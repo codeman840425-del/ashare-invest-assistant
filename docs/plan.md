@@ -402,7 +402,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 
 ### 2.4 前端信息架构（页面）
 深色交易终端风格、仅桌面（2.10）。新增主线页面：`/terminal`（**默认首页**：自选/持仓实时表 + K 线/分时 + 建议卡 + 信号流；固定三栏 + 底部面板，分隔条可调宽、可折叠，见 2.10）· `/suggestions/:id`（建议详情：维度×策略矩阵、证据、反证、失效条件、风控标记、建议链）· `/daily-reports`、`/daily-reports/:date`（盘后日报；旧路径 `/reports`、`/reports/:date` 只做重定向，契约 v0.2.3）· `/strategies`、`/strategies/:id`（策略库：规则清单、数据来源、版本、改参、胜率/盈亏、降权开关）· `/risk-controls`（六项风控开关与阈值）· `/notifications`（通知中心与偏好）· `/strategy-cards`（L1 卡片库，第二阶段）· `/strategy-instances`（我的策略实例：确认、暂停、改参）· `/candidate-signals/:id`（候选信号与不可执行原因）· `/plan-drafts/:id`（计划草案确认页）· `/restrictions`（禁投、冷静期、屏蔽）· `/admin/llm`、`/admin/realtime`、`/admin/ingest`（采集状态）、`/admin/promotions`（模板审核与生命周期）、`/admin/evaluation`（内部评估，问题 26 获批后）、`/admin/plans`（管理端）。
-原有页面保留：`/register`（注册，提交后显示"等待管理员审核"）· `/login` · `/today`（今日关注）· `/portfolio`（账户/持仓/成交）· `/market`（市场概览）· `/stocks/:code`（个股档案：行情、财务、资金流、因子、公告、问董秘、各策略适配与周期分类）· `/discover`（策略筛选，入口并入 `/strategies`）· `/candidates`（研究候选）· `/plans`（行动计划，含版本对比）· `/alerts`（提醒中心与规则）· `/reviews`（复盘）· `/settings`（画像、通知、隐私、数据导出/注销）· `/portfolio/import`（上传→预览→确认→结果）· `/admin/*`（管理员后台：注册审核、用户管理、审计日志，仅 admin 角色可见）。
+原有页面保留：`/register`（注册，提交后显示"等待管理员审核"）· `/login` · `/onboarding`（首次登录：同意条款与风险揭示、完成风险测评，`?next=` 返回原页；T-A05 D9）· `/account-status`（待审核、驳回、停用说明；T-A05 D9）· `/today`（今日关注）· `/portfolio`（账户/持仓/成交）· `/market`（市场概览）· `/stocks/:code`（个股档案：行情、财务、资金流、因子、公告、问董秘、各策略适配与周期分类）· `/discover`（策略筛选，入口并入 `/strategies`）· `/candidates`（研究候选）· `/plans`（行动计划，含版本对比）· `/alerts`（提醒中心与规则）· `/reviews`（复盘）· `/settings`（画像、通知、隐私、数据导出/注销）· `/portfolio/import`（上传→预览→确认→结果）· `/admin/*`（管理员后台：注册审核、用户管理、审计日志，仅 admin 角色可见）。
 
 所有页面固定位置展示风险揭示："本工具基于公开数据与您录入的信息、按透明规则生成**规则信号**，不构成投资建议，不保证收益；规则可能失效，交易决定与风险由您自行承担。"（最终文案以第 9 节问题 1 的合规结论和法务审定为准。）
 
@@ -1237,9 +1237,12 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `account_reviews` | id, user_id, action(approve/reject/disable/enable/reset_password), reason, admin_id, created_at — 只追加，审核历史 |
 | `login_attempts` | id, username_tried, user_id(nullable), ip_hash, success, failure_reason, at — 用于限速、锁定与审计（保留 180 天） |
 | `audit_logs` | id, actor_id, actor_role, action, target_type, target_id, detail(jsonb), ip_hash, at |
-| `consents` | id, user_id, kind(privacy_policy / sensitive_financial_info / risk_disclosure / email_notification / signal_risk_disclosure / terms), doc_version, granted(bool), at, ip_hash — 只追加；`terms` 为用户协议（T-B03 迁移 0004 补入，T-A05 确认） |
+| `consents` | id, user_id, kind(`terms` / `privacy` / `signal_risk_disclosure` / `sensitive_financial_info` / `email_notification`；前四个即契约 `consent_key`), action(grant/withdraw), doc_id(FK `legal_documents`，未定稿时 null), doc_version(语义化版本或 `"unversioned"`), content_sha256(用户当时看到的正文哈希，未定稿时 null), locale, channel(web/cli/api/admin_bootstrap), ui_surface, presentation(checkbox_unticked/scroll_and_confirm/modal), ip_hash, user_agent_hash, supersedes_id(nullable，同 kind 的上一条), at(服务端时间) — **只插入**（触发器拒绝 UPDATE/DELETE/TRUNCATE），每次同意或撤回新增一行；约束：`(doc_id IS NULL) = (doc_version = 'unversioned')`，`content_sha256` 必须等于 `doc_id` 那一行的哈希（应用层校验 + 触发器校验）。**T-A05（D10、versioning.md §4）**：kind 取值与契约 `consent_key` 统一，旧值 `privacy_policy` → `privacy`、`risk_disclosure` → `signal_risk_disclosure`（新迁移改 CHECK；开发库若已有旧值行，在迁移内临时停用触发器改写，生产库此前无数据）；`granted(bool)` 由 `action` 取代。V1 只用 `closed` 注册模式，`invite`（问题 18）留到以后 |
+| `legal_documents` | id, doc_key(`legal_doc_key`：四个 `consent_key` + `site_risk_notice`), version(语义化版本), version_no(同 doc_key 内单调递增), title, summary, content_md(全文), content_sha256, locale, change_level(major/minor/patch), change_checklist(jsonb，L1–L8 逐项是/否), changelog, review_ref(MAJOR 必填：用户审阅记录；对第三方开放后为律师意见编号), effective_at, published_at, published_by — **只插入**（触发器拒绝 UPDATE/DELETE/TRUNCATE）；表内只有已发布版本，草稿留在仓库；唯一 (doc_key, version)、(doc_key, version_no)；CHECK version 匹配语义化版本正则；停用通过 `legal_document_events`（doc_id, event: retired, at, by，只追加）记录。当前版本 = 同 doc_key 中 `effective_at ≤ now` 且未停用、`version_no` 最大的一行；没有这样的行时当前版本为 `"unversioned"`（versioning.md §2、§5；T-A05） |
+| `questionnaires` | id, questionnaire_key(`risk_profile`), version, version_no, yaml_source(原文), yaml_sha256, scoring_fingerprint(发布脚本计算，versioning.md §3.2), forces_retest, valid_days, remind_before_days, grace_days_after_expiry, max_submissions_per_24h, effective_at, published_at, published_by — **只插入**，规则同 `legal_documents`；当前问卷 = `effective_at ≤ now` 且 `version_no` 最大的一行 |
+| `risk_assessments` | id, user_id, questionnaire_id(FK), questionnaire_version, scoring_fingerprint, answers(jsonb，原样), subscores(jsonb), derived(jsonb：`risk_tolerance`/`experience`/`effort` 各自的值与命中规则 ID), flags(text[]，如 `no_loss_tolerance`、`self_report_higher`、`fast_completion`), started_at(nullable), client_duration_s(nullable), submitted_at, expires_at, channel — **只插入**（触发器拒绝 UPDATE/DELETE/TRUNCATE），每次有效提交新增一行（被 400 拒绝的提交不入库，含 K4 答错）；状态（`assessment_status`）**查询时计算**，不存列；与画像的关联由 `user_profiles.assessment_id` 反向引用，不回写本表（研究员草案中的 `profile_version_id` 会造成 UPDATE，T-A05 改为反向引用） |
 | `invite_codes` | id, code_hash(unique；`HMAC-SHA256(APP_MASTER_KEY, 归一化邀请码)`，明文不入库), created_by(admin), created_at, expires_at, max_uses(V1 恒 1), used_count, used_by(nullable), used_at, revoked_at, revoked_by, bound_username(nullable，绑定后只有该用户名可用), note — 状态由字段推导（active/used/expired/revoked），不物理删除；规则见 6.1 `config/auth.yaml`（T-A05） |
-| `user_profiles` | id, user_id, version_no, horizon_pref(text[]，取值为 `horizon` 枚举), effort(low/medium/high), risk_tolerance(1–5), experience(novice/intermediate/advanced), max_single_position_pct(decimal), capital_range(enum: <10万/10–50万/50–200万/>200万，选填), max_drawdown_pct(选填), focus_areas(text[]，选填), confirmed_at, created_at — **只追加**，最新版本为当前画像。**前五个字段与契约 `/me/profile` 一一对应（契约为准，T-A02）**；原 `horizon(short/medium/long)` 改为 `horizon_pref`，原 `weekly_hours` 由 `effort` 取代；选填字段契约暂未暴露，只供内部使用 |
+| `user_profiles` | id, user_id, version_no, assessment_id(FK `risk_assessments`，nullable；T-A05), questionnaire_version(nullable), horizon_pref(text[]，取值为 `horizon` 枚举), effort(low/medium/high，nullable：未测评时为空), risk_tolerance(1–5，nullable), experience(novice/intermediate/advanced，nullable), max_single_position_pct(decimal), capital_range(enum: <10万/10–50万/50–200万/>200万，选填), max_drawdown_pct(选填), focus_areas(text[]，选填), confirmed_at, created_at — **只追加**，最新版本为当前画像。**前五个字段与契约 `/me/profile` 一一对应（契约为准，T-A02）**；原 `horizon(short/medium/long)` 改为 `horizon_pref`，原 `weekly_hours` 由 `effort` 取代；选填字段契约暂未暴露，只供内部使用 |
 
 **账户/持仓/成交**
 | 表 | 关键字段 |
@@ -1734,7 +1737,7 @@ class BrokerStatementParser(Protocol):
 - **注册**：用户名（4–32 位，小写字母/数字/下划线，唯一，禁止保留词如 admin/root/system）、密码（≥ 10 位、至少含字母和数字、不得与用户名相同、不在常见弱口令表内）、可选申请说明；必须勾选用户协议/隐私政策/风险揭示（写 `consents`）。无短信/邮箱验证码、无图形验证码。
 - **未审核用户登录行为**：密码正确时返回 `403 ACCOUNT_NOT_APPROVED`（`details.status` 为 `pending` / `rejected`（附驳回理由）/ `disabled`），**不创建会话**；页面显示对应状态说明。为避免泄露用户名是否存在，只有在密码正确时才返回状态类错误，密码错误统一返回 `401 INVALID_CREDENTIALS`。
 - **管理员**：`role=admin`；首个管理员由运维用命令行创建（`python -m app.cli create-admin`），不能通过网页注册获得；管理员接口全部在 `/api/v1/admin/*`，需 `role=admin` + 会话；所有管理操作写 `account_reviews` 与 `audit_logs`。禁用账号立即吊销其所有会话。
-- **管理员能力（MVP）**：待审核列表（按申请时间）、查看申请信息（用户名、申请说明、注册时间、注册 IP 所属地粗粒度、同 IP 注册数）、批准、驳回（必填理由）、禁用/恢复（必填理由）、重置密码（生成一次性临时密码，用户下次登录强制修改）、查看审计日志。
+- **管理员能力（MVP）**：待审核列表（按申请时间）、查看申请信息（用户名、申请说明、注册时间、注册 IP 所属地粗粒度、同 IP 注册数；同 IP 注册数超过 6.1 `config/auth.yaml` 的 `admin.same_ip_highlight_threshold`（默认 3）时高亮，只作提示、不自动拦截，T-A05 D8）、批准、驳回（必填理由）、禁用/恢复（必填理由）、重置密码（生成一次性临时密码，用户下次登录强制修改）、查看审计日志。
 - **管理员不可见**用户的持仓、成交、计划等个人数据（最小权限）；如需排障，须用户授权（后续）。
 - **无验证码的防滥用**：
   - 注册：同一 IP 每小时 ≤ 5 次、每日 ≤ 20 次；全站 `pending` 账户数 ≥ 200 时暂停注册（返回 `503 REGISTRATION_CLOSED`）；蜜罐隐藏字段；注册请求最短填写时间（< 3 秒视为机器）。
@@ -1744,7 +1747,9 @@ class BrokerStatementParser(Protocol):
   - 修改密码/重置后吊销其他会话。
   - **会话（T-A05）**：空闲 7 天滑动过期 + 自登录起 30 天绝对过期（不续期），V1 不提供“记住我”；登录、修改密码时**轮换**会话（新 `sid` 与新 CSRF 令牌，旧会话作废）；改角色、禁用、驳回、管理员重置密码时吊销该用户全部会话。键见 6.1 `config/auth.yaml` `session.*`。
   - **邀请码（T-A05；`invite` 模式启用前由 T-B03c 实现，此前 `invite` 模式按 `closed` 处理，返回 `503 REGISTRATION_CLOSED`）**：只由管理员发放（`/admin/invites`）；128 位随机数，Crockford Base32 显示（26 字符，按 4 位分组加连字符，输入忽略大小写与连字符）；只存 HMAC 摘要，明文只在创建响应中出现一次；默认单次使用、7 天过期，可选绑定用户名，可吊销；核验与建用户在同一事务内（条件更新 `used_count`），核验失败一律返回同一种错误，不区分“不存在/过期/已用/已吊销”；发放、吊销、使用都写 `audit_logs`。不绑定邮箱（V1 无邮箱验证，绑定无法核实）。
-  - **同意书版本（T-A05）**：版本号取自 6.1 `config/auth.yaml` `consents.doc_versions`；未定稿时为 `null`，记为 `"unversioned"`，**只允许在 `closed` 模式下存在**——切到 `invite` 前五类文书必须有正式版本号，否则启动失败。
+  - **同意书版本（T-A05，取代 7c62f59 的 `auth.yaml consents.doc_versions`）**：五类文书（`terms`、`privacy`、`signal_risk_disclosure`、`sensitive_financial_info` 四个需同意 + `site_risk_notice` 只展示）的当前版本取自 `legal_documents`（3.3），版本号用语义化版本，规则与重新同意判定见 `docs/strategies/compliance/versioning.md`（MAJOR 变化 → 需重新同意）。没有已发布版本时当前版本为 `"unversioned"`，**只允许在 `closed` 模式下存在**：`REGISTRATION_MODE=invite` 而任一文书仍为 `"unversioned"` → 启动失败。文书由研究员起草版本，用户审阅后才能对第三方开放（第 9 节问题 42）。`"unversioned"` 视为 MAJOR 0：发布 1.0.0 后，原先的同意都需重新同意。
+  - **注册时的同意**：`agreements` 必须恰为 `terms`、`privacy`、`signal_risk_disclosure`（契约 §7.1，T-A05 D2；T-B03 现为 `risk_disclosure`，后端改）；`sensitive_financial_info` 在首次导入或手工录入成交前单独勾选（7.3）。
+  - **风险测评（T-A05）**：题目、计分、有效期见 `docs/strategies/compliance/risk_questionnaire.{md,yaml}`（研究员 T-B15），后端按该 yaml 直接实现，经发布脚本写入 `questionnaires`（第 9 节问题 41）；每次答卷写 `risk_assessments`（只插入）；结果先展示，用户确认后写入新画像版本（`user_profiles.assessment_id`）。问卷结果是否作为画像上限、`fit_ack` 能否越过封顶、有效期，见第 9 节问题 38–40【待用户确认】。
 
 ---
 
@@ -2631,7 +2636,7 @@ raw_file_retention_days: 365    # int，原始文件留存天数（第 9 节问�
 - **存储路径不进 YAML**：原始文件目录只来自环境变量 `IMPORT_STORAGE_PATH`（部署相关，见 2 节环境变量表、3.5A 存储要求）；YAML 里不设路径键，也不设 `*_env` 引用键。
 - 环境变量不能覆盖本文件的键。
 
-**`config/auth.yaml`**（认证、会话、邀请码、同意书版本，3.6；`api` 读取；T-A05 定，回应 T-B03。**不可热调**，改后重启；注册模式仍由环境变量 `REGISTRATION_MODE` 决定，不在本文件）
+**`config/auth.yaml`**（认证、会话、邀请码、审核提示，3.6；`api` 读取；T-A05 定，回应 T-B03。**不可热调**，改后重启；注册模式仍由环境变量 `REGISTRATION_MODE` 决定，不在本文件）
 ```yaml
 schema_version: 1
 password:
@@ -2652,17 +2657,12 @@ invite:
   default_ttl_h: 168            # int，默认 7 天过期
   max_ttl_h: 720                # int，管理员可设的最长有效期 30 天
   max_uses: 1                   # int，V1 只支持单次使用（模型只接受 1）
-consents:
-  doc_versions:                 # 各文书当前版本；null = 未定稿，存为 "unversioned"
-    terms: null
-    privacy: null
-    risk_disclosure: null
-    signal_risk_disclosure: null
-    sensitive_financial_info: null
+admin:
+  same_ip_highlight_threshold: 3   # int ◇，审核列表中同 IP 注册数超过此值时高亮，只作提示（3.6，T-A05 D8）
 ```
 - 固定规则（不是配置项）：哈希算法只用 argon2id；Cookie `sid` 为 `HttpOnly; SameSite=Lax; Path=/`，`Secure` 由环境变量 `SESSION_COOKIE_SECURE` 控制（默认 true；`APP_ENV` 不是 `local`/`test` 时设为 false → 启动失败）；Cookie `Max-Age` = `absolute_ttl_s`，服务端同时按 `idle_ttl_s` 与 `absolute_ttl_s` 判定；登录与改密轮换会话，改角色/禁用/驳回/重置吊销全部会话（3.6）。
 - 邀请码：明文 = `code_bytes` 随机字节的 Crockford Base32（无填充），入库前去连字符、转大写后做 `HMAC-SHA256(APP_MASTER_KEY, code)`；只由管理员发放；可选 `bound_username`；可吊销；`invite.created` / `invite.revoked` / `invite.redeemed` 写审计（不记明文）。
-- 同意书版本：`POST /me/consents` 与注册 `agreements` 记录的版本 = 本节当前值（`null` 记为 `"unversioned"`）；客户端提交的 `version` 与当前值不符 → `400 VALIDATION_ERROR`。`REGISTRATION_MODE=invite` 而任一版本为 `null` → 启动失败（切到 `invite` 前文书须定稿并取得律师意见，第 9 节问题 1）。
+- 同意书版本**不在本文件**（T-A05 改定）：当前版本来自 `legal_documents` 表（3.3），由发布脚本从仓库文书写入；`POST /me/consents` 提交的 `version`、`content_sha256` 与当前版本不符 → `400 VALIDATION_ERROR`。`REGISTRATION_MODE=invite` 而任一文书仍为 `"unversioned"` → 启动失败（对第三方开放前文书须经用户审阅，并按第 9 节问题 1 取得律师意见）。
 - 环境变量不能覆盖本文件的键。
 
 ---
@@ -2692,7 +2692,7 @@ consents:
 **产品形态的风险控制（MVP 全部实现）**
 1. **措辞**：界面不用"推荐/建议买入"，统一用"**规则信号 / 操作选项**"："按《高ROE稳定增长 v3》规则：买入条件满足（5/6 条）"，并始终同时展示反证与失效条件；禁用"保证、必涨、稳赚、牛股、金股、目标价"等词（`compliance` 词表 + CI 测试，LLM 输出同样过滤）。
 2. **用户配置规则**：建议只来自**用户启用的策略版本**（内置策略默认不启用，用户逐个阅读规则、适用条件和失效模式后勾选启用；阈值可改）；系统**不向未自选/未持有的股票主动推送**建议（筛选结果只在用户主动运行时展示）。
-3. **适当性与风险揭示**：首次启用建议功能前完成风险测评问卷（风险承受 1–5 级，写入画像版本），策略的 `fit_dimensions` 与画像不匹配时建议卡显示"与您的画像不匹配"并降低置信度；风险揭示同意书单独勾选（`consents.kind = signal_risk_disclosure`，记录版本）。
+3. **适当性与风险揭示**：首次启用建议功能前完成风险测评问卷（风险承受 1–5 级，写入画像版本；问卷与计分见 `docs/strategies/compliance/risk_questionnaire.yaml`，不是法定适当性评估，档位不用 C1–C5），策略的 `fit_dimensions` 与画像不匹配时建议卡显示"与您的画像不匹配"并降低置信度；风险揭示同意书单独勾选（`consents.kind = signal_risk_disclosure`，记录版本）。
 4. **用户确认**：建议卡只有"知道了 / 不采纳 / 转为我的计划"；**不下单、不对接券商、不提供一键交易**；转为计划需要用户自己填写或确认数量与价格。
 5. **不承诺收益**：不展示"历史胜率"营销语；模拟跟踪（2.8）只对本人可见、标注"模拟、样本有限、不代表未来"，不做对外排行/晒单。
 6. **不个性化招揽**：不向公众发送个股信号广告，不设"跟单/喊单"群；外部通知渠道默认只发提醒不发个股动作。
@@ -2710,7 +2710,7 @@ consents:
 - 任何**收费**（含会员）开通前，必须取得律师书面意见并优先走方案 B；会员体系（2.9）只预留数据结构。
 
 ### 7.3 个人信息保护（《个人信息保护法》《网络安全法》《数据安全法》）
-- 持仓、成交、资金规模属于**金融账户相关信息**，按《个保法》第 28 条作为**敏感个人信息**处理：单独同意（`consents.kind=sensitive_financial_info`）、告知必要性与影响、最小化收集（不收集身份证、券商账号/密码、银行卡）。
+- 持仓、成交、资金规模属于**金融账户相关信息**，按《个保法》第 28 条作为**敏感个人信息**处理：单独同意（`consents.kind=sensitive_financial_info`；`POST /imports`、`POST /trades` 在未同意时返回 `403 CONSENT_REQUIRED`，契约 §1.3）、告知必要性与影响、最小化收集（不收集身份证、券商账号/密码、银行卡）。
 - **交割单原始文件**含股东代码、资金明细等，同属敏感信息：上传前单独提示用途（解析与追溯）、默认保留 365 天（已定，问题 21）后自动删除、用户可随时删除单个原始文件、注销时一并删除；解析时股东代码明文不入库（只存 HMAC 与掩码，3.5A），资金账号、席位代码直接丢弃；管理员无权查看。
 - 注册只收集用户名、密码与可选申请说明；邮箱为可选（仅用于通知），不收集手机号。
 - 用户权利：查阅/导出（`GET /me/export`，JSON+CSV）、更正、删除/注销（`DELETE /me`，30 天内物理删除用户数据，审计日志保留脱敏记录）、撤回同意。
@@ -2872,7 +2872,7 @@ consents:
 | T-B26 | 通知：`notifications`、SSE `/stream`（心跳、`Last-Event-ID` 续传）、轮询兜底、渠道适配器接口（站内 + 邮件）、偏好/免打扰/频控、投递日志与重试 | 后端 | T-B23, T-B24 |
 | T-B27 | **模拟跟踪与自动降权**：`suggestion_tracking` T+1/5/20 vs 基准、`strategy_tracking_stats`（本人/全站匿名）、`user_strategy_weights`（2.5.7 公式，开关；与健康度合并见 T-B27a）、`/tracking*` | 后端 | T-B21, T-B06 |
 | T-B28 | 会员权益预留：`plans`/`plan_entitlements`/`user_subscriptions`/`entitlement_overrides`、`EntitlementService`、所有上限改走权益、`/admin/plans*` | 后端 | T-B03 |
-| T-B15 | 合规模块：措辞方案（"规则信号"）、禁用词校验、风险测评与 `signal_risk_disclosure` 同意门槛、全站揭示文案版本、审计 | 后端 | T-B03 |
+| T-B15 | 合规模块：措辞方案（"规则信号"）、禁用词校验、风险测评与 `signal_risk_disclosure` 同意门槛、全站揭示文案版本、审计；**T-A05 补**：`legal_documents`/`questionnaires`/`risk_assessments` 表（只插入）、consents 扩列、发布脚本（哈希/指纹/版本级别校验，versioning.md §3、§6）、契约 v0.2.4 的问卷与文书端点 | 后端 | T-B03 |
 | T-F11 | **交易终端主界面** `/terminal`：固定三栏 + 底部面板（分隔条可调宽）、一次请求 `GET /terminal`（ETag，SSE 断开时才轮询）、AG Grid Community 自选/持仓（实时价、各策略动作徽标、分歧徽标、stale 灰显）、K 线+分时+信号标记、SSE 接入 | 前端 | T-F01→T-B22/T-B26 |
 | T-F12 | **建议卡**：维度×策略矩阵、并列动作、止损止盈、理由/反证/证据（时间、来源、类型）、失效条件、风控标记、置信度、策略版本、LLM 解释引用跳转、历史建议链 | 前端 | T-B21/T-B31 |
 | T-F13 | 盘后日报页（账户概览、逐股卡片、缺口） | 前端 | T-B24 |
@@ -3038,6 +3038,11 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
    - **【已核实 T006b，T-A03 已同步】** 涨跌停价舍入：沪 3.3.17、深 3.3.19（含两条边界规则）；风险警示 50 万股买入上限：沪 4.4.10、深 4.5.4，**只适用主板与创业板，科创板不适用**（沪 4.4.1、6.14）；只能限价申报**只适用沪市**（沪 4.4.9）；科创板单笔 ≥ 200 股（沪 6.7）。
    - 仍待核实（不阻塞）：① 因子数量 77/82/85 的口径（2.5.14 H⑪，T003）；② 科创板“超出 200 股后按 1 股递增”与北交所交易单位（2.13；北交所 V1 不扫描）。
 37. **新手是否限制短线周期**——**【已定 2026-11-01，方案 A】**（horizon_classifier.md §9）：`profile.experience` 为 novice 或未填写时 `short` 封顶 59（不列为“适合”），用户可经 `fit_ack` 覆盖；实现为分类器新版本 1.1.0（`version_no: 2`）的 `requires` 规则 `SH0C`（6.1）。`intraday_t` 同样封顶 59，规则 `IT0C`【编排者默认，用户可否决，2026-11-01】。
+38. **问卷结果是否作为画像上限**——**【待用户确认】研究员默认：是**（`risk_questionnaire.yaml` `profile_write.derived_is_upper_bound: true`）：`risk_tolerance`、`experience`、`effort` 只能改得比最近一次有效测评**更保守**，改得更激进 → `400 VALIDATION_ERROR`（`issue: exceeds_assessment`，带 `max_allowed`）；没有有效测评时这三个字段只能为空（分类器按未填写处理）。理由：否则自填 intermediate 即可绕过 SH0C/IT0C。若用户否决：三个字段可自由填写，测评结果只作建议值。
+39. **`fit_ack` 能否越过封顶**——**【待用户确认】默认**：① 画像类封顶（SH0、SH0B、SH0C、IT0B、IT0C）与卡片适配下限（实例校验 I3）可以用 `fit_ack` 确认后启用（沿用问题 37 方案 A）；② **例外（研究员默认）**：测评命中 `no_loss_tolerance`（R1 选“不能接受任何本金亏损”）的用户，short / intraday_t 相关策略不提供 `fit_ack`；③ **（架构师默认）**证券级闸门 HG1–HG6 与 `data_missing` 类封顶不能用 `fit_ack` 越过（它们描述的是证券和数据，不是用户偏好）。契约：`422 STRATEGY_FIT_ACK_REQUIRED` 的 `details` 增加 `ack_allowed` 与 `blocking_rule_ids`。
+40. **测评有效期**——**【待用户确认】研究员初值**：有效 365 天，到期前 30 天提醒，过期后 30 天宽限期（只提示）；宽限期后视为未测评（⚖ 接口 `403 CONSENT_REQUIRED`，`required` 含 `risk_assessment`）；问卷 MAJOR 版本且 `forces_retest: true` 时强制重测；用户可随时重测，24 小时内最多提交 3 次。官方文件没有规定有效期，365 天没有监管依据。
+41. **风险测评的实现方式**——**【编排者定，2026-11-01】**：问卷已由研究员（T-B15）编写（`docs/strategies/compliance/risk_questionnaire.yaml`），后端直接按它实现并发布到 `questionnaires`；**不做**用 CLI 直接写测评记录的过渡方案（关闭 T-A05-decisions 待决问题 1）。
+42. **五类法律文书**——**【编排者定，2026-11-01】**：研究员起草各文书的版本（要点见 `docs/strategies/compliance/versioning.md` §7）；**用户审阅后**才能对第三方开放（并仍按问题 1 取得律师意见）；仅本人自用的 `closed` 阶段允许 `"unversioned"`（与 3.6 一致）。
 
 **I. 编排者默认（2026-11-01 12:32）——【编排者默认，用户可否决】**
 - **C(1) 首批 P0 策略**：G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01（研究员 `docs/strategies/catalog.md` 第 2 节总表；取代早期方案中 2.5.10 的 ①–⑨ MVP 模板清单）。引擎接口覆盖核对与缺口见 2.5.11A。
@@ -3060,4 +3065,4 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 - `config/*.yaml` 五个文件的键与默认值见 6.1；文件由后端创建。
 - 仍需运维决定（不属于契约）：nginx `proxy_pass` 尾斜杠导致 `/api` 前缀被去掉（T-B01 §4.1），建议去掉尾斜杠，保持 `/api/v1`。
 
-**仍待定的问题汇总**：77/82/85 个因子的口径【待 T003 补测核实】、交易规则 2023-04-10 之前未建模及深交所条款逐字核对（问题 36）；新手是否限制短线周期（问题 37）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法（问题 19，待脱敏范本；分红计入摊薄成本已定）；另见 2.5.14 H（续）末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning，以及 ST 10%、T+1 hold 阈值 1.0%、分红计入摊薄成本已于 2026-11-01 拍板。）
+**仍待定的问题汇总**：77/82/85 个因子的口径【待 T003 补测核实】、交易规则 2023-04-10 之前未建模及深交所条款逐字核对（问题 36）；新手是否限制短线周期（问题 37）；【待用户确认】问卷结果是否作为画像上限、`fit_ack` 能否越过封顶、测评有效期（问题 38–40，已按研究员默认写入契约 v0.2.4）；法律文书在账户注销后的保留期限、不同意 terms/privacy 时能否使用部分功能【待法务确认】（versioning.md §8 之外的未决项）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法（问题 19，待脱敏范本；分红计入摊薄成本已定）；另见 2.5.14 H（续）末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning，以及 ST 10%、T+1 hold 阈值 1.0%、分红计入摊薄成本已于 2026-11-01 拍板。）

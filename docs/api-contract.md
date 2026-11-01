@@ -1,12 +1,33 @@
 # A股个人投资研究与决策助手 · REST 接口契约（MVP v1）
 
-- 作者：架构师；日期：2026-11-01；版本：**v0.2.3**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
+- 作者：架构师；日期：2026-11-01；版本：**v0.2.4**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b；v0.2.4 为 T-A05 合入研究员 T-B15 合规文书与问卷、前端 T-F02 评审 D1–D7）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
 - 配套：[`plan.md`](./plan.md)（架构方案）。本契约优先于代码：FastAPI 生成的 `openapi.json` 与本文不一致时**改代码**。
 - **示例值全部虚构**：代码用 `600000.SH / 000001.SZ`，ID 用 `00000000-0000-4000-8000-0000000000xx`，金额为随意整数；不含任何真实账户、股东代码、姓名、金额或委托/成交编号。证券简称一律用“示例银行”“演示电子”这类虚构名称。
 
 ---
 
 ## 0. 变更记录
+
+### v0.2.4（2026-11-01，T-A05；合入研究员 T-B15 的 `docs/strategies/compliance/`（问卷、文书版本规则）与前端评审 T-F02 §4 D1–D7；**含不兼容变更**：注册 `agreements` 的 `risk_disclosure` 改为 `signal_risk_disclosure`，`POST /me/consents` 必须带 `content_sha256`，`/meta/registration` 不再返回 `doc_versions`，`Me.risk_assessment` 结构改变，`POST /me/risk-assessment` 响应改为 `RiskAssessment` 且返回 201）
+> 为什么单独升版本而不并入 v0.2.3：后端尚未同步 v0.2.3，但本次新增 3 张表、8 个端点并改了已发布字段的取值与必填项，不是“只加可选字段”，并入会让 v0.2.3 失去意义。
+| # | 项 | 决定 | 后端改动 | 前端改动 |
+|---|---|---|---|---|
+| 1 | 同意项键名（RQ 待办 1、V 待办 1） | 新枚举 `consent_key` = `terms` `privacy` `signal_risk_disclosure` `sensitive_financial_info`；`legal_doc_key` = `consent_key` + `site_risk_notice`（只展示，不需同意）。免责声明并入 `terms`，不单列。`email_notification` 只在库里，不出现在契约 | 新迁移改 `consents.kind` CHECK 并改写旧值（plan 3.3） | 用 `consent_key` |
+| 2 | 注册 `agreements`（D2） | 必须包含 `terms`、`privacy`、`signal_risk_disclosure`（原 `risk_disclosure` 作废，T-B03 现实现需改），可另含 `sensitive_financial_info`；其他值 → 400。`apply_note` ≤ 200（原 ≤ 500）；`display_name` 1–32；保留用户名 → 400 | 改校验 | 注册页勾选项 |
+| 3 | 文书版本来源（V 待办 4） | 当前版本来自新表 `legal_documents`（只插入），取代 v0.2.3 #26 的 `config/auth.yaml consents.doc_versions`；无已发布版本时为 `"unversioned"`，只允许 `closed` 模式。新增 `GET /meta/consent-docs`、`GET /legal/{doc_key}`、`GET /legal/{doc_key}/versions`、`GET /legal/{doc_key}/{version}`（D4） | 建表 + 触发器 + 发布脚本 + 端点；删 auth.yaml 的 `consents` 段 | 同意弹窗从 `/meta/consent-docs` 取版本和链接 |
+| 4 | `POST /me/consents`（V 待办 2） | 请求体加 `content_sha256`、`action`（`grant`/`withdraw`，默认 grant）、`ui_surface`、`presentation: consent_presentation`；`version`、`content_sha256` 与当前版本不符 → 400；服务端记录 channel、IP/UA 哈希、时间 | consents 扩列（plan 3.3） | 提交时带哈希 |
+| 5 | `Me.consents`（V 待办 3） | 每个 `consent_key` 都有一项：`{version \| null, accepted_at \| null, current_version, needs_reconsent}`；`needs_reconsent` 按 versioning.md §2 判定（MAJOR 变化或已撤回；`"unversioned"` 视为 MAJOR 0） | 计算 | 据此弹出重新同意 |
+| 6 | 风险测评端点（RQ 待办 2、3、6、7、8，D2、D4） | 新增 `GET /me/risk-assessment/questionnaire`（不含分值）、`GET /me/risk-assessment`（最近一次 + 状态）、`GET /me/risk-assessments`（历史）；`POST /me/risk-assessment` 请求体加 `questionnaire_version`（不符 → 409 `VERSION_CONFLICT`）、可选 `started_at`、`client_duration_s`；`choice` 暂为 string（以后有多选再改数组）；K4 答错 → 400 `details.reason="understanding_required"`；24 小时内超过 3 次 → 429；响应 `201 RiskAssessment`。`trade_count_12m` 由服务端从成交记录算，不由客户端提交 | 按 `risk_questionnaire.yaml` 实现计分；新表 `questionnaires`、`risk_assessments`（只插入） | `/onboarding` 测评页 |
+| 7 | 画像与测评（RQ 待办 5） | 测评只给出建议值，用户确认后 `PUT /me/profile`（带 `assessment_id`）写入新画像版本；`risk_tolerance`、`experience`、`effort` 可为 null（未测评）；**【待用户确认】** 超过测评上限 → 400 `issue: exceeds_assessment`、`max_allowed`（plan 第 9 节问题 38）。无画像 → `GET` 404；`max_single_position_pct` 5–50、最多 2 位小数（D2） | 校验 | 画像页显示上限 |
+| 8 | `CONSENT_REQUIRED.required`（RQ 待办 4） | 取值为 `consent_key` 或 `"risk_assessment"`（没有有效测评，含过期超过宽限期） | 门槛判定 | 按 `required` 跳转 `/onboarding` |
+| 9 | `STRATEGY_FIT_ACK_REQUIRED.details` | 加 `ack_allowed: boolean`、`blocking_rule_ids: string[]`；**【待用户确认】**（问题 39）`no_loss_tolerance` 用户的 short/intraday_t、HG1–HG6 与 `data_missing` 封顶 `ack_allowed=false` | 判定 | 不可确认时不显示确认按钮 |
+| 10 | `DimensionCell` 笔误（D1） | `exit_hits`、`exit_total` 与 `rules_*` 属于同一对象（v0.2.3 文字中多了一个 `}`），结构不变 | — | 按同一对象解析 |
+| 11 | 导入提示的处理选项（D3） | §4.1 新增“处理选项”表，逐码给出 `resolution_choices`（第一个为默认）与覆盖类选项；resolve 只要求 `resolution_choices` 非空，不限 `needs_action`；覆盖类 `reason` 必填（≤ 200） | 按表生成 | 按表渲染 |
+| 12 | 管理端用户与成交结构（D5） | 定义 `AdminUser`、`Trade`、`TradeCreate`、`ImportBatchSummary`；新增 `POST /trades/{id}/void`；PATCH `/admin/users/{id}` 在 `rejected`、`disabled`、`disabled→approved` 时 `reason` 必填 | 按结构返回 | 按结构渲染 |
+| 13 | CSRF 与敏感信息门槛（D6） | CSRF 为双提交，以 Cookie 为准；`sensitive_financial_info` 门槛改为 `POST /imports`、`POST /trades`（`POST /accounts` 不再要求，修正 v0.2.3 #26） | 改门槛范围 | — |
+| 14 | `/portfolio?account_id=`（D7） | `account_id` 可选，不传时合并全部账户 | 加参数 | 账户切换 |
+| 15 | 文书与问卷发布（V 待办 4–6） | 发布脚本校验哈希、版本号递增、变更级别与清单一致、MAJOR 需 `review_ref`；接口不提供发布或修改文书的写接口 | CLI（T-B15） | — |
+| — | `/meta/enums.version` | `"v0.2.3"` → `"v0.2.4"`；新增枚举 `consent_key`、`legal_doc_key`、`consent_presentation`、`assessment_status` | 改常量 | `CONTRACT_VERSION`、契约测试 |
 
 ### v0.2.3（2026-11-01，T-A03；处理前端 T-F01 §9 遗留 21 条，同步研究员 T006b 与用户拍板；**含一处不兼容类型变更**：`Evidence.provider` 改用 `data_provider`，删除 `local`）
 | # | 项 | 决定 | 后端改动 | 前端改动 |
@@ -38,7 +59,7 @@
 | 23 | `IT0C` 与原因码（同日补充，T-A05） | `SH0C`/`IT0C` 是周期分类器规则 ID，只出现在 `HorizonCap.rule_id`（`kind: "requires"`），**不是** `reason_code`，不进 `/meta/enums`；§6.1 原因码不变（仍 23 个） | 无（现实现即如此） | 按 `rule_id` 展示封顶说明，不查原因码文案 |
 | 24 | 用户名长度（同日补充，T-A05） | `username` 由 3–32 改为 **4–32**，`^[a-z0-9_]{4,32}$`（输入转小写），保留名 → `400 VALIDATION_ERROR`；与 plan 3.3/3.6 一致 | 无（T-B03 已按 4–32） | 注册表单校验改 4 |
 | 25 | 会话（同日补充，T-A05） | 空闲 7 天滑动 + 绝对 30 天；无“记住我”；登录与改密轮换 `sid` 和 CSRF 令牌（§1.3）；键见 plan 6.1 `config/auth.yaml` | 加绝对过期与改密轮换 | 改密 204 后从 `csrf_token` Cookie 重读令牌 |
-| 26 | 同意书（同日补充，T-A05） | `POST /me/consents` 的 `key` 增加 `sensitive_financial_info`；`version` 必须等于服务端当前版本（`GET /meta/registration` 返回 `doc_versions`），否则 `400 VALIDATION_ERROR`；`POST /accounts`、`POST /imports` 及手工录入成交/持仓的写接口要求已同意 `sensitive_financial_info`（plan 7.3，个保法第 28 条单独同意），否则 `403 CONSENT_REQUIRED` | 校验版本、加 key 与门槛 | 导入前弹单独同意；提交 `doc_versions` 中的版本 |
+| 26 | 同意书（同日补充，T-A05） | `POST /me/consents` 的 `key` 增加 `sensitive_financial_info`；`version` 必须等于服务端当前版本（`GET /meta/registration` 返回 `doc_versions`），否则 `400 VALIDATION_ERROR`；`POST /accounts`、`POST /imports` 及手工录入成交/持仓的写接口要求已同意 `sensitive_financial_info`（plan 7.3，个保法第 28 条单独同意），否则 `403 CONSENT_REQUIRED` | 校验版本、加 key 与门槛 | 导入前弹单独同意；提交 `doc_versions` 中的版本 （**v0.2.4 改**：版本来源改为 `legal_documents` 与 `/meta/consent-docs`，门槛范围改为 `POST /imports`、`POST /trades`）|
 | 27 | 邀请码（同日补充，T-A05） | 注册体增加 `apply_note`（`invite` 模式必填）；邀请码错误/过期/已用/已吊销统一为 `400 VALIDATION_ERROR {fields:[{field:"invite_code", issue:"invalid"}]}`；新增 `/admin/invites`（§7.9）。邀请功能（T-B03c）完成前 `invite` 模式按 `closed` 处理，返回 `503 REGISTRATION_CLOSED` | T-B03c 实现 | 注册页加申请说明；管理端邀请码页 |
 | — | `/meta/enums.version` | `"v0.2.2"` → `"v0.2.3"` | 改常量 | `CONTRACT_VERSION`、契约测试 |
 
@@ -71,7 +92,7 @@
 | `invalidation: [{expr, evidence_id}]` | `TextWithEvidence{text, expr, evidence_ids}` | `reasons`、`counter_evidence`、`invalidation` 同构 |
 | Suggestion 维度分 `score: 0.83` | `score: 0–100 整数`（未知为 `null`） | 对外所有 `score` 都是 0–100 整数；引擎内部 0–1 不外露；`confidence.value` 仍为 0–1 |
 | `strategies[].stop_loss` / `take_profit`（平铺） | `strategies[].stops: Stops{stop_loss, take_profit, time_stop_days}` | 与 `CandidateSignal.stops`、`PlanDraft.stops` 统一 |
-| `dimension_matrix[].cells[]{view}` | `DimensionCell{strategy_key, strategy_version_id, view, score, key_evidence_ids, rules_passed, rules_total}`，行上加 `divergent` | §5.2 |
+| `dimension_matrix[].cells[]{view}` | `DimensionCell{strategy_key, strategy_version_id, view, score, key_evidence_ids, rules_passed, rules_total}`，行上加 `divergent`（v0.2.3 起同一对象另有 `exit_hits, exit_total`，见 v0.2.3 #20） | §5.2 |
 | `import_status`: `preview_ready` / `confirmed` | `previewed` / `committed`；新增 `discarded` | 6.0 状态机已更新 |
 | 导入预览行 `status: ok\|error\|duplicate`、`error_code` | `status: import_row_status`、`findings: ImportFinding[]`、`dedup_status` | §4.1、§7.2 |
 | `409 IMPORT_DUPLICATE_FILE` | 文件级 **warning** `IMPORT_DUPLICATE_FILE`（不再是 HTTP 错误） | 同一文件可重新预览，确认时按行去重 |
@@ -139,9 +160,9 @@
 
 ### 1.3 认证与安全
 - **会话 Cookie** `sid`：`HttpOnly; Secure; SameSite=Lax; Path=/`；服务端会话存 Redis，空闲 7 天滑动过期、自登录起 30 天绝对过期（均可配置，plan 6.1 `config/auth.yaml` `session.*`）；V1 不提供“记住我”。登录与修改密码时轮换会话（新 `sid` 与新 `csrf_token`，旧会话作废）；改角色、禁用、驳回、管理员重置密码时吊销该用户全部会话。
-- **CSRF**：登录成功后响应体与 Cookie `csrf_token`（非 HttpOnly）给出令牌；所有 `POST/PUT/PATCH/DELETE` 必须带头 `X-CSRF-Token`，缺失或不符 → `403 CSRF_FAILED`。
+- **CSRF**：登录成功后响应体与 Cookie `csrf_token`（非 HttpOnly）给出令牌；所有 `POST/PUT/PATCH/DELETE` 必须带头 `X-CSRF-Token`，缺失或不符 → `403 CSRF_FAILED`。响应体 `csrf_token` 与 Cookie 值相同，以 Cookie 为准（双提交：服务端用常数时间比较请求头、Cookie 与会话内令牌，三者须一致）；响应体值只供读不到 Cookie 的客户端兜底（v0.2.4 #13）。
 - **权限**：未登录 → `401 AUTH_REQUIRED`；账号非 `approved` → `403 ACCOUNT_NOT_APPROVED`（以上两条均不适用于 `/admin/*`）；`/admin/*`：不是已登录的 `role=admin` 时（含未登录）一律 `404 NOT_FOUND`，与不存在的路径无法区分（不泄露管理端存在性；先于本节其他校验，v0.2.1）。用户只能访问自己的资源，访问他人资源一律 `404 NOT_FOUND`（不泄露存在性）。
-- **合规门槛**：建议类接口（标 ⚖：`/today`、`/suggestions*`、`/daily-reports*`、`/signals*`、`/candidate-signals*`、`/plan-drafts*` 的生成与确认、`/stream` 中标 ⚖ 的事件）要求用户已完成风险测评并同意 `signal_risk_disclosure`，否则 `403 CONSENT_REQUIRED`（`details.required: ["signal_risk_disclosure"]`）。涉及交易与持仓数据的写接口（`POST /accounts`、`POST /imports`、手工录入成交/持仓）要求已单独同意 `sensitive_financial_info`，否则 `403 CONSENT_REQUIRED`（`details.required: ["sensitive_financial_info"]`）（v0.2.3 #26）。
+- **合规门槛**：建议类接口（标 ⚖：`/today`、`/suggestions*`、`/daily-reports*`、`/signals*`、`/candidate-signals*`、`/plan-drafts*` 的生成与确认、`/stream` 中标 ⚖ 的事件）要求用户有**有效**风险测评（`assessment_status` ∈ {`valid`, `expiring`, `grace`}）且已同意 `signal_risk_disclosure` 的当前版本（`needs_reconsent=false`），否则 `403 CONSENT_REQUIRED`（`details.required` 列出所有缺项，取值为 `consent_key` 或 `"risk_assessment"`，如 `["signal_risk_disclosure", "risk_assessment"]`）。导入和手工录入成交（`POST /imports`、`POST /trades`）要求已单独同意 `sensitive_financial_info`（《个保法》第 28 条，plan 7.3），否则 `403 CONSENT_REQUIRED{required:["sensitive_financial_info"]}`（v0.2.4 #8、#13；`POST /accounts` 不要求）。
 - **限速**：超限 `429 RATE_LIMITED`，头 `Retry-After`（秒）。
 - 敏感字段一律掩码输出（如 `shareholder_code_masked: "A00****000"` 为格式示意），任何接口都不返回原始股东代码、资金账号或原始上传文件内容。
 
@@ -165,6 +186,10 @@
 |---|---|
 | `account_status` | `pending` `approved` `rejected` `disabled` |
 | `role` | `user` `admin` |
+| `consent_key` | `terms` `privacy` `signal_risk_disclosure` `sensitive_financial_info`（需用户同意的文书；v0.2.4） |
+| `legal_doc_key` | `terms` `privacy` `signal_risk_disclosure` `sensitive_financial_info` `site_risk_notice`（`site_risk_notice` = 全站固定风险揭示，只展示不需同意；v0.2.4） |
+| `consent_presentation` | `checkbox_unticked` `scroll_and_confirm` `modal`（同意时的呈现方式，记入 consents；v0.2.4） |
+| `assessment_status` | `valid` `expiring`（距到期 ≤ `remind_before_days`）`grace`（已过 `expires_at`、仍在宽限期内）`expired` `superseded`（有更新的一次测评）；服务端按时间计算，不存库（v0.2.4） |
 | `epistemic_type` | `fact` `estimate` `hypothesis` `execution` |
 | `horizon` | `intraday_t` `short` `swing` `long` |
 | `dimension` | `technical` `capital` `fundamental` `sentiment` `sector_market` `news` |
@@ -235,14 +260,14 @@
 | 403 | `ACCOUNT_LOCKED` | 连续失败临时锁定 | `{retry_after_s}` |
 | 403 | `CSRF_FAILED` | CSRF 令牌缺失/不符 | — |
 | 403 | `FORBIDDEN` | 角色不足（保留；`/admin/*` 不使用，一律 404，见 §1.3） | — |
-| 403 | `CONSENT_REQUIRED` | 缺少必要同意或风险测评 | `{required:[string]}` |
+| 403 | `CONSENT_REQUIRED` | 缺少必要同意（含需重新同意）或有效风险测评 | `{required:[string]}`（`consent_key` 或 `"risk_assessment"`，v0.2.4） |
 | 403 | `ENTITLEMENT_LIMIT_REACHED` | 超出套餐权益上限（自选数、重点关注数、导入次数、LLM 解释次数等） | `{key, limit, current}` |
 | 404 | `NOT_FOUND` | 资源不存在或不属于当前用户 | — |
 | 405 | `METHOD_NOT_ALLOWED` | 路径存在但方法不支持；响应头 `Allow`。非管理员（含未登录）访问 `/admin/*` 一律按 `404 NOT_FOUND` 返回，不带 `Allow` 头 | `{allowed: string[]}` |
 | 413 | `PAYLOAD_TOO_LARGE` | 请求体超过网关/框架上限（v0.2.3 补充）；应用层文件超限仍用 `422 IMPORT_FILE_ERRORS` | `{max_bytes}`（= plan 6.1 `imports.max_request_bytes`；nginx 返回时可省略） |
 | 409 | `CONFLICT` | 唯一约束冲突（如用户名已存在） | `{field}` |
 | 409 | `IDEMPOTENCY_CONFLICT` | 同一幂等键、不同请求体 | — |
-| 409 | `VERSION_CONFLICT` | 乐观锁版本号不符（`If-Match`/`base_version_no`） | `{current_version_no}` |
+| 409 | `VERSION_CONFLICT` | 乐观锁版本号不符（`If-Match`/`base_version_no`）；或提交测评时 `questionnaire_version` 不是当前问卷（v0.2.4） | `{current_version_no}`；测评时为 `{current_version: string}` |
 | 409 | `IMMUTABLE_RESOURCE` | 试图修改不可变对象（建议、已发布策略版本、日报、成交原记录） | — |
 | 422 | `IMPORT_FILE_ERRORS` | 文件级 error：上传阶段（空文件、过大、类型不符、行数超限，此时**不创建批次**），或确认时批次仍有文件级 error | `{findings: ImportFinding[]}`（code 见 §4.1） |
 | 422 | `IMPORT_ROW_ERRORS` | `mode=all` 确认时仍有 error 行 | `{error_rows: int}` |
@@ -259,7 +284,7 @@
 | 422 | `SUGGESTION_INSUFFICIENT_DATA` | 必备字段缺失，未生成建议（0A.2 缺一不可） | `{missing:[string]}` |
 | 409 | `INVALID_STATE_TRANSITION` | 状态机不允许的跃迁（第 6.0 节） | `{from, to, allowed}` |
 | 409 | `STRATEGY_VERSION_NOT_RUNNABLE` | 模板版本不是 `published`/`observing`（例如 simulating、retired） | `{lifecycle}` |
-| 422 | `STRATEGY_FIT_ACK_REQUIRED` | 周期分类器判定不适合，需要用户确认 `fit_ack` | `{horizon, suitable}` |
+| 422 | `STRATEGY_FIT_ACK_REQUIRED` | 周期分类器判定不适合，需要用户确认 `fit_ack`；`ack_allowed=false` 时带 `fit_ack` 也不能启用（v0.2.4，plan 第 9 节问题 39【待用户确认】） | `{horizon, suitable, ack_allowed: boolean, blocking_rule_ids: string[]}` |
 | 422 | `STRATEGY_PARAM_OUT_OF_RANGE` | 参数覆盖超出 param_schema 的 min/max/choices | `{param, min, max, choices}` |
 | 422 | `INSTANCE_SCOPE_INVALID` | 实例作用范围不合法（例如 security 范围缺少代码，或代码不在账户/自选中） | `{scope}` |
 | 422 | `PROMOTION_GATES_NOT_MET` | 晋级或上线时门禁未通过 | `{gates:[{gate, result}]}` |
@@ -340,6 +365,19 @@
 | 45 | `IMPORT_TIME_OUTSIDE_SESSION` | warning | row | 成交时间不在交易时段内 | 仅提示 | 生成器 |
 | 46 | `IMPORT_LOT_SIZE_IRREGULAR` | warning | row | 买入数量不符合整手规则 | 仅提示（科创板 200 股起、按 1 股递增等规则按板块处理） | 生成器 |
 
+**处理选项（v0.2.4 #11，T-F02 D3）**：`ImportFinding.resolution_choices` 按下表生成，第一个为 `default_resolution`；表中没有的提示码 `resolution_choices = []`、`default_resolution = null`。覆盖类选项提交时 `reason` 必填（1–200 字），并写审计。
+
+| 提示码 | `resolution_choices`（第一个为默认） | 覆盖类（须填理由） |
+|---|---|---|
+| 8 `IMPORT_ACCOUNT_MISMATCH` | `[confirm_new_holder_code]`（不选则须改选账户） | `confirm_new_holder_code` |
+| 26/27/28 `IMPORT_ENCODING_LOW_CONFIDENCE` / `IMPORT_FORMAT_LOW_CONFIDENCE` / `IMPORT_SNAPSHOT_AS_OF_ASSUMED` | `[confirm]`（要改编码、解析器或快照时间，用 `PUT /imports/{batch_id}/options`） | — |
+| 33 `IMPORT_UNKNOWN_SECURITY` | `[import_as_is, skip_row]` | — |
+| 34 `IMPORT_MARKET_INFERRED_CONFLICT` | `[use_master_data]` | — |
+| 36 `IMPORT_UNKNOWN_BIZ_TYPE` | `[keep_skipped, manual_entry]` | — |
+| 39/40 `IMPORT_DUPLICATE_IN_DB` / `IMPORT_DUPLICATE_IN_FILE` | `[keep_skipped, force_import]`（`needs_action=false`，但可覆盖） | `force_import` |
+| 41 `IMPORT_POSSIBLE_DUPLICATE_OF_MANUAL` | `[skip_import_row, keep_import_void_manual]` | `keep_import_void_manual` |
+
+
 ---
 ## 5. 共享对象（各接口复用）
 
@@ -355,7 +393,7 @@
 | `RiskFlag` | `{control: risk_control, level: risk_level, message: string, gated_actions: action[], quantity_cap: string(decimal) \| null, evidence_ids: string[]}` |
 | `DataStatusBlock` | 1.1 节的 `{data_status, data_as_of, gaps[]}` |
 | `Stops` | `{stop_loss: string(decimal) \| null, take_profit: string(decimal) \| null, time_stop_days: int \| null}`。所有止损、止盈、时间止损一律嵌套在 `stops` 中（`CandidateSignal`、`StrategyConclusion`、`PlanDraft`），不平铺 |
-| `ImportFinding` | `{id: string, code: string(IMPORT_*，§4.1), severity: import_severity, scope: import_scope, row_no: int \| null, field: string \| null, message: string, params: object, needs_action: boolean, resolution_choices: string[], default_resolution: string \| null, resolution: {choice: string, reason: string \| null, by: string(uuid), at: string(datetime)} \| null}`。`row_no` 为文件物理行号（从 1 起），文件级为 `null`；`params`/`message` 中的股东代码、资金账号先掩码 |
+| `ImportFinding` | `{id: string, code: string(IMPORT_*，§4.1), severity: import_severity, scope: import_scope, row_no: int \| null, field: string \| null, message: string, params: object, needs_action: boolean, resolution_choices: string[]（按 §4.1“处理选项”表，v0.2.4）, default_resolution: string \| null（= `resolution_choices[0]`，为空时 null）, resolution: {choice: string, reason: string \| null, by: string(uuid), at: string(datetime)} \| null}`。`row_no` 为文件物理行号（从 1 起），文件级为 `null`；`params`/`message` 中的股东代码、资金账号先掩码 |
 | `Bar` | `{t: string(date) \| string(datetime), open, high, low, close: string(decimal), pre_close: string(decimal) \| null, volume: string(decimal), amount: string(decimal), avg_price: string(decimal) \| null}`。`t`：日/周线为交易日（周线取该周最后交易日）；`1m` 为该分钟 bar 的**结束**时刻【口径待 T003/T-B05 实测上游后确认】。`volume` 单位为**股**、`amount` 单位为**元**（上游若以“手”返回，由 ingest 换算；上游单位【待 T003 核实】）。`avg_price` 只在 `1m` 给出（分时均价 = 当日累计成交额 / 累计成交量），日/周线为 `null` |
 | `WatchlistItem` | `{security_code, name, focus: boolean, group: string \| null, note: string \| null, added_at: string(datetime), refresh_tier: "tier1" \| "tier2" \| null}`。`refresh_tier` 由系统按重点关注与配额分配（只读；分层规则见 plan 0A.3，数值【待 T003】） |
 | `SignalEvent` | `{signal_event_id: string, security_code, name, kind: signal_kind, at: string(datetime), message: string, strategy_key: string \| null, instance_id: string(uuid) \| null, rule_id: string \| null, price: string(decimal) \| null, candidate_signal_id: string(uuid) \| null}`。规则事件，**不含动作建议**；`message` 须通过禁用词校验 |
@@ -389,7 +427,7 @@
 
 `StrategyConclusion`（`strategies[]` 的元素）：`{strategy_version_id, strategy_key, strategy_name: string, version_no: int, instance_id: uuid \| null, horizon, lifecycle, state: strategy_eval_state, action, t_leg: t_leg \| null, candidate_signal_id: uuid \| null（hold/wait 时为 null）, score: int(0–100) \| null, confidence: {level: confidence_level, value: number(0–1)}, rule_refs: RuleRef[], model_refs: ModelRef[], priority_weight: string(decimal), priority_downweighted: boolean, dimension_views: [{dimension, view: dimension_view, score: int(0–100) \| null, rules: RuleRef[]}], stops: Stops, reasons: TextWithEvidence[], counter_evidence: TextWithEvidence[], invalidation: TextWithEvidence[], valid_until: string(datetime) \| null}`
 
-`DimensionCell`：`{strategy_key, strategy_version_id, view: dimension_view, score: int(0–100) \| null, key_evidence_ids: string[]（≤ 3，取该维度 role ∈ {entry, filter, hold} 且 passed = true 的规则引用的前 3 个证据）, rules_passed: int, rules_total: int}`（`rules_passed/rules_total` 只统计 role ∈ {entry, filter, hold}，v0.2.2）, exit_hits: int, exit_total: int}`（v0.2.3：`exit_total` = 该维度 role ∈ {weakening, exit} 且已求值（`passed` 非 null）的规则数，`exit_hits` = 其中 `passed = true` 的条数；没有这类规则时均为 0）。行级 `divergent=true` 当且仅当该维度单元格中**同时存在** `bullish` 与 `bearish`（`neutral`、`unknown` 不参与，v0.2.3）。
+`DimensionCell`：`{strategy_key, strategy_version_id, view: dimension_view, score: int(0–100) \| null, key_evidence_ids: string[]（≤ 3，取该维度 role ∈ {entry, filter, hold} 且 passed = true 的规则引用的前 3 个证据）, rules_passed: int, rules_total: int, exit_hits: int, exit_total: int}`（`rules_passed/rules_total` 只统计 role ∈ {entry, filter, hold}，v0.2.2；`exit_*` v0.2.3；v0.2.4 修正括号笔误）（v0.2.3：`exit_total` = 该维度 role ∈ {weakening, exit} 且已求值（`passed` 非 null）的规则数，`exit_hits` = 其中 `passed = true` 的条数；没有这类规则时均为 0）。行级 `divergent=true` 当且仅当该维度单元格中**同时存在** `bullish` 与 `bearish`（`neutral`、`unknown` 不参与，v0.2.3）。
 
 **纯离场策略（exit-only，如 H-01 持仓风险监控；v0.2.3）**：规则只含 role ∈ {weakening, exit}（可另有 counter/invalidation）。① 只对**持有中**的证券求值；未持有时不出现在 `strategies[]`、`dimension_matrix`、`consensus` 中。② `state` ∈ {`hold_ok`, `weakening`, `exit_signal`, `insufficient_data`}，`action` ∈ {`hold`, `reduce`, `sell`}，从不出现 `entry_ok`/`buy`/`add`。③ 单元格 `rules_passed/rules_total` 为 0/0、`score` 为 `null`，展示改用 `exit_hits/exit_total`（前端显示“离场 x/y”）；`view`：任一命中 → `bearish`，全部已求值且未命中 → `neutral`，全部无法求值 → `unknown`。④ 计入行级 `divergent` 与 `consensus`（与 catalog 第 4 节第 4 点“冲突时并列展示”一致）。⑤ 计划草案 P1b 由 weakening/exit 命中满足。
 
@@ -453,35 +491,40 @@
 ### 7.1 认证与账号
 | 方法 | 路径 | 说明 | 请求 → 响应 |
 |---|---|---|---|
-| GET | `/meta/registration` | 注册模式（不需登录），前端据此隐藏注册入口 | → `200 {mode: registration_mode, doc_versions: {terms, privacy, risk_disclosure, signal_risk_disclosure, sensitive_financial_info}}`（各值为 string；未定稿为 `"unversioned"`，v0.2.3 #26） |
-| POST | `/auth/register` | 注册，状态为 `pending`。**V1 默认 `registration_mode=closed`**，一律返回 `503 REGISTRATION_CLOSED`；本人账号由 CLI 创建 | `{username: string(4–32，^[a-z0-9_]{4,32}$，输入转小写), password: string(10–128), display_name: string, invite_code: string \| null, apply_note: string(≤500) \| null, agreements: string[]}`；`agreements` 必须恰为 `["terms","privacy","risk_disclosure"]`（顺序不限），按当前 `doc_versions` 记录 → `201 {id, username, status:"pending"}`；`invite` 模式下 `invite_code`、`apply_note` 必填，邀请码无效（不存在/过期/已用/已吊销/绑定的用户名不符）一律 `400 VALIDATION_ERROR {fields:[{field:"invite_code", issue:"invalid"}]}`；可能返回 `409 CONFLICT`、`503 REGISTRATION_CLOSED`（含邀请功能未上线时的 `invite` 模式）、`429 RATE_LIMITED` |
+| GET | `/meta/registration` | 注册模式（不需登录），前端据此隐藏注册入口 | → `200 {mode: registration_mode}`（v0.2.4：`doc_versions` 移到 `GET /meta/consent-docs`） |
+| GET | `/meta/consent-docs` | 各文书当前版本（不需登录；`Cache-Control: public, max-age=300`；v0.2.4 #3） | → `200 {items: [ConsentDoc]}`，每个 `legal_doc_key` 一项：`ConsentDoc {key: legal_doc_key, version: string（语义化版本或 "unversioned"）, version_no: int \| null, title: string, summary: string, effective_at: string(datetime) \| null, content_sha256: string \| null, url: string \| null（= `/api/v1/legal/{key}`；未定稿时 null）, required_for: ("register" \| "advice" \| "import" \| "display")[]}`。`terms`、`privacy` → `["register"]`；`signal_risk_disclosure` → `["register", "advice"]`；`sensitive_financial_info` → `["import"]`；`site_risk_notice` → `["display"]`。`"unversioned"` 只会在 `registration_mode=closed` 时出现 |
+| GET | `/legal/{doc_key}` · `/legal/{doc_key}/versions` · `/legal/{doc_key}/{version}` | 文书正文（不需登录，v0.2.4 #3） | 当前版本 / 历史列表 / 指定版本：`LegalDocument {key: legal_doc_key, version, version_no, title, summary, content_md, content_sha256, locale, change_level: "major"\|"minor"\|"patch", changelog: string, effective_at, published_at}`；列表元素不含 `content_md`。未发布（`"unversioned"`）或版本不存在 → `404 NOT_FOUND`。已发布的版本永远可取（只插入，不删除） |
+| POST | `/auth/register` | 注册，状态为 `pending`。**V1 默认 `registration_mode=closed`**，一律返回 `503 REGISTRATION_CLOSED`；本人账号由 CLI 创建 | `{username: string(4–32，^[a-z0-9_]+$，服务端转小写；保留词 admin/root/system 等 → 400 VALIDATION_ERROR), password: string(10–128，须含字母与数字，不得等于用户名，不得在弱口令表中), display_name: string(1–32), invite_code: string \| null（V1 不用）, apply_note: string(≤200) \| null, agreements: consent_key[]}`；`agreements` 必须包含 `terms`、`privacy`、`signal_risk_disclosure`，可另含 `sensitive_financial_info`（v0.2.4 #2：原 `risk_disclosure` 作废），按 `/meta/consent-docs` 的当前版本记录（`presentation=checkbox_unticked`） → `201 {id, username, status:"pending"}`；`invite` 模式下 `invite_code`、`apply_note` 必填，邀请码无效（不存在/过期/已用/已吊销/绑定的用户名不符）一律 `400 VALIDATION_ERROR {fields:[{field:"invite_code", issue:"invalid"}]}`；可能返回 `409 CONFLICT`、`503 REGISTRATION_CLOSED`（含邀请功能未上线时的 `invite` 模式）、`429 RATE_LIMITED` |
 | POST | `/auth/login` | 登录 | `{username, password}` → `200 {user: Me, csrf_token}` + Set-Cookie；可能返回 `401 INVALID_CREDENTIALS`、`403 ACCOUNT_NOT_APPROVED{status, reason?}`、`403 ACCOUNT_LOCKED{retry_after_s}` |
 | POST | `/auth/logout` 🔒 | 注销 | → `204` |
 | POST | `/auth/password` 🔒 | 修改密码，同时注销其他会话并轮换当前会话 | `{old_password, new_password}` → `204` + Set-Cookie（新 `sid`、新 `csrf_token`；前端从 Cookie 重读 CSRF 令牌）；旧密码错误 → `400 VALIDATION_ERROR`（`field: old_password`），计入 T-B03a 限速 |
-| GET | `/me` 🔒 | 当前用户 | → `Me {id, username, display_name, role, status, entitlements: {key: value}, consents: {key: {version, accepted_at}}, risk_assessment: {level: int(1–5), assessed_at} \| null}` |
-| GET/PUT | `/me/profile` 🔒 | 投资画像（版本化，PUT 生成新版本） | `{horizon_pref: horizon[], effort: "low"\|"medium"\|"high", risk_tolerance: int(1–5), experience: "novice"\|"intermediate"\|"advanced", max_single_position_pct: string(decimal)}` → `{version_no, ...}` |
-| POST | `/me/consents` 🔒 | 同意条款 | `{key: "signal_risk_disclosure"\|"privacy"\|"terms"\|"sensitive_financial_info", version: string}` → `201`；`version` 必须等于 `GET /meta/registration` 返回的当前 `doc_versions[key]`，否则 `400 VALIDATION_ERROR`（`field: version`） |
-| POST | `/me/risk-assessment` 🔒 | 提交风险测评 | `{answers: [{q_id, choice}]}` → `{level, assessed_at}` |
-| GET/PATCH | `/admin/users` 🛡 · `/admin/users/{id}` 🛡 | 审核和停用账号 | PATCH `{status: "approved"\|"rejected"\|"disabled", reason: string \| null}` |
+| GET | `/me` 🔒 | 当前用户 | → `Me {id, username, display_name, role, status, entitlements: {key: value}, consents: {[consent_key]: {version: string \| null, accepted_at: string(datetime) \| null, current_version: string, needs_reconsent: boolean}}（四个键都有；未同意或已撤回时 `version`/`accepted_at` 为 null，`needs_reconsent=true`）, risk_assessment: RiskAssessmentSummary \| null}`；`RiskAssessmentSummary {assessment_id, questionnaire_version, risk_tolerance: int(1–5), submitted_at, expires_at, status: assessment_status, needs_retest: boolean}`（v0.2.4 #5、#6） |
+| GET/PUT | `/me/profile` 🔒 | 投资画像（版本化，PUT 生成新版本） | `{horizon_pref: horizon[], effort: "low"\|"medium"\|"high" \| null, risk_tolerance: int(1–5) \| null, experience: "novice"\|"intermediate"\|"advanced" \| null, max_single_position_pct: string(decimal，5–50，最多 2 位小数), assessment_id: uuid \| null}` → `{version_no, questionnaire_version: string \| null, ...}`；无画像时 GET → `404 NOT_FOUND`。三个测评字段为 null 表示未测评（分类器按未填写处理，plan 2.5.14）。**【待用户确认】（plan 第 9 节问题 38，研究员默认）**：这三个字段只能等于或比 `assessment_id`（省略时取最近一次有效测评）的 `derived` 更保守，更激进 → `400 VALIDATION_ERROR {fields:[{field, issue:"exceeds_assessment", max_allowed}]}`；没有有效测评时只能为 null。`assessment_id` 不是自己的或不是有效测评 → 400（v0.2.4 #7） |
+| POST | `/me/consents` 🔒 | 同意或撤回条款（只追加记录） | `{key: consent_key, version: string, content_sha256: string \| null, action: "grant"\|"withdraw"（默认 grant）, ui_surface: string(≤64), presentation: consent_presentation}` → `201 {key, version, action, at}`；`version` 与 `content_sha256` 必须等于 `/meta/consent-docs` 的当前值（`"unversioned"` 时 `content_sha256` 为 null），否则 `400 VALIDATION_ERROR`（`field: version` 或 `content_sha256`）。`withdraw` 只接受 `signal_risk_disclosure`、`sensitive_financial_info`（撤回后相应门槛立即生效，已有数据的处理见 plan 7.3）；`terms`、`privacy` 不能单独撤回（走注销账户）→ 400（v0.2.4 #4） |
+| GET | `/me/risk-assessment/questionnaire` 🔒 | 当前问卷（不含分值、正确答案和计分规则；v0.2.4 #6） | → `200 {questionnaire_key: "risk_profile", version, intro: string, groups: [{id, title}], questions: [{q_id, group, type: "single", required: boolean, title, choices: [{id, text}]}]}`；结构对应 `docs/strategies/compliance/risk_questionnaire.yaml`；没有已发布问卷 → `404 NOT_FOUND` |
+| GET | `/me/risk-assessment` 🔒 · `/me/risk-assessments` 🔒 | 最近一次测评 / 历史（分页） | → `RiskAssessment`；从未测评 → `404 NOT_FOUND`；历史元素同结构，记录不可修改 |
+| POST | `/me/risk-assessment` 🔒 | 提交风险测评（每次新增一条记录，不改画像） | `{questionnaire_version: string, answers: [{q_id: string, choice: string}], started_at: string(datetime) \| null, client_duration_s: int \| null}` → `201 RiskAssessment {assessment_id, questionnaire_version, submitted_at, expires_at, status: assessment_status, derived: {risk_tolerance: {value: int(1–5), rule_ids: string[]}, experience: {value, rule_ids}, effort: {value, rule_ids}}, flags: string[]（如 `no_loss_tolerance`、`self_report_higher`、`fast_completion`）, needs_retest: boolean}`。`questionnaire_version` 不是当前版本 → `409 VERSION_CONFLICT {current_version}`；缺题、未知 `q_id` 或选项 → `400 VALIDATION_ERROR {fields:[{field:"answers.<q_id>", issue}]}`；K4（理解确认）答错 → `400 VALIDATION_ERROR`，`details.reason = "understanding_required"`（不入库）；24 小时内超过 3 次 → `429 RATE_LIMITED`。`trade_count_12m` 等由服务端从成交记录计算，客户端不提交。用户确认后用 `PUT /me/profile` 带 `assessment_id` 写入画像。有效期 **【待用户确认】（问题 40）** 365 天、提前 30 天提醒、宽限 30 天 |
+| GET/PATCH | `/admin/users` 🛡 · `/admin/users/{id}` 🛡 | 审核和停用账号 | GET 列表分页（§1.2）`?status=&q=`，元素 `AdminUser {id, username, display_name, status: account_status, role, apply_note: string \| null, created_at, register_ip_region: string \| null（粗粒度）, same_ip_registrations: int, same_ip_flag: boolean（超过 plan 6.1 `admin.same_ip_highlight_threshold`，只作提示）, review_reason: string \| null, reviewed_at: string(datetime) \| null, last_login_at: string(datetime) \| null}`；PATCH `{status: "approved"\|"rejected"\|"disabled", reason: string(≤200) \| null}`：`rejected`、`disabled`，以及从 `disabled` 恢复为 `approved` 时 `reason` 必填，否则 `400 VALIDATION_ERROR`（v0.2.4 #12） |
 
 ### 7.2 账户、成交与导入（只返回掩码字段）
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET/POST | `/accounts` 🔒 | 券商账户：`{id, broker_name, alias, shareholder_code_masked, fund_account_masked, created_at}`；POST 只接受 `alias` 和 `broker_name` |
 | POST | `/imports` 🔒 | `multipart/form-data`：`file`、`account_id`、`kind: "trades"\|"positions"`、`snapshot_as_of: string(datetime) \| null`（持仓快照时间，可后补）。原始文件存放在仓库外、加密并做访问控制的存储中（plan.md 3.5A）→ `201 {batch_id, status: "uploaded", file_findings: ImportFinding[]}`，随后后台解析。上传阶段的文件级 error（空文件、过大、类型不符、行数超限）→ `422 IMPORT_FILE_ERRORS{findings}`，**不创建批次**。同一文件再次上传**不报错**，在 `file_findings` 中给出 warning `IMPORT_DUPLICATE_FILE{batch_id}` |
-| GET | `/imports` 🔒 | 批次列表（分页，`?account_id=&status=`） |
+| GET | `/imports` 🔒 | 批次列表（分页，`?account_id=&status=`）：元素 `ImportBatchSummary {batch_id, account_id, kind, status: import_status, parser_id: string \| null, stats, created_at, committed_at: string(datetime) \| null, reverted_at: string(datetime) \| null}`（v0.2.4 #12） |
 | GET | `/imports/{batch_id}` 🔒 | `{batch_id, account_id, kind, status: import_status, parser_id: string \| null, parser_version: string \| null, detected_encoding: string \| null, encoding_override: string \| null, encoding_confidence: number \| null, format_score: number \| null, detected_columns: string[], mapping: {[column]: field} \| null, snapshot_as_of: string(datetime) \| null, file_findings: ImportFinding[], stats: {rows, ok, warning, error, skipped, new, duplicate_in_db, duplicate_in_file, possible_duplicate_of_manual, needs_action_open: int}, created_at, committed_at: string \| null, reverted_at: string \| null}`。`parser_id` 取 `tdx_trades_v1` / `tdx_positions_v1`（旧名 `fmt_a_*` 作为别名接受）。轮询间隔 ≥ 1 秒，或等 SSE `notification(kind=import)` |
 | GET | `/imports/{batch_id}/rows` 🔒 | 预览行（分页，`?status=&code=&dedup_status=`）：`{row_no, status: import_row_status, kind: "trade" \| "event" \| "ignored", dedup_status: dedup_status \| null, findings: ImportFinding[], raw_masked: string, normalized: {trade_date, trade_time: string \| null, security_code, name, side: trade_side \| null, qty, price, amount, fee_total: string \| null, net_amount: string \| null, biz_type_raw: string} \| null}`。`raw_masked` 是掩码后的原始行；**不返回原始股东代码或资金账号** |
 | PUT | `/imports/{batch_id}/options` 🔒 | 改编码、解析器、列映射或快照时间并重新解析：`{encoding_override: string \| null, parser_id: string \| null, mapping: object \| null, snapshot_as_of: string(datetime) \| null}` → `202 {status: "parsing"}`；只允许 `previewed`/`failed`，否则 `409 INVALID_STATE_TRANSITION` |
-| POST | `/imports/{batch_id}/findings/{finding_id}/resolve` 🔒 | 处理一条 `needs_action` 提示：`{choice: string（须在 resolution_choices 中）, reason: string \| null}` → `200 ImportFinding`；选择覆盖类处理（如“仍然导入”）时 `reason` 必填，否则 `400 VALIDATION_ERROR`；写审计 |
+| POST | `/imports/{batch_id}/findings/{finding_id}/resolve` 🔒 | 处理一条提示：`{choice: string, reason: string \| null}` → `200 ImportFinding`；`choice` 须在该提示的 `resolution_choices` 中（非空即可处理，不限 `needs_action`，§4.1“处理选项”）；覆盖类选项 `reason` 必填（≤200），否则 `400 VALIDATION_ERROR`；写审计（v0.2.4 #11） |
 | POST | `/imports/{batch_id}/confirm` 🔒 | 两步提交的第二步，支持 `Idempotency-Key`：`{mode: "all" \| "valid_rows_only", acknowledge_warnings: boolean}` → `200 {status: "committed", written: {trades: int, events: int, snapshot_positions: int}, reconciliation: {status: reconciliation_status, diff_count: int} \| null}`。可能返回 `422 IMPORT_FILE_ERRORS`、`422 IMPORT_ROW_ERRORS`（`mode=all` 且有 error 行）、`422 IMPORT_WARNINGS_UNACKNOWLEDGED`、`422 IMPORT_NOTHING_TO_COMMIT`、`409 INVALID_STATE_TRANSITION`。`valid_rows_only` 只写 `ok`/`warning` 且 `dedup_status=new` 的行 |
 | POST | `/imports/{batch_id}/discard` 🔒 | 放弃未提交的批次 → `{status: "discarded"}`（只允许 `previewed`/`failed`） |
 | POST | `/imports/{batch_id}/revert` 🔒 | 回滚已提交批次 → `{status: "reverted"}` |
 | GET | `/imports/{batch_id}/errors.csv` 🔒 | `text/csv; charset=utf-8`（带 BOM）：列 `row_no, code, severity, field, message, raw_masked`；只含**掩码后**的原始行 |
-| GET/POST | `/trades` 🔒 · `/trades/{id}` 🔒 | 成交列表和手工录入；原记录不可修改，更正时写更正记录 |
+| GET/POST | `/trades` 🔒 · `/trades/{id}` 🔒 | 成交列表和手工录入；原记录不可修改，更正时写更正记录。GET `?account_id=&security_code=&from=&to=&include_voided=`（分页），元素 `Trade {id, account_id, trade_date, trade_time: string \| null, security_code, name, side: trade_side, qty: string(decimal), price: string(decimal), amount: string(decimal), fee_total: string(decimal) \| null, net_amount: string(decimal) \| null, source: "import"\|"manual", batch_id: uuid \| null, voided: boolean, void_reason: string \| null, voided_at: string(datetime) \| null, corrects_trade_id: uuid \| null, created_at}`。POST `TradeCreate {account_id, trade_date, trade_time: string \| null, security_code, side, qty: string(decimal), price: string(decimal), fee_total: string(decimal) \| null, corrects_trade_id: uuid \| null, reason: string \| null（corrects_trade_id 非空时必填）}` → `201 Trade`，支持 `Idempotency-Key`；带 `corrects_trade_id` 时在同一事务中作废原记录并写入新记录；需已同意 `sensitive_financial_info`（§1.3）（v0.2.4 #12） |
+| POST | `/trades/{id}/void` 🔒 | 作废一条成交（v0.2.4 #12） | `{reason: string(1–200)}` → `200 Trade`；已作废 → `409 INVALID_STATE_TRANSITION`；导入批次回滚造成的作废，`void_reason` 为 `"batch_reverted:{batch_id}"`；写审计 |
 | GET | `/snapshots` 🔒 | 持仓快照 |
 | GET | `/reconciliation?account_id=` 🔒 | 对账结果：`{status: reconciliation_status, as_of: string(datetime) \| null, items: [{kind: reconciliation_item_kind, security_code: string \| null, name: string \| null, ours: string(decimal) \| null, broker: string(decimal) \| null, diff: string(decimal) \| null, important: boolean, note: string}]}`。成本按**摊薄成本**比较（我方重建值计入分红：现金红利冲减、股息红利税补缴计入，与通达信一致，v0.2.2），容差 `max(0.01 元, 0.1%)`（plan 3.5A）；每次导入确认后重算 |
-| GET | `/portfolio` 🔒 | 持仓汇总：`{cash, total_assets, positions: [{security_code, name, qty, sellable_qty, cost_price, market_value, pnl, pnl_pct, weight_pct}], exposure: {sector: [{name, pct}]}, DataStatusBlock}` |
+| GET | `/portfolio?account_id=` 🔒 | 持仓汇总（`account_id` 可选，不传时合并全部账户；v0.2.4 #14）：`{cash, total_assets, positions: [{security_code, name, qty, sellable_qty, cost_price, market_value, pnl, pnl_pct, weight_pct}], exposure: {sector: [{name, pct}]}, DataStatusBlock}` |
 
 ### 7.3 自选、行情与证券
 | 方法 | 路径 | 说明 |
@@ -608,7 +651,7 @@
 - **ingest 心跳**（ingest 写、api 读）：leader 每 15 秒 `SET ingest:heartbeat <json> EX 600`，JSON 为 `{"ts": int(Unix 秒), "instance_id": string, "leader": true, "version": string, "budget_used_last_minute": int, "queue_depth": {"p0": int, "p1": int, "p2": int}}`；api 只依赖 `ts`，其余字段供 `/admin/ingest/status` 展示。判定顺序：Redis 不可用 → `unknown`；`ingest:paused` 存在（值为 JSON `{"by", "at", "reason"}`，管理员暂停时写入）→ `paused`；心跳缺失、无法解析或 `now - ts > 120` → `stale`；否则 `ok`。键名与阈值可配置（plan 6.1 `config/ingest.yaml`，环境变量 `INGEST_HEARTBEAT_KEY`、`INGEST_PAUSED_KEY`、`INGEST_STALE_AFTER_S`）。
 - **`/meta/enums` 结构**（取值全部来自后端的集中定义，路由里不写死）：
 ```json
-{"version": "v0.2.3",
+{"version": "v0.2.4",
  "enums": {"horizon": ["intraday_t", "short", "swing", "long"], "...": []},
  "reason_codes": [{"code": "T1_NOT_SELLABLE", "release_kinds": ["time"], "check_on": ["daily_close"], "manually_releasable": false, "note": "…"}],
  "error_codes": [{"code": "NOT_FOUND", "http_status": 404, "scope": "http"}],
@@ -666,3 +709,12 @@
   - OpenAPI schema 与所有响应示例中不得出现 provider 值 `local`；`Evidence.provider` ∈ `data_provider`；`cash_available` 只出现在 `/terminal.account`。
   - 所有 `RuleRef.dimension` 非空。
   - `POST /notifications/{id}/read`、`/notifications/read-all` 返回 204 且无响应体。
+- **v0.2.4**：
+  - 注册 `agreements` 含 `risk_disclosure` 或缺 `signal_risk_disclosure` → 400；`apply_note` 201 字 → 400。
+  - `POST /me/consents`：`content_sha256` 与 `/meta/consent-docs` 不符 → 400；同一 key 先 grant 再 withdraw 后，`Me.consents[key].needs_reconsent=true`，库中两行都在；对 `consents`、`legal_documents`、`questionnaires`、`risk_assessments` 执行 UPDATE/DELETE/TRUNCATE 被触发器拒绝。
+  - `REGISTRATION_MODE=invite` 且任一文书为 `"unversioned"` → 启动失败；`closed` 时 `/meta/consent-docs` 可返回 `"unversioned"`，`/legal/{key}` → 404。
+  - 测评：`questionnaire_version` 旧 → 409；缺题 → 400 且 `fields` 列出缺的 `q_id`；K4 答错 → 400 `understanding_required` 且不入库；24 小时第 4 次 → 429；问卷响应中不出现 `points`、`score`、`correct`；同一答卷两次计分结果一致，`derived` 与 `risk_questionnaire.yaml` 的样例一致。
+  - 没有有效测评时 ⚖ 接口 → 403，`required` 含 `"risk_assessment"`；测评过期超过宽限期后同样 403。
+  - 未同意 `sensitive_financial_info`：`POST /imports`、`POST /trades` → 403；`POST /accounts` 不受影响。
+  - CSRF：头与 Cookie 一致但与会话内令牌不符 → 403 `CSRF_FAILED`。
+  - §4.1“处理选项”表中每个码的 `resolution_choices` 与实际返回一致；`force_import` 不带理由 → 400；`POST /trades/{id}/void` 两次 → 第二次 409。

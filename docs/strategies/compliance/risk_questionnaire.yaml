@@ -1,0 +1,359 @@
+# 风险测评问卷（研究员 T-B15 草案，2026-11-01）
+# 用途：个人适配与风险提示，不是法定适当性评估（说明见 risk_questionnaire.md 第 1 节）
+# 所有分值、档位边界、有效期都是初值（calibration: initial_values），没有统计依据，可按版本规则调整（versioning.md）
+# 题目、选项的 id 一经发布不得复用为其他含义；改动按 versioning.md §3.2 判定版本级别
+
+schema_version: 1
+questionnaire_key: risk_profile
+questionnaire_version: "1.0.0"        # 语义化版本，正则与契约 classifier_version 相同
+version_no: 1                         # 内部单调递增整数（与 horizon_classifier 的 version_no 同一做法）
+status: draft                         # draft → published（发布后不可变）
+locale: zh-CN
+calibration: initial_values
+contract_ref: "v0.2.3"                # 字段与枚举以契约 /me/profile 为准
+answer_format: "POST /me/risk-assessment {answers: [{q_id, choice}]}；choice 为选项 id（如 \"B\"），本版全部为单选"
+
+outputs:                              # 问卷产出的画像字段（契约 /me/profile）
+  risk_tolerance: {type: int, range: [1, 5]}
+  experience: {type: enum, values: [novice, intermediate, advanced], order: [novice, intermediate, advanced]}
+  effort: {type: enum, values: [low, medium, high], order: [low, medium, high]}
+  not_derived: [horizon_pref, max_single_position_pct]   # 这两个字段由用户在画像页直接选择，问卷不推导
+
+display:
+  show_points_to_user: false          # 作答时不显示分值，防止按分作答
+  show_result_explanation: true       # 出结果时逐字段说明“因为哪道题得到这个结果”
+  intro: >-
+    本问卷用于了解您能承受的波动、投资经验和可投入的时间，帮助本工具调整周期适配和风险提示。
+    它不是证券经营机构的适当性评估，结果不代表对任何股票或规则信号的风险收益判断，也不构成投资建议。
+    请按真实情况作答。
+
+groups:
+  - {id: risk,      name: 风险承受}
+  - {id: experience, name: 投资经验}
+  - {id: effort,    name: 可投入精力}
+  - {id: capacity,  name: 资金与期限}
+  - {id: knowledge, name: 产品认知}
+
+questions:
+  # ---------- 风险承受 ----------
+  - id: R1
+    group: risk
+    type: single
+    required: true
+    stem: "如果投入股票的资金出现亏损，您最多能接受亏损本金的多少？"
+    options:
+      - {id: A, text: "不能接受任何本金亏损", points: 0}
+      - {id: B, text: "5% 以内", points: 2}
+      - {id: C, text: "5%–15%", points: 4}
+      - {id: D, text: "15%–30%", points: 6}
+      - {id: E, text: "30% 以上", points: 8}
+  - id: R2
+    group: risk
+    type: single
+    required: true
+    stem: "假设您持有的一只股票一个月内下跌 20%，而您当初买入的理由没有变化，您最可能怎么做？"
+    options:
+      - {id: A, text: "立即全部卖出，不想再承受波动", points: 0}
+      - {id: B, text: "卖出一部分，降低风险", points: 2}
+      - {id: C, text: "继续持有，按原计划观察", points: 4}
+      - {id: D, text: "按事先写好的计划分批买入", points: 6}
+  - id: R3
+    group: risk
+    type: single
+    required: true
+    stem: "假设有两种投资：甲预期年收益约 5%，可能有很小的亏损；乙预期年收益约 20%，但可能亏损 25% 甚至更多（均为假设情形，不对应任何真实产品）。您会怎样分配资金？"
+    options:
+      - {id: A, text: "全部投甲", points: 0}
+      - {id: B, text: "大部分投甲", points: 2}
+      - {id: C, text: "甲乙各一半", points: 4}
+      - {id: D, text: "大部分投乙", points: 6}
+      - {id: E, text: "全部投乙", points: 8}
+  - id: R4
+    group: risk
+    type: single
+    required: true
+    stem: "您投资股票的主要目标是："
+    options:
+      - {id: A, text: "保住本金，收益低一些也可以", points: 0}
+      - {id: B, text: "获得小幅收益，可以承担小幅波动", points: 2}
+      - {id: C, text: "获得较高收益，可以承担较大波动", points: 4}
+      - {id: D, text: "追求资产大幅增长，可以承担很大波动", points: 6}
+
+  # ---------- 资金与期限 ----------
+  - id: F1
+    group: capacity
+    type: single
+    required: true
+    stem: "您计划投入 A 股的资金，约占您家庭金融资产（存款、理财、基金、股票等，不含自住房和车）的比例："
+    options:
+      - {id: A, text: "70% 以上", points: 0}
+      - {id: B, text: "50%–70%", points: 1}
+      - {id: C, text: "30%–50%", points: 2}
+      - {id: D, text: "10%–30%", points: 3}
+      - {id: E, text: "10% 以下", points: 4}
+  - id: F2
+    group: capacity
+    type: single
+    required: true
+    stem: "这笔资金在多长时间内不会被挪作他用？"
+    options:
+      - {id: A, text: "3 个月内可能就要用", points: 0}
+      - {id: B, text: "3–12 个月", points: 1}
+      - {id: C, text: "1–3 年", points: 3}
+      - {id: D, text: "3 年以上", points: 4}
+  - id: F3
+    group: capacity
+    type: single
+    required: true
+    stem: "这笔资金的来源是："
+    options:
+      - {id: A, text: "自有闲置资金", points: 0}
+      - {id: B, text: "自有资金，但 1 年内有确定的大额支出（如购房、学费），可能要动用其中一部分", points: 0}
+      - {id: C, text: "包含借来的钱（信用贷、消费贷、亲友借款或融资融券等）", points: 0}
+    note: "本题不计分，只用于封顶（scoring.risk_tolerance.caps）"
+
+  # ---------- 投资经验 ----------
+  - id: E0
+    group: experience
+    type: single
+    required: false
+    stem: "您如何评价自己的投资经验？（自评，不计分，只用于一致性提示）"
+    options:
+      - {id: A, text: "新手", self_report: novice}
+      - {id: B, text: "有一定经验", self_report: intermediate}
+      - {id: C, text: "经验丰富", self_report: advanced}
+  - id: E1
+    group: experience
+    type: single
+    required: true
+    stem: "您用自己的账户买卖 A 股股票（含 ETF）有多少年？"
+    options:
+      - {id: A, text: "从未买卖过", points: 0}
+      - {id: B, text: "不足 1 年", points: 1}
+      - {id: C, text: "1–3 年", points: 3}
+      - {id: D, text: "3–5 年", points: 4}
+      - {id: E, text: "5 年以上", points: 5}
+  - id: E2
+    group: experience
+    type: single
+    required: true
+    stem: "您自己做过决定、买卖过的最复杂的品种是："
+    options:
+      - {id: A, text: "只有银行存款，或没有投资过", points: 0}
+      - {id: B, text: "银行理财、货币基金、债券基金", points: 0}
+      - {id: C, text: "股票型或混合型基金", points: 1}
+      - {id: D, text: "A 股股票或 ETF", points: 2}
+      - {id: E, text: "融资融券、期权、期货等杠杆或衍生品", points: 3}
+  - id: E3
+    group: experience
+    type: single
+    required: true
+    stem: "过去 12 个月，您自己下达的股票买卖大约有多少笔？（买一次或卖一次各算一笔）"
+    options:
+      - {id: A, text: "0 笔", points: 0}
+      - {id: B, text: "1–10 笔", points: 1}
+      - {id: C, text: "11–50 笔", points: 2}
+      - {id: D, text: "50 笔以上", points: 2}
+  - id: E4
+    group: experience
+    type: single
+    required: true
+    stem: "买入股票时，您会事先定好止损条件并执行吗？"
+    options:
+      - {id: A, text: "没有设过，或不了解止损", points: 0}
+      - {id: B, text: "设过，但经常没有执行", points: 1}
+      - {id: C, text: "大多数时候按计划执行", points: 2}
+
+  # ---------- 可投入精力 ----------
+  - id: T1
+    group: effort
+    type: single
+    required: true
+    stem: "交易日的交易时段（9:30–11:30、13:00–15:00），您通常能看盘吗？"
+    options:
+      - {id: A, text: "基本不能", points: 0}
+      - {id: B, text: "只能在午休或收盘后看", points: 1}
+      - {id: C, text: "每个交易日盘中累计能看 1 小时以上", points: 2}
+      - {id: D, text: "大部分交易时段都能看", points: 3}
+  - id: T2
+    group: effort
+    type: single
+    required: true
+    stem: "每周您愿意花多少时间复盘、阅读公告和研究？"
+    options:
+      - {id: A, text: "不到 1 小时", points: 0}
+      - {id: B, text: "1–3 小时", points: 1}
+      - {id: C, text: "3–8 小时", points: 2}
+      - {id: D, text: "8 小时以上", points: 3}
+
+  # ---------- 产品认知（每题答对 1 分，答错或“不确定”0 分） ----------
+  - id: K1
+    group: knowledge
+    type: single
+    required: true
+    stem: "在沪深交易所，您今天买入的 A 股股票，最早什么时候可以卖出？"
+    correct: B
+    explanation: "A 股股票实行 T+1：当日买入，下一个交易日起才能卖出。"
+    options:
+      - {id: A, text: "当天就可以"}
+      - {id: B, text: "下一个交易日"}
+      - {id: C, text: "三个交易日之后"}
+      - {id: D, text: "不确定"}
+  - id: K2
+    group: knowledge
+    type: single
+    required: true
+    stem: "创业板股票（上市前 5 个交易日之后）每日的涨跌幅限制是："
+    correct: C
+    explanation: "深交所交易规则：主板 10%，创业板 20%（market_rules_check.md O6，第 3.3.13 条）。"
+    options:
+      - {id: A, text: "5%"}
+      - {id: B, text: "10%"}
+      - {id: C, text: "20%"}
+      - {id: D, text: "不设涨跌幅限制"}
+      - {id: E, text: "不确定"}
+  - id: K3
+    group: knowledge
+    type: single
+    required: true
+    stem: "一只股票第一天下跌 10%，第二天上涨 10%。两天后，它相对最初的价格："
+    correct: B
+    explanation: "0.9 × 1.1 = 0.99，即下跌约 1%：跌掉的比例需要更大的涨幅才能涨回来。"
+    options:
+      - {id: A, text: "不涨不跌"}
+      - {id: B, text: "下跌约 1%"}
+      - {id: C, text: "上涨约 1%"}
+      - {id: D, text: "不确定"}
+  - id: K4
+    group: knowledge
+    type: single
+    required: true
+    stem: "本工具给出的“规则信号”（候选信号）和模拟跟踪结果，能保证未来收益吗？"
+    correct: C
+    must_answer_correctly: true         # 理解确认题：答错时服务端拒收（missing_policy），前端展示 explanation 后让用户重答
+    explanation: "不能。规则信号只是按您启用的规则对公开数据计算的结果，规则可能失效，按它操作也可能亏损本金。"
+    options:
+      - {id: A, text: "能"}
+      - {id: B, text: "规则大多数时候有效，基本能保证"}
+      - {id: C, text: "不能，规则可能失效，可能亏损本金"}
+      - {id: D, text: "不确定"}
+
+scoring:
+  # 子分：对列出的题目取所选选项的 points 求和；knowledge_correct 为 K1–K4 答对题数
+  subscores:
+    risk_points:       {sum_of: [R1, R2, R3, R4, F1, F2], range: [0, 36]}
+    experience_points: {sum_of: [E1, E2, E3, E4], plus: knowledge_correct, range: [0, 16]}
+    knowledge_correct: {count_correct: [K1, K2, K3, K4], range: [0, 4]}
+
+  risk_tolerance:
+    # 步骤：① 一票否决命中 → 直接取 1；② 否则按 risk_points 查档；③ 再取所有命中封顶的最小值
+    veto:
+      - {id: RV1, when: {q: R1, in: [A]}, level: 1, flag: no_loss_tolerance,
+         reason: "不能接受任何本金亏损：股票投资可能亏损本金，风险承受取最低档"}
+    bands:                             # 区间两端都含
+      - {min: 0,  max: 8,  level: 1}
+      - {min: 9,  max: 15, level: 2}
+      - {min: 16, max: 22, level: 3}
+      - {min: 23, max: 29, level: 4}
+      - {min: 30, max: 36, level: 5}
+    caps:                              # max_level：命中后结果不超过该值；多条命中取最小
+      - {id: RC1, when: {q: R1, in: [B]}, max_level: 2, reason: "可接受亏损 ≤ 5%"}
+      - {id: RC2, when: {q: R1, in: [C]}, max_level: 3, reason: "可接受亏损 ≤ 15%"}
+      - {id: RC3, when: {q: R1, in: [D]}, max_level: 4, reason: "可接受亏损 ≤ 30%"}
+      - {id: RC4, when: {q: F2, in: [A]}, max_level: 2, reason: "资金 3 个月内可能要用"}
+      - {id: RC5, when: {q: F3, in: [B]}, max_level: 3, reason: "1 年内有确定的大额支出"}
+      - {id: RC6, when: {q: F3, in: [C]}, max_level: 2, reason: "投资资金含借款"}
+      - {id: RC7, when: {score: knowledge_correct, le: 1}, max_level: 3, reason: "基础交易规则认知不足"}
+    labels: {1: 保守, 2: 稳健, 3: 平衡, 4: 积极, 5: 进取}   # 仅作展示，不使用 C1–C5，避免与经营机构的法定评级混淆
+
+  experience:
+    # 按顺序取第一条命中的规则
+    rules:
+      - {id: EX1, when: {q: E1, in: [A, B]}, value: novice,
+         reason: "自己买卖 A 股不足 1 年"}
+      - {id: EX2, when: {all: [{score: experience_points, ge: 12}, {q: E1, in: [D, E]}, {score: knowledge_correct, ge: 3}]},
+         value: advanced, reason: "3 年以上交易经历，经验分 ≥ 12，认知题答对 ≥ 3"}
+      - {id: EX3, when: {all: [{score: experience_points, ge: 7}, {score: knowledge_correct, ge: 2}]},
+         value: intermediate, reason: "经验分 ≥ 7，认知题答对 ≥ 2"}
+      - {id: EX4, when: always, value: novice, reason: "未达到 intermediate 条件"}
+
+  effort:
+    rules:
+      - {id: EF1, when: {all: [{q: T1, in: [D]}, {q: T2, in: [C, D]}]}, value: high,
+         reason: "大部分交易时段可看盘，且每周研究 ≥ 3 小时"}
+      - {id: EF2, when: {any: [{q: T1, in: [C, D]}, {all: [{q: T1, in: [B]}, {q: T2, in: [C, D]}]}]}, value: medium,
+         reason: "盘中累计可看盘 ≥ 1 小时，或午休/收盘后看盘且每周研究 ≥ 3 小时"}
+      - {id: EF3, when: always, value: low, reason: "盘中基本无法跟踪"}
+
+  condition_syntax: >-
+    {q: 题号, in: [选项id...]}：该题所选选项在列表中；
+    {score: 子分名, ge|le|eq: 整数}：子分比较（ge/le 含等号）；
+    {all: [...]} 全部满足；{any: [...]} 任一满足；always 恒真。
+    不允许其他写法，便于后端确定性实现与测试。
+
+missing_policy:
+  required_unanswered: reject          # 任一 required 题缺答或选项 id 不存在 → 422 VALIDATION_ERROR，details 列出 q_id；不出结果，不补默认值，不改画像
+  optional_unanswered: ignore          # E0 可不答，相关一致性校验跳过
+  must_answer_correctly_failed: reject # K4 答错 → 422 VALIDATION_ERROR，details.reason = "understanding_required"
+  unknown_q_id: reject
+  duplicate_q_id: reject
+  no_valid_assessment: >-
+    从未测评或测评已过有效期加宽限期：画像中的 risk_tolerance / experience / effort 按“未填写”处理时，
+    分类器的 SH0/SH0B/SH0C、IT0B/IT0C 全部不满足，short 与 intraday_t 封顶 59（horizon_classifier.md 第 6 节“画像未填”）；
+    建议类接口按契约返回 403 CONSENT_REQUIRED。
+
+consistency_checks:
+  # 只产生 flags 和提示文案；除注明外不改变映射结果（映射已按最保守口径设计）
+  - id: CC1
+    when: {self_report_gt_derived: experience}     # E0 自评高于推导结果（顺序见 outputs.experience.order）
+    action: use_derived
+    flag: self_report_higher
+    message: "您自评的经验高于问卷结果，画像按问卷结果 {derived} 填写。如需调整，请核对“交易年限”等题后重测。"
+  - id: CC2
+    when: {all: [{q: E1, in: [A]}, {any: [{q: E2, in: [D, E]}, {q: E3, in: [B, C, D]}]}]}
+    action: use_derived                            # experience 已由 EX1 判为 novice
+    flag: answers_inconsistent
+    message: "您选择了“从未买卖过 A 股”，但其他题显示有股票交易，请核对。"
+  - id: CC3
+    when: {all: [{q: R1, in: [A, B]}, {q: R3, in: [D, E]}]}
+    action: use_derived                            # 风险承受已由 RV1/RC1 封顶
+    flag: answers_inconsistent
+    message: "您能接受的亏损很小，但选择了可能亏损 25% 以上的分配方式，请核对。"
+  - id: CC4
+    when: {all: [{q: R4, in: [A]}, {q: R2, in: [D]}]}
+    action: flag_only
+    flag: answers_inconsistent
+    message: "您的目标是保住本金，但下跌后选择继续买入，请核对。"
+  - id: CC5
+    when: {all: [{q: E3, in: [A]}, {external: user.trade_count_12m, ge: 1}]}   # 来自导入成交；无导入数据时跳过
+    action: flag_only                              # 不用导入数据覆盖用户答案
+    flag: import_mismatch
+    message: "导入的成交记录显示过去 12 个月有交易，与您的作答不一致，请核对。"
+  - id: CC6
+    when: {external: client_duration_s, lt: 60}    # 客户端计时；未上报时跳过
+    action: flag_only
+    flag: fast_completion
+    message: "作答用时很短，请确认每题都按真实情况选择。"
+
+profile_write:
+  # 研究员默认，用户可否决（risk_questionnaire.md 第 5 节）
+  mode: propose_then_confirm           # 测评结果先展示，用户确认后写入新画像版本（plan：画像全部由用户确认）
+  derived_is_upper_bound: true         # 用户可以把三个字段改得比问卷结果更保守，不能改得更激进
+  raise_above_derived: reject          # PUT /me/profile 超过上限 → 422 VALIDATION_ERROR，details {field, max_allowed}
+  record_on_profile: [assessment_id, questionnaire_version]
+
+validity:
+  valid_days: 365                      # 初值，无官方依据（官方文件未规定有效期，见 md 第 2 节）
+  remind_before_days: 30
+  grace_days_after_expiry: 30          # 宽限期内只提示；宽限期后视为未测评（missing_policy.no_valid_assessment）
+  expiry_keeps_profile: true           # 过期不删除、不改写画像字段
+
+retest:
+  user_initiated: {allowed: true, max_submissions_per_24h: 3}   # 每次提交都留档；限次防止反复试答
+  forced_when:
+    - {id: RT1, when: "questionnaire MAJOR 版本发布且 forces_retest: true", effect: "旧结果在新版本 effective_at + grace_days_after_expiry 后视为无效"}
+    - {id: RT2, when: "测评过期（validity）", effect: "同 validity"}
+  suggested_when:
+    - {id: RS1, when: "用户修改画像中的 capital_range 或 max_drawdown_pct", effect: "提示重测，不强制"}
+    - {id: RS2, when: "出现 import_mismatch 或 answers_inconsistent 标记", effect: "结果页提示重测，不强制"}
+  history: immutable                   # 历次答卷、结果、标记只追加，不覆盖（versioning.md §5）

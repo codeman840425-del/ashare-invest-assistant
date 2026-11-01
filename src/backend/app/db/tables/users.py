@@ -108,7 +108,8 @@ consents = Table(
     boolean("granted", nullable=False),
     created_at("at"),
     txt("ip_hash"),
-    # 契约 §3 没有 consent 枚举：plan §3.3 的 4 种 + 契约 §7.1 注册/同意里的 signal_risk_disclosure
+    # 契约 §3 没有 consent 枚举：plan §3.3 的 4 种 + 契约 §7.1 注册/同意里的
+    # signal_risk_disclosure、terms
     one_of(
         "kind",
         [
@@ -117,6 +118,9 @@ consents = Table(
             "risk_disclosure",
             "email_notification",
             "signal_risk_disclosure",
+            # 契约 §7.1 POST /me/consents 的 key=terms（用户协议），plan §3.3 未列；
+            # 迁移 0004（T-B03）
+            "terms",
         ],
     ),
     schema=APP,
@@ -134,7 +138,7 @@ user_profiles = Table(
     txt("effort"),
     integer("risk_tolerance"),
     txt("experience"),
-    num("max_single_position_pct"),
+    num("max_single_position_pct", comment="范围由 API 校验，以 risk_controls 为准"),
     # 选填（契约暂未暴露，仅内部使用）。capital_range 的存储编码未定 → TODO(架构师)，暂不加 CHECK
     txt("capital_range"),
     num("max_drawdown_pct"),

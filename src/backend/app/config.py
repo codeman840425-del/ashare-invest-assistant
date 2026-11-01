@@ -38,6 +38,7 @@ from pydantic_settings import (
 )
 
 from app.config_files import BUSINESS_FILES, BusinessConfig
+from app.schemas.enums import RegistrationMode
 
 AppEnv = Literal["local", "test", "staging", "production"]
 
@@ -341,6 +342,12 @@ class Settings(BaseSettings):
 
     # --- 密钥 ---
     app_master_key: SecretStr | None = None
+
+    # 认证（plan §3.6 / 契约 §1.3，T-B03）：注册模式与会话 Cookie 的 Secure 标记
+    #: ``REGISTRATION_MODE``：closed（默认，``/auth/register`` → 503）/ invite / open
+    registration_mode: RegistrationMode = RegistrationMode.CLOSED
+    #: ``SESSION_COOKIE_SECURE``：生产必须 true；本地 http 调试可设 false
+    session_cookie_secure: bool = True
 
     # --- 分页（契约 §1.2） ---
     page_limit_default: int = Field(default=50, ge=1)

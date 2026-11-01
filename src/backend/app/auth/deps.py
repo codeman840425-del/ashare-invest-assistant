@@ -1,0 +1,113 @@
+"""认证依赖：数据库 / Redis 资源、当前用户、CSRF（契约 §1.3）。
+
+判定顺序（🔒 接口）：无会话或会话失效 → ``401 AUTH_REQUIRED``；用户不存在或已注销 → 吊销会话后
+``401 AUTH_REQUIRED``；账号非 ``approved`` → ``403 ACCOUNT_NOT_APPROVED {status}``；写方法
+（POST/PUT/PATCH/DELETE）的 ``X-CSRF-Token`` 缺失或不符 → ``403 CSRF_FAILED``。
+``/admin/*`` 的 404 规则不在这里（T-B03b）。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import uuid
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import Annotated, Any
+
+import redis
+from fastapi import Depends, Request
+from sqlalchemy import Engine, Row, select
+
+from app.auth.sessions import CSRF_HEADER, SESSION_COOKIE, Session, SessionStore
+from app.common.errors import AppError, ErrorCode
+from app.config import Settings, get_settings
+from app.db.engine import engine_for
+from app.db.tables.users import users
+from app.schemas.enums import AccountStatus
+
+UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def get_engine(settings: Annotated[Settings, Depends(get_settings)]) -> Engine:
+    if settings.database_url is None:
+        raise AppError(ErrorCode.INTERNAL_ERROR)
+    return engine_for(settings.database_url.get_secret_value())
+
+
+@lru_cache(maxsize=4)
+def _redis_for(url: str) -> redis.Redis:
+    return redis.Redis.from_url(url, socket_timeout=2, socket_connect_timeout=2)
+
+
+def get_session_store(settings: Annotated[Settings, Depends(get_settings)]) -> SessionStore:
+    if not settings.redis_url:
+        raise AppError(ErrorCode.INTERNAL_ERROR)
+    return SessionStore(_redis_for(settings.redis_url))
+
+
+EngineDep = Annotated[Engine, Depends(get_engine)]
+StoreDep = Annotated[SessionStore, Depends(get_session_store)]
+SettingsDep = Annotated[Settings, Depends(get_settings)]
+
+
+def client_ip(request: Request) -> str | None:
+    """客户端 IP：nginx 设置的 ``X-Real-IP`` 优先，否则取直连地址。
+
+    TODO(T-B03a)：可信代理名单由防滥用任务确定；这里只用于审计 ``ip_hash``，不做访问控制。
+    """
+    real = request.headers.get("x-real-ip")
+    if real:
+        return real.strip()[:64]
+    return request.client.host if request.client else None
+
+
+def ip_hash(settings: Settings, ip: str | None) -> str | None:
+    """``HMAC-SHA256(APP_MASTER_KEY, ip)``；未配置主密钥（仅 local/test 允许）时不记录。"""
+    if ip is None or settings.app_master_key is None:
+        return None
+    key = settings.app_master_key.get_secret_value().encode("utf-8")
+    return hmac.new(key, b"ip:" + ip.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+@dataclass(frozen=True)
+class AuthContext:
+    user: Row[Any]
+    session: Session
+
+    @property
+    def user_id(self) -> uuid.UUID:
+        return uuid.UUID(str(self.user.id))
+
+
+def load_user(engine: Engine, user_id: str) -> Row[Any] | None:
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        return None
+    with engine.connect() as conn:
+        return conn.execute(
+            select(users).where(users.c.id == uid, users.c.deleted_at.is_(None))
+        ).first()
+
+
+def current_auth(request: Request, engine: EngineDep, store: StoreDep) -> AuthContext:
+    session = store.get(request.cookies.get(SESSION_COOKIE))
+    if session is None:
+        raise AppError(ErrorCode.AUTH_REQUIRED)
+    user = load_user(engine, session.user_id)
+    if user is None:
+        store.delete(session)
+        raise AppError(ErrorCode.AUTH_REQUIRED)
+    if user.status != AccountStatus.APPROVED:
+        # 禁用即吊销属于 T-B03b；这里兜底：非 approved 的会话直接作废
+        store.revoke_user(str(user.id))
+        raise AppError(ErrorCode.ACCOUNT_NOT_APPROVED, details={"status": user.status})
+    if request.method.upper() in UNSAFE_METHODS and not session.csrf_ok(
+        request.headers.get(CSRF_HEADER)
+    ):
+        raise AppError(ErrorCode.CSRF_FAILED)
+    return AuthContext(user=user, session=session)
+
+
+AuthDep = Annotated[AuthContext, Depends(current_auth)]

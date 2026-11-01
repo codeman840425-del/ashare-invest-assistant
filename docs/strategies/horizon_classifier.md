@@ -125,6 +125,8 @@ rules:
            reason: "做T 需要已有底仓（T+1：当日买入不能当日卖出）"}
         - {id: IT0B, input: profile.effort, op: in, value: [medium, high], else_cap: 59,
            reason: "做T 需要盘中盯盘，画像精力为低或未填写"}
+        - {id: IT0C, input: profile.experience, op: in, value: [intermediate, advanced], else_cap: 59,
+           reason: "做T 需要盘中决断与纪律，画像经验为新手或未填写"}   # 编排者默认，用户可否决（2026-11-01）
       components:
         - {id: IT1, input: f.intraday_amplitude_20d, transform: rank_pct,
            bands: [{op: ge, value: 0.7, pts: 30}, {op: ge, value: 0.5, pts: 20}, {op: ge, value: 0.3, pts: 10}],
@@ -147,6 +149,8 @@ rules:
            reason: "短线波动大，画像风险承受 < 3 或未填写"}
         - {id: SH0B, input: profile.effort, op: in, value: [medium, high], else_cap: 59,
            reason: "短线需要每日跟踪，画像精力为低或未填写"}
+        - {id: SH0C, input: profile.experience, op: in, value: [intermediate, advanced], else_cap: 59,
+           reason: "短线需要盯盘与止损纪律，画像经验为新手或未填写"}   # 问题 37 方案 A，已定（2026-11-01）
       components:
         - {id: SH1, input: f.amount_20d_avg, unit: CNY,
            bands: [{op: ge, value: 300000000, pts: 20}, {op: ge, value: 100000000, pts: 10}],
@@ -296,10 +300,10 @@ plan §2.5.3 还提到 ATR% 和“交易频率”。v1 规则未使用：ATR% �
 | B 高振幅活跃 + 底仓 + 做T记录 | 振幅分位 0.85、成交额 12 亿、换手分位 0.8、涨停 2 次、波动分位 0.75、ma_trend>0、mom>0、ROE 3%、增速 −5%、分红 0 年、财报 30 期；有底仓、有做T、均持 4 日；偏好 [short, intraday_t]、精力 high、风险 4、经验 advanced | 100 | 100 | 70 | 20 | [short, intraday_t, swing] |
 | C 同 B，但为 ST | 同 B，`f.is_st=true` | 59 | 59 | 59 | 20 | [] |
 | D 北交所 | `sec.board=bse` | 0 | 0 | 0 | 0 | [] |
-| E 次新（上市 40 日） | 振幅分位 0.7、成交额 4 亿、换手分位 0.9、涨停 1 次、波动分位 0.85、ma_trend>0、mom 缺失、ROE 8%、增速缺失、财报 6 期；无持仓、无成交记录；偏好 [swing, short]、精力 medium、风险 3、经验 novice | 0（无底仓） | 85 | 59（HG6，raw 65） | 10 | [short] |
+| E 次新（上市 40 日） | 振幅分位 0.7、成交额 4 亿、换手分位 0.9、涨停 1 次、波动分位 0.85、ma_trend>0、mom 缺失、ROE 8%、增速缺失、财报 6 期；无持仓、无成交记录；偏好 [swing, short]、精力 medium、风险 3、经验 novice | 0（无底仓） | 59（novice 封顶，raw 85） | 59（HG6，raw 65） | 10 | [] |
 | F 无持仓 + 画像未填 + 财务缺失 | 振幅分位 0.5、成交额 1.5 亿、换手分位 0.5、波动分位 0.5、ma_trend<0、mom<0；ROE、增速、分红、财报期数都缺失；无持仓 | 0 | 28 | 25 | 10（缺失 65 分，封顶） | [] |
 
-> 用例 E 说明：对 novice 用户，次新股的 short 仍有可能列为“适合”。v1 不按经验封顶 short，因为 plan 没有要求；是否增加“novice → short 封顶 59”，请编排者或用户决定（第 8 节缺口 6）。研究员建议与备选方案见第 9 节，**待用户拍板**。
+> 用例 E 说明：按已定规则（用户 2026-11-01 拍板方案 A，见第 9 节），novice 用户的 short 封顶 59（raw 85→59），因此不列为“适合”；用户可经 `fit_ack` 自行选择。intraday_t 对 novice 同样封顶 59（编排者默认，用户可否决），本例因无底仓本就为 0。
 
 用例 B 的理由示例（示例文本；evidence_ids 为示例）：
 
@@ -317,11 +321,11 @@ plan §2.5.3 还提到 ATR% 和“交易频率”。v1 规则未使用：ATR% �
 3. **画像字段冲突。** plan 第 1170 行 `user_profiles` 是 `horizon(short/medium/long)`、`weekly_hours`；契约 `/me/profile` 是 `horizon_pref: horizon[]`、`effort`、`risk_tolerance`、`experience`。本规则按契约来，plan 需同步。
 4. **plan §6.1 的 `features:` 键名没有前缀，并且缺第 5 节的新增键。**
 5. **`rules` 的结构需要确认。** 本文用结构化的 gates/requires/components/bands；导入器也可以改用 DSL 表达式，但语义须与第 3 节一致。
-6. **是否按 `profile.experience` 限制 short**（见用例 E；plan 问题 37；研究员建议见第 9 节，**待用户拍板**）。另外，intraday_t 在 §9 C(6) 下目前只做盘后统计：分类器列为“适合”只表示周期匹配，T-01 实例运行时仍只出盘后统计。前端文案需说明这一点。
+6. **是否按 `profile.experience` 限制 short / intraday_t**（见用例 E；plan 问题 37；详见第 9 节）。**short：【已定 A】（用户拍板，2026-11-01，见 T-A03 §2）**：novice 或未填经验 → short 封顶 59，可 `fit_ack` 覆盖，落地为 `horizon_classifier.yaml` 规则 SH0C（`version_no: 2`，`classifier_version: "1.1.0"`）。**intraday_t：编排者默认，用户可否决**：同样封顶，口径与 short 一致（novice 或未填 → 封顶 59，可 `fit_ack` 覆盖）。另外，intraday_t 在 §9 C(6) 下目前只做盘后统计：分类器列为“适合”只表示周期匹配，T-01 实例运行时仍只出盘后统计。前端文案需说明这一点。
 
-## 9. 问题 37：novice 是否限制 short（T006b 问题 4，**待用户拍板**）
+## 9. 问题 37：novice 是否限制 short（T006b 问题 4；short **【已定 A】**，intraday_t **编排者默认，用户可否决**）
 
-> 本节只给专业建议和备选方案，**不替用户做决定**。改动只涉及 `horizon_classifier.yaml` 新版本（plan 问题 37 原文），不影响契约。
+> 本节原为专业建议和备选方案。2026-11-01 用户已就 short 选定方案 A（T-A03 §2）；intraday_t 由编排者默认同样封顶，用户可否决。9.1–9.3 保留为决策依据。改动只涉及 `horizon_classifier.yaml` 新版本（plan 问题 37 原文），不影响契约。
 
 ### 9.1 现状
 
@@ -359,7 +363,7 @@ plan §2.5.3 还提到 ATR% 和“交易频率”。v1 规则未使用：ATR% �
 
 如果用户更看重"少打扰"，B 是合理的次选。C、D 的复杂度目前没有必要。
 
-**另需用户一并决定**：intraday_t 是否同样处理。研究员建议先不加：intraday_t 已要求有底仓，§9 C(6) 下目前只出盘后统计。
+**intraday_t 是否同样处理**：研究员原建议先不加（intraday_t 已要求有底仓，§9 C(6) 下目前只出盘后统计）。**编排者已定默认：intraday_t 对 novice 也封顶，口径与 short 一致**（示意：intraday_t.requires 增加 `{id: IT0C, input: profile.experience, op: in, value: [intermediate, advanced], else_cap: 59, reason: "做T 需要盘中决断与纪律，画像经验为新手或未填写"}`，与架构师 fce21bb 一致）。用户可否决。
 
 ### 9.4 选 A 时的影响（示例）
 
@@ -367,4 +371,4 @@ plan §2.5.3 还提到 ATR% 和“交易频率”。v1 规则未使用：ATR% �
 - 用例 B（advanced）不受影响。
 - 需要同步：`classifier_version` 升版；用例表增加一行 novice 对照；理由文案见上表。
 
-**状态：待用户拍板**（A / B / C / D，及 intraday_t 是否同样处理）。用户定了之后，由架构师更新 plan 问题 37 和 `horizon_classifier.yaml` 新版本。
+**状态：short【已定 A】（用户拍板，2026-11-01，T-A03 §2）；intraday_t【编排者默认，用户可否决】（同样封顶，口径与 short 一致）。** 架构师已在 plan 问题 37 与 §6.1 落地 SH0C（`version_no: 2`，`classifier_version: "1.1.0"`）；架构师已在 fce21bb 落地 IT0C。第 4 节 rules 块已同步补入 SH0C、IT0C（T006d，结构不变，均为对应周期 requires 的 else_cap 59）。

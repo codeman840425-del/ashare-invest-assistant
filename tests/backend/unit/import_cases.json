@@ -1,7 +1,8 @@
 {
-  "_comment": "T004 导入验收用例（/workspace/team/reports/T004-import-cases.md，53 条）→ 夹具映射。只引用用例 ID、优先级与合成夹具文件名；用例正文以报告为准。新增/改编号须同步报告。",
+  "_comment": "T004 导入验收用例（/workspace/team/reports/T004-import-cases.md v2，54 条：原 53 条 + T-T01a 新增 TC-ENC-12）→ 夹具映射。只引用用例 ID、优先级与合成夹具文件名；期望结果统一读 fmt_a/expected.json（唯一期望来源）。新增/改编号须同步报告。",
   "source": "team/reports/T004-import-cases.md",
-  "count": 53,
+  "count": 54,
+  "expected_source": "tests/fixtures/broker_statements/fmt_a/expected.json",
   "cases": [
     {
       "id": "TC-ENC-01",
@@ -91,6 +92,15 @@
       "group": "ENC",
       "fixtures": [
         "trades_truncated_last_line.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-12",
+      "priority": "P1",
+      "group": "ENC",
+      "fixtures": [
+        "trades_cr.txt",
+        "trades_sample.txt"
       ]
     },
     {

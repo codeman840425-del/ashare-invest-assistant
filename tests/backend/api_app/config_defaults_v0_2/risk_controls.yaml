@@ -1,0 +1,39 @@
+# 快照：docs/plan.md v0.2 §6.1 `config/risk_controls.yaml` 代码块原文（T-T01a）。
+# 改默认值先改 plan §6.1，再同步本文件；test_config_yaml_defaults.py 会比对两处。
+schema_version: 1
+rc1_stop_take:                  # 每笔建议带止损/止盈
+  enabled: true
+  long_horizon_default_stop_pct: -20   # 中长线默认价格止损，可关
+  clamp_to_price_limit: true           # 止损/止盈价限制在当日/次日涨跌停价内
+rc2_position_cap:
+  enabled: true
+  single_position_max_pct: 20   # 单只市值 ≤ 总资产 20%（画像可调；用户可调范围 ◇ 5–50）
+rc3_total_exposure:             # 总仓位参考区间（%），按 market_regime；日报 regime_position_range 读这里
+  enabled: true
+  regime_ranges:
+    uptrend: [60, 90]
+    range: [40, 60]
+    downtrend: [0, 30]
+  regime_confirm_days: 2        # regime 防抖天数
+rc4_sector_concentration:
+  enabled: true
+  sw_l1_max_pct: 40             # 单一申万一级行业
+  concept_max_pct: 50           # 单一概念
+rc5_loss_streak_drawdown:
+  enabled: true
+  closed_loss_streak: 3         # 已平仓连续亏损笔数
+  drawdown_from_peak_pct: 10    # 账户净值自高点回撤
+  strategy_sim_fail_streak: 5   # 某策略模拟跟踪连续失败次数
+  pause_on_trigger: true        # 触发即挂 LOSS_STREAK_PAUSE（2.5.9），用户确认恢复或期满解除
+  pause_days: 5                 # ◇ 暂停期（交易日）
+rc6_plan_violation:
+  enabled: true
+  checks: [opposite_side, qty_over_plan, held_after_invalidation, buy_without_stop, buy_during_wait]
+executability:                  # 2.5.9 原因码的默认阈值
+  low_confidence_threshold: 0.4 # LOW_CONFIDENCE
+  new_listing_min_days: 30      # NEW_LISTING：上市不满 N 个交易日只阻断买入（与 2.5.11 gate_tradability 的 30 日一致）
+  cooling_off_after_stop:       # COOLING_OFF：止损后冷静期（第 9 节问题 31：功能提供、默认关闭、N=3）
+    enabled: false
+    days: 3
+  same_template_cooldown_days: 3  # 同模板同证券冷却 3 个交易日（问题 30）
+  # DATA_STALE 的阈值不在此处，统一用 realtime.yaml 的 stale_threshold_s

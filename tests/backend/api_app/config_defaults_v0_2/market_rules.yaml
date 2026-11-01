@@ -1,0 +1,46 @@
+# 快照：docs/plan.md v0.2 §6.1 `config/market_rules.yaml` 代码块原文（T-T01a）。
+# 改默认值先改 plan §6.1，再同步本文件；test_config_yaml_defaults.py 会比对两处。
+schema_version: 1
+segments:
+  - effective_from: "2026-07-06"      # 沪深主板 ST/*ST 涨跌幅改为 10% 的生效日（此前段为 5%，另列一段）【待 T003 补测核实】
+    price_limit_pct:                  # 前收 × (1 ± pct)，四舍五入到 0.01 元【精确舍入以交易所为准，待核实】
+      main_board: 10
+      main_board_st: 10
+      chinext: 20                     # 创业板（含风险警示）
+      star: 20                        # 科创板（含风险警示）
+      bse: 30                         # 北交所（含风险警示）
+    no_limit:                         # 无涨跌幅限制的情形（以交易所规则为准）
+      registered_ipo_first_days: 5    # 沪深注册制新股上市前 5 个交易日
+      bse_ipo_first_days: 1
+      delisting_period_first_day: true
+    lot:
+      buy_lot: 100
+      star_min_buy: 200               # 科创板 ≥ 200 股后按 1 股递增【待核实】
+      star_step: 1
+      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【待核实】
+      bse_step: 1
+    sessions:                         # 北京时间
+      call_auction: ["09:15", "09:25"]
+      morning: ["09:30", "11:30"]
+      afternoon: ["13:00", "14:57"]
+      closing_auction: ["14:57", "15:00"]
+    t_plus: 1
+    fees:
+      stamp_duty_sell_pct: 0.05       # 印花税仅卖出
+      transfer_fee_pct: 0.001         # 过户费双向
+      commission_rate_default_pct: null   # 佣金按用户费率；null = 未设置时由导入成交反推，仍无则提示用户填写
+      commission_min_yuan: 5          # 单笔最低（券商常见做法，以用户实际为准）
+      slippage_default_pct: 0.1       # 模板参数默认值
+    impact_cost:                      # 【编排者默认，用户可否决；初值待校准】第 9 节 C(7)
+      adv_window_days: 20             # 参与率 = 订单数量 ÷ 近 20 日日均成交量
+      tiers:                          # 参与率上界（%，含） → 成本（bp）
+        - {max_participation_pct: 0.1, bp: 0}    # I1
+        - {max_participation_pct: 0.5, bp: 5}    # I2
+        - {max_participation_pct: 1.0, bp: 15}   # I3
+        - {max_participation_pct: 2.0, bp: 30}   # I4
+        - {max_participation_pct: null, bp: 60}  # I5（> 2%）
+    unfillable:
+      one_price_limit_up_blocks_buy: true
+      one_price_limit_down_blocks_sell: true
+      skip_suspended: true
+  - effective_from: "2000-01-01"      # 2026-07-06 之前：除 main_board_st: 5 外，其余键与上一段相同（文件中写全，不做继承）

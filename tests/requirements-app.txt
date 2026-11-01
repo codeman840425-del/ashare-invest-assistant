@@ -1,0 +1,11 @@
+# 后端应用测试依赖（T-T01a）。版本取自 src/backend/uv.lock（T-B01，4b9cd8d）。
+# 用于 tests/backend/api_app/：在测试进程内 import app.main.create_app（不启动服务、不连外网）。
+# 安装：uv pip install --python tests/.venv/bin/python -r tests/requirements-app.txt
+# 后端 dev 依赖组接管后（uv sync --group dev），本文件随 requirements.txt 一起删除。
+fastapi==0.162.0
+starlette==1.10.0
+pydantic==2.14.2
+pydantic-settings==2.16.2
+pyyaml==6.0.3
+httpx==0.28.1
+anyio==4.16.0

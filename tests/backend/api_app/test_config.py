@@ -1,0 +1,177 @@
+"""T-B01 报告 §6 建议 8（配置）与 10（API 前缀）。"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import pytest
+
+pytestmark = [pytest.mark.unit]
+
+#: 虚构标记值：用来检查 MAIRUI_* 环境变量不会进入 Settings / 日志 / 响应（不是任何真实 licence）
+FAKE_LICENCE_MARKER = "FAKE-LICENCE-MARKER-0000"
+
+
+def test_production_requires_master_key(backend, clean_env):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="APP_MASTER_KEY"):
+        backend.config.Settings(app_env="production")
+    with pytest.raises(ValidationError, match="APP_MASTER_KEY"):
+        backend.config.Settings(app_env="staging")
+
+
+def test_master_key_min_length(backend, clean_env):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="32"):
+        backend.config.Settings(app_env="production", app_master_key="short-test-key")
+    s = backend.config.Settings(app_env="production", app_master_key="p" * 32)
+    assert "p" * 32 not in repr(s) and "p" * 32 not in str(s.model_dump())
+
+
+def test_dev_envs_allow_missing_key(backend, clean_env):
+    for env in ("local", "test"):
+        assert backend.config.Settings(app_env=env).app_master_key is None
+
+
+def test_defaults(backend, clean_env):
+    s = backend.config.Settings()
+    assert s.app_env == "local"
+    assert s.api_prefix == "/api/v1"
+    assert (s.page_limit_default, s.page_limit_max) == (50, 200)
+    assert s.health_check_timeout_s == 1.0
+    assert (s.ingest_heartbeat_key, s.ingest_paused_key, s.ingest_stale_after_s) == ("ingest:heartbeat", "ingest:paused", 120)
+    assert s.cursor_ttl_s == 86_400
+
+
+def test_env_overrides(backend, clean_env, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("INGEST_STALE_AFTER_S", "45")
+    monkeypatch.setenv("INGEST_HEARTBEAT_KEY", "hb:x")
+    monkeypatch.setenv("PAGE_LIMIT_MAX", "100")
+    s = backend.config.Settings()
+    assert (s.app_env, s.ingest_stale_after_s, s.ingest_heartbeat_key, s.page_limit_max) == ("test", 45, "hb:x", 100)
+
+
+def test_page_limit_default_gt_max_rejected(backend, clean_env):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        backend.config.Settings(page_limit_default=300, page_limit_max=200)
+
+
+def test_env_overrides_yaml_business(backend, clean_env, monkeypatch):
+    (clean_env / "realtime.yaml").write_text("schema_version: 1\nintervals: {quote_interval_s: 15}\n", encoding="utf-8")
+    assert backend.config.Settings().business["realtime"]["intervals"]["quote_interval_s"] == 15
+    # 环境变量优先于 yaml；pydantic-settings 对嵌套映射做深合并（只覆盖给出的键）
+    monkeypatch.setenv("BUSINESS", '{"realtime": {"intervals": {"quote_interval_s": 30}}}')
+    assert backend.config.Settings().business == {"realtime": {"schema_version": 1, "intervals": {"quote_interval_s": 30}}}
+
+
+def test_mairui_env_ignored(backend, clean_env, monkeypatch, caplog):
+    monkeypatch.setenv("MAIRUI_LICENCE", FAKE_LICENCE_MARKER)
+    monkeypatch.setenv("MAIRUI_EGRESS_IP_EXPECTED", "192.0.2.1")
+    s = backend.config.Settings(app_env="test")
+    assert not [f for f in type(s).model_fields if "mairui" in f.lower()]
+    assert FAKE_LICENCE_MARKER not in repr(s) and FAKE_LICENCE_MARKER not in str(s.model_dump())
+    caplog.set_level(logging.DEBUG)
+    from fastapi.testclient import TestClient
+
+    with TestClient(backend.main.create_app(s), raise_server_exceptions=False) as c:
+        bodies = [c.get(p).text for p in ("/api/v1/health", "/api/v1/meta/enums", "/api/v1/nope", "/api/v1/openapi.json")]
+    assert all(FAKE_LICENCE_MARKER not in b for b in bodies)
+    assert FAKE_LICENCE_MARKER not in caplog.text
+
+
+def test_secrets_not_in_repr(backend, clean_env):
+    s = backend.config.Settings(app_env="test", database_url="postgresql://127.0.0.1:1/x_marker_db", app_master_key="m" * 40)
+    text = repr(s) + str(s)
+    assert "x_marker_db" not in text and "m" * 40 not in text
+
+
+# ---------------- config/*.yaml 加载 ----------------
+def test_yaml_dir_loading(backend, clean_env):
+    (clean_env / "a.yaml").write_text("schema_version: 1\nk: 1\n", encoding="utf-8")
+    (clean_env / "b.yml").write_text("", encoding="utf-8")
+    (clean_env / "note.txt").write_text("ignored", encoding="utf-8")
+    sub = clean_env / "strategies"
+    sub.mkdir()
+    (sub / "s.yaml").write_text("x: 1\n", encoding="utf-8")
+    assert backend.config.Settings().business == {"a": {"schema_version": 1, "k": 1}, "b": {}}
+
+
+def test_missing_config_dir_is_empty(backend, clean_env, monkeypatch, tmp_path):
+    monkeypatch.setenv("CONFIG_DIR", str(tmp_path / "nope"))
+    assert backend.config.Settings().business == {}
+
+
+@pytest.mark.parametrize(
+    ("files", "match"),
+    [
+        ({"bad.yaml": "a: [1, 2\n"}, "解析失败"),
+        ({"list.yaml": "- 1\n- 2\n"}, "顶层必须是映射"),
+        ({"scalar.yaml": "42\n"}, "顶层必须是映射"),
+        ({"dup.yaml": "a: 1\n", "dup.yml": "a: 2\n"}, "重名"),
+    ],
+)
+def test_bad_yaml_fails_startup(backend, clean_env, files, match):
+    for name, text in files.items():
+        (clean_env / name).write_text(text, encoding="utf-8")
+    with pytest.raises(backend.config.ConfigError, match=match):
+        backend.config.Settings()
+
+
+def test_bad_yaml_error_has_no_content(backend, clean_env):
+    (clean_env / "bad.yaml").write_text("secret_marker_value: [unclosed\n", encoding="utf-8")
+    with pytest.raises(backend.config.ConfigError) as ei:
+        backend.config.Settings()
+    assert "secret_marker_value" not in str(ei.value)
+
+
+def test_unknown_yaml_key_rejected_plan_6_1(backend, clean_env):
+    """plan v0.2 §6.1：未知键 → 启动失败（extra=forbid），每个文件必须 schema_version: 1。"""
+    (clean_env / "realtime.yaml").write_text("schema_version: 1\nintervalz: {}\n", encoding="utf-8")
+    try:
+        backend.config.Settings()
+    except (backend.config.ConfigError, ValueError):
+        return
+    pytest.xfail("T-B02（config/*.yaml 的 pydantic 模型）未实现：未知键未被拒绝（plan v0.2 §6.1）")
+
+
+# ---------------- 10. API 前缀 ----------------
+@pytest.mark.parametrize(
+    ("raw", "norm"),
+    [("/api/v1", "/api/v1"), ("/v1", "/v1"), ("v1", "/v1"), ("/v1/", "/v1"), (" /v1 ", "/v1"), ("/", ""), ("", "")],
+)
+def test_prefix_normalization(backend, clean_env, raw, norm):
+    assert backend.config.Settings(api_prefix=raw).api_prefix == norm
+
+
+def test_prefix_v1_moves_routes_and_openapi(make_client):
+    c = make_client(api_prefix="/v1")
+    assert c.get("/v1/health").status_code in {200, 503}
+    assert c.get("/v1/meta/enums").status_code == 200
+    assert c.get("/api/v1/meta/enums").status_code == 404
+    spec = c.get("/v1/openapi.json").json()
+    paths = set(spec["paths"])
+    assert "/v1/meta/enums" in paths and all(p.startswith("/v1/") for p in paths)
+    assert c.get("/api/v1/openapi.json").status_code == 404
+
+
+def test_docs_only_in_dev(make_client):
+    assert make_client(app_env="test").get("/api/v1/docs").status_code == 200
+    assert make_client(app_env="production").get("/api/v1/docs").status_code == 404
+
+
+def test_openapi_error_schema(make_client):
+    spec = make_client().get("/api/v1/openapi.json").json()
+    assert "ErrorResponse" in spec["components"]["schemas"]
+    assert set(spec["components"]["schemas"]["ErrorBody"]["properties"]) == {"code", "message", "details", "request_id"}
+
+
+def test_settings_module_has_no_mairui_reference(backend):
+    src = Path(backend.config.__file__).read_text(encoding="utf-8")
+    # 文档字符串里可以提到“不读取 MAIRUI_LICENCE”，但不得声明字段或 os.environ 读取
+    assert "os.environ.get(\"MAIRUI" not in src and "mairui_licence:" not in src.lower()

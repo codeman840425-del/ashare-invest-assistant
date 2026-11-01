@@ -1,13 +1,14 @@
 // Playwright 配置（T-T01）。plan §8.0：桌面 1440×900、深色主题。
 // 运行：pnpm -C tests e2e
-//  - 未设置 E2E_BASE_URL：自动用 python3 起本地静态页（tests/e2e/static，端口 E2E_STATIC_PORT，默认 4173）跑示例。
+//  - 未设置 E2E_BASE_URL：自动用 python3 起本地静态页（tests/e2e/static，端口 E2E_STATIC_PORT，默认 4399）跑示例。
+//    不用 4173：那是 vite preview 默认端口，reuseExistingServer 会误连前端预览（T-T01a 发现）。
 //  - 设置 E2E_BASE_URL（如 http://127.0.0.1:8080，nginx）：不起静态服务，直接测目标站点；app.spec.ts 才会执行。
 import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 
-const staticPort = Number(process.env.E2E_STATIC_PORT ?? 4173);
+const staticPort = Number(process.env.E2E_STATIC_PORT ?? 4399);
 const externalBaseURL = process.env.E2E_BASE_URL;
 const baseURL = externalBaseURL ?? `http://127.0.0.1:${staticPort}`;
 

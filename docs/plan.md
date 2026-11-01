@@ -530,9 +530,9 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 - 因子总数 77/85 文档不一致【待 T003 验证】；以上因子 ID 均在因子文档出现（已核实），字段是否常为空需 T-B05 实测。
 
 #### 2.5.3 周期与策略自动分类（导入后执行，可覆盖）
-- 触发：导入确认、新增自选、每周六重算一次。输出写 `symbol_horizon_assessments`（版本化，带理由）。
+- 触发：导入确认、新增自选、某证券持仓由 0 变为 > 0 或清零（T-A02 新增）、每周六重算一次。输出写 `symbol_horizon_assessments`（版本化，带理由）。
 - **特征**：流动性（日均成交额、`turnover_20d_avg`、`amihud_20d`）、波动（`volatility_20d`、`intraday_amplitude_20d`、ATR%）、趋势（`ma_trend`、`momentum_60d`）、基本面完整度与质量（`roe_ttm`、`profit_cagr_3y`、`dividend_continuous_years`、财报期数）、情绪活跃度（`limit_up_count_20d`）、**用户自身行为**（该股历史平均持有天数、是否有同日买卖的做T记录、交易频率——来自导入成交）、画像（投资期限、精力、风险承受）。
-- **规则化打分**（分类器配置 `horizon_classifier_versions`，不可变）：每个周期 0–100 分，例如：`intraday_t` = 有底仓 × 日内振幅 ≥ 3% × 日成交额 ≥ 2 亿 × 用户精力 ≥ 中 × 历史有做T行为加分；`long` = 基本面完整（≥ 12 期财报）× ROE/分红稳定 × 用户期限 ≥ 长；`swing`、`short` 同理（**以上阈值均为示例**，正式规则与阈值由策略研究员在 `docs/strategies/` 中给出，写入不可变的 `horizon_classifier_versions`）。≥ 60 分的周期列为"适合"，并给出每个周期 2–4 条理由（引用特征值与证据 ID）及不适合的理由。
+- **规则化打分**（分类器配置 `horizon_classifier_versions`，不可变）：每个周期 0–100 分，例如：`intraday_t` = 有底仓 × 日内振幅 ≥ 3% × 日成交额 ≥ 2 亿 × 用户精力 ≥ 中 × 历史有做T行为加分；`long` = 基本面完整（≥ 12 期财报）× ROE/分红稳定 × 用户期限 ≥ 长；`swing`、`short` 同理（**以上阈值均为示例**，正式规则与阈值由策略研究员在 `docs/strategies/` 中给出，写入不可变的 `horizon_classifier_versions`）（见 horizon_classifier.md v1）。≥ 60 分的周期列为"适合"，并给出每个周期 2–4 条理由（引用特征值与证据 ID）及不适合的理由。
 - 每个"适合"周期下，按策略 `applicability` 与 `fit_dimensions` 匹配列出适用策略（`fit_score` 排序）。
 - **用户覆盖**：分类结果生成 `strategy_instances`（`status=proposed`，**用户确认后才变为 active**，2.5.0），替代原先的 `user_symbol_strategy_settings`；用户修改后系统不再自动改动，只在分类结果变化时提示"系统建议已变化"。
 
@@ -554,7 +554,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
  ⑦ 可执行性检查（2.5.9 原因码）：对每个方向为 buy/add/reduce/sell 的候选信号逐项检查
     → 有任一原因：写 non_executable_reasons（附 release_condition），信号状态 = blocked
     → 无原因：生成 plan_drafts（数量区间、价格区间、止损止盈、有效期、费用估算、人工判断清单），信号状态 = drafted
-    → 前提（P1b）：至少一条 passed 的规则引用；只有 model_refs 时不生成草案
+    → 前提（P1b）：至少一条 role ∈ {entry, exit, weakening} 且 passed = true 的规则引用（语义见 2.5.14 H⑮）；只有 model_refs 时不生成草案
  ⑧ 解释：模板解释必有；可选 LLM 改写（只引用证据 ID，经守卫校验，2.7）
  ⑨ 存档与后续：全部不可变；登记模拟跟踪（2.8）；登记原因监控（2.5.9）；按通知节奏推送
 ```
@@ -601,7 +601,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 ```
 - **命名规则（与契约一致）**：规则结果一律 `passed`；引用证据一律 `evidence_ids: string[]`（禁止单数 `evidence_id`）；证据对象主键是 `id`，在所属文档内唯一，全局用 `(snapshot_id, id)` 定位；`reasons` / `counter_evidence` / `invalidation` 都是 `TextWithEvidence{text, expr|null, evidence_ids}`。
 - **分数刻度**：引擎内部和策略规格中的阈值、权重用 0–1 小数；对外（API、存储、页面）所有名为 `score` 的字段都是 **0–100 整数**（四舍五入），观点为 `unknown` 时为 `null`；`confidence.value` 保持 0–1、两位小数。
-- **矩阵单元格**由服务端按 `strategies[].dimension_views` 派生（`key_evidence_ids` ≤ 3 个，取该维度中 passed 规则引用的前 3 个证据），契约测试检查两者一致；行级 `divergent=true` 表示该维度下各策略观点不同向。
+- **矩阵单元格**由服务端按 `strategies[].dimension_views` 派生（`key_evidence_ids` ≤ 3 个，取该维度中 role ∈ {entry, filter, hold} 且 passed = true 的规则引用的前 3 个证据；`rules_passed/rules_total` 同样只统计这三种角色，2.5.14 H⑮），契约测试检查两者一致；行级 `divergent=true` 表示该维度下各策略观点不同向。
 - **可执行性** `executability.status`：至少一个候选信号没有未解除原因 → `executable`；全部候选信号都被阻断 → `blocked`；没有候选信号（全部 hold/wait）→ `not_applicable`。
 
 #### 2.5.6 六项风控（逐项开关，`risk_control_settings`：系统默认 → 用户覆盖）
@@ -642,7 +642,8 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
   - 可用现金（扣除费用缓冲）/ 参考价；
   - 单只上限剩余额度；
   - 策略预算剩余额度；
-  - 单笔最大亏损 / (参考价 − 止损价)。
+  - 单笔最大亏损 / (参考价 − 止损价)；
+  - 沪深主板风险警示股票：当日累计买入上限 50 万股减去当日已知的已买入数量（`market_rules.yaml` `risk_warning.daily_buy_cap_shares`，2.13）。G-01 已阻断 ST 的买入方向，此项通常不触发，作为规则模块的防御性校验保留。
 - **数量区间**为 [上述结果的 50%，100%]；卖出方向的上限为可卖数量（T+1）。
 - **价格区间**：参考价 ± 模板滑点参数，限制在涨跌停价范围内。
 - **其他内容**：止损、止盈、时间止损；最大亏损金额及其占总资产比例；费用估算（优先用用户导入成交反推的真实费率，否则用默认费率并标注 `estimate`）；用户上下文快照（持仓、可卖数量、成本、现金、行业暴露）；`risk_flags`；**人工判断清单** `judgment_checklist[]`。清单为固定问题加模板问题，例如"是否了解该股近期公告？""这笔投入是否会影响生活资金？""如果触发止损，你会执行吗？"。
@@ -710,7 +711,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
   - 退市整理期；
   - 一字涨停（开盘即涨停且全日未打开）；
   - 低价股（默认 < 2 元）。
-  阈值可配置。
+  阈值可配置。**结果落点（T-A02，2.5.14 H⑯）**：前五项都有对应原因码（`ST_OR_DELISTING`、`SUSPENDED`、`NEW_LISTING`、`LIMIT_LOCKED`），写入 `gate_results` 并由 2.5.9 产出可解除的不可执行原因，不把模板 state 改为 `vetoed`；只有低价股作为 veto 使 state = `vetoed`。
 - **`regime` 插件**：用指数趋势、市场宽度和情绪周期（6 阶段）产出 `market_regime` 列，带 `confirm_days` 防抖（默认 2 天）。RC3 与各模板都引用这一列。ADX 仓位上限只作参考展示。
 - **`RiskHook` 接口**：
   ```python
@@ -814,7 +815,7 @@ class RuleTemplateStrategy(ScreenerStrategy, TimingStrategy):
 | `entry[]` / `counter_evidence[]` / `invalidation[]` / `exit[]` | `{text, expr: string\|null, status: quantified\|to_quantify}[]` | ✓ | 每类至少 1 条，`exit` 中至少一条是止损类；`expr` 非空时必须符合 C 节的 DSL |
 | `data_needs[]` | `{feature_key, frequency: 1m\|daily\|quarterly\|event, adjust: none\|qfq\|hfq, available_at}[]` | ✓ | `feature_key` 必须在 `feature_catalog`（2.5.10）中；不在其中的字段先写成 `feature_request`（见 E 节） |
 | `epistemic` | `{field_path: fact\|estimate\|hypothesis}` | ✓ | 至少要标出 `hypothesis` 和各条阈值的类型 |
-| 选填 | `applicability`、`universe`、`risk_suggestions`（引用 RC1–RC6）、`pitfalls[]`、`fit`（`effort`、`risk_tolerance_min` 1–5、`experience_min`）、`sources[]{title, kind, url_or_ref, source_version, license, license_status}`、`compliance_variants` | | 来源许可证规则见 7.6 |
+| 选填 | `applicability`、`universe`、`risk_suggestions`（引用 RC1–RC6）、`pitfalls[]`、`fit`（`effort`、`risk_tolerance_min` 1–5、`experience_min`）、`sources[]{title, kind, url_or_ref, source_version, license, license_status}`、`refs[]{ref, title, url}`（研究员文档的出处编号，如 `R12`；API 7.4 `refs`，H⑬）、`validation_summary`（H②）、`risk_level`（H⑫）、`compliance_variants` | | 来源许可证规则见 7.6 |
 | 系统字段 | `completeness`、表现记录 | ✗ | **不得在文档中填写**，由系统计算 |
 
 **C. 规则规格块 `strategy-spec`（L2 草稿）**
@@ -874,11 +875,11 @@ screen: null               # 选股模板写 {universe, filters[], rank_by, top_
 | 代码块 | 附录 A 用单个 ` ```yaml ` 块，内含 `rules`、`params`、`validation` 等顶层键 | 两种都接受：①A 节的三个带标签块；②**单个** ` ```yaml strategy-card ` 块，其中的 `rules`/`params`/`stops` 等顶层键视为 spec，`validation` 视为验证块。正式卡片必须带 `strategy-card` 标签，否则导入器跳过（模板附录里的示例不会被误导入） |
 | 字段范围 | 24 组字段，用 [L1]/[L2]/[SYS]/[OPT] 分层 | B 节是导入的**最低**要求；其余字段原样存入卡片版本的 `extra`（jsonb）并在详情页展示；标 [SYS] 的字段即使填写也会被忽略 |
 | 特征与参数引用 | `f.<feature_key>`、`p.<param>` 前缀 | DSL 接受前缀写法（**推荐**），也接受不带前缀的写法；同名时以前缀为准 |
-| 持仓与计划上下文 | `last_price`、`holding_days`、`plan.stop_loss`、`max_r_reached` | 新增只读上下文命名空间 `ctx.*`（`ctx.last_price`、`ctx.holding_days`、`ctx.sellable_qty`、`ctx.max_r_reached`）和 `plan.*`（`plan.stop_loss`、`plan.take_profit`、`plan.entry_price`）；**只允许在 `hold`/`weakening`/`exit` 规则中使用**，并且只在绑定实例与计划时求值；裸写 `last_price` 等按别名处理 |
+| 持仓与计划上下文 | `last_price`、`holding_days`、`plan.stop_loss`、`max_r_reached` | 新增只读上下文命名空间 `ctx.*`（`ctx.last_price`、`ctx.holding_days`、`ctx.sellable_qty`、`ctx.max_r_reached`）和 `plan.*`（`plan.stop_loss`、`plan.take_profit`、`plan.entry_price`）；**只允许在 `hold`/`weakening`/`exit` 规则中使用**，并且只在绑定实例与计划时求值；裸写 `last_price` 等按别名处理。**例外（H⑰）**：只依赖时钟、不依赖持仓的 `ctx.now_hhmm` 可用于任何角色的规则 |
 | 滚动函数 | `min(x, n)`、`hhv_close60` | `min(x,n)`/`max(x,n)` 是 `lowest`/`highest` 的别名；`hhv_close60` 这类是派生特征，要么写成 `highest(close, 60)`，要么在 `feature_catalog` 登记 |
 | 规则行 | `rule_id`（前缀 E/H/W/X/V/C/I/F）、`eval_time`（`daily_close`/`intraday_1m`/`event`）、`status`、`text`、`edge_cases`、`data`、`weight`、`core` | `rule_id` 是 `id` 的别名，前缀按模板约定；`eval_time` **采纳为必填**；`data` 是 `required_features` 的别名；`status: to_quantify` 的规则只进入 L1，不进入可运行模板 |
 | 参数 | 列表形式 `{name, type, default, min, max, step, 说明, sensitivity, user_editable}` | 列表形式和 D 节的映射形式都接受；`说明` 是 `desc` 的别名；`user_editable=false` 的参数不允许在 L3 改参（I4） |
-| 验证 | 卡内 `validation.type/window/benchmark/cost_model/oos_result/trade_log_ref` 摘要 + 独立的 validation.md | 卡内摘要作为 L1 展示字段保存；`oos_result` 必须是 `{metric, value, n, window}`，未执行就写"未验证"；E 节的验证块仍是 G6 的机器输入。validation.md 是方法说明，不被导入 |
+| 验证 | 卡内 `validation.type/window/benchmark/cost_model/oos_result/trade_log_ref` 摘要 + 独立的 validation.md | 卡内摘要作为 L1 展示字段保存；`oos_result` 为 `string \| null`（与 API 7.4 `validation_summary.oos_result` 一致，T-A02 统一；原"`{metric, value, n, window}` 对象"的写法作废），未执行就写"未验证"；E 节的验证块仍是 G6 的机器输入。validation.md 是方法说明，不被导入 |
 | 卡片级不可运行原因（模板附录 B 第 6 项提问） | `blocked_gates` | **采纳为系统字段**，名称统一为 `gates_missing[]`（API 7.4 节已返回），由系统根据 G1–G7 结果计算，研究员不用填写。它**不进入** 23 个不可执行原因码表——原因码只描述单个候选信号 |
 | 冲突与互斥"优先级" | 只用作展示顺序 | 与 P4 一致，引擎不合并结论 |
 | 冲击成本模型 | 研究侧估算 | **进入产品**（H 节⑨，2.13 冲击成本行），`epistemic_type=estimate` |
@@ -900,7 +901,18 @@ screen: null               # 选股模板写 {universe, filters[], rank_by, top_
 | ⑪ 因子数量 | 文档写 85 个、因子页另有"82 个已上线"的说法（validation.md 第 7 项），以 T003 补测和 T-B05 实测后的 `feature_catalog` 为准；导入器只认 catalog 中的键，所有因子按日频处理，盘中只用 T−1 值。 |
 | ⑫ `risk_level` | 卡片选填字段 `risk_level: normal \| high`（默认 normal）；`high` 默认不启用、不被分类器推荐（问题 11）。 |
 
-研究员侧仍待回答（不阻塞引擎开发）：分红是否计入摊薄成本（问题 19）、T+1 hold 阈值（第 9 节 C(7)）。
+**H（续）. T006a 对齐结论（2026-11-01，T-A02；回应 `_template.md` 附录 B 第 15–20 项）**
+
+| 议题 | 结论（引擎侧，已定） |
+|---|---|
+| ⑬ 卡片级 `refs[]` 与列表项 `ref` | 两者**不同名不同义，均保留**：卡片级选填 `refs[]` 是出处列表 `{ref, title, url}`（`ref` 为研究员文档的出处编号，如 `R12`；API 7.4 已返回）；列表项的 `ref: <rule_id>`（H①）指向 `rules[]` 中的规则。导入器按位置区分：顶层 `refs` → 出处；`entry[]`/`counter_evidence[]`/`invalidation[]`/`exit[]` 元素内的 `ref` → 规则。不改名，以免研究员文档与契约返工。 |
+| ⑭ `oos_result` 类型 | `string \| null`，以契约为准（G 节已改）；未做写 `"未验证"`。需要结构化数值的离线结果放在研究侧报告，不进卡片。 |
+| ⑮ `RuleRef.passed` 与 `rule_ids_passed` 语义 | **`passed = 该规则表达式求值为真`**，对所有角色一致：entry/filter/hold 为真 = 条件满足；veto/counter/invalidation/weakening/exit 为真 = **命中**。数据缺失无法求值 → `passed = null`（契约 v0.2.2 放宽为 `boolean \| null`），不计入 `rule_ids_passed`；未持有时 `ctx.*`/`plan.*` 规则**不求值、不出现在 `rule_refs` 中**。`rule_ids_passed` = `passed == true` 的规则 ID，按 `rules[]` 原顺序。下游：计划草案的 P1b 门槛"至少一条 passed 的规则"指 **role ∈ {entry, exit, weakening} 且 passed = true**；`DimensionCell.rules_passed/rules_total` 只统计 role ∈ {entry, filter, hold} 的规则（命中的 veto/counter 另在 `counter_evidence` 与 `gate_results` 中显示）。 |
+| ⑯ 一字涨停夹具与 G-01 | **采纳研究员写法**：夹具只评估本模板、不挂系统组件，一字涨停时期望 `{state: entry_ok, …, reason_codes: [LIMIT_LOCKED]}`。运行时 G-01 也挂载：G-01 中**有对应原因码**的检查项（停牌 → `SUSPENDED`、一字涨停 → `LIMIT_LOCKED`、ST/*ST/退市整理 → `ST_OR_DELISTING`、上市不满 30 日 → `NEW_LISTING`）结果写入 `gate_results`，并由可执行性检查（2.5.9）产出原因码（可解除、可监控），**不把模板 state 改为 `vetoed`**；只有**无对应原因码**的检查项（低价股 < 2 元）作为 veto 使 state = `vetoed`。这样一字涨停打开后 `LIMIT_LOCKED` 可按解除条件自动重评。G-01 自身的行为另由系统组件测试覆盖（T-T 组）。 |
+| ⑰ `ctx.now_hhmm` 用于入场规则 | **允许**（G 节 ctx 限制的唯一例外）：`ctx.now_hhmm`（北京时间 `HH:MM` 字符串，可与字面量比较）只依赖时钟、不依赖持仓，可用于任何角色的规则。求值取值：盘中 = 本轮扫描时刻；`post_close_stats` 重放 = 被重放 bar 的结束时刻；日线盘后规则中使用 → 导入时报 `CARD_IMPORT_INVALID`（`issue=intraday_ctx_in_daily_rule`）。T-01 目前为盘后统计，不阻塞。 |
+| ⑱ ST/*ST 涨跌幅 | 已核实，2026-07-06 起 10%、此前 5%（2.11、2.13、`market_rules.yaml`）。风险警示股票的 50 万股买入上限与限价申报约束见 2.13。 |
+
+研究员侧原待回答的问题 19（分红是否计入摊薄成本）与 C(7) T+1 hold 阈值均已于 2026-11-01 定（第 9 节）。仍待研究员确认（不阻塞）：是否按 `profile.experience = novice` 限制 short 周期（horizon_classifier.md §8 第 6 项，第 9 节问题 37）。
 
 
 ### 2.6 通知渠道（站内为主，可插拔）
@@ -1002,7 +1014,8 @@ class LLMGateway:
 
 ### 2.8 建议的模拟跟踪（替代回测）
 - **不做回测**。每条 `buy/add/sell/reduce/hold/wait` 建议生成时记录**参考价**（生成时刻快照的最新价、`data_as_of`）与基准（默认沪深300，可选所属行业指数）。
-- **跟踪规则**：`suggestion_tracking` 在 T+1、T+5、T+20 个交易日收盘后计算：区间收益（复权口径：用日 K 前复权【复权参数待 T003 验证】）、同期基准收益、超额收益、区间最大回撤/最大上涨、是否触发过失效条件及触发时间；"方向正确"的定义按动作：buy/add 看超额 > 0，sell/reduce 看超额 < 0，hold 看 |超额| 在阈值内，wait 只记录不计胜率。
+- **两个价格口径分开（T-A02 已定）**：**参考价**只用于计划草案的数量/价格区间与界面展示；**模拟跟踪的起点**一律用 2.8.1 的**入场价**（盘后生成 → T+1 开盘价；盘中生成 → 下一根 1 分钟 bar 开盘价），T+1/T+5/T+20 的区间收益、基准收益与超额都从入场价对应时点算起（基准取同一时点的指数价）。隔夜跳空对 hold 与 sell 都无法规避，因此不计入。
+- **跟踪规则**：`suggestion_tracking` 在 T+1、T+5、T+20 个交易日收盘后计算：区间收益（复权口径：用日 K 前复权【复权参数待 T003 验证】）、同期基准收益、超额收益、区间最大回撤/最大上涨、是否触发过失效条件及触发时间；"方向正确"的定义按动作：buy/add 看超额 > 0，sell/reduce 看超额 < 0，hold 看 |超额| 在阈值内（T+1 为 1.0%、T+5 为 2%、T+20 为 5%，第 9 节 C(7)；T+1 的 hold 方向正确率只展示、不进健康度），wait 只记录不计胜率。
 - **口径**：纯模拟，**不代表用户实际收益**；若用户据此有实际成交（导入或手动），复盘页把"建议模拟结果"与"实际成交结果"并列，差异计入"执行"维度。
 - **统计**：按策略版本、周期、动作、置信度分组的样本数（即 `strategy_tracking_stats`，并驱动 2.5.7 自动降权）、命中率、平均超额（样本少于 30 时标注"样本不足"）；**本人统计仅本人可见；全站匿名汇总（scope=global，只有策略级聚合数字，不含任何用户/个股持仓信息）仅登录用户在策略页可见**，不做对外宣传与排名（避免"业绩展示"引发合规问题，见 7.2）。
 - 喂给能力 5（复盘）：复盘时间线显示每条建议的跟踪结果；策略边界统计（某策略在某市场环境下的表现）。
@@ -1010,6 +1023,7 @@ class LLMGateway:
 #### 2.8.1 模拟跟踪口径（采纳调研 §3.6 的建议，使用 2.13 的交易规则模块）
 - **入场价**：盘后信号按 T+1 开盘价入场；盘中信号按下一根 1 分钟 bar 的开盘价入场。
 - **不可成交样本**：一字涨停买不进、一字跌停卖不出、停牌的样本记为"不可成交"，**不计入胜率**，但计数会显示出来。
+- **hold 的被动样本**：T+1 停牌、T+1 一字跌停、当日买入当日不能卖的仓位（`forced_hold`）的 hold 样本不计入 n，只单独计数（validation.md §7.1A，T-A02 已定）。
 - **成本**：可选扣除佣金（含最低收费）、过户费、卖出印花税和滑点（2.13）。
 - **冷却**：同一模板加同一证券有冷却期，防止重复样本。
 - **独立跟踪**：每个模板版本独立跟踪，退出只作用于自己。
@@ -1074,7 +1088,7 @@ class LLMGateway:
 | 生命周期 draft → simulated → published，放文件不等于激活 | **采纳并扩展**为 `draft / simulating / published / observing / retired`，由数据库状态加管理员批准控制；注册表显式登记 | 防止误上线；与健康度合并为一个状态机 |
 | 按 A 股规则做内部评估（参考 OSkhQuant 思路） | **采纳**为共享模块 `app/market_rules`（2.13），模拟跟踪与内部评估共用；**不拷贝任何代码**（该项目为 CC BY-NC） | 口径统一；许可证合规 |
 | 抗过拟合：K 折样本外稳健度 + 发布后每日复验 + 健康/观察/退役（参考 TSP） | **采纳为仅内部可见的评估模块**，与"内部历史验证"合并为一个模块（2.12.4），并与自动降权合并为一个健康度机制（2.8.2）；**是否启用待用户拍板**（第 9 节问题 26） | 与"产品内不做回测"相容：结果不展示给终端用户，只用于管理员审核和默认参数选择 |
-| ST 股涨跌幅 5%（用户 12:02 的表述） | **更正**：沪深主板风险警示股票自 **2026-07-06** 起为 10%（交易所 2026-04-24 发布的新版交易规则）；规则按生效日期分段存储，历史回看仍用 5% | 网上资料如此，**【待 T003 补测核实】**（以交易所正式规则为准；规则模块按生效日期分段，核实后只改 `market_rules.yaml`） |
+| ST 股涨跌幅 5%（用户 12:02 的表述） | **更正**：沪深主板风险警示股票自 **2026-07-06** 起为 10%（交易所 2026-04-24 发布的新版交易规则）；规则按生效日期分段存储，历史回看仍用 5% | **【已定，已核实 2026-11-01】** 官方出处：上交所《关于发布〈上海证券交易所交易规则（2026 年修订）〉的通知》（上证发〔2026〕41 号）、深交所《关于发布〈深圳证券交易所交易规则（2026 年修订）〉的通知》（深证上〔2026〕551 号），2026-04-24 发布，**2026-07-06 起施行**（链接见 `docs/strategies/market_rules_check.md` O1–O8）；已写入 `market_rules.yaml`（2026-07-06 段 10%，此前一段 5%） |
 
 ### 2.12 多因子与事件驱动的质量保障
 
@@ -1152,20 +1166,21 @@ class LLMGateway:
 ### 2.13 A 股交易规则模块（共享，`app/market_rules`）
 模拟跟踪（2.8）、计划草案的数量与价格计算（2.5.8）、可执行性检查（2.5.9）和内部评估（2.12.4）**共用同一个模块**。规则按**生效日期分段**存于 `config/market_rules.yaml` 并入库（`market_rule_versions`），回看历史时使用当时有效的规则。思路参考 OSkhQuant 的成本与整手规则，**不拷贝其代码**（该项目为 CC BY-NC）。
 
-| 规则 | 内容（2026-11-01 网上核实；以交易所最新规则为准） |
+| 规则 | 内容（2026-11-01 网上核实；以交易所最新规则为准；规则只建模到 2023-04-10，更早的回看标“交易规则未建模”，见 `market_rules.yaml` `modeled_from`） |
 |---|---|
 | T+1 | 当日买入的股票下一交易日才可卖出；可卖数量 = 昨日持仓 − 今日已卖 |
-| 涨跌幅 | 主板 10%；创业板、科创板 20%；北交所 30%；**沪深主板 ST/*ST 自 2026-07-06 起为 10%（此前为 5%）【待 T003 补测核实】**；创业板、科创板风险警示股票 20%；北交所风险警示股票 30% |
+| 涨跌幅 | 主板 10%；创业板、科创板 20%；北交所 30%；**沪深主板 ST/*ST 自 2026-07-06 起为 10%（此前为 5%）【已定，已核实：上证发〔2026〕41 号、深证上〔2026〕551 号，2026-07-06 施行】**；创业板、科创板风险警示股票 20%；北交所风险警示股票 30% |
 | 无涨跌幅限制 | 沪深注册制新股上市前 5 个交易日；北交所新股上市首日；退市整理期首日（以交易所规则为准）。这些情形下有盘中临时停牌机制（较开盘价 ±30%、±60% 各停牌 10 分钟） |
-| 涨跌停价计算 | 前收盘价 × (1 ± 比例)，四舍五入到 0.01 元【精确舍入规则以交易所为准，待核实】 |
+| 涨跌停价计算 | 前收盘价 × (1 ± 比例)，按四舍五入取至价格最小变动单位（A 股 0.01 元）。沪已核实（上交所交易规则第 3.3.17 条）；深交所同类条款【待逐字核对】 |
 | 交易单位 | 买入为 100 股的整数倍（科创板 ≥ 200 股后按 1 股递增；北交所单笔不低于 100 股，可按 1 股递增）【以交易所规则为准，待核实】；余额不足 100 股须一次性卖出 |
 | 交易时段 | 集合竞价 9:15–9:25；连续竞价 9:30–11:30、13:00–14:57；收盘集合竞价 14:57–15:00 |
 | 费用 | 印花税：**仅卖出**，0.05%；过户费：双向 0.001%；佣金：双向，按用户费率，单笔最低 5 元（券商常见做法，以用户实际为准，可由导入的成交反推）；滑点：模板参数，默认 0.1% |
-| 冲击成本 | 按参与率（订单数量 ÷ 近 20 个交易日日均成交量）分 5 档的确定性估算：I1 ≤ 0.1% → 0 bp；I2 ≤ 0.5% → 5 bp；I3 ≤ 1% → 15 bp；I4 ≤ 2% → 30 bp；I5 > 2% → 60 bp。【编排者默认，初值待校准】（第 9 节 C(7)）；`epistemic_type=estimate`；计划草案（2.5.8）、模拟跟踪（2.8.1）、内部评估共用，结果写入卡片的 `costs.impact_*` 展示 |
+| 冲击成本 | 按参与率（**成交额口径**：拟成交额 = 计划数量 × 参考价，÷ 近 20 个**有效**交易日日成交额均值，停牌日不计；T-A02 已定，与 `_template.md` §18 一致）分 5 档的确定性估算：I1 ≤ 0.1% → 0 bp；I2 ≤ 0.5% → 5 bp；I3 ≤ 1% → 15 bp；I4 ≤ 2% → 30 bp；I5 > 2% → 60 bp。【编排者默认，初值待校准】（第 9 节 C(7)）；`epistemic_type=estimate`；计划草案（2.5.8）、模拟跟踪（2.8.1）、内部评估共用，结果写入卡片的 `costs.impact_*` 展示 |
 | 不可成交 | 买入方向遇一字涨停（或开盘即涨停未打开）不可成交；卖出方向遇一字跌停不可成交；停牌日跳过 |
+| 风险警示股票其他约束 | 沪深主板 ST/*ST：单只当日累计买入 ≤ 50 万股（沪第 4.4.10 条已核实，深【待逐字核对】）→ 计划草案数量上限截断到 50 万股并提示（G-01 已阻断 ST 买入方向，通常不触发，作防御性校验）；只能限价申报（沪第 4.4.9 条）→ 本产品不下单，只在草案与通知文案提示“请使用限价委托”（`market_rules.yaml` `risk_warning`，T-A02） |
 | 时点 | 数据可用时刻精确到分钟（2.12.1），不允许使用未来数据 |
 
-- 规则模块有独立的单元测试（T-T19），用交易所示例和边界值验证：涨跌停价、整手、费用的最低收费、T+1 可卖数量、2026-07-06 前后 ST 比例的切换。
+- 规则模块有独立的单元测试（T-T19），用交易所示例和边界值验证：涨跌停价、整手、费用的最低收费、T+1 可卖数量、2026-07-06 前后 ST 比例的切换（2026-07-03 为 5%、2026-07-06 为 10%）、风险警示股票 50 万股买入上限截断、`modeled_from` 之前返回“规则未建模”。
 
 ---
 
@@ -1218,7 +1233,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `login_attempts` | id, username_tried, user_id(nullable), ip_hash, success, failure_reason, at — 用于限速、锁定与审计（保留 180 天） |
 | `audit_logs` | id, actor_id, actor_role, action, target_type, target_id, detail(jsonb), ip_hash, at |
 | `consents` | id, user_id, kind(privacy_policy / sensitive_financial_info / risk_disclosure / email_notification), doc_version, granted(bool), at, ip_hash |
-| `user_profiles` | id, user_id, version_no, capital_range(enum: <10万/10–50万/50–200万/>200万), horizon(short/medium/long), risk_tolerance(1–5), max_drawdown_pct, weekly_hours, focus_areas(text[]), confirmed_at, created_at — **只追加**，最新版本为当前画像 |
+| `user_profiles` | id, user_id, version_no, horizon_pref(text[]，取值为 `horizon` 枚举), effort(low/medium/high), risk_tolerance(1–5), experience(novice/intermediate/advanced), max_single_position_pct(decimal), capital_range(enum: <10万/10–50万/50–200万/>200万，选填), max_drawdown_pct(选填), focus_areas(text[]，选填), confirmed_at, created_at — **只追加**，最新版本为当前画像。**前五个字段与契约 `/me/profile` 一一对应（契约为准，T-A02）**；原 `horizon(short/medium/long)` 改为 `horizon_pref`，原 `weekly_hours` 由 `effort` 取代；选填字段契约暂未暴露，只供内部使用 |
 
 **账户/持仓/成交**
 | 表 | 关键字段 |
@@ -1271,7 +1286,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `strategy_rules`（物化视图） | strategy_version_id, rule_id, dimension, role, expr, weight, required_data — 由 config 展开，供检索"哪些策略用到某因子/某维度" |
 | `engine_policies` | id, version_no, config(jsonb：动作映射通则、置信度公式、维度观点阈值、分歧检测规则), published_at — 不可变 |
 | `horizon_classifier_versions` | id, version_no, config(jsonb：特征、各周期打分规则、阈值), published_at — 不可变 |
-| `symbol_horizon_assessments` | id, user_id, security_code, classifier_version_id, snapshot_id, scores(jsonb：{intraday_t,short,swing,long: 0–100}), suitable_horizons(text[]), reasons(jsonb：[{horizon, text, evidence_ids, polarity: for/against}]), recommended_strategy_version_ids(uuid[]), trigger(import/watchlist_add/weekly), created_at — 只追加 |
+| `symbol_horizon_assessments` | id, user_id, security_code, classifier_version_id, snapshot_id, scores(jsonb：{intraday_t,short,swing,long: 0–100}), suitable_horizons(text[]), reasons(jsonb：[{horizon, text, evidence_ids, polarity: for/against}]), recommended_strategy_version_ids(uuid[]), trigger(import/watchlist_add/weekly/position_open_close), created_at — 只追加 |
 | ~~`user_symbol_strategy_settings`~~ | **已废弃**，由 `strategy_instances` 取代（见下方"策略三层"表组）。迁移时把旧行映射为 `status=active` 的实例 |
 | `risk_control_settings` | id, scope(system/user), user_id(nullable), control(position_cap/total_exposure/sector_concentration/stop_take/loss_streak_drawdown/plan_violation), enabled(bool), params(jsonb), updated_at；变更写历史表 |
 | `risk_events` | id, user_id, control, level(info/warning/critical), subject(account/security/strategy), security_code, detail(jsonb), suggestion_id(nullable), trade_id(nullable), created_at — 只追加 |
@@ -1540,7 +1555,7 @@ class BrokerStatementParser(Protocol):
 | 证券名称 | `security_name_raw` | string | — | 否 | |
 | 证券数量 | `quantity` | decimal | 股 | 是 | |
 | 可卖数量 | `sellable_quantity` | decimal | 股 | 否 | 与 T+1 有关，仅展示 |
-| 成本价 | `broker_cost_price` | decimal | 元，4 位小数 | 否 | **券商口径成本**：已确认为通达信的**摊薄成本**（含已实现盈亏与费用，第 9 节问题 20）；分红是否冲减【待范本，问题 19】 |
+| 成本价 | `broker_cost_price` | decimal | 元，4 位小数 | 否 | **券商口径成本**：已确认为通达信的**摊薄成本**（含已实现盈亏与费用，第 9 节问题 20）；**分红计入摊薄成本**（现金红利冲减、股息红利税补缴增加，【已定 2026-11-01】问题 19）；导入后与我方重建值对账 |
 | 当前价 | `last_price_ref` | decimal | 元 | 否 | 导出时刻价格，仅作对账参考，不覆盖行情 |
 | 最新市值 | `market_value_ref` | decimal | 元 | 否 | |
 | 浮动盈亏 | `unrealized_pnl_ref` | decimal | 元 | 否 | |
@@ -1577,7 +1592,7 @@ class BrokerStatementParser(Protocol):
 |---|---|---|---|
 | 数量 | `opening_positions + trades + account_events` 截至快照 `as_of` 的持股数 | 快照 `证券数量` | 必须完全相等；不等→`quantity_mismatch`（重要） |
 | 持仓存在性 | 我方有、券商无 / 券商有、我方无 | — | `missing_in_broker` / `missing_in_ours`（重要）——典型原因：缺期初持仓、缺分红送转/新股入账记录、导入的成交区间不完整 |
-| 成本 | 我方按**摊薄成本**重建（主口径，与通达信一致：买入金额与费用计入，卖出回款冲减，问题 20）；另算移动加权成本只用于展示 | 快照 `成本价` | 差额 ≤ max(0.01 元, 0.1%) → `ok`；否则 → `cost_differs`（提示性，不视为错误；分红是否冲减成本未确认时在说明中提示，问题 19） |
+| 成本 | 我方按**摊薄成本**重建（主口径，与通达信一致：买入金额与费用计入，卖出回款冲减，**现金红利冲减、股息红利税补缴计入**，送转股只加数量；问题 19、20 已定）：摊薄成本价 =（累计买入金额 + 费用 − 累计卖出回款 − 现金红利 + 股息红利税补缴）÷ 当前持股数；另算移动加权成本只用于展示 | 快照 `成本价`（券商显示的成本价） | **每次导入确认后必做**。差额 ≤ max(0.01 元, 0.1%) → `ok`；否则 → `cost_differs`（提示性，不视为错误）。`note` 给出可能原因：缺红利入账或股息税流水（`account_events` 中该证券无 `dividend` 记录而券商成本更低）、缺期初持仓、成交区间不完整、税费行未细分（`kind=other`） |
 | 现金 | 成交明细最后一笔的 `剩余金额`；以及"上一笔剩余金额 + 本笔发生金额 = 本笔剩余金额"的**连续性检查** | 快照 `余额` | 末笔剩余金额 vs 快照余额，差额 ≠ 0 → `cash_gap`；连续性断点 → `cash_chain_break`（附：断点所在日期、差额），提示"存在未包含在成交明细中的资金流水（如利息、银证转账、分红到账、费用扣收）"，建议导入资金流水或手动补录 `cash_movements` |
 | 市值/总资产 | 我方数量 × 我方行情价 | `参考市值/资产` | 仅展示差异，不判定（价格时点不同） |
 
@@ -1659,7 +1674,7 @@ class BrokerStatementParser(Protocol):
 4. **"0" 视为缺失**：成交编号、委托编号、申报序号为 `0`，或成交时间为 `0`，一律视为"没有该值"（撤单行常见），不参与去重键、不报格式错误。
 5. **负数成交编号**按不透明字符串处理，不报错（3.5A）。
 6. **撤单、废单**：`ROW_CANCELLED` / `ROW_REJECTED`，`skipped`；这些行的数量、价格为 0 不另报 `INVALID_QUANTITY` / `INVALID_PRICE`。
-7. **非成交业务**（红利入账、股息红利税补缴、新股入账、银证转账等）写入 `account_events`，不报提示码；**映射表【待范本，问题 19】**，在拿到真实写法前只识别夹具中出现的写法，股息红利税暂记 `account_events.kind=other` 并在对账说明中提示"税费类流水未细分"；没见过的写法一律 `UNKNOWN_BIZ_TYPE`，不猜。
+7. **非成交业务**（红利入账、股息红利税补缴、新股入账、银证转账等）写入 `account_events`，不报提示码；**映射表【待范本，问题 19】**，在拿到真实写法前只识别夹具中出现的写法，股息红利税暂记 `account_events.kind=other` 并在对账说明中提示"税费类流水未细分"（摊薄成本重建时：`dividend` 冲减成本，股息红利税补缴计入成本，问题 19 已定；`kind=other` 的税费行按发生金额符号计入，真实写法待范本）；没见过的写法一律 `UNKNOWN_BIZ_TYPE`，不猜。
 8. **GB18030 扩展字符**：严格按 GB18030 解码；定宽切分走 3.5A 的策略 b（空白分词）为主路径，不受字符字节宽度影响；策略 a 的显示宽度按 `east_asian_width` 计（W/F 记 2），两策略结果不一致时报 `ROW_COLUMN_MISMATCH`，不猜测。
 9. **换行**：CRLF、LF、单独 CR 都接受（②已统一换行）。夹具目前没有纯 CR 文件，已请测试补一个（T-T09）。
 10. 容差：`AMOUNT_MISMATCH` 0.05 元、`NET_AMOUNT_MISMATCH` 0.02 元（与 3.5A 字段表一致）；对账的成本容差见 3.5A 对账表。
@@ -2215,11 +2230,12 @@ on_demand:
 **`config/market_rules.yaml`**（交易规则，2.13；按 `effective_from` 分段，导入为 `market_rule_versions`，回看用当时有效段）
 ```yaml
 schema_version: 1
+modeled_from: "2023-04-10"            # 规则只建模到此日；更早的行情回看时 market_rule_version = null，评估结果标“交易规则未建模”，不得作为晋级依据（T-A02，第 9 节问题 36）
 segments:
-  - effective_from: "2026-07-06"      # 沪深主板 ST/*ST 涨跌幅改为 10% 的生效日（此前段为 5%，另列一段）【待 T003 补测核实】
-    price_limit_pct:                  # 前收 × (1 ± pct)，四舍五入到 0.01 元【精确舍入以交易所为准，待核实】
+  - effective_from: "2026-07-06"      # 【已定，已核实】沪深主板 ST/*ST 涨跌幅由 5% 改为 10% 的施行日（上证发〔2026〕41 号、深证上〔2026〕551 号）；此前一段为 5%
+    price_limit_pct:                  # 前收 × (1 ± pct)，按四舍五入取至价格最小变动单位（A 股 0.01 元）：沪已核实（上交所交易规则第 3.3.17 条），深交所同类条款【待逐字核对】
       main_board: 10
-      main_board_st: 10
+      main_board_st: 10               # 【已定，已核实】沪深主板 ST/*ST：10%（上证发〔2026〕41 号、深证上〔2026〕551 号，2026-04-24 发布，2026-07-06 起施行；出处见 docs/strategies/market_rules_check.md O1–O8）
       chinext: 20                     # 创业板（含风险警示）
       star: 20                        # 科创板（含风险警示）
       bse: 30                         # 北交所（含风险警示）
@@ -2246,7 +2262,8 @@ segments:
       commission_min_yuan: 5          # 单笔最低（券商常见做法，以用户实际为准）
       slippage_default_pct: 0.1       # 模板参数默认值
     impact_cost:                      # 【编排者默认，用户可否决；初值待校准】第 9 节 C(7)
-      adv_window_days: 20             # 参与率 = 订单数量 ÷ 近 20 日日均成交量
+      adv_basis: amount               # 【已定 T-A02】成交额口径：参与率 = 拟成交额（计划数量 × 参考价）÷ 近 N 个有效交易日日成交额均值（停牌日不计），与 _template.md §18 一致
+      adv_window_days: 20             # N
       tiers:                          # 参与率上界（%，含） → 成本（bp）
         - {max_participation_pct: 0.1, bp: 0}    # I1
         - {max_participation_pct: 0.5, bp: 5}    # I2
@@ -2257,7 +2274,56 @@ segments:
       one_price_limit_up_blocks_buy: true
       one_price_limit_down_blocks_sell: true
       skip_suspended: true
-  - effective_from: "2000-01-01"      # 2026-07-06 之前：除 main_board_st: 5 外，其余键与上一段相同（文件中写全，不做继承）
+    risk_warning:                     # 风险警示股票（ST/*ST）的额外约束（T-A02 新增，market_rules_check.md M5/M6）
+      daily_buy_cap_shares: 500000    # 单只当日累计买入 ≤ 50 万股：沪已核实（第 4.4.10 条），深【待逐字核对】；计划草案数量上限截断到此值并在草案中提示
+      limit_order_only: true          # 只能限价申报（沪第 4.4.9 条）；本产品不下单，只用于草案与通知文案“请使用限价委托”
+      applies_to_boards: [main_board] # 创业板、科创板风险警示股票的同类约束未核对，暂不建模；北交所 V1 不扫描（C(8)）
+  - effective_from: "2023-04-10"      # 2023-04-10 ～ 2026-07-05：除 main_board_st: 5 外与上一段相同（文件中写全，不做继承）。起始日取沪深主板注册制新股首批上市日【待核实官方出处】；更早的规则（创业板 2020-08-24 前为 10%、主板新股首日 44% 等）未建模
+    price_limit_pct:                  # 同上一段
+      main_board: 10
+      main_board_st: 5                # 【已核实】2026-07-06 之前沪深主板 ST/*ST 为 5%（出处同上一段）
+      chinext: 20                     # 创业板（含风险警示）
+      star: 20                        # 科创板（含风险警示）
+      bse: 30                         # 北交所（含风险警示）
+    no_limit:                         # 无涨跌幅限制的情形（以交易所规则为准）
+      registered_ipo_first_days: 5    # 沪深注册制新股上市前 5 个交易日
+      bse_ipo_first_days: 1
+      delisting_period_first_day: true
+    lot:
+      buy_lot: 100
+      star_min_buy: 200               # 科创板 ≥ 200 股后按 1 股递增【待核实】
+      star_step: 1
+      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【待核实】
+      bse_step: 1
+    sessions:                         # 北京时间
+      call_auction: ["09:15", "09:25"]
+      morning: ["09:30", "11:30"]
+      afternoon: ["13:00", "14:57"]
+      closing_auction: ["14:57", "15:00"]
+    t_plus: 1
+    fees:
+      stamp_duty_sell_pct: 0.05       # 印花税仅卖出
+      transfer_fee_pct: 0.001         # 过户费双向
+      commission_rate_default_pct: null   # 佣金按用户费率；null = 未设置时由导入成交反推，仍无则提示用户填写
+      commission_min_yuan: 5          # 单笔最低（券商常见做法，以用户实际为准）
+      slippage_default_pct: 0.1       # 模板参数默认值
+    impact_cost:                      # 【编排者默认，用户可否决；初值待校准】第 9 节 C(7)
+      adv_basis: amount
+      adv_window_days: 20
+      tiers:                          # 参与率上界（%，含） → 成本（bp）
+        - {max_participation_pct: 0.1, bp: 0}    # I1
+        - {max_participation_pct: 0.5, bp: 5}    # I2
+        - {max_participation_pct: 1.0, bp: 15}   # I3
+        - {max_participation_pct: 2.0, bp: 30}   # I4
+        - {max_participation_pct: null, bp: 60}  # I5（> 2%）
+    unfillable:
+      one_price_limit_up_blocks_buy: true
+      one_price_limit_down_blocks_sell: true
+      skip_suspended: true
+    risk_warning:
+      daily_buy_cap_shares: 500000    # 本段是否同样适用【待核实】；只影响回看，不影响当前草案
+      limit_order_only: true
+      applies_to_boards: [main_board]
 ```
 
 **`config/risk_controls.yaml`**（RC1–RC6 系统默认，2.5.6；用户可在 `/risk-controls` 覆盖，在 `min`/`max` 范围外返回 `422 RISK_CONTROL_INVALID_PARAMS`）
@@ -2308,27 +2374,164 @@ version_no: 1
 suitable_threshold: 60          # int，0–100 分 ≥ 60 列为“适合”
 reasons_per_horizon: [2, 4]     # 每个周期给 2–4 条理由
 recompute:
-  on: [import_confirm, watchlist_add, weekly]
+  "on": [import_confirm, watchlist_add, weekly, position_open_close]   # 键加引号（YAML 1.1 会把裸 on 读成 true）；position_open_close：某证券持仓由 0 变为 > 0 或清零时重算该证券（T-A02 采纳研究员建议，intraday_t 依赖 user.has_position）
   weekly_day: saturday
-features:                       # 分类器可用特征（必须都在 feature_catalog 中，否则启动失败）
-  - turnover_20d_avg
-  - amihud_20d
-  - volatility_20d
-  - intraday_amplitude_20d
-  - ma_trend
-  - momentum_60d
-  - roe_ttm
-  - profit_cagr_3y
-  - dividend_continuous_years
-  - limit_up_count_20d
+features:                       # 分类器输入（T-A02 统一前缀）：f.* 必须都在 feature_catalog 中，否则启动失败；sec.*（证券主数据）、user.*（导入成交/持仓统计）、profile.*（/me/profile）由系统提供，不进 feature_catalog
+  - f.amount_20d_avg            # 新增：成交额 20 日均值（元）
+  - f.turnover_20d_avg
+  - f.amihud_20d                # v1 规则未用，保留
+  - f.volatility_20d
+  - f.intraday_amplitude_20d
+  - f.ma_trend
+  - f.momentum_60d
+  - f.roe_ttm
+  - f.profit_cagr_3y
+  - f.dividend_continuous_years
+  - f.limit_up_count_20d
+  - f.fin_report_count          # 新增：已披露财报期数
+  - f.list_days                 # 已用于 G-01
+  - f.is_st                     # 新增或与 G-01 共用：风险警示状态
+  - f.is_delisting_period       # 新增：退市整理期
+  - sec.type                    # 新增：证券类型（主数据，不是时间序列特征）
+  - sec.board                   # 新增：板块
+  - user.has_position           # 新增：当前是否有持仓
   - user.avg_holding_days
   - user.has_t_trades
   - profile.horizon_pref
   - profile.effort
-rules: {}                       # 各周期打分规则：由策略研究员在 docs/strategies/ 给出后由导入器写入；
-                                # 2.5.3 中的阈值（振幅 ≥ 3%、成交额 ≥ 2 亿、≥ 12 期财报）只是示例，不作为默认值
+  - profile.risk_tolerance      # 新增（契约 /me/profile 已有）
+  - profile.experience          # 新增（契约 /me/profile 已有）
+rules:
+  rule_schema: 1                     # 本规则块的结构版本（T-A02 已确认导入器按此结构解析）
+  calibration: initial_values        # 全部阈值与分值为初值，待模拟跟踪/内部评估校准；不是统计结论
+  rank_pct_universe: "T−1 日盘后落库截面：沪深 A 股股票，剔除北交所、停牌、上市 < 20 个交易日；平均秩 / N，取值 [0, 1]"
+  data_missing_cap: {missing_points_ge: 40, cap: 59}   # 某周期中因 f.* 缺失而拿不到的满分合计 ≥ 40 → 该周期最高 59 分
+  tie_order: [long, swing, short, intraday_t]          # suitable[] 同分时的排序
+  gates:                             # 按顺序全部求值；score 取 0 优先，其次取最小 cap
+    - {id: HG1, input: sec.type, op: ne, value: stock, horizons: all, score: 0,
+       reason: "分类器只覆盖 A 股股票（ETF、可转债等不分类）"}
+    - {id: HG2, input: sec.board, op: eq, value: bse, horizons: all, score: 0,
+       reason: "首版不含北交所（plan 第 9 节 C(8)）"}
+    - {id: HG3, input: f.is_delisting_period, op: eq, value: true, horizons: all, score: 0,
+       reason: "退市整理期：不分类"}
+    - {id: HG4, input: f.is_st, op: eq, value: true, horizons: all, cap: 59,
+       reason: "风险警示股票（ST/*ST）：可交易性闸门阻断买入方向，不列为适合"}
+    - {id: HG5, input: f.list_days, op: lt, value: 20, horizons: all, cap: 59,
+       reason: "上市不足 20 个交易日：历史太短"}
+    - {id: HG6, input: f.list_days, op: lt, value: 60, horizons: [swing, long], cap: 59,
+       reason: "上市不足 60 个交易日：60 日趋势与动量无法计算"}
+  horizons:
+    intraday_t:
+      requires:
+        - {id: IT0, input: user.has_position, op: eq, value: true, else_score: 0,
+           reason: "做T 需要已有底仓（T+1：当日买入不能当日卖出）"}
+        - {id: IT0B, input: profile.effort, op: in, value: [medium, high], else_cap: 59,
+           reason: "做T 需要盘中盯盘，画像精力为低或未填写"}
+      components:
+        - {id: IT1, input: f.intraday_amplitude_20d, transform: rank_pct,
+           bands: [{op: ge, value: 0.7, pts: 30}, {op: ge, value: 0.5, pts: 20}, {op: ge, value: 0.3, pts: 10}],
+           text: "近 20 日日内振幅位于全市场 {v:pct} 分位"}
+        - {id: IT2, input: f.amount_20d_avg, unit: CNY,
+           bands: [{op: ge, value: 500000000, pts: 25}, {op: ge, value: 200000000, pts: 15}, {op: ge, value: 100000000, pts: 5}],
+           text: "近 20 日日均成交额 {v:yi} 亿元"}
+        - {id: IT3, input: profile.effort,
+           bands: [{op: eq, value: high, pts: 20}, {op: eq, value: medium, pts: 10}],
+           text: "画像精力：{v}"}
+        - {id: IT4, input: user.has_t_trades,
+           bands: [{op: eq, value: true, pts: 15}],
+           text: "该股导入成交中{v:has}同日买卖（做T）记录"}
+        - {id: IT5, input: profile.experience,
+           bands: [{op: eq, value: advanced, pts: 10}, {op: eq, value: intermediate, pts: 5}],
+           text: "画像经验：{v}"}
+    short:
+      requires:
+        - {id: SH0, input: profile.risk_tolerance, op: ge, value: 3, else_cap: 59,
+           reason: "短线波动大，画像风险承受 < 3 或未填写"}
+        - {id: SH0B, input: profile.effort, op: in, value: [medium, high], else_cap: 59,
+           reason: "短线需要每日跟踪，画像精力为低或未填写"}
+      components:
+        - {id: SH1, input: f.amount_20d_avg, unit: CNY,
+           bands: [{op: ge, value: 300000000, pts: 20}, {op: ge, value: 100000000, pts: 10}],
+           text: "近 20 日日均成交额 {v:yi} 亿元"}
+        - {id: SH2, input: f.turnover_20d_avg, transform: rank_pct,
+           bands: [{op: ge, value: 0.6, pts: 15}, {op: ge, value: 0.4, pts: 8}],
+           text: "近 20 日平均换手率位于全市场 {v:pct} 分位"}
+        - {id: SH3, input: f.limit_up_count_20d, unit: count,
+           bands: [{op: ge, value: 2, pts: 15}, {op: ge, value: 1, pts: 10}],
+           text: "近 20 日涨停 {v} 次"}
+        - {id: SH4, input: f.volatility_20d, transform: rank_pct,
+           bands: [{op: between, value: [0.4, 0.9], pts: 10}],
+           text: "近 20 日波动率位于全市场 {v:pct} 分位（0.4–0.9 加分，过低或过高不加）"}
+        - {id: SH5, input: f.ma_trend, unit: sign,
+           bands: [{op: gt, value: 0, pts: 10}],
+           text: "均线趋势值 {v}（> 0 为多头排列）"}
+        - {id: SH6, input: profile.horizon_pref,
+           bands: [{op: contains, value: short, pts: 15}],
+           text: "画像周期偏好：{v}"}
+        - {id: SH7, input: profile.effort,
+           bands: [{op: eq, value: high, pts: 10}, {op: eq, value: medium, pts: 5}],
+           text: "画像精力：{v}"}
+        - {id: SH8, input: user.avg_holding_days, unit: trading_days,
+           bands: [{op: le, value: 5, pts: 5}],
+           text: "该股历史平均持有 {v} 个交易日"}
+    swing:
+      requires: []
+      components:
+        - {id: SW1, input: f.amount_20d_avg, unit: CNY,
+           bands: [{op: ge, value: 100000000, pts: 15}, {op: ge, value: 50000000, pts: 8}],
+           text: "近 20 日日均成交额 {v:yi} 亿元"}
+        - {id: SW2, input: f.ma_trend, unit: sign,
+           bands: [{op: gt, value: 0, pts: 20}],
+           text: "均线趋势值 {v}（> 0 为多头排列）"}
+        - {id: SW3, input: f.momentum_60d, unit: sign,
+           bands: [{op: gt, value: 0, pts: 15}],
+           text: "近 60 日动量 {v}（> 0 为上涨）"}
+        - {id: SW4, input: f.volatility_20d, transform: rank_pct,
+           bands: [{op: le, value: 0.8, pts: 10}],
+           text: "近 20 日波动率位于全市场 {v:pct} 分位（≤ 0.8 加分）"}
+        - {id: SW5, input: f.roe_ttm, unit: pct,
+           bands: [{op: gt, value: 0, pts: 10}],
+           text: "ROE(TTM) {v}%"}
+        - {id: SW6, input: profile.horizon_pref,
+           bands: [{op: contains, value: swing, pts: 20}],
+           text: "画像周期偏好：{v}"}
+        - {id: SW7, input: user.avg_holding_days, unit: trading_days,
+           bands: [{op: between, value: [5, 60], pts: 10}],
+           text: "该股历史平均持有 {v} 个交易日"}
+    long:
+      requires:
+        - {id: LG0, input: f.fin_report_count, op: ge, value: 12, else_cap: 59,
+           reason: "已披露财报不足 12 期（或缺失）：基本面历史不完整"}
+        - {id: LG0B, input: f.roe_ttm, op: not_null, else_cap: 59,
+           reason: "ROE(TTM) 缺失：无法判断质量"}
+      components:
+        - {id: LG1, input: f.fin_report_count, unit: count,
+           bands: [{op: ge, value: 12, pts: 15}],
+           text: "已披露财报 {v} 期"}
+        - {id: LG2, input: f.roe_ttm, unit: pct,
+           bands: [{op: ge, value: 10, pts: 20}, {op: ge, value: 5, pts: 10}],
+           text: "ROE(TTM) {v}%"}
+        - {id: LG3, input: f.profit_cagr_3y, unit: pct,
+           bands: [{op: gt, value: 0, pts: 15}],
+           text: "近 3 年净利润复合增速 {v}%"}
+        - {id: LG4, input: f.dividend_continuous_years, unit: years,
+           bands: [{op: ge, value: 3, pts: 15}, {op: ge, value: 1, pts: 8}],
+           text: "连续分红 {v} 年"}
+        - {id: LG5, input: f.volatility_20d, transform: rank_pct,
+           bands: [{op: le, value: 0.6, pts: 10}, {op: le, value: 0.8, pts: 5}],
+           text: "近 20 日波动率位于全市场 {v:pct} 分位"}
+        - {id: LG6, input: profile.horizon_pref,
+           bands: [{op: contains, value: long, pts: 20}],
+           text: "画像周期偏好：{v}"}
+        - {id: LG7, input: user.avg_holding_days, unit: trading_days,
+           bands: [{op: ge, value: 60, pts: 5}],
+           text: "该股历史平均持有 {v} 个交易日"}
 ```
-`rules` 为空时分类器不输出“适合”，前端显示“周期分类规则未配置”，用户可手动选择周期。
+`rules` 为空时分类器不输出“适合”，前端显示“周期分类规则未配置”，用户可手动选择周期。规则见 `docs/strategies/horizon_classifier.md` v1（T006a；判定顺序见该文 §3，比较语义见 §4 末尾“边界与比较语义”）。
+
+- **导入器（T-A02 已定）**：采用结构化 `rule_schema: 1`（`gates` / `requires` / `components` / `bands`），不改写为 DSL 字符串；导入时校验：`f.*` 的 `unit` 与 feature_catalog 一致（不一致拒绝导入，不静默换算）、所有 `id` 唯一、每个周期 components 满分合计 = 100。
+- **输出（契约 v0.2.2）**：`scores` 四个周期都给 0–100 整数、不为 null（闸门/前提判 0 分时附不适合理由）；`reasons[]` 元素带 `horizon` 与 `polarity: for/against`，与 `symbol_horizon_assessments.reasons` 一致；另返回 `inputs_missing: string[]`（缺失的 `f.*` 键），用来区分“真 0 分”与“缺数据被封顶”（horizon_classifier.md §8 缺口 1、2 均由契约 v0.2.2 解决）。
+- `intraday_t` 列为“适合”只表示周期匹配；T-01 在 C(5) 下仍只出盘后统计，前端文案需说明。
 
 **`config/llm.yaml`**（LLM 网关，2.7、2.7.1、2.7.2；`tasks.*`、`models.*.price_*`、`gateway.max_concurrency` 可热调，其余改 YAML 后重启）
 ```yaml
@@ -2681,7 +2884,7 @@ budget:
 | T-T16 | **可解释性门禁**（0B）：属性测试（随机快照 → 每个信号的追溯字段非空，证据可解析到 `data_snapshots`）；只有 `model_refs` 时无法生成草案；LLM 输出中的每个数字或断言都引用证据 ID；契约中缺少追溯字段即失败。**CI 必过** | 测试 | 2 | T-B33, T-B25 |
 | T-T17 | 原因与解除测试：23 种原因码各自的触发与解除（回放 + 时钟模拟）、手动解除只允许不可机器判断的条件、多条原因全部解除才重新检查；统计必带 n（缺少即失败） | 测试 | 2 | T-B33 |
 | T-T18 | 计划草案测试：数量公式边界（整手、科创板规则、T+1 可卖、涨跌停价）、`stale` 与过期、没有确认就没有计划；内部评估接口对普通用户不可达 | 测试 | 2 | T-B34 |
-| T-T19 | 交易规则模块测试：涨跌停价、无涨跌幅情形、费用最低收费、2026-07-06 前后 ST 比例切换、停牌跳过 | 测试 | 2 | T-B36 |
+| T-T19 | 交易规则模块测试：涨跌停价、无涨跌幅情形、费用最低收费、2026-07-06 前后 ST 比例切换（5% → 10%）、停牌跳过、风险警示股票 50 万股买入上限、`modeled_from` 之前返回“规则未建模”、冲击成本成交额口径 | 测试 | 2 | T-B36 |
 | T-T20 | `ingest` 唯一性测试：第二个实例启动被拒、锁丢失即停止外呼、优先级抢占（P0 不被 P2 饿死）、IP 超限模拟 → 告警与暂停、非 `ingest` 容器中没有 licence 环境变量 | 测试 | 1 | T-B04a |
 | T-T21 | 2.5.14 契约测试：用测试目录中的虚构卡片验证导入器的通过、拒绝和幂等行为（缺必填字段、DSL 越权、参数 default 越界、fixtures 不足 6 个），不读取 `docs/strategies/` 的真实内容作为测试数据 | 测试 | 2 | T-B20d |
 | T-T08（扩展） | 性能：3A.5 的 P95 目标、3 年规模合成数据、locust + pgbench、SSE 延迟、`ingest` 队列等待；回退超过 20% 时告警 | 测试 | 4（第 2 阶段起每阶段跑一次） | T-B41, T-O08 |
@@ -2730,7 +2933,8 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 18. **账号审核细节**——**【已定 2026-11-01】（架构师默认）**：`invite` 模式下注册须填邀请码和申请说明；待审核只在管理端显示角标；被驳回的用户最多重新申请 3 次；**对其他人开放前**管理员必须启用 TOTP（单用户期间可不启用）。当前为 `closed` 模式，这些规则先实现、不生效。
 
 **E. 导入与隐私**
-19. **其他交割单范本**——**【已定 2026-11-01】目前只支持通达信格式**（`tdx_trades_v1` / `tdx_positions_v1`）；其他券商格式以后再加。仍需要（不阻塞）：另外需要一份含**撤单、红利入账、股息税、新股中签/入账、银证转账**真实写法的脱敏范本（股东代码、资金账号替换为 X，金额可改为虚构值）。用途：确定这些行的业务类型映射（目前按夹具推测，3.5A-1 标【待范本】），以及**现金分红是否冲减摊薄成本**（影响对账）。
+19. **其他交割单范本**——**【已定 2026-11-01】目前只支持通达信格式**（`tdx_trades_v1` / `tdx_positions_v1`）；其他券商格式以后再加。仍需要（不阻塞）：另外需要一份含**撤单、红利入账、股息税、新股中签/入账、银证转账**真实写法的脱敏范本（股东代码、资金账号替换为 X，金额可改为虚构值）。用途：确定这些行的业务类型映射（目前按夹具推测，3.5A-1 标【待范本】）。
+   - **分红与摊薄成本——【已定 2026-11-01】分红计入摊薄成本，与通达信一致**：已实现盈亏与分红都并入成本。我方摊薄成本价 =（累计买入金额 + 买卖费用 − 累计卖出回款 − 现金红利到账 + 股息红利税补缴）÷ 当前持股数；送转股只增加数量、不改变成本总额。导入后**必须与券商显示的“成本价”对账**（3.5A 对账表“成本”行），差额超容差记 `cost_differs` 并给出可能原因（缺红利/税费流水、缺期初持仓等）。红利、税费行的真实写法仍待上面的脱敏范本，不阻塞。
 20. **格式 A 的待确认项**——**【已定 2026-11-01】**：(a) 来源为**通达信（TDX）导出**，解析器 ID 改为 `tdx_trades_v1`、`tdx_positions_v1`（旧名 `fmt_a_*` 保留为别名）；(b) 持仓快照"成本价"为**摊薄成本**，对账以摊薄成本为主口径（3.5A）；(c) 快照没有日期列，导出时间由用户在上传时确认（默认上传时间，产生 `IMPORT_SNAPSHOT_AS_OF_ASSUMED` 提示）。
 21. **原始文件留存期**——**【已定 2026-11-01】（架构师默认）**：保留 365 天，用户可随时删除单个文件，注销时一并删除；可在设置里改。
 22. **敏感数据加密**——**【已定 2026-11-01】（架构师默认）**：MVP 不做持仓/成交的应用层字段加密，依赖磁盘加密 + 访问控制；股东代码 HMAC + 掩码（明文不入库）、原始文件应用层 AES-256-GCM 加密并存放在仓库外，这两项照常执行。
@@ -2759,7 +2963,10 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 **H2. 2026-11-01 补充拍板**
 34. **前端版本**——**【已定 2026-11-01】React 19 + antd 6**（原型 T-F00 已验证），全文替换原 React 18 + AntD 5（概览表、1.1、2.10、T-F01）。
 35. **错误追踪与密钥扫描**——**【已定 2026-11-01】暂不接入 Sentry**（境内部署时再决定是否自托管）；**不依赖 GitHub secret scanning，只用 gitleaks**（7.4A）。
-36. **仍待 T003 补测核实**（不改为已定）：沪深主板 ST/*ST 涨跌幅 2026-07-06 起由 5% 改为 10%（2.13）；因子数量 77/82/85 的口径（2.5.14 H⑪）。
+36. **交易规则与因子口径**——
+   - **【已定 2026-11-01，已核实】沪深主板 ST/*ST 涨跌幅 2026-07-06 起由 5% 改为 10%**，此前为 5%。出处：上证发〔2026〕41 号、深证上〔2026〕551 号（2026-04-24 发布，2026-07-06 施行；链接见 `docs/strategies/market_rules_check.md` O1–O8）。已写入 2.11、2.13、`market_rules.yaml`（T-A02）。
+   - 仍待核实（不阻塞）：① 因子数量 77/82/85 的口径（2.5.14 H⑪，T003）；② `market_rules.yaml` 只建模到 2023-04-10（`modeled_from`），该起始日（沪深主板注册制新股首批上市）与更早各板块规则的生效日未核实官方出处，更早的回看标“交易规则未建模”；③ 深交所涨跌停价舍入条款、风险警示股票 50 万股买入上限条款未逐字核对（沪已核实第 3.3.17、4.4.10 条）；④ 科创板/北交所交易单位【待核实】（2.13）。
+37. **新手是否限制短线周期**——**【待定，不阻塞】**（horizon_classifier.md §8 第 6 项、§7 用例 E）：`profile.experience = novice` 时是否给 `short` 封顶 59（不列为“适合”）。v1 规则未加此项；需研究员给出建议、用户拍板，改动只涉及 `horizon_classifier.yaml` 新版本。
 
 **I. 编排者默认（2026-11-01 12:32）——【编排者默认，用户可否决】**
 - **C(1) 首批 P0 策略**：G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01（研究员 `docs/strategies/catalog.md` 第 2 节总表；取代早期方案中 2.5.10 的 ①–⑨ MVP 模板清单）。引擎接口覆盖核对与缺口见 2.5.11A。
@@ -2768,7 +2975,7 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 - **C(4) N-01 风险公告否决**：公告数据缺失或过期时，**阻断买入方向的计划草案**，原因码 `KEY_DATA_MISSING`（附缺失字段 `f.ann_risk_count_10d`），解除条件：该字段在新快照中非空**且**公告数据源状态为 `verified_live`（2.5.11A）。卖出方向不受影响。
 - **C(5) T-01 做T**：在实测盘中延迟之前**只做盘后统计**：不产生盘中候选信号、草案或通知；盘后按规则统计"当日若执行会触发几次、回补率、扣费后单腿结果"，标为模拟（2.5.11A）。延迟实测达标并经用户确认后才开放盘中。
 - **C(6) 内部评估结果的用户可见范围**：放在第三阶段；架构师选择**方案 A**（研究员 validation.md §9.3）：用户只看到"是否做过内部检验（是/否）、方法类型、检验日期"，**不显示任何数值、通过与否或曲线**；数值只在管理端可见。理由：① 告诉用户"这条规则有没有被检验过"符合可解释性原则 P1，方案 B 连这一点也隐藏了；② 不出现数值就不构成"历史业绩展示"，与 7.2 第 5 条一致；③ 与 2.12.4"结果数值永不展示"不矛盾。注意：单用户期间用户本人就是管理员，可以在管理端看到数值；对他人开放后此隔离才真正起作用。
-- **C(7) 成本与阈值初值**：冲击成本分档 0/5/15/30/60 bp（2.13）；hold 的"方向正确"阈值 T+5 |超额| ≤ 2%、T+20 |超额| ≤ 5%（2.8）。全部标"初值，待校准"。T+1 的 hold 阈值未给出，**暂不统计 T+1 的 hold 方向正确率**（只记录数值），待定。
+- **C(7) 成本与阈值初值**：冲击成本分档 0/5/15/30/60 bp（2.13；参与率按成交额口径 = 拟成交额 ÷ 近 20 个有效交易日日成交额均值，T-A02 已定）；hold 的"方向正确"阈值 T+5 |超额| ≤ 2%、T+20 |超额| ≤ 5%（2.8）。全部标"初值，待校准"。**T+1 的 hold 阈值【已定 2026-11-01】|超额| ≤ 1.0%**（窗口：盘后生成 → T+1 开盘至 T+1 收盘；盘中生成 → 下一根 1 分钟 bar 开盘至 T+1 收盘；validation.md §7.1A 方案 2）。T+1 停牌、T+1 一字跌停、`forced_hold` 样本不计入 n；首版**只展示、不进健康度**，标“初值，待校准”；累计 n ≥ 30 后由管理员复核分布再决定是否调整。
 - **C(8) 数据范围**：V1 不含北交所（`boards.bse=false`）、没有新闻源；N-03（新闻类）在 catalog 中保持**不可运行**（L1 卡片），解除条件按 catalog 第 5 节：用户拍板接入有授权的新闻源（问题 8/9），接入后仍须走 G1–G7。
 
 **后端骨架反馈 T-B01 §4 的处理（2026-11-01，T-A01；契约 v0.2 变更记录“v0.2 补充”为准）**
@@ -2782,4 +2989,4 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 - `config/*.yaml` 五个文件的键与默认值见 6.1；文件由后端创建。
 - 仍需运维决定（不属于契约）：nginx `proxy_pass` 尾斜杠导致 `/api` 前缀被去掉（T-B01 §4.1），建议去掉尾斜杠，保持 `/api/v1`。
 
-**仍待定的问题汇总**：C(7) 中 T+1 hold 阈值；ST 涨跌幅变更与 77/82/85 个因子的口径【待 T003 补测核实】（问题 36）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法与分红是否冲减摊薄成本（问题 19，待脱敏范本）；另见 2.5.14 H 末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning 已于 2026-11-01 拍板。）
+**仍待定的问题汇总**：77/82/85 个因子的口径【待 T003 补测核实】、交易规则 2023-04-10 之前未建模及深交所条款逐字核对（问题 36）；新手是否限制短线周期（问题 37）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法（问题 19，待脱敏范本；分红计入摊薄成本已定）；另见 2.5.14 H（续）末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning，以及 ST 10%、T+1 hold 阈值 1.0%、分红计入摊薄成本已于 2026-11-01 拍板。）

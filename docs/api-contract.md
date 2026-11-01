@@ -1,12 +1,25 @@
 # A股个人投资研究与决策助手 · REST 接口契约（MVP v1）
 
-- 作者：架构师；日期：2026-11-01；版本：**v0.2.1**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
+- 作者：架构师；日期：2026-11-01；版本：**v0.2.2**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
 - 配套：[`plan.md`](./plan.md)（架构方案）。本契约优先于代码：FastAPI 生成的 `openapi.json` 与本文不一致时**改代码**。
 - **示例值全部虚构**：代码用 `600000.SH / 000001.SZ`，ID 用 `00000000-0000-4000-8000-0000000000xx`，金额为随意整数；不含任何真实账户、股东代码、姓名、金额或委托/成交编号。证券简称一律用“示例银行”“演示电子”这类虚构名称。
 
 ---
 
 ## 0. 变更记录
+
+### v0.2.2（2026-11-01，T-A02；合入研究员 T006a：周期分类器 v1、规则语义、交易规则核实；不改字段名，只放宽一处类型、补两处字段与说明）
+| 项 | 决定 | 后端改动 |
+|---|---|---|
+| `RuleRef.passed` | 类型 `boolean` → **`boolean \| null`**。语义统一为“**该规则表达式求值为真**”：entry/filter/hold 为真 = 条件满足；veto/counter/invalidation/weakening/exit 为真 = **命中**。数据缺失无法求值 → `null`；未持有时 `ctx.*`/`plan.*` 规则不求值、**不出现在** `rule_refs`/`dimension_views[].rules` 中（plan 2.5.14 H⑮） | 求值器输出三值；Pydantic 类型改 `bool \| None`；前端渲染三态（满足/命中、不满足、无法判断） |
+| `rule_ids_passed`（夹具 `expected.json`）与 P1b | `rule_ids_passed` = `passed == true` 的规则 ID（按 `rules[]` 顺序），`null` 不列入。`POST /plan-drafts` 的 `PLAN_REQUIRES_EXPLAINABLE_SIGNAL` 判定改为：信号中**没有任何 role ∈ {entry, exit, weakening} 且 passed = true 的 RuleRef** | 改判定条件；契约测试补“只有 veto 命中 / 只有 null”两例 |
+| `DimensionCell.rules_passed/rules_total`、`key_evidence_ids` | 只统计 role ∈ {entry, filter, hold} 的规则（命中的 veto/counter 是反向信息，另见 `counter_evidence`、`gate_results`） | 改派生逻辑与一致性测试 |
+| `/horizon-assessments` | `scores` **必含四个周期**，每个都是 int 0–100、**不为 null**（数据缺失按封顶处理，见 plan 6.1 `horizon_classifier.yaml` `data_missing_cap`）；`reasons[]` 元素为 `TextWithEvidence & {horizon: horizon, polarity: "for" \| "against"}`；新增 `inputs_missing: string[]`（缺失的 `f.*` 输入键，用来区分“真 0 分”与“缺数据被封顶”，回应 horizon_classifier.md §8 缺口 2；不再为此让 `scores` 允许 null）。重算触发新增 `position_open_close` | 改响应模型；分类器按规则 v1 输出 |
+| 卡片 `refs[]` 与列表项 `ref` | 澄清：`/strategy-cards/{id}` 的 `refs[].ref` 是**出处编号**（如 `R12`），与卡片 `entry[]` 等列表项中引用规则的 `ref: <rule_id>` 不同义；两者都保留，不改名（plan 2.5.14 H⑬） | 导入器按位置区分；无接口字段变化 |
+| `validation_summary.oos_result` | 确认 `string \| null`（plan 原写的结构化对象作废，以本契约为准） | 无 |
+| G-01 与原因码 `LIMIT_LOCKED` 等 | 运行时 `gate_tradability` 中有对应原因码的检查项（停牌、一字涨停、ST/退市整理、新股）只写入 `gate_results` 并产出不可执行原因，**不把 `state` 改为 `vetoed`**；低价股仍为 veto（plan 2.5.11、2.5.14 H⑯） | 改闸门落点；T-T17 补“一字涨停 → `entry_ok` + `LIMIT_LOCKED`，打开后自动重评” |
+| `/reconciliation` 成本口径 | 我方摊薄成本**计入分红**（现金红利冲减、股息红利税补缴计入，与通达信一致，plan 第 9 节问题 19 已定）；每次导入确认后与券商“成本价”对账 | 成本重建纳入 `account_events` 的红利与税费 |
+| `/meta/enums.version` | `"v0.2.1"` → `"v0.2.2"` | 改常量 |
 
 ### v0.2.1（2026-11-01，T-A01 小修；不改任何字段名和枚举）
 | 项 | 决定 | 后端改动 |
@@ -299,7 +312,7 @@
 | 对象 | 结构 |
 |---|---|
 | `Evidence` | 主键 `id` 在所属文档（一条建议、一个候选信号、一份日报）内唯一，全局用 `(snapshot_id, id)` 定位；其他对象一律用 `evidence_ids: string[]` 引用，**不存在 `evidence_id` 字段**。结构 `{id: string, key: string(feature_key), value: string \| number \| boolean \| null, unit: string \| null, provider: "mairui" \| "local" \| "user_import", endpoint: string \| null, data_as_of: string(datetime), fetched_at: string(datetime), epistemic_type}` |
-| `RuleRef` | `{rule_id: string, snippet_id: string(uuid) \| null, snippet_version: int \| null, role: rule_role, dimension: dimension, passed: boolean, value: string \| null, threshold: string \| null, evidence_ids: string[]}` |
+| `RuleRef` | `{rule_id: string, snippet_id: string(uuid) \| null, snippet_version: int \| null, role: rule_role, dimension: dimension, passed: boolean \| null, value: string \| null, threshold: string \| null, evidence_ids: string[]}`。`passed` = 规则表达式求值为真（veto/counter/invalidation/weakening/exit 为真即“命中”）；无法求值为 `null`；未持有时 `ctx.*`/`plan.*` 规则不出现（v0.2.2） |
 | `ModelRef` | `{model_key: string, version: string, role: "auxiliary", output: object, evidence_ids: string[]}` — `role` 只允许为 `auxiliary` |
 | `TextWithEvidence` | `{text: string, expr: string \| null, evidence_ids: string[]}`，用于 `counter_evidence[]`、`invalidation[]`、`reasons[]` |
 | `Stat` | `{value: string(decimal) \| null, n: int, window: string, small_sample: boolean}`。n < 30 时 `small_sample=true`；n < 5 时 `value=null`（plan 2.12.3；这是展示阈值，与降权门槛 n ≥ 20 无关）。**所有胜率、收益、IC、CAR 都用这个结构** |
@@ -340,7 +353,7 @@
 
 `StrategyConclusion`（`strategies[]` 的元素）：`{strategy_version_id, strategy_key, strategy_name: string, version_no: int, instance_id: uuid \| null, horizon, lifecycle, state: strategy_eval_state, action, t_leg: t_leg \| null, candidate_signal_id: uuid \| null（hold/wait 时为 null）, score: int(0–100) \| null, confidence: {level: confidence_level, value: number(0–1)}, rule_refs: RuleRef[], model_refs: ModelRef[], priority_weight: string(decimal), priority_downweighted: boolean, dimension_views: [{dimension, view: dimension_view, score: int(0–100) \| null, rules: RuleRef[]}], stops: Stops, reasons: TextWithEvidence[], counter_evidence: TextWithEvidence[], invalidation: TextWithEvidence[], valid_until: string(datetime) \| null}`
 
-`DimensionCell`：`{strategy_key, strategy_version_id, view: dimension_view, score: int(0–100) \| null, key_evidence_ids: string[]（≤ 3，取该维度 passed 规则引用的前 3 个证据）, rules_passed: int, rules_total: int}`；行级 `divergent=true` 表示该维度下各策略观点不同向。
+`DimensionCell`：`{strategy_key, strategy_version_id, view: dimension_view, score: int(0–100) \| null, key_evidence_ids: string[]（≤ 3，取该维度 role ∈ {entry, filter, hold} 且 passed = true 的规则引用的前 3 个证据）, rules_passed: int, rules_total: int}`（`rules_passed/rules_total` 只统计 role ∈ {entry, filter, hold}，v0.2.2）；行级 `divergent=true` 表示该维度下各策略观点不同向。
 
 ### 5.3 日报（`DailyReport`，不可变）
 `{date: string(date), generated_at, account_id: uuid \| null, market: {regime: market_regime \| null, regime_position_range: {min_pct: string(decimal), max_pct: string(decimal)} \| null, breadth: {up: int, down: int, limit_up: int, limit_down: int} \| null, summary: TextWithEvidence[]}, account: {total_assets, cash, position_pct: string(decimal), pnl_day: string(decimal), position_vs_regime: "below" \| "within" \| "above" \| null} \| null, reconciliation: {status: reconciliation_status, as_of: string(datetime) \| null, diff_count: int, important_count: int}, stocks: [{security_code, name, suggestion_id: uuid \| null, suggestion: SuggestionSummary \| null, change_from_previous: "new" \| "changed" \| "unchanged" \| "removed", highlights: TextWithEvidence[], invalidation: TextWithEvidence[], next_watch: TextWithEvidence[]}], pending: {plan_drafts: int, active_reasons: int}, explanation: {source: "template" \| "llm", text: string, llm_call_id: string \| null}, evidence: Evidence[], DataStatusBlock}`。
@@ -425,7 +438,7 @@
 | GET | `/imports/{batch_id}/errors.csv` 🔒 | `text/csv; charset=utf-8`（带 BOM）：列 `row_no, code, severity, field, message, raw_masked`；只含**掩码后**的原始行 |
 | GET/POST | `/trades` 🔒 · `/trades/{id}` 🔒 | 成交列表和手工录入；原记录不可修改，更正时写更正记录 |
 | GET | `/snapshots` 🔒 | 持仓快照 |
-| GET | `/reconciliation?account_id=` 🔒 | 对账结果：`{status: reconciliation_status, as_of: string(datetime) \| null, items: [{kind: reconciliation_item_kind, security_code: string \| null, name: string \| null, ours: string(decimal) \| null, broker: string(decimal) \| null, diff: string(decimal) \| null, important: boolean, note: string}]}`。成本按**摊薄成本**比较，容差 `max(0.01 元, 0.1%)`（plan 3.5A） |
+| GET | `/reconciliation?account_id=` 🔒 | 对账结果：`{status: reconciliation_status, as_of: string(datetime) \| null, items: [{kind: reconciliation_item_kind, security_code: string \| null, name: string \| null, ours: string(decimal) \| null, broker: string(decimal) \| null, diff: string(decimal) \| null, important: boolean, note: string}]}`。成本按**摊薄成本**比较（我方重建值计入分红：现金红利冲减、股息红利税补缴计入，与通达信一致，v0.2.2），容差 `max(0.01 元, 0.1%)`（plan 3.5A）；每次导入确认后重算 |
 | GET | `/portfolio` 🔒 | 持仓汇总：`{cash, total_assets, positions: [{security_code, name, qty, sellable_qty, cost_price, market_value, pnl, pnl_pct, weight_pct}], exposure: {sector: [{name, pct}]}, DataStatusBlock}` |
 
 ### 7.3 自选、行情与证券
@@ -444,7 +457,7 @@
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/strategy-cards` 🔒 | `?completeness=&horizon=&category=`；元素 `{id, key, name, category, horizons, completeness, current_version_no, source_kind, performance: {win_rate_5d: Stat, avg_excess_5d: Stat} \| null}` |
-| GET | `/strategy-cards/{id}` 🔒 | 卡片当前版本：2.5.14 B 节的全部字段，加 `field_epistemic`、`narrative`、`gates_missing: string[]`（例如 `["G1:stop_loss_to_quantify"]`）、`refs: [{ref: string, title: string, url: string \| null}]`（研究员文档的出处编号，如 `R12`）、`validation_summary: {type: string, window: string \| null, benchmark: string \| null, cost_model: string \| null, oos_result: string \| null, trade_log_ref: string \| null} \| null`（研究员文档中的**外部**验证信息，产品不做回测）、`risk_level: card_risk_level` |
+| GET | `/strategy-cards/{id}` 🔒 | 卡片当前版本：2.5.14 B 节的全部字段，加 `field_epistemic`、`narrative`、`gates_missing: string[]`（例如 `["G1:stop_loss_to_quantify"]`）、`refs: [{ref: string, title: string, url: string \| null}]`（研究员文档的出处编号，如 `R12`；**不是**列表项中引用规则的 `ref: <rule_id>`）、`validation_summary: {type: string, window: string \| null, benchmark: string \| null, cost_model: string \| null, oos_result: string \| null, trade_log_ref: string \| null} \| null`（研究员文档中的**外部**验证信息，产品不做回测）、`risk_level: card_risk_level` |
 | GET | `/strategy-cards/{id}/versions` 🔒 · `/strategy-cards/{id}/versions/{no}` 🔒 | 版本历史，内容不可变 |
 | POST | `/strategy-cards` 🔒 | 用户私有卡片（字段同 2.5.14 B 节）→ `201`；可能返回 `422 STRATEGY_INVALID_CONFIG` |
 | POST | `/strategy-cards/{id}/versions` 🔒 | 新版本（`base_version_no` 乐观锁）；可能返回 `409 VERSION_CONFLICT` |
@@ -458,7 +471,7 @@
 | GET | `/strategies/{id}/versions/{vid}/tracking` 🔒 | 跟踪统计：`{scope: "mine"\|"site", by_horizon: [{horizon_days: 1\|5\|20, win_rate: Stat, avg_return_pct: Stat, avg_excess_pct: Stat, profit_loss_ratio: Stat, max_loss_streak: int}]}` |
 | GET | `/strategies/{id}/versions/{vid}/lifecycle-events` 🔒 | 生命周期历史 |
 | POST | `/admin/strategies/{id}/versions/{vid}/lifecycle` 🛡 | `{to: lifecycle, reason: string}` → `200 {from, to}`；可能返回 `409 INVALID_STATE_TRANSITION` 或 `422 PROMOTION_GATES_NOT_MET{gates}` |
-| GET | `/horizon-assessments?security_code=` 🔒 | 周期分类结果（版本化）：`{suitable: horizon[], scores: {horizon: int}, reasons: [TextWithEvidence], classifier_version}` |
+| GET | `/horizon-assessments?security_code=` 🔒 | 周期分类结果（版本化）：`{suitable: horizon[], scores: {intraday_t: int, short: int, swing: int, long: int}（四个都有，0–100，不为 null）, reasons: [TextWithEvidence & {horizon: horizon, polarity: "for" \| "against"}]（每个周期 2–4 条，`reasons_per_horizon`）, inputs_missing: string[], classifier_version}`（v0.2.2；规则见 plan 6.1 `horizon_classifier.yaml`） |
 
 ### 7.5 L3 实例、限制与风控
 | 方法 | 路径 | 说明 |
@@ -504,7 +517,7 @@
 ### 7.7 计划草案与计划（确认草案是生成计划的唯一入口）
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/plan-drafts` 🔒 ⚖ | 生成草案 `{signal_ids: uuid[](≥1)}` → `201 PlanDraft`。可能返回：没有 passed 的规则引用（只有 model_refs）→ `422 PLAN_REQUIRES_EXPLAINABLE_SIGNAL`；信号状态不是 `drafted`/`released` → `409 INVALID_STATE_TRANSITION`；仍有生效原因 → `409 SIGNAL_NOT_EXECUTABLE{reason_ids}`；信号属于 `simulating` 模板 → `409 STRATEGY_VERSION_NOT_RUNNABLE` |
+| POST | `/plan-drafts` 🔒 ⚖ | 生成草案 `{signal_ids: uuid[](≥1)}` → `201 PlanDraft`。可能返回：没有 role ∈ {entry, exit, weakening} 且 passed = true 的规则引用（例如只有 model_refs）→ `422 PLAN_REQUIRES_EXPLAINABLE_SIGNAL`；信号状态不是 `drafted`/`released` → `409 INVALID_STATE_TRANSITION`；仍有生效原因 → `409 SIGNAL_NOT_EXECUTABLE{reason_ids}`；信号属于 `simulating` 模板 → `409 STRATEGY_VERSION_NOT_RUNNABLE` |
 | GET | `/plan-drafts` 🔒 · `/plan-drafts/{id}` 🔒 | `PlanDraft {id, status: plan_draft_status, signal_ids, security_code, name, action, qty_range: {min, max, lot}, price_range: {low, high}, stops: Stops, max_loss_amount, max_loss_pct, fee_estimate: {amount, epistemic_type}, user_context_snapshot: {holding_qty, sellable_qty, cash, sector_pct}, risk_flags: RiskFlag[], judgment_checklist: [{id, question, required: boolean}], valid_until, market_rule_version_id}`，其中金额都是 `string(decimal)` |
 | POST | `/plan-drafts/{id}/confirm` 🔒 ⚖ | `{checklist_answers: [{id, answer: "yes"\|"no"\|"unsure", note?}], risk_ack: true, chosen_qty: string(decimal), chosen_price: string(decimal), deviation_ack: boolean}` → `201 {plan_id, plan_version_no: 1}`。可能返回：必答项缺失 → `422 CHECKLIST_INCOMPLETE{missing}`；`risk_ack` 不为 true → `422 RISK_ACK_REQUIRED`；数量或价格超出区间且未确认偏离 → `422 DEVIATION_ACK_REQUIRED{fields}`；草案状态为 stale/expired → `409 PLAN_DRAFT_STALE` |
 | POST | `/plan-drafts/{id}/discard` 🔒 | `{note}` → `status:"discarded"` |
@@ -549,7 +562,7 @@
 - **ingest 心跳**（ingest 写、api 读）：leader 每 15 秒 `SET ingest:heartbeat <json> EX 600`，JSON 为 `{"ts": int(Unix 秒), "instance_id": string, "leader": true, "version": string, "budget_used_last_minute": int, "queue_depth": {"p0": int, "p1": int, "p2": int}}`；api 只依赖 `ts`，其余字段供 `/admin/ingest/status` 展示。判定顺序：Redis 不可用 → `unknown`；`ingest:paused` 存在（值为 JSON `{"by", "at", "reason"}`，管理员暂停时写入）→ `paused`；心跳缺失、无法解析或 `now - ts > 120` → `stale`；否则 `ok`。键名与阈值可配置（plan 6.1 `config/ingest.yaml`，环境变量 `INGEST_HEARTBEAT_KEY`、`INGEST_PAUSED_KEY`、`INGEST_STALE_AFTER_S`）。
 - **`/meta/enums` 结构**（取值全部来自后端的集中定义，路由里不写死）：
 ```json
-{"version": "v0.2.1",
+{"version": "v0.2.2",
  "enums": {"horizon": ["intraday_t", "short", "swing", "long"], "...": []},
  "reason_codes": [{"code": "T1_NOT_SELLABLE", "release_kinds": ["time"], "check_on": ["daily_close"], "manually_releasable": false, "note": "…"}],
  "error_codes": [{"code": "NOT_FOUND", "http_status": 404, "scope": "http"}],

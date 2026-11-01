@@ -60,7 +60,7 @@ A = re.ASCII  # \b 只按 ASCII 判定（与 gitleaks/RE2 一致：中文字符�
 LINE_RULES: list[tuple[str, str, re.Pattern[str]]] = [
     ("S1", BLOCK, re.compile(r"(?i)mairuiapi\.com/\S+/[A-Za-z0-9-]{16,}", A)),
     ("S1", BLOCK, re.compile(r"""(?i)(mairui[_-]?)?licen[cs]e\s*[:=]\s*["']?[A-Za-z0-9-]{16,}""", A)),
-    ("S2", BLOCK, re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b", A)),  # 启发式；真实值比对见 secret-exact job
+    ("S2", BLOCK, re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b", A)),  # 启发式；真实值精确比对在本机 check_real_secrets.sh（CI 不做）
     (
         "S2",
         BLOCK,

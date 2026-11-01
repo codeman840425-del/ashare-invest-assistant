@@ -416,3 +416,29 @@ def test_gitleaks_report_masks(tmp_path: Path) -> None:
     assert value not in r.stdout
     rpt.write_text("[]")
     assert subprocess.run([sys.executable, str(CI_DIR / "gitleaks_report.py"), str(rpt)], capture_output=True).returncode == 0
+
+
+def test_gitleaks_s1_probes_allowlist_is_narrow(tmp_repo: Path) -> None:
+    """S1 的 probes 历史误报豁免必须是 提交 + 路径 + 内容 三者 AND，换任何一个都照样拦。"""
+    cfg = tomllib.loads((REPO / ".gitleaks.toml").read_text(encoding="utf-8"))
+    s1 = next(r for r in cfg["rules"] if r["id"] == "S1-mairui-licence-assign")
+    (al,) = s1["allowlists"]
+    assert al["condition"] == "AND"
+    assert len(al["commits"]) == 1 and re.fullmatch(r"[0-9a-f]{40}", al["commits"][0])
+    assert al["paths"] == [r"^src/backend/probes/common\.py$"]
+    assert len(al["regexes"]) == 1 and al["regexTarget"] == "match"
+    bin_ = gitleaks_bin()
+    if not bin_:
+        pytest.skip("没有 gitleaks")
+    value = "-".join(("DRYRUN", "FAKE", "LICENCE", "0000", "0" * 12))
+    write(tmp_repo, "src/backend/probes/common.py", f'DRY_RUN_LICENCE = "{value}"\n')
+    write(tmp_repo, "other.py", f'DRY_RUN_LICENCE = "{value}"\n')
+    commit_all(tmp_repo)
+    rpt = tmp_repo.parent / "gl.json"
+    subprocess.run([bin_, "git", str(tmp_repo), "--no-banner", "-c", str(tmp_repo / ".gitleaks.toml"),
+                    "--ignore-gitleaks-allow", "-f", "json", "-r", str(rpt), "--exit-code", "0"],
+                   check=True, capture_output=True)
+    hits = {(f["RuleID"], f["File"]) for f in json.loads(rpt.read_text())}
+    # 同路径同内容但提交不同：照拦；其他路径：照拦
+    assert ("S1-mairui-licence-assign", "src/backend/probes/common.py") in hits
+    assert ("S1-mairui-licence-assign", "other.py") in hits

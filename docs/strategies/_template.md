@@ -686,7 +686,7 @@ compliance_variants:
 | 14 | 非做T卡的无底仓夹具 | — | H⑩：可用"可卖为 0 时出现卖出信号"替代 | FX6 | **已解决**（H⑩） |
 | 15 | `refs` 与列表项 `ref` 同名 | — | 契约 `GET /strategy-cards/{id}` 返回卡片级 `refs: [{ref, title, url}]`；H① 的列表项 `ref` 指规则 ID | 两者都用，文档中分别说明 | **待架构师确认**：导入器按位置区分即可，建议在 §2.5.14 B 写明 `refs` 为卡片级选填字段 |
 | 16 | `oos_result` 类型 | — | 契约 v0.2：`string \| null`；plan 第 881 行：对象 `{metric, value, n, window}` | 按契约写字符串 | **待架构师统一** |
-| 17 | `rule_ids_passed` 与 `passed` 的语义 | — | 契约 `RuleRef.passed: boolean`；未定义 veto/counter 规则"passed"是指"命中"还是"未命中" | 本模板约定：求值为真即列入（veto/counter 为真 = 命中），unknown 不列入，未持有时不求值 ctx/plan 规则 | **待架构师确认** |
+| 17 | `rule_ids_passed` 与 `passed` 的语义 | — | 契约 `RuleRef.passed: boolean`；未定义 veto/counter 规则"passed"是指"命中"还是"未命中" | 本模板约定：求值为真即列入（veto/counter 为真 = 命中），unknown 不列入，未持有时不求值 ctx/plan 规则 | **已解决**（契约 v0.2.2，T-A02 提交 044b50b：`RuleRef.passed` 为 boolean \| null，`rule_ids_passed` 只列求值为真的规则） |
 | 18 | 涨跌停夹具的期望 state | — | 一字涨停时，系统组件 G-01 闸门（买入方向 veto）与执行层 `LIMIT_LOCKED` 都可能生效 | FX5 写为模板自身 `entry_ok` + `reason_codes: [LIMIT_LOCKED]`（夹具只评估本模板，不挂系统组件） | **待架构师确认** |
 | 19 | `ctx.*` 只能用于 hold/weakening/exit | — | catalog T-01 的入场规则需要 `ctx.now_hhmm`（时间条件） | T-01 目前为 `post_close_stats`，暂不受影响 | **待架构师确认**：`ctx.now_hhmm` 是否例外允许在 entry 规则中使用 |
 | 20 | ST 涨跌幅 | — | plan §2.13 / market_rules：主板 ST 自 2026-07-06 起 10% | 已核实官方出处（`market_rules_check.md`），§7.2、§17 已同步 | **已核实**；plan 问题 36 与 §2.13"待核实"标记可关闭（需架构师改 plan） |

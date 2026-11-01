@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- E2E 示例静态页（T-T01）：仅用于验证 Playwright 环境（1440×900、深色），不是产品页面。 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>AIA E2E 冒烟页</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; font-family: sans-serif; background: #ffffff; color: #111111; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #141414; color: #e6e6e6; }
+    }
+    #narrow { display: none; }
+    @media (max-width: 1279px) { #narrow { display: block; } #app { display: none; } }
+  </style>
+</head>
+<body>
+  <div id="app"><h1>A股投资研究助手 · E2E 冒烟页</h1><span role="status" data-status="fresh">数据时间 2026-11-02T10:31:00+08:00</span></div>
+  <div id="narrow">请使用电脑端</div>
+</body>
+</html>

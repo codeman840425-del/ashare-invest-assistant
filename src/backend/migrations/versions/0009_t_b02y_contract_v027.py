@@ -8,9 +8,12 @@ Create Date: 2026-11-02 07:00:00+08:00
    加 ``horizon``、``paused_by``、``pause_reason_code``、``paused_until``、``updated_at``、
    ``archived_at``；``origin`` 加 ``system``；暂停字段与归档字段的一致性 CHECK；
    索引 ``(user_id, status, created_at desc, id desc)``。``horizon`` 可空（旧行没有值；
-   T-B32 写入时必填）。
+   T-B32 写入时必填）。升级时先回填（评审 M1）：已有 ``paused`` 行 ``paused_by='user'``；
+   已有 ``archived`` 行 ``archived_at`` = 最近一次 archived 事件时间，否则 ``confirmed_at``，
+   否则 ``created_at``。
 2. ``market.securities``（plan §3.3 v0.2.7，证券公开主数据，全站一份）：加 ``type``
-   （stock/cdr/index/etf；**ETF 按 Q3 裁定纳入**）、``list_date_basis``、``delist_date``、
+   （stock/cdr/etf/index，v0.2.8 顺序；**ETF 按 Q3 裁定纳入**）、``list_date_basis``、
+   ``delist_date``、
    ``risk_flag``、``name_norm``、``name_initials``、``master_source``、``master_as_of``；
    ``status`` 改名为 ``listing_status`` 并加 CHECK；删除 ``industry_codes``（行业移到按证书的
    表，由 T-B06 建）。主键仍是文本 ``code``（与全部 app 表的 ``security_code`` 一致，不引入
@@ -21,6 +24,10 @@ Create Date: 2026-11-02 07:00:00+08:00
    非空时）与 ``app.candidate_signals`` 写入前检查 ``market.securities.type``，只允许
    ``stock``/``cdr``；查不到主数据也拒绝（失败即关闭）。应用层同口径：
    :mod:`app.strategy.eligibility`。
+
+downgrade 会丢信息（评审 m4，有意接受）：``origin='system'`` 改回 ``user``；暂停原因/到期时间、
+``archived_at``、``horizon``、证券 ``type`` 等新列与三张历史表随之删除；再升级时按上面的回填规则
+重建 ``paused_by``/``archived_at``。
 """
 
 from __future__ import annotations
@@ -48,7 +55,7 @@ REASON_CODES = (
     "CONFLICTS_CONFIRMED_PLAN", "BLOCKLISTED", "COOLING_OFF", "LOSS_STREAK_PAUSE",
     "STRATEGY_CONFLICT", "USER_MUTED",
 )  # fmt: skip
-SECURITY_TYPES = ("stock", "cdr", "index", "etf")
+SECURITY_TYPES = ("stock", "cdr", "etf", "index")  # 契约 v0.2.8 §3 顺序
 ELIGIBLE_TYPES = ("stock", "cdr")
 
 
@@ -116,6 +123,25 @@ def upgrade() -> None:
         "strategy_instances",
         _in("pause_reason_code", REASON_CODES),
         schema=A,
+    )
+    # 评审 review-T-B02y M1：先回填 0008 已有的暂停/归档行，再加一致性 CHECK。
+    # 0008 只有用户暂停（无系统暂停）→ paused_by='user'，reason/until 保持 NULL。
+    # archived_at 取最可信的来源：该实例最近一次 kind='archived' 的事件时间
+    # （strategy_instance_events 只追加）；没有事件时退回 confirmed_at，再退回 created_at。
+    # 不用 updated_at：它是本迁移新加的列，旧行的值是迁移执行时刻 now()。
+    op.execute(
+        "UPDATE app.strategy_instances SET paused_by = 'user' "
+        "WHERE status = 'paused' AND paused_by IS NULL"
+    )
+    op.execute(
+        """
+        UPDATE app.strategy_instances i
+           SET archived_at = coalesce(
+                 (SELECT max(e.at) FROM app.strategy_instance_events e
+                   WHERE e.instance_id = i.id AND e.kind = 'archived'),
+                 i.confirmed_at, i.created_at)
+         WHERE i.status = 'archived' AND i.archived_at IS NULL
+        """
     )
     # 契约 §5.1：status != paused 时暂停字段全为 null；暂停时必须有 paused_by；
     # 用户暂停时 reason/until 为 null

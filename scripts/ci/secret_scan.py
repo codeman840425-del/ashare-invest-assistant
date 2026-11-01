@@ -16,6 +16,13 @@ gitleaks 负责正则类规则与其默认规则集；本脚本负责全部 S1�
   secret_scan.py files P [P ...]      # 指定的磁盘文件（自测用）
   --repo DIR                          # 仓库目录（默认当前目录）
   --allow FILE                        # 允许清单（默认 <repo>/.secretscan-allow.yaml）
+  --ignore FILE                       # 指纹豁免（默认 <repo>/.gitleaksignore，与 gitleaks 共用同一个文件）
+
+指纹豁免（commit/range/history 模式）：.gitleaksignore 每行 ``完整提交sha:文件:gitleaks规则ID:行号``。
+本脚本的命中先换算成对应的 gitleaks 规则 ID（LINE_RULE_GL_IDS 等），再用 ``git blame`` 找出这一行是
+哪个提交、哪个文件的第几行引入的；只有“引入它的提交+文件+规则+行号”恰好等于某条指纹时才放行。
+因此后续提交原样带过来的同一行仍被放行（gitleaks 本来也只报引入它的那个提交），
+而换了提交（重新引入同样内容）或换了行（新增一行同样内容）都照样拦。工作区/暂存区模式没有提交，不适用指纹。
 """
 
 from __future__ import annotations
@@ -72,6 +79,17 @@ LINE_RULES: list[tuple[str, str, re.Pattern[str]]] = [
     ("S5", BLOCK, re.compile(r"\b[A-Z]\d{9}\b", A)),
     ("S9", BLOCK, ACCOUNT_RE),
 ]
+# LINE_RULES 每一项对应的 gitleaks 规则 ID（.gitleaks.toml；用于 .gitleaksignore 指纹匹配），顺序一一对应
+LINE_RULE_GL_IDS = [
+    "S1-mairui-licence-url",
+    "S1-mairui-licence-assign",
+    "S2-sk-heuristic",
+    "S2-secret-assign",
+    "S3-private-key",
+    "S5-sh-holder-code",
+    "S9-fund-account",
+]
+assert len(LINE_RULE_GL_IDS) == len(LINE_RULES)
 S6_RE = re.compile(r"\b0\d{9}\b", A)
 S8_ID_RE = re.compile(r"\b\d{17}[\dXx]\b", A)
 S8_PHONE_RE = re.compile(r"\b1[3-9]\d{9}\b", A)
@@ -171,6 +189,49 @@ def load_allow(path: Path | None, text: str | None = None) -> AllowList:
     return al
 
 
+# --------------------------------------------------------------------------- 指纹豁免（.gitleaksignore）
+FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+Fingerprint = tuple[str, str, str, int]  # (完整提交 sha, 文件, gitleaks 规则 ID, 行号)
+
+
+def load_ignore(path: Path | None) -> tuple[set[Fingerprint], list[str]]:
+    """读取 gitleaks 指纹文件。只接受带完整提交 sha 的 4 段指纹；其他格式记为错误（不静默放宽）。"""
+    fps: set[Fingerprint] = set()
+    errors: list[str] = []
+    if path is None or not path.exists():
+        return fps, errors
+    for no, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(":")
+        if len(parts) != 4 or not FULL_SHA.match(parts[0]) or not parts[3].isdigit() or int(parts[3]) < 1:
+            errors.append(f"{path.name} 第 {no} 行不是 完整提交sha:文件:规则ID:行号 形式的指纹")
+            continue
+        fps.add((parts[0], parts[1], parts[2], int(parts[3])))
+    return fps, errors
+
+
+def blame_origin(repo: Path, commit: str, path: str, line: int) -> tuple[str, str, int] | None:
+    """这一行由哪个提交、哪个文件的第几行引入（git blame，跟随整文件改名）。"""
+    out = git_maybe(repo, "blame", "--porcelain", "-L", f"{line},{line}", commit, "--", path)
+    if not out:
+        return None
+    lines = out.decode("utf-8", "surrogateescape").splitlines()
+    head = lines[0].split()
+    fname = next((ln[len("filename "):] for ln in lines if ln.startswith("filename ")), path)
+    return head[0], fname, int(head[1])
+
+
+def fingerprint_allowed(repo: Path, fps: set[Fingerprint], f: "Finding") -> bool:
+    if not fps or not f.gl_rule or f.line < 1 or not FULL_SHA.match(f.where):
+        return False
+    if not any(fp[2] == f.gl_rule for fp in fps):
+        return False
+    origin = blame_origin(repo, f.where, f.path, f.line)
+    return origin is not None and (origin[0], origin[1], f.gl_rule, origin[2]) in fps
+
+
 # --------------------------------------------------------------------------- 快照读取
 class Snapshot:
     """在同一时间点读取其他文件（夹具 meta.json）。"""
@@ -253,10 +314,12 @@ class Finding:
     rule: str
     level: str
     value: str
-    where: str = ""
+    where: str = ""  # 提交（完整 sha）或 staged/空
+    gl_rule: str = ""  # 对应的 gitleaks 规则 ID（指纹匹配用；告警级规则为空）
 
     def render(self) -> str:
-        prefix = f"{self.where}:" if self.where else ""
+        where = self.where[:10] if FULL_SHA.match(self.where) else self.where
+        prefix = f"{where}:" if where else ""
         return f"{prefix}{self.path}:{self.line}:{self.rule} {mask(self.value)}"
 
 
@@ -279,18 +342,18 @@ def scan_blob(path: str, data: bytes, snap: Snapshot, allow: AllowList, where: s
     digest = hashlib.sha256(data).hexdigest()
     base = posixpath.basename(path)
 
-    def add(line: int, rule: str, level: str, value: str) -> None:
+    def add(line: int, rule: str, level: str, value: str, gl_rule: str = "") -> None:
         if allow.value_allowed(rule, value) or allow.path_allowed(rule, path, digest):
             return
         if rule in FIXTURE_RULES and fx is not None and fx.exempt and value in fx.fake_ids:
             return
-        out.append(Finding(path, line, rule, level, value, where))
+        out.append(Finding(path, line, rule, level, value, where, gl_rule))
 
     fx = fixture_verdict(path, data, snap, allow)
 
     # S4：.env* 文件（.env.example 除外）
     if ENV_FILE_RE.search(path) and base != ENV_EXAMPLE:
-        add(0, "S4", BLOCK, base)
+        add(0, "S4", BLOCK, base, "S4-env-file")
 
     text, is_gbk = decode(data)
     if text is None:
@@ -304,19 +367,19 @@ def scan_blob(path: str, data: bytes, snap: Snapshot, allow: AllowList, where: s
                 continue
             val = m.group(2).split(" #", 1)[0].strip().strip("'\"")
             if not ENV_PLACEHOLDER.fullmatch(val):
-                add(no, "S4", BLOCK, f"{m.group(1)}={val}")
+                add(no, "S4", BLOCK, f"{m.group(1)}={val}", "S4-env-example-value")
 
     header_has_holder = any(HOLDER in ln for ln in lines[:HEADER_CONTEXT_LINES])
     for no, line in enumerate(lines, 1):
-        for rule, level, rx in LINE_RULES:
+        for (rule, level, rx), gl_rule in zip(LINE_RULES, LINE_RULE_GL_IDS, strict=True):
             for m in rx.finditer(line):
-                add(no, rule, level, m.group(0))
+                add(no, rule, level, m.group(0), gl_rule)
         if header_has_holder or HOLDER in line:
             for m in S6_RE.finditer(line):
-                add(no, "S6", BLOCK, m.group(0))
+                add(no, "S6", BLOCK, m.group(0), "S6-sz-holder-code")
         for m in S8_ID_RE.finditer(line):
             if id_checksum_ok(m.group(0)):
-                add(no, "S8", BLOCK, m.group(0))
+                add(no, "S8", BLOCK, m.group(0), "S8-id-card")
         for m in S8_PHONE_RE.finditer(line):
             add(no, "S8", WARN, m.group(0))
         for m in S9_CARD_RE.finditer(line):
@@ -328,7 +391,7 @@ def scan_blob(path: str, data: bytes, snap: Snapshot, allow: AllowList, where: s
         hits = [w for w in HEADER_WORDS if w in text]
         if len(hits) >= 3:
             first = next(i for i, ln in enumerate(lines, 1) if any(w in ln for w in hits))
-            add(first, "S7", BLOCK, "".join(hits))
+            add(first, "S7", BLOCK, "".join(hits), "S7-statement-header")
         elif is_gbk:
             add(0, "S7", BLOCK, "GB18030")
     return out
@@ -353,14 +416,15 @@ def iter_staged(repo: Path) -> Iterator[tuple[str, bytes, Snapshot, str]]:
 
 
 def iter_rev_tree(repo: Path, rev: str) -> Iterator[tuple[str, bytes, Snapshot, str]]:
-    snap = Snapshot(lambda p: git_maybe(repo, "show", f"{rev}:{p}"))
+    full = git(repo, "rev-parse", "--verify", f"{rev}^{{commit}}").decode().strip()
+    snap = Snapshot(lambda p: git_maybe(repo, "show", f"{full}:{p}"))
     for rec in git(repo, "ls-tree", "-r", "-z", rev).decode("utf-8", "surrogateescape").split("\0"):
         if not rec:
             continue
         info, path = rec.split("\t", 1)
         mode, kind, sha = info.split()
         if kind == "blob" and mode != "120000":
-            yield path, git(repo, "cat-file", "blob", sha), snap, rev[:10]
+            yield path, git(repo, "cat-file", "blob", sha), snap, full
 
 
 def iter_commits(repo: Path, revs: list[str]) -> Iterator[tuple[str, bytes, Snapshot, str]]:
@@ -384,7 +448,7 @@ def iter_commits(repo: Path, revs: list[str]) -> Iterator[tuple[str, bytes, Snap
             if new_mode in ("160000", "120000") or (path, new_sha) in seen:
                 continue
             seen.add((path, new_sha))
-            yield path, git(repo, "cat-file", "blob", new_sha), snap, c[:10]
+            yield path, git(repo, "cat-file", "blob", new_sha), snap, c
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -393,11 +457,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("targets", nargs="*")
     ap.add_argument("--repo", type=Path, default=Path.cwd())
     ap.add_argument("--allow", type=Path)
+    ap.add_argument("--ignore", type=Path)
     args = ap.parse_args(argv)
     repo = args.repo.resolve()
     allow = load_allow(args.allow or repo / ".secretscan-allow.yaml")
     for e in allow.errors:
         print(f"::error title=secretscan-allow::{e}")
+    fps, ignore_errors = load_ignore(args.ignore or repo / ".gitleaksignore")
+    for e in ignore_errors:
+        print(f"::error title=gitleaksignore::{e}")
 
     it: Iterable[tuple[str, bytes, Snapshot, str]]
     if args.mode == "tree":
@@ -422,6 +490,8 @@ def main(argv: list[str] | None = None) -> int:
     for path, data, snap, where in it:
         scanned += 1
         for f in scan_blob(path, data, snap, allow, where):
+            if fingerprint_allowed(repo, fps, f):
+                continue
             if f.level == BLOCK:
                 blocks += 1
                 print(f.render())
@@ -431,7 +501,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"WARN {f.render()}")
                 print(f"::warning file={f.path},line={max(f.line, 1)},title={f.rule}::{f.rule} {mask(f.value)}")
     print(f"secret_scan {args.mode}: 扫描 {scanned} 个文件版本，阻断 {blocks}，警告 {warns}")
-    return 1 if blocks or allow.errors else 0
+    return 1 if blocks or allow.errors or ignore_errors else 0
 
 
 if __name__ == "__main__":

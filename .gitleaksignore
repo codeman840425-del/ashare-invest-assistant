@@ -1,0 +1,9 @@
+# gitleaks 指纹豁免（commit:file:rule:line）。gitleaks 与 scripts/ci/secret_scan.py 共用本文件。
+# 只放已人工确认为非真实值的历史命中，精确到 提交+文件+规则+行；换了提交或行照样拦。
+# 新增须架构师或测试负责人评审（CODEOWNERS），并在 reports 里记录确认方式。
+#
+# ccf7cba deploy/env/.env.example 第 15、21 行：POSTGRES_PASSWORD、APP_MASTER_KEY 的 change-me-… 占位符（35f0139 起已改为 changeme… 形式）
+ccf7cbab6ad23471089bca76328ad2e165fad656:deploy/env/.env.example:S4-env-example-value:15
+ccf7cbab6ad23471089bca76328ad2e165fad656:deploy/env/.env.example:S4-env-example-value:21
+# ccf7cba src/backend/probes/common.py 第 39 行：dry-run 虚构证书常量 DRY_RUN_LICENCE（已用本机真实值精确比对确认不是真实值；3f04eda 起改为分段拼接）
+ccf7cbab6ad23471089bca76328ad2e165fad656:src/backend/probes/common.py:S1-mairui-licence-assign:39

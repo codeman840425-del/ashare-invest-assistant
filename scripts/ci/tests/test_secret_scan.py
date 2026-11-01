@@ -418,27 +418,100 @@ def test_gitleaks_report_masks(tmp_path: Path) -> None:
     assert subprocess.run([sys.executable, str(CI_DIR / "gitleaks_report.py"), str(rpt)], capture_output=True).returncode == 0
 
 
-def test_gitleaks_s1_probes_allowlist_is_narrow(tmp_repo: Path) -> None:
-    """S1 的 probes 历史误报豁免必须是 提交 + 路径 + 内容 三者 AND，换任何一个都照样拦。"""
-    cfg = tomllib.loads((REPO / ".gitleaks.toml").read_text(encoding="utf-8"))
-    s1 = next(r for r in cfg["rules"] if r["id"] == "S1-mairui-licence-assign")
-    (al,) = s1["allowlists"]
-    assert al["condition"] == "AND"
-    assert len(al["commits"]) == 1 and re.fullmatch(r"[0-9a-f]{40}", al["commits"][0])
-    assert al["paths"] == [r"^src/backend/probes/common\.py$"]
-    assert len(al["regexes"]) == 1 and al["regexTarget"] == "match"
+
+# --------------------------------------------------------------------------- .gitleaksignore 指纹豁免
+S1_GL = "S1-mairui-licence-assign"
+
+
+def _s1_line() -> str:
+    return "LICENCE = " + chr(34) + fake_token(24) + chr(34)
+
+
+def _py_history(repo: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, str(CI_DIR / "secret_scan.py"), "history", "--repo", str(repo)],
+                          capture_output=True, text=True)
+
+
+def _gl_history(repo: Path) -> set[tuple[str, str, str, int]]:
     bin_ = gitleaks_bin()
-    if not bin_:
-        pytest.skip("没有 gitleaks")
-    value = "-".join(("DRYRUN", "FAKE", "LICENCE", "0000", "0" * 12))
-    write(tmp_repo, "src/backend/probes/common.py", f'DRY_RUN_LICENCE = "{value}"\n')
-    write(tmp_repo, "other.py", f'DRY_RUN_LICENCE = "{value}"\n')
-    commit_all(tmp_repo)
-    rpt = tmp_repo.parent / "gl.json"
-    subprocess.run([bin_, "git", str(tmp_repo), "--no-banner", "-c", str(tmp_repo / ".gitleaks.toml"),
-                    "--ignore-gitleaks-allow", "-f", "json", "-r", str(rpt), "--exit-code", "0"],
-                   check=True, capture_output=True)
-    hits = {(f["RuleID"], f["File"]) for f in json.loads(rpt.read_text())}
-    # 同路径同内容但提交不同：照拦；其他路径：照拦
-    assert ("S1-mairui-licence-assign", "src/backend/probes/common.py") in hits
-    assert ("S1-mairui-licence-assign", "other.py") in hits
+    assert bin_
+    rpt = repo.parent / "gl.json"
+    subprocess.run([bin_, "git", str(repo), "--no-banner", "-c", str(repo / ".gitleaks.toml"), "--ignore-gitleaks-allow",
+                    "--log-opts=--all", "-f", "json", "-r", str(rpt), "--exit-code", "0"], check=True, capture_output=True)
+    return {(f["Commit"], f["File"], f["RuleID"], f["StartLine"]) for f in json.loads(rpt.read_text())}
+
+
+def _fingerprint_repo(repo: Path) -> str:
+    """提交 A：a.py 第 2 行是 S1 命中；之后提交 B 改了 a.py 别的行（这一行原样带过去）。返回 A 的完整 sha。"""
+    write(repo, "a.py", "x = 1\n" + _s1_line() + "\n")
+    a = commit_all(repo, "A")
+    write(repo, "a.py", "x = 2\n" + _s1_line() + "\ny = 3\n")
+    commit_all(repo, "B")
+    return a
+
+
+def test_gitleaksignore_positive(tmp_repo: Path) -> None:
+    a = _fingerprint_repo(tmp_repo)
+    r = _py_history(tmp_repo)
+    assert r.returncode == 1 and "a.py:2:S1" in r.stdout  # 没有指纹时拦
+    write(tmp_repo, ".gitleaksignore", f"# 注释\n\n{a}:a.py:{S1_GL}:2\n")
+    commit_all(tmp_repo, "ignore")
+    r = _py_history(tmp_repo)
+    assert r.returncode == 0, r.stdout  # A 引入、B 原样带过去的同一行都放行
+    if gitleaks_bin():
+        assert _gl_history(tmp_repo) == set()
+
+
+@pytest.mark.parametrize("variant", ["other-commit", "other-line", "other-file", "other-rule", "wrong-line-fp"])
+def test_gitleaksignore_negative(tmp_repo: Path, variant: str) -> None:
+    a = _fingerprint_repo(tmp_repo)
+    fp_line, fp_rule = 2, S1_GL
+    if variant == "other-rule":
+        fp_rule = "S2-secret-assign"
+    if variant == "wrong-line-fp":
+        fp_line = 1
+    write(tmp_repo, ".gitleaksignore", f"{a}:a.py:{fp_rule}:{fp_line}\n")
+    commit_all(tmp_repo, "ignore")
+    if variant == "other-commit":  # 删掉后在新提交里原样重新引入（同文件同行号）
+        write(tmp_repo, "a.py", "x = 2\n")
+        commit_all(tmp_repo, "del")
+        write(tmp_repo, "a.py", "x = 2\n" + _s1_line() + "\n")
+        commit_all(tmp_repo, "re-add")
+        expect = "a.py:2:S1"
+    elif variant == "other-line":  # 同一提交历史里另起一行同样内容
+        write(tmp_repo, "a.py", "x = 2\n" + _s1_line() + "\ny = 3\n" + _s1_line() + "\n")
+        commit_all(tmp_repo, "dup")
+        expect = "a.py:4:S1"
+    elif variant == "other-file":
+        write(tmp_repo, "b.py", "x = 1\n" + _s1_line() + "\n")
+        commit_all(tmp_repo, "b")
+        expect = "b.py:2:S1"
+    else:
+        expect = "a.py:2:S1"
+    r = _py_history(tmp_repo)
+    assert r.returncode == 1 and expect in r.stdout, r.stdout
+    if gitleaks_bin():
+        hits = _gl_history(tmp_repo)
+        file_, line = expect.split(":")[:2]
+        assert any(h[1] == file_ and h[3] == int(line) and h[2] == S1_GL for h in hits), hits
+
+
+@pytest.mark.parametrize("bad", ["abc:a.py:S1-x:2", "a.py:S1-x:2", "{sha}:a.py:S1-x:0", "{sha}:a.py:S1-x"])
+def test_gitleaksignore_malformed_is_error(tmp_repo: Path, bad: str) -> None:
+    write(tmp_repo, "a.py", "x = 1\n")
+    sha = commit_all(tmp_repo)
+    write(tmp_repo, ".gitleaksignore", bad.format(sha=sha) + "\n")
+    r = _py_history(tmp_repo)
+    assert r.returncode == 1 and "gitleaksignore" in r.stdout
+
+
+def test_repo_gitleaksignore_is_narrow() -> None:
+    """仓库的 .gitleaksignore：只有 4 段完整指纹，规则 ID 都在 .gitleaks.toml 里；toml 里不再有重复的 S1 规则级豁免。"""
+    cfg = tomllib.loads((REPO / ".gitleaks.toml").read_text(encoding="utf-8"))
+    ids = {r["id"] for r in cfg["rules"]}
+    fps, errors = ss.load_ignore(REPO / ".gitleaksignore")
+    assert errors == [] and fps
+    for commit, path, rule, line in fps:
+        assert re.fullmatch(r"[0-9a-f]{40}", commit) and rule in ids and line >= 1 and "*" not in path
+    s1 = next(r for r in cfg["rules"] if r["id"] == S1_GL)
+    assert "allowlists" not in s1

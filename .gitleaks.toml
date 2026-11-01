@@ -24,18 +24,6 @@ description = "S1 麦蕊 licence（赋值形式）"
 regex = '''(?i)(mairui[_-]?)?licen[cs]e\s*[:=]\s*["']?[A-Za-z0-9-]{16,}'''
 keywords = ["licence", "license"]
 tags = ["S1", "block"]
-[[rules.allowlists]]
-# 单点误报：提交 ccf7cba 的 src/backend/probes/common.py:39 是 dry-run 专用虚构证书常量（DRY_RUN_LICENCE），
-# 已用本机真实 MAIRUI_LICENCE / DEEPSEEK_API_KEY 做过精确比对（相等、互相包含都不成立；2026-11-01 运维 T-O01b）。
-# 3f04eda 起该行改为分段拼接，当前树不再命中；这里只为全量历史扫描放行那一条历史记录。
-# 三个条件同时满足才放行（AND）：该提交 + 该文件 + 整段命中内容逐字符等于那个虚构值。
-# 正则里故意写成 \s、0{12}，避免本文件自己被 S1 命中。
-description = "S1 历史误报：ccf7cba probes/common.py 的 dry-run 虚构证书"
-condition = "AND"
-commits = ["ccf7cbab6ad23471089bca76328ad2e165fad656"]
-paths = ['''^src/backend/probes/common\.py$''']
-regexTarget = "match"
-regexes = ['''^LICENCE\s=\s"DRYRUN-FAKE-LICENCE-0000-0{12}$''']
 
 # ---------------------------------------------------------------- S2 API Key
 [[rules]]

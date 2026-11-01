@@ -11,15 +11,18 @@ import { fmtTime } from '../../lib/format';
 type Target = AdminUserPatch['status'];
 const ACTIONS: Record<AccountStatus, Target[]> = { pending: ['approved', 'rejected'], approved: ['disabled'], rejected: ['approved'], disabled: ['approved'] };
 const ACTION_TEXT: Record<Target, string> = { approved: '通过', rejected: '驳回', disabled: '停用' };
-const NEEDS_REASON = (t: Target) => t !== 'approved';
-/** 同一 IP 注册数达到这个值时高亮提示（plan 3.6 风控线索） // [待契约确认] 阈值 */
-const SAME_IP_ALERT = 3;
+/** 驳回、停用，以及从停用恢复（plan 1736“禁用/恢复须填理由”；评审 m1）必须填写理由 */
+const NEEDS_REASON = (to: Target, from: AccountStatus) => to !== 'approved' || from === 'disabled';
+/** 同 IP 高亮：只看服务端返回的 same_ip_flag（v0.2.4 #12 必填；阈值是服务端配置，前端不写死） */
+const sameIpFlag = (r: AdminUser) => r.same_ip_flag;
+const PAGE_SIZE = 50;
 
-/** 管理端用户审核（契约 §7.9 GET/PATCH /admin/users）。驳回、停用必须填写理由。 */
+/** 管理端用户审核（契约 §7.9 GET/PATCH /admin/users）。驳回、停用、从停用恢复必须填写理由；列表按游标“加载更多”。 */
 export function AdminUsersPage() {
   const [status, setStatus] = useState<AccountStatus | ''>('pending');
   const [q, setQ] = useState('');
-  const list = useAdminUsers(status, q.trim());
+  const list = useAdminUsers(status, q.trim(), PAGE_SIZE);
+  const rows = list.data?.pages.flatMap((p) => p.items) ?? [];
   const patch = usePatchAdminUser();
   const [pending, setPending] = useState<{ user: AdminUser; to: Target } | null>(null);
   const [reason, setReason] = useState('');
@@ -50,7 +53,7 @@ export function AdminUsersPage() {
         size="small"
         rowKey="id"
         loading={list.isPending}
-        dataSource={list.data?.items ?? []}
+        dataSource={rows}
         pagination={false}
         locale={{ emptyText: '没有符合条件的用户' }}
         columns={[
@@ -62,7 +65,7 @@ export function AdminUsersPage() {
           { title: '注册 IP 属地', dataIndex: 'register_ip_region', width: 120, render: (v: string | null) => v ?? '—' },
           {
             title: '同 IP 注册', dataIndex: 'same_ip_registrations', width: 96, align: 'right',
-            render: (n: number) => (n >= SAME_IP_ALERT ? <Tooltip title="同一 IP 注册较多，建议核实"><Tag color="orange" className="mono">{n}</Tag></Tooltip> : <span className="mono">{n}</span>),
+            render: (n: number, r) => (sameIpFlag(r) ? <Tooltip title="同一 IP 注册较多，建议核实"><Tag color="orange" className="mono">{n}</Tag></Tooltip> : <span className="mono">{n}</span>),
           },
           { title: '审核理由', dataIndex: 'review_reason', ellipsis: true, render: (v: string | null) => v ?? <span className="muted">—</span> },
           {
@@ -79,23 +82,30 @@ export function AdminUsersPage() {
           },
         ]}
       />
+      {list.hasNextPage ? (
+        <div style={{ textAlign: 'center', marginTop: 8 }}>
+          <Button onClick={() => void list.fetchNextPage()} loading={list.isFetchingNextPage} data-testid="admin-users-more">加载更多</Button>
+        </div>
+      ) : rows.length ? <div className="muted small" style={{ textAlign: 'center', marginTop: 8 }}>已显示全部 {rows.length} 条</div> : null}
       <Modal
         open={!!pending}
         title={pending ? `${ACTION_TEXT[pending.to]}：${pending.user.display_name}（${pending.user.username}）` : ''}
         okText={pending ? `确认${ACTION_TEXT[pending.to]}` : '确认'}
-        okButtonProps={{ disabled: !!pending && NEEDS_REASON(pending.to) && !reason.trim(), loading: patch.isPending, danger: pending?.to !== 'approved' }}
+        okButtonProps={{ disabled: !!pending && NEEDS_REASON(pending.to, pending.user.status) && !reason.trim(), loading: patch.isPending, danger: pending?.to !== 'approved' }}
         onOk={submit}
         onCancel={() => setPending(null)}
         destroyOnHidden
       >
-        {pending && NEEDS_REASON(pending.to) ? <Alert type="warning" showIcon style={{ marginBottom: 8 }} title="驳回或停用必须填写理由，理由会展示给该用户并写入审计。" /> : null}
+        {pending && NEEDS_REASON(pending.to, pending.user.status) ? (
+          <Alert type="warning" showIcon style={{ marginBottom: 8 }} title="驳回、停用或从停用恢复必须填写理由，理由会写入审计；驳回和停用的理由会展示给该用户。" />
+        ) : null}
         <Input.TextArea
           rows={3}
           maxLength={200}
           showCount
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder={pending && NEEDS_REASON(pending.to) ? '必填：理由' : '可选：备注'}
+          placeholder={pending && NEEDS_REASON(pending.to, pending.user.status) ? '必填：理由' : '可选：备注'}
           data-testid="admin-reason"
         />
         {patch.isError ? <div style={{ marginTop: 8 }}><ErrorBox error={patch.error} prefix="操作失败" /></div> : null}

@@ -1,5 +1,5 @@
 import { Button, Result } from 'antd';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useLocation, useSearchParams } from 'react-router';
 import { ACCOUNT_STATUS } from '../../i18n/importLabels';
 import type { AccountStatus } from '../../api/enums';
 import { AuthLayout } from './AuthLayout';
@@ -17,7 +17,9 @@ export function AccountStatusPage() {
   const raw = sp.get('status') ?? 'pending';
   const status = (raw in VIEW ? raw : 'pending') as AccountStatus;
   const v = VIEW[status];
-  const reason = sp.get('reason');
+  // 原因从 history state 读取（评审 m4）；刷新或直接打开时没有原因，只显示状态
+  const loc = useLocation();
+  const reason = (loc.state as { reason?: string | null } | null)?.reason ?? null;
   const username = sp.get('username');
   return (
     <AuthLayout title="账号状态" testId="account-status">

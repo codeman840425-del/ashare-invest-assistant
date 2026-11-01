@@ -3,7 +3,7 @@ import {
   Alert, Button, Checkbox, Collapse, DatePicker, Descriptions, Form, Popconfirm, Radio, Result, Select, Space, Steps, Table, Tag, Upload,
 } from 'antd';
 import type { Dayjs } from 'dayjs';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   downloadErrorsCsv, useAccounts, useConfirmImport, useDiscardImport, useImportBatch, useImportOptions, useImportRows, useResolveFinding, useRevertImport,
   useUploadImport, type RowFilter,
@@ -23,8 +23,15 @@ const toIso = (d: Dayjs) => d.format('YYYY-MM-DDTHH:mm:ss+08:00');
 /** 交割单导入向导（T-F04）：上传 → 解析 → 预览着色与逐项处理 → 确认写入 → 结果（可撤销 / 下载问题清单）。 */
 export function ImportWizardPage() {
   const { batchId } = useParams();
+  const [sp] = useSearchParams();
+  // 评审 P2：通知深链 /portfolio/import?batch=<id> 统一跳到批次页
+  const legacy = sp.get('batch');
+  if (!batchId && legacy) return <Navigate replace to={`/portfolio/import/${encodeURIComponent(legacy)}`} />;
   return batchId ? <BatchView id={batchId} /> : <UploadStep />;
 }
+
+/** 上传上限（契约 413 PAYLOAD_TOO_LARGE；评审 m7 先在前端拦截，服务端仍以 413 为准） */
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 function StepsBar({ current, failed }: { current: number; failed?: boolean }) {
   return (
@@ -42,6 +49,7 @@ function UploadStep() {
   const accounts = useAccounts();
   const upload = useUploadImport();
   const [file, setFile] = useState<File | null>(null);
+  const [tooBig, setTooBig] = useState(false);
   const [form] = Form.useForm<UploadForm>();
   const kind = Form.useWatch('kind', form);
 
@@ -67,7 +75,7 @@ function UploadStep() {
         <Alert type="warning" showIcon title={<span>还没有券商账户，请先到 <Link to="/portfolio">持仓与账户</Link> 新建。</span>} />
       ) : (
         <Form<UploadForm> form={form} layout="vertical" requiredMark={false} onFinish={submit}
-          initialValues={{ account_id: sp.get('account') ?? list[0].id, kind: sp.get('kind') === 'positions' ? 'positions' : 'trades' }}>
+          initialValues={{ account_id: sp.get('account_id') ?? sp.get('account') ?? list[0].id, kind: sp.get('kind') === 'positions' ? 'positions' : 'trades' }}>
           <Form.Item name="account_id" label="导入到账户" rules={[{ required: true }]}>
             <Select options={list.map((a) => ({ value: a.id, label: `${a.alias} · ${a.broker_name}` }))} style={{ maxWidth: 320 }} />
           </Form.Item>
@@ -83,7 +91,13 @@ function UploadStep() {
             <Upload.Dragger
               accept=".txt,.csv"
               maxCount={1}
-              beforeUpload={(f) => { setFile(f); upload.reset(); return false; }}
+              beforeUpload={(f) => {
+                upload.reset();
+                if (f.size > MAX_UPLOAD_BYTES) { setFile(null); setTooBig(true); return Upload.LIST_IGNORE; }
+                setTooBig(false);
+                setFile(f);
+                return false;
+              }}
               onRemove={() => setFile(null)}
               fileList={file ? [{ uid: 'f', name: file.name, status: 'done' }] : []}
             >
@@ -91,6 +105,7 @@ function UploadStep() {
               <p className="muted">文件只用于解析本账户的成交与持仓；预览中只显示掩码后的原始行。</p>
             </Upload.Dragger>
           </Form.Item>
+          {tooBig ? <Alert type="error" showIcon title="文件超过 5 MB，请按日期分段导出后再上传" style={{ marginBottom: 8 }} data-testid="upload-too-big" /> : null}
           {fileErrors.length ? (
             <div className="imp-findings" data-testid="upload-file-errors">
               <Alert type="error" showIcon title={IMPORT_422_TEXT.IMPORT_FILE_ERRORS} style={{ marginBottom: 8 }} />
@@ -122,7 +137,7 @@ function BatchView({ id }: { id: string }) {
         <h2 className="page-title">交割单导入 <Tag color={st.color} data-testid="batch-status">{st.text}</Tag></h2>
         <Space>
           <span className="muted">{KIND_TEXT[b.kind]} · 上传于 <span className="mono">{fmtTime(b.created_at)}</span></span>
-          <Link to={`/portfolio?account=${b.account_id}&tab=imports`}>返回导入记录</Link>
+          <Link to={`/portfolio?account_id=${b.account_id}&tab=imports`}>返回导入记录</Link>
         </Space>
       </div>
       <StepsBar current={step} failed={b.status === 'failed'} />
@@ -273,7 +288,7 @@ function PreviewStep({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Impo
       )}
       <Space style={{ marginTop: 12 }}>
         <Popconfirm title="放弃这个批次？" description="不会写入任何数据。" okText="放弃" okButtonProps={{ danger: true }}
-          onConfirm={() => discard.mutate({ id: b.batch_id, v: null }, { onSuccess: () => navigate(`/portfolio?account=${b.account_id}&tab=imports`) })}>
+          onConfirm={() => discard.mutate({ id: b.batch_id, v: null }, { onSuccess: () => navigate(`/portfolio?account_id=${b.account_id}&tab=imports`) })}>
           <Button danger loading={discard.isPending}>放弃本批次</Button>
         </Popconfirm>
         {s.error + s.warning > 0 ? <Button onClick={() => { setDlErr(null); downloadErrorsCsv(b.batch_id).catch(setDlErr); }}>下载问题清单 CSV</Button> : null}
@@ -345,7 +360,7 @@ function ConfirmPanel({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Imp
 function DoneStep({ b, result }: { b: ImportBatch; result: ImportConfirmResponse | null }) {
   const revert = useRevertImport();
   const [dlErr, setDlErr] = useState<unknown>(null);
-  const toRecon = `/portfolio?account=${b.account_id}&tab=reconciliation`;
+  const toRecon = `/portfolio?account_id=${b.account_id}&tab=reconciliation`;
   if (b.status === 'discarded') return <Result status="info" title="本批次已放弃" subTitle="没有写入任何数据。" extra={<Link to="/portfolio/import">重新上传</Link>} />;
   if (b.status === 'reverted') {
     return <Result status="info" title="本批次已撤销" subTitle={`撤销于 ${b.reverted_at ? fmtTime(b.reverted_at) : '—'}；写入的成交已标记为作废，持仓与对账已重算。`} extra={<Link to={toRecon}>查看对账</Link>} data-testid="import-reverted" />;

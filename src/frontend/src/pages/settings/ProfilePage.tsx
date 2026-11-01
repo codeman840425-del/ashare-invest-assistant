@@ -10,7 +10,7 @@ import { EFFORT, EXPERIENCE, RISK_LEVEL_TEXT } from '../../i18n/accountLabels';
 import { HORIZON } from '../../i18n/labels';
 import { applyFieldErrors } from '../../lib/formErrors';
 
-interface FormValues { horizon_pref: Horizon[]; effort: ProfileInput['effort']; risk_tolerance: number; experience: ProfileInput['experience']; max_single_position_pct: number }
+interface FormValues { horizon_pref: Horizon[]; effort: ProfileInput['effort']; risk_tolerance: number | null; experience: ProfileInput['experience']; max_single_position_pct: number }
 const FIELDS = ['horizon_pref', 'effort', 'risk_tolerance', 'experience', 'max_single_position_pct'] as const;
 const DEFAULTS: FormValues = { horizon_pref: ['swing'], effort: 'medium', risk_tolerance: 3, experience: 'novice', max_single_position_pct: 20 };
 
@@ -26,13 +26,15 @@ export function ProfilePage() {
   if (profile.isPending) return <Loading />;
   if (profile.isError) return <ErrorBox error={profile.error} />;
   const p = profile.data;
-  const initial: FormValues = p ? { ...p, max_single_position_pct: Number(p.max_single_position_pct) } : DEFAULTS;
+  const initial: FormValues = p
+    ? { horizon_pref: p.horizon_pref, effort: p.effort, risk_tolerance: p.risk_tolerance, experience: p.experience, max_single_position_pct: Number(p.max_single_position_pct) }
+    : DEFAULTS;
 
   const onFinish = (v: FormValues) => {
     setMsg(null);
     setOther([]);
     save.mutate(
-      { ...v, max_single_position_pct: String(v.max_single_position_pct) },
+      { ...v, max_single_position_pct: String(Number(v.max_single_position_pct.toFixed(2))) },
       { onSuccess: (r) => setMsg(`已保存为第 ${r.version_no} 版（旧版本保留）`), onError: (e) => setOther(applyFieldErrors(form, e, FIELDS)) },
     );
   };
@@ -44,7 +46,7 @@ export function ProfilePage() {
       </h2>
       <p className="muted">画像用于候选信号的周期偏好、新手封顶和仓位上限提示；不会据此给出买卖结论。每次保存生成新版本。</p>
       <div className="kv-line">
-        风险测评：{me.data?.risk_assessment ? <b>{RISK_LEVEL_TEXT[me.data.risk_assessment.level]}</b> : <span className="muted">未完成</span>}
+        风险测评：{me.data?.risk_assessment ? <b>{RISK_LEVEL_TEXT[me.data.risk_assessment.risk_tolerance]}</b> : <span className="muted">未完成</span>}
         <Link to="/onboarding?next=/settings/profile" style={{ marginLeft: 12 }}>{me.data?.risk_assessment ? '重新测评' : '去完成'}</Link>
       </div>
       {msg ? <Alert type="success" showIcon title={msg} style={{ margin: '12px 0' }} data-testid="profile-saved" /> : null}
@@ -68,12 +70,12 @@ export function ProfilePage() {
           </Radio.Group>
         </Form.Item>
         <Form.Item noStyle shouldUpdate={(a, b) => a.experience !== b.experience}>
-          {({ getFieldValue }) => <div className="muted form-hint">{EXPERIENCE[getFieldValue('experience') as FormValues['experience']]?.hint}</div>}
+          {({ getFieldValue }) => <div className="muted form-hint">{EXPERIENCE[(getFieldValue('experience') as FormValues['experience']) ?? 'novice']?.hint}</div>}
         </Form.Item>
-        {/* [待契约确认] 契约只写 string(decimal)，5–50 的范围取自 mock，后端以 400 fields 为准 */}
+        {/* v0.2.4 #7：5–50，最多 2 位小数（评审 m11） */}
         <Form.Item name="max_single_position_pct" label="单只股票最大仓位（%）" extra="用于计划条件里的仓位上限提示，范围 5–50"
           rules={[{ required: true, type: 'number', min: 5, max: 50, message: '请输入 5–50' }]}>
-          <InputNumber min={5} max={50} step={1} addonAfter="%" style={{ width: 160 }} />
+          <InputNumber min={5} max={50} step={1} precision={2} addonAfter="%" style={{ width: 160 }} />
         </Form.Item>
         <Button type="primary" htmlType="submit" loading={save.isPending}>保存为新版本</Button>
       </Form>

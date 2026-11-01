@@ -72,7 +72,7 @@ describe('开通引导：同意条款 → 风险测评 → 完成', () => {
     expect(go).toBeEnabled();
     fireEvent.click(go);
     const risk = await screen.findByTestId('onboarding-risk');
-    const submit = within(risk).getByRole('button', { name: /提交测评/ });
+    const submit = await within(risk).findByRole('button', { name: /提交测评/ });
     expect(submit).toBeDisabled();
     for (const g of within(risk).getAllByRole('radiogroup')) fireEvent.click(within(g).getAllByRole('radio')[1]);
     expect(submit).toBeEnabled();

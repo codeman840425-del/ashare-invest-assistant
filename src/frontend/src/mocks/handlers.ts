@@ -1,14 +1,14 @@
 /**
- * MSW 处理器：按契约 v0.2.3 §7 的路径与响应结构返回示例数据。只拦截同源 `/api/v1/*`。
+ * MSW 处理器：按契约 v0.2.5 §7 的路径与响应结构返回示例数据。只拦截同源 `/api/v1/*`。
  * 未实现的端点统一返回 404 + 契约错误信封（code=NOT_FOUND），便于发现漏接。
  */
 import { http, HttpResponse, delay, matchRequestUrl } from 'msw';
 import type { MarketOverview, Notification, TerminalScope, TodayResponse } from '../api/types';
 import { accountHandlers } from './accountHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
-import { resetSession } from './session';
+import { currentUser, resetSession } from './session';
 import {
-  CANDIDATE_SIGNALS, DAILY_REPORTS, HORIZON_ASSESSMENTS, DAILY_REPORT_LIST, HEALTH_READY, NOTIFICATIONS, NOW, PORTFOLIO, QUOTES, REASONS,
+  ACCOUNT_ID, CANDIDATE_SIGNALS, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOTIFICATIONS, NOW, PORTFOLIO, QUOTES, REASONS,
   SIGNAL_EVENTS, SUGGESTIONS, SUGGESTION_LIST, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, WATCHLIST, dailyBars, intradayBars,
 } from './fixtures';
 
@@ -93,9 +93,15 @@ const routeHandlers = [
     const code = new URL(request.url).searchParams.get('security_code');
     if (!code) return validation('security_code', 'security_code 必填');
     const a = HORIZON_ASSESSMENTS[code];
-    return a ? HttpResponse.json(a) : notFound('周期分类结果');
+    if (!a) return notFound('周期分类结果');
+    return HttpResponse.json(currentUser()?.username === 'novice_user' ? noviceAssessment(a) : a);
   }),
-  http.get(`${API}/portfolio`, () => HttpResponse.json(PORTFOLIO)),
+  // v0.2.4 #14：account_id 可选；示例数据的持仓都在主账户，其他账户为空
+  http.get(`${API}/portfolio`, ({ request }) => {
+    const id = new URL(request.url).searchParams.get('account_id');
+    if (!id || id === ACCOUNT_ID) return HttpResponse.json(PORTFOLIO);
+    return HttpResponse.json({ ...PORTFOLIO, total_assets: '0.00', cash: '0.00', positions: [], exposure: { sector: [] } });
+  }),
   http.get(`${API}/quotes`, ({ request }) => {
     const codes = (new URL(request.url).searchParams.get('codes') ?? '').split(',').filter(Boolean);
     if (codes.length > 50) return validation('codes', 'codes 最多 50 个');

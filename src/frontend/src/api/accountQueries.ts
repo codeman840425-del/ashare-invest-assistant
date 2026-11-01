@@ -1,19 +1,20 @@
 /**
- * T-F02 / T-F02a / T-F04 的查询与变更（TanStack Query）。路径与请求体对齐契约 §7.1 / §7.2 / §7.9。
+ * T-F02 / T-F02a / T-F04 的查询与变更（TanStack Query）。路径与请求体对齐契约 v0.2.4 §7.1 / §7.2 / §7.9。
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, apiGet, clearEtagCache, apiPatch, apiPost, apiPut, apiUpload, buildUrl, fetchUrl, newIdempotencyKey, setCsrfToken } from './client';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, apiGet, clearEtagCache, apiPatch, apiPost, apiPut, apiUpload, buildUrl, fetchUrl, setCsrfToken } from './client';
 import type {
-  AdminUser, AdminUserPatch, BrokerAccount, BrokerAccountCreate, ConsentRequest, ImportBatch, ImportConfirmRequest, ImportConfirmResponse,
+  AdminUser, AdminUserPatch, BrokerAccount, BrokerAccountCreate, ConsentRequest, ConsentResponse, ImportBatch, ImportBatchSummary, ImportConfirmRequest, ImportConfirmResponse,
   ImportFinding, ImportKind, ImportOptions, ImportRow, ImportUploadResponse, LoginRequest, LoginResponse, Profile, ProfileInput, Reconciliation,
-  RegisterRequest, RegisterResponse, ResolveFindingRequest, RiskAssessmentRequest, RiskAssessmentResult, Trade, TradeCreate,
+  RegisterRequest, RegisterResponse, ResolveFindingRequest, RiskAssessmentRequest, RiskAssessment, RiskQuestionnaire, ConsentDoc, Trade, TradeCreate,
 } from './accountTypes';
-import type { AccountStatus } from './enums';
+import type { AccountStatus, ConsentKey, ConsentPresentation } from './enums';
 import type { Paged, RegistrationMeta } from './types';
 import { qk } from './queries';
 
 export const ak = {
   registration: ['meta', 'registration'] as const,
+  questionnaire: ['me', 'risk-questionnaire'] as const,
   profile: ['me', 'profile'] as const,
   adminUsers: (status: string, q: string) => ['admin', 'users', status, q] as const,
   accounts: ['accounts'] as const,
@@ -22,11 +23,28 @@ export const ak = {
   batch: (id: string) => ['import', id] as const,
   rows: (id: string, filter: string) => ['import', id, 'rows', filter] as const,
   reconciliation: (accountId: string) => ['reconciliation', accountId] as const,
+  consentDocs: ['meta', 'consent-docs'] as const,
 };
 
 // ---------------- §7.1 ----------------
 export const useRegistrationMode = () =>
   useQuery({ queryKey: ak.registration, queryFn: ({ signal }) => apiGet<RegistrationMeta>('/meta/registration', undefined, signal), staleTime: 60_000 });
+
+/** GET /meta/consent-docs（v0.2.4 #3）：各文书当前版本、哈希与正文链接；不需登录，服务端缓存 300 秒 */
+export const useConsentDocs = () =>
+  useQuery({
+    queryKey: ak.consentDocs,
+    queryFn: ({ signal }) => apiGet<{ items: ConsentDoc[] }>('/meta/consent-docs', undefined, signal),
+    staleTime: 300_000,
+  });
+/**
+ * POST /me/consents 请求体（v0.2.4 #4）：version、content_sha256 取自 /meta/consent-docs 的当前值；
+ * 文书清单里没有该项时按“未定稿”提交（version="unversioned"、哈希 null）。
+ */
+export function consentBody(docs: ConsentDoc[] | undefined, key: ConsentKey, ui_surface: string, presentation: ConsentPresentation): ConsentRequest {
+  const d = docs?.find((x) => x.key === key);
+  return { key, version: d?.version ?? 'unversioned', content_sha256: d?.content_sha256 ?? null, action: 'grant', ui_surface, presentation };
+}
 
 export function useLogin() {
   const qc = useQueryClient();
@@ -53,21 +71,47 @@ export function useLogout() {
     },
   });
 }
+/**
+ * 改密（契约 §7.1、#25）：204 后服务端轮换 sid 与 csrf_token。内存兜底令牌作废，之后的写请求从 Cookie 重新读取。
+ * 目前没有改密页面（设置页任务另排），先把调用约定固定在这里。
+ */
+export const useChangePassword = () =>
+  useMutation({
+    mutationFn: (b: { old_password: string; new_password: string }) => apiPost<void>('/auth/password', b),
+    onSuccess: () => setCsrfToken(null),
+  });
 export const useRegister = () => useMutation({ mutationFn: (b: RegisterRequest) => apiPost<RegisterResponse>('/auth/register', b) });
 
 export function useConsent() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (b: ConsentRequest) => apiPost<void>('/me/consents', b), onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }) });
+  return useMutation({ mutationFn: (b: ConsentRequest) => apiPost<ConsentResponse>('/me/consents', b), onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }) });
 }
+/**
+ * 风险测评问卷（评审 P1、v0.2.4 #6）：只从接口取，不在前端写死题目。
+ * 404（没有已发布问卷）时返回 null，页面显示“尚未发布”。
+ */
+export const useRiskQuestionnaire = (enabled = true) =>
+  useQuery({
+    queryKey: ak.questionnaire,
+    enabled,
+    queryFn: async ({ signal }) => {
+      try {
+        return await apiGet<RiskQuestionnaire>('/me/risk-assessment/questionnaire', undefined, signal);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+  });
 export function useRiskAssessment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: RiskAssessmentRequest) => apiPost<RiskAssessmentResult>('/me/risk-assessment', b),
+    mutationFn: (b: RiskAssessmentRequest) => apiPost<RiskAssessment>('/me/risk-assessment', b),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }),
   });
 }
 
-/** 还没有画像时后端返回 404，这里转为 null（// [待契约确认] 404 还是 200 null） */
+/** 还没有画像时后端返回 404，这里转为 null（评审裁定 T-F02 #4 已确认） */
 export const useProfile = () =>
   useQuery({
     queryKey: ak.profile,
@@ -86,10 +130,13 @@ export function useSaveProfile() {
 }
 
 // ---------------- §7.9 管理端 ----------------
-export const useAdminUsers = (status: AccountStatus | '', q: string) =>
-  useQuery({
-    queryKey: ak.adminUsers(status, q),
-    queryFn: ({ signal }) => apiGet<Paged<AdminUser>>('/admin/users', { status, q, limit: 100 }, signal),
+/** 按 §1.2 游标分页，“加载更多”取下一页（评审 m10） */
+export const useAdminUsers = (status: AccountStatus | '', q: string, limit = 50) =>
+  useInfiniteQuery({
+    queryKey: [...ak.adminUsers(status, q), limit],
+    initialPageParam: null as string | null,
+    queryFn: ({ signal, pageParam }) => apiGet<Paged<AdminUser>>('/admin/users', { status, q, limit, cursor: pageParam }, signal),
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
     retry: false,
   });
 export function usePatchAdminUser() {
@@ -113,10 +160,23 @@ export const useTrades = (accountId: string | undefined) =>
     queryFn: ({ signal }) => apiGet<Paged<Trade>>('/trades', { account_id: accountId, limit: 200 }, signal),
     enabled: !!accountId,
   });
+/** 手工录入：Idempotency-Key 由调用方持有，重复点击或重试复用同一个，成功后再换新（评审 s1） */
 export function useCreateTrade() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: TradeCreate) => apiPost<Trade>('/trades', b, { idempotencyKey: newIdempotencyKey() }),
+    mutationFn: ({ body, key }: { body: TradeCreate; key: string }) => apiPost<Trade>('/trades', body, { idempotencyKey: key }),
+    onSuccess: (t) => {
+      void qc.invalidateQueries({ queryKey: ak.trades(t.account_id) });
+      void qc.invalidateQueries({ queryKey: ak.reconciliation(t.account_id) });
+    },
+  });
+}
+
+/** POST /trades/{id}/void（v0.2.4 #12）：reason 1–200 字；已作废 → 409 */
+export function useVoidTrade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => apiPost<Trade>(`/trades/${encodeURIComponent(id)}/void`, { reason }),
     onSuccess: (t) => {
       void qc.invalidateQueries({ queryKey: ak.trades(t.account_id) });
       void qc.invalidateQueries({ queryKey: ak.reconciliation(t.account_id) });
@@ -128,7 +188,7 @@ export function useCreateTrade() {
 export const useImports = (accountId: string | undefined) =>
   useQuery({
     queryKey: ak.imports(accountId ?? ''),
-    queryFn: ({ signal }) => apiGet<Paged<ImportBatch>>('/imports', { account_id: accountId, limit: 50 }, signal),
+    queryFn: ({ signal }) => apiGet<Paged<ImportBatchSummary>>('/imports', { account_id: accountId, limit: 50 }, signal),
     enabled: !!accountId,
   });
 

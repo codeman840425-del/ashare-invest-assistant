@@ -18,7 +18,7 @@ export const ERROR_TEXT: Partial<Record<AnyErrorCode, string>> = {
   ENTITLEMENT_LIMIT_REACHED: '已达到当前权益上限',
   NOT_FOUND: '内容不存在或已删除',
   METHOD_NOT_ALLOWED: '前端调用方式与接口不一致（已记录到控制台）',
-  PAYLOAD_TOO_LARGE: '文件过大',
+  PAYLOAD_TOO_LARGE: '文件过大，超过上传上限',
   CONFLICT: '数据冲突，请刷新后重试',
   IDEMPOTENCY_CONFLICT: '重复提交，请勿多次点击',
   VERSION_CONFLICT: '数据已被修改，请刷新后重试',
@@ -26,7 +26,7 @@ export const ERROR_TEXT: Partial<Record<AnyErrorCode, string>> = {
   SUGGESTION_SUPERSEDED: '该候选信号卡已被新版本取代',
   SUGGESTION_REFRESH_TOO_FREQUENT: '刷新过于频繁，请稍后再试',
   SUGGESTION_INSUFFICIENT_DATA: '必备数据缺失，暂未生成候选信号卡',
-  FRESH_DATA_REQUIRED: '数据刷新中，稍后自动重试',
+  FRESH_DATA_REQUIRED: '行情数据暂未更新，请稍后再试',
   INGEST_PAUSED: '行情采集已暂停，当前显示的是缓存数据',
   UPSTREAM_ERROR: '数据源返回异常，请稍后重试',
   UPSTREAM_RATE_LIMITED: '数据源限流，请求已排队，请稍后重试',
@@ -38,8 +38,37 @@ export const ERROR_TEXT: Partial<Record<AnyErrorCode, string>> = {
   NOT_MODIFIED: '数据未变化，但本地缓存缺失，请刷新页面',
 };
 
+/** 字节数 → “5 MB” / “26 MB” / “512 KB” */
+export function fmtBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${+(n / 1024 / 1024).toFixed(1)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}
+
+/** CONSENT_REQUIRED.details.required（契约 #26）；缺省视为需要完成开通引导 */
+export function consentRequired(e: ApiError): string[] | null {
+  const r = e.details?.required;
+  return Array.isArray(r) ? r.map(String) : null;
+}
+/** 只缺“个人敏感信息处理单独同意”：在当前页弹出单独同意，不跳开通引导（评审 s2） */
+export function onlySensitiveConsentMissing(e: unknown): boolean {
+  if (!(e instanceof ApiError) || e.code !== 'CONSENT_REQUIRED') return false;
+  const r = consentRequired(e);
+  return !!r && r.length > 0 && r.every((k) => k === 'sensitive_financial_info');
+}
+
 export function errorText(e: unknown): string {
   if (e instanceof ApiError) {
+    // 带参数的文案（评审 m6 / m7）
+    if (e.code === 'FRESH_DATA_REQUIRED') {
+      const s = Number(e.details?.retry_after_s);
+      if (Number.isFinite(s) && s > 0) return `行情数据暂未更新，请 ${Math.ceil(s)} 秒后再试`;
+    }
+    if (e.code === 'PAYLOAD_TOO_LARGE') {
+      const max = Number(e.details?.max_bytes);
+      if (Number.isFinite(max) && max > 0) return `文件过大，超过单次上传上限 ${fmtBytes(max)}`;
+    }
+    if (onlySensitiveConsentMissing(e)) return '需要先单独同意个人敏感信息处理，才能建账户、导入或录入成交';
     const t = ERROR_TEXT[e.code];
     if (t) return t;
     if (e.message && e.code !== 'HTTP_ERROR') return e.message;
@@ -51,21 +80,25 @@ export function errorText(e: unknown): string {
 
 export type GlobalErrorAction = 'login' | 'consent' | 'log' | 'none';
 
-/** 全局处理（QueryCache/MutationCache.onError）：401 → 登录页；CONSENT_REQUIRED → 开通引导；405 → 控制台 */
+/**
+ * 全局处理（QueryCache/MutationCache.onError）：401 → 登录页；CONSENT_REQUIRED → 开通引导；405 → 控制台。
+ * CONSENT_REQUIRED 只缺 sensitive_financial_info 时不跳转（由当前页的单独同意弹窗处理，避免在引导页循环；评审 s2）。
+ */
 export function globalErrorAction(e: unknown): GlobalErrorAction {
   if (!(e instanceof ApiError)) return 'none';
   if (e.status === 401 && e.code === 'AUTH_REQUIRED') return 'login';
-  if (e.code === 'CONSENT_REQUIRED') return 'consent';
+  if (e.code === 'CONSENT_REQUIRED') return onlySensitiveConsentMissing(e) ? 'none' : 'consent';
   if (e.status === 405 || e.code === 'METHOD_NOT_ALLOWED') return 'log';
   return 'none';
 }
 
-const FRESH_MAX = 3;
-
-/** 重试策略（评审 m1）：4xx 不重试；503 FRESH_DATA_REQUIRED 最多 3 次；其余 5xx/网络错误重试 1 次 */
+/**
+ * 重试策略（评审 m1）：4xx 不重试；5xx/网络错误重试 1 次。
+ * FRESH_DATA_REQUIRED 只出现在写操作（如 manual_refresh），不做自动重试，提示用户按 retry_after_s 再试（裁定 T-F01 #2，评审 m6）。
+ */
 export function shouldRetry(failureCount: number, e: unknown): boolean {
   if (!(e instanceof ApiError)) return failureCount < 1;
-  if (e.code === 'FRESH_DATA_REQUIRED') return failureCount < FRESH_MAX;
+  if (e.code === 'FRESH_DATA_REQUIRED') return false;
   if (e.status === 0 || e.status >= 500) return failureCount < 1;
   return false;
 }

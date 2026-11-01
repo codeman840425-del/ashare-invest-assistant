@@ -31,7 +31,7 @@ export function SuggestionPanel({ row, suggestion, loading, error }: { row: Term
         {sg.consensus.status === 'divergent'
           ? `存在分歧（${sg.strategies.length} 个策略：${sg.strategies.map((s) => ACTION_SHORT[s.action]).join(' / ')}）· 并列展示，不合并`
           : sg.consensus.status === 'unanimous'
-            ? `各策略一致：${shortAction(sg.strategies[0].action)}`
+            ? (sg.strategies[0] ? `各策略一致：${shortAction(sg.strategies[0].action)}` : "各策略一致")
             : sg.consensus.status === 'single' ? '仅 1 个策略实例' : '暂无启用的策略实例'}
       </div>
       <div className="right-scroll">

@@ -39,7 +39,7 @@ describe('M2 全局错误处理', () => {
   it('ErrorBox 按码显示中文文案并带 data-code', async () => {
     server.use(http.get('/api/v1/suggestions', err(503, 'FRESH_DATA_REQUIRED')));
     renderAt('/suggestions');
-    const box = await screen.findByText(/数据刷新中/);
+    const box = await screen.findByText(/行情数据暂未更新/);
     expect(box.closest('[data-code]')).toHaveAttribute('data-code', 'FRESH_DATA_REQUIRED');
   });
 });

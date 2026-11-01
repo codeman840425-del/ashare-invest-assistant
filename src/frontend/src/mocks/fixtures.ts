@@ -628,6 +628,9 @@ export const NOTIFICATIONS: Notification[] = [
   { id: uid(903), kind: 'invalidation', severity: 'important', title: '演示医药：接近失效条件（止损位）', body: '请核对候选信号卡中的失效条件。', created_at: '2026-11-02T10:05:00+08:00', read_at: null, security_code: '600002.SH', name: '演示医药', target: { type: 'suggestion', id: sgId('600002.SH'), route: `/suggestions/${sgId('600002.SH')}` } },
   { id: uid(904), kind: 'reason_released', severity: 'info', title: '演示材料：“非交易时段”原因已解除，已重新检查', body: null, created_at: '2026-11-02T09:30:02+08:00', read_at: null, security_code: '002001.SZ', name: '演示材料', target: { type: 'suggestion', id: sgId('002001.SZ'), route: `/suggestions/${sgId('002001.SZ')}` } },
   { id: uid(905), kind: 'strategy_health', severity: 'attention', title: '超跌修复（示例）进入观察期，优先级权重 0.55', body: null, created_at: '2026-11-02T08:30:00+08:00', read_at: null, security_code: null, name: null, target: { type: 'strategy_version', id: STRATEGIES.demo_reversal.version_id, route: `/strategies/${STRATEGIES.demo_reversal.version_id}` } },
+  // 契约 §5.1 Notification.target.route 的两种带查询参数的深链（评审 P2）
+  { id: uid(908), kind: 'import', severity: 'info', title: '交割单导入已完成：主账户（示例）', body: '可在导入向导中查看本批次的写入结果。', created_at: '2026-11-01T20:32:00+08:00', read_at: null, security_code: null, name: null, target: { type: 'import_batch', id: uid(820), route: `/portfolio/import?batch=${uid(820)}` } },
+  { id: uid(909), kind: 'import', severity: 'attention', title: '对账发现 2 处重要差异：主账户（示例）', body: null, created_at: '2026-11-01T20:33:00+08:00', read_at: null, security_code: null, name: null, target: { type: 'reconciliation', id: ACCOUNT_ID, route: `/portfolio?tab=reconciliation&account_id=${ACCOUNT_ID}` } },
   { id: uid(906), kind: 'daily_report', severity: 'info', title: `${REPORT_DATE} 盘后日报已生成`, body: null, created_at: '2026-10-30T17:42:00+08:00', read_at: '2026-10-30T18:02:00+08:00', security_code: null, name: null, target: { type: 'daily_report', id: REPORT_DATE, route: `/daily-reports/${REPORT_DATE}` } },
   { id: uid(907), kind: 'system', severity: 'info', title: '系统维护提示：周六 22:00 起暂停采集 30 分钟（示例）', body: null, created_at: '2026-10-29T09:00:00+08:00', read_at: '2026-10-29T09:10:00+08:00', security_code: null, name: null, target: { type: 'none', id: null, route: null } },
 ];
@@ -704,8 +707,16 @@ export const DAILY_REPORT_LIST: DailyReportListItem[] = DAILY_REPORTS.map((d) =>
 export const ME: Me = {
   id: uid(2), username: 'demo_user', display_name: '示例用户', role: 'user', status: 'approved',
   entitlements: { 'watchlist.per_user_cap': 50 },
-  consents: { signal_risk_disclosure: { version: 'v1', accepted_at: '2026-10-01T09:00:00+08:00' } },
-  risk_assessment: { level: 3, assessed_at: '2026-10-01T09:05:00+08:00' },
+  consents: {
+    terms: { version: '1.0.0', accepted_at: '2026-10-01T09:00:00+08:00', current_version: '1.0.0', needs_reconsent: false },
+    privacy: { version: '1.0.0', accepted_at: '2026-10-01T09:00:00+08:00', current_version: '1.0.0', needs_reconsent: false },
+    signal_risk_disclosure: { version: '1.0.0', accepted_at: '2026-10-01T09:00:00+08:00', current_version: '1.0.0', needs_reconsent: false },
+    sensitive_financial_info: { version: '1.0.0', accepted_at: '2026-10-01T09:00:00+08:00', current_version: '1.0.0', needs_reconsent: false },
+  },
+  risk_assessment: {
+    assessment_id: uid(940), questionnaire_version: '1.0.0', risk_tolerance: 3, submitted_at: '2026-10-01T09:05:00+08:00',
+    expires_at: '2027-10-01T09:05:00+08:00', status: 'valid', needs_retest: false,
+  },
 };
 export const HEALTH_READY: HealthReady = { status: 'ok', db: 'ok', redis: 'ok', ingest: 'ok', checked_at: NOW, version: 'mock-0.2' };
 
@@ -739,3 +750,18 @@ SUGGESTIONS.forEach((sg, i) => {
     snapshot_id: sg.snapshot_id, evidence: sg.evidence.filter((e) => used.has(e.id)),
   };
 });
+
+/**
+ * 新手（或画像未填写）用户看到的周期分类（契约 v0.2.3 #23 / 问题 37）：short 与 intraday_t 分数封顶 59，
+ * caps 含 `{kind:"requires", rule_id:"SH0C"|"IT0C"}`。SH0C / IT0C 是分类器规则 ID，不是 reason_code。
+ */
+export function noviceAssessment(a: HorizonAssessment): HorizonAssessment {
+  const scores = { ...a.scores, short: Math.min(a.scores.short, 59), intraday_t: Math.min(a.scores.intraday_t, 59) };
+  const caps: HorizonCap[] = [
+    ...a.caps,
+    { horizon: 'short', cap: 59, kind: 'requires', rule_id: 'SH0C', inputs_missing: [] },
+    { horizon: 'intraday_t', cap: 59, kind: 'requires', rule_id: 'IT0C', inputs_missing: [] },
+  ];
+  const suitable = a.suitable.filter((h) => scores[h] >= 60);
+  return { ...a, scores, caps, suitable: suitable.length ? suitable : a.suitable.filter((h) => h !== 'short' && h !== 'intraday_t') };
+}

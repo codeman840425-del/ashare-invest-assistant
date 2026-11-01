@@ -57,7 +57,7 @@ export function buildUrl(path: string, params?: QueryParams): string {
 }
 
 let memoryCsrf: string | null = null;
-/** 登录响应里的 csrf_token；Cookie 读不到（如 HttpOnly 或跨路径）时用它兜底 // [待契约确认] CSRF 以 Cookie 还是响应体为准 */
+/** 登录响应里的 csrf_token；v0.2.4 #13 双提交、以 Cookie 为准，Cookie 读不到时才用它兜底 */
 export function setCsrfToken(t: string | null) {
   memoryCsrf = t;
 }

@@ -38,11 +38,9 @@ export const ACCOUNT_STATUS: Record<AccountStatus, L> = {
   disabled: { text: '已停用', color: 'default' },
 };
 
-/**
- * 解析选项与处理选项的中文名。契约只规定 choice 须在 resolution_choices 中，没有列出取值，
- * 这里按 §4.1“处理”列的描述命名。 // [待契约确认]
- */
+/** 处理选项的中文名：取值按契约 v0.2.4 §4.1“处理选项”表（#11） */
 export const RESOLUTION_CHOICE: Record<string, string> = {
+  confirm_new_holder_code: '确认使用新的股东代码',
   confirm: '已核对，确认',
   import_as_is: '按原代码导入',
   skip_row: '跳过本行',
@@ -53,8 +51,8 @@ export const RESOLUTION_CHOICE: Record<string, string> = {
   skip_import_row: '跳过导入行（保留手动记录）',
   keep_import_void_manual: '保留导入并作废手动记录',
 };
-/** 覆盖类选择：契约要求必须填写理由，并写审计 // [待契约确认] 取值 */
-export const OVERRIDE_CHOICES: ReadonlySet<string> = new Set(['force_import', 'keep_import_void_manual']);
+/** 覆盖类选择（v0.2.4 §4.1“处理选项”表第三列）：必须填写理由（1–200 字），并写审计 */
+export const OVERRIDE_CHOICES: ReadonlySet<string> = new Set(['confirm_new_holder_code', 'force_import', 'keep_import_void_manual']);
 export const choiceText = (c: string) => RESOLUTION_CHOICE[c] ?? c;
 
 /** 标准化字段（列映射的目标字段）中文名，对齐 §7.2 预览行 normalized */
@@ -126,3 +124,11 @@ export const TRADE_SIDE: Record<TradeSide, L> = {
   buy: { text: '买入', color: 'red' },
   sell: { text: '卖出', color: 'green' },
 };
+
+/** 作废原因（评审 m8）：撤销导入批次产生的作废显示为批次撤销 */
+export function voidReasonText(t: { void_reason: string | null }): string {
+  const r = t.void_reason;
+  if (!r) return '此记录已作废，不再参与持仓与对账';
+  if (r.startsWith('batch_reverted:')) return '所属导入批次已撤销，此记录不再参与持仓与对账';
+  return `已作废：${r}`;
+}

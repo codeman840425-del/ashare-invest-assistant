@@ -39,7 +39,7 @@ export function FindingItem({ f, onResolve, busy, readOnly }: { f: ImportFinding
         <span>{findingText(f)}</span>
       </div>
       {spec.handling ? <div className="muted imp-handling">处理：{spec.handling}</div> : null}
-      {f.needs_action && !readOnly ? (
+      {f.resolution_choices.length > 0 && !readOnly ? (
         <div className="imp-resolve">
           <Radio.Group value={choice} onChange={(e) => setChoice(e.target.value as string)}>
             {f.resolution_choices.map((c) => (
@@ -47,7 +47,7 @@ export function FindingItem({ f, onResolve, busy, readOnly }: { f: ImportFinding
             ))}
           </Radio.Group>
           {needReason ? (
-            <Input size="small" placeholder="覆盖默认处理，必须填写理由（写入审计）" value={reason} onChange={(e) => setReason(e.target.value)} style={{ maxWidth: 360 }} data-testid={`reason-${f.id}`} />
+            <Input size="small" maxLength={200} placeholder="覆盖默认处理，必须填写理由（写入审计）" value={reason} onChange={(e) => setReason(e.target.value)} style={{ maxWidth: 360 }} data-testid={`reason-${f.id}`} />
           ) : null}
           <Button size="small" type={f.resolution ? 'default' : 'primary'} loading={busy} disabled={!choice || (needReason && !reason.trim())}
             onClick={() => onResolve?.(choice!, reason.trim() || null)} data-testid={`resolve-${f.id}`}>

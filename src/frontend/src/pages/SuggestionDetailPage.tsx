@@ -1,3 +1,4 @@
+import { capExplanation } from '../i18n/horizonCaps';
 import { Alert, Button, Select, Tag, Tooltip } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router';
@@ -60,6 +61,7 @@ function HorizonPanel({ sg }: { sg: Suggestion }) {
       <div className="panel-head">
         <span className="panel-title">周期分类</span>
         {a ? <span className="muted small">{a.classifier_version}</span> : null}
+        {a && a.snapshot_id !== sg.snapshot_id ? <span className="muted small" data-testid="hz-newer-snapshot">周期分类基于较新快照</span> : null}
       </div>
       {q.isLoading ? <div className="muted small">加载中…</div> : q.isError || !a ? <div className="muted small">周期分类暂不可用</div> : (
         <div className="hz-list small">
@@ -79,8 +81,9 @@ function HorizonPanel({ sg }: { sg: Suggestion }) {
             );
           })}
           {a.caps.map((c, i) => (
-            <div key={`cap-${i}`} className="hz-missing">
-              {HORIZON[c.horizon]} 封顶 {c.cap}：{c.kind === 'data_missing' ? `缺少输入 ${c.inputs_missing.join('、')}` : `规则 ${c.rule_id ?? '—'} 不满足`}
+            <div key={`cap-${i}`} className="hz-missing" data-testid={`cap-${c.horizon}-${c.rule_id ?? "missing"}`}>
+              {HORIZON[c.horizon]} 封顶 {c.cap}：{capExplanation(c)}
+              {c.kind === 'requires' && c.rule_id ? <span className="mono muted">（{c.rule_id}）</span> : null}
             </div>
           ))}
           {a.inputs_missing.length ? (

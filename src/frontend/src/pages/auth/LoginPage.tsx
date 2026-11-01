@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Button, Form, Input } from 'antd';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../../api/client';
+import { errorText } from '../../api/errorPolicy';
 import { useLogin, useRegistrationMode } from '../../api/accountQueries';
 import { fmtDuration, needsOnboarding, safeNext } from '../../lib/auth';
 import { AuthLayout } from './AuthLayout';
@@ -18,7 +19,7 @@ export function LoginPage() {
 
   const onFinish = (v: FormValues) => {
     setErr(null);
-    login.mutate(v, {
+    login.mutate({ ...v, username: v.username.trim().toLowerCase() }, {
       onSuccess: (r) => {
         const target = safeNext(next);
         navigate(needsOnboarding(r.user) ? `/onboarding?next=${encodeURIComponent(target)}` : target, { replace: true });
@@ -26,9 +27,9 @@ export function LoginPage() {
       onError: (e) => {
         if (e instanceof ApiError && e.code === 'ACCOUNT_NOT_APPROVED') {
           const d = (e.details ?? {}) as { status?: string; reason?: string | null };
+          // 原因只放在 history state，不进 URL（避免进入浏览器历史与访问日志；评审 m4）
           const q = new URLSearchParams({ status: d.status ?? 'pending', username: v.username });
-          if (d.reason) q.set('reason', d.reason);
-          navigate(`/account-status?${q.toString()}`);
+          navigate(`/account-status?${q.toString()}`, { state: { reason: d.reason ?? null } });
         } else if (e instanceof ApiError && e.code === 'ACCOUNT_LOCKED') {
           const s = Number((e.details as { retry_after_s?: number } | null)?.retry_after_s ?? 0);
           setErr(`登录失败次数过多，账号已临时锁定，请 ${fmtDuration(s)}后再试。`);
@@ -37,7 +38,7 @@ export function LoginPage() {
         } else if (e instanceof ApiError && e.code === 'RATE_LIMITED') {
           setErr('请求过于频繁，请稍后再试。');
         } else {
-          setErr(e instanceof Error ? e.message : '登录失败');
+          setErr(errorText(e));
         }
       },
     });

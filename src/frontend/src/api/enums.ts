@@ -1,9 +1,9 @@
 /**
- * 契约 v0.2.2 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。
+ * 契约 v0.2.5 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。v0.2.5 作废的 consent_key 等四个枚举由 T-F05 删除。
  * 运行时以 `GET /meta/enums` 为准；这里的常量用于类型推导与 mock 校验。
  */
 /** 与 `/meta/enums.version` 对齐的契约版本 */
-export const CONTRACT_VERSION = 'v0.2.3';
+export const CONTRACT_VERSION = 'v0.2.5';
 
 export const ENUMS = {
   account_status: ['pending', 'approved', 'rejected', 'disabled'],
@@ -33,6 +33,11 @@ export const ENUMS = {
   bar_freq: ['1m', 'd', 'w'],
   bar_adjust: ['none', 'qfq', 'hfq'],
   registration_mode: ['closed', 'invite', 'open'],
+  // v0.2.4 #1、#6
+  consent_key: ['terms', 'privacy', 'signal_risk_disclosure', 'sensitive_financial_info'],
+  legal_doc_key: ['terms', 'privacy', 'signal_risk_disclosure', 'sensitive_financial_info', 'site_risk_notice'],
+  consent_presentation: ['checkbox_unticked', 'scroll_and_confirm', 'modal'],
+  assessment_status: ['valid', 'expiring', 'grace', 'expired', 'superseded'],
   notification_target_type: [
     'suggestion', 'candidate_signal', 'plan_draft', 'plan', 'daily_report', 'import_batch', 'reconciliation', 'strategy_version', 'none',
   ],
@@ -122,3 +127,7 @@ export type HealthStatus = E<'health_status'>;
 export type ComponentHealth = E<'component_health'>;
 export type IngestHealth = E<'ingest_health'>;
 export type ReasonCode = (typeof REASON_CODES)[number];
+export type ConsentKey = E<'consent_key'>;
+export type LegalDocKey = E<'legal_doc_key'>;
+export type ConsentPresentation = E<'consent_presentation'>;
+export type AssessmentStatus = E<'assessment_status'>;

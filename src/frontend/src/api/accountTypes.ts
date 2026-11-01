@@ -1,9 +1,9 @@
 /**
- * T-F02 / T-F02a / T-F04 用到的类型：契约 v0.2.3 §5.1 ImportFinding、§7.1 认证与账号、§7.2 账户/成交/导入、§7.9 管理端。
+ * T-F02 / T-F02a / T-F04 / T-F05 用到的类型：契约 v0.2.4 §5.1 ImportFinding、§7.1 认证与账号、§7.2 账户/成交/导入、§7.9 管理端。
  * 契约没写清结构的地方按前端判断补齐，并标注 `// [待契约确认]`（清单见 reports/T-F02.md「遗留问题」）。
  */
 import type {
-  AccountStatus, DedupStatus, Horizon, ImportRowStatus, ImportScope, ImportSeverity, ImportStatus,
+  AccountStatus, AssessmentStatus, ConsentKey, ConsentPresentation, LegalDocKey, DedupStatus, Horizon, ImportRowStatus, ImportScope, ImportSeverity, ImportStatus,
   ReconciliationItemKind, ReconciliationStatus, Role, TradeSide,
 } from './enums';
 import type { DateStr, DateTime, Decimal, Me, Uuid } from './types';
@@ -11,14 +11,50 @@ import type { DateStr, DateTime, Decimal, Me, Uuid } from './types';
 // ---------- §7.1 认证 ----------
 export interface LoginRequest { username: string; password: string }
 export interface LoginResponse { user: Me; csrf_token: string }
-/** 契约 §7.1：agreements 取值未定义，前端按 /me/consents 的 key 填写 // [待契约确认] */
-export type ConsentKey = 'signal_risk_disclosure' | 'privacy' | 'terms';
+/** 契约 v0.2.4 §3 `consent_key`（需用户同意的文书） */
+export type { ConsentKey };
 export interface RegisterRequest {
+  /** 4–32 位，^[a-z0-9_]{4,32}$，前端输入即转小写（v0.2.3 #24） */
   username: string;
+  /** 10–128 位 */
   password: string;
+  /** 1–32 */
   display_name: string;
   invite_code: string | null;
+  /** ≤200 字（v0.2.4 #2）；invite 模式必填 */
+  apply_note: string | null;
+  /** 必须包含 terms、privacy、signal_risk_disclosure，可另含 sensitive_financial_info（v0.2.4 #2） */
   agreements: ConsentKey[];
+}
+
+/** GET /meta/consent-docs 的元素（v0.2.4 #3） */
+export interface ConsentDoc {
+  key: LegalDocKey;
+  /** 语义化版本或 "unversioned" */
+  version: string;
+  version_no: number | null;
+  title: string;
+  summary: string;
+  effective_at: DateTime | null;
+  content_sha256: string | null;
+  /** = /api/v1/legal/{key}；未定稿时 null */
+  url: string | null;
+  required_for: ('register' | 'advice' | 'import' | 'display')[];
+}
+/** GET /legal/{doc_key}（v0.2.4 #3） */
+export interface LegalDocument {
+  key: LegalDocKey;
+  version: string;
+  version_no: number;
+  title: string;
+  summary: string;
+  content_md: string;
+  content_sha256: string;
+  locale: string;
+  change_level: 'major' | 'minor' | 'patch';
+  changelog: string;
+  effective_at: DateTime;
+  published_at: DateTime;
 }
 export interface RegisterResponse { id: Uuid; username: string; status: 'pending' }
 /** 403 ACCOUNT_NOT_APPROVED 的 details（plan 3.6：rejected 附驳回理由） */
@@ -26,27 +62,66 @@ export interface NotApprovedDetails { status: Exclude<AccountStatus, 'approved'>
 
 export type Effort = 'low' | 'medium' | 'high';
 export type Experience = 'novice' | 'intermediate' | 'advanced';
-/** PUT /me/profile 请求体（契约 §7.1，T-A02：画像表单只用这五个契约字段） */
+/**
+ * PUT /me/profile 请求体（契约 §7.1，v0.2.4 #7）：三个测评字段可为 null（未测评）；
+ * 写入测评建议值时带 assessment_id；最多 2 位小数的 max_single_position_pct 为 5–50。
+ */
 export interface ProfileInput {
   horizon_pref: Horizon[];
-  effort: Effort;
-  risk_tolerance: number;
-  experience: Experience;
+  effort: Effort | null;
+  risk_tolerance: number | null;
+  experience: Experience | null;
   max_single_position_pct: Decimal;
+  assessment_id?: Uuid | null;
 }
-/** GET/PUT /me/profile 响应：`{version_no, ...}`；还没有画像时 GET 返回 404 NOT_FOUND // [待契约确认] */
-export interface Profile extends ProfileInput { version_no: number }
+/** GET/PUT /me/profile 响应；还没有画像时 GET 返回 404 NOT_FOUND（v0.2.4 #7） */
+export interface Profile extends ProfileInput { version_no: number; questionnaire_version?: string | null }
 
-export interface ConsentRequest { key: ConsentKey; version: string }
+/** POST /me/consents（v0.2.4 #4）：version 与 content_sha256 必须等于 /meta/consent-docs 的当前值 */
+export interface ConsentRequest {
+  key: ConsentKey;
+  version: string;
+  content_sha256: string | null;
+  action?: 'grant' | 'withdraw';
+  /** ≤64，记录在哪个界面同意（如 onboarding、import_upload） */
+  ui_surface: string;
+  presentation: ConsentPresentation;
+}
+export interface ConsentResponse { key: ConsentKey; version: string; action: 'grant' | 'withdraw'; at: DateTime }
 export interface RiskAnswer { q_id: string; choice: string }
-export interface RiskAssessmentRequest { answers: RiskAnswer[] }
-export interface RiskAssessmentResult { level: number; assessed_at: DateTime }
+/** POST /me/risk-assessment（v0.2.4 #6） */
+export interface RiskAssessmentRequest {
+  questionnaire_version: string;
+  answers: RiskAnswer[];
+  started_at: DateTime | null;
+  client_duration_s: number | null;
+}
+/**
+ * GET /me/risk-assessment/questionnaire（v0.2.4 #6）：不含分值与计分规则；没有已发布问卷 → 404。
+ * 题目只从这里取，前端不内置题库（评审 P1）。
+ */
+export interface RiskQuestionnaire {
+  questionnaire_key: 'risk_profile';
+  version: string;
+  intro: string;
+  groups: { id: string; title: string }[];
+  questions: { q_id: string; group: string; type: 'single'; required: boolean; title: string; choices: { id: string; text: string }[] }[];
+}
+export interface DerivedValue<T> { value: T; rule_ids: string[] }
+/** POST /me/risk-assessment 的 201 响应、GET /me/risk-assessment（v0.2.4 #6） */
+export interface RiskAssessment {
+  assessment_id: Uuid;
+  questionnaire_version: string;
+  submitted_at: DateTime;
+  expires_at: DateTime;
+  status: AssessmentStatus;
+  derived: { risk_tolerance: DerivedValue<number>; experience: DerivedValue<Experience>; effort: DerivedValue<Effort> };
+  flags: string[];
+  needs_retest: boolean;
+}
 
 // ---------- §7.9 管理端：用户审核 ----------
-/**
- * GET /admin/users 列表元素。契约只写了“审核和停用账号”，未给结构；字段取自 plan 3.6 管理员能力
- * （用户名、申请说明、注册时间、注册 IP 属地粗粒度、同 IP 注册数）与 users 表。 // [待契约确认]
- */
+/** GET /admin/users 列表元素（v0.2.4 #12）。`same_ip_flag` 由服务端按 `admin.same_ip_highlight_threshold` 计算，只作提示 */
 export interface AdminUser {
   id: Uuid;
   username: string;
@@ -59,6 +134,8 @@ export interface AdminUser {
   review_reason: string | null;
   register_ip_region: string | null;
   same_ip_registrations: number;
+  same_ip_flag: boolean;
+  last_login_at: DateTime | null;
 }
 export interface AdminUserPatch { status: 'approved' | 'rejected' | 'disabled'; reason: string | null }
 
@@ -104,7 +181,19 @@ export interface ImportStats {
   possible_duplicate_of_manual: number;
   needs_action_open: number;
 }
-/** GET /imports/{batch_id}（GET /imports 列表元素沿用同一结构 // [待契约确认]） */
+/** GET /imports 列表元素 ImportBatchSummary（v0.2.4 #12；评审 s4）。详情字段一律走 GET /imports/{batch_id} */
+export interface ImportBatchSummary {
+  batch_id: Uuid;
+  account_id: Uuid;
+  kind: ImportKind;
+  status: ImportStatus;
+  parser_id: string | null;
+  stats: ImportStats;
+  created_at: DateTime;
+  committed_at: DateTime | null;
+  reverted_at: DateTime | null;
+}
+/** GET /imports/{batch_id} */
 export interface ImportBatch {
   batch_id: Uuid;
   account_id: Uuid;
@@ -161,10 +250,7 @@ export interface ImportConfirmResponse {
 }
 export interface ResolveFindingRequest { choice: string; reason: string | null }
 
-/**
- * GET /trades 列表元素。契约只写“成交列表和手工录入；原记录不可修改，更正时写更正记录”，未给结构；
- * 字段取自 plan 3.3 trades 表与 §7.2 预览行 normalized。 // [待契约确认]
- */
+/** GET /trades 列表元素 Trade（v0.2.4 #12）。导入撤销造成的作废 `void_reason` 为 `batch_reverted:{batch_id}` */
 export interface Trade {
   id: Uuid;
   account_id: Uuid;
@@ -177,12 +263,16 @@ export interface Trade {
   price: Decimal;
   amount: Decimal;
   fee_total: Decimal | null;
+  net_amount: Decimal | null;
   source: 'import' | 'manual';
   batch_id: Uuid | null;
   voided: boolean;
+  void_reason: string | null;
+  voided_at: DateTime | null;
+  corrects_trade_id: Uuid | null;
   created_at: DateTime;
 }
-/** POST /trades 手工录入请求体 // [待契约确认] */
+/** POST /trades 手工录入请求体 TradeCreate（v0.2.4 #12）；corrects_trade_id 非空时 reason 必填 */
 export interface TradeCreate {
   account_id: Uuid;
   trade_date: DateStr;
@@ -192,6 +282,8 @@ export interface TradeCreate {
   qty: Decimal;
   price: Decimal;
   fee_total: Decimal | null;
+  corrects_trade_id?: Uuid | null;
+  reason?: string | null;
 }
 
 /** GET /reconciliation?account_id= */

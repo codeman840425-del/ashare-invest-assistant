@@ -1,15 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Table, Tabs, Tag, Tooltip } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import {
-  downloadErrorsCsv, useAccounts, useCreateAccount, useCreateTrade, useImports, useReconciliation, useRevertImport, useTrades,
+  downloadErrorsCsv, useAccounts, useCreateAccount, useCreateTrade, useImports, useReconciliation, useRevertImport, useTrades, useVoidTrade,
 } from '../../api/accountQueries';
-import type { BrokerAccount, ImportBatch, ReconciliationItem, Trade } from '../../api/accountTypes';
+import type { BrokerAccount, ImportBatchSummary, ReconciliationItem, Trade } from '../../api/accountTypes';
+import { newIdempotencyKey } from '../../api/client';
 import { usePortfolio } from '../../api/queries';
 import type { PortfolioPosition } from '../../api/types';
 import { DataStatusTag, ErrorBox, Loading } from '../../components/common';
-import { DILUTED_COST_NOTE, IMPORT_STATUS, RECON_KIND, RECON_STATUS, TRADE_SIDE } from '../../i18n/importLabels';
+import { DILUTED_COST_NOTE, IMPORT_STATUS, RECON_KIND, RECON_STATUS, TRADE_SIDE, voidReasonText } from '../../i18n/importLabels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { applyFieldErrors } from '../../lib/formErrors';
 import { TERM } from '../../i18n/statementTerms';
@@ -22,13 +23,15 @@ export function PortfolioPage() {
   const [sp, setSp] = useSearchParams();
   const accounts = useAccounts();
   const list = accounts.data?.items ?? [];
-  const accountId = sp.get('account') ?? list[0]?.id;
+  // 通知深链用 account_id（契约 Notification.target.route）；旧链接的 account 作为别名（评审 P2）
+  const accountId = sp.get('account_id') ?? sp.get('account') ?? list[0]?.id;
   const tab = (TABS as string[]).includes(sp.get('tab') ?? '') ? (sp.get('tab') as TabKey) : 'positions';
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
 
   const setParam = (k: string, v: string) => {
     const n = new URLSearchParams(sp);
+    if (k === 'account_id') n.delete('account');
     n.set(k, v);
     setSp(n, { replace: true });
   };
@@ -45,13 +48,13 @@ export function PortfolioPage() {
             <Select<string>
               value={accountId}
               style={{ width: 240 }}
-              onChange={(v) => setParam('account', v)}
+              onChange={(v) => setParam('account_id', v)}
               options={list.map((a) => ({ value: a.id, label: accountLabel(a) }))}
               data-testid="account-select"
             />
           ) : null}
           <Button onClick={() => setCreating(true)}>新建账户</Button>
-          <Button type="primary" disabled={!accountId} onClick={() => navigate(`/portfolio/import?account=${accountId}`)} data-testid="go-import">导入交割单 / 持仓</Button>
+          <Button type="primary" disabled={!accountId} onClick={() => navigate(`/portfolio/import?account_id=${accountId}`)} data-testid="go-import">导入交割单 / 持仓</Button>
         </Space>
       </div>
       {!list.length ? (
@@ -61,14 +64,14 @@ export function PortfolioPage() {
           activeKey={tab}
           onChange={(k) => setParam('tab', k)}
           items={[
-            { key: 'positions', label: '持仓', children: <PositionsTab /> },
+            { key: 'positions', label: '持仓', children: <PositionsTab accountId={accountId!} /> },
             { key: 'trades', label: '成交', children: <TradesTab accountId={accountId!} /> },
             { key: 'imports', label: '导入记录', children: <ImportsTab accountId={accountId!} /> },
             { key: 'reconciliation', label: '对账', children: <ReconTab accountId={accountId!} onGo={(t) => setParam('tab', t)} /> },
           ]}
         />
       )}
-      <CreateAccountModal open={creating} onClose={(id) => { setCreating(false); if (id) setParam('account', id); }} />
+      <CreateAccountModal open={creating} onClose={(id) => { setCreating(false); if (id) setParam('account_id', id); }} />
     </div>
   );
 }
@@ -95,9 +98,9 @@ function CreateAccountModal({ open, onClose }: { open: boolean; onClose: (id?: s
   );
 }
 
-function PositionsTab() {
-  // [待契约确认] GET /portfolio 未带 account_id，这里展示的是全部账户合并持仓
-  const q = usePortfolio();
+function PositionsTab({ accountId }: { accountId: string }) {
+  const [scope, setScope] = useState<'account' | 'all'>('account');
+  const q = usePortfolio(scope === 'account' ? accountId : undefined);
   if (q.isPending) return <Loading />;
   if (q.isError) return <ErrorBox error={q.error} />;
   const p = q.data;
@@ -107,7 +110,9 @@ function PositionsTab() {
         <span>总资产 <b className="mono">{fmtAmount(p.total_assets)}</b></span>
         <span>现金余额 <b className="mono">{fmtAmount(p.cash)}</b></span>
         <DataStatusTag status={p.data_status} asOf={p.data_as_of} gaps={p.gaps} />
-        <span className="muted">合并全部账户；成本为摊薄成本（分红计入成本）</span>
+        <Radio.Group size="small" value={scope} onChange={(e) => setScope(e.target.value as 'account' | 'all')} optionType="button" data-testid="portfolio-scope"
+          options={[{ value: 'account', label: '当前账户' }, { value: 'all', label: '合并全部账户' }]} />
+        <span className="muted">成本为摊薄成本（分红计入成本）</span>
       </Space>
       <Table<PortfolioPosition>
         size="small" rowKey="security_code" pagination={false} dataSource={p.positions}
@@ -128,30 +133,53 @@ function PositionsTab() {
   );
 }
 
-interface TradeForm { trade_date: Dayjs; trade_time?: string; security_code: string; side: 'buy' | 'sell'; qty: number; price: number; fee_total?: number | null }
-const TRADE_FIELDS = ['trade_date', 'trade_time', 'security_code', 'side', 'qty', 'price', 'fee_total'] as const;
+interface TradeForm { trade_date: Dayjs; trade_time?: string; security_code: string; side: 'buy' | 'sell'; qty: number; price: number; fee_total?: number | null; reason?: string }
+const TRADE_FIELDS = ['trade_date', 'trade_time', 'security_code', 'side', 'qty', 'price', 'fee_total', 'reason'] as const;
+
 
 function TradesTab({ accountId }: { accountId: string }) {
   const q = useTrades(accountId);
   const create = useCreateTrade();
+  const voidTrade = useVoidTrade();
   const [open, setOpen] = useState(false);
+  const [corrects, setCorrects] = useState<Trade | null>(null);
+  const [voiding, setVoiding] = useState<Trade | null>(null);
+  const [voidReason, setVoidReason] = useState('');
   const [form] = Form.useForm<TradeForm>();
   const [other, setOther] = useState<string[]>([]);
+  // 评审 s1：同一次录入（含网络失败后的重试）沿用同一个 Idempotency-Key，成功后才换新
+  const idemKey = useRef(newIdempotencyKey());
+  const openCreate = (orig: Trade | null) => {
+    form.resetFields();
+    create.reset();
+    setOther([]);
+    setCorrects(orig);
+    idemKey.current = newIdempotencyKey();
+    if (orig) form.setFieldsValue({ security_code: orig.security_code, side: orig.side, qty: Number(orig.qty), price: Number(orig.price), fee_total: orig.fee_total == null ? null : Number(orig.fee_total), trade_time: orig.trade_time ?? undefined });
+    setOpen(true);
+  };
   const submit = (v: TradeForm) => {
     setOther([]);
     create.mutate(
       {
-        account_id: accountId, trade_date: v.trade_date.format('YYYY-MM-DD'), trade_time: v.trade_time?.trim() || null, security_code: v.security_code.trim().toUpperCase(),
-        side: v.side, qty: String(v.qty), price: String(v.price), fee_total: v.fee_total == null ? null : String(v.fee_total),
+        key: idemKey.current,
+        body: {
+          account_id: accountId, trade_date: v.trade_date.format('YYYY-MM-DD'), trade_time: v.trade_time?.trim() || null, security_code: v.security_code.trim().toUpperCase(),
+          side: v.side, qty: String(v.qty), price: String(v.price), fee_total: v.fee_total == null ? null : String(v.fee_total),
+          ...(corrects ? { corrects_trade_id: corrects.id, reason: v.reason?.trim() } : {}),
+        },
       },
-      { onSuccess: () => setOpen(false), onError: (e) => setOther(applyFieldErrors(form, e, TRADE_FIELDS)) },
+      {
+        onSuccess: () => { idemKey.current = newIdempotencyKey(); setOpen(false); },
+        onError: (e) => setOther(applyFieldErrors(form, e, TRADE_FIELDS)),
+      },
     );
   };
   return (
     <div data-testid="trades-tab">
       <Space className="kv-line">
-        <Button type="primary" size="small" onClick={() => { form.resetFields(); create.reset(); setOther([]); setOpen(true); }}>手工录入成交</Button>
-        <span className="muted">原记录不可修改；录错时请录入一条更正记录，或撤销整批导入。</span>
+        <Button type="primary" size="small" onClick={() => openCreate(null)}>手工录入成交</Button>
+        <span className="muted">原记录不可修改；录错时请录入一条更正记录或作废该条，导入的记录也可撤销整批。</span>
       </Space>
       {q.isError ? <ErrorBox error={q.error} /> : null}
       <Table<Trade>
@@ -172,13 +200,32 @@ function TradesTab({ accountId }: { accountId: string }) {
             render: (s: Trade['source'], r) => (
               <Space size={4}>
                 <Tag>{s === 'import' ? '导入' : '手工'}</Tag>
-                {r.voided ? <Tooltip title="所属导入批次已撤销，此记录不再参与持仓与对账"><Tag color="purple">已作废</Tag></Tooltip> : null}
+                {r.voided ? <Tooltip title={voidReasonText(r)}><Tag color="purple" data-testid={`voided-${r.id}`}>已作废</Tag></Tooltip> : null}
+                {r.corrects_trade_id ? <Tag>更正记录</Tag> : null}
               </Space>
             ),
           },
+          {
+            title: '操作', key: 'op',
+            render: (_v, r) => (r.voided ? <span className="muted">{voidReasonText(r)}</span> : (
+              <Space size={4}>
+                <Button size="small" type="link" onClick={() => openCreate(r)} data-testid={`correct-${r.id}`}>更正</Button>
+                <Button size="small" type="link" danger onClick={() => { voidTrade.reset(); setVoidReason(''); setVoiding(r); }} data-testid={`void-${r.id}`}>作废</Button>
+              </Space>
+            )),
+          },
         ]}
       />
-      <Modal open={open} title="手工录入成交" okText="保存" onOk={() => form.submit()} okButtonProps={{ loading: create.isPending }} onCancel={() => setOpen(false)} destroyOnHidden>
+      <Modal
+        open={!!voiding} title="作废这条成交？" okText="作废" okButtonProps={{ danger: true, disabled: !voidReason.trim(), loading: voidTrade.isPending }}
+        onCancel={() => setVoiding(null)} destroyOnHidden
+        onOk={() => voiding && voidTrade.mutate({ id: voiding.id, reason: voidReason.trim() }, { onSuccess: () => setVoiding(null) })}
+      >
+        <p className="muted">作废不物理删除，记录保留并标记，持仓与对账随之重算。</p>
+        <Input.TextArea value={voidReason} onChange={(e) => setVoidReason(e.target.value)} maxLength={200} showCount placeholder="作废原因（必填，1–200 字）" data-testid="void-reason" />
+        {voidTrade.isError ? <ErrorBox error={voidTrade.error} prefix="作废失败" /> : null}
+      </Modal>
+      <Modal open={open} title={corrects ? '录入更正记录' : '手工录入成交'} okText="保存" onOk={() => form.submit()} okButtonProps={{ loading: create.isPending }} onCancel={() => setOpen(false)} destroyOnHidden>
         <Form<TradeForm> form={form} layout="vertical" requiredMark={false} initialValues={{ side: 'buy' }} onFinish={submit}>
           <Space align="start">
             <Form.Item name="trade_date" label={TERM.tradeDate} rules={[{ required: true, message: '必填' }]}><DatePicker /></Form.Item>
@@ -193,6 +240,11 @@ function TradesTab({ accountId }: { accountId: string }) {
             <Form.Item name="price" label="价格" rules={[{ required: true, type: 'number', min: 0.001, message: '大于 0' }]}><InputNumber min={0} step={0.01} style={{ width: 120 }} /></Form.Item>
             <Form.Item name="fee_total" label="费用合计（可选）"><InputNumber min={0} step={0.01} style={{ width: 120 }} /></Form.Item>
           </Space>
+          {corrects ? (
+            <Form.Item name="reason" label="更正原因" extra="保存后原记录自动作废" rules={[{ required: true, whitespace: true, message: '更正时必须填写原因' }, { max: 200, message: '不超过 200 字' }]}>
+              <Input maxLength={200} data-testid="correct-reason" />
+            </Form.Item>
+          ) : null}
         </Form>
         {other.length ? <Alert type="error" showIcon title={other.join('；')} /> : null}
         {create.isError && !other.length ? <ErrorBox error={create.error} prefix="保存失败" /> : null}
@@ -211,13 +263,13 @@ function ImportsTab({ accountId }: { accountId: string }) {
       {q.isError ? <ErrorBox error={q.error} /> : null}
       {revert.isError ? <ErrorBox error={revert.error} prefix="撤销失败" /> : null}
       {dlErr ? <ErrorBox error={dlErr} prefix="下载失败" /> : null}
-      <Table<ImportBatch>
+      <Table<ImportBatchSummary>
         size="small" rowKey="batch_id" loading={q.isPending} dataSource={q.data?.items ?? []} pagination={false}
         locale={{ emptyText: '暂无导入记录' }}
         columns={[
           { title: '上传时间', dataIndex: 'created_at', render: (v: string) => <span className="mono">{fmtTime(v)}</span> },
-          { title: '类型', dataIndex: 'kind', render: (k: ImportBatch['kind']) => (k === 'trades' ? '交割单 / 成交' : '持仓快照') },
-          { title: '状态', dataIndex: 'status', render: (s: ImportBatch['status']) => <Tag color={IMPORT_STATUS[s].color}>{IMPORT_STATUS[s].text}</Tag> },
+          { title: '类型', dataIndex: 'kind', render: (k: ImportBatchSummary['kind']) => (k === 'trades' ? '交割单 / 成交' : '持仓快照') },
+          { title: '状态', dataIndex: 'status', render: (s: ImportBatchSummary['status']) => <Tag color={IMPORT_STATUS[s].color}>{IMPORT_STATUS[s].text}</Tag> },
           {
             title: '行数（正常 / 警告 / 错误 / 跳过）', key: 'stats',
             render: (_v, b) => <span className="mono">{b.stats.rows}（{b.stats.ok} / {b.stats.warning} / {b.stats.error} / {b.stats.skipped}）</span>,
@@ -261,7 +313,7 @@ function ReconTab({ accountId, onGo }: { accountId: string; onGo: (tab: TabKey) 
       <Alert type="info" showIcon title="成本口径" description={DILUTED_COST_NOTE} style={{ marginBottom: 12 }} data-testid="diluted-cost-note" />
       {r.status === 'not_imported' ? (
         <Empty description="还没有导入券商持仓快照，无法对账。">
-          <Button type="primary" onClick={() => navigate(`/portfolio/import?account=${accountId}&kind=positions`)}>导入持仓快照</Button>
+          <Button type="primary" onClick={() => navigate(`/portfolio/import?account_id=${accountId}&kind=positions`)}>导入持仓快照</Button>
         </Empty>
       ) : (
         <Table<ReconciliationItem>
@@ -279,7 +331,7 @@ function ReconTab({ accountId, onGo }: { accountId: string; onGo: (tab: TabKey) 
               title: '数据整理', key: 'act',
               render: (_v, x) => {
                 const k = RECON_KIND[x.kind];
-                return <Button size="small" type="link" onClick={() => (k.actionTo === 'import' ? navigate(`/portfolio/import?account=${accountId}`) : onGo('trades'))}>{k.action}</Button>;
+                return <Button size="small" type="link" onClick={() => (k.actionTo === 'import' ? navigate(`/portfolio/import?account_id=${accountId}`) : onGo('trades'))}>{k.action}</Button>;
               },
             },
           ]}

@@ -1,5 +1,5 @@
 /**
- * Mock 字段校验：示例数据的字段名必须与契约 v0.2.x（当前 v0.2.3，docs/api-contract.md，只读）逐字一致。
+ * Mock 字段校验：示例数据的字段名必须与契约 v0.2.x（当前 v0.2.5，docs/api-contract.md，只读）逐字一致。
  * 字段清单直接从契约文本解析（§5.1 内联结构、§5.2 字段表、StrategyConclusion / DimensionCell / DailyReport 定义），
  * 契约改动后这里会第一时间失败。
  */
@@ -117,12 +117,9 @@ describe(`Mock 字段与契约 ${CONTRACT_VERSION} 逐字一致`, () => {
 
   it('StrategyConclusion / DimensionCell', () => {
     const sc = sorted(proseShape('`StrategyConclusion`'));
-    // [待契约确认] v0.2.3 的 DimensionCell 定义里 `}` 位置有误（exit_hits/exit_total 写在第一个 `}` 之后），
-    // 这里把紧随其后的 `, exit_*: int` 也算进字段清单
-    const dcLine = CONTRACT.split('\n').find((l) => l.startsWith('`DimensionCell`'))!;
-    const dcExtra = [...dcLine.matchAll(/,\s*(exit_\w+):\s*int/g)].map((m) => m[1]);
-    expect(dcExtra).toEqual(['exit_hits', 'exit_total']);
-    const dc = sorted([...proseShape('`DimensionCell`'), ...dcExtra]);
+    // v0.2.4 #10 已修正 DimensionCell 的 `}` 笔误：exit_hits / exit_total 与 rules_* 同属一个对象
+    const dc = sorted(proseShape('`DimensionCell`'));
+    expect(dc).toEqual(expect.arrayContaining(['exit_hits', 'exit_total']));
     for (const s of SUGGESTIONS) {
       for (const x of s.strategies) expect(keysOf(x)).toEqual(sc);
       for (const row of s.dimension_matrix) for (const c of row.cells) expect(keysOf(c)).toEqual(dc);
@@ -196,7 +193,8 @@ describe('Mock 业务一致性', () => {
     }
   });
 
-  it('v0.2.3：契约版本与 /meta/enums.version 示例一致', () => {
+  it('v0.2.5：前端对齐的契约版本与契约文本、/meta/enums.version 示例一致', () => {
+    expect(CONTRACT_VERSION).toBe('v0.2.5');
     expect(CONTRACT).toContain(`版本：**${CONTRACT_VERSION}**`);
     expect(CONTRACT).toContain(`{"version": "${CONTRACT_VERSION}"`);
   });
@@ -205,7 +203,8 @@ describe('Mock 业务一致性', () => {
     const line = CONTRACT.split('\n').find((l) => l.includes('`/horizon-assessments?security_code=`'))!;
     const shape = line.slice(line.indexOf('周期分类结果'));
     const HZ_KEYS = ['suitable', 'scores', 'reasons', 'inputs_missing', 'caps', 'classifier_version', 'snapshot_id', 'evidence'];
-    expect(sorted(topKeys(shape))).toEqual(sorted(HZ_KEYS));
+    // v0.2.5 新增的 hints（HorizonHint）随 T-F05（画像规则改为提示）一起接入；T-F05 提交时并入 HZ_KEYS
+    expect(sorted(topKeys(shape).filter((k) => k !== 'hints'))).toEqual(sorted(HZ_KEYS));
     expect(sorted(topKeys(shape.slice(shape.indexOf('scores:') + 7)))).toEqual(sorted(ENUMS.horizon));
     expect(Object.keys(HORIZON_ASSESSMENTS)).toHaveLength(SUGGESTIONS.length);
     let capped = 0;

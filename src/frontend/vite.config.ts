@@ -10,7 +10,21 @@ export default defineConfig(({ mode }) => ({
   plugins: [react(), ...(mode === 'production' ? [] : [msw()])],
   build: {
     outDir: mode === 'mock' ? 'dist-mock' : 'dist',
-    chunkSizeWarningLimit: 4000,
+    // 评审 m9：路由懒加载 + 第三方库分块。只有 vendor-antd / vendor-ag-grid 两个第三方块超过 500 kB（库本身体积），
+    // 阈值按它们设到 1300 kB；业务代码块 ≤ 500 kB 由 scripts/check-dist.mjs（pnpm check:dist）单独卡住，不靠调高阈值掩盖
+    chunkSizeWarningLimit: 1300,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('ag-grid')) return 'vendor-ag-grid';
+          if (id.includes('lightweight-charts')) return 'vendor-charts';
+          if (/[\\/](antd|@ant-design|rc-[^\\/]+|@rc-component)[\\/]/.test(id)) return 'vendor-antd';
+          if (/[\\/](react|react-dom|react-router|scheduler)[\\/]/.test(id)) return 'vendor-react';
+          return undefined;
+        },
+      },
+    },
   },
   optimizeDeps: { entries: ['index.html'] },
   server: {

@@ -8,7 +8,7 @@ import type {
   DataStatus, Dimension, DimensionView, EpistemicType, ExecutabilityStatus, GapReason, HealthStatus, Horizon, IngestHealth,
   Lifecycle, MarketRegime, MarketSession, NotificationKind, NotificationTargetType, ReasonCode, ReasonStatus,
   ReconciliationStatus, RegistrationMode, ReleaseKind, RiskControl, RiskLevel, Role, AccountStatus, RuleRole, Severity,
-  SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus,
+  SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus, AssessmentStatus, ConsentKey,
 } from './enums';
 
 export type Decimal = string;
@@ -351,9 +351,22 @@ export interface Me {
   role: Role;
   status: AccountStatus;
   entitlements: Record<string, unknown>;
-  consents: Record<string, { version: string; accepted_at: DateTime }>;
-  risk_assessment: { level: number; assessed_at: DateTime } | null;
+  /** v0.2.4 #5：四个 consent_key 都有一项；未同意或已撤回时 version/accepted_at 为 null，needs_reconsent=true */
+  consents: Record<ConsentKey, ConsentState>;
+  risk_assessment: RiskAssessmentSummary | null;
 }
+export interface ConsentState { version: string | null; accepted_at: DateTime | null; current_version: string; needs_reconsent: boolean }
+/** v0.2.4 #6 */
+export interface RiskAssessmentSummary {
+  assessment_id: Uuid;
+  questionnaire_version: string;
+  risk_tolerance: number;
+  submitted_at: DateTime;
+  expires_at: DateTime;
+  status: AssessmentStatus;
+  needs_retest: boolean;
+}
+/** GET /meta/registration（v0.2.4：只有 mode；文书版本改由 GET /meta/consent-docs 提供） */
 export interface RegistrationMeta { mode: RegistrationMode }
 export interface PortfolioPosition {
   security_code: string;

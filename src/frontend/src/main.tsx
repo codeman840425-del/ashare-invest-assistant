@@ -14,7 +14,7 @@ dayjs.locale('zh-cn');
 async function enableMocks() {
   // 生产构建（mode=production）里这段在编译期整体剔除：dist/ 不含 MSW 与示例数据
   if (import.meta.env.MODE === 'production' || !IS_MOCK) return;
-  // 仅开发/示例构建：MSW Service Worker 拦截 /api/v1/*，返回按契约 v0.2.3 构造的示例数据
+  // 仅开发/示例构建：MSW Service Worker 拦截 /api/v1/*，返回按契约 v0.2.5 构造的示例数据
   const { network } = await import('virtual:msw');
   const { handlers } = await import('./mocks/handlers');
   network.configure({ handlers });

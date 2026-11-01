@@ -54,7 +54,9 @@ describe('M2：错误码类型与全局处理', () => {
     const sec = CONTRACT.slice(CONTRACT.indexOf('## 4. 错误码表'), CONTRACT.indexOf('### 4.1'));
     const rows = [...sec.matchAll(/^\| (\d{3}) \| `([A-Z][A-Z0-9_]*)` \|/gm)].map((m) => [m[2], Number(m[1])]);
     expect(rows.length).toBeGreaterThan(50);
-    expect(Object.entries(ERROR_CODES)).toEqual(rows);
+    // v0.2.5 作废的两个码由 T-F05（删除同意 / 测评 / fit_ack）随界面一起删除；T-F05 提交时去掉这个例外
+    const T_F05_PENDING = ['CONSENT_REQUIRED', 'STRATEGY_FIT_ACK_REQUIRED'];
+    expect(Object.entries(ERROR_CODES).filter(([c]) => !T_F05_PENDING.includes(c))).toEqual(rows);
     expect(isErrorCode('IMPORT_ROW_COLUMN_MISMATCH')).toBe(false); // §4.1 提示码不在 error_codes
   });
 
@@ -64,9 +66,12 @@ describe('M2：错误码类型与全局处理', () => {
     expect(err(418, 'TEAPOT').known).toBe(false);
   });
 
-  it('文案按码：413 文件过大、503 FRESH_DATA_REQUIRED 数据刷新中；未知码回落', () => {
-    expect(errorText(err(413, 'PAYLOAD_TOO_LARGE'))).toBe('文件过大');
-    expect(errorText(err(503, 'FRESH_DATA_REQUIRED'))).toContain('数据刷新中');
+  it('文案按码：413 带上限、503 FRESH_DATA_REQUIRED 带等待秒数（T-F02 评审 m6/m7）；未知码回落', () => {
+    expect(errorText(err(413, 'PAYLOAD_TOO_LARGE'))).toBe('文件过大，超过上传上限');
+    expect(errorText(err(413, 'PAYLOAD_TOO_LARGE', { max_bytes: 27262976 }))).toBe('文件过大，超过单次上传上限 26 MB');
+    expect(errorText(err(503, 'FRESH_DATA_REQUIRED', { retry_after_s: 8 }))).toBe('行情数据暂未更新，请 8 秒后再试');
+    expect(errorText(err(503, 'FRESH_DATA_REQUIRED'))).toBe('行情数据暂未更新，请稍后再试');
+    expect(errorText(err(403, 'CONSENT_REQUIRED', { required: ['sensitive_financial_info'] }))).toContain('个人敏感信息');
     expect(errorText(err(403, 'CONSENT_REQUIRED'))).toContain('风险揭示');
     expect(errorText(new ApiError(502, 'HTTP_ERROR', 'HTTP 502', null, null))).toContain('服务暂时不可用');
     for (const k of Object.keys(ERROR_TEXT)) expect(isErrorCode(k) || ['HTTP_ERROR', 'NETWORK_ERROR', 'NOT_MODIFIED'].includes(k)).toBe(true);
@@ -76,6 +81,10 @@ describe('M2：错误码类型与全局处理', () => {
     expect(globalErrorAction(err(401, 'AUTH_REQUIRED'))).toBe('login');
     expect(globalErrorAction(err(401, 'INVALID_CREDENTIALS'))).toBe('none');
     expect(globalErrorAction(err(403, 'CONSENT_REQUIRED', { required: ['signal_risk_disclosure'] }))).toBe('consent');
+    expect(globalErrorAction(err(403, 'CONSENT_REQUIRED'))).toBe('consent');
+    // 只缺个人敏感信息单独同意：不跳开通引导（评审 s2）
+    expect(globalErrorAction(err(403, 'CONSENT_REQUIRED', { required: ['sensitive_financial_info'] }))).toBe('none');
+    expect(globalErrorAction(err(403, 'CONSENT_REQUIRED', { required: ['sensitive_financial_info', 'risk_assessment'] }))).toBe('consent');
     expect(globalErrorAction(err(405, 'METHOD_NOT_ALLOWED', { allowed: ['GET'] }))).toBe('log');
     expect(globalErrorAction(new Error('x'))).toBe('none');
   });
@@ -93,10 +102,10 @@ describe('M2：错误码类型与全局处理', () => {
     spy.mockRestore();
   });
 
-  it('重试策略：4xx 不重试；FRESH_DATA_REQUIRED 最多 3 次；5xx/网络 1 次；retry_after_s 优先', () => {
+  it('重试策略：4xx 不重试；FRESH_DATA_REQUIRED 不自动重试（评审 m6）；5xx/网络 1 次；retry_after_s 优先', () => {
     expect(shouldRetry(0, err(404, 'NOT_FOUND'))).toBe(false);
     expect(shouldRetry(0, err(429, 'RATE_LIMITED'))).toBe(false);
-    expect([0, 1, 2, 3].map((n) => shouldRetry(n, err(503, 'FRESH_DATA_REQUIRED')))).toEqual([true, true, true, false]);
+    expect(shouldRetry(0, err(503, 'FRESH_DATA_REQUIRED'))).toBe(false);
     expect([0, 1].map((n) => shouldRetry(n, err(500, 'INTERNAL_ERROR')))).toEqual([true, false]);
     expect(shouldRetry(0, err(0, 'NETWORK_ERROR'))).toBe(true);
     expect(retryDelay(1, err(503, 'UPSTREAM_RATE_LIMITED', { retry_after_s: 5 }))).toBe(5000);

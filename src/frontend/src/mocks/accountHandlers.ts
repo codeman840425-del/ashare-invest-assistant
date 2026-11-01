@@ -1,17 +1,21 @@
 /**
  * MSW 处理器（T-F02 / T-F02a / T-F04）：认证、同意与风险测评、画像、管理端用户审核、券商账户、成交、导入、对账。
- * 后端目前只实现了 /health* 与 /meta/enums（src/backend/app/api/v1），其余都在这里按契约 v0.2.3 模拟。
+ * 后端目前只实现了 /health* 与 /meta/enums（src/backend/app/api/v1），其余都在这里按契约 v0.2.4 模拟。
  */
 import { http, HttpResponse } from 'msw';
 import type {
   AdminUserPatch, BrokerAccountCreate, ConsentRequest, ImportConfirmRequest, ImportOptions, LoginRequest, ProfileInput, RegisterRequest,
-  ResolveFindingRequest, RiskAssessmentRequest, Trade, TradeCreate,
+  ImportBatchSummary, ResolveFindingRequest, RiskAssessmentRequest, Trade, TradeCreate,
 } from '../api/accountTypes';
-import { ENUMS } from '../api/enums';
+import { ENUMS, type ConsentKey, type LegalDocKey } from '../api/enums';
 import { OVERRIDE_CHOICES } from '../i18n/importLabels';
-import { emptyStats, finding, applyParse, currentUser, hasCompliance, publicBatch, reconciliationFor, state, toAdminUser, toMe, type MockBatch, type MockUser } from './session';
+import {
+  MOCK_INVITE_CODES, emptyStats, finding, applyParse, currentUser, missingCompliance, publicBatch, reconciliationFor, state, toAdminUser, toMe,
+  type MockBatch, type MockUser,
+} from './session';
 import { errorBody, page } from './handlerUtils';
 import { NOW, uid } from './fixtures';
+import { CONSENT_KEYS, RISK_QUESTIONNAIRE, UNDERSTANDING_Q, consentDocs, demoSha, legalDocument, scoreAssessment, withStatus } from './compliance';
 
 const API = '/api/v1';
 const json = (body: unknown, status = 200) => HttpResponse.json(body as Record<string, unknown>, { status });
@@ -21,8 +25,10 @@ const notFound = (what: string) => err(404, 'NOT_FOUND', `${what} 不存在（�
 const badTransition = (from: string, to: string) => err(409, 'INVALID_STATE_TRANSITION', `不能从 ${from} 变为 ${to}`, { from, to });
 const noContent = (status = 204) => new HttpResponse(null, { status });
 
-const PUBLIC = [/^\/meta\//, /^\/health/, /^\/auth\/login$/, /^\/auth\/register$/];
+const PUBLIC = [/^\/meta\//, /^\/legal\//, /^\/health/, /^\/auth\/login$/, /^\/auth\/register$/];
 const GATED = [/^\/today/, /^\/suggestions/, /^\/daily-reports/, /^\/signals/, /^\/candidate-signals/, /^\/plan-drafts/];
+/** v0.2.4 #13：上传导入、手工录入成交需要个人敏感信息单独同意（POST /accounts 不要求） */
+const SENSITIVE_WRITES = [/^\/imports$/, /^\/trades$/];
 
 const me = () => currentUser()!;
 const myAccount = (id: string | null) => state.accounts.find((a) => a.id === id);
@@ -31,7 +37,7 @@ const myBatch = (id: string) => state.batches.find((b) => b.batch_id === id && !
 let seq = 1000;
 const nextId = () => uid(++seq);
 
-const USERNAME_RE = /^[a-z0-9_]{4,32}$/; // [待契约确认] 契约 3–32，plan 3.6 为 4–32 且限定字符集；按 plan 校验
+const USERNAME_RE = /^[a-z0-9_]{4,32}$/; // 契约 #24
 const RESERVED = ['admin', 'root', 'system'];
 
 export const accountHandlers = [
@@ -47,15 +53,31 @@ export const accountHandlers = [
     if (PUBLIC.some((re) => re.test(path))) return undefined;
     if (!user) return err(401, 'AUTH_REQUIRED', '请先登录');
     if (user.status !== 'approved') return err(403, 'ACCOUNT_NOT_APPROVED', '账号未通过审核', { status: user.status });
-    if (GATED.some((re) => re.test(path)) && !hasCompliance(user)) {
-      const required = [...(!user.consents.signal_risk_disclosure ? ['signal_risk_disclosure'] : []), ...(!user.risk_assessment ? ['risk_assessment'] : [])];
-      return err(403, 'CONSENT_REQUIRED', '请先阅读并同意风险揭示、完成风险测评', { required });
+    const required = GATED.some((re) => re.test(path)) ? missingCompliance(user) : [];
+    if (required.length) return err(403, 'CONSENT_REQUIRED', '请先阅读并同意风险揭示、完成有效的风险测评', { required });
+    if (request.method === 'POST' && SENSITIVE_WRITES.some((re) => re.test(path)) && toMe(user).consents.sensitive_financial_info.needs_reconsent) {
+      return err(403, 'CONSENT_REQUIRED', '请先单独同意个人敏感信息处理', { required: ['sensitive_financial_info'] });
     }
     return undefined;
   }),
 
   // ---------------- §7.1 认证 ----------------
   http.get(`${API}/meta/registration`, () => json({ mode: state.registrationMode })),
+  // v0.2.4 #3：文书版本与正文
+  http.get(`${API}/meta/consent-docs`, () => json({ items: consentDocs(state.docVersions) })),
+  http.get(`${API}/legal/:key/versions`, ({ params }) => {
+    const v = state.docVersions[params.key as LegalDocKey];
+    if (!v || v === 'unversioned') return notFound('文书');
+    // 版本列表不含正文
+    const rest: Partial<ReturnType<typeof legalDocument>> = { ...legalDocument(params.key as LegalDocKey, v) };
+    delete rest.content_md;
+    return json({ items: [rest] });
+  }),
+  http.get(`${API}/legal/:key/:version?`, ({ params }) => {
+    const v = state.docVersions[params.key as LegalDocKey];
+    if (!v || v === 'unversioned' || (params.version && params.version !== v)) return notFound('文书');
+    return json(legalDocument(params.key as LegalDocKey, v));
+  }),
   http.post(`${API}/auth/login`, async ({ request }) => {
     const body = (await request.json()) as Partial<LoginRequest>;
     const user = state.users.find((x) => x.username === body.username);
@@ -82,32 +104,85 @@ export const accountHandlers = [
     if (pwd.length < 10 || !/[a-zA-Z]/.test(pwd) || !/\d/.test(pwd)) fields.push({ field: 'password', issue: '至少 10 位，且包含字母和数字' });
     else if (pwd === name) fields.push({ field: 'password', issue: '不能与用户名相同' });
     if (!b.display_name?.trim()) fields.push({ field: 'display_name', issue: '必填' });
-    if (state.registrationMode === 'invite' && !b.invite_code?.trim()) fields.push({ field: 'invite_code', issue: '邀请制下必填' });
-    const need = ['terms', 'privacy', 'signal_risk_disclosure'];
-    if (!need.every((k) => b.agreements?.includes(k as never))) fields.push({ field: 'agreements', issue: '须同意用户协议、隐私政策和风险揭示' });
+    if (pwd.length > 128) fields.push({ field: 'password', issue: 'too_long' });
+    if (state.registrationMode === 'invite') {
+      if (!b.invite_code?.trim()) fields.push({ field: 'invite_code', issue: 'required' });
+      else if (!MOCK_INVITE_CODES.includes(b.invite_code.trim())) fields.push({ field: 'invite_code', issue: 'invalid' });
+      if (!b.apply_note?.trim()) fields.push({ field: 'apply_note', issue: 'required' });
+    }
+    if ((b.apply_note ?? '').length > 200) fields.push({ field: 'apply_note', issue: 'too_long' });
+    if ((b.display_name ?? '').trim().length > 32) fields.push({ field: 'display_name', issue: 'too_long' });
+    // v0.2.4 #2：必须包含 terms / privacy / signal_risk_disclosure，可另含 sensitive_financial_info，其他值 → 400
+    const got = new Set(b.agreements ?? []);
+    const need: ConsentKey[] = ['terms', 'privacy', 'signal_risk_disclosure'];
+    if (!need.every((k) => got.has(k)) || [...got].some((k) => !CONSENT_KEYS.includes(k))) fields.push({ field: 'agreements', issue: 'invalid' });
     if (fields.length) return validationError(fields);
     if (state.users.some((x) => x.username === name)) return err(409, 'CONFLICT', '用户名已被使用');
     const id = nextId();
     state.users.push({
-      id, username: name, display_name: b.display_name!.trim(), role: 'user', status: 'pending', apply_note: null, created_at: NOW, reviewed_at: null,
-      review_reason: null, register_ip_region: '上海（示例）', same_ip_registrations: 1, consents: {}, risk_assessment: null,
+      id, username: name, display_name: b.display_name!.trim(), role: 'user', status: 'pending', apply_note: b.apply_note?.trim() || null, created_at: NOW, reviewed_at: null,
+      review_reason: null, register_ip_region: '上海（示例）', same_ip_registrations: 1, assessments: [],
+      grants: Object.fromEntries([...got].map((k) => [k, { version: state.docVersions[k], accepted_at: NOW }])),
     });
     return json({ id, username: name, status: 'pending' }, 201);
   }),
   http.get(`${API}/me`, () => json(toMe(me()))),
+  // v0.2.4 #4：version 与 content_sha256 必须等于 /meta/consent-docs 的当前值；withdraw 只接受两项
   http.post(`${API}/me/consents`, async ({ request }) => {
     const b = (await request.json()) as Partial<ConsentRequest>;
-    if (!b.key || !['signal_risk_disclosure', 'privacy', 'terms'].includes(b.key) || !b.version) return validationError([{ field: 'key', issue: '取值不合法' }]);
-    me().consents = { ...me().consents, [b.key]: { version: b.version, accepted_at: NOW } };
-    return noContent(201);
+    if (!b.key || !CONSENT_KEYS.includes(b.key)) return validationError([{ field: 'key', issue: 'invalid' }]);
+    const cur = state.docVersions[b.key];
+    if (b.version !== cur) return validationError([{ field: 'version', issue: 'invalid' }]);
+    if ((b.content_sha256 ?? null) !== (cur === 'unversioned' ? null : demoSha(b.key, cur))) return validationError([{ field: 'content_sha256', issue: 'invalid' }]);
+    if (!b.ui_surface || b.ui_surface.length > 64) return validationError([{ field: 'ui_surface', issue: 'invalid' }]);
+    if (!b.presentation || !ENUMS.consent_presentation.includes(b.presentation)) return validationError([{ field: 'presentation', issue: 'invalid' }]);
+    const action = b.action ?? 'grant';
+    if (action === 'withdraw') {
+      if (b.key === 'terms' || b.key === 'privacy') return validationError([{ field: 'action', issue: 'invalid' }]);
+      const rest = { ...me().grants };
+      delete rest[b.key];
+      me().grants = rest;
+    } else {
+      me().grants = { ...me().grants, [b.key]: { version: cur, accepted_at: NOW } };
+    }
+    return json({ key: b.key, version: cur, action, at: NOW }, 201);
+  }),
+  // v0.2.4 #6：问卷（不含分值）；示例问卷只在 MSW 中（评审 P1）
+  http.get(`${API}/me/risk-assessment/questionnaire`, () =>
+    state.questionnairePublished ? json(RISK_QUESTIONNAIRE) : err(404, 'NOT_FOUND', '风险测评问卷尚未发布（示例）')),
+  http.get(`${API}/me/risk-assessment`, () => {
+    const list = me().assessments;
+    return list.length ? json(withStatus(list, list[list.length - 1], NOW)) : notFound('风险测评');
+  }),
+  http.get(`${API}/me/risk-assessments`, ({ request }) => {
+    const list = me().assessments;
+    return json(page([...list].reverse().map((a) => withStatus(list, a, NOW)), new URL(request.url)));
   }),
   http.post(`${API}/me/risk-assessment`, async ({ request }) => {
     const b = (await request.json()) as Partial<RiskAssessmentRequest>;
-    if (!b.answers?.length) return validationError([{ field: 'answers', issue: '必填' }]);
-    const score = b.answers.reduce((a, x) => a + Math.max(0, 'abcd'.indexOf(x.choice)), 0);
-    const level = Math.min(5, Math.max(1, Math.round((score / (b.answers.length * 3)) * 4) + 1));
-    me().risk_assessment = { level, assessed_at: NOW };
-    return json({ level, assessed_at: NOW });
+    if (!state.questionnairePublished) return notFound('风险测评问卷');
+    if (b.questionnaire_version !== RISK_QUESTIONNAIRE.version) {
+      return err(409, 'VERSION_CONFLICT', '问卷已更新，请重新作答', { current_version: RISK_QUESTIONNAIRE.version });
+    }
+    const answers = b.answers ?? [];
+    const fields: { field: string; issue: string }[] = [];
+    for (const a of answers) {
+      const q = RISK_QUESTIONNAIRE.questions.find((x) => x.q_id === a.q_id);
+      if (!q) fields.push({ field: `answers.${a.q_id}`, issue: 'unknown_question' });
+      else if (!q.choices.some((c) => c.id === a.choice)) fields.push({ field: `answers.${a.q_id}`, issue: 'invalid_choice' });
+    }
+    for (const q of RISK_QUESTIONNAIRE.questions) {
+      if (q.required && !answers.some((a) => a.q_id === q.q_id)) fields.push({ field: `answers.${q.q_id}`, issue: 'required' });
+    }
+    if (fields.length) return validationError(fields);
+    if (answers.find((a) => a.q_id === UNDERSTANDING_Q.q_id)?.choice !== UNDERSTANDING_Q.correct) {
+      return err(400, 'VALIDATION_ERROR', '理解确认题未通过', { reason: 'understanding_required', fields: [{ field: `answers.${UNDERSTANDING_Q.q_id}`, issue: 'understanding_required' }] });
+    }
+    const recent = me().assessments.filter((a) => Date.parse(NOW) - Date.parse(a.submitted_at) < 86_400_000);
+    if (recent.length >= 3) return err(429, 'RATE_LIMITED', '24 小时内提交次数过多', { retry_after_s: 3600 });
+    const a = scoreAssessment(nextId(), answers, NOW);
+    me().assessments = [...me().assessments, a];
+    return json(a, 201);
   }),
   http.get(`${API}/me/profile`, () => {
     const p = state.profiles.get(me().id);
@@ -149,7 +224,7 @@ export const accountHandlers = [
     if (!x) return notFound('用户');
     const b = (await request.json()) as Partial<AdminUserPatch>;
     if (!b.status || !['approved', 'rejected', 'disabled'].includes(b.status)) return validationError([{ field: 'status', issue: '取值不合法' }]);
-    if ((b.status === 'rejected' || b.status === 'disabled') && !b.reason?.trim()) return validationError([{ field: 'reason', issue: '驳回或停用必须填写理由' }]);
+    if ((b.status === 'rejected' || b.status === 'disabled' || x.status === 'disabled') && !b.reason?.trim()) return validationError([{ field: 'reason', issue: 'required' }]);
     if (x.id === state.currentUserId) return badTransition(x.status, b.status);
     const allowed: Record<MockUser['status'], string[]> = { pending: ['approved', 'rejected'], approved: ['disabled'], rejected: ['approved'], disabled: ['approved'] };
     if (!allowed[x.status].includes(b.status)) return badTransition(x.status, b.status);
@@ -185,8 +260,14 @@ export const accountHandlers = [
     return t ? json(t) : notFound('成交');
   }),
   http.post(`${API}/trades`, async ({ request }) => {
+    // v0.2.4 #12：支持 Idempotency-Key（同一键重放返回第一次的结果）
+    const key = request.headers.get('Idempotency-Key');
+    if (key && state.tradeIdem.has(key)) return json(state.tradeIdem.get(key), 201);
     const b = (await request.json()) as Partial<TradeCreate>;
     const fields: { field: string; issue: string }[] = [];
+    const orig = b.corrects_trade_id ? state.trades.find((x) => x.id === b.corrects_trade_id && !!myAccount(x.account_id)) : undefined;
+    if (b.corrects_trade_id && !orig) fields.push({ field: 'corrects_trade_id', issue: 'not_found' });
+    if (b.corrects_trade_id && !b.reason?.trim()) fields.push({ field: 'reason', issue: 'required' });
     if (!myAccount(b.account_id ?? null)) fields.push({ field: 'account_id', issue: '账户不存在' });
     if (!b.trade_date || !/^\d{4}-\d{2}-\d{2}$/.test(b.trade_date)) fields.push({ field: 'trade_date', issue: '日期格式 YYYY-MM-DD' });
     if (!b.security_code || !/^\d{6}\.(SH|SZ|BJ)$/.test(b.security_code)) fields.push({ field: 'security_code', issue: '格式如 600000.SH' });
@@ -197,10 +278,22 @@ export const accountHandlers = [
     const t: Trade = {
       id: nextId(), account_id: b.account_id!, trade_date: b.trade_date!, trade_time: b.trade_time ?? null, security_code: b.security_code!, name: '（手动录入）',
       side: b.side!, qty: String(b.qty), price: Number(b.price).toFixed(2), amount: (Number(b.qty) * Number(b.price)).toFixed(2), fee_total: b.fee_total ?? null,
-      source: 'manual', batch_id: null, voided: false, created_at: NOW,
+      net_amount: null, source: 'manual', batch_id: null, voided: false, void_reason: null, voided_at: null, corrects_trade_id: b.corrects_trade_id ?? null, created_at: NOW,
     };
+    if (orig) Object.assign(orig, { voided: true, void_reason: b.reason!.trim(), voided_at: NOW });
     state.trades.push(t);
+    if (key) state.tradeIdem.set(key, t);
     return json(t, 201);
+  }),
+  http.post(`${API}/trades/:id/void`, async ({ params, request }) => {
+    const t = state.trades.find((x) => x.id === params.id && !!myAccount(x.account_id));
+    if (!t) return notFound('成交');
+    const b = (await request.json()) as { reason?: string };
+    const reason = b.reason?.trim() ?? '';
+    if (!reason || reason.length > 200) return validationError([{ field: 'reason', issue: reason ? 'too_long' : 'required' }]);
+    if (t.voided) return badTransition('voided', 'voided');
+    Object.assign(t, { voided: true, void_reason: reason, voided_at: NOW });
+    return json(t);
   }),
 
   // ---------------- 导入 ----------------
@@ -239,7 +332,8 @@ export const accountHandlers = [
     const url = new URL(request.url);
     const acc = url.searchParams.get('account_id');
     const st = url.searchParams.get('status');
-    const items = state.batches.filter((b) => myAccount(b.account_id) && (!acc || b.account_id === acc) && (!st || b.status === st)).map(publicBatch);
+    const items = state.batches.filter((b) => myAccount(b.account_id) && (!acc || b.account_id === acc) && (!st || b.status === st))
+      .map(({ batch_id, account_id, kind, status, parser_id, stats, created_at, committed_at, reverted_at }): ImportBatchSummary => ({ batch_id, account_id, kind, status, parser_id, stats, created_at, committed_at, reverted_at }));
     return json(page(items, url));
   }),
   http.get(`${API}/imports/:id`, ({ params }) => {
@@ -287,6 +381,7 @@ export const accountHandlers = [
     const body = (await request.json()) as Partial<ResolveFindingRequest>;
     if (!body.choice || !f.resolution_choices.includes(body.choice)) return validationError([{ field: 'choice', issue: '须在 resolution_choices 中' }]);
     if (OVERRIDE_CHOICES.has(body.choice) && !body.reason?.trim()) return validationError([{ field: 'reason', issue: '覆盖类处理必须填写理由' }]);
+    if ((body.reason ?? '').length > 200) return validationError([{ field: 'reason', issue: 'too_long' }]);
     f.resolution = { choice: body.choice, reason: body.reason?.trim() || null, by: me().id, at: NOW };
     return json(f);
   }),
@@ -315,7 +410,8 @@ export const accountHandlers = [
         const n = r.normalized!;
         state.trades.push({
           id: nextId(), account_id: b.account_id, trade_date: n.trade_date, trade_time: n.trade_time, security_code: n.security_code, name: n.name,
-          side: n.side ?? 'buy', qty: n.qty, price: n.price, amount: n.amount, fee_total: n.fee_total, source: 'import', batch_id: b.batch_id, voided: false, created_at: NOW,
+          side: n.side ?? 'buy', qty: n.qty, price: n.price, amount: n.amount, fee_total: n.fee_total, net_amount: n.net_amount, source: 'import', batch_id: b.batch_id,
+          voided: false, void_reason: null, voided_at: null, corrects_trade_id: null, created_at: NOW,
         });
       }
     }
@@ -348,7 +444,7 @@ export const accountHandlers = [
     b.status = 'reverted';
     b.reverted_at = NOW;
     state.trades.forEach((t) => {
-      if (t.batch_id === b.batch_id) t.voided = true;
+      if (t.batch_id === b.batch_id && !t.voided) Object.assign(t, { voided: true, void_reason: `batch_reverted:${b.batch_id}`, voided_at: NOW });
     });
     return json({ status: 'reverted' });
   }),

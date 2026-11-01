@@ -25,7 +25,7 @@ export const qk = {
   unread: ['notifications', 'unread-count'] as const,
   dailyReports: ['daily-reports'] as const,
   dailyReport: (date: string) => ['daily-report', date] as const,
-  portfolio: ['portfolio'] as const,
+  portfolio: (accountId?: string) => ['portfolio', accountId ?? 'all'] as const,
   horizon: (code: string) => ['horizon-assessments', code] as const,
 };
 
@@ -101,7 +101,9 @@ export const useDailyReport = (date: string | undefined) =>
     enabled: !!date,
   });
 
-export const usePortfolio = () => useQuery({ queryKey: qk.portfolio, queryFn: ({ signal }) => apiGet<Portfolio>('/portfolio', undefined, signal) });
+/** GET /portfolio?account_id=（v0.2.4 #14）：不传 account_id 时合并全部账户 */
+export const usePortfolio = (accountId?: string) =>
+  useQuery({ queryKey: qk.portfolio(accountId), queryFn: ({ signal }) => apiGet<Portfolio>('/portfolio', accountId ? { account_id: accountId } : undefined, signal) });
 
 export function useMarkNotificationRead() {
   const qc = useQueryClient();

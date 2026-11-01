@@ -4,14 +4,29 @@ import { Link, useNavigate } from 'react-router';
 import { ApiError } from '../../api/client';
 import { useRegister, useRegistrationMode } from '../../api/accountQueries';
 import type { ConsentKey } from '../../api/accountTypes';
+import { errorText } from '../../api/errorPolicy';
 import { Loading, ErrorBox } from '../../components/common';
-import { CONSENT_ORDER, CONSENT_TEXT } from '../../i18n/accountLabels';
+import { AGREEMENT_ORDER, CONSENT_TEXT } from '../../i18n/accountLabels';
 import { AuthLayout } from './AuthLayout';
 
-interface FormValues { username: string; display_name: string; password: string; password2: string; invite_code?: string; agreements: ConsentKey[] }
+interface FormValues {
+  username: string; display_name: string; password: string; password2: string; invite_code?: string; apply_note?: string; agreements: ConsentKey[];
+}
 
-// [待契约确认] 契约 username 为 3–32；plan 3.6 为 4–32 且限定小写字母/数字/下划线。前端按更严的 plan 校验，后端以 400 fields 为准。
+/** 契约 #24：^[a-z0-9_]{4,32}$，输入即转小写；保留字由后端 400 返回 */
 const USERNAME_RE = /^[a-z0-9_]{4,32}$/;
+const APPLY_NOTE_MAX = 200; // v0.2.4 #2
+
+/** 400 fields[].issue → 中文（未知 issue 显示原值） */
+function issueText(field: string, issue: string): string {
+  if (field === 'invite_code' && issue === 'invalid') return '邀请码无效或已失效';
+  if (field === 'username' && issue === 'reserved') return '该用户名为系统保留，请换一个';
+  if (issue === 'required') return '必填';
+  if (issue === 'too_long') return '超出长度上限';
+  if (issue === 'too_short') return '长度不足';
+  if (issue === 'invalid') return '格式不正确';
+  return issue;
+}
 
 export function RegisterPage() {
   const reg = useRegistrationMode();
@@ -44,23 +59,27 @@ export function RegisterPage() {
   const onFinish = (v: FormValues) => {
     setErr(null);
     register.mutate(
-      { username: v.username, password: v.password, display_name: v.display_name.trim(), invite_code: v.invite_code?.trim() || null, agreements: v.agreements },
+      {
+        username: v.username.toLowerCase(), password: v.password, display_name: v.display_name.trim(),
+        invite_code: mode === 'invite' ? v.invite_code?.trim() || null : null,
+        apply_note: v.apply_note?.trim() || null, agreements: v.agreements,
+      },
       {
         onSuccess: (r) => setDone(r.username),
         onError: (e) => {
-          if (!(e instanceof ApiError)) return setErr(e.message);
+          if (!(e instanceof ApiError)) return setErr(errorText(e));
           if (e.code === 'REGISTRATION_CLOSED') return setErr('closed');
           if (e.code === 'CONFLICT') return form.setFields([{ name: 'username', errors: ['用户名已被使用'] }]);
           if (e.code === 'VALIDATION_ERROR') {
             const fields = ((e.details as { fields?: { field: string; issue: string }[] } | null)?.fields ?? []);
-            const known = new Set(['username', 'password', 'display_name', 'invite_code', 'agreements']);
-            form.setFields(fields.filter((f) => known.has(f.field)).map((f) => ({ name: f.field as keyof FormValues, errors: [f.issue] })));
+            const known = new Set(['username', 'password', 'display_name', 'invite_code', 'apply_note', 'agreements']);
+            form.setFields(fields.filter((f) => known.has(f.field)).map((f) => ({ name: f.field as keyof FormValues, errors: [issueText(f.field, f.issue)] })));
             const other = fields.filter((f) => !known.has(f.field));
-            if (other.length) setErr(other.map((f) => `${f.field}：${f.issue}`).join('；'));
+            if (other.length) setErr(other.map((f) => `${f.field}：${issueText(f.field, f.issue)}`).join('；'));
+            else if (!fields.length) setErr(errorText(e));
             return;
           }
-          // [待契约确认] 邀请码无效的错误码未定义，暂按通用错误展示后端文案
-          setErr(e.code === 'RATE_LIMITED' ? '注册请求过于频繁，请稍后再试。' : e.message);
+          setErr(e.code === 'RATE_LIMITED' ? '注册请求过于频繁，请稍后再试。' : errorText(e));
         },
       },
     );
@@ -72,14 +91,15 @@ export function RegisterPage() {
       {err && err !== 'closed' ? <Alert type="error" showIcon style={{ marginBottom: 12 }} title={err} /> : null}
       <Form<FormValues> form={form} layout="vertical" onFinish={onFinish} requiredMark={false} disabled={register.isPending} initialValues={{ agreements: [] }}>
         <Form.Item name="username" label="用户名" extra="4–32 位小写字母、数字或下划线，用于登录"
+          normalize={(v: string | undefined) => v?.toLowerCase()}
           rules={[{ required: true, message: '请输入用户名' }, { pattern: USERNAME_RE, message: '4–32 位小写字母、数字或下划线' }]}>
-          <Input autoComplete="username" />
+          <Input autoComplete="username" data-testid="reg-username" />
         </Form.Item>
         <Form.Item name="display_name" label="显示名" rules={[{ required: true, whitespace: true, message: '请输入显示名' }, { max: 32, message: '不超过 32 个字' }]}>
           <Input />
         </Form.Item>
-        <Form.Item name="password" label="密码" extra="至少 10 位，包含字母和数字"
-          rules={[{ required: true, message: '请输入密码' }, { min: 10, message: '至少 10 位' }, { pattern: /(?=.*[A-Za-z])(?=.*\d)/, message: '需同时包含字母和数字' }]}>
+        <Form.Item name="password" label="密码" extra="10–128 位，包含字母和数字"
+          rules={[{ required: true, message: '请输入密码' }, { min: 10, message: '至少 10 位' }, { max: 128, message: '不超过 128 位' }, { pattern: /(?=.*[A-Za-z])(?=.*\d)/, message: '需同时包含字母和数字' }]}>
           <Input.Password autoComplete="new-password" />
         </Form.Item>
         <Form.Item name="password2" label="确认密码" dependencies={['password']}
@@ -88,14 +108,19 @@ export function RegisterPage() {
         </Form.Item>
         {mode === 'invite' ? (
           <Form.Item name="invite_code" label="邀请码" rules={[{ required: true, whitespace: true, message: '邀请制下必须填写邀请码' }]}>
-            <Input />
+            <Input data-testid="reg-invite" />
           </Form.Item>
         ) : null}
-        {/* [待契约确认] agreements 的取值按 consent key（terms/privacy/signal_risk_disclosure）提交 */}
+        {/* v0.2.4 #2：apply_note ≤200 字，邀请制必填 */}
+        <Form.Item name="apply_note" label={mode === 'invite' ? '申请说明' : '申请说明（可选）'} extra="简单说明用途，供管理员审核参考"
+          rules={[{ required: mode === 'invite', whitespace: true, message: '邀请制下请填写申请说明' }, { max: APPLY_NOTE_MAX, message: `不超过 ${APPLY_NOTE_MAX} 字` }]}>
+          <Input.TextArea rows={2} maxLength={APPLY_NOTE_MAX} showCount data-testid="reg-apply-note" />
+        </Form.Item>
+        {/* v0.2.4 #2：agreements 必须包含 terms / privacy / signal_risk_disclosure */}
         <Form.Item name="agreements" label="协议与揭示"
-          rules={[{ validator: (_r, v: ConsentKey[]) => (CONSENT_ORDER.every((k) => v?.includes(k)) ? Promise.resolve() : Promise.reject(new Error('需同意全部三项才能注册'))) }]}>
+          rules={[{ validator: (_r, v: ConsentKey[]) => (AGREEMENT_ORDER.every((k) => v?.includes(k)) ? Promise.resolve() : Promise.reject(new Error('需同意全部三项才能注册'))) }]}>
           <Checkbox.Group className="agree-group">
-            {CONSENT_ORDER.map((k) => (
+            {AGREEMENT_ORDER.map((k) => (
               <Checkbox key={k} value={k} data-testid={`agree-${k}`}>
                 <b>{CONSENT_TEXT[k].title}</b>
                 <div className="muted small">{CONSENT_TEXT[k].summary}</div>

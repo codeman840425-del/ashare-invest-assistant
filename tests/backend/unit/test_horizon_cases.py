@@ -1,16 +1,16 @@
-"""周期分类器示例用例（docs/strategies/horizon_classifier.md §7）按 plan v0.2.3 §6.1 规则的期望（T-T01c）。
+"""周期分类器示例用例按 plan §6.1 ``horizon_classifier.yaml`` 规则的期望（T-T01c 建立；T-T01d 同步契约 v0.2.5 / 分类器 1.2.0）。
 
-- 用测试内的**参考求值器**（只读 ``config_defaults/horizon_classifier.yaml`` 快照 = plan §6.1 代码块原文）
-  按 horizon_classifier.md §3/§4 的判定顺序计算：闸门（score 0 优先，其次最小 cap）→ requires（else_score / else_cap）
-  → components 取第一条命中的档位 → 数据缺失封顶 → suitable（≥ suitable_threshold，按分数降序，同分按 tie_order）。
-- 用例 E（novice，次新股）：问题 37 方案 A（SH0C，classifier 1.1.0）后 short 85 → 59，suitable [short] → []；
-  intraday_t 无底仓为 0（同样 ≤ 59）。与 horizon_classifier.md §7 用例 E 行一致。
-- novice（或未填经验）的 intraday_t 同样封顶 59：plan §2.5.3 / §6.1 规则 IT0C（编排者默认，用户可否决，
-  origin/main fce21bb/fb583bf）。若用户否决 IT0C，删去对应用例并同步快照。
-- 契约 v0.2.3 #23（T-A05，7c62f59）：``SH0C``/``IT0C`` 是分类器规则 ID，只出现在 ``HorizonCap.rule_id``
-  （``kind: "requires"``），**不是** reason_code。参考求值器按契约 §5 ``HorizonCap`` 结构输出 ``caps``：
-  ``{horizon, cap, kind: "requires"|"data_missing", rule_id, inputs_missing}``；所有不满足的 requires（带 else_cap）
-  都列出，生效值取最小；闸门（HG*）封顶不属于 HorizonCap 的两种 kind，单独放在 ``gate_caps``。
+- 用测试内的**参考求值器**（只读 ``config_defaults/horizon_classifier.yaml`` 快照 = plan v0.2.5 §6.1 代码块原文）
+  按 horizon_classifier.md §3/§4 的判定顺序计算：闸门（score 0 优先，其次最小 cap）→ requires → components 取第一条
+  命中的档位 → 数据缺失封顶 → suitable（≥ suitable_threshold，按分数降序，同分按 tie_order）。
+- 契约 v0.2.5（T-A06 bd33f83，用户 2026-11-02 决定）：requires 规则新增 ``mode: cap``（默认）| ``hint``。
+  画像类规则 SH0/SH0B/SH0C/IT0B/IT0C 为 ``mode: hint``：输入未填写 → 跳过（不提示、不封顶）；已填写且不满足 →
+  只写入 ``hints[]``（``HorizonHint {horizon, rule_id, text}``），不改分数、不进 ``caps[]``、不影响 ``suitable``。
+  ``mode: cap`` 的规则不满足时进 ``caps``（``kind: "requires"``；``else_score`` 的 cap 记 0，如 IT0 无底仓）。
+- 契约 §5 ``HorizonCap``：``{horizon, cap, kind: "requires"|"data_missing", rule_id, inputs_missing}``；
+  闸门（HG*）封顶不属于 HorizonCap 的两种 kind，单独放在 ``gate_caps``。规则 ID 不是 reason_code（v0.2.3 #23）。
+- 用例 E（novice，次新股）：1.1.0 时 short 被 SH0C 封顶 59；1.2.0 起只提示，short 85、suitable [short]。
+  docs/strategies/horizon_classifier.md §7 用例 E 行仍是 1.1.0 口径（研究员按 T-A06 §6 更新），本文件以 plan §6.1 为准。
 - 后端分类器（T-B30）落地后，应以同一组输入调用后端实现并比对；目前后端没有分类器，只做规则层期望。
 
 全部为示例数值，不联网、不依赖后端。
@@ -32,7 +32,9 @@ CFG = yaml.safe_load(SNAP.read_text(encoding="utf-8"))
 RULES = CFG["rules"]
 THRESHOLD = CFG["suitable_threshold"]
 HORIZONS = ("intraday_t", "short", "swing", "long")
-NOVICE_CAP = 59
+NOVICE_CAP = 59  # 1.1.0 的画像封顶值；1.2.0 起不应再出现
+#: v0.2.5：画像类 hint 规则
+PROFILE_HINT_RULES = {"SH0", "SH0B", "SH0C", "IT0B", "IT0C"}
 
 def _cond(op: str, actual: Any, value: Any) -> bool:
     if op == "not_null":
@@ -61,11 +63,13 @@ def _cond(op: str, actual: Any, value: Any) -> bool:
 
 
 def evaluate(inputs: dict[str, Any]) -> dict[str, Any]:
-    """返回 {raw, scores, caps(HorizonCap 列表/周期), gate_caps(闸门 id/周期), suitable}。``rank_pct`` 输入直接给分位值；``f.*`` 为 None 记为缺失。"""
+    """返回 {raw, scores, caps(HorizonCap 列表/周期), gate_caps(闸门 id/周期), hints(HorizonHint 列表), suitable}。
+    ``rank_pct`` 输入直接给分位值；``f.*`` 为 None 记为缺失；``profile.*`` 为 None 记为未填写。"""
     raw: dict[str, int] = {}
     scores: dict[str, int] = {}
     caps: dict[str, list[dict[str, Any]]] = {}
     gate_caps: dict[str, list[str]] = {}
+    hints: list[dict[str, Any]] = []
     for h in HORIZONS:
         spec = RULES["horizons"][h]
         zero = False
@@ -80,12 +84,20 @@ def evaluate(inputs: dict[str, Any]) -> dict[str, Any]:
                     limits.append((g["cap"], g["id"]))
                     gates.append(g["id"])
         for q in spec["requires"]:
-            if not _cond(q["op"], inputs.get(q["input"]), q.get("value")):
+            mode = q.get("mode", "cap")
+            actual = inputs.get(q["input"])
+            if mode == "hint":
+                if actual is not None and not _cond(q["op"], actual, q.get("value")):
+                    hints.append({"horizon": h, "rule_id": q["id"], "text": q["reason"]})
+                continue
+            if not _cond(q["op"], actual, q.get("value")):
                 if "else_score" in q:
                     zero = True
+                    cap = q["else_score"]
                 else:
-                    limits.append((q["else_cap"], q["id"]))
-                    hcaps.append({"horizon": h, "cap": q["else_cap"], "kind": "requires", "rule_id": q["id"], "inputs_missing": []})
+                    cap = q["else_cap"]
+                    limits.append((cap, q["id"]))
+                hcaps.append({"horizon": h, "cap": cap, "kind": "requires", "rule_id": q["id"], "inputs_missing": []})
         total = missing = 0
         missing_keys: list[str] = []
         for c in spec["components"]:
@@ -106,7 +118,11 @@ def evaluate(inputs: dict[str, Any]) -> dict[str, Any]:
         gate_caps[h] = gates
     order = {h: i for i, h in enumerate(RULES["tie_order"])}
     suitable = sorted((h for h in HORIZONS if scores[h] >= THRESHOLD), key=lambda h: (-scores[h], order[h]))
-    return {"raw": raw, "scores": scores, "caps": caps, "gate_caps": gate_caps, "suitable": suitable}
+    return {"raw": raw, "scores": scores, "caps": caps, "gate_caps": gate_caps, "hints": hints, "suitable": suitable}
+
+
+def hint_ids(r: dict[str, Any], horizon: str | None = None) -> set[str]:
+    return {x["rule_id"] for x in r["hints"] if horizon is None or x["horizon"] == horizon}
 
 
 def rule_ids(caps: list[dict[str, Any]], kind: str = "requires") -> list[str]:
@@ -125,8 +141,6 @@ def assert_horizon_cap_shape(r: dict[str, Any]) -> None:
             assert r["scores"][h] <= min(c["cap"] for c in items)
 
 
-#: 契约 #23：规则 ID 不是 reason_code（§6.1 原因码形如 ``R_`` / 大写下划线，不含 HG*/SH0C/IT0C 这类规则 ID）
-NOVICE_RULE_IDS = {"SH0C", "IT0C"}
 
 
 #: 用例 B（horizon_classifier.md §7）：高振幅活跃 + 底仓 + 做T记录，advanced
@@ -151,76 +165,130 @@ CASE_E = {
 }
 
 
-@pytest.mark.parametrize(("horizon", "rule_id"), [("short", "SH0C"), ("intraday_t", "IT0C")])
-def test_snapshot_is_classifier_1_1_0_with_novice_caps(horizon, rule_id):
-    assert (CFG["version_no"], CFG["classifier_version"]) == (2, "1.1.0")
+#: 画像全空（v0.2.5：未填写 → 不封顶、不提示）
+EMPTY_PROFILE = {"profile.horizon_pref": None, "profile.effort": None, "profile.risk_tolerance": None, "profile.experience": None}
+#: 画像全部满足画像类规则
+FULL_PROFILE = {"profile.effort": "high", "profile.risk_tolerance": 4, "profile.experience": "advanced"}
+
+
+def _profile_rules() -> list[tuple[str, dict[str, Any]]]:
+    return [(h, q) for h in HORIZONS for q in RULES["horizons"][h]["requires"] if q["input"].startswith("profile.")]
+
+
+def test_snapshot_is_classifier_1_2_0():
+    """v0.2.5 组 4：``version_no: 3``、``classifier_version: "1.2.0"``。"""
+    assert (CFG["version_no"], CFG["classifier_version"]) == (3, "1.2.0")
+
+
+@pytest.mark.parametrize(("horizon", "rule_id", "input_key", "op", "value"), [
+    ("short", "SH0", "profile.risk_tolerance", "ge", 3),
+    ("short", "SH0B", "profile.effort", "in", ["medium", "high"]),
+    ("short", "SH0C", "profile.experience", "in", ["intermediate", "advanced"]),
+    ("intraday_t", "IT0B", "profile.effort", "in", ["medium", "high"]),
+    ("intraday_t", "IT0C", "profile.experience", "in", ["intermediate", "advanced"]),
+])
+def test_profile_rules_are_hint_mode_without_else_cap(horizon, rule_id, input_key, op, value):
+    """v0.2.5 组 4：SH0/SH0B/SH0C/IT0B/IT0C 为 ``mode: hint``，不带 ``else_cap`` / ``else_score``。"""
     rule = next(q for q in RULES["horizons"][horizon]["requires"] if q["id"] == rule_id)
-    assert (rule["input"], rule["op"], rule["value"], rule["else_cap"]) == (
-        "profile.experience", "in", ["intermediate", "advanced"], NOVICE_CAP)
+    assert (rule["input"], rule["op"], rule["value"], rule.get("mode")) == (input_key, op, value, "hint")
+    assert "else_cap" not in rule and "else_score" not in rule
+    assert isinstance(rule["reason"], str) and rule["reason"]
 
 
-def test_case_b_unchanged_by_sh0c():
+def test_all_profile_rules_are_hints_and_cap_rules_keep_else():
+    """所有 ``profile.*`` 规则都是 hint（共 5 条）；其余 requires（如 IT0、LG0）仍为 cap 模式且带 else_cap/else_score。"""
+    assert {q["id"] for _, q in _profile_rules()} == PROFILE_HINT_RULES
+    assert all(q.get("mode") == "hint" for _, q in _profile_rules())
+    for h in HORIZONS:
+        for q in RULES["horizons"][h]["requires"]:
+            if q.get("mode", "cap") == "cap":
+                assert ("else_cap" in q) != ("else_score" in q), q["id"]
+            assert q.get("mode", "cap") in {"cap", "hint"}
+
+
+def test_case_b_unchanged():
     r = evaluate(CASE_B)
     assert r["scores"] == {"intraday_t": 100, "short": 100, "swing": 70, "long": 20}
-    assert r["suitable"] == ["short", "intraday_t", "swing"]
+    assert r["suitable"] == ["short", "intraday_t", "swing"] and r["hints"] == []
 
 
-def test_case_e_novice_short_capped_and_not_suitable():
-    """用例 E（v0.2.3）：short raw 85 被 SH0C 封顶 59；swing raw 65 被 HG6 封顶 59；suitable 为空。"""
+def test_empty_profile_no_59_cap_and_no_hints():
+    """v0.2.5 组 4：画像全空时 short/intraday_t 与“画像全满足”相比只差加分项（不出现 59 封顶），``hints=[]``。"""
+    empty = evaluate({**CASE_B, **EMPTY_PROFILE})
+    full = evaluate({**CASE_B, **FULL_PROFILE})
+    assert empty["hints"] == []
+    for h in ("short", "intraday_t"):
+        assert not [c for c in empty["caps"][h] if c["rule_id"] in PROFILE_HINT_RULES]
+        assert empty["scores"][h] == empty["raw"][h] and empty["scores"][h] != NOVICE_CAP
+        assert empty["scores"][h] <= full["scores"][h]  # 只差画像加分项（如 SH4 偏好）
+    assert "short" in empty["suitable"] and "intraday_t" in empty["suitable"]
+
+
+@pytest.mark.parametrize("base", ["B", "E"])
+def test_novice_hints_sh0c_it0c_without_caps_and_suitable_unchanged(base):
+    """v0.2.5 组 4：``experience=novice`` → hints 含 SH0C、IT0C；caps 不含二者；suitable 与非 novice 时相同。"""
+    case = CASE_B if base == "B" else CASE_E
+    novice = evaluate({**case, "profile.experience": "novice"})
+    control = evaluate({**case, "profile.experience": "advanced"})
+    assert {"SH0C", "IT0C"} <= hint_ids(novice)
+    assert hint_ids(novice, "short") >= {"SH0C"} and hint_ids(novice, "intraday_t") >= {"IT0C"}
+    for h in HORIZONS:
+        assert not {"SH0C", "IT0C"} & set(rule_ids(novice["caps"][h]))
+    assert novice["suitable"] == control["suitable"]  # 分数可因经验加分项不同（如 intraday_t），但无 59 封顶
+    assert all(novice["scores"][h] == novice["raw"][h] or novice["gate_caps"][h] or novice["caps"][h] for h in HORIZONS)
+    assert_horizon_cap_shape(novice)
+
+
+def test_risk_tolerance_2_hints_sh0():
+    r = evaluate({**CASE_B, "profile.risk_tolerance": 2})
+    assert hint_ids(r) == {"SH0"} and r["hints"][0]["horizon"] == "short"
+    assert r["scores"] == evaluate(CASE_B)["scores"]
+
+
+def test_effort_low_hints_sh0b_and_it0b():
+    r = evaluate({**CASE_B, "profile.effort": "low"})
+    assert hint_ids(r, "short") == {"SH0B"} and hint_ids(r, "intraday_t") == {"IT0B"}
+    assert r["suitable"] == evaluate(CASE_B)["suitable"]
+
+
+def test_hint_shape_is_horizon_hint():
+    """契约 v0.2.5 ``HorizonHint`` = ``{horizon, rule_id, text}``；text 为规则的中文 reason；rule_id 不是 reason_code。"""
+    r = evaluate({**CASE_B, "profile.experience": "novice", "profile.effort": "low", "profile.risk_tolerance": 1})
+    assert hint_ids(r) == PROFILE_HINT_RULES
+    for x in r["hints"]:
+        assert set(x) == {"horizon", "rule_id", "text"} and x["horizon"] in HORIZONS
+        assert isinstance(x["text"], str) and x["text"] and "未填写" not in x["text"]
+
+
+def test_it0_no_base_position_still_in_caps_as_requires():
+    """v0.2.5 组 4：IT0（无底仓）仍是 ``mode: cap``，在 caps 中 ``kind=requires``，分数 0。"""
+    r = evaluate({**CASE_B, "user.has_position": False})
+    assert {"horizon": "intraday_t", "cap": 0, "kind": "requires", "rule_id": "IT0", "inputs_missing": []} in r["caps"]["intraday_t"]
+    assert r["scores"]["intraday_t"] == 0 and "intraday_t" not in r["suitable"]
+    assert_horizon_cap_shape(r)
+
+
+def test_case_e_under_1_2_0():
+    """用例 E（novice 次新股）：1.2.0 起 short 不再封顶（85，适合），只提示 SH0C；intraday_t 无底仓 IT0 → 0；swing 被 HG6 封顶 59。"""
     r = evaluate(CASE_E)
     assert r["raw"]["short"] == 85 and r["raw"]["swing"] == 65
-    assert r["scores"] == {"intraday_t": 0, "short": NOVICE_CAP, "swing": 59, "long": 10}
-    assert r["caps"]["short"] == [{"horizon": "short", "cap": NOVICE_CAP, "kind": "requires", "rule_id": "SH0C", "inputs_missing": []}]
+    assert r["scores"] == {"intraday_t": 0, "short": 85, "swing": 59, "long": 10}
+    assert r["caps"]["short"] == []
+    assert rule_ids(r["caps"]["intraday_t"]) == ["IT0"]
     assert r["gate_caps"]["swing"] == ["HG6"] and r["caps"]["swing"] == []  # 闸门封顶不是 HorizonCap
-    assert r["suitable"] == []
+    assert hint_ids(r) == {"SH0C", "IT0C"} and r["suitable"] == ["short"]
     assert_horizon_cap_shape(r)
 
 
-def test_case_e_intraday_t_within_novice_cap():
-    """用例 E 的 intraday_t（无底仓，IT0 → 0）同样不超过 59、不列为适合。"""
-    r = evaluate(CASE_E)
-    assert r["scores"]["intraday_t"] <= NOVICE_CAP and "intraday_t" not in r["suitable"]
-
-
-def test_case_e_intraday_t_caps_contain_it0c_rule_id():
-    """契约 v0.2.3 测试点（#23）：novice 夹具 intraday_t ≤ 59 且 caps 含 {horizon: intraday_t, kind: requires, rule_id: IT0C}。"""
-    r = evaluate(CASE_E)
-    assert {"horizon": "intraday_t", "cap": NOVICE_CAP, "kind": "requires", "rule_id": "IT0C", "inputs_missing": []} in r["caps"]["intraday_t"]
-    assert r["scores"]["intraday_t"] <= NOVICE_CAP
-    assert_horizon_cap_shape(r)
-
-
-def test_novice_rule_ids_are_rule_ids_not_reason_codes():
-    """#23：SH0C/IT0C 只作为 requires 规则的 id 出现（HorizonCap.rule_id），快照里不出现在任何 reason_code 字段。"""
-    for h in ("short", "intraday_t"):
-        rule = next(q for q in RULES["horizons"][h]["requires"] if q["id"] in NOVICE_RULE_IDS)
-        assert "reason_code" not in rule
-        assert isinstance(rule.get("reason", ""), str)  # reason 是展示文案，不是码
-    blob = SNAP.read_text(encoding="utf-8")
-    assert not re.search(r"reason_code[^\n]*(SH0C|IT0C)", blob)
-
-
-@pytest.mark.parametrize("experience", ["intermediate", "advanced"])
-def test_case_e_control_non_novice_short_suitable(experience):
-    r = evaluate({**CASE_E, "profile.experience": experience})
-    assert r["scores"]["short"] == 85 and r["suitable"] == ["short"]
-
-
-def test_case_e_experience_unfilled_treated_as_novice():
+def test_experience_unfilled_no_hint_no_cap():
+    """v0.2.5：经验未填写 → 不再按 novice 处理（不封顶、不提示）。"""
     r = evaluate({**CASE_E, "profile.experience": None})
-    assert r["scores"]["short"] == NOVICE_CAP and r["suitable"] == []
+    assert r["scores"]["short"] == 85 and r["hints"] == [] and r["suitable"] == ["short"]
 
 
-def test_novice_short_capped_even_when_otherwise_full_score():
-    r = evaluate({**CASE_B, "profile.experience": "novice"})
-    assert r["scores"]["short"] == NOVICE_CAP and "short" not in r["suitable"]
-
-
-@pytest.mark.parametrize("experience", ["novice", None])
-def test_novice_intraday_t_capped_like_short(experience):
-    """IT0C：novice（或未填写）用户的 intraday_t 同样最高 59、不列为适合（用例 B 本为 100）。"""
-    r = evaluate({**CASE_B, "profile.experience": experience})
-    assert r["scores"]["intraday_t"] == NOVICE_CAP and rule_ids(r["caps"]["intraday_t"]) == ["IT0C"]
-    assert r["scores"]["short"] == NOVICE_CAP and rule_ids(r["caps"]["short"]) == ["SH0C"]
-    assert r["suitable"] == ["swing"]
-    assert_horizon_cap_shape(r)
+def test_rule_ids_are_not_reason_codes():
+    """#23：画像类规则 ID 只出现在 HorizonHint.rule_id / HorizonCap.rule_id，快照里不出现在任何 reason_code 字段。"""
+    for _, rule in _profile_rules():
+        assert "reason_code" not in rule
+    blob = SNAP.read_text(encoding="utf-8")
+    assert not re.search(r"reason_code[^\n]*(SH0|IT0)", blob)

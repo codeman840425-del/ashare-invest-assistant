@@ -1,15 +1,16 @@
-"""认证/会话/CSRF/同意书（T-B03，契约 §1.3、§4、§7.1；plan §3.6）——真实 PostgreSQL + Redis（T-T01d）。
+"""认证/会话/CSRF/改密/me（T-B03，契约 §1.3、§4、§7.1；plan §3.6）——真实 PostgreSQL + Redis（T-T01d）。
 
 - 后端没有 ``app/auth/sessions.py``（T-B03 未合入）时整组 skip；缺 argon2/alembic/sqlalchemy/redis 时 skip（原因写明）。
 - 每个模块新建一个独立数据库（``tt01d_auth_<随机>``），``alembic upgrade head`` 后测试，结束即删除；
   Redis 只按本组用户的键断言，不 ``FLUSHDB``，可与其他用例共用实例。
 - 用户名、口令、主密钥全部运行时随机生成，不含任何真实凭据；不连外网、不调用任何行情接口。
 - 契约 v0.2.3 #24–#27（T-A05，架构师 7c62f59，尚未推到 origin）：用户名 4–32、会话绝对 30 天 + 改密轮换、
-  同意书 ``doc_versions`` / ``sensitive_financial_info`` / ``CONSENT_REQUIRED``、注册 ``apply_note`` 与邀请码。
+  注册 ``apply_note`` 与邀请码（#26 同意书部分已被 v0.2.5 作废，用例已删除）。
   后端未实现的条目用 ``xfail(strict=True)``，原因写明负责任务（T-B03 跟进 / T-B03c）。
-- 同意书（consents）相关用例按用户决定暂停：标 ``skip``，原因 ``on hold pending T-A06 (v0.2.5)``；
-  不新增契约 v0.2.4 的同意书/风险测评用例（T-T01d 范围调整）。CSRF 用例借 ``/me/consents`` 作非安全方法载体，
-  只断言 CSRF 拒绝，不涉及同意书语义，保留。
+- 契约 v0.2.5（T-A06 bd33f83，用户 2026-11-02 决定不做同意流程与风险测评）：旧的同意书/测评/agreements 用例
+  **已删除**（不保留 skip）；CSRF 用例的非安全方法载体从 ``/me/consents`` 改为 ``/auth/logout``、``/auth/password``、
+  ``PUT /me/profile``。§8 v0.2.5 的 5 组用例见文末“契约 v0.2.5”一节；后端未同步前标 ``xfail(strict=False)``，
+  原因写明负责任务（后端 T-B03b / T-B01 / T-B30，取自 T-A06 §3 后端清单）。
 - 契约 v0.2.4（35f4880，未推到 origin）：``apply_note`` ≤ 200；CSRF 双提交以 Cookie 为准（头、Cookie、会话令牌三者一致）。
 - 防暴力（限速/渐进锁定，plan §3.6 数值）归 T-B03a：用 ``xfail(strict=True)`` 固化契约预期，实现后会 XPASS 失败提醒转正。
 """
@@ -51,22 +52,25 @@ API = "/api/v1"
 CT_JSON = "application/json; charset=utf-8"
 IDLE_TTL_S = 604800  # 契约 §1.3：滑动 7 天
 ABSOLUTE_TTL_S = 2592000  # 契约 #25 / plan 6.1 auth.yaml session.absolute_ttl_s：自登录起 30 天，不续期；Cookie Max-Age 取此值
-DOC_KEYS = ("terms", "privacy", "risk_disclosure", "signal_risk_disclosure", "sensitive_financial_info")
 #: 后端未跟上 v0.2.3 #24–#27 的负责任务
 T_B03_FU = "T-B03 跟进（契约 v0.2.3 #25/#26，T-A05 7c62f59）：后端尚未实现"
-#: 用户取消（T-T01d 范围调整）：同意书与 v0.2.4 风险测评用例暂停
-ON_HOLD = "on hold pending T-A06 (v0.2.5)"
+#: 契约 v0.2.5（T-A06 bd33f83）后端未同步时的负责任务（T-A06 §3 后端清单）
+B_V025_AUTH = "后端 T-B03b（契约 v0.2.5 / T-A06 §3：删同意与测评端点、表、门槛，注册忽略 agreements，Me 删 consents/risk_assessment）"
+B_V025_ENUMS = "后端 T-B01 / T-B03b（契约 v0.2.5 / T-A06 §3：errors.py、schemas/enums.py 删作废码与枚举，version v0.2.5）"
+B_V025_INSTANCES = "后端（策略实例 POST，契约 v0.2.5 / T-A06 §1.4、§3：删 fit_ack 校验、加 warnings；接口尚未实现）"
 #: 后端未跟上契约 v0.2.4（T-A05 35f4880）的负责任务
 T_B03_V024 = "T-B03 跟进（契约 v0.2.4，T-A05 35f4880）：后端尚未实现"
 T_B03C = "T-B03c（契约 #27 邀请码）：未实现前 invite 模式按 closed 返回 503"
+#: 旧客户端的注册 ``agreements``：现后端（f44b6ee）仍必填；v0.2.5 起服务端忽略。默认注册体照发，以兼容两者
 AGREEMENTS = ["terms", "privacy", "risk_disclosure"]
-ME_KEYS = {"id", "username", "display_name", "role", "status", "entitlements", "consents", "risk_assessment"}
+#: 契约 v0.2.5 §7.1 ``Me``（删 consents、risk_assessment）
+ME_KEYS = {"id", "username", "display_name", "role", "status", "entitlements"}
+#: v0.2.5 前的 Me 多出的键（后端未同步时允许出现，由 test_v025_me_has_no_consent_or_assessment_keys 跟踪）
+ME_RETIRED_KEYS = {"consents", "risk_assessment"}
 BJ_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+08:00$")
 UNSAFE = [
-    ("POST", "/me/consents", {"key": "privacy", "version": "v-tt01d"}),
     ("PUT", "/me/profile", {"version": 0}),
     ("POST", "/auth/password", {"old_password": "x", "new_password": "y"}),
-    ("POST", "/me/risk-assessment", {"answers": {}}),
     ("POST", "/auth/logout", None),
 ]
 
@@ -84,7 +88,7 @@ def new_name() -> str:
 
 
 def reg(username: str, password: str, **kw: Any) -> dict[str, Any]:
-    """契约 §7.1 注册体：``{username, password, display_name, invite_code?, agreements}``。"""
+    """契约 §7.1 注册体：``{username, password, display_name, invite_code?}``；``agreements`` 为旧字段（v0.2.5 起忽略）。"""
     body: dict[str, Any] = {"username": username, "password": password, "display_name": "测试用户", "agreements": AGREEMENTS}
     body.update(kw)
     return body
@@ -232,13 +236,10 @@ def user_session_keys(authdb: SimpleNamespace, uid: str) -> set[str]:
 # ---------------------------------------------------------------------------
 # 迁移版本（DB 自检同步改为 0004）
 # ---------------------------------------------------------------------------
-def test_alembic_head_is_0004_and_terms_consent_kind(authdb: SimpleNamespace, sql: Callable[..., Any]) -> None:
+def test_alembic_head_is_0004(authdb: SimpleNamespace, sql: Callable[..., Any]) -> None:
+    """现后端 head = 0004（T-B03）。v0.2.5 的删表迁移落地后 head 会前移，届时同步本用例与 DB 自检。"""
     assert (BACKEND_DIR / "migrations" / "versions").is_dir()
     assert sql("SELECT version_num FROM alembic_version")[0][0] == "0004"
-    (cdef,) = sql(
-        "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='ck_consents_kind'"
-    )[0]
-    assert "'terms'" in cdef
 
 
 # ---------------------------------------------------------------------------
@@ -248,17 +249,7 @@ def test_alembic_head_is_0004_and_terms_consent_kind(authdb: SimpleNamespace, sq
 def test_meta_registration_reports_mode(app_client: Callable[..., Any], mode: str) -> None:
     r = app_client(mode).get(f"{API}/meta/registration")
     assert r.status_code == 200 and r.json()["mode"] == mode
-    assert set(r.json()) <= {"mode", "doc_versions"}
-
-
-@pytest.mark.skip(reason=ON_HOLD)
-def test_meta_registration_reports_doc_versions(app_client: Callable[..., Any]) -> None:
-    """#26：``doc_versions`` 五个键，值为 string；auth.yaml 默认 null → ``"unversioned"``。"""
-    body = app_client("closed").get(f"{API}/meta/registration").json()
-    assert set(body) == {"mode", "doc_versions"}
-    assert set(body["doc_versions"]) == set(DOC_KEYS)
-    assert all(isinstance(v, str) and v for v in body["doc_versions"].values())
-    assert set(body["doc_versions"].values()) == {"unversioned"}  # plan 6.1 auth.yaml 默认全部未定稿
+    assert set(r.json()) == {"mode"}  # v0.2.4 起不再返回 doc_versions
 
 
 def test_registration_default_is_closed(authdb: SimpleNamespace, make_client: Callable[..., Any]) -> None:
@@ -287,7 +278,7 @@ def test_register_requires_display_name(app_client: Callable[..., Any], display_
     assert "display_name" in fields(assert_err(r, 400, "VALIDATION_ERROR"))
 
 
-def test_register_open_creates_pending_user_with_consents_and_no_session(
+def test_register_open_creates_pending_user_and_no_session(
     app_client: Callable[..., Any], sql: Callable[..., Any]
 ) -> None:
     c = app_client("open")
@@ -302,8 +293,6 @@ def test_register_open_creates_pending_user_with_consents_and_no_session(
     (row,) = sql("SELECT password_hash, role, status FROM app.users WHERE id=:i", i=body["id"])
     assert row.password_hash.startswith("$argon2id$") and pw not in row.password_hash
     assert row.role == "user" and row.status == "pending"
-    kinds = {k for (k,) in sql("SELECT kind FROM app.consents WHERE user_id=:i AND granted", i=body["id"])}
-    assert kinds == {"terms", "privacy_policy", "risk_disclosure"}
 
 
 def test_register_duplicate_username_case_insensitive_is_409(app_client: Callable[..., Any]) -> None:
@@ -399,19 +388,6 @@ def test_register_rejects_weak_password(app_client: Callable[..., Any], kind: st
     assert candidate not in json.dumps(err, ensure_ascii=False)  # 不回显口令
 
 
-@pytest.mark.parametrize(
-    "agreements", [[], ["terms", "privacy"], ["terms", "privacy", "risk_disclosure", "marketing"], None],
-    ids=["empty", "missing-risk", "unknown-extra", "absent"],
-)
-def test_register_requires_exact_agreements(app_client: Callable[..., Any], agreements: list[str] | None) -> None:
-    payload = reg(new_name(), new_pw())
-    del payload["agreements"]
-    if agreements is not None:
-        payload["agreements"] = agreements
-    r = app_client("open").post(f"{API}/auth/register", json=payload)
-    assert "agreements" in fields(assert_err(r, 400, "VALIDATION_ERROR"))
-
-
 @pytest.mark.parametrize("extra", [{"role": "admin"}, {"status": "approved"}])
 def test_register_rejects_privilege_fields(app_client: Callable[..., Any], sql: Callable[..., Any], extra: dict[str, str]) -> None:
     name = new_name()
@@ -429,7 +405,7 @@ def test_login_success_returns_me_and_csrf_and_cookies(session: Callable[..., Si
     s = session()
     body = s.resp.json()
     assert set(body) == {"user", "csrf_token"}
-    assert set(body["user"]) == ME_KEYS
+    assert ME_KEYS <= set(body["user"]) <= ME_KEYS | ME_RETIRED_KEYS
     assert body["user"]["username"] == s.user.username and body["user"]["status"] == "approved"
     assert len(s.csrf) >= 32 and s.sid and len(s.sid) >= 32
     assert s.client.cookies.get("csrf_token") == s.csrf
@@ -727,8 +703,9 @@ def test_csrf_double_submit_cookie_forgery_rejected(session: Callable[..., Simpl
     s = session()
     forged = secrets.token_urlsafe(32)
     s.client.cookies.set("csrf_token", forged)
-    r = s.client.post(f"{API}/me/consents", json={"key": "privacy", "version": "v-forged"}, headers={"X-CSRF-Token": forged})
+    r = s.client.post(f"{API}/auth/logout", headers={"X-CSRF-Token": forged})
     assert_err(r, 403, "CSRF_FAILED")
+    assert s.client.get(f"{API}/me").status_code == 200
 
 
 def test_csrf_header_and_cookie_agree_but_not_session_is_403(session: Callable[..., SimpleNamespace]) -> None:
@@ -758,11 +735,15 @@ def test_csrf_double_submit_requires_cookie_to_match(session: Callable[..., Simp
     assert_err(r, 403, "CSRF_FAILED")
 
 
-def test_csrf_failure_has_no_side_effect(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
+def test_csrf_failure_has_no_side_effect(session: Callable[..., SimpleNamespace], app_client: Callable[..., Any]) -> None:
+    """缺 CSRF 头的改密被拒后：旧口令仍可登录、新口令不可登录、会话仍有效。"""
     s = session()
-    r = s.client.post(f"{API}/me/consents", json={"key": "signal_risk_disclosure", "version": "v-csrf"})
+    new = new_pw()
+    r = s.client.post(f"{API}/auth/password", json={"old_password": s.user.password, "new_password": new})
     assert_err(r, 403, "CSRF_FAILED")
-    assert sql("SELECT count(*) FROM app.consents WHERE user_id=:i AND doc_version='v-csrf'", i=s.user.id)[0][0] == 0
+    assert s.client.get(f"{API}/me").status_code == 200
+    assert app_client().post(f"{API}/auth/login", json={"username": s.user.username, "password": s.user.password}).status_code == 200
+    assert app_client().post(f"{API}/auth/login", json={"username": s.user.username, "password": new}).status_code == 401
 
 
 @pytest.mark.parametrize("method,path", [("GET", "/me"), ("HEAD", "/me"), ("GET", "/me/profile"), ("GET", "/meta/registration")])
@@ -775,8 +756,9 @@ def test_safe_methods_exempt_from_csrf(session: Callable[..., SimpleNamespace], 
 
 
 def test_unsafe_without_session_is_401_not_csrf(app_client: Callable[..., Any]) -> None:
-    r = app_client().post(f"{API}/me/consents", json={"key": "privacy", "version": "v1"})
+    r = app_client().post(f"{API}/auth/password", json={"old_password": new_pw(), "new_password": new_pw()})
     assert_err(r, 401, "AUTH_REQUIRED")
+    assert_err(app_client().post(f"{API}/auth/logout"), 401, "AUTH_REQUIRED")
 
 
 # ---------------------------------------------------------------------------
@@ -850,10 +832,10 @@ def test_change_password_rotates_current_session(
     old.cookies.set("sid", old_sid)
     assert_err(old.get(f"{API}/me"), 401, "AUTH_REQUIRED")
     assert s.client.get(f"{API}/me").status_code == 200
-    ok = s.client.post(f"{API}/me/consents", json={"key": "privacy", "version": "unversioned"}, headers={"X-CSRF-Token": new_csrf})
-    assert ok.status_code == 201
-    stale = s.client.post(f"{API}/me/consents", json={"key": "privacy", "version": "unversioned"}, headers={"X-CSRF-Token": old_csrf})
+    stale = s.client.post(f"{API}/auth/logout", headers={"X-CSRF-Token": old_csrf})
     assert_err(stale, 403, "CSRF_FAILED")
+    ok = s.client.post(f"{API}/auth/logout", headers={"X-CSRF-Token": new_csrf})
+    assert ok.status_code == 204
 
 
 def test_change_password_requires_auth(app_client: Callable[..., Any]) -> None:
@@ -862,87 +844,21 @@ def test_change_password_requires_auth(app_client: Callable[..., Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# /me 与同意书
+# /me
 # ---------------------------------------------------------------------------
 def test_me_requires_auth(app_client: Callable[..., Any]) -> None:
     assert_err(app_client().get(f"{API}/me"), 401, "AUTH_REQUIRED")
 
 
 def test_me_shape(session: Callable[..., SimpleNamespace]) -> None:
+    """契约 v0.2.5 ``Me`` 的核心键齐全；作废键（consents/risk_assessment）由 v0.2.5 组单独跟踪，这里不因其存在而失败。"""
     s = session()
     me = s.client.get(f"{API}/me").json()
-    assert set(me) == ME_KEYS
+    assert ME_KEYS <= set(me) <= ME_KEYS | ME_RETIRED_KEYS
     assert me["id"] == s.user.id and me["username"] == s.user.username
     assert me["role"] == "user" and me["status"] == "approved"
     assert isinstance(me["entitlements"], dict)
-    assert me["risk_assessment"] is None
-    assert set(me["consents"]) == set(AGREEMENTS)
-    for v in me["consents"].values():
-        assert set(v) == {"version", "accepted_at"} and BJ_RE.match(v["accepted_at"])
     assert "password_hash" not in json.dumps(me) and "failed_login_count" not in me
-
-
-def current_doc_version(client: Any, key: str) -> str:
-    """#26：当前版本取自 ``/meta/registration`` 的 ``doc_versions``；旧后端没有该字段时按 auth.yaml 默认 ``"unversioned"``。"""
-    return client.get(f"{API}/meta/registration").json().get("doc_versions", {}).get(key, "unversioned")
-
-
-@pytest.mark.skip(reason=ON_HOLD)
-@pytest.mark.parametrize("key", ["signal_risk_disclosure", "privacy", "terms", "sensitive_financial_info"])
-def test_post_consent_and_me_reflects_latest(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], key: str) -> None:
-    s = session()
-    ver = current_doc_version(s.client, key)
-    r = s.client.post(f"{API}/me/consents", json={"key": key, "version": ver}, headers={"X-CSRF-Token": s.csrf})
-    assert r.status_code == 201, r.text[:300]
-    body = r.json()
-    assert set(body) == {"key", "version", "accepted_at"} and body["key"] == key and body["version"] == ver
-    assert BJ_RE.match(body["accepted_at"])
-    me = s.client.get(f"{API}/me").json()
-    assert me["consents"][key]["version"] == ver
-    (n,) = sql("SELECT count(*) FROM app.audit_logs WHERE actor_id=:i AND action='consent.granted'", i=s.user.id)[0]
-    assert n >= 1
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [{"key": "marketing", "version": "v1"}, {"key": "privacy"}, {"version": "v1"}, {"key": "privacy", "version": "v1", "granted": False}],
-    ids=["unknown-key", "no-version", "no-key", "extra-field"],
-)
-@pytest.mark.skip(reason=ON_HOLD)
-def test_post_consent_invalid_is_400(session: Callable[..., SimpleNamespace], payload: dict[str, Any]) -> None:
-    s = session()
-    r = s.client.post(f"{API}/me/consents", json=payload, headers={"X-CSRF-Token": s.csrf})
-    assert_err(r, 400, "VALIDATION_ERROR")
-
-
-@pytest.mark.skip(reason=ON_HOLD)
-@pytest.mark.parametrize("key", ["privacy", "signal_risk_disclosure"])
-def test_post_consent_version_mismatch_is_400(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], key: str) -> None:
-    """#26：``version`` 必须等于当前 ``doc_versions[key]``，否则 ``400 VALIDATION_ERROR``（field: version），且不落库。"""
-    s = session()
-    bad = "v-tt01d-" + secrets.token_hex(3)
-    r = s.client.post(f"{API}/me/consents", json={"key": key, "version": bad}, headers={"X-CSRF-Token": s.csrf})
-    assert fields(assert_err(r, 400, "VALIDATION_ERROR")) == ["version"]
-    assert sql("SELECT count(*) FROM app.consents WHERE user_id=:i AND doc_version=:v", i=s.user.id, v=bad)[0][0] == 0
-
-
-@pytest.mark.skip(reason=ON_HOLD)
-@pytest.mark.parametrize("path,body", [
-    ("/imports", None),
-    ("/accounts", {"name": "测试账户", "broker": "示例证券", "account_type": "cash"}),
-], ids=["imports", "accounts"])
-def test_financial_writes_require_sensitive_financial_info_consent(
-    session: Callable[..., SimpleNamespace], path: str, body: dict[str, Any] | None
-) -> None:
-    """#26（plan 7.3，个保法第 28 条单独同意）：未同意 ``sensitive_financial_info`` → ``403 CONSENT_REQUIRED``。"""
-    s = session()
-    hdr = {"X-CSRF-Token": s.csrf}
-    if body is None:
-        r = s.client.post(f"{API}{path}", files={"files": ("demo.csv", b"col\n1\n", "text/csv")}, headers=hdr)
-    else:
-        r = s.client.post(f"{API}{path}", json=body, headers=hdr)
-    err = assert_err(r, 403, "CONSENT_REQUIRED")
-    assert err["details"]["required"] == ["sensitive_financial_info"]
 
 
 def test_admin_routes_hidden_from_non_admin(session: Callable[..., SimpleNamespace], app_client: Callable[..., Any]) -> None:
@@ -963,7 +879,7 @@ def test_audit_logs_contain_no_password_or_raw_ip(
     app_client().post(f"{API}/auth/login", json={"username": s.user.username, "password": bad})
     rows = sql("SELECT action, detail::text AS d, ip_hash FROM app.audit_logs WHERE actor_id=:i OR target_id=:t", i=s.user.id, t=s.user.id)
     assert rows, "登录应写审计"
-    assert all(r.action.startswith(("auth.", "consent.")) for r in rows)
+    assert all(r.action.startswith(("auth.", "consent.")) for r in rows)  # consent.*：v0.2.5 前的后端；见 v0.2.5 组
     blob = json.dumps([list(r) for r in rows], default=str)
     for secret in (s.user.password, bad, s.sid, s.csrf, "testclient"):
         assert secret not in blob
@@ -1016,3 +932,121 @@ def test_client_supplied_x_real_ip_not_trusted(
         i=s.user.id, t=s.user.id,
     )]
     assert len(hashes) == 2 and hashes[0] == hashes[1]
+
+
+# ---------------------------------------------------------------------------
+# 契约 v0.2.5（T-A06 bd33f83）§8 测试点：不做同意流程与风险测评
+# 后端（f44b6ee 起的 T-B03/T-B03b 实现）尚未同步 → 受影响用例 xfail(strict=False)，原因写明负责任务。
+# 分类器 1.2.0 的规则层期望在 tests/backend/unit/test_horizon_cases.py；/meta/enums 与文档码表在 test_meta_enums.py。
+# ---------------------------------------------------------------------------
+#: 组 1：作废的端点（v0.2.5 → 404）
+# 后端从未实现的 3 个端点已是 404（直接断言，防回归）；仍存在的 3 个端点待后端同步 → xfail(strict=False)。
+_V025_PENDING = pytest.mark.xfail(strict=False, reason=B_V025_AUTH)
+V025_RETIRED_ENDPOINTS = [
+    pytest.param("GET", "/meta/consent-docs", None, id="GET /meta/consent-docs"),
+    pytest.param("GET", "/legal/terms", None, id="GET /legal/terms"),
+    pytest.param("POST", "/me/consents", {"key": "privacy", "version": "unversioned"}, id="POST /me/consents", marks=_V025_PENDING),
+    pytest.param("GET", "/me/risk-assessment", None, id="GET /me/risk-assessment", marks=_V025_PENDING),
+    pytest.param("POST", "/me/risk-assessment", {"answers": {}}, id="POST /me/risk-assessment", marks=_V025_PENDING),
+    pytest.param("GET", "/me/risk-assessment/questionnaire", None, id="GET /me/risk-assessment/questionnaire"),
+]
+
+
+@pytest.mark.parametrize("method,path,body", V025_RETIRED_ENDPOINTS)
+def test_v025_retired_consent_and_assessment_endpoints_are_404(
+    session: Callable[..., SimpleNamespace], method: str, path: str, body: Any
+) -> None:
+    """v0.2.5 组 1：``/meta/consent-docs``、``/legal/terms``、``POST /me/consents``、``/me/risk-assessment*`` → 404。"""
+    s = session()
+    r = s.client.request(method, f"{API}{path}", json=body, headers={"X-CSRF-Token": s.csrf})
+    assert_err(r, 404, "NOT_FOUND")
+
+
+def _consent_rows(sql: Callable[..., Any], uid: Any) -> int:
+    """v0.2.5 可能删表：表不存在视为 0 行。"""
+    if sql("SELECT to_regclass('app.consents')")[0][0] is None:
+        return 0
+    return sql("SELECT count(*) FROM app.consents WHERE user_id=:i", i=uid)[0][0]
+
+
+@pytest.mark.xfail(strict=False, reason=B_V025_AUTH)
+@pytest.mark.parametrize("agreements", ["absent", "legacy"])
+def test_v025_register_ignores_agreements_and_writes_no_consent(
+    app_client: Callable[..., Any], sql: Callable[..., Any], agreements: str
+) -> None:
+    """v0.2.5 组 2：注册带或不带 ``agreements`` 都 201，库中不产生同意记录（旧字段服务端忽略，不报错、不记录）。"""
+    body = reg(new_name(), new_pw())
+    if agreements == "absent":
+        body.pop("agreements")
+    r = app_client("open").post(f"{API}/auth/register", json=body)
+    assert r.status_code == 201, (r.status_code, r.text[:300])
+    assert _consent_rows(sql, r.json()["id"]) == 0
+    assert sql("SELECT count(*) FROM app.audit_logs WHERE target_id=:i AND action LIKE 'consent.%'", i=r.json()["id"])[0][0] == 0
+
+
+@pytest.mark.xfail(strict=False, reason=B_V025_AUTH)
+def test_v025_me_has_no_consent_or_assessment_keys(session: Callable[..., SimpleNamespace]) -> None:
+    """v0.2.5 组 2：``Me`` = ``{id, username, display_name, role, status, entitlements}``，无 consents、risk_assessment。"""
+    s = session()
+    assert set(s.client.get(f"{API}/me").json()) == ME_KEYS
+    assert set(s.resp.json()["user"]) == ME_KEYS
+
+
+#: 组 3：⚖ 建议类接口与财务写入（v0.2.5 无合规门槛）
+V025_UNGATED = [
+    ("GET", "/terminal"), ("GET", "/today"), ("GET", "/candidate-signals"), ("GET", "/suggestions"),
+    ("GET", "/daily-reports"), ("GET", "/signals"), ("POST", "/plan-drafts"), ("POST", "/suggestions/refresh"),
+    ("POST", "/imports"), ("POST", "/trades"),
+]
+#: 自报画像全部“不满足”（v0.2.5 §7.1 /me/profile 请求体）
+V025_LOW_PROFILE = {"horizon_pref": ["long"], "effort": "low", "risk_tolerance": 1, "experience": "novice",
+                    "max_single_position_pct": "10"}
+
+
+@pytest.mark.parametrize("profile", ["none", "unsatisfied"])
+def test_v025_no_403_gate_without_or_with_low_profile(session: Callable[..., SimpleNamespace], profile: str) -> None:
+    """v0.2.5 组 3：无画像、或画像不满足任何条件时，⚖ 接口、``POST /imports``、``POST /trades`` 均不返回 403。
+
+    现后端尚无这些路由（404），本用例对“没有门槛”成立；路由落地后同一断言继续生效。"""
+    s = session()
+    hdr = {"X-CSRF-Token": s.csrf}
+    if profile == "unsatisfied":
+        r = s.client.put(f"{API}/me/profile", json=V025_LOW_PROFILE, headers=hdr)
+        if r.status_code != 200:
+            pytest.xfail(B_V025_AUTH + f"（PUT /me/profile 拒绝 v0.2.5 画像体：{r.status_code}）")
+    for method, path in V025_UNGATED:
+        r = s.client.request(method, f"{API}{path}", json={} if method == "POST" else None, headers=hdr)
+        assert r.status_code != 403, (method, path, r.text[:200])
+        if r.status_code >= 400:
+            assert r.json()["error"]["code"] not in {"CONSENT_REQUIRED", "CSRF_FAILED"}, (method, path)
+
+
+@pytest.mark.xfail(strict=False, reason="后端 T-B30（周期分类器 1.2.0 与 GET /horizon-assessments 尚未实现；T-A06 §3）")
+def test_v025_horizon_assessment_has_hints_and_classifier_1_2_0(session: Callable[..., SimpleNamespace]) -> None:
+    """v0.2.5 组 4（接口层）：``/horizon-assessments`` 返回 ``hints: HorizonHint[]``（永不为 null）、``classifier_version`` 1.2.0；
+    novice 画像 → hints 含 SH0C/IT0C 且 caps 不含二者。规则层期望见 unit/test_horizon_cases.py。"""
+    s = session()
+    hdr = {"X-CSRF-Token": s.csrf}
+    assert s.client.put(f"{API}/me/profile", json=V025_LOW_PROFILE, headers=hdr).status_code == 200
+    r = s.client.get(f"{API}/horizon-assessments", params={"security_code": "600000"})
+    assert r.status_code == 200, r.text[:300]
+    body = r.json()
+    assert body["classifier_version"] == "1.2.0" and isinstance(body["hints"], list)
+    for h in body["hints"]:
+        assert set(h) == {"horizon", "rule_id", "text"}
+    ids = {h["rule_id"] for h in body["hints"]}
+    assert {"SH0C", "IT0C"} <= ids
+    assert not ids & {c["rule_id"] for c in body["caps"]}
+
+
+@pytest.mark.xfail(strict=False, reason=B_V025_INSTANCES)
+def test_v025_strategy_instance_unsuitable_horizon_is_201_with_warnings(session: Callable[..., SimpleNamespace]) -> None:
+    """v0.2.5 组 5：``POST /strategy-instances`` 对不适合的周期 → 201 且 ``warnings`` 非空；请求带 ``fit_ack`` 被忽略。
+    （接口落地后需补策略版本/账户夹具；目前路由不存在。）"""
+    s = session()
+    body = {"strategy_version_id": "00000000-0000-4000-8000-000000000001", "scope": "security", "account_id": None,
+            "security_code": "600000", "horizon": "intraday_t", "param_overrides": None, "budget_amount": None,
+            "fit_ack": {"rule_ids": ["IT0C"]}}
+    r = s.client.post(f"{API}/strategy-instances", json=body, headers={"X-CSRF-Token": s.csrf})
+    assert r.status_code == 201, (r.status_code, r.text[:300])
+    assert r.json()["warnings"] and all(isinstance(w, str) and w for w in r.json()["warnings"])

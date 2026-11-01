@@ -18,6 +18,9 @@ T-T01d（T-A05，7c62f59，契约 #22）：§6.1 由 6 个文件变为 8 个（�
 T-B02a 暂放的 ``ingest.imports.*`` 作废，``ingest.yaml`` 不得再有 ``imports`` 段。
 契约 v0.2.4（35f4880）：``auth.yaml`` 去掉 ``consents.doc_versions``（改由 ``legal_documents`` 表），
 新增 ``admin.same_ip_highlight_threshold``；快照按 35f4880 的 plan §6.1 原文。
+契约 v0.2.5（T-A06 bd33f83）：不做同意流程（``auth.yaml`` 仍无 consents 段）；``horizon_classifier.yaml`` 升到
+``version_no: 3`` / ``classifier_version: "1.2.0"``，画像类 requires 改 ``mode: hint``，快照按 bd33f83 的 plan §6.1 原文；
+docs 仍为 v0.2.4 时快照比对 xfail（运维推送 bd33f83）。
 
 YAML 一律按 1.2 布尔规则读取（只认 true/false），与后端 ``config_files`` 一致；plan 已把 ``"on"`` 加引号。
 """
@@ -48,12 +51,15 @@ CONFIG_DIR = Path(os.environ.get("AIA_CONFIG_DIR", REPO_ROOT / "config")).resolv
 #: T-A02 改动的文件 → 负责同步仓库文件与后端模型的任务
 OWNER = {
     "market_rules": "后端 T-B36（交易规则模块：modeled_from / adv_basis / risk_warning，第二段 2023-04-10；v0.2.3 applies_to_boards 加 chinext、新增 limit_order_only_exchanges）",
-    "horizon_classifier": "后端 T-B30（周期分类：f.* 特征、recompute 加 position_open_close、rules 全文；v0.2.3 version_no 2 / classifier_version 1.1.0 / SH0C）",
+    "horizon_classifier": "后端 T-B30（周期分类：f.* 特征、recompute 加 position_open_close、rules 全文；v0.2.5 version_no 3 / classifier_version 1.2.0 / 画像类 requires 为 mode: hint，T-A06 §3）",
     "llm": "后端 T-B25（LLM 网关：config/llm.yaml 与其模型）",
     "imports": "后端 T-B02a 跟进（T-A05：新建 config/imports.yaml 与模型，键路径 imports.*，删除 ingest.imports.*）",
     "auth": "后端 T-B03 跟进（T-A05：新建 config/auth.yaml 与模型：password/password_hash/session/invite/admin；v0.2.4 无 consents 段）",
 }
 HORIZONS = ("intraday_t", "short", "swing", "long")
+#: plan v0.2.5（T-A06 bd33f83）改动的 §6.1 代码块；docs 仍是 v0.2.4 时快照比对 xfail，待运维推送
+V025_CHANGED = {"horizon_classifier": 3}
+V025_DOCS_PENDING = "plan §6.1 仍为 v0.2.4：架构师 T-A06 bd33f83（v0.2.5，分类器 1.2.0）未推到 origin（运维推送）"
 
 
 class _Yaml12Loader(yaml.SafeLoader):
@@ -198,8 +204,8 @@ def test_key_defaults_risk_controls():
 
 def test_key_defaults_horizon_classifier():
     d = snap("horizon_classifier")
-    # v0.2.3（T-A03，问题 37 方案 A）：新增 SH0C 发新版本 version_no 2 / classifier_version 1.1.0
-    assert (d["version_no"], d["classifier_version"], d["suitable_threshold"], d["reasons_per_horizon"]) == (2, "1.1.0", 60, [2, 4])
+    # v0.2.3：version_no 2 / 1.1.0（SH0C）；v0.2.5（T-A06）：画像类规则改 mode: hint → version_no 3 / 1.2.0
+    assert (d["version_no"], d["classifier_version"], d["suitable_threshold"], d["reasons_per_horizon"]) == (3, "1.2.0", 60, [2, 4])
     assert re.fullmatch(r"\d+\.\d+\.\d+", d["classifier_version"])
     assert d["recompute"]["on"] == ["import_confirm", "watchlist_add", "weekly", "position_open_close"]
     assert True not in d["recompute"], "YAML 1.1 把裸 on 读成 true：plan 要求加引号"
@@ -236,6 +242,11 @@ def test_horizon_rules_ids_unique_and_caps_below_threshold():
     for h in r["horizons"].values():
         for q in h["requires"]:
             assert q.get("else_score", 0) == 0 and q.get("else_cap", 0) < d["suitable_threshold"]
+            # v0.2.5：mode ∈ {cap(默认), hint}；hint 不得带 else_cap/else_score，cap 必须恰有其一
+            if q.get("mode", "cap") == "hint":
+                assert "else_cap" not in q and "else_score" not in q and q["input"].startswith("profile."), q["id"]
+            else:
+                assert q.get("mode", "cap") == "cap" and ("else_cap" in q) != ("else_score" in q), q["id"]
 
 
 @pytest.mark.parametrize("horizon", HORIZONS)
@@ -289,7 +300,7 @@ def test_key_defaults_auth():
     inv = d["invite"]
     assert (inv["code_bytes"], inv["default_ttl_h"], inv["max_ttl_h"], inv["max_uses"]) == (16, 168, 720, 1)
     assert inv["default_ttl_h"] <= inv["max_ttl_h"]
-    # 契约 v0.2.4 #3（35f4880）：文书版本改由 legal_documents 表提供，auth.yaml 删除 consents 段；新增审核提示阈值
+    # 契约 v0.2.4 #3：auth.yaml 删除 consents 段（v0.2.5 同意流程整体作废）；新增审核提示阈值
     assert "consents" not in d and "doc_versions" not in str(d)
     assert d["admin"] == {"same_ip_highlight_threshold": 3}
     keys = [p for p in diff_paths(d, {}) if re.search(r"(?i)(secret|master_key|api_key|pepper)", p)]
@@ -337,7 +348,10 @@ def test_snapshot_equals_plan_block(docs_dir, name):
     if name in _t_a05_missing(blocks):
         pytest.xfail(f"plan §6.1 尚无 {name}.yaml：架构师 7c62f59 未推到 origin（运维推送）")
     assert name in blocks, f"plan §6.1 已无 {name}.yaml"
-    assert load12(blocks[name]) == snap(name), f"plan §6.1 的 {name}.yaml 已变，请同步快照"
+    plan = load12(blocks[name])
+    if name in V025_CHANGED and plan.get("version_no", 0) < V025_CHANGED[name] and snap(name)["version_no"] == V025_CHANGED[name]:
+        pytest.xfail(V025_DOCS_PENDING)
+    assert plan == snap(name), f"plan §6.1 的 {name}.yaml 已变，请同步快照"
 
 
 # ---------------- 3. 后端模型接受 plan v0.2.3 快照 ----------------
@@ -370,7 +384,7 @@ def test_backend_model_accepts_plan_snapshot(cfgtools, name):
     except Exception as exc:  # pydantic.ValidationError
         if name in OWNER:
             locs = sorted({".".join(map(str, e["loc"])) for e in getattr(exc, "errors", list)()})[:8]
-            pytest.xfail(f"后端模型拒绝 plan v0.2.3 的 {name}.yaml（{locs}）：{OWNER[name]}")
+            pytest.xfail(f"后端模型拒绝 plan §6.1 快照的 {name}.yaml（{locs}）：{OWNER[name]}")
         raise
 
 
@@ -381,7 +395,7 @@ def _repo_file(name: str) -> Path:
         if p.is_file():
             return p
     if name in OWNER and any((CONFIG_DIR / f"{n}.yaml").is_file() for n in NAMES):
-        pytest.xfail(f"{CONFIG_DIR.name}/{name}.yaml 未创建（plan v0.2.3 §6.1）：{OWNER[name]}")
+        pytest.xfail(f"{CONFIG_DIR.name}/{name}.yaml 未创建（plan §6.1）：{OWNER[name]}")
     pytest.skip(f"{CONFIG_DIR}/{name}.yaml 尚未创建（依赖 T-B01 后续 / T-B02：plan §6.1 文件由后端创建）")
 
 
@@ -390,7 +404,7 @@ def test_repo_yaml_equals_plan_defaults(name):
     got = load12(_repo_file(name).read_text(encoding="utf-8"))
     diffs = diff_paths(got, snap(name))
     if diffs and name in OWNER:
-        pytest.xfail(f"仓库 config/{name}.yaml 与 plan v0.2.3 不一致 {diffs[:8]}：{OWNER[name]}")
+        pytest.xfail(f"仓库 config/{name}.yaml 与 plan §6.1 快照不一致 {diffs[:8]}：{OWNER[name]}")
     assert diffs == []
 
 

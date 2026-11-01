@@ -1,12 +1,44 @@
 # A股个人投资研究与决策助手 · REST 接口契约（MVP v1）
 
-- 作者：架构师；日期：2026-11-02；版本：**v0.2.7**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b；v0.2.4 为 T-A05 合入研究员 T-B15 合规文书与问卷、前端 T-F02 评审 D1–D7；v0.2.5 为 T-A06 按用户 2026-11-02 决定删除同意流程与风险测评；v0.2.6 为 T-A07 每用户自用麦蕊证书并入 T006e 裁定；v0.2.7 为 T-A08 补齐个股数据接口、策略实例列表与状态机、周 K 口径与 `/today` 三块）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
-- 配套：[`plan.md`](./plan.md)（架构方案）。本契约优先于代码：FastAPI 生成的 `openapi.json` 与本文不一致时**改代码**。
+- 作者：架构师；日期：2026-11-02；版本：**v0.2.8**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b；v0.2.4 为 T-A05 合入研究员 T-B15 合规文书与问卷、前端 T-F02 评审 D1–D7；v0.2.5 为 T-A06 按用户 2026-11-02 决定删除同意流程与风险测评；v0.2.6 为 T-A07 每用户自用麦蕊证书并入 T006e 裁定；v0.2.7 为 T-A08 补齐个股数据接口、策略实例列表与状态机、周 K 口径与 `/today` 三块；v0.2.8 为 T-A09 按证书拆分 `/admin/ingest/status`、ETF 纳入、注册蜜罐字段、管理员暂停期间的证书 PUT 规则、`/admin/*` 不进 openapi）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
+- 配套：[`plan.md`](./plan.md)（架构方案）。本契约优先于代码：FastAPI 生成的 `openapi.json` 与本文不一致时**改代码**。例外：`/admin/*` 不进 `openapi.json`（v0.2.8，§1.3），其结构以本文为准、由契约测试验证。
 - **示例值全部虚构**：代码用 `600000.SH / 000001.SZ`，ID 用 `00000000-0000-4000-8000-0000000000xx`，金额为随意整数；不含任何真实账户、股东代码、姓名、金额或委托/成交编号。证券简称一律用“示例银行”“演示电子”这类虚构名称。
 
 ---
 
 ## 0. 变更记录
+
+### v0.2.8（2026-11-02，T-A09：`/admin/ingest/status` 按证书拆分、ETF 纳入（plan 第 9 节问题 53 已定）、注册蜜罐字段、管理员暂停期间的证书 PUT 规则、`/admin/*` 不进 openapi（架构师裁定）、首页为 `/today`；**含不兼容变更**：#1（管理端响应结构）、#12–#14（证书接口在暂停期与重复 PUT 时的行为）、#15（`openapi.json` 不再含 `/admin/*`）；#4 为默认搜索结果的行为变化，结构兼容）
+
+| # | 项 | 决定 | 后端改动 | 前端改动 |
+|---|---|---|---|---|
+| 1 | `/admin/ingest/status` 证书状态（**不兼容**，仅管理端） | 删除全站 `licence: {expires_on, days_left}`，改为按证书的 `licences: IngestLicenceStatus[]` 与 `licences_truncated: boolean`（§5.1、§7.9）；字段与 v0.2.6 `/admin/data-licences`、每证书令牌桶与 p0/p1/p2 队列同名同义；**不含证书值或其任何片段** | 改响应；按证书汇总调用量、队列、熔断 | `/admin/ingest` 页改为按证书的表格 |
+| 2 | `AdminDataLicence` | 加 `licence_id: uuid \| null`（未设置为 `null`），与 `IngestLicenceStatus.licence_id` 对应 | 新增字段 | 可选：两页互相跳转 |
+| 3 | `security_type` 加 `etf` | ETF 纳入证券公开主数据、搜索、行情、持仓与导入；**策略不对 ETF 运行**；可转债本版不纳入（v0.2.7 未决 Q3） | 枚举；主数据导入交易所 ETF 名单【待 Q2 / T-A04 补测】 | 类型联合加 `etf`；类型徽标“ETF” |
+| 4 | 证券搜索（行为变化） | `types=` 默认由 `stock,cdr` 改为 `stock,cdr,etf`；同层排序 `stock` > `cdr` > `etf` > `index`；默认仍不含指数 | 改默认值与排序 | 结果中显示 ETF 徽标；只要股票时传 `types=stock,cdr` |
+| 5 | 证券资料 | ETF：`board`、`list_date_basis`、`risk_flag`、股本、`industry` 为 `null`，`concepts` 为 `[]`，不计入缺失、不出 gap（§5.1） | 同步 | 不显示这些栏位 |
+| 6 | 个股数据 | ETF 的 financials、fund-flows、factors、announcements：`200`、空 `items`、`data_status:"unavailable"`、`gaps[].reason="not_applicable"`；指数保持 `no_source` 不变 | 同步 | 显示“ETF 不适用” |
+| 7 | `gap_reason` 加 `not_applicable` | 该证券类型没有此类数据（本版只用于 ETF） | 枚举 | 文案 |
+| 8 | 行情 | ETF 的 `/quotes`、`/bars`、`/terminal`、`/today` 行与股票同口径；价格保留 3 位小数【待 T003 补测：麦蕊 ETF 实时与日 K、复权口径】 | 采集范围含 ETF 持仓与自选 | 价格按 3 位小数显示 |
+| 9 | 持仓与导入 | ETF 成交可导入、手工录入、重建持仓；整手 100 份；`sellable_qty` 按 T+1【待研究员核对 T+0 ETF】；可转债行仍按 `IMPORT_UNKNOWN_SECURITY` | 同步 | 无 |
+| 10 | 策略实例 | ETF 不能建实例：`scope="security"` 且为 ETF → `422 INSTANCE_SCOPE_INVALID{scope, security_code, security_type:"etf", issue:"security_type_not_supported"}`（复用错误码，详情加三个键）；`account`/`watch_group` 范围运行时跳过 ETF；分类器 HG1 已对非股票判 0 分，规则不变，不产生 `proposed`；H-01 不挂到 ETF 持仓（§6.0A 第 8 条） | 校验与运行范围 | 个股页对 ETF 隐藏“建策略实例”，或按 422 提示 |
+| 11 | 注册蜜罐（架构师裁定） | `POST /auth/register` 加可选字段 `website`（隐藏，须为空或不传）与 `form_started_at`（int，毫秒）；命中时返回与正常注册相同的状态码和响应体，不建用户，审计 `auth.register_honeypot`（不记表单内容），仍计入 IP 限速；两字段不触发 `extra=forbid` 的 400（§7.1） | 改注册体与判定 | 注册页加隐藏输入与表单渲染时间 |
+| 12 | 暂停期 PUT（**行为定义**，架构师裁定） | 管理员暂停按用户记录；暂停期间 `PUT /me/data-licence` → `202`，`status` 仍为 `paused_by_admin`，不验证；DELETE 后再 PUT 也不解除；只有管理员 resume 解除（§7.1、§7.9） | 暂停记录与证书行分离 | 暂停状态下的提示文案 |
+| 13 | 重复 PUT 同一证书（**行为定义**） | 不清除 `quota_exceeded`、`ip_limited` 和 `paused_until`；返回 `202` 与当前状态，到期前不验证 | 判定 | 无 |
+| 14 | 暂停期测试与恢复 | 暂停期间 `POST /me/data-licence/test` → `409 DATA_LICENCE_UNAVAILABLE{status:"paused_by_admin"}`；resume 时证书已删除 → `not_set` | 同步 | 暂停时禁用“测试”按钮 |
+| 15 | `/admin/*` 不进 openapi（**不兼容**，仅工具链） | `include_in_schema=False`；契约优先；管理端由契约测试验证（§1.3、§9） | 已如此实现，补契约测试 | 管理端类型按契约手写，不从 openapi 生成 |
+| 16 | 首页 | 前端首页为 `/today`（今日关注），`/` 重定向到 `/today`；`/terminal` 为交易终端（plan 2.4） | 无 | 改根路由重定向 |
+| — | `/meta/enums.version` | `"v0.2.7"` → `"v0.2.8"` | 同步 | `CONTRACT_VERSION` |
+
+**v0.2.8 未决问题**（同步 plan 第 9 节问题 61–65；均有默认，未否决即按默认执行）
+
+| # | plan 第 9 节 | 问题 | 默认（未否决即按此实现） | 需要谁定 |
+|---|---|---|---|---|
+| U1 | 61 | 跨境、债券、黄金、货币等 ETF 实行 T+0，`sellable_qty` 与 `T1_NOT_SELLABLE` 如何处理 | 一律按 T+1 计算（偏保守，只可能少算可卖数量） | 研究员核对品种清单 |
+| U2 | 62 | ETF 名单来源；麦蕊 ETF 实时、日 K、复权是否可用 | 名单只用交易所公开基金列表；取不到行情时按 §1.1 降级 | T003 / T-A04 补测 |
+| U3 | 63 | 交割单中的可转债按 `import_as_is` 导入后，持仓如何展示（无主数据、无行情） | 本版不变：按原代码显示，无行情 | 编排者 |
+| U4 | 64 | 各档位麦蕊日额度（`IngestLicenceStatus.daily_limit`） | 只有钻石版过期后有值（`diamond_after_expiry_per_day`），其余为 `null` | T003 补测 |
+| U5 | 65 | 指数的财务、资金流是否也改用 `not_applicable` | 不改，保持 `no_source`（避免对已上线行为做不兼容修改） | 架构师（下一轮） |
 
 ### v0.2.7（2026-11-02，T-A08：补齐策略列表 `risk_level`、策略实例列表与状态机、个股数据接口、周 K 口径、`/today` 的提醒、计划触发与数据缺口；证券公开主数据范围按用户 2026-11-02 决定（Q1）；**无不兼容变更**：只新增端点、字段和枚举值；`/securities?q=` 保留为别名）
 > 本版不新增任何与荐股、评级、目标价相关的字段或文案；不写入任何证书值。标【待 T003 补测】【待补测】的数值或映射须等实测结果出来才能定稿。
@@ -41,13 +73,13 @@
 |---|---|---|---|---|
 | Q1 | 51 | 证券公开主数据是否全站一份（plan 2.1B 原写“证券列表……也按证书各取一份”） | **已定（架构师 T-A08，2026-11-02）**：见上表 #19；来源【待 Q2 / T-A04 补测】，确认前不得用他人证书 | — |
 | Q2 | 52 | 交易所公开证券列表能否展示、能否再分发（T007 §4）；连同 Q1 的来源（交易所公开列表或管理员本人证书） | 只展示 Q1 所列公开字段，加 `attribution` 注明来源；来源确认前只用交易所公开列表 | 用户（合规）；T-A04 补测 |
-| Q3 | 53 | ETF、可转债是否纳入 `security_type` 和搜索 | **已定（编排者，2026-11-02）**：ETF 纳入 `security_type`、搜索与持仓（交割单可能含 ETF 成交），策略不对 ETF 运行；可转债本版不纳入。枚举与各接口的同步在 T-A09 完成 | — |
+| Q3 | 53 | ETF、可转债是否纳入 `security_type` 和搜索 | **已定（编排者，2026-11-02）**：ETF 纳入 `security_type`、搜索与持仓（交割单可能含 ETF 成交），策略不对 ETF 运行；可转债本版不纳入。枚举与各接口的同步**已在 v0.2.8 完成**（T-A09，见 v0.2.8 #3–#10） | — |
 | Q4 | 54 | 因子的行业内分位：麦蕊没有直接提供，自行计算需要定义行业口径和最小样本数 | 不提供，只给全市场排名 | 研究员 |
 | Q5 | 55 | 实例归档时，其已开放的候选信号如何处理（继续有效直到过期，还是置为 `invalidated`） | 暂不变更状态，信号自然过期 | 架构师 + 研究员 |
 | Q6 | 56 | 搜索默认是否包含指数 | 不包含，需要时传 `types=` | 前端 + 产品 |
 | Q7 | 57 | 实例数量是否受权益上限约束（`ENTITLEMENT_LIMIT_REACHED`） | 本版不加；如需加，confirm/resume 时检查 | 架构师（2.9 权益） |
 | Q8 | 58 | 复权 `f` 与 `fr` 的区别、前复权基准日如何取得 | 先按 `f` 实现，`adjust_as_of` 来源待补测 | T003 补测 |
-| Q9 | 59 | `/alerts`、`/plans` 的完整结构仍未定义（T-F06/T-F07 卡在这里）；`/today` 的“查看全部”指向这两个页面 | `TodayAlert`、`TodayPlanTrigger` 先作为这两个接口元素的子集，结构定义时必须兼容 | 架构师（下一轮 T-A09） |
+| Q9 | 59 | `/alerts`、`/plans` 的完整结构仍未定义（T-F06/T-F07 卡在这里）；`/today` 的“查看全部”指向这两个页面 | `TodayAlert`、`TodayPlanTrigger` 先作为这两个接口元素的子集，结构定义时必须兼容 | 架构师（T-A09 未处理，顺延下一轮） |
 | Q10 | 60 | 板块资金的 `industry` 用哪套行业分类；资金流分档阈值、因子单位等 | 标【待 T003 补测】 | T003 补测 |
 
 ### v0.2.6（2026-11-02，T-A07：每用户自用麦蕊证书（用户已定，plan 2.1B、第 9 节问题 49–50）；并入 T006e 架构裁定；**含不兼容变更**：`HorizonCap.kind` 删 `requires`、加 `gate`）
@@ -229,7 +261,7 @@
 | 时间 | `string(datetime)`：ISO 8601 含时区，服务端统一输出 `+08:00`；日期 `string(date)` = `YYYY-MM-DD`（交易日按北京时间） |
 | 金额/价格/数量/比例 | **十进制字符串** `string(decimal)`，如 `"10.25"`、`"0.1530"`；不用 JSON number，避免浮点误差。百分比字段名以 `_pct` 结尾，值为百分数（`"3.20"` = 3.20%） |
 | 分数/置信度数值 | `number`。**所有名为 `score` 的字段都是 0–100 整数**（四舍五入；观点未知时为 `null`）；引擎内部的 0–1 小数不对外。`confidence.value` 为 0–1、两位小数。这些是规则计算结果，不是金额 |
-| 证券代码 | `string`：`{6位代码}.{SH\|SZ\|BJ}`；指数同格式（如 `000300.SH`） |
+| 证券代码 | `string`：`{6位代码}.{SH\|SZ\|BJ}`；指数、ETF 同格式（如 `000300.SH`、`510300.SH`；ETF 为 v0.2.8） |
 | 证券简称 | **凡含 `security_code` 的对象都同时带 `name: string`**（证券简称）。不可变对象（建议、日报、信号）里的 `name` 是生成当时的简称，可能与当前简称不同；代码查不到简称时为代码本身，不为 `null`。**例外（v0.2.7 写明）**：`security_code` 本身允许为 `null` 的对象（`StrategyInstance`、`TodayAlert`、`RiskEvent`、`/today.risk_flags` 元素等），`security_code` 为 `null` 时 `name` 也为 `null` |
 | 条件请求 | 标注“ETag”的 `GET` 返回弱 ETag（`W/"…"`）；客户端带 `If-None-Match` 且内容未变 → `304`（无响应体）。头 `Cache-Control: private, no-cache` |
 | 可空 | 标记为 `T \| null` 的字段总是出现，值可为 `null`；未标记的字段必有值 |
@@ -242,7 +274,7 @@
 {"data_status": "fresh", "data_as_of": "2026-11-02T10:31:00+08:00", "gaps": [{"key": "news", "reason": "no_source", "message": "本产品不提供新闻资讯"}]}
 ```
 - `data_status: "fresh" | "stale" | "pending" | "partial" | "unavailable"`：`stale`=超过刷新间隔 ×2 未更新（0A.3）；`pending`=已投递按需拉取任务；`partial`=部分维度缺数据；`unavailable`=上游不可用，或本人数据证书不可用且从未取到数据（v0.2.6）。本人证书不可用时行情接口不报错，只把 `data_status` 置为 `stale`/`unavailable` 并在 `gaps` 中给出 `data_licence_unavailable`；**不会用他人证书的数据补齐**。
-- `gaps[]: {key: string, reason: "no_source"|"not_yet_published"|"upstream_error"|"quota_deferred"|"user_input_missing"|"data_licence_unavailable", message: string}`。
+- `gaps[]: {key: string, reason: "no_source"|"not_yet_published"|"upstream_error"|"quota_deferred"|"user_input_missing"|"data_licence_unavailable"|"not_applicable", message: string}`（`not_applicable`：该证券类型没有此类数据，如 ETF 的财务、资金流、因子、公告；v0.2.8）。
 - **混合来源响应（v0.2.7）**：一个响应同时含“证券公开主数据”（全站一份，范围见 v0.2.7 #19：代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示）和“本人证书取到的麦蕊数据”时，`data_status` 只按证书部分判定。证书部分从未取到时为 `partial`（主数据仍返回），`gaps` 给出 `data_licence_unavailable` 或 `not_yet_published`，被影响的字段为 `null`；证书部分全部可用时按 0A.3 规则判定。**个股与板块类读接口**（§7.3 中 v0.2.7 新增的端点、`/securities/{code}/bars`、`/quotes`）**不返回** `409 DATA_LICENCE_UNAVAILABLE`；该错误码仍只用于需要触发拉取的写操作。
 - **缓存未命中（v0.2.7）**：本人证书下没有缓存时返回 `200`，`data_status:"pending"`，按本人证书入队（P1）；当日该证书配额不足时 `gaps` 加 `{reason:"quota_deferred"}`，不报 429。
 - **证书范围（v0.2.7）**：除证券公开主数据外，所有字段都只来自本人证书取到的数据；**不会用他人证书的数据补齐**（与 v0.2.6 #1 一致）。公开主数据的确切来源（交易所公开列表，或用管理员本人证书拉取）【待 Q2 / T-A04 补测】；确认前只用交易所公开列表，不得用他人（含管理员）的证书为其他用户取数。
@@ -258,6 +290,7 @@
 - **权限**：未登录 → `401 AUTH_REQUIRED`；账号非 `approved` → `403 ACCOUNT_NOT_APPROVED`（以上两条均不适用于 `/admin/*`）；`/admin/*`：不是已登录的 `role=admin` 时（含未登录）一律 `404 NOT_FOUND`，与不存在的路径无法区分（不泄露管理端存在性；先于本节其他校验，v0.2.1）。用户只能访问自己的资源，访问他人资源一律 `404 NOT_FOUND`（不泄露存在性）。
 - **合规门槛**：**无**（v0.2.5 作废原有的测评与同意门槛，`CONSENT_REQUIRED` 不再存在）。标 ⚖ 的建议类接口（`/today`、`/suggestions*`、`/daily-reports*`、`/signals*`、`/candidate-signals*`、`/plan-drafts*`、`/stream` 中标 ⚖ 的事件）只表示“输出是规则信号”：前端须在其旁固定展示免责提示（`docs/strategies/compliance/disclaimer.md`：“本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。”），服务端不拦截。`POST /imports`、`POST /trades` 也不需要单独同意。
 - **限速**：超限 `429 RATE_LIMITED`，头 `Retry-After`（秒）。
+- **`/admin/*` 不进 openapi（v0.2.8，架构师裁定）**：所有 `/admin/*` 路由以 `include_in_schema=False` 注册，公开的 `openapi.json` 与 `/docs` 中没有它们（与上面的 404 规则一致，不向非管理员暴露管理端路径）。管理端的请求和响应结构**以本契约为准**（§5.1 `AdminDataLicence`、`IngestLicenceStatus` 等，§7.9），由契约测试逐接口校验（§9），不得依赖 `openapi.json` 生成管理端类型；前端管理页类型按本契约手写。“`openapi.json` 与本文不一致时改代码”只适用于非 `/admin/*` 路径。
 - 敏感字段一律掩码输出（如 `shareholder_code_masked: "A00****000"` 为格式示意），任何接口都不返回原始股东代码、资金账号或原始上传文件内容。
 
 ---
@@ -307,7 +340,7 @@
 | `severity` | `info` `attention` `important` |
 | `channel` | `in_app` `email` `wecom_app`（预留） |
 | `data_status` | `fresh` `stale` `pending` `partial` `unavailable`（含义见 1.1） |
-| `gap_reason` | `no_source` `not_yet_published` `upstream_error` `quota_deferred` `user_input_missing` `data_licence_unavailable`（`gaps[].reason`，1.1；v0.2.6 加 `data_licence_unavailable`） |
+| `gap_reason` | `no_source` `not_yet_published` `upstream_error` `quota_deferred` `user_input_missing` `data_licence_unavailable` `not_applicable`（`gaps[].reason`，1.1；v0.2.6 加 `data_licence_unavailable`；v0.2.8 加 `not_applicable`） |
 | `data_provider` | `mairui` `user_import` `user_input` `system` `exchange`（`Evidence.provider` 与 `ProviderRef.provider`；`system` = 系统计算；v0.2.3 起 `Evidence.provider` 只用此枚举，没有 `local`；v0.2.7 加 `exchange` = 沪深北交易所公开证券列表（T007），只用于证券公开主数据，且只在 Q2 / T-A04 确认来源为交易所公开列表时使用；若确认改由管理员本人证书拉取，则这些字段的 `provider` 为 `mairui`） |
 | `source_kind` | `market_data` `disclosure` `user_input` `system_calc`（证据来源类别，plan 3.1） |
 | `trade_side` | `buy` `sell` |
@@ -338,7 +371,7 @@
 | `ingest_health` | `ok` `stale` `paused` `unknown`（`unknown` = Redis 不可用，无法判断） |
 | `data_licence_status` | `not_set` `pending_verification` `active` `invalid` `expired` `quota_exceeded` `ip_limited` `paused_by_admin`（v0.2.6，plan 2.1B） |
 | `data_licence_tier` | `free` `trial` `monthly` `annual` `diamond` `other`（v0.2.6；用户自报的麦蕊证书档位，决定默认每分钟上限） |
-| `security_type` | `stock` `cdr` `index`（v0.2.7；ETF、可转债暂不收录，见 v0.2.7 未决 Q3） |
+| `security_type` | `stock` `cdr` `etf` `index`（v0.2.7；v0.2.8 加 `etf`，见 v0.2.7 未决 Q3、plan 第 9 节问题 53；可转债本版不收录） |
 | `board` | `main` `chinext` `star` `bse`（v0.2.7） |
 | `listing_status` | `listed` `delisting_period` `delisted` `missing_from_list`（v0.2.7；`missing_from_list`=麦蕊或历史数据中有、但交易所当前列表中找不到，T007 §5）。**停牌不是上市状态**，用 `SecurityProfile.suspended` 表示 |
 | `security_risk_flag` | `st` `star_st` `delisting`（v0.2.7；同时命中时取最高一项：`delisting` > `star_st` > `st`） |
@@ -397,7 +430,7 @@
 | 409 | `INVALID_STATE_TRANSITION` | 状态机不允许的跃迁（第 6.0 节）。`allowed` 是**用户从 `from` 出发、通过接口可以到达的目标状态**（不含系统专用转换），按该对象状态枚举的顺序排列；没有可达状态时为 `[]`（v0.2.7 写明） | `{from, to, allowed}` |
 | 409 | `STRATEGY_VERSION_NOT_RUNNABLE` | 模板版本不是 `published`/`observing`（例如 simulating、retired） | `{lifecycle}` |
 | 422 | `STRATEGY_PARAM_OUT_OF_RANGE` | 参数覆盖超出 param_schema 的 min/max/choices | `{param, min, max, choices}` |
-| 422 | `INSTANCE_SCOPE_INVALID` | 实例作用范围不合法（例如 security 范围缺少代码，或代码不在账户/自选中） | `{scope}` |
+| 422 | `INSTANCE_SCOPE_INVALID` | 实例作用范围不合法（例如 security 范围缺少代码，或代码不在账户/自选中；v0.2.8：证券为 ETF，策略不对 ETF 运行） | `{scope}`；ETF 时为 `{scope, security_code, security_type: "etf", issue: "security_type_not_supported"}`（v0.2.8） |
 | 422 | `PROMOTION_GATES_NOT_MET` | 晋级或上线时门禁未通过 | `{gates:[{gate, result}]}` |
 | 422 | `CARD_IMPORT_INVALID` | 导入器校验研究员文档失败（plan.md 2.5.14，只在管理端/CI 出现） | `{file, block, errors:[{path, issue}]}` |
 | 422 | `COMPLIANCE_LINT_FAILED` | 用户可见文案含禁用词 | `{terms}` |
@@ -474,7 +507,7 @@
 | 43 | `IMPORT_CASH_CHAIN_BREAK` | warning | row | 剩余金额链在本行断开，差额 {diff} 元 | 仅提示（日间可能有非成交资金流水） | `trades_duplicates_in_file.txt` 行 8；`trades_reimport_overlap.txt` |
 | 44 | `IMPORT_NON_TRADING_DAY` | warning | row | 成交日期 {date} 不是交易日 | 仅提示 | 生成器 |
 | 45 | `IMPORT_TIME_OUTSIDE_SESSION` | warning | row | 成交时间不在交易时段内 | 仅提示 | 生成器 |
-| 46 | `IMPORT_LOT_SIZE_IRREGULAR` | warning | row | 买入数量不符合整手规则 | 仅提示（科创板 200 股起、按 1 股递增等规则按板块处理） | 生成器 |
+| 46 | `IMPORT_LOT_SIZE_IRREGULAR` | warning | row | 买入数量不符合整手规则 | 仅提示（科创板 200 股起、按 1 股递增等规则按板块处理；ETF 按 100 份整数倍，v0.2.8） | 生成器 |
 
 **处理选项（v0.2.4 #11，T-F02 D3）**：`ImportFinding.resolution_choices` 按下表生成，第一个为 `default_resolution`；表中没有的提示码 `resolution_choices = []`、`default_resolution = null`。覆盖类选项提交时 `reason` 必填（1–200 字），并写审计。
 
@@ -514,13 +547,14 @@
 | `HorizonHint` | `{horizon: horizon, rule_id: string, text: string}`（v0.2.5）。画像类 `requires` 规则（`mode: hint`）在画像**已填写且不满足**时给出的提示，如 `{horizon:"short", rule_id:"SH0C", text:"短线需要盯盘与止损纪律，您自报的经验为新手"}`；画像未填写不产生提示；不影响分数与 `suitable`。**提示与分数无关**：即使该周期已被 `IT0` 等判为 0 分，仍按画像给出提示（v0.2.6，T006e）。`rule_id` 不是 `reason_code` |
 | `HorizonCap` | `{horizon: horizon, cap: int(0–100), kind: "gate" \| "data_missing", rule_id: string \| null, inputs_missing: string[]}`（v0.2.3；**v0.2.6 改 `kind` 取值，T006e**）。`gate`：hard gate 命中（`rule_id` 为 `HG1`–`HG6`，判 0 分的 HG1–HG3 记 `cap: 0`，`inputs_missing` 为 `[]`）；`data_missing`：数据缺失或不足导致封顶——必需特征缺失时 `rule_id=null`、`inputs_missing` 为该周期缺失的 `f.*` 键；`LG0`（财报不足 12 期）、`LG0B`（ROE 缺失）的 `else_cap` 也记为 `data_missing`，`rule_id` 为规则 ID。`requires` 取值 v0.2.6 删除：画像类规则只进 `hints[]`（v0.2.5）；`IT0`（无底仓）的 `else_score: 0` 是分数而非封顶，不进 `caps`，只在 `reasons[]` 中给出反向理由。`rule_id` 是 `horizon_classifier.yaml` 的规则 ID，**不是** `reason_code`，不进 `/meta/enums`（v0.2.3 #23）。同一周期多个封顶都列出，生效值取最小 |
 | `DataLicenceStatus` | `{status: data_licence_status, tier: data_licence_tier \| null, has_quant_pro: boolean \| null, expires_on: string(date) \| null（用户填写）, days_to_expiry: int \| null, set_at: datetime \| null, last_verified_at: datetime \| null, last_error_code: "101" \| "102" \| "103" \| "429" \| "503" \| "network" \| "http_5xx" \| null, last_error_at: datetime \| null, paused_until: datetime \| null}`（v0.2.6）。**不含证书值或其任何片段**；未设置时 `status: "not_set"`、其余字段为 null |
-| `AdminDataLicence` | `DataLicenceStatus` 全部字段 + `{user_id: uuid, username, display_name, per_minute_limit: int, calls_last_minute: int, calls_today: int, queue_depth: {p0: int, p1: int, p2: int}}`（v0.2.6；同样不含证书值） |
+| `AdminDataLicence` | `DataLicenceStatus` 全部字段 + `{licence_id: uuid \| null（v0.2.8；未设置为 null）, user_id: uuid, username, display_name, per_minute_limit: int, calls_last_minute: int, calls_today: int, queue_depth: {p0: int, p1: int, p2: int}}`（v0.2.6；同样不含证书值） |
+| `IngestLicenceStatus` | v0.2.8，`/admin/ingest/status` 的 `licences[]` 元素，每张证书一行：`{licence_id: uuid, user_id: uuid, username, display_name, status: data_licence_status, tier: data_licence_tier \| null, has_quant_pro: boolean \| null, expires_on: string(date) \| null, days_left: int \| null, calls_today: int, daily_limit: int \| null, per_minute_limit: int, calls_last_minute: int, queue_depth: {p0: int, p1: int, p2: int}, paused_until: datetime \| null, last_error_code: 同 DataLicenceStatus, last_error_at: datetime \| null}`。与 `AdminDataLicence` 同名字段同义；`days_left` 即 `days_to_expiry`（北京时间 `expires_on` 减今天的天数，已过期为负，`expires_on` 为 null 时为 null）；`calls_today` 为北京时间当日 00:00 起该证书已发出的上游调用数；`daily_limit` 为该证书当日的上游日额度，目前只有钻石版过期后取 `ingest.yaml` 的 `diamond_after_expiry_per_day`，其余为 `null`（未知或不限，【待 T003 补测：各档位日额度】）；`per_minute_limit` 为该证书令牌桶的当前上限；`queue_depth` 为该证书 p0/p1/p2 队列积压；`paused_until` 是上游熔断或限流造成的暂停（管理员暂停看 `status`）。**不含证书值、密文、HMAC 或其任何片段，也不含证书长度** |
 
 **v0.2.7 新增对象**（下列结构中未标 `| null` 的字段均不为 null；数组无元素时为 `[]`）
 
 **`ProviderRef`**：`{provider: data_provider, endpoint: string | null, fetched_at: string(datetime) | null}`。只用于展示类接口的 `sources[]`，用来注明来源；建议、信号类论断仍用 `Evidence`。
 
-**`SecurityHit`**：`{security_code, name, type: security_type, exchange: "SH"|"SZ"|"BJ", board: board | null（指数为 null）, listing_status: listing_status | null, risk_flag: security_risk_flag | null, match_kind: security_match_kind, matched_text: string | null（命中的是曾用名、旧代码或拼音首字母时，给出命中的原文；其余为 null）, quote_missing: boolean | null（该代码在公开主数据中有、在本人证书的麦蕊代码集中没有时为 true；尚未比对时为 null【待补测：交易所与麦蕊代码集比对】）}`。
+**`SecurityHit`**：`{security_code, name, type: security_type, exchange: "SH"|"SZ"|"BJ", board: board | null（指数、ETF 为 null）, listing_status: listing_status | null, risk_flag: security_risk_flag | null, match_kind: security_match_kind, matched_text: string | null（命中的是曾用名、旧代码或拼音首字母时，给出命中的原文；其余为 null）, quote_missing: boolean | null（该代码在公开主数据中有、在本人证书的麦蕊代码集中没有时为 true；尚未比对时为 null【待补测：交易所与麦蕊代码集比对】）}`。
 
 **`SecurityProfile`**：
 ```text
@@ -538,6 +572,7 @@
 - 第一行到 `attribution` 是**证券公开主数据**（全站一份，范围见 v0.2.7 #19：代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示；`type`、`code_history` 属“代码”，`list_date_basis` 属“上市日”，`delist_date` 属“状态”；拼音只用于搜索，不在本对象中返回）。来源【待 Q2 / T-A04 补测】，确认前只用交易所公开列表（`provider=exchange`），不得用他人证书。`list_date_basis="neeq_select"` 表示北交所平移股取的是精选层挂牌日；`attribution` 是固定的来源说明文字（如“证券列表来自上交所、深交所、北交所公开信息”），前端原样展示。**不提供公司全称**（不在公开主数据范围内）。
 - `industry` 之后的字段来自本人证书（`provider=mairui`）；从未取到时为 `null` 或 `[]`，规则见 §1.1 混合来源响应。
 - 指数：`board`、`list_date_basis`、股本、`industry` 为 `null`，`concepts` 为 `[]`。
+- ETF（v0.2.8）：`board`、`list_date_basis`、`risk_flag`、股本（`total_shares`、`float_shares`）、`industry` 为 `null`，`concepts` 为 `[]`；这些字段对 ETF 不适用，不计入 `data_status` 的缺失判断，也不出 gap；`suspended` 照常来自本人证书。ETF 名单属于证券公开主数据，只用交易所公开的基金列表【待 Q2 / T-A04 补测】。可转债不收录。
 
 **`FinancialPeriod`**：
 ```text
@@ -642,7 +677,7 @@
 5. resume 一个系统暂停（`pause_reason_code="LOSS_STREAK_PAUSE"`）的实例，视为“用户确认恢复”：清空暂停字段，并在事件 `detail` 中记 `{released_reason_code: "LOSS_STREAK_PAUSE"}`。用户暂停的实例不会被系统自动恢复。
 6. 暂停期间该实例不生成新的候选信号；已存在的候选信号状态不变。归档时如何处理仍开放的候选信号，见 v0.2.7 未决 Q5。
 7. 对 archived 实例 `PATCH` → `409 IMMUTABLE_RESOURCE`。
-8. `POST /strategy-instances` 创建的实例 `origin="user"`、直接为 `active`（与 v0.2.6 一致）；`proposed` 只由周期分类器产生（`origin="classifier"`）；`origin="system"` 只由系统挂载（如 H-01）。
+8. `POST /strategy-instances` 创建的实例 `origin="user"`、直接为 `active`（与 v0.2.6 一致）；`proposed` 只由周期分类器产生（`origin="classifier"`）；`origin="system"` 只由系统挂载（如 H-01）。v0.2.8：**ETF 不能创建实例**——`scope="security"` 且证券为 ETF → `422 INSTANCE_SCOPE_INVALID{scope, security_code, security_type:"etf", issue:"security_type_not_supported"}`；`scope="account"`/`"watch_group"` 的实例运行时跳过其中的 ETF（不报错，不产生候选信号和建议）；周期分类器对 ETF 各周期判 0 分（HG1，规则不变），不产生 `proposed` 实例；H-01 不挂到 ETF 持仓。
 
 ### 6.1 不可执行原因码（`reason_code`，与 plan.md 2.5.9 一致；`GET /meta/enums` 下发，含默认解除条件）
 | code | 默认 `release_condition.kind` | `check_on` | 可手动解除 |
@@ -689,24 +724,24 @@
 | 方法 | 路径 | 说明 | 请求 → 响应 |
 |---|---|---|---|
 | GET | `/meta/registration` | 注册模式（不需登录），前端据此隐藏注册入口 | → `200 {mode: registration_mode}`（v0.2.5：不再有文书版本） |
-| POST | `/auth/register` | 注册，状态为 `pending`。**V1 默认 `registration_mode=closed`**，一律返回 `503 REGISTRATION_CLOSED`；本人账号由 CLI 创建 | `{username: string(4–32，^[a-z0-9_]+$，服务端转小写；保留词 admin/root/system 等 → 400 VALIDATION_ERROR), password: string(10–128，须含字母与数字，不得等于用户名，不得在弱口令表中), display_name: string(1–32), invite_code: string \| null（V1 不用）, apply_note: string(≤200) \| null}`；提交注册即视为已知悉固定免责提示（注册页展示），不记录同意；旧客户端发来的 `agreements` 字段被忽略（v0.2.5） → `201 {id, username, status:"pending"}`；`invite` 模式下 `invite_code`、`apply_note` 必填，邀请码无效（不存在/过期/已用/已吊销/绑定的用户名不符）一律 `400 VALIDATION_ERROR {fields:[{field:"invite_code", issue:"invalid"}]}`；可能返回 `409 CONFLICT`、`503 REGISTRATION_CLOSED`（含邀请功能未上线时的 `invite` 模式）、`429 RATE_LIMITED` |
+| POST | `/auth/register` | 注册，状态为 `pending`。**V1 默认 `registration_mode=closed`**，一律返回 `503 REGISTRATION_CLOSED`；本人账号由 CLI 创建 | `{username: string(4–32，^[a-z0-9_]+$，服务端转小写；保留词 admin/root/system 等 → 400 VALIDATION_ERROR), password: string(10–128，须含字母与数字，不得等于用户名，不得在弱口令表中), display_name: string(1–32), invite_code: string \| null（V1 不用）, apply_note: string(≤200) \| null, website: string \| null（v0.2.8 蜜罐，可选）, form_started_at: int \| null（v0.2.8，可选）}`；提交注册即视为已知悉固定免责提示（注册页展示），不记录同意；旧客户端发来的 `agreements` 字段被忽略（v0.2.5） → `201 {id, username, status:"pending"}`；`invite` 模式下 `invite_code`、`apply_note` 必填，邀请码无效（不存在/过期/已用/已吊销/绑定的用户名不符）一律 `400 VALIDATION_ERROR {fields:[{field:"invite_code", issue:"invalid"}]}`；可能返回 `409 CONFLICT`、`503 REGISTRATION_CLOSED`（含邀请功能未上线时的 `invite` 模式）、`429 RATE_LIMITED`。**蜜罐与最短填写时间（v0.2.8，架构师裁定）**：`website` 是前端隐藏的输入框（不可见、`tabindex=-1`、`autocomplete=off`），正常提交为空串或不传；`form_started_at` 是注册表单首次渲染时的毫秒时间戳（Unix epoch ms），前端应按服务端时钟校正（用 `GET /meta/registration` 响应头 `Date` 与本地时钟的差值），不传则不做此项检查。两字段是注册体的正式字段，**不触发** `extra=forbid` 的 `400 VALIDATION_ERROR`（其他未知字段仍 400）；`website` 不校验内容与长度；`form_started_at` 不是整数 → `400 VALIDATION_ERROR`。**命中条件**：`website` 去首尾空白后非空；或 `form_started_at` 存在且“服务端当前毫秒时间 − `form_started_at` < 3000”（含未来时间）。**判定顺序**：注册模式（`closed` → 503）→ IP 限速（命中的请求同样计数）→ 字段与邀请码校验（400）→ 用户名冲突（409）→ 待审核数上限（503）→ 蜜罐。**命中时**返回与正常注册相同的状态码和响应体（`201 {id: 随机 uuid, username: 归一化后的用户名, status:"pending"}`），但不创建用户、不消耗邀请码、不进入待审核列表；写审计 `auth.register_honeypot`（`actor_id=null`，`detail` 只含 `{trigger: "website"\|"too_fast"\|"both"}`，**不记录用户名、口令、申请说明等任何表单内容**，`ip_hash` 照常）。3000 毫秒是固定规则，不进配置 |
 | POST | `/auth/login` | 登录 | `{username, password}` → `200 {user: Me, csrf_token}` + Set-Cookie；可能返回 `401 INVALID_CREDENTIALS`、`403 ACCOUNT_NOT_APPROVED{status, reason?}`、`403 ACCOUNT_LOCKED{retry_after_s}` |
 | POST | `/auth/logout` 🔒 | 注销 | → `204` |
 | POST | `/auth/password` 🔒 | 修改密码，同时注销其他会话并轮换当前会话 | `{old_password, new_password}` → `204` + Set-Cookie（新 `sid`、新 `csrf_token`；前端从 Cookie 重读 CSRF 令牌）；旧密码错误 → `400 VALIDATION_ERROR`（`field: old_password`），计入 T-B03a 限速 |
 | GET | `/me` 🔒 | 当前用户 | → `Me {id, username, display_name, role, status, entitlements: {key: value}, data_licence_status: data_licence_status}`（v0.2.5 删 `consents`、`risk_assessment`；v0.2.6 加 `data_licence_status`） |
 | GET/PUT | `/me/profile` 🔒 | 投资画像（版本化，PUT 生成新版本；全部由用户自报） | `{horizon_pref: horizon[], effort: "low"\|"medium"\|"high" \| null, risk_tolerance: int(1–5) \| null, experience: "novice"\|"intermediate"\|"advanced" \| null, max_single_position_pct: string(decimal，5–50，最多 2 位小数)}` → `{version_no, ...}`；无画像时 GET → `404 NOT_FOUND`（分类器按未填写处理）。三个自报字段为 null 表示未填写：分类器不封顶、不提示（plan 2.5.3、2.5.14）。v0.2.5 删 `assessment_id`、`questionnaire_version` 与 `exceeds_assessment` 校验 |
 | GET | `/me/data-licence` 🔒 | 本人数据证书状态（v0.2.6，plan 2.1B） | → `200 DataLicenceStatus`；**永不返回证书值** |
-| PUT | `/me/data-licence` 🔒 | 设置或替换本人麦蕊证书：服务端用 `ingest` 公钥加密后存库，并投递一次验证 | `{licence: string（去首尾空白后 16–64 位，`^[A-Za-z0-9-]+$`，【待核实 T-B05】）, tier: data_licence_tier, has_quant_pro: boolean, expires_on: string(date) \| null}` → `202 DataLicenceStatus`（`status: "pending_verification"`）；同一证书已绑定其他账号 → `409 DATA_LICENCE_IN_USE`；格式不符 → `400 VALIDATION_ERROR`（`field: "licence"`，消息不含输入值）；10 次/小时 → `429 RATE_LIMITED` |
+| PUT | `/me/data-licence` 🔒 | 设置或替换本人麦蕊证书：服务端用 `ingest` 公钥加密后存库，并投递一次验证 | `{licence: string（去首尾空白后 16–64 位，`^[A-Za-z0-9-]+$`，【待核实 T-B05】）, tier: data_licence_tier, has_quant_pro: boolean, expires_on: string(date) \| null}` → `202 DataLicenceStatus`（`status: "pending_verification"`）；同一证书已绑定其他账号 → `409 DATA_LICENCE_IN_USE`；格式不符 → `400 VALIDATION_ERROR`（`field: "licence"`，消息不含输入值）；10 次/小时 → `429 RATE_LIMITED`。**管理员暂停期间（v0.2.8，架构师裁定）**：暂停**按用户记录**，不随证书行的替换或删除而消失。暂停期间 PUT（新证书或同一证书）照常校验（400/409/429 同上），通过后保存密文和元数据，返回 `202 DataLicenceStatus`，其中 `status` 仍为 `"paused_by_admin"`；**不投递验证**，`ingest` 不使用该证书；DELETE 后再 PUT 同样不解除暂停。只有管理员 resume 能解除（§7.9）。**重复 PUT 同一证书**（与当前证书相同，按服务端 HMAC 判定）：`paused_until` 未到期时保留；状态为 `quota_exceeded` 或 `ip_limited` 时保持该状态；这两种情况返回 `202` 与当前状态，不投递验证，只更新 `tier`、`has_quant_pro`、`expires_on`。其余情况照常转为 `pending_verification` 并验证 |
 | PATCH | `/me/data-licence` 🔒 | 只改元数据（不改证书） | `{tier?, has_quant_pro?, expires_on?}` → `200 DataLicenceStatus`；未设置 → `409 DATA_LICENCE_NOT_SET` |
-| DELETE | `/me/data-licence` 🔒 | 删除本人证书（密文清除，`ingest` 15 秒内停止使用；该证书名下的行情数据按保留策略清理） | → `204`；未设置也 `204`（幂等） |
-| POST | `/me/data-licence/test` 🔒 | 让 `ingest` 用本人证书调用一次轻量接口 | → `202 {verification_id: uuid}`，结果经 SSE `data_licence` 与 `GET /me/data-licence` 获取；未设置 → `409 DATA_LICENCE_NOT_SET`；5 次/小时 → `429 RATE_LIMITED`；采集暂停 → `503 INGEST_PAUSED` |
+| DELETE | `/me/data-licence` 🔒 | 删除本人证书（密文清除，`ingest` 15 秒内停止使用；该证书名下的行情数据按保留策略清理） | → `204`；未设置也 `204`（幂等）；管理员暂停期间 DELETE 照常清除密文，之后 `GET` 仍返回 `status:"paused_by_admin"`（证书相关字段为 null），暂停记录保留（v0.2.8） |
+| POST | `/me/data-licence/test` 🔒 | 让 `ingest` 用本人证书调用一次轻量接口 | → `202 {verification_id: uuid}`，结果经 SSE `data_licence` 与 `GET /me/data-licence` 获取；未设置 → `409 DATA_LICENCE_NOT_SET`；5 次/小时 → `429 RATE_LIMITED`；采集暂停 → `503 INGEST_PAUSED`；管理员暂停期间 → `409 DATA_LICENCE_UNAVAILABLE{status:"paused_by_admin"}`（v0.2.8） |
 | GET/PATCH | `/admin/users` 🛡 · `/admin/users/{id}` 🛡 | 审核和停用账号 | GET 列表分页（§1.2）`?status=&q=`，元素 `AdminUser {id, username, display_name, status: account_status, role, apply_note: string \| null, created_at, register_ip_region: string \| null（粗粒度）, same_ip_registrations: int, same_ip_flag: boolean（超过 plan 6.1 `admin.same_ip_highlight_threshold`，只作提示）, review_reason: string \| null, reviewed_at: string(datetime) \| null, last_login_at: string(datetime) \| null}`；PATCH `{status: "approved"\|"rejected"\|"disabled", reason: string(≤200) \| null}`：`rejected`、`disabled`，以及从 `disabled` 恢复为 `approved` 时 `reason` 必填，否则 `400 VALIDATION_ERROR`（v0.2.4 #12） |
 
 ### 7.2 账户、成交与导入（只返回掩码字段）
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET/POST | `/accounts` 🔒 | 券商账户：`{id, broker_name, alias, shareholder_code_masked, fund_account_masked, created_at}`；POST 只接受 `alias` 和 `broker_name` |
-| POST | `/imports` 🔒 | `multipart/form-data`：`file`、`account_id`、`kind: "trades"\|"positions"`、`snapshot_as_of: string(datetime) \| null`（持仓快照时间，可后补）。原始文件存放在仓库外、加密并做访问控制的存储中（plan.md 3.5A）→ `201 {batch_id, status: "uploaded", file_findings: ImportFinding[]}`，随后后台解析。上传阶段的文件级 error（空文件、过大、类型不符、行数超限）→ `422 IMPORT_FILE_ERRORS{findings}`，**不创建批次**。同一文件再次上传**不报错**，在 `file_findings` 中给出 warning `IMPORT_DUPLICATE_FILE{batch_id}` |
+| POST | `/imports` 🔒 | `multipart/form-data`：`file`、`account_id`、`kind: "trades"\|"positions"`、`snapshot_as_of: string(datetime) \| null`（持仓快照时间，可后补）。原始文件存放在仓库外、加密并做访问控制的存储中（plan.md 3.5A）→ `201 {batch_id, status: "uploaded", file_findings: ImportFinding[]}`，随后后台解析。上传阶段的文件级 error（空文件、过大、类型不符、行数超限）→ `422 IMPORT_FILE_ERRORS{findings}`，**不创建批次**。同一文件再次上传**不报错**，在 `file_findings` 中给出 warning `IMPORT_DUPLICATE_FILE{batch_id}`。v0.2.8：交割单与持仓文件中的 ETF 按证券主数据识别，照常导入并重建持仓；可转债不在主数据中，仍按 `IMPORT_UNKNOWN_SECURITY` 处理（`import_as_is` / `skip_row`） |
 | GET | `/imports` 🔒 | 批次列表（分页，`?account_id=&status=`）：元素 `ImportBatchSummary {batch_id, account_id, kind, status: import_status, parser_id: string \| null, stats, created_at, committed_at: string(datetime) \| null, reverted_at: string(datetime) \| null}`（v0.2.4 #12） |
 | GET | `/imports/{batch_id}` 🔒 | `{batch_id, account_id, kind, status: import_status, parser_id: string \| null, parser_version: string \| null, detected_encoding: string \| null, encoding_override: string \| null, encoding_confidence: number \| null, format_score: number \| null, detected_columns: string[], mapping: {[column]: field} \| null, snapshot_as_of: string(datetime) \| null, file_findings: ImportFinding[], stats: {rows, ok, warning, error, skipped, new, duplicate_in_db, duplicate_in_file, possible_duplicate_of_manual, needs_action_open: int}, created_at, committed_at: string \| null, reverted_at: string \| null}`。`parser_id` 取 `tdx_trades_v1` / `tdx_positions_v1`（旧名 `fmt_a_*` 作为别名接受）。轮询间隔 ≥ 1 秒，或等 SSE `notification(kind=import)` |
 | GET | `/imports/{batch_id}/rows` 🔒 | 预览行（分页，`?status=&code=&dedup_status=`）：`{row_no, status: import_row_status, kind: "trade" \| "event" \| "ignored", dedup_status: dedup_status \| null, findings: ImportFinding[], raw_masked: string, normalized: {trade_date, trade_time: string \| null, security_code, name, side: trade_side \| null, qty, price, amount, fee_total: string \| null, net_amount: string \| null, biz_type_raw: string} \| null}`。`raw_masked` 是掩码后的原始行；**不返回原始股东代码或资金账号** |
@@ -720,26 +755,26 @@
 | POST | `/trades/{id}/void` 🔒 | 作废一条成交（v0.2.4 #12）：`{reason: string(1–200)}` → `200 Trade`；已作废 → `409 INVALID_STATE_TRANSITION`；导入批次回滚造成的作废，`void_reason` 为 `"batch_reverted:{batch_id}"`；写审计 |
 | GET | `/snapshots` 🔒 | 持仓快照 |
 | GET | `/reconciliation?account_id=` 🔒 | 对账结果：`{status: reconciliation_status, as_of: string(datetime) \| null, items: [{kind: reconciliation_item_kind, security_code: string \| null, name: string \| null, ours: string(decimal) \| null, broker: string(decimal) \| null, diff: string(decimal) \| null, important: boolean, note: string}]}`。成本按**摊薄成本**比较（我方重建值计入分红：现金红利冲减、股息红利税补缴计入，与通达信一致，v0.2.2），容差 `max(0.01 元, 0.1%)`（plan 3.5A）；每次导入确认后重算 |
-| GET | `/portfolio?account_id=` 🔒 | 持仓汇总（`account_id` 可选，不传时合并全部账户；v0.2.4 #14）：`{cash, total_assets, positions: [{security_code, name, qty, sellable_qty, cost_price, market_value, pnl, pnl_pct, weight_pct}], exposure: {sector: [{name, pct}]}, DataStatusBlock}` |
+| GET | `/portfolio?account_id=` 🔒 | 持仓汇总（`account_id` 可选，不传时合并全部账户；v0.2.4 #14）：`{cash, total_assets, positions: [{security_code, name, qty, sellable_qty, cost_price, market_value, pnl, pnl_pct, weight_pct}], exposure: {sector: [{name, pct}]}, DataStatusBlock}`。v0.2.8：持仓可含 ETF，`sellable_qty` 一律按 T+1 计算【待研究员核对：T+0 的 ETF 品种，v0.2.8 未决 U1】 |
 
 ### 7.3 自选、行情与证券
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET/POST/PATCH/DELETE | `/watchlist` 🔒 · `/watchlist/{security_code}` 🔒 | GET（不分页）→ `{items: WatchlistItem[], caps: {watchlist: int, focus: int}}`；POST `{security_code, group: string \| null, note: string \| null}` → `201 WatchlistItem`；PATCH `{group?, note?}`。超出上限返回 `403 ENTITLEMENT_LIMIT_REACHED{key:"watchlist.per_user_cap"}`（上限数值 **待 T003 验证**） |
 | PUT | `/watchlist/{security_code}/focus` 🔒 | 设为重点关注 `{focus: boolean}` |
-| GET | `/securities/search` 🔒 | v0.2.7。`?q=`（必填，归一化后长度 1–20）`&types=`（逗号分隔 `security_type`，默认 `stock,cdr`）`&include_delisted=false&limit=`（默认 20，最大 50），**不分页** → `{items: SecurityHit[], master_as_of: string(date)}`。**归一化**：NFKC、去空白、字母转大写；`600000.SH`、`SH600000`、`sh600000`、`600000` 都按代码处理。**匹配范围**：6 位代码、简称、拼音首字母（例如 `PFYH`）、曾用名、北交所旧代码（经 `security_code_history` 解析到新代码，`match_kind=former_code`）、模糊匹配（`pg_trgm` 相似度 ≥ `search.similarity_threshold`，默认 0.3；查询中至少有 2 个汉字才启用）。**排序**：先按 `security_match_kind` 层级（`code_exact` > `name_exact` > `initials_exact` > `code_prefix` > `name_prefix` > `initials_prefix` > `name_contains` > `former_name` = `former_code` > `fuzzy`）；同层依次比较：`listing_status`（`listed` 优先，其次 `delisting_period`，其余靠后）→ `type`（`stock` > `cdr` > `index`）→ 命中位置（越靠前越优先）→ 简称长度（短的优先）→ trgm 相似度（降序）→ `security_code`（升序）。同一证券只出现一次，取最高层的命中。**拼音首字母**：用 pypinyin 生成，多音字的组合最多 16 个（`search.initials_max_variants`）；另外生成去掉 `ST`/`*ST` 前缀的版本；巨潮提供的拼音只用于交叉校验。`include_delisted=false` 时排除 `delisted`，`missing_from_list` 仍返回。默认不含指数（v0.2.7 未决 Q6）。缓存：`Cache-Control: private, max-age=60`。q 为空或归一化后超长、`limit` 越界 → `400 VALIDATION_ERROR`。只查证券公开主数据，不触发麦蕊拉取，也不受证书影响（`quote_missing` 除外） |
+| GET | `/securities/search` 🔒 | v0.2.7。`?q=`（必填，归一化后长度 1–20）`&types=`（逗号分隔 `security_type`，默认 `stock,cdr,etf`；v0.2.8 加 `etf`）`&include_delisted=false&limit=`（默认 20，最大 50），**不分页** → `{items: SecurityHit[], master_as_of: string(date)}`。**归一化**：NFKC、去空白、字母转大写；`600000.SH`、`SH600000`、`sh600000`、`600000` 都按代码处理。**匹配范围**：6 位代码、简称、拼音首字母（例如 `PFYH`）、曾用名、北交所旧代码（经 `security_code_history` 解析到新代码，`match_kind=former_code`）、模糊匹配（`pg_trgm` 相似度 ≥ `search.similarity_threshold`，默认 0.3；查询中至少有 2 个汉字才启用）。**排序**：先按 `security_match_kind` 层级（`code_exact` > `name_exact` > `initials_exact` > `code_prefix` > `name_prefix` > `initials_prefix` > `name_contains` > `former_name` = `former_code` > `fuzzy`）；同层依次比较：`listing_status`（`listed` 优先，其次 `delisting_period`，其余靠后）→ `type`（`stock` > `cdr` > `etf` > `index`；v0.2.8）→ 命中位置（越靠前越优先）→ 简称长度（短的优先）→ trgm 相似度（降序）→ `security_code`（升序）。同一证券只出现一次，取最高层的命中。**拼音首字母**：用 pypinyin 生成，多音字的组合最多 16 个（`search.initials_max_variants`）；另外生成去掉 `ST`/`*ST` 前缀的版本；巨潮提供的拼音只用于交叉校验。`include_delisted=false` 时排除 `delisted`，`missing_from_list` 仍返回。默认不含指数（v0.2.7 未决 Q6）；默认含 ETF（v0.2.8），只要股票时传 `types=stock,cdr`；可转债不收录，搜不到。缓存：`Cache-Control: private, max-age=60`。q 为空或归一化后超长、`limit` 越界 → `400 VALIDATION_ERROR`。只查证券公开主数据，不触发麦蕊拉取，也不受证书影响（`quote_missing` 除外） |
 | GET | `/securities?q=` 🔒 | 证券搜索（不分页，最多 20 条）：`[{security_code, name}]`。**v0.2.7 起为 `/securities/search` 的别名**，`types` 和 `limit` 取默认值，返回结构保持不变；新代码请改用 `/securities/search` |
 | GET | `/securities/{code}` 🔒 | v0.2.7。`SecurityProfile`（§5.1），弱 ETag。不存在 → `404 NOT_FOUND`；北交所旧代码 → `404 NOT_FOUND{superseded_by}`。公开主数据每日 18:00 更新、07:30 补拉（T007 §6；来源【待 Q2 / T-A04 补测】）；行业、概念、股本按本人证书每日盘后更新；`suspended` 每个交易日 09:15 前按本人证书刷新【待 T003 补测：停牌标记的来源端点】 |
-| GET | `/securities/{code}/financials` 🔒 | v0.2.7。`?report_period=`（可多值，默认全部）`&limit=`（默认 8，最大 40）`&as_of=`（日期，可选：只返回 `available_from ≤ as_of` 的报告期，时点视图）→ `{security_code, name, items: FinancialPeriod[]（period_end 降序）, sources: ProviderRef[], data_status, data_as_of, gaps}`，**不分页**。同一报告期有更正时只返回最新一版，`is_restated=true`。指数或无财务数据的证券：`200`，`items: []`，`data_status:"unavailable"`，`gaps:[{key:"financials", reason:"no_source"}]`。更新：每日盘后按本人证书增量拉取【待 T003 补测：财报端点与 `announce_date` 字段是否可得】 |
-| GET | `/securities/{code}/fund-flows` 🔒 | v0.2.7。`?days=`（默认 60，最大 250）或 `?from=&to=`（日期，区间不超过 250 个交易日；两种方式同时给出 → `400 VALIDATION_ERROR`）→ `{security_code, name, items: FundFlowDay[]（trade_date 升序）, sources, data_status, data_as_of, gaps}`，不分页。停牌日不出行。当日数据在盘后更新（15:40 后）【待 T003 补测：更新时刻】，入库前不出当日行；更新后还会再次校准的日期 `is_final=false`。指数 → `200` 空 `items` + `no_source` gap |
-| GET | `/securities/{code}/factors` 🔒 | v0.2.7。`?trade_date=`（可选，默认最新）`&category=`（可多值）→ `{security_code, name, trade_date, factor_set_version: string, counts: {total: int, by_category: object<factor_category, int>}, items: FactorValue[], sources, data_status, data_as_of, gaps}`，不分页。因子数量为 85 个（77 个日频 + 8 个日内）【待 T003 补测：最终数量与单位】。北向资金类因子取不到时 `value` 为 `null`，并带 `gaps[{key:"factor.<id>", reason:"no_source"}]`。**不提供行业内分位**（v0.2.7 未决 Q4）。每日盘后按本人证书更新 |
-| GET | `/securities/{code}/announcements` 🔒 | v0.2.7。§1.2 游标分页（默认 `published_at desc, id desc`）；`?from=&to=&category=` → `Paged<Announcement> & {disclaimer: string, sources, data_status, data_as_of, gaps}`。`disclaimer` 为固定文案：“公告内容以交易所及上市公司披露原文为准，本系统仅提供标题与原文链接。” 每日盘后按本人证书更新，盘中不刷新【待 T003 补测】 |
+| GET | `/securities/{code}/financials` 🔒 | v0.2.7。`?report_period=`（可多值，默认全部）`&limit=`（默认 8，最大 40）`&as_of=`（日期，可选：只返回 `available_from ≤ as_of` 的报告期，时点视图）→ `{security_code, name, items: FinancialPeriod[]（period_end 降序）, sources: ProviderRef[], data_status, data_as_of, gaps}`，**不分页**。同一报告期有更正时只返回最新一版，`is_restated=true`。指数或无财务数据的证券：`200`，`items: []`，`data_status:"unavailable"`，`gaps:[{key:"financials", reason:"no_source"}]`。ETF（v0.2.8）：同样 `200`、`items: []`、`data_status:"unavailable"`，但 `gaps:[{key:"financials", reason:"not_applicable"}]`；指数保持 `no_source`。更新：每日盘后按本人证书增量拉取【待 T003 补测：财报端点与 `announce_date` 字段是否可得】 |
+| GET | `/securities/{code}/fund-flows` 🔒 | v0.2.7。`?days=`（默认 60，最大 250）或 `?from=&to=`（日期，区间不超过 250 个交易日；两种方式同时给出 → `400 VALIDATION_ERROR`）→ `{security_code, name, items: FundFlowDay[]（trade_date 升序）, sources, data_status, data_as_of, gaps}`，不分页。停牌日不出行。当日数据在盘后更新（15:40 后）【待 T003 补测：更新时刻】，入库前不出当日行；更新后还会再次校准的日期 `is_final=false`。指数 → `200` 空 `items` + `no_source` gap；ETF（v0.2.8）→ `200`、空 `items`、`data_status:"unavailable"`、`gaps:[{key:"fund_flows", reason:"not_applicable"}]` |
+| GET | `/securities/{code}/factors` 🔒 | v0.2.7。`?trade_date=`（可选，默认最新）`&category=`（可多值）→ `{security_code, name, trade_date, factor_set_version: string, counts: {total: int, by_category: object<factor_category, int>}, items: FactorValue[], sources, data_status, data_as_of, gaps}`，不分页。因子数量为 85 个（77 个日频 + 8 个日内）【待 T003 补测：最终数量与单位】。北向资金类因子取不到时 `value` 为 `null`，并带 `gaps[{key:"factor.<id>", reason:"no_source"}]`。**不提供行业内分位**（v0.2.7 未决 Q4）。每日盘后按本人证书更新。ETF（v0.2.8）→ `200`，`items: []`，`counts.total: 0`，`data_status:"unavailable"`，`gaps:[{key:"factors", reason:"not_applicable"}]` |
+| GET | `/securities/{code}/announcements` 🔒 | v0.2.7。§1.2 游标分页（默认 `published_at desc, id desc`）；`?from=&to=&category=` → `Paged<Announcement> & {disclaimer: string, sources, data_status, data_as_of, gaps}`。`disclaimer` 为固定文案：“公告内容以交易所及上市公司披露原文为准，本系统仅提供标题与原文链接。” 每日盘后按本人证书更新，盘中不刷新【待 T003 补测】。ETF（v0.2.8）：本版不收录基金公告 → `items: []`，`data_status:"unavailable"`，`gaps:[{key:"announcements", reason:"not_applicable"}]` |
 | GET | `/market/sector-flows` 🔒 | v0.2.7。`?kind=industry\|concept`（必填）`&sort=`（`sector_sort`，默认 `main_net_desc`）`&limit=`（默认 20，最大 100），不分页 → `{kind, taxonomy: industry_taxonomy \| null（concept 时为 null）, trade_date, items: SectorFlow[], sources, data_status, data_as_of, gaps}`。**盘后数据**：每个交易日 15:40 后按本人证书更新一次，盘中返回上一交易日的数据；不提供盘中实时数据，前端不必轮询（响应带弱 ETag） |
-| GET | `/quotes?codes=600000.SH,000001.SZ` 🔒 | 只读缓存，**从不触发上游调用**：`{items: [{security_code, name, price, change_pct, volume, amount, t, DataStatusBlock}]}`；`codes` 最多 200 个 |
-| GET | `/securities/{code}/bars` 🔒 | 参数 `freq: bar_freq`（必填）、`adjust: bar_adjust`（日/周默认 `qfq`，`1m` 只能 `none`）、`from`/`to`（`string(date)`）或 `before` + `limit`（向前翻页，`limit` 默认 500、最大 2,000）。响应 `{security_code, name, freq, adjust, pre_close: string(decimal) \| null（1m 时为所请求首个交易日的前收，作分时基准）, items: Bar[]（按 t 升序）, next_before: string \| null, DataStatusBlock}`。缓存里没有时返回 `data_status:"pending"` 并按本人证书加入回补队列，**不同步等待**。v0.2.7：增加 `freq=w` 的口径（§6.2）；`Bar` 加 `is_final`；响应顶层加 `adjust_as_of: string(date) \| null`（前复权的基准日；`adjust=none` 时为 `null`），客户端发现 `adjust_as_of` 变化时，必须丢弃已缓存的同证券、同复权方式的 bar 并重新加载 |
+| GET | `/quotes?codes=600000.SH,000001.SZ` 🔒 | 只读缓存，**从不触发上游调用**：`{items: [{security_code, name, price, change_pct, volume, amount, t, DataStatusBlock}]}`；`codes` 最多 200 个；ETF 与股票同口径（v0.2.8；价格保留 3 位小数）【待 T003 补测：麦蕊 ETF 实时行情是否可用】 |
+| GET | `/securities/{code}/bars` 🔒 | 参数 `freq: bar_freq`（必填）、`adjust: bar_adjust`（日/周默认 `qfq`，`1m` 只能 `none`）、`from`/`to`（`string(date)`）或 `before` + `limit`（向前翻页，`limit` 默认 500、最大 2,000）。响应 `{security_code, name, freq, adjust, pre_close: string(decimal) \| null（1m 时为所请求首个交易日的前收，作分时基准）, items: Bar[]（按 t 升序）, next_before: string \| null, DataStatusBlock}`。缓存里没有时返回 `data_status:"pending"` 并按本人证书加入回补队列，**不同步等待**。v0.2.7：增加 `freq=w` 的口径（§6.2）；`Bar` 加 `is_final`；响应顶层加 `adjust_as_of: string(date) \| null`（前复权的基准日；`adjust=none` 时为 `null`），客户端发现 `adjust_as_of` 变化时，必须丢弃已缓存的同证券、同复权方式的 bar 并重新加载。ETF（v0.2.8）照常提供，价格保留 3 位小数；ETF 的复权口径【待 T003 补测】 |
 | GET | `/market/overview` 🔒 | 大盘、宽度、regime、涨跌停统计（v0.2.3 最小结构，只读缓存）：`{trade_date: string(date), session: market_session, indices: [{security_code, name, price: string(decimal) \| null, change_pct: string(decimal) \| null, amount: string(decimal) \| null, t: string(datetime) \| null}], breadth: {up: int, down: int, flat: int, limit_up: int, limit_down: int} \| null, regime: market_regime \| null, regime_position_range: {min_pct, max_pct} \| null, turnover_total: string(decimal) \| null, DataStatusBlock}`。指数清单由后端配置，不在契约中写死 |
-| GET | `/terminal` 🔒 ⚖ | **终端一屏聚合**（ETag）：`?scope=all\|watchlist\|holdings`（默认 `all`）`&account_id=`（默认用户的默认账户）。→ `{server_time, trade_date: string(date), session: market_session, account: {account_id, total_assets, cash_available, position_pct, pnl_day, regime: market_regime \| null, regime_position_range: {min_pct, max_pct} \| null, data_status} \| null, rows: TerminalRow[], truncated: boolean, unread_notifications: int}`。不分页，`rows` 最多 300 行（持仓在前按 `weight_pct` 降序，其次重点关注、其余自选按加入时间），超出时 `truncated=true`。`trade_date` 为行情所属交易日（非交易日为最近一个交易日）；`account.cash_available` = 可用资金：最近一次券商资金快照的“可用”，没有快照时等于重建的现金余额 `cash`（v0.2.3 定义）。服务端**固定次数查询**完成（无 N+1，T-B44 测试查询数）；只读缓存，不触发上游。客户端以 SSE `quote`/`suggestion`/`candidate_signal` 增量更新；SSE 断开时才轮询，间隔 ≥ 15 秒并带 `If-None-Match` |
-| GET | `/today` 🔒 ⚖ | 首页聚合（ETag）：`{server_time, trade_date, session: market_session, market: {regime, regime_position_range, data_status}, focus: {items: TerminalRow[], more: boolean}, pending_plan_drafts: {items: [{id, security_code, name, action, valid_until, status: plan_draft_status}], more}, released_reasons: {items: [{reason_id, signal_id, code: reason_code, security_code, name, released_at}], more}, risk_flags: {items: [RiskFlag & {security_code: string \| null, name: string \| null, risk_event_id: uuid \| null（v0.2.7）}], more}, invalidations_today: {items: [{suggestion_id, security_code, name, strategy_key, text, at}], more}, daily_report: {date, status: "ready" \| "generating" \| "not_yet"}, reconciliation: {status: reconciliation_status, as_of, diff_count, important_count}, unread_notifications: int}`；v0.2.7 新增 `alerts`、`plan_triggers`、`data_gaps`、`evidence` 四个顶层字段，见下方 `/today` 补充。每个列表最多 50 条，`more=true` 时的去向见下方“查看全部”去向表（v0.2.7） |
+| GET | `/terminal` 🔒 ⚖ | **终端一屏聚合**（ETag）：`?scope=all\|watchlist\|holdings`（默认 `all`）`&account_id=`（默认用户的默认账户）。→ `{server_time, trade_date: string(date), session: market_session, account: {account_id, total_assets, cash_available, position_pct, pnl_day, regime: market_regime \| null, regime_position_range: {min_pct, max_pct} \| null, data_status} \| null, rows: TerminalRow[], truncated: boolean, unread_notifications: int}`。不分页，`rows` 最多 300 行（持仓在前按 `weight_pct` 降序，其次重点关注、其余自选按加入时间），超出时 `truncated=true`。`trade_date` 为行情所属交易日（非交易日为最近一个交易日）；`account.cash_available` = 可用资金：最近一次券商资金快照的“可用”，没有快照时等于重建的现金余额 `cash`（v0.2.3 定义）。服务端**固定次数查询**完成（无 N+1，T-B44 测试查询数）；只读缓存，不触发上游。客户端以 SSE `quote`/`suggestion`/`candidate_signal` 增量更新；SSE 断开时才轮询，间隔 ≥ 15 秒并带 `If-None-Match`。ETF 行（v0.2.8）照常显示行情，不显示策略建议和候选信号 |
+| GET | `/today` 🔒 ⚖ | 首页聚合（ETag；前端首页为 `/today`，`/` 重定向到 `/today`，v0.2.8）：`{server_time, trade_date, session: market_session, market: {regime, regime_position_range, data_status}, focus: {items: TerminalRow[], more: boolean}, pending_plan_drafts: {items: [{id, security_code, name, action, valid_until, status: plan_draft_status}], more}, released_reasons: {items: [{reason_id, signal_id, code: reason_code, security_code, name, released_at}], more}, risk_flags: {items: [RiskFlag & {security_code: string \| null, name: string \| null, risk_event_id: uuid \| null（v0.2.7）}], more}, invalidations_today: {items: [{suggestion_id, security_code, name, strategy_key, text, at}], more}, daily_report: {date, status: "ready" \| "generating" \| "not_yet"}, reconciliation: {status: reconciliation_status, as_of, diff_count, important_count}, unread_notifications: int}`；v0.2.7 新增 `alerts`、`plan_triggers`、`data_gaps`、`evidence` 四个顶层字段，见下方 `/today` 补充。每个列表最多 50 条，`more=true` 时的去向见下方“查看全部”去向表（v0.2.7） |
 
 所有 v0.2.7 新增的个股读接口：`{code}` 不存在 → `404 NOT_FOUND`；用北交所旧代码 → `404{superseded_by}`；参数越界 → `400 VALIDATION_ERROR`；限流 → `429 RATE_LIMITED{retry_after_s}`。**不返回** `409 DATA_LICENCE_UNAVAILABLE`（§1.1）。弱 ETag 与 §1 相同。
 
@@ -812,7 +847,7 @@ evidence: Evidence[]
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/strategy-instances` 🔒 | v0.2.7。`?status=`（可多值，默认 `proposed,active,paused`；要包含已归档需显式传 `archived`）`&strategy_id=&strategy_version_id=&horizon=&scope=&account_id=&security_code=&origin=&risk_level=&order=`（`instance_sort`，默认 `created_at_desc`；同值时按 `id` 同向排序），§1.2 游标分页 → `Paged<StrategyInstance>`。游标与本次的筛选或排序不一致 → `400 INVALID_CURSOR` |
-| POST | `/strategy-instances` 🔒 | POST `{strategy_version_id, scope: "account"\|"security"\|"watch_group", account_id, security_code: string \| null, horizon, param_overrides: object \| null, budget_amount: string(decimal) \| null}` → `201 {id, status:"active", derived_strategy_version_id: uuid \| null, warnings: string[]}`。按 I1–I7 校验，可能返回 `STRATEGY_VERSION_NOT_RUNNABLE`、`STRATEGY_HORIZON_MISMATCH`、`STRATEGY_PARAM_OUT_OF_RANGE`、`ENTITLEMENT_LIMIT_REACHED`、`INSTANCE_SCOPE_INVALID`。周期分类判定不适合或画像低于卡片 `fit` 下限时正常 201，`warnings[]` 给出中文说明（v0.2.5：`fit_ack` 作废）；画像相关字段未填写时不给画像提示；画像不匹配不降低后续建议的 `confidence`（v0.2.6，T006e）；`risk_level: high` 的模板也无需确认字段。创建的实例 `origin="user"`（v0.2.7） |
+| POST | `/strategy-instances` 🔒 | POST `{strategy_version_id, scope: "account"\|"security"\|"watch_group", account_id, security_code: string \| null, horizon, param_overrides: object \| null, budget_amount: string(decimal) \| null}` → `201 {id, status:"active", derived_strategy_version_id: uuid \| null, warnings: string[]}`。按 I1–I7 校验，可能返回 `STRATEGY_VERSION_NOT_RUNNABLE`、`STRATEGY_HORIZON_MISMATCH`、`STRATEGY_PARAM_OUT_OF_RANGE`、`ENTITLEMENT_LIMIT_REACHED`、`INSTANCE_SCOPE_INVALID`。周期分类判定不适合或画像低于卡片 `fit` 下限时正常 201，`warnings[]` 给出中文说明（v0.2.5：`fit_ack` 作废）；画像相关字段未填写时不给画像提示；画像不匹配不降低后续建议的 `confidence`（v0.2.6，T006e）；`risk_level: high` 的模板也无需确认字段。创建的实例 `origin="user"`（v0.2.7）。v0.2.8：`scope="security"` 且证券为 ETF → `422 INSTANCE_SCOPE_INVALID{scope, security_code, security_type:"etf", issue:"security_type_not_supported"}`（§6.0A 第 8 条） |
 | GET/PATCH | `/strategy-instances/{id}` 🔒 | GET → `StrategyInstance`（§5.1，v0.2.7）；他人或不存在的 → `404 NOT_FOUND`。PATCH `{param_overrides?, budget_amount?}`；改参会生成新的派生版本；archived 实例 → `409 IMMUTABLE_RESOURCE`（v0.2.7） |
 | POST | `/strategy-instances/{id}/confirm` · `/pause` · `/resume` · `/archive` 🔒 | 见 §6.0A（v0.2.7）：→ `200 StrategyInstance`；目标态即当前态时返回 200（幂等）；非法 → `409 INVALID_STATE_TRANSITION{from, to, allowed}`；版本不可运行 → `409 STRATEGY_VERSION_NOT_RUNNABLE{lifecycle}` |
 | GET | `/strategy-instances/{id}/events` 🔒 | §1.2 分页，`at desc, id desc` → 元素 `{id, kind: instance_event_kind, from_status: instance_status \| null, to_status: instance_status \| null, actor: "user" \| "system", reason_code: reason_code \| null, note: string \| null, detail: object \| null, at: string(datetime)}`（v0.2.7）。`created` 的 `from_status` 为 `null`；`params_changed` 两个状态都为 `null`，`detail` 中给出 `{derived_strategy_version_id}` |
@@ -879,10 +914,10 @@ evidence: Evidence[]
 ### 7.9 管理端（🛡；非管理员（含未登录）访问任何 `/admin/*` 一律返回 404，不暴露其存在，见 §1.3）
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/admin/ingest/status` 🛡 | 只读：`{leader: {instance_id, egress_ip_masked: "203.0.113.x", lease_expires_at}, budget: {per_minute_limit: int, used_last_minute: int}（v0.2.6：全进程合计；按证书的明细见 `/admin/data-licences`）, queues: [{priority: "p0_intraday"\|"p1_daily"\|"p2_backfill", depth: int, oldest_age_s: int}], errors_24h: [{upstream_code: string, count: int}], ip_limit_alerts_24h: int, freshness: [{dataset, data_as_of, data_status}], licence: {expires_on: string(date), days_left: int}}`。**不返回 licence 内容**；`per_minute_limit` 等数值 **待 T003 验证** |
+| GET | `/admin/ingest/status` 🛡 | 只读：`{leader: {instance_id, egress_ip_masked: "203.0.113.x", lease_expires_at}, budget: {per_minute_limit: int, used_last_minute: int}（v0.2.6：全进程合计；按证书的明细见 `/admin/data-licences`）, queues: [{priority: "p0_intraday"\|"p1_daily"\|"p2_backfill", depth: int, oldest_age_s: int}], errors_24h: [{upstream_code: string, count: int}], ip_limit_alerts_24h: int, freshness: [{dataset, data_as_of, data_status}], licences: IngestLicenceStatus[], licences_truncated: boolean}`。**v0.2.8 不兼容变更**：删除原全站 `licence: {expires_on, days_left}`（它来自已停用的全站证书），改为按证书的 `licences[]`（§5.1 `IngestLicenceStatus`，与 `/admin/data-licences` 同名字段同义）：每张已设置的证书一行，`not_set` 的用户不列出；不分页，最多 500 行，超出时 `licences_truncated=true`，完整列表看 `/admin/data-licences`；排序：`status` 依次为 `invalid`、`ip_limited`、`quota_exceeded`、`expired`、`paused_by_admin`、`pending_verification`、`active`，同状态按 `days_left` 升序（null 在后），再按 `username`。顶层 `budget`、`queues`、`errors_24h` 仍是全部证书的合计。**不返回任何证书值、密文、HMAC 或其片段**；`per_minute_limit` 等数值 **待 T003 验证** |
 | POST | `/admin/ingest/pause` · `/admin/ingest/resume` 🛡 | 暂停或恢复外呼（迁移和冷备切换时使用，写审计） |
 | GET | `/admin/data-licences` 🛡 | 全部用户的数据证书状态（v0.2.6，分页）→ `AdminDataLicence[]`；**不返回证书值或任何片段** |
-| POST | `/admin/data-licences/{user_id}/pause` · `/admin/data-licences/{user_id}/resume` 🛡 | `{reason: string(1–200)}` → `204`；暂停后状态为 `paused_by_admin`，恢复后为 `pending_verification` 并重新验证；写审计；未设置 → `409 DATA_LICENCE_NOT_SET` |
+| POST | `/admin/data-licences/{user_id}/pause` · `/admin/data-licences/{user_id}/resume` 🛡 | `{reason: string(1–200)}` → `204`；暂停后状态为 `paused_by_admin`，恢复后为 `pending_verification` 并重新验证；写审计；未设置 → `409 DATA_LICENCE_NOT_SET`。v0.2.8：暂停**按用户记录**，暂停期间用户 PUT 或 DELETE 证书都不解除（§7.1）；resume 时证书已在暂停期间被删除 → `204`，状态为 `not_set` |
 | GET/POST | `/admin/invites` 🛡 | 邀请码（v0.2.3 #27，T-B03c）：POST `{ttl_h: int \| null（默认 168，≤ 720）, bound_username: string \| null, note: string(≤200) \| null}` → `201 {id, code, expires_at, bound_username, note}`，**`code` 明文只在此响应出现一次**；GET 列表（分页）`{id, status: "active"\|"used"\|"expired"\|"revoked", created_by, created_at, expires_at, used_at, used_by, bound_username, note}`，不含明文或摘要；均写审计 |
 | DELETE | `/admin/invites/{id}` 🛡 | 吊销邀请码 → `204`；已用或已吊销 → `409 INVALID_STATE_TRANSITION`；只改状态，不物理删除 |
 | GET/PUT | `/admin/realtime-settings` 🛡 | 刷新间隔、分层上限（默认值 **待 T003 验证**） |
@@ -903,7 +938,7 @@ evidence: Evidence[]
 - **ingest 心跳**（ingest 写、api 读）：leader 每 15 秒 `SET ingest:heartbeat <json> EX 600`，JSON 为 `{"ts": int(Unix 秒), "instance_id": string, "leader": true, "version": string, "budget_used_last_minute": int, "queue_depth": {"p0": int, "p1": int, "p2": int}}`；api 只依赖 `ts`，其余字段供 `/admin/ingest/status` 展示。判定顺序：Redis 不可用 → `unknown`；`ingest:paused` 存在（值为 JSON `{"by", "at", "reason"}`，管理员暂停时写入）→ `paused`；心跳缺失、无法解析或 `now - ts > 120` → `stale`；否则 `ok`。键名与阈值可配置（plan 6.1 `config/ingest.yaml`，环境变量 `INGEST_HEARTBEAT_KEY`、`INGEST_PAUSED_KEY`、`INGEST_STALE_AFTER_S`）。
 - **`/meta/enums` 结构**（取值全部来自后端的集中定义，路由里不写死）：
 ```json
-{"version": "v0.2.7",
+{"version": "v0.2.8",
  "enums": {"horizon": ["intraday_t", "short", "swing", "long"], "...": []},
  "reason_codes": [{"code": "T1_NOT_SELLABLE", "release_kinds": ["time"], "check_on": ["daily_close"], "manually_releasable": false, "note": "…"}],
  "error_codes": [{"code": "NOT_FOUND", "http_status": 404, "scope": "http"}],
@@ -938,7 +973,7 @@ evidence: Evidence[]
 ---
 
 ## 9. 契约测试要点（T-T17 等）
-- 所有响应示例都能用 OpenAPI schema 校验通过；所有统计字段都带 `n`，缺少即失败。
+- 所有非 `/admin/*` 的响应示例都能用 OpenAPI schema 校验通过（`/admin/*` 不在 `openapi.json` 中，按本契约 §5.1、§7.9 的结构逐接口断言，v0.2.8）；所有统计字段都带 `n`，缺少即失败。
 - 候选信号和建议的响应中，P1 要求的四个数组都非空，`model_refs[*].role == "auxiliary"`。
 - 不存在任何 `POST /candidate-signals/{id}/convert` 一类的接口；只有 `/plan-drafts/{id}/confirm` 能创建 `origin=plan_draft` 的计划。
 - 未登录、普通用户、非 `approved` 账号访问任何 `/admin/*`（含 `/admin/evaluation/*`、不存在的子路径、用错方法、缺 CSRF）一律 404，响应体与不存在的普通路径逐字节相同（`request_id` 除外），不带 `Allow` 头；全文不得再出现“`/admin/*` 返回 403”。
@@ -973,7 +1008,7 @@ evidence: Evidence[]
   - 分类器：无底仓时 `intraday_t` 分数为 0 且 `caps` 中没有 `IT0`；同时 `experience=novice` → `hints` 仍含 `IT0C`；`caps[].kind` 只出现 `gate`、`data_missing`；ST 股 → `caps` 含 `{kind: "gate", rule_id: "HG4", cap: 59}`；财报不足 12 期 → 含 `{kind: "data_missing", rule_id: "LG0", cap: 59}`。
   - 画像不匹配时建议卡的 `confidence` 与画像匹配时相同；画像相关字段未填写时 `warnings` 中没有画像提示。
   - 创建 `risk_level: high` 模板的实例不需要任何确认字段 → 201。
-  - `/meta/enums.version == "v0.2.6"`（v0.2.7 起为 `"v0.2.7"`，见 v0.2.7 验收 1），含 `data_licence_status`、`data_licence_tier`；`error_codes` 含三个 `DATA_LICENCE_*`。
+  - `/meta/enums.version == "v0.2.6"`（v0.2.7 起为 `"v0.2.7"`，v0.2.8 起为 `"v0.2.8"`，见 v0.2.8 验收 1），含 `data_licence_status`、`data_licence_tier`；`error_codes` 含三个 `DATA_LICENCE_*`。
 - **v0.2.5**：
   - `/meta/consent-docs`、`/legal/terms`、`POST /me/consents`、`/me/risk-assessment*` → 404；`/meta/enums` 不含 `consent_key`、`legal_doc_key`、`consent_presentation`、`assessment_status`，`reason_codes` 为 22 个且不含 `PROFILE_OR_CONSENT_MISSING`，`error_codes` 不含 `CONSENT_REQUIRED`、`STRATEGY_FIT_ACK_REQUIRED`。
   - 注册带或不带 `agreements` 都 201，库中不产生同意记录；`Me` 无 `consents`、`risk_assessment` 键。
@@ -986,7 +1021,7 @@ evidence: Evidence[]
   - §4.1“处理选项”表中每个码的 `resolution_choices` 与实际返回一致；`force_import` 不带理由 → 400；`POST /trades/{id}/void` 两次 → 第二次 409。
 
 - **v0.2.7 验收**（T-A08）：
-  1. `/meta/enums.version == "v0.2.7"`；`enums` 的键集合等于 §3 表名集合（包括新增的 18 个枚举与 `data_provider.exchange`）。
+  1. `/meta/enums.version == "v0.2.7"`（v0.2.8 起为 `"v0.2.8"`）；`enums` 的键集合等于 §3 表名集合（包括新增的 18 个枚举与 `data_provider.exchange`）。
   2. `/strategies` 每个元素都有 `risk_level ∈ card_risk_level`；`?risk_level=high` 只返回 high；未关联卡片的模板为 `normal`；派生版本与母版本一致。
   3. `GET /strategy-instances`：默认不含 `archived`；`?status=archived` 只返回 archived；各 `order` 下翻页不重复、不遗漏（插入并发数据后再翻页）；改变筛选后沿用旧游标 → `400 INVALID_CURSOR`。
   4. 状态机：对 4 种状态 × 4 种操作的 16 种组合，结果全部符合 §6.0A（200 转换 / 200 幂等 / 409 + `allowed` 正确）；幂等的空操作不写事件、不改 `updated_at`；`origin=system` 的实例 archive → 409 且 `allowed` 不含 `archived`；对同一实例并发 10 次 pause，只产生 1 条 `paused` 事件。
@@ -1001,3 +1036,17 @@ evidence: Evidence[]
   13. 周 K：用固定日线夹具（含节假日周、整周停牌周、`sf=1` 占位行、盘中当日 bar）验证 `t`、OHLC、`pre_close`、`is_final`、整周停牌不出 bar；`qfq` 周 K 的 `close` 等于同一请求下 `qfq` 日 K 在 `t` 日的 `close`。
   14. `/today`：新增的 4 个顶层字段都存在；`alerts` 不含 `origin=plan_condition`；`alerts` 和 `plan_triggers` 的每个 `evidence_ids` 都能在 `evidence[]` 中找到；三块的排序符合 §7.3 补充；`data_gaps.more` 恒为 false；每条 `risk_flags` 的 `risk_event_id` 都能在 `/risk-controls/events?status=active` 中找到。
   15. 禁用词：`alerts[].title`、`plan_triggers[].condition_text` 的服务端拼接部分、`data_gaps[].message`、`SectorFlow`、`Announcement.disclaimer` 都通过合规禁用词校验。
+- **v0.2.8 验收**（T-A09）：
+  1. `/meta/enums.version == "v0.2.8"`；`security_type` 含 `etf`，`gap_reason` 含 `not_applicable`；前端 `CONTRACT_VERSION` 同步。
+  2. `/admin/ingest/status`：没有 `licence` 键，有 `licences` 与 `licences_truncated`；设置两张测试证书（A `active`、B `quota_exceeded`）时各一行，键集合等于 `IngestLicenceStatus`，B 排在 A 前；`not_set` 用户不出现；`queue_depth`、`calls_today` 与 `/admin/data-licences` 同一证书的值一致。
+  3. 证书不泄露：`/admin/ingest/status`、`/admin/data-licences` 的响应全文不含任一测试证书值的长度 ≥ 4 的子串，也不含密文或 HMAC（测试证书值只在测试进程内随机生成，不写入仓库）。
+  4. `/admin/data-licences` 元素含 `licence_id`，与 `/admin/ingest/status` 中同一证书的 `licence_id` 相等；未设置证书的用户为 `null`。
+  5. `openapi.json` 的 `paths` 中没有任何 `/admin` 前缀的路径；§7.9 的每个管理端接口都有按本契约结构断言的契约测试。
+  6. ETF 搜索：不传 `types` 时按 ETF 代码或简称能搜到，`type="etf"`、`board=null`；`types=stock,cdr` 时搜不到；同层排序 `stock` > `cdr` > `etf` > `index`；可转债代码搜不到。
+  7. ETF 资料与数据：`/securities/{etf}` 的 `board`、`risk_flag`、股本、`industry` 为 `null`，`concepts=[]`，且不因此出现 gap；financials、fund-flows、factors、announcements 均为 `200`、空 `items`、`data_status="unavailable"`、`gaps[0].reason="not_applicable"`；指数的 financials 仍为 `no_source`。
+  8. ETF 行情与持仓：`/quotes`、`/bars`、`/terminal` 对 ETF 与股票同口径，价格为 3 位小数字符串；含 ETF 成交的交割单可导入并重建出 ETF 持仓；可转债行给出 `IMPORT_UNKNOWN_SECURITY`。
+  9. ETF 策略：`POST /strategy-instances` 以 `scope="security"` + ETF → `422 INSTANCE_SCOPE_INVALID`，`details` 含 `security_type="etf"`、`issue="security_type_not_supported"`；`scope="account"` 的实例在账户含 ETF 持仓时正常 `201`，运行后不对 ETF 产生候选信号或建议；分类器对 ETF 四个周期都是 0 分且不产生 `proposed` 实例；H-01 不挂到 ETF 持仓。
+  10. 注册蜜罐（在 `registration_mode=open` 的测试环境中）：`website` 非空 → `201`，响应键集合与正常注册相同，`users` 无新增、邀请码未消耗，审计有一条 `auth.register_honeypot` 且 `detail` 中没有用户名、口令、申请说明；`form_started_at` 为 1 秒前或未来时间 → 同样命中；5 秒前或不传 → 正常创建；带这两个字段不报 400，带其他未知字段仍报 400；命中的请求计入 IP 限速（同一 IP 第 6 次 → `429`）；`closed` 模式下命中也返回 `503 REGISTRATION_CLOSED`。
+  11. 暂停期 PUT：管理员 pause 后，用户 PUT 新证书 → `202` 且 `status="paused_by_admin"`，没有验证任务入队，`ingest` 不用该证书发出任何请求；DELETE 后 GET 仍为 `paused_by_admin`，再 PUT 仍为 `paused_by_admin`；`POST /me/data-licence/test` → `409 DATA_LICENCE_UNAVAILABLE{status:"paused_by_admin"}`；管理员 resume 后为 `pending_verification` 并投递验证；暂停期间删除证书后 resume → `not_set`。
+  12. 重复 PUT 同一证书：`quota_exceeded`、`ip_limited` 状态下 → `202`，状态与 `paused_until` 不变，没有验证任务入队；`active` 但熔断中（`paused_until` 未到）→ `paused_until` 保留；`invalid` 状态下 → `pending_verification` 并验证。
+  13. 前端路由：访问 `/` 重定向到 `/today`。

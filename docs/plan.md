@@ -49,7 +49,7 @@
 | P5 | **先解释、后运行。** | L1 知识卡只用于解释；只有通过晋级门槛的卡才能成为 L2 可运行模板（2.5.0）。 |
 | P6 | **不可变与可回看。** | 信号、建议、计划版本、策略版本、日报都只追加；回看时显示当时的快照。 |
 | P7 | **诚实标注数据。** | 所有内容都带 `epistemic_type`；数据缺口通过 `gaps` 显式展示，不推断空值；未核实的内容标【待核实】。 |
-| P8 | **共享数据、单一出口。** | 麦蕊只经唯一的行情采集服务 `ingest` 调用（单副本、固定出口 IP、licence 只在此容器，2.1A）；~~行情全站共享；用户增长不会线性放大外部调用~~（v0.2.6 起按证书隔离，见 2.1B；只有证券公开主数据全站一份，第 9 节问题 51）。 |
+| P8 | **~~共享数据~~按证书隔离数据、单一出口。** | 麦蕊只经唯一的行情采集服务 `ingest` 调用（单副本、固定出口 IP、licence 只在此容器，2.1A）；~~行情全站共享；用户增长不会线性放大外部调用~~（v0.2.6 起按证书隔离，见 2.1B；只有证券公开主数据全站一份，第 9 节问题 51）。 |
 
 **P1 质量门禁**（T-T16，CI 必过）：
 - **属性测试**：随机快照生成的每条候选信号都必须有非空的 `rule_refs`、`evidence`、`counter_evidence`、`invalidation`；每个 `evidence_ids` 中的引用都能在快照中解析，且值一致。
@@ -95,17 +95,17 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
   09:15–09:25 集合竞价：麦蕊无盘中竞价数据（T003，见 4.0），不刷新、不改变建议，界面显示上一交易日收盘快照并标注
   09:30–11:30 / 13:00–15:00：连续刷新循环（间隔见 0A.6 推导，默认 15 秒，配置项 realtime.quote_interval_s）
      │
-     ├─ ① universe = ∪(所有 approved 用户的持仓 ∪ 自选) − 停牌/退市（导入/自选变更时增量重算；Redis SET）
-     │     分层：Tier-1（≤ 1,500 只，见 0A.7）= 持仓优先 + 自选按关注人数排序；超出部分为 Tier-2
-     ├─ ② 快照层（全站共享，一次拉取服务所有用户）
+     ├─ ① universe 按证书分别计算：每张证书 = 该用户（持仓 ∪ 自选）− 停牌/退市（v0.2.6 起按证书隔离，2.1B；导入/自选变更时增量重算；Redis SET，键带 licence_id）
+     │     分层（每张证书内）：Tier-1（上限见 0A.7，按证书计）= 持仓优先 + 重点关注 + 其余自选；超出部分为 Tier-2
+     ├─ ② 快照层（按证书隔离：每张证书各自拉取，只服务该证书的用户，不跨证书共享，2.1B）
      │     a. /hsrl/ssjy_more（券商源，≤20 只/次）循环覆盖 Tier-1+Tier-2，每 quote_interval_s 一轮
      │     b. /hsrl/ssjy/all（券商源，全市场，1 次/分钟）每分钟一次：市场宽度/涨跌家数 + 校验 + a 失败时兜底
      │     c. /hsrl/real/all（网络源，全市场，1 次/分钟）仅作 b 的备用源
-     │     写 Redis `quote:{code}`（TTL 3 分钟）+ market.realtime_quotes（当日分区，按分钟降采样保存）
+     │     写 Redis `quote:{licence_id}:{code}`（TTL 3 分钟）+ market.realtime_quotes（当日分区，按分钟降采样保存）
      ├─ ③ 分钟线层（Quant Pro /hsstock/pro/latest/{code}.{mkt}/1/n?lt≤5）
      │     Tier-1：每分钟 lt=2（覆盖 1 根漏取）；Tier-2：每 5 分钟 lt=5；盘后用 /hsstock/pro/history 补齐当日全部 1 分钟 K
      ├─ ④ 增量信号评估：只评估本轮价格/量有变化的股票；
-     │     共享层：按 (code, strategy_version, 参数哈希) 计算市场类条件 → signal_states（全站共享）
+     │     证书内共享层：按 (licence_id, code, strategy_version, 参数哈希) 计算市场类条件 → signal_states（同一证书内共享，不跨证书）
      │     用户层：用户计划/建议的个人条件（失效价、触发价、仓位阈值）→ user_signal_states
      ├─ ⑤ 翻转检测：与上一状态比较；只有"状态翻转"或"失效条件触发"才产生事件（去抖：连续 2 轮成立才确认；失效价类可配置为立即）
      └─ ⑥ 事件 → 生成新建议版本（规则引擎） → alerts → 通知分发（站内 SSE + 可选渠道）
@@ -137,7 +137,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
    - 不决定动作、分数、置信度，不新增事实；输入只含证据 JSON（含证据 `id`），要求每句以 `[E12]` 形式引用证据；
    - **防幻觉校验**：输出中所有数字必须能在输入证据中找到（数值与单位精确匹配或按约定四舍五入），所有引用 ID 必须存在；出现未引用句子、新数字、新股票代码、禁用词（"保证/必涨/稳赚"等）→ 丢弃，按网关策略重试/切换备用模型，仍失败则回退到**模板解释**（模板始终可用，LLM 不可用不影响建议生成）；
    - 原始 prompt/输出/模型/token/成本存 `llm_calls`；用户可一键查看"原始结构化证据"；
-   - **用量估算**：每条解释约 1.5k 输入 + 0.3k 输出 tokens；100 用户 × 平均 30 只股票 × 每日 1 次（盘后）≈ 3,000 次/日 ≈ 5.4M tokens/日；盘中只对翻转事件生成（估计 ≤ 盘后量的 30%）；同一 (code, method_version, snapshot) 的共享部分（个股事实解读）全站缓存复用，只有涉及个人持仓的段落按用户生成。按 2.7.1 的 `deepseek-flash` 官方价目（2026-11-01 核实）估算：每日约 4.5M 输入 + 0.9M 输出 tokens，全部按高峰价且缓存全未命中时 ≈ 4.5×2 + 0.9×8 ≈ 16.2 元/日，空闲时段减半，缓存命中部分更低；价目可能变动，以官方价目页和账单为准。网关按调用记录成本并设日预算上限。
+   - **用量估算**：每条解释约 1.5k 输入 + 0.3k 输出 tokens；100 用户 × 平均 30 只股票 × 每日 1 次（盘后）≈ 3,000 次/日 ≈ 5.4M tokens/日；盘中只对翻转事件生成（估计 ≤ 盘后量的 30%）；同一 (code, method_version, snapshot) 的个股事实解读在**同一证书内**缓存复用（快照来自本人证书数据，不跨证书复用，2.1B），只有涉及个人持仓的段落按用户生成。按 2.7.1 的 `deepseek-flash` 官方价目（2026-11-01 核实）估算：每日约 4.5M 输入 + 0.9M 输出 tokens，全部按高峰价且缓存全未命中时 ≈ 4.5×2 + 0.9×8 ≈ 16.2 元/日，空闲时段减半，缓存命中部分更低；价目可能变动，以官方价目页和账单为准。网关按调用记录成本并设日预算上限。
 5. **不可变存档**：`suggestions` 行写入后禁止 UPDATE/DELETE（触发器）；头表 `suggestion_threads`（每用户每股票一条）只保存当前指针与状态。
 
 ### 0A.5 盘后批处理流水线（交易日）
@@ -208,7 +208,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 | 后端语言/框架 | **Python 3.12 + FastAPI**（Pydantic v2 强类型模型、自动 OpenAPI） | ① 投资计算（收益、回撤、仓位、归因、指标）天然依赖 pandas/numpy 生态；② 麦蕊官方 Python SDK `mairui`【已核实存在，v1.2.0】可做参考（生产仍用自封装 HTTP 客户端以统一限流）；③ FastAPI 自动输出 OpenAPI，前端据此生成 TS 类型，契约可机器校验；④ 类型检查用 mypy（strict）。 | NestJS/TypeScript 全栈类型统一更好，但量化计算生态弱；Go 性能好但开发效率与数据处理库不如 Python。MVP 瓶颈不在 CPU。 |
 | ORM / 迁移 | SQLAlchemy 2.x（async）+ Alembic | 成熟、支持 PostgreSQL 特性（JSONB、分区、部分索引）。 | — |
 | 数据库 | **PostgreSQL 16 + TimescaleDB 扩展（推荐，同一实例）** | 事务一致性（交易、计划、版本），JSONB 存证据和快照，行级安全可选；行情时序（1 分钟 K、日 K、实时快照、因子、特征宽表）使用 hypertable，配合列式压缩、保留策略和连续聚合；一个库同时承载业务数据与行情（3A）。TimescaleDB 2.x 社区版可自托管免费，支持 PG16 及以上，镜像版本固定 | 纯 PG 分区（可行但需自己写压缩和保留，作为备选）；DuckDB（适合离线分析，不适合多用户在线并发写入，内部评估可选用它读 Parquet 导出）；ClickHouse（运维重，10–100 用户不需要）；**SQLite 不采用** |
-| 缓存 / 队列 / 限流 | **Redis 7** | ① 全站共享热数据缓存（实时快照、榜单）；② Celery broker；③ 麦蕊全局令牌桶（Lua 原子脚本）；④ 会话存储。 | — |
+| 缓存 / 队列 / 限流 | **Redis 7** | ① 热数据缓存（实时快照、榜单；键带 `licence_id`，按证书隔离，2.1B）；② Celery broker；③ 麦蕊每证书令牌桶（Lua 原子脚本，2.1B）；④ 会话存储。 | — |
 | 任务调度 / 实时 | **Celery worker + 单实例 Celery Beat**（盘后批、提醒、跟踪、日报、健康度）+ **唯一的行情采集服务 `ingest`**（单副本、单活锁、令牌桶 + 优先队列，2.1A）+ **`signal-rt` 进程**（订阅 `market.updated`，盘中特征 → 规则 → 候选信号 → 可执行性 → 原因解除监控，0A.3） | Beat 只能单实例，避免重复触发。麦蕊"60 秒内最多 2 个 IP"是硬约束，外呼必须集中到一个进程、一个出口 IP。盘中计算与外呼分开，计算故障不影响采集。 | APScheduler（没有分布式队列）、Kafka 或流处理（规模用不上）、多节点直连麦蕊（违反 IP 限制） |
 | 通知 / 推送 | **站内通知 + SSE 实时推送**（`GET /api/v1/stream`，轮询兜底）；渠道适配器可插拔：MVP 站内 + 可选邮件；企业微信自建应用列为第二步（2.6） | SSE 单向、走 HTTP、Nginx 易透传，100 用户规模单进程足够。 | WebSocket（双向不需要）、短信（需签名模板与费用）、个人微信（无官方接口，不做） |
 | 前端 | **React 19 + TypeScript + Vite + React Router + TanStack Query + antd 6（Ant Design 6，暗色 + compact 算法）+ AG Grid Community（实时密集表格，禁止 Enterprise）+ TradingView Lightweight Charts（K 线/分时）+ ECharts（统计图）+ react-resizable-panels（分隔条调宽/折叠）**（**【已定 2026-11-01】React 19 + antd 6**，原型 T-F00 已验证，第 9 节问题 34） | 深色交易终端风格、仅桌面（2.10）；AG Grid Community（MIT）适合实时更新的密集表格，低频小表用 AntD Table（2.10 选型结论）；Lightweight Charts 体积小、金融图表专用（Apache-2.0，需保留署名）。 | Next.js（无 SSR 需求）、Vue（团队偏好待定，二者皆可） |
@@ -265,7 +265,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 ```
 
 - **`ingest`（行情采集服务）**：全系统**唯一**调用麦蕊、唯一持有 licence 的组件（详见 2.1A）。职责包括：URL 构造、令牌桶与优先队列、singleflight、重试（429/503 指数退避）、错误码映射（101/102/103）、原始响应落库（`raw_payloads`，供审计与快照使用）、IP 超限告警。原先设计中"datagw 作为库在 realtime/worker 内运行"的方案**作废**，因为多进程多主机外呼会违反 2-IP 限制。
-- **API、worker、signal-rt 都不直接调用麦蕊**：用户请求只读共享表和缓存。缓存缺失时，向 `ingest:requests` 投递按需拉取意图，并返回 `data_status: "pending"`，避免用户行为放大外部调用；数据到达后通过 SSE 推送。
+- **API、worker、signal-rt 都不直接调用麦蕊**：用户请求只读本人证书名下的行情表和缓存（证券公开主数据全站一份）。缓存缺失时，向 `ingest:requests` 投递按需拉取意图，并返回 `data_status: "pending"`，避免用户行为放大外部调用；数据到达后通过 SSE 推送。
 
 ### 2.1A 行情采集服务 `ingest`：唯一调用麦蕊的服务（硬约束）
 > 硬约束（2026-11-01 12:05）：同一证书 **60 秒内最多 2 个来源公网 IP**【文档/FAQ 已列，待 T003 验证】。因此全系统只有**一个**行情采集服务调用麦蕊，固定一个出口 IP；其他服务和所有用户只读我们的缓存和数据库。
@@ -361,11 +361,11 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
    | 数据缺失型 503 | 不变 | 不熔断，记缺失 |
    | 网络错误 / 5xx | 不变 | 按证书退避（同频率 503） |
    | 超过用户填的 `expires_on` | `expired` | 钻石版按过期后每日额度运行，只保留 P0 重点关注与全市场快照；其他档位停止；通知 |
-   | 管理员暂停 | `paused_by_admin` | 停止，直到管理员恢复 |
+   | 管理员暂停 | `paused_by_admin` | 停止，直到管理员恢复。暂停按用户记录：期间用户 PUT 新证书或同一证书 → `202`，状态仍为 `paused_by_admin`，不验证；DELETE 后再 PUT 也不解除（契约 v0.2.8） |
 
    - 用户看到：行情接口的 `data_status` 为 `stale`（有旧数据）或 `unavailable`（从未取到），`gaps[].reason = "data_licence_unavailable"`，前端显示横幅“你的数据证书不可用：{状态}，请到 设置 → 数据证书 处理”。需要触发拉取的写操作（如手动刷新）返回 `409 DATA_LICENCE_UNAVAILABLE`。
    - 通知：`notification_kind` 新增 `data_licence`（状态变化、验证结果、到期提醒）。**到期提醒**在用户填写的 `expires_on` 前 30、7、1 天各一次（麦蕊接口是否返回到期日【待核实】，所以由用户填写；可在 https://www.mairuiapi.com/query 自查）。
-   - 管理端 `GET /admin/data-licences` 只列状态、档位、到期、调用量与队列长度，**不显示证书值**；可暂停/恢复（写审计）。
+   - 管理端 `GET /admin/data-licences` 只列状态、档位、到期、调用量与队列长度，**不显示证书值**；可暂停/恢复（写审计）。重复 PUT 同一证书不清除 `quota_exceeded`、`ip_limited` 和 `paused_until`（契约 v0.2.8）。
 
 7. **`MAIRUI_LICENCE` 的去留**：生产和预发**不再使用**；`ingest` 发现它非空即拒绝启动。用户本人的证书也和朋友一样，在网页中录入。只有 T-B05 等本机实测脚本可在用户本人电脑的 shell 中**临时**设置它，绝不写入 compose、`.env` 或仓库。
 
@@ -377,7 +377,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 | `admin` | 管理员审核后台：待审核列表、批准、驳回（附理由）、禁用/恢复、重置密码、审计日志查看；管理员角色 | 平台运营 |
 | `importing` | 交割单导入：文件接收与留存、编码识别、券商解析器插件、列映射、预览确认、去重幂等、错误行报告、导入批次 | 1、5 |
 | `profile` | 投资画像：资金规模区间、投资期限、风险承受、可投入精力（小时/周）、关注方向；全部由用户确认，带 `confirmed_at` | 1/2/3 |
-| `marketdata` | 证券主数据、交易日历、行情、财务、资金流、因子、公告、问董秘的共享存储与查询；数据完整性（gap）判断 | 全部 |
+| `marketdata` | 证券主数据、交易日历、行情、财务、资金流、因子、公告、问董秘的存储与查询（麦蕊来源按证书隔离，证券公开主数据全站一份，2.1B）；数据完整性（gap）判断 | 全部 |
 | `portfolio` | 账户、期初持仓、成交记录（只追加+冲正）、持仓计算（移动加权成本）、资产与暴露（行业/个股集中度） | 1、5 |
 | `situation` | "今日关注"聚合：持仓相关事件、计划触发、提醒、数据缺口；市场概览 | 1、4 |
 | `strategy` | **策略三层**（2.5.0、2.5.13）：L1 卡片、L2 模板（接口、注册表、生命周期、规则求值器）、L3 实例；候选信号、不可执行原因、计划草案；筛选；周期分类器 `horizon` 子模块 | 主线、2 |
@@ -394,7 +394,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 | `features` | 唯一的特征管线与 `feature_catalog`（2.5.10） | 主线 |
 | `market_rules` | A 股交易规则（2.13） | 主线、5 |
 | `evaluation` | 内部评估，仅管理员可用（2.12.4，问题 26） | 平台 |
-| `signals` | 信号状态（共享/用户）、翻转检测、信号事件 | 主线、4 |
+| `signals` | 信号状态（证书内共享/用户）、翻转检测、信号事件 | 主线、4 |
 | `advice` | 建议引擎：流水线、置信度、分歧分析、不可变建议与建议链（2.5.4） | 主线 |
 | `risk` | 六项风控 RC1–RC6、风控设置与事件（2.5.6） | 主线、3 |
 | `reports` | 盘后流水线与日报（0A.5） | 主线、1 |
@@ -457,8 +457,8 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 **不做什么**：Brinson 等专业业绩归因、自动挖掘行为模式、社区分享复盘。
 
 ### 2.4 前端信息架构（页面）
-深色交易终端风格、仅桌面（2.10）。新增主线页面：`/terminal`（**默认首页**：自选/持仓实时表 + K 线/分时 + 建议卡 + 信号流；固定三栏 + 底部面板，分隔条可调宽、可折叠，见 2.10）· `/suggestions`（建议列表，按状态筛选，契约 v0.2.7）· `/suggestions/:id`（建议详情：维度×策略矩阵、证据、反证、失效条件、风控标记、建议链）· `/daily-reports`、`/daily-reports/:date`（盘后日报；旧路径 `/reports`、`/reports/:date` 只做重定向，契约 v0.2.3）· `/strategies`、`/strategies/:id`（策略库：规则清单、数据来源、版本、改参、胜率/盈亏、降权开关）· `/risk-controls`（六项风控开关与阈值；“事件”页签 `?tab=events` 列出生效中的风控事件，契约 v0.2.7）· `/notifications`（通知中心与偏好）· `/strategy-cards`（L1 卡片库，第二阶段）· `/strategy-instances`（我的策略实例：列表筛选、确认、暂停、恢复、归档、改参；状态机见契约 §6.0A）· `/candidate-signals`（候选信号列表，含“今日解除”页签 `?tab=released`，契约 v0.2.7）· `/candidate-signals/:id`（候选信号与不可执行原因）· `/plan-drafts`（草案列表，按状态筛选，契约 v0.2.7）· `/plan-drafts/:id`（计划草案确认页）· `/restrictions`（禁投、冷静期、屏蔽）· `/admin/llm`、`/admin/realtime`、`/admin/ingest`（采集状态）、`/admin/promotions`（模板审核与生命周期）、`/admin/evaluation`（内部评估，问题 26 获批后）、`/admin/plans`（管理端）。
-原有页面保留：`/register`（注册，提交后显示"等待管理员审核"）· `/login` · `/account-status`（待审核、驳回、停用说明；T-A05 D9）·（`/onboarding` 已作废：没有同意与测评步骤，画像在 `/settings` 中选填，T-A06）· `/today`（今日关注）· `/portfolio`（账户/持仓/成交）· `/market`（市场概览）· `/stocks/:code`（个股档案：行情、财务、资金流、因子、公告、问董秘、各策略适配与周期分类）· `/discover`（策略筛选，入口并入 `/strategies`）· `/candidates`（研究候选）· `/plans`（行动计划，含版本对比）· `/alerts`（提醒中心与规则）· `/reviews`（复盘）· `/settings`（画像、通知、隐私、数据导出/注销）· `/portfolio/import`（上传→预览→确认→结果）· `/admin/*`（管理员后台：注册审核、用户管理、审计日志，仅 admin 角色可见）。
+深色交易终端风格、仅桌面（2.10）。新增主线页面：`/terminal`（交易终端，**不是首页**——首页为 `/today`，`/` 重定向到 `/today`，契约 v0.2.8：自选/持仓实时表 + K 线/分时 + 建议卡 + 信号流；固定三栏 + 底部面板，分隔条可调宽、可折叠，见 2.10）· `/suggestions`（建议列表，按状态筛选，契约 v0.2.7）· `/suggestions/:id`（建议详情：维度×策略矩阵、证据、反证、失效条件、风控标记、建议链）· `/daily-reports`、`/daily-reports/:date`（盘后日报；旧路径 `/reports`、`/reports/:date` 只做重定向，契约 v0.2.3）· `/strategies`、`/strategies/:id`（策略库：规则清单、数据来源、版本、改参、胜率/盈亏、降权开关）· `/risk-controls`（六项风控开关与阈值；“事件”页签 `?tab=events` 列出生效中的风控事件，契约 v0.2.7）· `/notifications`（通知中心与偏好）· `/strategy-cards`（L1 卡片库，第二阶段）· `/strategy-instances`（我的策略实例：列表筛选、确认、暂停、恢复、归档、改参；状态机见契约 §6.0A）· `/candidate-signals`（候选信号列表，含“今日解除”页签 `?tab=released`，契约 v0.2.7）· `/candidate-signals/:id`（候选信号与不可执行原因）· `/plan-drafts`（草案列表，按状态筛选，契约 v0.2.7）· `/plan-drafts/:id`（计划草案确认页）· `/restrictions`（禁投、冷静期、屏蔽）· `/admin/llm`、`/admin/realtime`、`/admin/ingest`（采集状态）、`/admin/promotions`（模板审核与生命周期）、`/admin/evaluation`（内部评估，问题 26 获批后）、`/admin/plans`（管理端）。
+原有页面保留：`/register`（注册，提交后显示"等待管理员审核"）· `/login` · `/account-status`（待审核、驳回、停用说明；T-A05 D9）·（`/onboarding` 已作废：没有同意与测评步骤，画像在 `/settings` 中选填，T-A06）· `/today`（今日关注，**首页**；`/` 重定向到此）· `/portfolio`（账户/持仓/成交）· `/market`（市场概览）· `/stocks/:code`（个股档案：行情、财务、资金流、因子、公告、问董秘、各策略适配与周期分类）· `/discover`（策略筛选，入口并入 `/strategies`）· `/candidates`（研究候选）· `/plans`（行动计划，含版本对比）· `/alerts`（提醒中心与规则）· `/reviews`（复盘）· `/settings`（画像、通知、隐私、数据导出/注销）· `/portfolio/import`（上传→预览→确认→结果）· `/admin/*`（管理员后台：注册审核、用户管理、审计日志，仅 admin 角色可见）。
 
 所有页面固定位置展示免责提示（前端 `RiskDisclosure` 组件；页面底部、候选信号与行动计划卡片处）："本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。"——文案以 `docs/strategies/compliance/disclaimer.md`（1.0，2026-11-02 定稿）为准，代码与该文件逐字一致。**只展示，不需要用户勾选或确认，不记录同意**（T-A06，第 9 节问题 43）。
 
@@ -939,7 +939,7 @@ screen: null               # 选股模板写 {universe, filters[], rank_by, top_
 | 规则行 | `rule_id`（前缀 E/H/W/X/V/C/I/F）、`eval_time`（`daily_close`/`intraday_1m`/`event`）、`status`、`text`、`edge_cases`、`data`、`weight`、`core` | `rule_id` 是 `id` 的别名，前缀按模板约定；`eval_time` **采纳为必填**；`data` 是 `required_features` 的别名；`status: to_quantify` 的规则只进入 L1，不进入可运行模板 |
 | 参数 | 列表形式 `{name, type, default, min, max, step, 说明, sensitivity, user_editable}` | 列表形式和 D 节的映射形式都接受；`说明` 是 `desc` 的别名；`user_editable=false` 的参数不允许在 L3 改参（I4） |
 | 验证 | 卡内 `validation.type/window/benchmark/cost_model/oos_result/trade_log_ref` 摘要 + 独立的 validation.md | 卡内摘要作为 L1 展示字段保存；`oos_result` 为 `string \| null`（与 API 7.4 `validation_summary.oos_result` 一致，T-A02 统一；原"`{metric, value, n, window}` 对象"的写法作废），未执行就写"未验证"；E 节的验证块仍是 G6 的机器输入。validation.md 是方法说明，不被导入 |
-| 卡片级不可运行原因（模板附录 B 第 6 项提问） | `blocked_gates` | **采纳为系统字段**，名称统一为 `gates_missing[]`（API 7.4 节已返回），由系统根据 G1–G7 结果计算，研究员不用填写。它**不进入** 23 个不可执行原因码表——原因码只描述单个候选信号 |
+| 卡片级不可运行原因（模板附录 B 第 6 项提问） | `blocked_gates` | **采纳为系统字段**，名称统一为 `gates_missing[]`（API 7.4 节已返回），由系统根据 G1–G7 结果计算，研究员不用填写。它**不进入** 22 个不可执行原因码表（T-A06 前为 23 个）——原因码只描述单个候选信号 |
 | 冲突与互斥"优先级" | 只用作展示顺序 | 与 P4 一致，引擎不合并结论 |
 | 冲击成本模型 | 研究侧估算 | **进入产品**（H 节⑨，2.13 冲击成本行），`epistemic_type=estimate` |
 
@@ -1050,7 +1050,7 @@ class LLMGateway:
 #### 2.7.2 网关实现要求（T-B25 按此实现）
 - **key**：进程启动时读取环境变量 `DEEPSEEK_API_KEY`；只检查非空，为空则 DeepSeek 供应商标记 `unconfigured`，所有任务回落模板，`/health/ready` 不因此失败（LLM 不是就绪依赖）。key 只注入运行 LLM 网关的 `api` 与 `worker` 容器，不注入 `ingest`、前端、nginx、数据库。不写入数据库、YAML、日志、异常信息、`llm_calls.request_body`；HTTP 客户端日志关闭请求头输出，`Authorization` 一律脱敏为 `***`。
 - **请求**：`POST {base_url}/chat/completions`，`model` 取自 `config/llm.yaml`；解释类任务**显式关闭思考模式**（`thinking: {type: "disabled"}`，因为默认开启；关闭后 `temperature` 才生效，延迟和输出 tokens 更可控）◇；`response_format: {type: "json_object"}`，system prompt 含 “json” 字样和输出样例；`max_tokens` 按任务配置；`stream: false`。
-- **user_id**：传 `"u_" + HMAC-SHA256(服务端密钥, 用户 UUID)` 的前 16 位十六进制（不可逆、不含任何个人信息）；全站共享的个股事实段落传固定值 `"shared"`。
+- **user_id**：传 `"u_" + HMAC-SHA256(服务端密钥, 用户 UUID)` 的前 16 位十六进制（不可逆、不含任何个人信息）；同一证书内复用的个股事实段落传固定值 `"shared"`（不含证书或用户标识）。
 - **缓存友好**：消息顺序固定为“版本化 system 模板 → 任务说明与输出样例 → 证据 JSON”，可变内容放最后，提高前缀命中；`llm_calls` 记录 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`。
 - **发送前守卫**：渲染后的 prompt 先跑 7.4A 的 S5、S6、S8、S9 规则和用户名/邮箱精确匹配；任一命中 → 不发送、记 `validation_status=blocked_pii`、回落模板并告警。只允许发送 `EvidencePack` 中的结构化证据（证券代码、指标、规则结果、持仓比例与成本价），**禁止**发送股东代码、资金账号/客户号、用户名、姓名、邮箱、成交编号/委托编号、持仓数量与金额、交割单原文。
 - **超时**：连接超时 5 秒；单次读超时 = 任务 `timeout_s`（默认 30 秒，日报总览 60 秒）；单次调用总截止时间（含重试与退避）90 秒 ◇。响应体解析前去掉保活空行。
@@ -1256,7 +1256,7 @@ class LLMGateway:
 2. **只追加 + 版本**：`research_candidates`、`action_plans`、`reviews` 采用"头表（当前指针、状态）+ 版本表（不可变）"；版本表行禁止 UPDATE/DELETE（数据库触发器强制）。
 3. **数据快照**：每个版本创建时生成 `data_snapshots`，记录当时引用的数据项的值、数据源、`data_as_of`（数据本身对应的时点）、`fetched_at`（我们拿到的时间）。回看时只读快照，不读最新行情。
 4. **成交只追加**：`trades` 不允许修改；更正用 `void`（作废标记 + 原因）+ 新记录；持仓由成交推导。
-5. **个人数据与共享行情数据分 schema**：`app`（用户数据，含 `user_id`，所有查询强制按用户过滤）与 `market`（~~全站共享~~ v0.2.6 起麦蕊来源的行带 `source_licence_id` 按证书隔离，2.1B；只有证券公开主数据全站一份，第 9 节问题 51）。
+5. **个人数据与行情数据分 schema**：`app`（用户数据，含 `user_id`，所有查询强制按用户过滤）与 `market`（~~全站共享~~ v0.2.6 起麦蕊来源的行带 `source_licence_id` 按证书隔离，2.1B；只有证券公开主数据全站一份，第 9 节问题 51）。
 6. 时间：数据库统一 `timestamptz`（UTC）；交易日用 `date`（Asia/Shanghai 口径）；金额用 `numeric(20,4)`，API 中以字符串传输。
 
 ### 3.2 实体关系（概要）
@@ -1271,7 +1271,7 @@ users 1─n watchlist_items ─> securities
 strategies 1─n strategy_versions ─> dimension_definitions ; strategy_cards 1─n strategy_card_versions ─> strategy_versions(晋级) ; users 1─n strategy_instances ─> strategy_versions ; symbol_horizon_assessments ─> horizon_classifier_versions
 strategy_instances 1─n candidate_signals(不可变正文) 1─n candidate_signal_events ; candidate_signals 1─n non_executable_reasons 1─n reason_status_events ; candidate_signals n─n plan_drafts 1─0..1 action_plans ; strategy_versions 1─n strategy_lifecycle_events / strategy_promotion_reviews / strategy_health_daily ; users 1─1 risk_control_settings ; users 1─n risk_events
 users 1─n suggestion_threads 1─n suggestions(不可变) ─> data_snapshots / engine_policies ; suggestions 1─n suggestion_tracking ; suggestions 1─n suggestion_user_actions
-users 1─n daily_reports 1─n daily_report_items ─> suggestions ; signal_states(共享) / user_signal_states 1─n signal_events
+users 1─n daily_reports 1─n daily_report_items ─> suggestions ; signal_states(证书内共享) / user_signal_states 1─n signal_events
 strategy_tracking_stats / user_strategy_weights ─> strategy_versions ; feature_catalog ─> market.feature_bars_daily ; market_rule_versions ; event_definitions ─> market.market_events ; llm_providers 1─n llm_models ; llm_task_routes ─> prompt_templates ; llm_calls
 users 1─n notifications 1─n notification_deliveries ; users 1─n notification_channel_bindings ; plans 1─n plan_entitlements ; users 1─n user_subscriptions
 users 1─n research_candidates 1─n candidate_versions ─> data_snapshots
@@ -1379,7 +1379,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `strategy_instance_events` | id, instance_id, kind(created/confirmed/paused/resumed/params_changed/archived), from_status(nullable), to_status(nullable), actor(user/system), actor_id(nullable), reason_code(nullable), note(nullable), detail(jsonb), at（契约 v0.2.7） |
 | `candidate_signals` | **正文不可变**：id, user_id, instance_id, strategy_version_id, security_id, horizon, proposed_action, t_leg, score, confidence, stops(jsonb), **rule_refs**(jsonb：[{rule_id, snippet_id, version, role, passed, value, threshold}], 非空), **evidence**(jsonb：[{id, provider, endpoint, symbol, field, value, unit, data_as_of, fetched_at, epistemic_type}], 非空), **counter_evidence**(非空), **invalidation**(非空), **model_refs**(jsonb：[{model_id, version, output, role:'auxiliary'}]), gate_results(jsonb), risk_flags(jsonb), crowding_flag, feature_set_version, snapshot_id, valid_until, cooldown_key, created_at；**头表字段**：state(open/blocked/released/drafted/confirmed/dismissed/expired/invalidated/superseded), state_changed_at；按月分区；CHECK 约束：`jsonb_array_length(rule_refs) > 0 AND jsonb_array_length(evidence) > 0` |
 | `candidate_signal_events` | id, signal_id, from_state, to_state, cause(executability_check/reason_released/user/expiry/invalidation/supersede), detail(jsonb), at — 只追加 |
-| `non_executable_reasons` | id, signal_id, user_id, code(23 种之一，2.5.9), description, evidence(jsonb), epistemic_type, detected_at, snapshot_id, release_condition(jsonb), check_on(text[]), machine_checkable(bool), next_check_at, status(active/released/obsolete), released_at, release_evidence(jsonb), released_by(system/user_id) |
+| `non_executable_reasons` | id, signal_id, user_id, code(22 种之一，2.5.9), description, evidence(jsonb), epistemic_type, detected_at, snapshot_id, release_condition(jsonb), check_on(text[]), machine_checkable(bool), next_check_at, status(active/released/obsolete), released_at, release_evidence(jsonb), released_by(system/user_id) |
 | `reason_status_events` | id, reason_id, from_status, to_status, evaluated_value(jsonb), at — 只追加；解除时发 `reason_released` 通知 |
 | `plan_drafts` | **不可变**：id, user_id, signal_ids(uuid[]), instance_id, action, qty_range(jsonb：{min, max, lot}), price_range(jsonb), stops(jsonb), max_loss_amount, max_loss_pct, fee_estimate(jsonb，带 epistemic_type), user_context_snapshot(jsonb：持仓、可卖数量、现金、暴露), risk_flags(jsonb), judgment_checklist(jsonb：[{id, question, required}]), market_rule_version_id, snapshot_id, expires_at, created_at；**头表**：status(pending/confirmed/discarded/expired/stale), status_changed_at |
 | `plan_draft_confirmations` | id, draft_id, user_id, checklist_answers(jsonb), risk_ack(bool), chosen_qty, chosen_price, deviation(jsonb：超出区间的部分与二次确认), plan_id, created_at |
@@ -1407,7 +1407,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `intraday_universe` | trade_date, security_code, tier(1/2/3=仅全市场快照), holders_count, watchers_count, focus_users_count, computed_at（每日一张、变更时更新） |
 | `market.realtime_quotes` | code, ts(行情时间), price, open, high, low, pre_close, volume, amount, pct_change, source(ssjy_more/ssjy_all/real_all), fetched_at（按日分区；按分钟降采样保存，默认保留 10 个交易日，可配置）；**TimescaleDB hypertable**，chunk 1 天，7 天后压缩（3A） |
 | `market.minute_bars` | code, ts, open, high, low, close, volume, amount, source('pro_latest'/'pro_history'), fetched_at（**hypertable**，chunk 1 天，7 天后压缩；保留期按 3A.2 与问题 28 修订；原方案只持久化 Tier-1：1,500 只 × 240 根 ≈ 36 万行/日，默认保留 90 天 ≈ 3,200 万行，约 3–4 GB【估算】；Tier-2 分钟线只放 Redis 当日） |
-| `signal_states` | id, security_code, strategy_version_id, params_hash, rule_states(jsonb), state, last_tick_id, changed_at — 全站共享的当前状态 |
+| `signal_states` | id, source_licence_id（2.1B）, security_code, strategy_version_id, params_hash, rule_states(jsonb), state, last_tick_id, changed_at — 同一证书内共享的当前状态（不跨证书） |
 | `user_signal_states` | id, user_id, security_code, source(suggestion_invalidation/plan_condition/user_rule), source_id, condition(jsonb), state(true/false/unknown), last_tick_id, changed_at |
 | `signal_events` | id, tick_id, scope(shared/user), user_id(nullable), security_code, from_state, to_state, trigger_kind(flip/invalidation/stale/resume), detail(jsonb), quote_ts, created_at — 只追加 |
 | `suggestion_threads` | id, user_id, security_code, account_id(nullable), current_suggestion_id, status(active/superseded/invalidated/expired), user_decision(none/accepted/dismissed/acted), decided_at, updated_at — 头表 |
@@ -1452,11 +1452,11 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `reviews` | id, user_id, plan_id(nullable), security_code, period_start, period_end, current_version_id |
 | `review_versions` | id, review_id, version_no, plan_version_ids(uuid[]), trade_ids(uuid[]), outcome_metrics(jsonb: 收益/基准/超额/回撤，均 fact+计算方法), attribution(jsonb: {market, execution, judgment}，每项含 epistemic_type), lessons(text), tags(text[]), snapshot_id, created_at — **不可变** |
 
-**快照与共享行情**
+**快照与行情**（麦蕊来源按证书隔离，见本节“数据归属”；只有证券公开主数据全站一份）
 | 表 | 关键字段 |
 |---|---|
 | `data_snapshots` | id, created_at, purpose(candidate/plan/alert/review/screen), items(jsonb: [{key（如 quote.{symbol}.close）, value, unit, data_as_of, fetched_at, provider, endpoint, raw_payload_id}]), known_events(jsonb: 当时已知的公告/事件 id 列表), hash |
-| `market.securities` | ~~code, name, exchange, board, list_date, status, industry_codes, updated_at~~ → v0.2.7：security_id, code("600000.SH"), type(stock/cdr/index), name, exchange(SH/SZ/BJ), board, list_date, list_date_basis, delist_date, listing_status, risk_flag, name_norm, name_initials(text[]), master_source, master_as_of, updated_at。**证券公开主数据，全站一份**（第 9 节问题 51：只含代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示；不存公司全称）；`master_source` 来源【待问题 52 / T-A04 补测】，确认前只用交易所公开列表。行业、概念、股本移到按证书的表（带 `source_licence_id`，2.1B）。另建 `security_name_history`、`security_code_history`、`security_risk_flag_history`（T007 §5）；索引 `gin (name_norm gin_trgm_ops)`、`gin (name_initials)`（迁移中 `CREATE EXTENSION IF NOT EXISTS pg_trgm`） |
+| `market.securities` | ~~code, name, exchange, board, list_date, status, industry_codes, updated_at~~ → v0.2.7：security_id, code("600000.SH"), type(stock/cdr/etf/index；契约 v0.2.8 加 etf), name, exchange(SH/SZ/BJ), board, list_date, list_date_basis, delist_date, listing_status, risk_flag, name_norm, name_initials(text[]), master_source, master_as_of, updated_at。**证券公开主数据，全站一份**（第 9 节问题 51：只含代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示；不存公司全称）；`master_source` 来源【待问题 52 / T-A04 补测】，确认前只用交易所公开列表。行业、概念、股本移到按证书的表（带 `source_licence_id`，2.1B）。另建 `security_name_history`、`security_code_history`、`security_risk_flag_history`（T007 §5）；索引 `gin (name_norm gin_trgm_ops)`、`gin (name_initials)`（迁移中 `CREATE EXTENSION IF NOT EXISTS pg_trgm`） |
 | `market.trading_calendar` | date, is_open |
 | `market.daily_bars` | code, trade_date, open, high, low, close, volume, amount, adj_type, fetched_at（按年分区） |
 | `market.quotes_snapshot` | code, ts, price, pct_change, … （只保留当日+近 5 日，热数据在 Redis） |
@@ -1471,7 +1471,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `ops.ingest_leases` | id, holder_host, egress_ip, started_at, last_renewed_at, ended_at, end_reason — 单活锁历史（审计"任何时刻只有一个调用方"） |
 | `market.raw_payloads` | id, source_licence_id（T-A07）, endpoint, params_hash, fetched_at, status, body(jsonb, 压缩), body_hash — 保留 90 天（快照引用的永久保留） |
 
-> **数据归属（T-A07，2.1B）**：`data_sharing.mode=per_licence`（默认）时，全部 `market.*` 表（`securities`、`trading_calendar`、`daily_bars`、`quotes_snapshot`、`realtime_quotes`、`minute_bars`、`financial_reports`、`fund_flows`、`factor_values`、`announcements`、`qa_items`、`market_events`、`feature_bars_daily`）、`market.raw_payloads`、`intraday_universe` 与 Redis 行情缓存键都加 `source_licence_id`（uuid，FK `user_data_licences.id`），并进入唯一键和主要查询索引；`signal_states` 的 `scope=shared` 改为“同一证书内共享”。读取一律按当前用户的证书过滤，不读别人证书取到的数据。用户删除证书或账号时，该证书名下的行情数据按保留策略清理，不转给他人。`shared_cache` 模式下 `source_licence_id` 只记录实际取数的证书，供审计（启用前须取得麦蕊书面确认，第 9 节问题 50）。
+> **数据归属（T-A07，2.1B）**：`data_sharing.mode=per_licence`（默认）时，全部 `market.*` 表（`securities` 除外：它只存证券公开主数据，全站一份，第 9 节问题 51；`trading_calendar`、`daily_bars`、`quotes_snapshot`、`realtime_quotes`、`minute_bars`、`financial_reports`、`fund_flows`、`factor_values`、`announcements`、`qa_items`、`market_events`、`feature_bars_daily`）、`market.raw_payloads`、`intraday_universe` 与 Redis 行情缓存键都加 `source_licence_id`（uuid，FK `user_data_licences.id`），并进入唯一键和主要查询索引；`signal_states` 的 `scope=shared` 改为“同一证书内共享”。读取一律按当前用户的证书过滤，不读别人证书取到的数据。用户删除证书或账号时，该证书名下的行情数据按保留策略清理，不转给他人。`shared_cache` 模式下 `source_licence_id` 只记录实际取数的证书，供审计（启用前须取得麦蕊书面确认，第 9 节问题 50）。
 
 > `first_seen_at` 是"我们何时知道"的依据，是按原貌回看与"当时已知信息"判断的关键：回看 T 时刻时，只使用 `first_seen_at <= T` 的公告/事件/财报版本。
 
@@ -1796,7 +1796,7 @@ class BrokerStatementParser(Protocol):
 - **管理员能力（MVP）**：待审核列表（按申请时间）、查看申请信息（用户名、申请说明、注册时间、注册 IP 所属地粗粒度、同 IP 注册数；同 IP 注册数超过 6.1 `config/auth.yaml` 的 `admin.same_ip_highlight_threshold`（默认 3）时高亮，只作提示、不自动拦截，T-A05 D8）、批准、驳回（必填理由）、禁用/恢复（必填理由）、重置密码（生成一次性临时密码，用户下次登录强制修改）、查看审计日志。
 - **管理员不可见**用户的持仓、成交、计划等个人数据（最小权限）；如需排障，须用户授权（后续）。
 - **无验证码的防滥用**：
-  - 注册：同一 IP 每小时 ≤ 5 次、每日 ≤ 20 次；全站 `pending` 账户数 ≥ 200 时暂停注册（返回 `503 REGISTRATION_CLOSED`）；蜜罐隐藏字段；注册请求最短填写时间（< 3 秒视为机器）。
+  - 注册：同一 IP 每小时 ≤ 5 次、每日 ≤ 20 次；全站 `pending` 账户数 ≥ 200 时暂停注册（返回 `503 REGISTRATION_CLOSED`）；蜜罐与最短填写时间（契约 v0.2.8 §7.1）：注册体有两个可选字段 `website`（隐藏输入，须为空或不传）和 `form_started_at`（int，表单首次渲染的毫秒时间戳，前端按服务端时钟校正）；`website` 非空或“当前时间 − `form_started_at` < 3000 毫秒”视为命中，返回与正常注册相同的状态码和响应体，但不创建用户、不消耗邀请码，写审计 `auth.register_honeypot`（不记录表单内容），仍计入 IP 限速；两字段不会触发 `extra=forbid` 的 400；3000 毫秒为固定规则，不进 `auth.yaml`。
   - 登录：同一 IP 每分钟 ≤ 10 次；同一用户名连续失败 5 次锁定 15 分钟，再失败递增（30/60 分钟，上限 24 小时）；锁定返回 `403 ACCOUNT_LOCKED` 及 `details.retry_after_s`。
   - 全局：Nginx `limit_req` + 应用层 Redis 滑动窗口；返回 `429 RATE_LIMITED` + `Retry-After`。
   - 密码哈希：argon2id（memory 64 MiB、time 3、parallelism 1，参数可配置并支持登录时透明升级）；键为 6.1 `config/auth.yaml` 的 `password_hash.*`，下限按 OWASP（m ≥ 19456 KiB、t ≥ 2、p ≥ 1），低于下限启动失败（T-A05）。
@@ -2087,7 +2087,7 @@ MVP 明确写入产品：**"本产品不提供新闻资讯；公告信息为盘�
 - **管理端**
   - LLM：`/admin/llm/*`，含供应商、模型、任务路由、提示词模板、测试调用和用量。
   - 实时参数：`/admin/realtime-settings`。
-  - 采集状态：`/admin/ingest/status`（队列、预算、错误码、新鲜度、锁持有者；只读）。
+  - 采集状态：`/admin/ingest/status`（队列、预算、错误码、新鲜度、锁持有者，以及按证书的状态列表 `licences[]`：状态、档位、到期、今日调用量与上限、队列积压、熔断、最近错误码，不含证书值；只读，契约 v0.2.8）。
   - 模板审核与生命周期：`/admin/promotions`、`/admin/strategies/{id}/versions/{vid}/lifecycle`。
   - 套餐与订阅：`/admin/plans`、`/admin/subscriptions`。
 - **其他资源分组**
@@ -2156,7 +2156,7 @@ ashare-invest-assistant/
 │   │       ├── notify/             # 通知中心、SSE 广播、channels/（in_app、email、wecom 预留）
 │   │       ├── importing/          # 交割单导入：encoding.py、registry.py、mapping.py、dedup.py、
 │   │       │   └── parsers/        #   generic_delimited.py、csv_template.py、{broker}_v1.py（待范本）
-│   │       ├── marketdata/         # 共享行情存取、gap 判断
+│   │       ├── marketdata/         # 行情存取（按证书隔离）、gap 判断
 │   │       ├── jobs/               # Celery app、beat 调度表、任务
 │   │       ├── db/                 # SQLAlchemy models、session
 │   │       └── common/             # 错误码、分页、时间、金额工具
@@ -2234,7 +2234,7 @@ boards:                         # V1 扫描范围（第 9 节问题 10、C(8)）
   chinext: true
   star: true
   bse: false                    # V1 不含北交所【编排者默认，用户可否决】
-  etf_cb_holdings_only: true    # ETF、可转债只做持仓展示
+  etf_cb_holdings_only: true    # ETF 只做搜索、行情与持仓展示，不进策略扫描；可转债本版不纳入主数据（问题 53，契约 v0.2.8）
 universe:
   tier1_cap: 1500               # int，Tier-1 只数【待 T003】
   universe_hard_cap: 4000       # int，系统去重池硬上限
@@ -2970,7 +2970,7 @@ admin:
 | T-B04 | ~~麦蕊网关 `datagw`~~ **由 T-B04a（`ingest` 服务）取代**，以下功能全部移入 `ingest`：URL 构造、Redis Lua 令牌桶（`per_minute_budget` 可配置）、并发上限（`max_concurrency`）、singleflight、错误码映射（101/102/103/403/429/503）与自适应退避、licence 脱敏、`raw_payloads`、日计数器与降级开关、**录制/回放模式**（本地与 CI 不访问真实麦蕊） | 后端 | T-B02 |
 | T-B05 | **麦蕊实测联调（真实证书，仅一台机器）**：逐一调用 0A.6 与 4.2 的接口，确认字段、空值、延迟、`/hsrl/ssjy/all` 每分钟次数、并发规则、6000/分钟是按接口还是按证书、因子数量（77/85）、`dividend_yield` 可用性、资金流盘中更新频率、板块实时；产出 `docs/mairui-verified.md` 与脱敏 fixtures；回填本文全部【待核实】与【待 T003 验证】；**与 T003 报告 `/workspace/team/reports/T003-mairui-capability.md` 对账**，只在当前唯一调用方上执行 | 后端 | T-B04a |
 | T-B05a | **日线数据质量检查**（T003 发现的伪停牌占位行）：`sf=1` 且同日快照有成交 → 标 `suspect`，排除出指标、信号与跟踪计算，生成管理端告警；补测结果写入 T-B05 产出 | 后端 | T-B05 |
-| T-B06 | 行情共享层：主数据、日历、指数、日 K、全市场快照、板块与成分、涨跌停池、`marketdata` 查询 + `gaps`；`/securities/search`（pg_trgm + 拼音首字母）、`/securities/{code}`、周 K 聚合（契约 v0.2.7；公开主数据范围与来源见第 9 节问题 51–52） | 后端 | T-B05 |
+| T-B06 | 行情层（按证书隔离；证券公开主数据全站一份；契约 v0.2.8 起含 ETF）：主数据、日历、指数、日 K、全市场快照、板块与成分、涨跌停池、`marketdata` 查询 + `gaps`；`/securities/search`（pg_trgm + 拼音首字母）、`/securities/{code}`、周 K 聚合（契约 v0.2.7；公开主数据范围与来源见第 9 节问题 51–52） | 后端 | T-B05 |
 | T-B07 | 盘后数据批：因子截面（2.5 所需因子）、资金流、龙虎榜、公告/问董秘/jrts/解禁/业绩预告、财务；`/securities/{code}/financials` `/fund-flows` `/factors` `/announcements`、`/market/sector-flows`（契约 v0.2.7） | 后端 | T-B06 |
 | T-B08 | 账户、期初持仓、手动成交（只追加+冲正）、`account_events`、持仓由成交重建、`/portfolio/summary` | 后端 | T-B06 |
 | T-B18 | 导入框架（编码识别、解析器注册表、列映射、预览/确认/撤销、去重、错误行报告、原始文件加密存仓库外） | 后端 | T-B08 |
@@ -2986,7 +2986,7 @@ admin:
 | T-T03 | 认证与越权测试（A 不能访问 B；非 admin（含未登录）访问 `/admin/*` 一律 404（契约 v0.2.1）；锁定；禁用即失效） | 测试 | T-B03* |
 | T-T09 | 导入测试（**仅合成样本**，GBK/UTF-8/BOM、定宽 CJK 宽度、幂等、撤销、对账属性测试） | 测试 | T-B18/T-B19 |
 
-**里程碑 M1**：本地一条命令启动；能登录、导入（合成样本）并看到由成交重建的持仓；行情与因子来自共享缓存。
+**里程碑 M1**：本地一条命令启动；能登录、导入（合成样本）并看到由成交重建的持仓；行情与因子来自本人证书的缓存。
 
 ### Phase 2：主线优先——策略库、盘后分析、盘中建议（约 4–5 周）
 | ID | 任务 | 角色 | 依赖 |
@@ -2996,7 +2996,7 @@ admin:
 | T-B21 | **建议引擎**：2.5.4 流水线（数据装配→维度评估→策略结论→风控门控→分歧分析→优先级→解释→不可变存档）、`engine_policies`、置信度公式、**不合并的维度×策略矩阵与 divergence**、`suggestions`/`suggestion_threads`（不可变、建议链）、`/suggestions*` | 后端 | T-B20, T-B09 |
 | T-B31 | **六项风控** RC1–RC6：止损止盈计算（含涨跌停价约束）、单只仓位、总仓位 vs 大盘环境（regime 计算）、板块集中度、连续亏损与回撤、违反计划（导入后即时检查）；`risk_control_settings`（系统默认+用户开关）、`risk_events`、`/risk-controls*` | 后端 | T-B21, T-B08 |
 | T-B22 | **盘中实时链路**：universe 与刷新计划（生成 P0 拉取计划交给 `ingest`）+ `signal-rt` 计算进程、`intraday_universe`（去重、Tier-1/2/3、硬上限 4,000）、`ssjy_more` 批量轮询、`/hsrl/ssjy/all` 每分钟、Pro 1 分钟 K（Tier-1 每分钟 lt=2、Tier-2 每 5 分钟 lt=5）、自适应间隔与退避、stale 判定、`config/realtime.yaml` + `realtime_settings` | 后端 | T-B05, T-B06 |
-| T-B23 | 信号与翻转：共享 `signal_states`、用户 `user_signal_states`（失效条件/计划条件）、`signal_events`、翻转→新建议（盘中）、通知节奏合并 | 后端 | T-B22, T-B21 |
+| T-B23 | 信号与翻转：证书内共享的 `signal_states`、用户 `user_signal_states`（失效条件/计划条件）、`signal_events`、翻转→新建议（盘中）、通知节奏合并 | 后端 | T-B22, T-B21 |
 | T-B24 | **盘后流水线与日报**：0A.5 时间表、`pipeline_runs`（可重跑、幂等）、`daily_reports`/`daily_report_items`（不可变、revision）、数据缺口汇总 | 后端 | T-B21, T-B07 |
 | T-B25 | **LLM 网关 + 管理后台接口**：供应商适配器（OpenAI 兼容 / 其他；先实现 DeepSeek，按 2.7.1/2.7.2 与 `config/llm.yaml`，key 只从 `DEEPSEEK_API_KEY` 读取并只校验非空）、AES-256-GCM 密钥（仅 `api_key_source=db` 的供应商）、任务路由、超时/重试/熔断（按官方错误码）、发送前 PII 守卫、预算、提示词模板版本、证据引用与数字校验、模板兜底、`llm_calls` 与用量统计、`/admin/llm/*` | 后端 | T-B01, T-O05 |
 | T-B26 | 通知：`notifications`、SSE `/stream`（心跳、`Last-Event-ID` 续传）、轮询兜底、渠道适配器接口（站内 + 邮件）、偏好/免打扰/频控、投递日志与重试 | 后端 | T-B23, T-B24 |
@@ -3063,7 +3063,7 @@ admin:
 | T-B20c | 接入研究员首批策略（由 T-B20d 从 `docs/strategies/` 导入的模板与 fixtures，每个 ≥ 6 个）、G1–G6 自动门禁、G7 审核页接口 | 后端 | 2 | T-B20b, T-B20d |
 | T-B20d | **研究员文档导入器**：解析 `docs/strategies/` 中的 `strategy-card` / `strategy-spec` / `validation` 代码块（2.5.14 A–E），完成校验、按 `key + version_no` 幂等导入、生成导入报告和 `config/strategies/*.yaml`；CI 对该目录只读做格式检查 | 后端 | 2 | T-B20b |
 | T-B32 | **策略实例**：`strategy_instances`（I1–I7 校验、`proposed` 需确认、派生版本、风控快照）与 `/strategy-instances*`（列表筛选与分页、§6.0A 状态机与幂等、`/events` 结构，契约 v0.2.7）；替代旧的 `user_symbol_strategy_settings` | 后端 | 2 | T-B20c, T-B30 |
-| T-B33 | **候选信号、可执行性与解除监控**：`candidate_signals`（P1 校验，不通过即拒写）、事件表、冷却、23 种原因码及默认解除条件、按 `check_on` 的解除监控（盘中每轮或事件触发）、`reason_released` 通知 | 后端 | 2 | T-B32, T-B36, T-B23 |
+| T-B33 | **候选信号、可执行性与解除监控**：`candidate_signals`（P1 校验，不通过即拒写）、事件表、冷却、22 种原因码及默认解除条件、按 `check_on` 的解除监控（盘中每轮或事件触发）、`reason_released` 通知 | 后端 | 2 | T-B32, T-B36, T-B23 |
 | T-B34 | **计划草案与确认**：数量与价格区间计算（2.5.8，使用 T-B36）、人工判断清单、`stale` 判定、确认 → `action_plans` 与 `plan_versions`（origin=plan_draft）；`PLAN_REQUIRES_EXPLAINABLE_SIGNAL` | 后端 | 2 | T-B33 |
 | T-B27a | **健康度与降权合并机制**（2.8.2）：`strategy_health_baselines` / `strategy_health_daily`、published ↔ observing 自动切换（带迟滞）、退役建议只通知管理员、用户 `auto_downweight` 开关；模拟跟踪口径（2.8.1：T+1 开盘或下一根 1 分钟 bar 入场、剔除不可成交样本、可选成本） | 后端 | 2 | T-B27, T-B36 |
 | T-B37 | 事件定义与事件信号：`event_definitions`、最早可交易时刻对齐、提前反应（拥挤）检查、AI 抽取事件的置信度、原文链接与人工复核队列（2.12.2） | 后端 | 2 | T-B35, T-B25 |
@@ -3081,7 +3081,7 @@ admin:
 | T-F20 | 管理端：模板生命周期与审核页（卡片对照规则、G1–G7 报告）、`ingest` 状态页（队列、预算、错误码、新鲜度）、内部评估页（第三阶段） | 前端 | 2/3 | T-B20c, T-B04a |
 | T-F21 | 性能：AG Grid 虚拟化与批量事务更新、K 线窗口加载、游标翻页组件 | 前端 | 2 | T-B41 |
 | T-T16 | **可解释性门禁**（0B）：属性测试（随机快照 → 每个信号的追溯字段非空，证据可解析到 `data_snapshots`）；只有 `model_refs` 时无法生成草案；LLM 输出中的每个数字或断言都引用证据 ID；契约中缺少追溯字段即失败。**CI 必过** | 测试 | 2 | T-B33, T-B25 |
-| T-T17 | 原因与解除测试：23 种原因码各自的触发与解除（回放 + 时钟模拟）、手动解除只允许不可机器判断的条件、多条原因全部解除才重新检查；统计必带 n（缺少即失败） | 测试 | 2 | T-B33 |
+| T-T17 | 原因与解除测试：22 种原因码各自的触发与解除（回放 + 时钟模拟）、手动解除只允许不可机器判断的条件、多条原因全部解除才重新检查；统计必带 n（缺少即失败） | 测试 | 2 | T-B33 |
 | T-T18 | 计划草案测试：数量公式边界（整手、科创板规则、T+1 可卖、涨跌停价）、`stale` 与过期、没有确认就没有计划；内部评估接口对普通用户不可达 | 测试 | 2 | T-B34 |
 | T-T19 | 交易规则模块测试：涨跌停价、无涨跌幅情形、费用最低收费、2026-07-06 前后 ST 比例切换（5% → 10%）、停牌跳过、风险警示股票 50 万股买入上限、`modeled_from` 之前返回“规则未建模”、冲击成本成交额口径 | 测试 | 2 | T-B36 |
 | T-T20 | `ingest` 唯一性测试：第二个实例启动被拒、锁丢失即停止外呼、优先级抢占（P0 不被 P2 饿死）、IP 超限模拟 → 告警与暂停、非 `ingest` 容器中没有 licence 环境变量 | 测试 | 1 | T-B04a |
@@ -3121,7 +3121,7 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 7. **刷新与上限默认值**——**【已定 2026-11-01】（架构师默认）**：快照间隔 15 秒（T-B05 实测后调到上限）；Tier-1 1,500 只每分钟 1 分钟 K；universe 硬上限 4,000；每用户自选 100、重点关注 20。数值仍【待 T003 验证】，可在后台修改。
 8. **消息面缺口**——**【已定 2026-11-01】（架构师默认）**：先用"公告类型 + 事件因子"；暂不询价巨潮或持牌资讯商。**V1 没有新闻源**【编排者默认，见 C(8)】。
 9. **情绪面缺口**——**【已定 2026-11-01】（架构师默认）**：用涨跌停、炸板、连板、竞价量比和市场宽度替代；暂不采购舆情数据。
-10. **覆盖范围**——**【已定 2026-11-01】（架构师默认）**：沪深主板、创业板、科创板；ETF、可转债只做持仓展示。**V1 不含北交所**【编排者默认，见 C(8)】：北交所股票可以导入和展示持仓，但不进入策略扫描（模板 `universe.boards.bse=false`）。
+10. **覆盖范围**——**【已定 2026-11-01】（架构师默认）**：沪深主板、创业板、科创板；ETF 只做搜索、行情与持仓展示（不运行策略），可转债本版不纳入（问题 53 取代原“ETF、可转债只做持仓展示”）。**V1 不含北交所**【编排者默认，见 C(8)】：北交所股票可以导入和展示持仓，但不进入策略扫描（模板 `universe.boards.bse=false`）。
 
 **C. 策略库与建议引擎**
 11. **内置策略**——**【已定 2026-11-01】高风险的短线情绪类策略默认不启用**。卡片新增选填字段 `risk_level: normal | high`（2.5.0A）；`high` 的模板不会被周期分类器推荐，~~用户必须在策略页逐项确认风险后手动启用~~ **（2026-11-02 编排者决定取代，T006e）**：手动启用**不需要逐项确认**，策略页启用开关旁固定展示一段风险说明文字（2.5.0A ⑫），与“不弹同意书、不做确认”一致。首批上线哪些策略：【编排者默认，见 C(1)】。
@@ -3187,7 +3187,7 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 50. **【待麦蕊书面确认，未决，不阻断开发】证书归属与共享**：请用户向麦蕊书面询问（QQ 3826425416 或 https://www.mairuiapi.com/linkmeans 的企业顾问表单，保留记录）：① 用户付费、以朋友本人账号申请的证书，由用户的服务器代朋友调用，是否允许；② 同一台服务器（同一出口 IP）同时使用多位不同持有人的证书是否允许，“60 秒 2 个 IP”是否按证书单独计算；③ 用 A 的证书取到的行情（含派生指标）缓存后展示给同样持有证书的 B，是否允许（即 `shared_cache`）；④ 如需书面授权或企业版，范围与费用。答复前一律 `per_licence`，`shared_cache` 禁用；答复存档后由用户拍板。
 51. **证券公开主数据是否全站一份（T-A08 Q1）**——**【架构师已定 2026-11-02，T-A08】**：只有交易所公开信息全站共享：代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示；行业、概念、股本等仍按本人证书各取（2.1B 例外，契约 v0.2.7 §1.1、变更 #19）。公开信息的确切来源（交易所公开列表，或用管理员本人证书拉取）【待问题 52 / T-A04 补测】；**确认前不得用他人（含管理员）的证书**为其他用户取数，只用交易所公开列表。公司全称不在范围内，不收录。
 52. **【暂按默认，补测后复核】只展示问题 51 所列公开字段并加来源说明】交易所公开证券列表能否展示、能否再分发（T007 §4；T-A08 Q2）**：连同问题 51 的来源一起定。默认：只展示问题 51 所列字段，响应带 `attribution` 注明来源；来源确认前只用交易所公开列表。需要谁定：用户（合规）；T-A04 补测。
-53. **【编排者已定 2026-11-02】ETF、可转债是否纳入 `security_type` 和搜索（T-A08 Q3）**：ETF 纳入 `security_type`、搜索与持仓（交割单可能含 ETF 成交），策略不对 ETF 运行；可转债本版不纳入。枚举与接口同步在 T-A09 完成。
+53. **【编排者已定 2026-11-02】ETF、可转债是否纳入 `security_type` 和搜索（T-A08 Q3）**：ETF 纳入 `security_type`、搜索与持仓（交割单可能含 ETF 成交），策略不对 ETF 运行；可转债本版不纳入。枚举与接口同步在 T-A09 完成——**已在契约 v0.2.8 同步**：`security_type` 加 `etf`；搜索 `types=` 默认含 `etf`；资料、行情、持仓、导入照常；ETF 不能建策略实例（复用 `422 INSTANCE_SCOPE_INVALID`）；财务、因子、资金流、公告返回空数组与 `not_applicable` gap；HG1 不变。
 54. **【编排者 2026-11-02 定为按默认】不提供，只给全市场排名】因子的行业内分位（T-A08 Q4）**：麦蕊没有直接提供，自行计算需要定义行业口径和最小样本数。需要谁定：研究员。
 55. **【编排者 2026-11-02 定为按默认】暂不变更状态，信号自然过期】实例归档时其已开放的候选信号如何处理（T-A08 Q5）**：继续有效直到过期，还是置为 `invalidated`。需要谁定：架构师 + 研究员。
 56. **【编排者 2026-11-02 定为按默认】不包含，需要时传 `types=`】证券搜索默认是否包含指数（T-A08 Q6）**。需要谁定：前端 + 产品。
@@ -3195,6 +3195,11 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 58. **【暂按默认，补测后复核】先按 `f` 实现，`adjust_as_of` 来源待补测】复权 `f` 与 `fr` 的区别、前复权基准日如何取得（T-A08 Q8）**。需要谁定：T003 补测。
 59. **【编排者 2026-11-02 定为按默认】`TodayAlert`、`TodayPlanTrigger` 先作为两接口元素的子集，结构定义时必须兼容】`/alerts`、`/plans` 的完整结构仍未定义（T-A08 Q9）**：T-F06/T-F07 卡在这里；`/today` 的“查看全部”指向这两个页面。需要谁定：架构师（下一轮 T-A09）。
 60. **【暂按默认，补测后复核】标【待 T003 补测】】板块资金的 `industry` 用哪套行业分类；资金流分档阈值、因子单位等（T-A08 Q10）**。需要谁定：T003 补测。
+61. **【暂按默认，T-A09 新增，契约 v0.2.8 未决 U1】一律按 T+1 计算】T+0 的 ETF（跨境、债券、黄金、货币等）的 `sellable_qty` 与 `T1_NOT_SELLABLE`**。需要谁定：研究员核对品种清单。
+62. **【暂按默认，补测后复核；U2】名单只用交易所公开基金列表，取不到行情时按契约 §1.1 降级】ETF 名单来源；麦蕊 ETF 实时、日 K、复权是否可用**。需要谁定：T003 / T-A04 补测。
+63. **【暂按默认；U3】本版不变，按原代码显示、无行情】交割单中的可转债按 `import_as_is` 导入后，持仓如何展示**。需要谁定：编排者。
+64. **【暂按默认，补测后复核；U4】只有钻石版过期后有值，其余为 null】各档位麦蕊日额度（`/admin/ingest/status` 的 `daily_limit`）**。需要谁定：T003 补测。
+65. **【暂按默认；U5】不改，保持 `no_source`】指数的财务、资金流是否也改用 `not_applicable`**。需要谁定：架构师。
 
 **I. 编排者默认（2026-11-01 12:32）——【编排者默认，用户可否决】**
 - **C(1) 首批 P0 策略**：G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01（研究员 `docs/strategies/catalog.md` 第 2 节总表；取代早期方案中 2.5.10 的 ①–⑨ MVP 模板清单）。引擎接口覆盖核对与缺口见 2.5.11A。
@@ -3214,7 +3219,7 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 - ingest 心跳：确认 Redis 心跳 + 120 秒判 stale，键 `ingest:heartbeat`（JSON，含 `ts`）与 `ingest:paused`（契约 §7.10，plan 6.1）。
 - `/meta/enums` 外层结构：`{version, enums, reason_codes, error_codes, import_codes, risk_control_labels}`。
 - `PENDING_T_A01` 的 21 个枚举取值 v0.2 不变；§3 新增 `health_status`、`component_health`、`ingest_health`、`gap_reason`、`data_provider`、`source_kind`。
-- `config/*.yaml` 五个文件的键与默认值见 6.1；文件由后端创建。
+- `config/*.yaml` 的文件清单、键与默认值以 6.1 为准；文件由后端创建。（T-A09 更正：原文“五个文件”是 T-A01 时的数目——`realtime`、`ingest`、`market_rules`、`risk_controls`、`horizon_classifier`；之后 6.1 又加了 `llm`、`imports`、`auth`、`securities`（契约 v0.2.7），现共 9 个。）
 - 仍需运维决定（不属于契约）：nginx `proxy_pass` 尾斜杠导致 `/api` 前缀被去掉（T-B01 §4.1），建议去掉尾斜杠，保持 `/api/v1`。
 
-**仍待定的问题汇总**：T-A08 新增问题 52–60（契约 v0.2.7 未决问题，均有默认值）；77/82/85 个因子的口径【待 T003 补测核实】、交易规则 2023-04-10 之前未建模及深交所条款逐字核对（问题 36）；【风险提示，未决】朋友属于第三方：朋友的敏感个人信息、咨询资质、律师书面意见（问题 48；麦蕊再分发改由每人自用证书解决，问题 49）；**麦蕊证书归属、代运营、同 IP 多证书与共享缓存【待麦蕊书面确认】（问题 50）**；（问题 38–42 已于 2026-11-02 作废，见问题 43–47）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法（问题 19，待脱敏范本；分红计入摊薄成本已定）；另见 2.5.14 H（续）末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning，以及 ST 10%、T+1 hold 阈值 1.0%、分红计入摊薄成本已于 2026-11-01 拍板。）
+**仍待定的问题汇总**：T-A08 问题 51–60 中，51、53 已定（53 已在契约 v0.2.8 同步）；54–57、59 按默认执行（59 的 `/alerts`、`/plans` 完整结构仍待架构师定义）；52、58、60 暂按默认，补测后复核；T-A09 新增问题 61–65（契约 v0.2.8 未决 U1–U5，均有默认，62、64 补测后复核）；77/82/85 个因子的口径【待 T003 补测核实】、交易规则 2023-04-10 之前未建模及深交所条款逐字核对（问题 36）；【风险提示，未决】朋友属于第三方：朋友的敏感个人信息、咨询资质、律师书面意见（问题 48；麦蕊再分发改由每人自用证书解决，问题 49）；**麦蕊证书归属、代运营、同 IP 多证书与共享缓存【待麦蕊书面确认】（问题 50）**；（问题 38–42 已于 2026-11-02 作废，见问题 43–47）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法（问题 19，待脱敏范本；分红计入摊薄成本已定）；另见 2.5.14 H（续）末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning，以及 ST 10%、T+1 hold 阈值 1.0%、分红计入摊薄成本已于 2026-11-01 拍板。）

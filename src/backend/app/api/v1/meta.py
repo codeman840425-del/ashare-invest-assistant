@@ -39,6 +39,12 @@ router = APIRouter(tags=["meta"])
 
 CACHE_CONTROL = "public, max-age=300"
 
+#: OpenAPI 响应头声明（契约 §7.10：强 ETag + ``Cache-Control: public, max-age=300``）
+_CACHE_HEADERS: dict[str, Any] = {
+    "ETag": {"description": "强 ETag（内容哈希）", "schema": {"type": "string"}},
+    "Cache-Control": {"description": CACHE_CONTROL, "schema": {"type": "string"}},
+}
+
 
 class ReasonCodeOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -126,6 +132,13 @@ def _etag_matches(header: str, etag: str) -> bool:
     "/meta/enums",
     response_model=EnumsResponse,
     summary="枚举、原因码、错误码与导入提示码（不分页，可缓存）",
+    responses={
+        200: {"headers": _CACHE_HEADERS},
+        304: {
+            "description": "Not Modified：If-None-Match 命中当前 ETag，无响应体（契约 §7.10）",
+            "headers": _CACHE_HEADERS,
+        },
+    },
 )
 async def meta_enums(
     if_none_match: Annotated[str | None, Header()] = None,

@@ -288,7 +288,7 @@
 | veto 作用范围 | 只作用于本模板 |
 
 ## 21. 个人适配 [OPT/L1]
-`fit: {effort: low|medium|high, risk_tolerance_min: 1–5, experience_min: novice|intermediate|advanced}`（§2.5.14 B；枚举与契约 profile.experience 一致，为 `advanced` 不是 `experienced`）；另可写 `capital_min_cny`（至少能买 1 手且满足单标的上限）、`drawdown_expect`、`mismatch_handling`（不匹配时提示并降置信度，实例化需逐项确认）。
+`fit: {effort: low|medium|high, risk_tolerance_min: 1–5, experience_min: novice|intermediate|advanced}`（§2.5.14 B；枚举与契约 profile.experience 一致，为 `advanced` 不是 `experienced`）；另可写 `capital_min_cny`（至少能买 1 手且满足单标的上限）、`drawdown_expect`、`mismatch_handling`（不匹配时只提示并降置信度；实例化**不需确认**：画像低于 `fit` 下限时 `POST /strategy-instances` 照常 201，只在 `warnings[]` 说明，契约 v0.2.5 `fit_ack` 作废）。`fit` 各项只作提示，不阻止、不封顶。
 
 ## 22. 参数与敏感性 [L2]
 `params_schema`（D 节）：映射形式 `{name: {type, default, min, max, step, desc, unit?, choices?}}` 或列表形式（`说明` 是 `desc` 的别名）。类型严格；`default ∈ [min, max]`。另填 `user_editable`（false 的参数不允许在 L3 改）和 `sensitivity`（研究侧结论摘要，未做写"未评估"，方法见 validation.md §5.1）。

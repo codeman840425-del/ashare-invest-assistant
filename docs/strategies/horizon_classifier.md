@@ -4,6 +4,7 @@
 > 字段名对齐 `docs/api-contract.md` v0.2：`horizon` 枚举、`/horizon-assessments`、`TextWithEvidence`、`/me/profile`。
 > **所有阈值与分值都是初值，待模拟跟踪校准**，不是统计结论，也没有回测依据。示例表中的数值全部为“示例”。
 > 分类结果是**候选周期**，不是买卖建议。用户确认后才生效（plan §2.5.0、§9 C Q15）。
+> **当前版本：`classifier_version: "1.2.0"`（`version_no: 3`，契约 v0.2.5，T-A06，T006e 同步）。** 画像类规则（`SH0`、`SH0B`、`SH0C`、`IT0B`、`IT0C`）只提示、不封顶：画像未填写时跳过；已填写且不满足时只写 `hints[]`。1.1.0（v2，新手封顶）、1.0.0（v1）不可变，保留。
 
 ## 0. 粘贴位置（给架构师）
 
@@ -42,9 +43,9 @@
 | `user.has_t_trades` | bool，导入成交中存在同日买卖 | 导入成交 | 视为“无记录”：0 分，**不算**数据缺失 |
 | `user.avg_holding_days` | 交易日 | 导入成交（已平仓回合） | 同上 |
 | `profile.horizon_pref` | `horizon[]` | `/me/profile` | 0 分，不算数据缺失 |
-| `profile.effort` | `low` / `medium` / `high` | `/me/profile` | 0 分；相关 requires 视为不满足 |
+| `profile.effort` | `low` / `medium` / `high` | `/me/profile` | 0 分；画像类 requires（`mode: hint`）跳过：不提示、不封顶（1.2.0） |
 | `profile.risk_tolerance` | int 1–5 | `/me/profile` | 同上 |
-| `profile.experience` | `novice` / `intermediate` / `advanced` | `/me/profile` | 0 分 |
+| `profile.experience` | `novice` / `intermediate` / `advanced` | `/me/profile` | 0 分；同上，不提示、不封顶 |
 
 **单位约定。**
 - 波动、振幅、换手这类特征的单位尚未实测（可能是小数也可能是百分数），一律用 T−1 截面的 `rank_pct`（平均秩 / N，取值 [0, 1]，并列取平均秩）。截面范围：沪深 A 股股票，剔除北交所、停牌股、上市不足 20 日的股票。
@@ -56,7 +57,9 @@
 
 ## 2. 输出（与契约一致）
 
-`GET /horizon-assessments` 返回 `{suitable: horizon[], scores: {horizon: int}, reasons: [TextWithEvidence], classifier_version}`。
+`GET /horizon-assessments` 返回 `{suitable: horizon[], scores: {horizon: int}, reasons: [TextWithEvidence], classifier_version}`。（契约现行版本另有 `inputs_missing`、`caps: HorizonCap[]`、`hints: HorizonHint[]`、`snapshot_id`、`evidence`，以契约 §7.4 为准。）
+
+- `hints`（v0.2.5，永不为 null）：元素 `HorizonHint {horizon, rule_id, text}`，由 `mode: hint` 的 requires 规则在输入已填写且不满足时产生；`text` 取规则的 `reason`。不改分数、不进 `caps`、不影响 `suitable`。`rule_id` 不是 `reason_code`。
 
 - `scores`：四个周期都要给。值为 0–100 的**整数**。
 - `suitable`：`scores ≥ suitable_threshold`（60）的周期。按分数降序；同分时按 `tie_order` 排：long → swing → short → intraday_t（偏保守的在前）。
@@ -73,7 +76,10 @@
 1. **闸门 `gates`**：按顺序全部求值，适用周期包含 h 且条件为真的都记录下来。
    - 带 `score: 0` 的：h 的最终分数记为 0。
    - 带 `cap` 的：记入封顶集合。
-2. **周期前提 `requires`**：条件为假时，或者输入为 null 时（`not_null` 除外），执行 `else_score: 0` 或 `else_cap`。
+2. **周期前提 `requires`**：按规则的 `mode` 处理（可选键，默认 `cap`；1.2.0 起）。
+   - `mode: cap`（默认）：条件为假时，或者输入为 null 时（`not_null` 除外），执行 `else_score: 0` 或 `else_cap`，并记入 `caps[]`（`kind: requires`）。
+   - `mode: hint`：不得带 `else_cap`/`else_score`。输入为 null（画像未填写）→ 跳过，不提示、不封顶；输入已填写且条件为假 → 只写入 `hints[]`（`{horizon, rule_id, text: reason}`），不改分数、不进 `caps[]`、不影响 `suitable`，也不进第 7 步的理由。
+   - 画像类规则 `SH0`、`SH0B`、`SH0C`、`IT0B`、`IT0C` 全部为 `mode: hint`；非画像的 `IT0`、`LG0`、`LG0B` 仍为 `cap`。
 3. **组件打分 `components`**：每个组件的 `bands` 自上而下取**第一条**为真的分档，得到 pts；都不满足则 0 分。输入为 null 时得 0 分；如果输入是 `f.*`，就把该组件的满分计入 `missing_points`。
 4. **数据缺失封顶**：`missing_points ≥ 40` 时 cap 59。
 5. **合成**：`raw = Σ pts`（四个周期的满分都是 100）。
@@ -92,7 +98,7 @@
    - 排除：`risk_level: high` 的卡（Q11，例如 S-03）；不可执行的卡（N-03）。
    - 系统组件 H-01 / G-01 / N-01 不经分类器，由系统挂载（C(3)）。
    - 结果生成 `status=proposed` 的实例，用户确认后才生效（Q15）。
-9. **用户覆盖**：用户选了不在 suitable 中的周期时，需要 `fit_ack`（否则返回 `422 STRATEGY_FIT_ACK_REQUIRED`）。确认后 `horizon_assessment.user_overridden = true`，之后重算不改用户的选择；suitable 集合变化时只提示“系统建议已变化”。
+9. **用户覆盖**：用户可以自由为任何周期创建实例，不需要确认（契约 v0.2.5：`fit_ack` 与 `STRATEGY_FIT_ACK_REQUIRED` 作废）。所选周期不在 suitable 中、或画像低于卡片 `fit` 下限时，`POST /strategy-instances` 照常返回 201，只在 `warnings[]` 中给出中文说明（I3 只校验模板 `horizons`）。用户修改后系统不再自动改动，之后重算不改用户的选择；suitable 集合变化时只提示“系统建议已变化”。
 
 **重算触发**沿用 plan：`import_confirm`、`watchlist_add`、每周六。建议架构师考虑增加“持仓清零 / 新建仓”这个触发：intraday_t 依赖 `user.has_position`，周内变化时最多滞后一周。T 卡运行时另有 `NO_POSITION` / `T1_NOT_SELLABLE` 拦截，所以滞后不会导致错误执行。
 
@@ -123,10 +129,12 @@ rules:
       requires:
         - {id: IT0, input: user.has_position, op: eq, value: true, else_score: 0,
            reason: "做T 需要已有底仓（T+1：当日买入不能当日卖出）"}
-        - {id: IT0B, input: profile.effort, op: in, value: [medium, high], else_cap: 59,
-           reason: "做T 需要盘中盯盘，画像精力为低或未填写"}
-        - {id: IT0C, input: profile.experience, op: in, value: [intermediate, advanced], else_cap: 59,
-           reason: "做T 需要盘中决断与纪律，画像经验为新手或未填写"}   # 编排者默认，用户可否决（2026-11-01）
+        # T-A06（1.2.0）：requires 规则新增可选键 mode: cap（默认）| hint。hint 规则不得带 else_cap/else_score；输入未填写时跳过（不提示、不封顶）；
+        #        不满足时只写入输出 hints[]（{horizon, rule_id, text}），不改分数、不进 caps[]。画像类规则全部为 hint（用户 2026-11-02 决定）
+        - {id: IT0B, input: profile.effort, op: in, value: [medium, high], mode: hint,
+           reason: "做T 需要盘中盯盘，您自报的精力为低"}
+        - {id: IT0C, input: profile.experience, op: in, value: [intermediate, advanced], mode: hint,
+           reason: "做T 需要盘中决断与纪律，您自报的经验为新手"}   # 【用户已定 2026-11-02】只在自报 novice 时提示
       components:
         - {id: IT1, input: f.intraday_amplitude_20d, transform: rank_pct,
            bands: [{op: ge, value: 0.7, pts: 30}, {op: ge, value: 0.5, pts: 20}, {op: ge, value: 0.3, pts: 10}],
@@ -145,12 +153,12 @@ rules:
            text: "画像经验：{v}"}
     short:
       requires:
-        - {id: SH0, input: profile.risk_tolerance, op: ge, value: 3, else_cap: 59,
-           reason: "短线波动大，画像风险承受 < 3 或未填写"}
-        - {id: SH0B, input: profile.effort, op: in, value: [medium, high], else_cap: 59,
-           reason: "短线需要每日跟踪，画像精力为低或未填写"}
-        - {id: SH0C, input: profile.experience, op: in, value: [intermediate, advanced], else_cap: 59,
-           reason: "短线需要盯盘与止损纪律，画像经验为新手或未填写"}   # 问题 37 方案 A，已定（2026-11-01）
+        - {id: SH0, input: profile.risk_tolerance, op: ge, value: 3, mode: hint,
+           reason: "短线波动大，您自报的风险承受 < 3"}
+        - {id: SH0B, input: profile.effort, op: in, value: [medium, high], mode: hint,
+           reason: "短线需要每日跟踪，您自报的精力为低"}
+        - {id: SH0C, input: profile.experience, op: in, value: [intermediate, advanced], mode: hint,
+           reason: "短线需要盯盘与止损纪律，您自报的经验为新手"}   # 【用户已定 2026-11-02】只在自报 novice 时提示（取代问题 37 方案 A）
       components:
         - {id: SH1, input: f.amount_20d_avg, unit: CNY,
            bands: [{op: ge, value: 300000000, pts: 20}, {op: ge, value: 100000000, pts: 10}],
@@ -286,7 +294,8 @@ plan §2.5.3 还提到 ATR% 和“交易频率”。v1 规则未使用：ATR% �
 | 银行等没有毛利率之类口径的行业 | v1 只用 ROE、增速、分红，不受影响 |
 | 亏损股 | ROE ≤ 0：swing 的 SW5、long 的 LG2 得 0 分；增速基期 ≤ 0 时为 null，计入缺失 |
 | 无导入成交 | `user.*` 为“无记录”，0 分，不算缺失 |
-| 画像未填 | profile 组件 0 分；intraday_t / short 的 requires 不满足，封顶 59；swing / long 不受影响 |
+| 画像未填 | profile 组件 0 分（只是不加分）；画像类 requires（`mode: hint`）跳过：不封顶、不提示，`hints=[]`（1.2.0；1.1.0 曾封顶 59） |
+| 画像已填但低于画像类前提（如 novice、风险 < 3、精力 low） | 只在 `hints[]` 提示，分数与 suitable 不变 |
 | 持仓已清 | intraday_t 的 IT0 不满足，得 0 分（下次重算生效） |
 | 除权除息 | 涉及价格的特征按前复权计算（与 feature_catalog 一致）；分类器本身不碰价格 |
 
@@ -296,14 +305,16 @@ plan §2.5.3 还提到 ATR% 和“交易频率”。v1 规则未使用：ATR% �
 
 | 用例 | 关键输入（示例） | intraday_t | short | swing | long | suitable |
 |---|---|---|---|---|---|---|
-| A 大盘稳健 + 长线画像 | 振幅分位 0.2、成交额 8 亿、换手分位 0.2、波动分位 0.25、ma_trend>0、mom>0、ROE 11%、增速 6%、连续分红 8 年、财报 40 期；有底仓、无做T、均持 90 日；偏好 [long, swing]、精力 low、风险 2、经验 intermediate | 30（raw 30；IT0B 封顶 59） | 30 | 90 | 100 | [long, swing] |
+| A 大盘稳健 + 长线画像 | 振幅分位 0.2、成交额 8 亿、换手分位 0.2、波动分位 0.25、ma_trend>0、mom>0、ROE 11%、增速 6%、连续分红 8 年、财报 40 期；有底仓、无做T、均持 90 日；偏好 [long, swing]、精力 low、风险 2、经验 intermediate | 30（raw 30；IT0B 只提示） | 30（SH0、SH0B 只提示） | 90 | 100 | [long, swing] |
 | B 高振幅活跃 + 底仓 + 做T记录 | 振幅分位 0.85、成交额 12 亿、换手分位 0.8、涨停 2 次、波动分位 0.75、ma_trend>0、mom>0、ROE 3%、增速 −5%、分红 0 年、财报 30 期；有底仓、有做T、均持 4 日；偏好 [short, intraday_t]、精力 high、风险 4、经验 advanced | 100 | 100 | 70 | 20 | [short, intraday_t, swing] |
 | C 同 B，但为 ST | 同 B，`f.is_st=true` | 59 | 59 | 59 | 20 | [] |
 | D 北交所 | `sec.board=bse` | 0 | 0 | 0 | 0 | [] |
-| E 次新（上市 40 日） | 振幅分位 0.7、成交额 4 亿、换手分位 0.9、涨停 1 次、波动分位 0.85、ma_trend>0、mom 缺失、ROE 8%、增速缺失、财报 6 期；无持仓、无成交记录；偏好 [swing, short]、精力 medium、风险 3、经验 novice | 0（无底仓） | 59（novice 封顶，raw 85） | 59（HG6，raw 65） | 10 | [] |
+| E 次新（上市 40 日） | 振幅分位 0.7、成交额 4 亿、换手分位 0.9、涨停 1 次、波动分位 0.85、ma_trend>0、mom 缺失、ROE 8%、增速缺失、财报 6 期；无持仓、无成交记录；偏好 [swing, short]、精力 medium、风险 3、经验 novice | 0（无底仓） | 85（raw 85，不封顶；SH0C 只提示） | 59（HG6，raw 65） | 10 | [short] |
 | F 无持仓 + 画像未填 + 财务缺失 | 振幅分位 0.5、成交额 1.5 亿、换手分位 0.5、波动分位 0.5、ma_trend<0、mom<0；ROE、增速、分红、财报期数都缺失；无持仓 | 0 | 28 | 25 | 10（缺失 65 分，封顶） | [] |
 
-> 用例 E 说明：按已定规则（用户 2026-11-01 拍板方案 A，见第 9 节），novice 用户的 short 封顶 59（raw 85→59），因此不列为“适合”；用户可经 `fit_ack` 自行选择。intraday_t 对 novice 同样封顶 59（编排者默认，用户可否决），本例因无底仓本就为 0。
+> 用例 E 说明（1.2.0，契约 v0.2.5）：novice 只提示、不封顶。short = raw 85（SH1 20 + SH2 15 + SH3 10 + SH4 10 + SH5 10 + SH6 15 + SH7 5），列为“适合”，`suitable = [short]`；`caps` 中不出现 SH0C/IT0C，非画像项照旧（intraday_t 的 IT0、long 的 LG0，以及 HG6 对 swing/long 的闸门封顶）。`hints` = `[{horizon: short, rule_id: SH0C, text: "短线需要盯盘与止损纪律，您自报的经验为新手"}, {horizon: intraday_t, rule_id: IT0C, text: "做T 需要盘中决断与纪律，您自报的经验为新手"}]`（风险 3、精力 medium 满足 SH0/SH0B/IT0B，不提示）。intraday_t 因无底仓（IT0）仍为 0。1.1.0 下本例 short 为 59、suitable 为 []，已被取代。
+>
+> 用例 A、F 的分数在 1.2.0 下不变（原封顶均未生效）：A 的 `hints` 为 IT0B、SH0、SH0B；F 画像未填，`hints=[]`。
 
 用例 B 的理由示例（示例文本；evidence_ids 为示例）：
 
@@ -321,11 +332,11 @@ plan §2.5.3 还提到 ATR% 和“交易频率”。v1 规则未使用：ATR% �
 3. **画像字段冲突。** plan 第 1170 行 `user_profiles` 是 `horizon(short/medium/long)`、`weekly_hours`；契约 `/me/profile` 是 `horizon_pref: horizon[]`、`effort`、`risk_tolerance`、`experience`。本规则按契约来，plan 需同步。
 4. **plan §6.1 的 `features:` 键名没有前缀，并且缺第 5 节的新增键。**
 5. **`rules` 的结构需要确认。** 本文用结构化的 gates/requires/components/bands；导入器也可以改用 DSL 表达式，但语义须与第 3 节一致。
-6. **是否按 `profile.experience` 限制 short / intraday_t**（见用例 E；plan 问题 37；详见第 9 节）。**short：【已定 A】（用户拍板，2026-11-01，见 T-A03 §2）**：novice 或未填经验 → short 封顶 59，可 `fit_ack` 覆盖，落地为 `horizon_classifier.yaml` 规则 SH0C（`version_no: 2`，`classifier_version: "1.1.0"`）。**intraday_t：编排者默认，用户可否决**：同样封顶，口径与 short 一致（novice 或未填 → 封顶 59，可 `fit_ack` 覆盖）。另外，intraday_t 在 §9 C(6) 下目前只做盘后统计：分类器列为“适合”只表示周期匹配，T-01 实例运行时仍只出盘后统计。前端文案需说明这一点。
+6. **是否按 `profile.experience` 限制 short / intraday_t**（见用例 E；plan 问题 37、44；详见第 9 节）。**【已定：只提示、不封顶】（用户 2026-11-02，T-A06，契约 v0.2.5，取代 2026-11-01 的问题 37 方案 A）**：`SH0C`/`IT0C` 改为 `mode: hint`，只在自报 `experience=novice` 时写入 `hints[]`；经验未填写不提示、不封顶；不改分数、不影响 `suitable`。架构师同时把 `SH0`、`SH0B`、`IT0B` 统一改为 `mode: hint`。落地为 `horizon_classifier.yaml` `version_no: 3`、`classifier_version: "1.2.0"`。`fit_ack` 作废，用户可自由选择 short 与 intraday_t（实例创建只给 `warnings[]`）。另外，intraday_t 在 §9 C(6) 下目前只做盘后统计：分类器列为“适合”只表示周期匹配，T-01 实例运行时仍只出盘后统计。前端文案需说明这一点。
 
-## 9. 问题 37：novice 是否限制 short（T006b 问题 4；short **【已定 A】**，intraday_t **编排者默认，用户可否决**）
+## 9. 问题 37：novice 是否限制 short（T006b 问题 4；**已被 plan 问题 44 取代：只提示、不封顶**，用户 2026-11-02）
 
-> 本节原为专业建议和备选方案。2026-11-01 用户已就 short 选定方案 A（T-A03 §2）；intraday_t 由编排者默认同样封顶，用户可否决。9.1–9.3 保留为决策依据。改动只涉及 `horizon_classifier.yaml` 新版本（plan 问题 37 原文），不影响契约。
+> **2026-11-02 更新（T-A06，契约 v0.2.5）**：用户决定不做风险测评、不签协议，本工具仅供朋友私下使用，用户可自由选择 short 与 intraday_t。问题 37 方案 A（新手封顶）**作废**，改为接近方案 B 的“只提示”：画像类规则 `mode: hint`，提示写入独立的 `hints[]`（不写入 reasons），见第 3 节第 2 步与第 4 节。以下 9.1–9.4 为 2026-11-01 的历史决策依据，仅供回看，**不再是现行规则**。
 
 ### 9.1 现状
 
@@ -365,10 +376,10 @@ plan §2.5.3 还提到 ATR% 和“交易频率”。v1 规则未使用：ATR% �
 
 **intraday_t 是否同样处理**：研究员原建议先不加（intraday_t 已要求有底仓，§9 C(6) 下目前只出盘后统计）。**编排者已定默认：intraday_t 对 novice 也封顶，口径与 short 一致**（示意：intraday_t.requires 增加 `{id: IT0C, input: profile.experience, op: in, value: [intermediate, advanced], else_cap: 59, reason: "做T 需要盘中决断与纪律，画像经验为新手或未填写"}`，与架构师 fce21bb 一致）。用户可否决。
 
-### 9.4 选 A 时的影响（示例）
+### 9.4 选 A 时的影响（示例；历史，已被 1.2.0 取代，现行期望见第 7 节用例 E）
 
 - 用例 E（novice）：short 由 85 → 59（示例），suitable 由 [short] → []。用户可通过 `fit_ack` 自行选择 short。
 - 用例 B（advanced）不受影响。
 - 需要同步：`classifier_version` 升版；用例表增加一行 novice 对照；理由文案见上表。
 
-**状态：short【已定 A】（用户拍板，2026-11-01，T-A03 §2）；intraday_t【编排者默认，用户可否决】（同样封顶，口径与 short 一致）。** 架构师已在 plan 问题 37 与 §6.1 落地 SH0C（`version_no: 2`，`classifier_version: "1.1.0"`）；架构师已在 fce21bb 落地 IT0C。第 4 节 rules 块已同步补入 SH0C、IT0C（T006d，结构不变，均为对应周期 requires 的 else_cap 59）。
+**状态：【已被取代】short、intraday_t 均为“只提示、不封顶”（用户 2026-11-02 决定，plan 问题 44，T-A06，契约 v0.2.5）。** 历史：2026-11-01 short 定方案 A、intraday_t 编排者默认同样封顶，落地为 SH0C/IT0C `else_cap: 59`（`version_no: 2`，`classifier_version: "1.1.0"`，T006d）；该版本不可变、保留。现行：第 4 节 rules 块中 `SH0`、`SH0B`、`SH0C`、`IT0B`、`IT0C` 均为 `mode: hint`、去掉 `else_cap` 与“或未填写”（`version_no: 3`，`classifier_version: "1.2.0"`，T006e）；`fit_ack` 作废。用例 E 新期望：short 85、`suitable = [short]`，`hints` 含 SH0C（及 intraday_t 的 IT0C）。

@@ -30,7 +30,15 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 import yaml
-from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -340,6 +348,36 @@ class _InitNoneIsUnset(PydanticBaseSettingsSource):
         return data
 
 
+class AuthAbusePolicy(BaseModel):
+    """无验证码的防滥用阈值（plan §3.6，T-B03a）。
+
+    默认值逐条取自 plan §3.6；plan §6.1 尚无对应 YAML 段与键名（待架构师定），先作为
+    ``Settings.auth_abuse`` 的结构化字段（测试可整体覆盖），不新增环境变量。
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: 登录：同一 IP 每分钟 ≤ 10 次
+    login_ip_per_minute: int = Field(default=10, ge=1)
+    #: 注册：同一 IP 每小时 ≤ 5 次、每日 ≤ 20 次
+    register_ip_per_hour: int = Field(default=5, ge=1)
+    register_ip_per_day: int = Field(default=20, ge=1)
+    #: 全站 pending 账户数 ≥ 200 时暂停注册（503 REGISTRATION_CLOSED）
+    pending_cap: int = Field(default=200, ge=1)
+    #: 同一用户名连续失败 5 次锁定 15 分钟，再失败递增（30/60 分钟…），上限 24 小时
+    lock_after_failures: int = Field(default=5, ge=1)
+    lock_base_s: int = Field(default=900, ge=1)
+    lock_max_s: int = Field(default=86_400, ge=1)
+
+    @model_validator(mode="after")
+    def _check(self) -> AuthAbusePolicy:
+        if self.lock_base_s > self.lock_max_s:
+            raise ValueError("lock_base_s 不能大于 lock_max_s")
+        if self.register_ip_per_hour > self.register_ip_per_day:
+            raise ValueError("register_ip_per_hour 不能大于 register_ip_per_day")
+        return self
+
+
 class Settings(BaseSettings):
     """后端 API 进程的配置。字段名大写即对应环境变量名（大小写不敏感）。"""
 
@@ -378,6 +416,8 @@ class Settings(BaseSettings):
     registration_mode: RegistrationMode = RegistrationMode.CLOSED
     #: ``SESSION_COOKIE_SECURE``：生产必须 true；只有 APP_ENV=local/test 可设 false（S6）
     session_cookie_secure: bool = True
+    #: 防滥用阈值（T-B03a，plan §3.6）
+    auth_abuse: AuthAbusePolicy = Field(default_factory=AuthAbusePolicy)
     #: ``TRUSTED_PROXIES``：只有直连对端落在这些网段（我方 nginx）时才采信转发头，且只取
     #: ``X-Forwarded-For`` 最右一跳（nginx 追加的 ``$remote_addr``）。JSON 数组；空 = 不采信。
     trusted_proxies: tuple[str, ...] = _DEFAULT_TRUSTED_PROXIES

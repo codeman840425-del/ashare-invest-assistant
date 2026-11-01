@@ -57,10 +57,17 @@ def get_password_policy(settings: Annotated[Settings, Depends(get_settings)]) ->
     return policy_for(settings.business.auth)
 
 
+def get_redis(settings: Annotated[Settings, Depends(get_settings)]) -> redis.Redis:
+    if not settings.redis_url:
+        raise AppError(ErrorCode.INTERNAL_ERROR)
+    return _redis_for(settings.redis_url)
+
+
 EngineDep = Annotated[Engine, Depends(get_engine)]
 StoreDep = Annotated[SessionStore, Depends(get_session_store)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 PasswordsDep = Annotated[PasswordPolicy, Depends(get_password_policy)]
+RedisDep = Annotated[redis.Redis, Depends(get_redis)]
 
 
 def _parse_ip(value: str | None) -> str | None:

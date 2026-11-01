@@ -1,7 +1,8 @@
 """``/meta/registration``、``/auth/*``（契约 §7.1、§1.3；plan §3.6；T-B03）。
 
 同步 ``def`` 路由：数据库（psycopg 同步引擎）与 Redis 都是阻塞调用，FastAPI 放线程池执行。
-限速、渐进锁定、蜜罐、``login_attempts``、pending 上限归 T-B03a；邀请码归 T-B03c。
+防滥用（T-B03a，``app.auth.abuse``）：登录/注册按 IP 限速、改密按用户限速、渐进锁定、pending 上限、
+``login_attempts``；蜜罐与最短填写时间需契约增加请求字段，暂未实现（见报告）。邀请码归 T-B03c。
 会话期限、argon2 参数、口令长度取 ``config/auth.yaml``（T-B03b）。
 """
 
@@ -16,11 +17,12 @@ from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.me import build_me
-from app.auth import service
+from app.auth import abuse, service
 from app.auth.deps import (
     AuthDep,
     EngineDep,
     PasswordsDep,
+    RedisDep,
     SettingsDep,
     StoreDep,
     client_ip,
@@ -116,11 +118,20 @@ def register(
     settings: SettingsDep,
     engine: EngineDep,
     passwords: PasswordsDep,
+    rds: RedisDep,
 ) -> RegisterOut:
     # closed：一律 503（先于参数业务校验）。invite：邀请码的存储与核验未定义（无表、无发放接口），
     # 不能核验就不能放行 → 按最保守理解同 closed（报告 TODO）。open：契约“保留，V1 不用”，照实现。
     if settings.registration_mode != RegistrationMode.OPEN:
         raise AppError(ErrorCode.REGISTRATION_CLOSED)
+
+    # 防滥用（plan §3.6）：同一 IP 每小时/每日上限（每次尝试都计，含校验失败）→ 429；
+    # 全站 pending 达上限 → 503 REGISTRATION_CLOSED（暂停注册）
+    policy = settings.auth_abuse
+    ip = client_ip(request, settings)
+    abuse.RateLimiter(rds).enforce(abuse.ip_key(settings, ip), abuse.register_windows(policy))
+    with engine.connect() as conn:
+        abuse.enforce_pending_cap(conn, policy)
 
     username = body.username.strip().lower()
     fields: list[dict[str, str]] = []
@@ -136,7 +147,7 @@ def register(
     if fields:
         raise _validation(fields)
 
-    ih = ip_hash(settings, client_ip(request, settings))
+    ih = ip_hash(settings, ip)
     pw_hash = passwords.hash(body.password)
     try:
         with engine.begin() as conn:
@@ -179,21 +190,47 @@ def login(
     engine: EngineDep,
     store: StoreDep,
     passwords: PasswordsDep,
+    rds: RedisDep,
 ) -> dict[str, Any]:
+    policy = settings.auth_abuse
+    ip = client_ip(request, settings)
+    # 同一 IP 每分钟上限 → 429（不落 login_attempts，防刷表）
+    abuse.RateLimiter(rds).enforce(abuse.ip_key(settings, ip), abuse.login_windows(policy))
+
     username = body.username.strip().lower()
-    ih = ip_hash(settings, client_ip(request, settings))
+    tried = username[: abuse.USERNAME_TRIED_MAX]
+    ih = ip_hash(settings, ip)
     with engine.connect() as conn:
         user = service.find_user_by_username(conn, username)
+    user_id = None if user is None else user.id
 
-    now = service.now_utc()
-    if user is not None and user.locked_until is not None and user.locked_until > now:
-        retry = max(1, int((user.locked_until - now).total_seconds()))
+    # 锁定期内不校验密码（密码正确也拒绝）；不存在的用户名同规则锁定，不泄露存在性
+    retry = abuse.locked_retry_after(user, tried, rds, service.now_utc())
+    if retry is not None:
+        with engine.begin() as conn:
+            abuse.record_attempt(
+                conn,
+                username=tried,
+                user_id=user_id,
+                ip_hash=ih,
+                success=False,
+                failure_reason="locked",
+            )
         raise AppError(ErrorCode.ACCOUNT_LOCKED, details={"retry_after_s": retry})
 
     # 用户不存在也跑一次哈希校验（时间接近），错误一律 401，不区分“用户不存在 / 密码错”
     if not passwords.verify(None if user is None else user.password_hash, body.password):
-        if user is not None:
-            with engine.begin() as conn:
+        with engine.begin() as conn:
+            locked_s = abuse.record_failure(conn, policy, user_id=user_id, username=tried, rds=rds)
+            abuse.record_attempt(
+                conn,
+                username=tried,
+                user_id=user_id,
+                ip_hash=ih,
+                success=False,
+                failure_reason="invalid_credentials",
+            )
+            if user is not None:
                 service.audit(
                     conn,
                     action="auth.login_failed",
@@ -201,10 +238,23 @@ def login(
                     actor_role=user.role,
                     target_type="user",
                     target_id=str(user.id),
+                    detail=None if locked_s is None else {"locked_s": locked_s},
                     ip_hash=ih,
                 )
         raise AppError(ErrorCode.INVALID_CREDENTIALS)
     assert user is not None  # noqa: S101 - verify(None, ...) 恒为 False
+
+    # 密码正确即打断“连续失败”（含未批准账号）
+    with engine.begin() as conn:
+        abuse.reset_failures(conn, user=user, username=tried, rds=rds)
+        abuse.record_attempt(
+            conn,
+            username=tried,
+            user_id=user_id,
+            ip_hash=ih,
+            success=user.status == AccountStatus.APPROVED,
+            failure_reason=None if user.status == AccountStatus.APPROVED else "not_approved",
+        )
 
     # 密码正确但未批准：403 + status（+ 驳回原因），不建会话（plan §3.6）
     if user.status != AccountStatus.APPROVED:
@@ -272,8 +322,13 @@ def change_password(
     engine: EngineDep,
     store: StoreDep,
     passwords: PasswordsDep,
+    rds: RedisDep,
 ) -> Response:
     if not passwords.verify(auth.user.password_hash, body.old_password):
+        # 契约 §7.1：旧密码错误计入 T-B03a 限速——按用户计数，超限 429 + Retry-After
+        abuse.RateLimiter(rds).enforce(
+            str(auth.user_id), abuse.password_change_windows(settings.auth_abuse)
+        )
         raise _validation([{"field": "old_password", "issue": "incorrect"}])
     fields = [
         {"field": "new_password", "issue": i}

@@ -22,7 +22,7 @@
 | 策略库 | 覆盖四种周期：日内做T、短线、波段、中长线。六个维度：技术、资金、基本面、情绪、板块与大盘、消息。策略由引擎的三层（L1 卡片 / L2 模板 / L3 实例）承载，具体策略见 `docs/strategies/`（由策略研究员维护）；每个策略的规则、所用特征和数据来源都对用户可见。导入后**自动判定每只股票适合的周期与策略**并给出理由，用户可改。**信号矛盾时不合并结论**，按"维度 × 策略"矩阵并列展示。**六项风控**逐项可开关。模拟跟踪统计各策略的胜率与盈亏，并可开关**自动降权**（只影响排序）。 |
 | 技术栈 | 后端：**Python 3.12 + FastAPI + Pydantic v2 + SQLAlchemy 2 + Alembic**。任务：**Celery + 单实例 Beat + 唯一的行情采集服务 `ingest`（全站唯一调用麦蕊，2.1A）+ 盘中信号进程 `signal-rt`**。存储：**PostgreSQL 16 + TimescaleDB（行情时序 hypertable，3A）+ Redis 7**。前端：**React 19 + TS + Vite + TanStack Query + antd 6（暗色 + compact）+ AG Grid Community + TradingView Lightweight Charts**，深色交易终端风格，仅桌面。部署：**Docker Compose 单机**，配置全部走环境变量，不绑定任何云厂商。 |
 | 规模与部署 | V1 面向 10–100 名用户：单机，**不用 k8s，不拆微服务**。先在本地测试，之后买服务器迁移（1.3 节附迁移手册）。域名**未备案**：对公网开放前必须解决（第 9 节问题 4）。 |
-| 数据接入 | 只有**行情采集服务 `ingest`**（单副本、单活锁、licence 只在此容器）能调用麦蕊：固定出口 IP、全局令牌桶（默认每分钟 3,000，可配置）、优先队列（盘中实时 > 日批 > 历史回补）、singleflight、原始响应留存；故障切换只做冷备；其他服务和用户只读缓存和数据库（2.1A）。数据全站共享。盘中按"去重后的系统证券池"分层刷新。 |
+| 数据接入 | 只有**行情采集服务 `ingest`**（单副本、单活锁）能调用麦蕊；**每位用户用自己的麦蕊证书**（【用户已定 2026-11-02】，2.1B）：证书加密存库、只有 `ingest` 能解密、从不回显；固定出口 IP、**每张证书一个令牌桶**（默认每分钟 3,000，可配置）和各自的优先队列（盘中实时 > 日批 > 历史回补）、证书之间轮转调度；singleflight、原始响应留存；故障切换只做冷备；其他服务和用户只读缓存和数据库（2.1A）。**数据默认不跨用户共享**：每位用户看到的行情只来自用他本人证书拉取的数据（共享一份【待麦蕊书面确认】，7.1）。盘中按"该证书的去重证券池"分层刷新。 |
 | 刷新与上限 | 由配额推导，参数全部可配置（0A.6、0A.7）：<br>• 多股快照默认 **15 秒**一轮（N ≤ 2,000）；<br>• Tier-1 **1,500 只每分钟**取 Pro 1 分钟 K，Tier-2 每 5 分钟；<br>• 系统 universe **硬上限 4,000**；<br>• 每用户自选 **100**、重点关注 **20**。<br>以上依据官网文档推导，**【待 T003 验证】**，实测后调到上限。 |
 | LLM | 供应商无关的网关，**先接 DeepSeek**（OpenAI 兼容适配器，第 9 节问题 16）：base_url、模型、超时与重试写在 `config/llm.yaml`（6.1），DeepSeek 的 key 只从环境变量 `DEEPSEEK_API_KEY` 读取（2.7.1，已按官方文档核实），按任务路由，带超时、重试、备用链和预算，记录 token 与成本，提示词模板版本化。输入是证据，输出是带 `[E#]` 引用的解释；**不决定动作**，失败时回落到模板。 |
 | 账号 | 用户名 + 密码（argon2id），**无验证码**。V1 **注册默认关闭**（`REGISTRATION_MODE=closed`，本人账号由 CLI 创建）；以后开放为邀请制，注册后为 `pending`，管理员批准后才能使用。防滥用靠限速和锁定（第 9 节问题 1）。 |
@@ -188,6 +188,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 - **分钟线层**：Tier-1 每分钟每股 1 次（lt=2）→ N₁ 次/分钟；Tier-2 每 5 分钟 lt=5 → N₂/5 次/分钟。默认预算 2,000/分钟 → N₁ + N₂/5 ≤ 2,000，取 N₁ = 1,500、N₂ = 2,500（见 0A.7）。
 - **全天调用量（默认配置、N = 4,000 = Tier-1 1,500 + Tier-2 2,500）**：快照（每轮 200 次、c=1 时约 30 秒一轮）≈ 10.2 万 + 分钟线 1,500×255 + 2,500×51 ≈ 51 万 + 全市场 255 + 盘后批 ≈ 2–3 万 ≈ **63–64 万次/日**，钻石版每日不限，可行；证书到期后（每日 20,000 次）只能保留全市场接口 + 小范围分钟线，需续费（第 7.5 节）。
 - 1 分钟 K 的历史回补、盘后批量在 15:05 后使用全部预算。
+- **T-A07（每用户证书）**：本节与 0A.7 的推导改为**对每张证书分别适用**（N 为该用户的去重证券数，预算为该证书的桶）；所有证书共用同一出口的串行时延（实测约 0.26 秒/次，T003），这才是总量瓶颈，见 2.1B 第 5 点。
 
 ### 0A.7 自选股上限（由配额推导）
 > **【待 T003 验证】本节所有数据可用性结论**（接口、字段、因子、限流、历史深度、刷新间隔、上限推算）都来自文档推导，须以后端实测报告 `/workspace/team/reports/T003-mairui-capability.md` 为准；报告出来后逐项替换本节标记。
@@ -223,9 +224,9 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 
 ### 1.3 部署形态：先本地测试，后迁移服务器（V1 用户 10–100 人）
 - **规模定位**：10–100 个用户、单台主机、Docker Compose；**不用 k8s、不拆微服务、不引入消息中间件以外的分布式组件**。代码按模块化单体组织（第 2.2 节），API 与 worker 共用同一镜像、不同启动命令。
-- **容器清单**（`deploy/compose/docker-compose.yml`）：`nginx`（静态前端、反向代理、SSE 透传）、`api`（uvicorn 2–4 workers）、`worker`（Celery，队列 `default/batch/llm/notify/evaluation`）、**`ingest`（行情采集服务，`replicas: 1`，全站唯一调用麦蕊，唯一注入 `MAIRUI_LICENCE`，2.1A）**、`signal-rt`（盘中信号计算，单实例，**无 licence**）、`beat`（唯一）、`postgres`（PG16 + TimescaleDB 镜像，版本固定）、`redis`。出口 IP 即主机的固定公网 IP；`ingest` 启动时自检。
+- **容器清单**（`deploy/compose/docker-compose.yml`）：`nginx`（静态前端、反向代理、SSE 透传）、`api`（uvicorn 2–4 workers）、`worker`（Celery，队列 `default/batch/llm/notify/evaluation`）、**`ingest`（行情采集服务，`replicas: 1`，全站唯一调用麦蕊，唯一能解密用户证书（只有它注入 `DATA_LICENCE_SEAL_PRIVATE_KEYS`），2.1A、2.1B）**、`signal-rt`（盘中信号计算，单实例，**无 licence**）、`beat`（唯一）、`postgres`（PG16 + TimescaleDB 镜像，版本固定）、`redis`。出口 IP 即主机的固定公网 IP；`ingest` 启动时自检。
 - **资源估算**：4 vCPU / 8 GB 内存 / 100 GB SSD 足够（分钟线保留 90 天约 3–4 GB，见 3.3）；测试期用开发者本机（Docker Desktop 或 Linux）即可。
-- **配置全部走环境变量**（pydantic-settings；`deploy/env/.env.example` 只有变量名与假值）：`DATABASE_URL`、`REDIS_URL`、`MAIRUI_LICENCE`、`MAIRUI_BASE_URL`、`MAIRUI_PRO_BASE_URL`、`APP_MASTER_KEY`（加密 LLM key / 股东代码 HMAC / 原始文件）、`IMPORT_STORAGE_PATH`、`PUBLIC_BASE_URL`、`SESSION_COOKIE_SECURE`、`REGISTRATION_MODE`（默认 `closed`）、`SMTP_*`；运行参数（实时间隔、预算、上限）在数据库配置表 + `config/*.yaml` 默认值中，可在后台修改。 **`MAIRUI_LICENCE` 只注入 `ingest` 容器**；其他容器的 env 文件不含此变量，CI 会检查。
+- **配置全部走环境变量**（pydantic-settings；`deploy/env/.env.example` 只有变量名与假值）：`DATABASE_URL`、`REDIS_URL`、`MAIRUI_BASE_URL`、`MAIRUI_PRO_BASE_URL`、`APP_MASTER_KEY`（加密 LLM key / 股东代码 HMAC / 原始文件）、`IMPORT_STORAGE_PATH`、`PUBLIC_BASE_URL`、`SESSION_COOKIE_SECURE`、`REGISTRATION_MODE`（默认 `closed`）、`SMTP_*`；运行参数（实时间隔、预算、上限）在数据库配置表 + `config/*.yaml` 默认值中，可在后台修改。 **T-A07 起生产不再使用 `MAIRUI_LICENCE`**（每用户证书加密存库，2.1B）：`DATA_LICENCE_SEAL_PUBLIC_KEYS`、`DATA_LICENCE_SEAL_KEY_VERSION` 注入 `api`；**`DATA_LICENCE_SEAL_PRIVATE_KEYS` 只注入 `ingest` 容器**，其他容器的 env 文件不含私钥，CI 会检查；`ingest` 发现 `MAIRUI_LICENCE` 非空即拒绝启动（只有本机实测脚本可在用户本人电脑的 shell 中临时设置它）。
 - **无云厂商锁定**：只依赖 PostgreSQL、Redis、本地卷（或任意 S3 兼容存储，通过 `IMPORT_STORAGE_BACKEND=local|s3` 切换）；不用托管专有服务；镜像可在任意主机运行。
 - **迁移流程（本地 → 服务器）**：`pg_dump` 加原始文件卷打包（加密）→ 新主机 `docker compose up`（**先不启动 `ingest`**）→ `pg_restore` → 修改 `PUBLIC_BASE_URL` 与 DNS → **停止本地 `ingest` → 等待 ≥ 60 秒 → 启动服务器 `ingest` → 核对出口 IP → 从本地 `.env` 删除 licence**。迁移期间及之后，开发机不得用同一证书做真实调用（2.1A；第 9 节问题 27）。操作手册写在 `deploy/scripts/migrate.md` 和 `deploy/runbooks/ingest-failover.md`（T-O06、T-O07）。
 - **测试期访问**：本地 `http://localhost`，不对公网开放；如需让少数测试用户访问，用内网/VPN（如自建 WireGuard）而非把未备案域名解析到境内主机。
@@ -270,14 +271,14 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 > 硬约束（2026-11-01 12:05）：同一证书 **60 秒内最多 2 个来源公网 IP**【文档/FAQ 已列，待 T003 验证】。因此全系统只有**一个**行情采集服务调用麦蕊，固定一个出口 IP；其他服务和所有用户只读我们的缓存和数据库。
 
 - **唯一性**：
-  - `ingest` 是独立容器，**`replicas: 1`**，也是**唯一**注入 `MAIRUI_LICENCE` 的容器。`api`、`worker`、`signal-rt`、`beat` 的环境中**没有** licence，也不包含麦蕊 HTTP 客户端。CI 用 import-linter 规则检查：`app.ingest.mairui_client` 只能被 `app.ingest` 引用。
+  - `ingest` 是独立容器，**`replicas: 1`**，也是**唯一**能解密用户证书的容器（只有它注入 `DATA_LICENCE_SEAL_PRIVATE_KEYS`；T-A07 起不再使用全站 `MAIRUI_LICENCE`，2.1B）。`api`、`worker`、`signal-rt`、`beat` 的环境中**没有**证书私钥，也不包含麦蕊 HTTP 客户端。CI 用 import-linter 规则检查：`app.ingest.mairui_client` 只能被 `app.ingest` 引用。
   - 进程启动时先获取 Redis 分布式**单活锁** `ingest:leader`（TTL 30 秒，每 10 秒续约，锁值含主机名、出口 IP 和启动时间）。拿不到锁就拒绝启动并告警。
   - 运行中如果续约失败，**立即停止所有外呼**，然后退出。
 - **固定出口 IP**：
   - 生产环境由服务器的固定公网 IP 出网。启动时自检出口 IP，并与配置值 `MAIRUI_EGRESS_IP_EXPECTED` 比对；不一致时拒绝外呼并告警。
   - 不走代理池，不走多出口 NAT。
 - **全局限流与请求队列**（全在 `ingest` 进程内，Redis 只作为状态持久化和监控）：
-  - **令牌桶**：`per_minute_budget`，默认每分钟 3,000，可热调；同时有并发上限 `max_concurrency`，默认 1。官网写钻石版每分钟 6,000 次，但计数口径和并发规则【待 T003 验证】。
+  - **令牌桶**（T-A07 起改为**每张证书一个桶**，本条与下表的份额规则对每张证书分别适用，见 2.1B）：`per_minute_budget`，默认每分钟 3,000，可热调；同时有并发上限 `max_concurrency`，默认 1。官网写钻石版每分钟 6,000 次，但计数口径和并发规则【待 T003 验证】。
   - **三级优先队列**，各级有预算份额，高优先级可借用低优先级的空闲额度：
 
     | 优先级 | 内容 | 预算份额 |
@@ -290,11 +291,11 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
   - singleflight 和请求去重：同一时刻同一个 URL 只调用一次。
   - **其他服务请求数据的方式**：只能往 Redis Stream `ingest:requests` 投递"拉取意图"（证券、数据集、优先级、截止时间），**不得直接外呼**。`ingest` 写库后，经 Redis pub/sub 发出 `market.updated` 事件；`signal-rt`、`worker` 和 SSE 只读库和缓存。
 - **故障切换只做冷备**：
-  - 备机（或备用容器）平时**不运行** `ingest`；licence 只在主机上。
+  - 备机（或备用容器）平时**不运行** `ingest`；证书私钥 `DATA_LICENCE_SEAL_PRIVATE_KEYS` 只在主机上（T-A07）。
   - 切换手册（`deploy/runbooks/ingest-failover.md`）：
     - ① 确认主机 `ingest` 已停止，并且锁已过期；
     - ② **等待 ≥ 60 秒**；
-    - ③ 在备机注入 licence，启动 `ingest`；
+    - ③ 在备机注入证书私钥，启动 `ingest`（所有证书一起停、一起等 60 秒、一起恢复）；
     - ④ 核对出口 IP。
   - **任何时候都不允许两个活跃调用方。**
 - **本地开发与测试，以及从本地迁移到服务器**：
@@ -309,10 +310,64 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 
     本地的 `.env` 随后删除 licence。
   - 如需开发和生产并行，**申请第二张开发证书**（第 9 节问题 27）。
+  - **T-A07**：本节“开发与生产不能同时调用”改为**按证书执行**；朋友的证书永远不离开生产 `ingest`，开发联调只允许用用户本人的证书，且须先在后台暂停该证书（2.1B 第 3 点）。
 - **告警**：
   - **立即告警**（站内管理员通知 + 邮件）：麦蕊返回"IP 超限"（文档写码 103 / HTTP 429，具体返回【待 T003 验证】）、101/102 证书错误、单活锁丢失、出口 IP 不符、令牌桶连续 5 分钟耗尽。
-  - **降级**：IP 超限时 `ingest` 暂停外呼 120 秒后再试，并把全站 `data_status` 置为 `stale`。
+  - **降级**（T-A07 起按证书处理，2.1B 第 6 点）：IP 超限时只暂停**该证书** 120 秒后再试，只把使用该证书的用户的 `data_status` 置为 `stale`；出口 IP 不符、单活锁丢失仍停止全部外呼。
 - **可观测指标**：各优先级的队列长度和等待时延、每分钟调用数、按错误码统计的计数、每个数据集的新鲜度（`data_as_of` 落后多少）。
+
+### 2.1B 每用户自用麦蕊证书（【用户已定 2026-11-02】，T-A07，契约 v0.2.6）
+
+用户为每位朋友单独购买一张麦蕊证书（第 9 节问题 49）。每位用户在“设置 → 数据证书”录入**自己的**证书，`ingest` 只用该证书为该用户取数。2.1A 的单活、单出口、singleflight、原始响应留存规则不变；下列各点在其基础上改为“按证书”。
+
+1. **存储与可见性**
+   - 证书在 `user_data_licences.ciphertext` 中以 **HPKE（RFC 9180，Base 模式：DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM）** 密文保存。`api` 只持有公钥（`DATA_LICENCE_SEAL_PUBLIC_KEYS`，按 `key_version` 编号；`DATA_LICENCE_SEAL_KEY_VERSION` 指定当前版本），**只能加密、不能解密**；私钥 `DATA_LICENCE_SEAL_PRIVATE_KEYS` **只注入 `ingest`**。AAD = `"mairui-licence|v1|" + user_id + "|" + row_id + "|" + key_version`，防止密文被挪到别的用户或行。
+   - 不用 `APP_MASTER_KEY` 的原因：`api` 持有它，等于 `api` 能解密；证书明文也**不经过 Redis**（`ingest:requests` 只带 `licence_id`）。
+   - 防一证多用：`api` 用 HKDF(`APP_MASTER_KEY`, info=`"data-licence-dedup-v1"`) 派生的键计算 `licence_hmac`，在未删除行上唯一；第二个用户绑定同一证书 → `409 DATA_LICENCE_IN_USE`。`licence_hmac` 不出接口、不进日志。
+   - `api` 的数据库角色对 `ciphertext` 无 SELECT，只读视图 `user_data_licence_status`。**任何接口都不返回证书值或其任何片段**（没有末 4 位、没有指纹）；PUT 只返回状态。
+   - 格式校验：去首尾空白后长度 16–64，只允许 `[A-Za-z0-9-]`（与 7.4A S1 一致，【待核实 T-B05：实际证书字符集与长度】）；拒绝 `/ ? # %` 与空白，防止拼进 URL 路径时注入。校验失败的消息不含输入值。
+   - 脱敏：`ingest` 日志中 URL 的证书段替换为 `***`；`ingest` 另对已加载的全部证书明文做字符串替换（日志、异常、留存的上游响应）；`api` 请求体日志对 `licence` 字段脱敏；Sentry `before_send` 同样处理。
+   - 密钥轮换：生成新密钥对 → `api` 切到新 `key_version` → `ingest` 后台逐行解密并用新公钥重新封装 → 旧私钥下线。私钥与数据库备份**分开保存**，开发环境恢复生产备份时无法解密证书（开发只能用用户本人证书，见第 3 点）。
+   - 验证：PUT 或 `POST /me/data-licence/test` 后，`api` 向 `ingest:requests` 投递 `verify_licence`（只带 `licence_id`）；`ingest` 用一次轻量接口（如交易日历或单只实时行情）验证，结果写回状态表，经 SSE `data_licence` 与通知告知用户。
+
+2. **调度（每证书令牌桶 + 证书间公平）**
+   - **每张证书一个令牌桶**。默认取所填档位官方频率的**一半**（与 2.1A 留余量一致；官方档位见 T003 报告）：钻石 3,000/分钟（官方 6,000；过期后官方每天 2 万次）、包年 1,500（官方 3,000）、包月/体验 500（官方 1,000）、免费/未知 150（官方 300）。管理员可对单张证书覆盖（`per_minute_limit_override`）。全市场快照（1 次/分钟）、历史与全量接口（60 次/分钟）等**接口级限额也按证书计数**。
+   - 每张证书有自己的 P0（盘中实时）> P1（日批/按需）> P2（历史回补）队列，份额规则同 2.1A。
+   - **证书之间**：先比优先级（任何证书的 P0 先于其他证书的 P1），同一优先级内按**赤字轮转（DRR，quantum = 1 次调用）**依次出队，单个用户大量回补不会饿死别人的 P0。
+   - 并发：`per_licence_max_concurrency` 默认 1；`global_max_concurrency` 默认 2，【待 T-B05 实测：同 IP 多证书并发是否触发限流】。
+   - 熔断按证书；只有**所有**证书同时失败（多为出口或上游整体故障）才触发全局熔断。单活锁与 Stream 不变；`market.updated` 事件与缓存键都带 `licence_id`。
+
+3. **网络**：所有证书都经同一固定出口 IP。2.1A 的“同一证书 60 秒内 ≤ 2 个 IP”规则**按证书执行**：朋友的证书永远不离开生产 `ingest`；开发或本机实测只允许用用户本人的证书，步骤为“后台暂停该证书 → 等 ≥ 60 秒 → 开发使用 → 停止 → 等 ≥ 60 秒 → 后台恢复”。
+
+4. **共享与否**：`config/ingest.yaml` 的 `data_sharing.mode`：
+   - `per_licence`（**默认，合规推荐**）：所有 `market.*` 行、原始响应、Redis 缓存、特征都带 `source_licence_id`，每位用户只读本人证书取到的数据；证券列表、交易日历等参考数据也按证书各取一份。
+   - `shared_cache`：一份数据全站共用。用 A 的证书取到的数据给 B 看，按条款字面属于“再次分发/交由第三方使用”（7.1）。**【待麦蕊书面确认】（第 9 节问题 50），取得书面答复前禁止启用。**
+   - **硬规则**：任何模式下都**不跨证书回退**——B 的证书不可用时，不用 A 或管理员的证书替 B 取数，也不把 A 的缓存给 B（`shared_cache` 获批后除外）。
+
+5. **成本与容量**（每张证书分别计算，N 为该用户去重证券数）
+   - 额度不是瓶颈：全市场快照 1 次/分钟；N = 1,000 只按 15 秒刷新约 200 次/分钟；分钟 K 约 `20 + (N − 20) / 5` 次/分钟；合计约 400 次/分钟，远低于钻石版的 3,000。
+   - 瓶颈是**串行时延**：实测约 0.26 秒/次（T003），单连接约 230 次/分钟，两位重度用户就需要约 4 个并发连接。因此默认盘中配置为“全市场快照 60 秒 + 重点关注 ≤ 20 只 15 秒，其余用全市场快照”，每张证书约 5–30 次/分钟，10 位用户合计 50–300 次/分钟。
+   - 盘后批量每张证书约 2–3.5 万次；10 张证书约 20–35 万次，串行需 10–15 小时。因此盘后批量**只取该用户自选与持仓范围**，加上批量日 K 接口。
+   - `shared_cache` 只需取一份，成本约为 `per_licence` 的 1/用户数；这只是成本差异，在麦蕊书面确认前不作为启用理由。
+
+6. **降级与状态**（麦蕊异常常以 HTTP 200 + `{"error": …}` 返回，`ingest` 必须解析响应体）
+
+   | 上游信号 | 证书状态（`data_licence_status`） | 处理 |
+   |---|---|---|
+   | 102 证书无效 | `invalid` | 立即停止该证书的全部调用，不自动重试；通知用户与管理员；用户重新 PUT 或点“测试”后才恢复 |
+   | 101 当日额度用完 | `quota_exceeded` | 暂停到北京时间次日 00:01 |
+   | 103 / HTTP 429（IP 超限） | `ip_limited` | 暂停 120 秒；1 小时内 3 次 → 暂停 1 小时，并通知用户（“证书可能正在别处使用”）和管理员 |
+   | 频率 503 | 不变（`active`） | 该证书退避 1 → 2 → 4 … 60 秒；连续 5 次 → 熔断 300 秒（`paused_until`） |
+   | 数据缺失型 503 | 不变 | 不熔断，记缺失 |
+   | 网络错误 / 5xx | 不变 | 按证书退避（同频率 503） |
+   | 超过用户填的 `expires_on` | `expired` | 钻石版按过期后每日额度运行，只保留 P0 重点关注与全市场快照；其他档位停止；通知 |
+   | 管理员暂停 | `paused_by_admin` | 停止，直到管理员恢复 |
+
+   - 用户看到：行情接口的 `data_status` 为 `stale`（有旧数据）或 `unavailable`（从未取到），`gaps[].reason = "data_licence_unavailable"`，前端显示横幅“你的数据证书不可用：{状态}，请到 设置 → 数据证书 处理”。需要触发拉取的写操作（如手动刷新）返回 `409 DATA_LICENCE_UNAVAILABLE`。
+   - 通知：`notification_kind` 新增 `data_licence`（状态变化、验证结果、到期提醒）。**到期提醒**在用户填写的 `expires_on` 前 30、7、1 天各一次（麦蕊接口是否返回到期日【待核实】，所以由用户填写；可在 https://www.mairuiapi.com/query 自查）。
+   - 管理端 `GET /admin/data-licences` 只列状态、档位、到期、调用量与队列长度，**不显示证书值**；可暂停/恢复（写审计）。
+
+7. **`MAIRUI_LICENCE` 的去留**：生产和预发**不再使用**；`ingest` 发现它非空即拒绝启动。用户本人的证书也和朋友一样，在网页中录入。只有 T-B05 等本机实测脚本可在用户本人电脑的 shell 中**临时**设置它，绝不写入 compose、`.env` 或仓库。
 
 ### 2.2 后端模块（与五种能力映射）
 
@@ -485,7 +540,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 |---|---|---|
 | I1 | 模板版本状态为 `published` 或 `observing`（`simulating` 只允许管理员和自愿参与模拟的用户实例化，且不生成计划草案） | `STRATEGY_VERSION_NOT_RUNNABLE` |
 | I2 | 用户已批准（T-A06：不再要求风险测评或同意） | HTTP 层 `403 ACCOUNT_NOT_APPROVED` |
-| I3 | 所选周期在模板 `horizons` 内。周期分类判定“不适合”、或画像低于卡片适配下限（`fit`）时**只在响应 `warnings[]` 中提示，不需要确认、不阻止**（T-A06：`fit_ack` 作废，用户可自由选择 short 与 intraday_t） | `STRATEGY_HORIZON_MISMATCH` |
+| I3 | 所选周期在模板 `horizons` 内。周期分类判定“不适合”、或画像低于卡片适配下限（`fit`）时**只在响应 `warnings[]` 中提示，不需要确认、不阻止**（T-A06：`fit_ack` 作废，用户可自由选择 short 与 intraday_t）；画像相关字段未填写时不提示；画像不匹配**不降低置信度**（T006e） | `STRATEGY_HORIZON_MISMATCH` |
 | I4 | 参数覆盖都在 `min..max` 内；有覆盖时自动生成派生版本 | `STRATEGY_PARAM_OUT_OF_RANGE` |
 | I5 | 范围（持仓 / 自选 / 指定证券 / 模板筛选结果）在权益上限内；做T 实例要求有底仓 | `ENTITLEMENT_LIMIT_REACHED` / `INSTANCE_SCOPE_INVALID` |
 | I6 | 风控设置已解析，并快照到实例版本；若关闭了 RC1，实例和卡片持续显示警示 | 只警示 |
@@ -534,7 +589,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 - **特征**：流动性（日均成交额、`turnover_20d_avg`、`amihud_20d`）、波动（`volatility_20d`、`intraday_amplitude_20d`、ATR%）、趋势（`ma_trend`、`momentum_60d`）、基本面完整度与质量（`roe_ttm`、`profit_cagr_3y`、`dividend_continuous_years`、财报期数）、情绪活跃度（`limit_up_count_20d`）、**用户自身行为**（该股历史平均持有天数、是否有同日买卖的做T记录、交易频率——来自导入成交）、画像（投资期限、精力、风险承受）。
 - **规则化打分**（分类器配置 `horizon_classifier_versions`，不可变）：每个周期 0–100 分，例如：`intraday_t` = 有底仓 × 日内振幅 ≥ 3% × 日成交额 ≥ 2 亿 × 用户精力 ≥ 中 × 历史有做T行为加分；`long` = 基本面完整（≥ 12 期财报）× ROE/分红稳定 × 用户期限 ≥ 长；`swing`、`short` 同理（**以上阈值均为示例**，正式规则与阈值由策略研究员在 `docs/strategies/` 中给出，写入不可变的 `horizon_classifier_versions`）（见 horizon_classifier.md v1）。≥ 60 分的周期列为"适合"，并给出每个周期 2–4 条理由（引用特征值与证据 ID）及不适合的理由。
 - 每个"适合"周期下，按策略 `applicability` 与 `fit_dimensions` 匹配列出适用策略（`fit_score` 排序）。
-- **画像类规则只提示、不封顶【用户已定 2026-11-02，T-A06，取代问题 37 方案 A】**：画像（`profile.*`）由用户自报、全部选填；分类器 1.2.0（`version_no: 3`）把画像类 `requires` 规则 `SH0`、`SH0B`、`SH0C`、`IT0B`、`IT0C` 都改为 `mode: hint`：**画像未填写时不封顶也不提示**；已填写且不满足时只在 `/horizon-assessments` 的 `hints[]` 中给出提示（如 `experience=novice` 时提示“短线需要盯盘与止损纪律”），**不降低分数、不影响 `suitable`**。用户可以自由为任何证券选择 short 与 intraday_t（实例校验 I3 只给 `warnings`）。非画像的 `requires`（`IT0` 底仓、`LG0`/`LG0B` 财报）与 hard gates（HG1–HG6）不变，仍会封顶。规则 ID 不是 `reason_code`（同 T-A05）。画像类加分项（`IT3`、`IT5`、`SH7` 等）不变：未填写只是不加分。horizon_classifier.md 由研究员同步（T-A06 报告）。
+- **画像类规则只提示、不封顶【用户已定 2026-11-02，T-A06，取代问题 37 方案 A】**：画像（`profile.*`）由用户自报、全部选填；分类器 1.2.0（`version_no: 3`）把画像类 `requires` 规则 `SH0`、`SH0B`、`SH0C`、`IT0B`、`IT0C` 都改为 `mode: hint`：**画像未填写时不封顶也不提示**；已填写且不满足时只在 `/horizon-assessments` 的 `hints[]` 中给出提示（如 `experience=novice` 时提示“短线需要盯盘与止损纪律”），**不降低分数、不影响 `suitable`**。用户可以自由为任何证券选择 short 与 intraday_t（实例校验 I3 只给 `warnings`）。非画像规则照旧生效（契约 v0.2.6，T006e 裁定）：hard gates HG1–HG6 判 0 分或封顶 59，记入 `caps[]`，`kind: gate`、`rule_id` 为 `HGn`（判 0 分的 HG1–HG3 记 `cap: 0`）；`IT0`（无底仓）的 `else_score: 0` 是**分数**，不是封顶，不进 `caps[]`，只在 `reasons[]` 中给出反向理由；`LG0`（财报期数不足）、`LG0B`（ROE 缺失）的 `else_cap: 59` 属于数据不足，记入 `caps[]` 时 `kind: data_missing`、`rule_id` 为规则 ID（架构师 T-A07 归类）。`caps[].kind` 不再有 `requires`。**提示与分数相互独立（T006e 裁定 1）**：某周期即使已被 `IT0` 判为 0 分，`experience=novice` 时仍给出 `IT0C` 提示。规则 ID 不是 `reason_code`（同 T-A05）。画像类加分项（`IT3`、`IT5`、`SH7` 等）不变：未填写只是不加分。horizon_classifier.md 由研究员同步（T-A06 报告）。
 - **用户覆盖**：分类结果生成 `strategy_instances`（`status=proposed`，**用户确认后才变为 active**，2.5.0），替代原先的 `user_symbol_strategy_settings`；用户修改后系统不再自动改动，只在分类结果变化时提示"系统建议已变化"。
 
 #### 2.5.4 引擎流水线（L2 求值 → L3 候选信号 → 可执行性 → 计划草案）
@@ -753,7 +808,7 @@ H-01 是"周期分类只推荐、不自动启用"（问题 15）的**唯一例�
 | W-02 `sw_breakout` | 日线盘后 | 部分 | 布林带宽及其自身 120 日分位：新增 `std(x,n)`、`ts_pct_rank(x,n)`，或登记派生特征 `f.boll_bw20`、`f.boll_bw20_pct120`（两种都支持，常用的登记为派生特征以便缓存）→ T-B42 |
 | L-01 `lt_value` | 筛选型，**每月**首个交易日盘后 | 部分 | ① 调度 `scan.schedule=monthly_first_trading_day`；② 行业内分位 `rank_pct_in` 或派生特征（如 `f.pe_ttm_ind_pct`）；③ 筛选的单行业上限 `screen.per_group_cap`；④ 因子历史值是否按时点计算【待 T003】 → T-B42、T-B43 |
 
-- **S-03**（`st_strong_momo`，高风险）：随附为模板，`risk_level: high`，默认不启用、不被分类器推荐（C(2)）。
+- **S-03**（`st_strong_momo`，高风险）：随附为模板，`risk_level: high`，默认不启用、不被分类器推荐（C(2)）；手动启用无需确认，开关旁固定展示风险说明（T006e）。
 - **北交所**：V1 不扫描（`boards.bse=false`），持仓仍可导入和展示（C(8)）。
 - **N-03**（新闻舆情）：无数据源，保持 L1 卡片、不可运行（C(8)）。
 
@@ -902,7 +957,7 @@ screen: null               # 选股模板写 {universe, filters[], rank_by, top_
 | ⑨ 冲击成本 | **进入产品**，只放在"成本与滑点"（卡片 `costs.impact_*`）：按参与率分 5 档的确定性估算（2.13），计划草案（2.5.8）、模拟跟踪（2.8.1）和内部评估共用；`epistemic_type=estimate`，档位为初值待校准。 |
 | ⑩ 非做T卡的"无底仓"夹具 | G6 的夹具覆盖要求中"做T 无底仓"一项，对非做T卡可用"持仓可卖数量为 0 时出现卖出信号"替代（研究员附录 B 第 14 项）。G6 其余覆盖要求不放宽。 |
 | ⑪ 因子数量 | 文档写 85 个、因子页另有"82 个已上线"的说法（validation.md 第 7 项），以 T003 补测和 T-B05 实测后的 `feature_catalog` 为准；导入器只认 catalog 中的键，所有因子按日频处理，盘中只用 T−1 值。 |
-| ⑫ `risk_level` | 卡片选填字段 `risk_level: normal \| high`（默认 normal）；`high` 默认不启用、不被分类器推荐（问题 11）。 |
+| ⑫ `risk_level` | 卡片选填字段 `risk_level: normal \| high`（默认 normal）；`high` 默认不启用、不被分类器推荐（问题 11）。手动启用**不需要确认、不弹窗**；启用开关旁固定展示风险说明（T006e）：“高风险策略：短线情绪类规则，波动和回撤可能很大，规则可能很快失效。仅供研究参考，盈亏自负。”【编排者默认文案，可改】 |
 
 **H（续）. T006a 对齐结论（2026-11-01，T-A02；回应 `_template.md` 附录 B 第 15–20 项）**
 
@@ -1291,7 +1346,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `strategy_rules`（物化视图） | strategy_version_id, rule_id, dimension, role, expr, weight, required_data — 由 config 展开，供检索"哪些策略用到某因子/某维度" |
 | `engine_policies` | id, version_no, config(jsonb：动作映射通则、置信度公式、维度观点阈值、分歧检测规则), published_at — 不可变 |
 | `horizon_classifier_versions` | id, version_no, semver(text，唯一，匹配 `^(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$`，即契约 `classifier_version`；T-A03), config(jsonb：特征、各周期打分规则、阈值), published_at — 不可变 |
-| `symbol_horizon_assessments` | id, user_id, security_code, classifier_version_id, snapshot_id, scores(jsonb：{intraday_t,short,swing,long: 0–100}), suitable_horizons(text[]), reasons(jsonb：[{horizon, text, evidence_ids, polarity: for/against}]), inputs_missing(text[] NOT NULL DEFAULT '{}'：缺失的 feature_catalog 键 `f.*`，去重升序，无缺失为空数组，CHECK 每项匹配 `^f\.[a-z0-9_]+$`；T-A03), hints(jsonb NOT NULL DEFAULT '[]'：`HorizonHint[]`，T-A06), caps(jsonb NOT NULL DEFAULT '[]'：[{horizon, cap, kind: data_missing/requires, rule_id, inputs_missing}]；T-A03), evidence(jsonb：Evidence[]，理由引用的证据，契约 v0.2.3), recommended_strategy_version_ids(uuid[]), trigger(import/watchlist_add/weekly/position_open_close), created_at — 只追加 |
+| `symbol_horizon_assessments` | id, user_id, security_code, classifier_version_id, snapshot_id, scores(jsonb：{intraday_t,short,swing,long: 0–100}), suitable_horizons(text[]), reasons(jsonb：[{horizon, text, evidence_ids, polarity: for/against}]), inputs_missing(text[] NOT NULL DEFAULT '{}'：缺失的 feature_catalog 键 `f.*`，去重升序，无缺失为空数组，CHECK 每项匹配 `^f\.[a-z0-9_]+$`；T-A03), hints(jsonb NOT NULL DEFAULT '[]'：`HorizonHint[]`，T-A06), caps(jsonb NOT NULL DEFAULT '[]'：[{horizon, cap, kind: gate/data_missing, rule_id, inputs_missing}]；T-A03；v0.2.6（T006e）删 `requires`、加 `gate`), evidence(jsonb：Evidence[]，理由引用的证据，契约 v0.2.3), recommended_strategy_version_ids(uuid[]), trigger(import/watchlist_add/weekly/position_open_close), created_at — 只追加 |
 | ~~`user_symbol_strategy_settings`~~ | **已废弃**，由 `strategy_instances` 取代（见下方"策略三层"表组）。迁移时把旧行映射为 `status=active` 的实例 |
 | `risk_control_settings` | id, scope(system/user), user_id(nullable), control(position_cap/total_exposure/sector_concentration/stop_take/loss_streak_drawdown/plan_violation), enabled(bool), params(jsonb), updated_at；变更写历史表 |
 | `risk_events` | id, user_id, control, level(info/warning/critical), subject(account/security/strategy), security_code, detail(jsonb), suggestion_id(nullable), trade_id(nullable), created_at — 只追加 |
@@ -1368,6 +1423,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | 表 | 关键字段 |
 |---|---|
 | `llm_providers` | id, name, kind(openai_compatible/anthropic/…), base_url, api_key_source(env/db), api_key_env(变量名，如 `DEEPSEEK_API_KEY`；source=env 时必填), api_key_ciphertext(source=db 时才有), key_version, status(ok/unconfigured/auth_failed/insufficient_balance/circuit_open), enabled, created_by, updated_at |
+| `user_data_licences` | id, user_id(FK；未删除行唯一), provider('mairui'), ciphertext(bytea，HPKE 封装：封装公钥 + AES-256-GCM 密文与标签；删除后置 NULL), seal_key_version(int), licence_hmac(bytea，未删除行唯一；只用于防一证多用，不出接口、不进日志), tier(free/trial/monthly/annual/diamond/other，用户填写), has_quant_pro(bool，用户填写), expires_on(date，用户填写), status(`data_licence_status`), status_changed_at, last_verified_at, last_error_code, last_error_at, consecutive_failures, paused_until, per_minute_limit_override(int，管理员可设), created_at, updated_at, deleted_at — **证书值只以密文存在，没有末几位或指纹**；`api` 的数据库角色对 `ciphertext` 只有 INSERT/UPDATE、无 SELECT，读不含密文的视图 `user_data_licence_status`（2.1B，契约 v0.2.6） |
 | `llm_models` | id, provider_id, model_name, context_window, max_output_tokens, thinking(enabled/disabled), price_input_cache_hit_per_1m, price_input_cache_miss_per_1m, price_output_per_1m（高峰价）, offpeak_multiplier, currency, price_checked_at, enabled |
 | `llm_task_routes` | task(primary key), primary_model_id, fallback_model_ids(uuid[]), timeout_s, max_retries, temperature, max_output_tokens, daily_budget, enabled, prompt_template_id |
 | `prompt_templates` | id, task, version_no, system_text, user_template, output_schema(jsonb), status(draft/active/retired), created_by, created_at — 激活后不可修改 |
@@ -1409,9 +1465,12 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `market.announcements` | id, code, published_at, title, summary, url, category(lx), level(jb), source('mairui'), first_seen_at |
 | `market.qa_items` | id, code, question, answer, asked_at, answered_at, first_seen_at |
 | `market.market_events` | id, code, type(limit_up/limit_down/lhb/unlock/forecast/express/…), event_date, payload, first_seen_at, event_definition_id, source(rule/llm), confidence, original_title, original_url, review_status |
-| `ops.ingest_request_log`（hypertable，保留 30 天） | id, requested_at, requester(service), priority(P0/P1/P2), dataset, endpoint_key, symbols_count, dedup_key, status(queued/done/failed/dropped), http_status, mairui_code, latency_ms, finished_at — 只记录元数据，不记录 licence 和完整 URL |
+| `ops.ingest_request_log`（hypertable，保留 30 天） | id, requested_at, licence_id（T-A07）, requester(service), priority(P0/P1/P2), dataset, endpoint_key, symbols_count, dedup_key, status(queued/done/failed/dropped), http_status, mairui_code, latency_ms, finished_at — 只记录元数据，不记录 licence 和完整 URL |
+| `ops.data_licence_events`（只追加） | id, licence_id, user_id, event(set/replaced/deleted/verified/invalid/expired/quota_exceeded/ip_limited/paused/resumed/expiry_reminder), actor(user/admin/ingest), from_status, to_status, upstream_code, at — 不含证书值及其任何片段（T-A07） |
 | `ops.ingest_leases` | id, holder_host, egress_ip, started_at, last_renewed_at, ended_at, end_reason — 单活锁历史（审计"任何时刻只有一个调用方"） |
-| `market.raw_payloads` | id, endpoint, params_hash, fetched_at, status, body(jsonb, 压缩), body_hash — 保留 90 天（快照引用的永久保留） |
+| `market.raw_payloads` | id, source_licence_id（T-A07）, endpoint, params_hash, fetched_at, status, body(jsonb, 压缩), body_hash — 保留 90 天（快照引用的永久保留） |
+
+> **数据归属（T-A07，2.1B）**：`data_sharing.mode=per_licence`（默认）时，全部 `market.*` 表（`securities`、`trading_calendar`、`daily_bars`、`quotes_snapshot`、`realtime_quotes`、`minute_bars`、`financial_reports`、`fund_flows`、`factor_values`、`announcements`、`qa_items`、`market_events`、`feature_bars_daily`）、`market.raw_payloads`、`intraday_universe` 与 Redis 行情缓存键都加 `source_licence_id`（uuid，FK `user_data_licences.id`），并进入唯一键和主要查询索引；`signal_states` 的 `scope=shared` 改为“同一证书内共享”。读取一律按当前用户的证书过滤，不读别人证书取到的数据。用户删除证书或账号时，该证书名下的行情数据按保留策略清理，不转给他人。`shared_cache` 模式下 `source_licence_id` 只记录实际取数的证书，供审计（启用前须取得麦蕊书面确认，第 9 节问题 50）。
 
 > `first_seen_at` 是"我们何时知道"的依据，是按原貌回看与"当时已知信息"判断的关键：回看 T 时刻时，只使用 `first_seen_at <= T` 的公告/事件/财报版本。
 
@@ -2205,8 +2264,9 @@ degraded_profile:               # 证书到期降级档（7.x 风险表），管
 **`config/ingest.yaml`**（采集服务 `ingest`，2.1A；只有 `ingest` 进程读取。交割单上传上限**不在本文件**，见 `config/imports.yaml`）
 ```yaml
 schema_version: 1
+# T-A07：budget.* 改为“每张证书”的默认值（证书档位未知且无管理员覆盖时使用）；全进程并发见 licences.global_max_concurrency
 budget:
-  per_minute_budget: 3000       # int，全局令牌桶（钻石版文档 6000/分钟，自设一半）【待 T003】；可热调，上调上限 5400
+  per_minute_budget: 3000       # int，每证书令牌桶（原为全局）（钻石版文档 6000/分钟，自设一半）【待 T003】；可热调，上调上限 5400
   max_concurrency: 1            # int，并发上限【待 T003】
   shares:                       # 各层每分钟份额，合计 ≤ per_minute_budget；高优先级可借用低优先级空闲额度
     snapshot: 800               # 快照层
@@ -2234,6 +2294,36 @@ egress:
 on_demand:
   coalesce_window_s: 5          # ◇ 按需拉取“同证券同接口”合并窗口
   priority: p1_daily
+licences:                       # T-A07 每用户证书（2.1B）
+  tier_per_minute:              # ◇ 各档位默认每证书每分钟上限（官方档位的一半，T003）
+    diamond: 3000
+    annual: 1500
+    monthly: 500
+    trial: 500
+    free: 150
+    other: 150
+  diamond_after_expiry_per_day: 20000   # 钻石版过期后官方每日额度
+  per_licence_max_concurrency: 1
+  global_max_concurrency: 2     # 【待 T-B05 实测】同 IP 多证书并发
+  cross_licence_scheduling: drr # 先比优先级，同级按证书赤字轮转
+  drr_quantum: 1
+  breaker:
+    consecutive_503: 5
+    open_s: 300
+    backoff_s: [1, 2, 4, 8, 16, 32, 60]
+  ip_limited_pause_s: 120
+  ip_limited_escalate: {count: 3, window_s: 3600, pause_s: 3600}
+  quota_resume_at: "00:01"      # 北京时间次日
+  expiry_reminder_days: [30, 7, 1]
+  verify_rate_limit_per_hour: 5
+  live_profile:                 # ◇ 默认盘中配置（每证书）
+    full_snapshot_interval_s: 60
+    focus_max: 20
+    focus_interval_s: 15
+  eod_scope: user_universe      # 盘后批量只取该用户自选与持仓 + 批量日 K
+data_sharing:
+  mode: per_licence             # per_licence（默认）| shared_cache【待麦蕊书面确认，禁用】
+  allow_cross_licence_fallback: false   # 硬规则：不可改为 true
 ```
 心跳载荷与健康判定见 api-contract §7.10（键 `ingest:heartbeat`，JSON `{ts, instance_id, leader, version, budget_used_last_minute, queue_depth}`）。
 
@@ -2433,11 +2523,13 @@ rules:
        reason: "上市不足 20 个交易日：历史太短"}
     - {id: HG6, input: f.list_days, op: lt, value: 60, horizons: [swing, long], cap: 59,
        reason: "上市不足 60 个交易日：60 日趋势与动量无法计算"}
+    # T006e（契约 v0.2.6）：gates 命中写入 caps[]，kind: gate、rule_id: HGn；判 0 分的 HG1–HG3 记 cap: 0
   horizons:
     intraday_t:
       requires:
         - {id: IT0, input: user.has_position, op: eq, value: true, else_score: 0,
            reason: "做T 需要已有底仓（T+1：当日买入不能当日卖出）"}
+        # T006e（契约 v0.2.6）：IT0 的 else_score: 0 是分数，不进 caps[]，只写 reasons[]；hints[] 与分数无关，判 0 分的周期照样给 IT0C 提示
         # T-A06：requires 规则新增可选键 mode: cap（默认）| hint。hint 规则不得带 else_cap/else_score；输入未填写时跳过（不提示、不封顶）；
         #        不满足时只写入输出 hints[]（{horizon, rule_id, text}），不改分数、不进 caps[]。画像类规则全部为 hint（用户 2026-11-02 决定）
         - {id: IT0B, input: profile.effort, op: in, value: [medium, high], mode: hint,
@@ -2523,6 +2615,7 @@ rules:
            reason: "已披露财报不足 12 期（或缺失）：基本面历史不完整"}
         - {id: LG0B, input: f.roe_ttm, op: not_null, else_cap: 59,
            reason: "ROE(TTM) 缺失：无法判断质量"}
+        # T006e（契约 v0.2.6，架构师归类）：LG0/LG0B 的 else_cap 属于数据不足，写入 caps[] 时 kind: data_missing、rule_id: LG0/LG0B
       components:
         - {id: LG1, input: f.fin_report_count, unit: count,
            bands: [{op: ge, value: 12, pts: 15}],
@@ -2549,7 +2642,7 @@ rules:
 `rules` 为空时分类器不输出“适合”，前端显示“周期分类规则未配置”，用户可手动选择周期。规则见 `docs/strategies/horizon_classifier.md` v1（T006a；判定顺序见该文 §3，比较语义见 §4 末尾“边界与比较语义”）。
 
 - **导入器（T-A02 已定）**：采用结构化 `rule_schema: 1`（`gates` / `requires` / `components` / `bands`），不改写为 DSL 字符串；导入时校验：`f.*` 的 `unit` 与 feature_catalog 一致（不一致拒绝导入，不静默换算）、所有 `id` 唯一、每个周期 components 满分合计 = 100。
-- **输出（契约 v0.2.2）**：`scores` 四个周期都给 0–100 整数、不为 null（闸门/前提判 0 分时附不适合理由）；`reasons[]` 元素带 `horizon` 与 `polarity: for/against`，与 `symbol_horizon_assessments.reasons` 一致；另返回 `inputs_missing: string[]`（缺失的 `f.*` 键），用来区分“真 0 分”与“缺数据被封顶”（horizon_classifier.md §8 缺口 1、2 均由契约 v0.2.2 解决）。**契约 v0.2.3**：`inputs_missing` 只含 feature_catalog 键（`f.*`），去重、升序，永不为 null，无缺失为 `[]`；新增 `caps[]`（`{horizon, cap, kind: data_missing|requires, rule_id, inputs_missing}`，说明每个周期为何被封顶）；响应带 `snapshot_id` 与 `evidence[]`，理由的 `evidence_ids` 只在本响应内解析；`classifier_version` 为语义化版本字符串（如 `"1.1.0"`），与 `horizon_classifier_versions.semver` 一致。**契约 v0.2.5（T-A06）**：新增 `hints[]`（`{horizon, rule_id, text}`，画像类 `mode: hint` 规则在画像已填写且不满足时的提示，永不为 null）；画像类规则不再进 `caps[]`；当前版本 `"1.2.0"`。
+- **输出（契约 v0.2.2）**：`scores` 四个周期都给 0–100 整数、不为 null（闸门/前提判 0 分时附不适合理由）；`reasons[]` 元素带 `horizon` 与 `polarity: for/against`，与 `symbol_horizon_assessments.reasons` 一致；另返回 `inputs_missing: string[]`（缺失的 `f.*` 键），用来区分“真 0 分”与“缺数据被封顶”（horizon_classifier.md §8 缺口 1、2 均由契约 v0.2.2 解决）。**契约 v0.2.3**：`inputs_missing` 只含 feature_catalog 键（`f.*`），去重、升序，永不为 null，无缺失为 `[]`；新增 `caps[]`（`{horizon, cap, kind, rule_id, inputs_missing}`，说明每个周期为何被封顶；`kind` 现为 `gate|data_missing`，见下）；响应带 `snapshot_id` 与 `evidence[]`，理由的 `evidence_ids` 只在本响应内解析；`classifier_version` 为语义化版本字符串（如 `"1.1.0"`），与 `horizon_classifier_versions.semver` 一致。**契约 v0.2.5（T-A06）**：新增 `hints[]`（`{horizon, rule_id, text}`，画像类 `mode: hint` 规则在画像已填写且不满足时的提示，永不为 null）；画像类规则不再进 `caps[]`；当前版本 `"1.2.0"`。**契约 v0.2.6（T006e）**：`caps[].kind` 改为 `gate | data_missing`（HG1–HG6 → `gate`；`LG0`/`LG0B` → `data_missing`）；`IT0` 判 0 分不进 `caps`；`hints[]` 与分数无关（已判 0 分的周期照样给提示）。
 - `intraday_t` 列为“适合”只表示周期匹配；T-01 在 C(5) 下仍只出盘后统计，前端文案需说明。
 
 **`config/llm.yaml`**（LLM 网关，2.7、2.7.1、2.7.2；`tasks.*`、`models.*.price_*`、`gateway.max_concurrency` 可热调，其余改 YAML 后重启）
@@ -2673,6 +2766,12 @@ admin:
   3. 备选数据源：交易所授权行情商、Tushare Pro 商用授权等，均需书面确认。
 - **交易所行情授权**：在公开网站展示沪深实时行情，业内通常需要上交所/深交所下属信息公司的行情经营许可【待核实具体要求，是否允许延时行情免授权】。
 - 架构配合：数据源抽象（`ingest` 内的 provider 适配接口），可替换/叠加供应商；所有展示数据带 `provider` 字段便于合规审查与下架。
+- **T-A07 每用户自用证书的合规分析（2026-11-02；用户已定为每位朋友单独买一张证书，第 9 节问题 49）**：
+  - 依据（2026-11-02 再次查阅）：《服务条款》https://www.mairuiapi.com/legal （同 https://mairui.club/legal ）2.1(4)“证书仅限于申请账号自行使用”、2.1(5)（见上）；FAQ https://www.mairui.club/faq （“证书可在您名下多套系统共用”、60 秒 2 个 IP、错误码 101/102/103）；帮助 https://mairui.club/help ；证书申请 https://www.mairuiapi.com/getlicence ；联系方式 https://www.mairuiapi.com/linkmeans ；证书查询 https://www.mairuiapi.com/query 。
+  - **每人用自己的证书、只看自己证书取的数据（`per_licence`，默认）**：数据只给证书持有人本人用，最接近“申请账号自行使用”，按字面**基本合规**。前提与剩余风险：① 证书应以朋友本人账号申请、由朋友持有（用户可以代付费用）；若登记在用户名下再给朋友用，可能被认定为“交由第三方使用/转让”；② 用户作为运营方在自己服务器上代朋友调用其证书，条款没有明确允许或禁止【待麦蕊书面确认】；③ 一台服务器、一个出口 IP 同时跑多位不同持有人的证书，FAQ 未说明【待麦蕊书面确认】；④ 跨证券的派生统计（分位、排名）也须只用本人证书的数据计算。
+  - **全站共用一份数据（`shared_cache`）**：A 的证书取到的数据给 B 看，即使 B 也买了证书，按 2.1(5) 字面仍属“再次分发/交由第三方使用”，**不合规风险高**。**结论：标【待麦蕊书面确认】，取得书面答复前不得启用。**
+  - 建议用户书面询问麦蕊（问题清单见第 9 节问题 50），保留答复记录。
+  - 每人自用证书**不解决**：交易所行情授权（上文）、证券投资咨询资质（7.2）、朋友的敏感个人信息（7.3）。
 
 ### 7.2 证券投资咨询资质（操作建议功能的合规设计）—— 第 9 节问题 1
 **结论先行**：主线功能（对个股给出 买入/加仓/持有/减仓/卖出/等待）在形式上属于"买卖时机建议 / 品种选择建议"。**向公众提供并直接或间接获取经济利益**，基本可以认定为证券投资咨询业务，须证监会核准；而证监会目前**暂不受理**该项新设审批（CEPA 安排除外）。因此"自己申请牌照"在现阶段不可行，必须在产品形态上控制风险，并在收费/公开前拍板。
@@ -2687,7 +2786,7 @@ admin:
 **产品形态的风险控制（MVP 全部实现）**
 1. **措辞**：界面不用"推荐/建议买入"，统一用"**规则信号 / 操作选项**"："按《高ROE稳定增长 v3》规则：买入条件满足（5/6 条）"，并始终同时展示反证与失效条件；禁用"保证、必涨、稳赚、牛股、金股、目标价"等词（`compliance` 词表 + CI 测试，LLM 输出同样过滤）。
 2. **用户配置规则**：建议只来自**用户启用的策略版本**（内置策略默认不启用，用户逐个阅读规则、适用条件和失效模式后勾选启用；阈值可改）；系统**不向未自选/未持有的股票主动推送**建议（筛选结果只在用户主动运行时展示）。
-3. **风险揭示（T-A06 改）**：不做风险测评、不弹同意书；全站固定展示免责提示（`docs/strategies/compliance/disclaimer.md`，2.4）；画像（自报、选填）与策略 `fit` 或周期不匹配时，建议卡与实例只显示“与您的画像不匹配”的提示（可降低置信度），不阻止、不要求确认。
+3. **风险揭示（T-A06 改）**：不做风险测评、不弹同意书；全站固定展示免责提示（`docs/strategies/compliance/disclaimer.md`，2.4）；画像（自报、选填）与策略 `fit` 或周期不匹配时，建议卡与实例只显示“与您的画像不匹配”的提示（`warnings[]`/提示文字），**不降低置信度**（置信度只反映信号证据，T006e 裁定 3）、不阻止、不要求确认；相关画像字段未填写时不提示。
 4. **用户确认**：建议卡只有"知道了 / 不采纳 / 转为我的计划"；**不下单、不对接券商、不提供一键交易**；转为计划需要用户自己填写或确认数量与价格。
 5. **不承诺收益**：不展示"历史胜率"营销语；模拟跟踪（2.8）只对本人可见、标注"模拟、样本有限、不代表未来"，不做对外排行/晒单。
 6. **不个性化招揽**：不向公众发送个股信号广告，不设"跟单/喊单"群；外部通知渠道默认只发提醒不发个股动作。
@@ -2721,7 +2820,7 @@ admin:
 - 访问控制：所有 `app.*` 查询强制 `user_id` 过滤（仓储层统一封装 + 集成测试"越权访问"用例）；可选启用 PostgreSQL RLS 兜底。
 - 密码：argon2id；注册/登录限速、渐进式锁定、蜜罐字段（无验证码，详见 3.6）；管理员账号仅由 CLI 创建，对其他人开放前管理员必须启用 TOTP 二次验证（已定，第 9 节问题 18）。
 - 上传安全：仅文本类扩展名 + 内容嗅探（拒绝二进制）、大小上限、解析在 worker 中带超时与行数上限（≤ 50,000 行）、原始文件存私有存储且不可经 URL 直接访问、文件名不参与路径拼接。
-- 秘密管理：licence 仅 `ingest` 容器可见；日志脱敏；仓库密钥与敏感信息扫描见 7.4A。
+- 秘密管理：用户证书以 HPKE 密文存库，解密私钥只在 `ingest` 容器（2.1B）；日志脱敏；仓库密钥与敏感信息扫描见 7.4A。
 - 备份：每日全量 + WAL，保留 30 天，季度演练恢复。
 - 审计：登录、导出、删除、计划/成交变更、导入确认/撤销、全部管理员操作写 `audit_logs`。
 - 依赖安全：Dependabot + `pip-audit`/`pnpm audit` 进 CI。
@@ -2741,7 +2840,7 @@ admin:
 | S1 | 麦蕊 licence | ① URL 末段：`(?i)mairuiapi\.com/\S+/[A-Za-z0-9-]{16,}`；② 赋值：`(?i)(mairui[_-]?)?licen[cs]e\s*[:=]\s*["']?[A-Za-z0-9-]{16,}`。licence 的实际长度与字符集【待核实】，T-B05 拿到真实 licence 后收紧长度并在本地钩子中增加"真实值精确匹配"（值只从本机环境变量读取，不入库） | 阻断 | 不豁免 |
 | S2 | LLM / 第三方 API key | ① `\bsk-[A-Za-z0-9_-]{20,}\b`（OpenAI 风格的常见写法，只作扫描启发式；**DeepSeek 官方文档未公布 key 格式**（2.7.1），所以运行时配置只校验非空，不用此正则）；③ 本地 pre-commit 与手动检查：若本机设置了 `DEEPSEEK_API_KEY`，用不打印的精确比对 `git grep -qF -- "$DEEPSEEK_API_KEY"` 检查真实值未入库（值只从环境变量读取，命中只输出 FOUND）；② 通用赋值：`(?i)\b(api[_-]?key\|secret\|token\|passwd\|password)\b\s*[:=]\s*["'][^"'\s]{12,}["']` | 阻断 | 不豁免 |
 | S3 | 私钥 | `-----BEGIN [A-Z ]*PRIVATE KEY-----` | 阻断 | 不豁免 |
-| S4 | 环境变量文件 | 除 `.env.example` 外，任何 `.env*` 文件都不得入库；`.env.example` 中 `APP_MASTER_KEY`、`MAIRUI_LICENCE`、`*_PASSWORD`、`*_API_KEY`、`DATABASE_URL` 的值只能为空或占位符（`changeme`、`<...>`、`example`） | 阻断 | 不豁免 |
+| S4 | 环境变量文件 | 除 `.env.example` 外，任何 `.env*` 文件都不得入库；`.env.example` 中 `APP_MASTER_KEY`、`MAIRUI_LICENCE`、`DATA_LICENCE_SEAL_PRIVATE_KEYS`、`*_PASSWORD`、`*_API_KEY`、`DATABASE_URL` 的值只能为空或占位符（`changeme`、`<...>`、`example`） | 阻断 | 不豁免 |
 | S5 | 沪市股东代码 | `\b[A-Z]\d{9}\b` | 阻断 | 见下方豁免 |
 | S6 | 深市股东代码 | `\b0\d{9}\b`，且同一行或同一文件表头含"股东"（避免与时间戳、金额误报） | 阻断 | 见下方豁免 |
 | S7 | 疑似真实交割单 | 文件中同时出现以下表头中的 ≥ 3 个：`成交日期`、`证券代码`、`股东代码`、`成交编号`、`委托编号`、`发生金额`、`剩余金额`；或文件是 GBK/GB18030 编码的文本 | 阻断 | 见下方豁免；`docs/*.md` 不适用 S7（见下方“docs 例外”） |
@@ -2769,6 +2868,9 @@ admin:
 | 风险 | 影响 | 缓解 |
 |---|---|---|
 | 麦蕊 2-IP 限制（同一证书 60 秒内最多 2 个来源公网 IP，**硬约束**） | 多机、多环境或开发机与生产同时调用 → IP 超限，全站行情中断 | 唯一的行情采集服务 `ingest`（单副本 + 单活锁 + 固定出口 IP 自检 + licence 只在该容器中，2.1A）；本地和 CI 用回放模式；故障切换只做冷备（停旧实例并等待 ≥ 60 秒）；IP 超限立即告警并暂停外呼；开发真实联调与生产互斥，或申请第二张证书（问题 27） |
+| 证书归属、代运营与共享缓存未获麦蕊书面确认（T-A07） | 被认定违约 → 证书被停用 | 默认 `per_licence`、不跨证书共享；朋友以本人账号申请证书；书面询问麦蕊（第 9 节问题 50） |
+| 某位用户的证书失效、到期或超额（T-A07） | 该用户行情中断 | 按证书降级与通知、到期前 30/7/1 天提醒；**不回退**到他人或管理员证书（2.1B 第 6 点） |
+| 多证书共用一个出口的串行时延（T-A07） | 用户多时刷新变慢 | 默认“全市场快照 60 秒 + 重点关注 15 秒”；`global_max_concurrency` 待 T-B05 实测后调整（2.1B 第 5 点） |
 | 单点：`ingest` 故障导致全站行情停滞 | 盘中建议暂停（stale） | 容器自动重启（重启间隔 ≥ 60 秒，并检查锁）；新鲜度监控和告警；冷备手册；P0 队列优先，确保实时数据先恢复 |
 | 历史因子是否"按时点"未核实 | 内部评估有前视偏差 | 待 T003 验证；先用我们自己按时点落库的数据（2.12.1） |
 | TimescaleDB 扩展升级与许可证 | 升级受阻 | 固定镜像版本；升级前在演练环境测试 `pg_upgrade`；社区版只自用，不对外提供数据库服务 |
@@ -2901,7 +3003,7 @@ admin:
 ### Phase 4：上线准备（买服务器、备案后，约 1–1.5 周）
 | ID | 任务 | 角色 | 依赖 |
 |---|---|---|---|
-| T-O06 | **迁移手册与演练**：本地 → 服务器（`pg_dump`/恢复、导入文件卷迁移、主密钥迁移、**停本地 `ingest` → 等待 ≥ 60 秒 → 启服务器 `ingest` → 核对出口 IP → 删除本地 licence**，以免同一证书 60 秒内超过 2 个 IP）、回滚步骤 | 运维 | M2 |
+| T-O06 | **迁移手册与演练**：本地 → 服务器（`pg_dump`/恢复、导入文件卷迁移、主密钥迁移、**停本地 `ingest` → 等待 ≥ 60 秒 → 启服务器 `ingest` → 核对出口 IP → 删除本地 licence**，以免同一证书 60 秒内超过 2 个 IP；T-A07：生产不用 `MAIRUI_LICENCE`，上线后用户本人的证书也在服务器网页“设置 → 数据证书”录入，私钥只放服务器 `ingest`）、回滚步骤 | 运维 | M2 |
 | T-O03 | 服务器环境：主机、域名与 ICP 备案（或按第 9 节决定的方案）、TLS、单出口 IP、备份、监控（IP 超限告警、`ingest` 锁与新鲜度、429/503、预算使用率、SSE 连接数、任务延迟） | 运维 | 用户决策 |
 | T-O04 | 生产部署流水线（手动审批）、备份恢复演练、证书/Pro 到期提醒 | 运维 | T-O03 |
 | T-T08 | 安全测试（OWASP 基线、会话、CSRF、越权、SSRF——LLM base_url 白名单）、性能基线（100 用户、4,000 只 universe、SSE 100 连接） | 测试 | M2 |
@@ -2917,7 +3019,7 @@ admin:
 
 | ID | 任务 | 角色 | 阶段 | 依赖 |
 |---|---|---|---|---|
-| T-B04a | **行情采集服务 `ingest`**（2.1A）：独立容器单副本、licence 只在此注入、单活锁、出口 IP 自检、令牌桶 + 三级优先队列（P0 实时 / P1 日批 / P2 回补）、请求意图 Stream、singleflight、`market.updated` 事件、IP 超限告警与暂停、回放模式；import-linter 规则禁止其他包引用麦蕊客户端 | 后端 | 1 | T-B02 |
+| T-B04a | **行情采集服务 `ingest`**（2.1A）：独立容器单副本、证书私钥只在此注入（T-A07）、单活锁、出口 IP 自检、令牌桶 + 三级优先队列（P0 实时 / P1 日批 / P2 回补）、请求意图 Stream、singleflight、`market.updated` 事件、IP 超限告警与暂停、回放模式；import-linter 规则禁止其他包引用麦蕊客户端；**T-A07（2.1B）**：HPKE 解密、每证书令牌桶与三级队列、证书间 DRR 轮转、全局并发上限、按证书熔断与状态机、`verify_licence` 意图、`data_sharing.mode` 与 `source_licence_id`、到期提醒、`MAIRUI_LICENCE` 非空拒绝启动 | 后端 | 1 | T-B02 |
 | T-O07 | `ingest` 运维：compose 中 `replicas: 1` 与重启策略、固定出口 IP、冷备切换手册 `deploy/runbooks/ingest-failover.md`、迁移手册中的"停旧 → 等待 60 秒 → 启新"、告警通道 | 运维 | 1 | T-B04a |
 | T-O08 | **PG16 + TimescaleDB**：镜像版本固定、hypertable、压缩、保留策略、连续聚合；磁盘与 WAL 规划（≥ 300 GB）；备份恢复演练（含压缩块） | 运维 | 0 | T-O01 |
 | T-B02a | 数据模型第二轮（3.3 新增表组）：三层表、`candidate_signals` 的 CHECK 约束、不可变触发器、按月分区、部分索引（3A.6）、`market_rule_versions`、`event_definitions` | 后端 | 1 | T-B02, T-O08 |
@@ -2950,6 +3052,10 @@ admin:
 | T-T18 | 计划草案测试：数量公式边界（整手、科创板规则、T+1 可卖、涨跌停价）、`stale` 与过期、没有确认就没有计划；内部评估接口对普通用户不可达 | 测试 | 2 | T-B34 |
 | T-T19 | 交易规则模块测试：涨跌停价、无涨跌幅情形、费用最低收费、2026-07-06 前后 ST 比例切换（5% → 10%）、停牌跳过、风险警示股票 50 万股买入上限、`modeled_from` 之前返回“规则未建模”、冲击成本成交额口径 | 测试 | 2 | T-B36 |
 | T-T20 | `ingest` 唯一性测试：第二个实例启动被拒、锁丢失即停止外呼、优先级抢占（P0 不被 P2 饿死）、IP 超限模拟 → 告警与暂停、非 `ingest` 容器中没有 licence 环境变量 | 测试 | 1 | T-B04a |
+| T-B45 | **数据证书 API（契约 v0.2.6，2.1B）**：`/me/data-licence` GET/PUT/PATCH/DELETE 与 `/test`；`/admin/data-licences` 与 pause/resume；HPKE 公钥加密、`licence_hmac` 防重、`ciphertext` 列级授权与状态视图、请求体与日志脱敏、通知 `data_licence`、SSE `data_licence`、`gaps` 的 `data_licence_unavailable`；`Me.data_licence_status` | 后端 | 1 | T-B04a |
+| T-F22 | **数据证书设置页与提示**：“设置 → 数据证书”（密码型输入、提交后清空、永不回显；档位、Quant Pro、到期日；状态徽标与“测试证书”按钮）；证书不可用时的全站横幅与 `gaps` 文案；管理端证书列表（只显示状态）；S-03 等 `risk_level: high` 模板启用开关旁的固定风险说明（T006e） | 前端 | 1 | T-B45 |
+| T-O09 | **证书密钥运维**：生成 X25519 密钥对与版本号、私钥只注入 `ingest`、公钥注入 `api`、轮换与重新封装手册、私钥与数据库备份分开保存、从 compose 与 `.env.example` 移除 `MAIRUI_LICENCE`、冷备切换包含私钥 | 运维 | 1 | T-B04a |
+| T-T22 | **每用户证书测试**：值不出现在任何响应/日志/SSE/通知（含子串扫描）；`api` 无法解密；一证多用 409；按证书 101/102/103/503 的状态与暂停；不跨证书回退；DRR 公平与 P0 抢占；`per_licence` 下读取只命中本人证书的数据；分类器 `caps.kind` 与 `hints` 独立性（T006e） | 测试 | 1 | T-B45 |
 | T-T21 | 2.5.14 契约测试：用测试目录中的虚构卡片验证导入器的通过、拒绝和幂等行为（缺必填字段、DSL 越权、参数 default 越界、fixtures 不足 6 个），不读取 `docs/strategies/` 的真实内容作为测试数据 | 测试 | 2 | T-B20d |
 | T-T08（扩展） | 性能：3A.5 的 P95 目标、3 年规模合成数据、locust + pgbench、SSE 延迟、`ingest` 队列等待；回退超过 20% 时告警 | 测试 | 4（第 2 阶段起每阶段跑一次） | T-B41, T-O08 |
 
@@ -2972,7 +3078,7 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
    - `REGISTRATION_MODE` 取 `closed`（默认，注册接口返回 `503 REGISTRATION_CLOSED`）/ `invite`（需邀请码，进入 `pending` 待审核）/ `open`（保留，V1 不用）。用户本人账号由 `python -m app.cli create-admin` 创建，单用户期间本人同时是管理员。
    - 方案 B（持牌机构合作）仍是**收费前必须**；方案 C 作为退路保留。
    - 子问题——**【已定 2026-11-01】内测前只供用户本人使用，暂不请律师。** 但**对任何第三方开放（切到 `invite`）之前，必须先取得律师书面意见**（与 7.2 一致），这一前置条件不取消。
-2. **麦蕊数据再分发授权**（7.1）——**【已定 2026-11-01】暂不申请**。后果：授权到手前系统只供用户本人使用；任何第三方访问（包括"少量知情测试者"）都要等授权。
+2. **麦蕊数据再分发授权**（7.1）——**【已定 2026-11-01】暂不申请**。后果：授权到手前系统只供用户本人使用；任何第三方访问（包括"少量知情测试者"）都要等授权。**T-A07 更新（2026-11-02）**：用户改为给每位朋友单独买证书、各用各的（问题 49），朋友使用不再依赖“再分发授权”；证书归属、代运营、同 IP 多证书与共享缓存仍【待麦蕊书面确认】（问题 50）。
 3. **收费时机**——**【已定 2026-11-01】免费**。会员模型只预留数据结构，不接支付。
 4. **运营主体、域名与备案**（1.3、7.3）——**【已定 2026-11-01】先本地测试，以后购买境内服务器并以个人名义 ICP 备案**；不采用香港/境外服务器。备案耗时与"金融/证券类信息服务"的前置审批要求仍【待核实】，在买服务器前查清。
 
@@ -2985,7 +3091,7 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 10. **覆盖范围**——**【已定 2026-11-01】（架构师默认）**：沪深主板、创业板、科创板；ETF、可转债只做持仓展示。**V1 不含北交所**【编排者默认，见 C(8)】：北交所股票可以导入和展示持仓，但不进入策略扫描（模板 `universe.boards.bse=false`）。
 
 **C. 策略库与建议引擎**
-11. **内置策略**——**【已定 2026-11-01】高风险的短线情绪类策略默认不启用**。卡片新增选填字段 `risk_level: normal | high`（2.5.0A）；`high` 的模板不会被周期分类器推荐，用户必须在策略页逐项确认风险后手动启用。首批上线哪些策略：【编排者默认，见 C(1)】。
+11. **内置策略**——**【已定 2026-11-01】高风险的短线情绪类策略默认不启用**。卡片新增选填字段 `risk_level: normal | high`（2.5.0A）；`high` 的模板不会被周期分类器推荐，~~用户必须在策略页逐项确认风险后手动启用~~ **（2026-11-02 编排者决定取代，T006e）**：手动启用**不需要逐项确认**，策略页启用开关旁固定展示一段风险说明文字（2.5.0A ⑫），与“不弹同意书、不做确认”一致。首批上线哪些策略：【编排者默认，见 C(1)】。
 12. **风控默认值**——**【已定 2026-11-01】（架构师默认）**：单只 ≤ 20%；总仓位按大盘 上行 60–90% / 震荡 40–60% / 下行 0–30%；单一行业 ≤ 40%；连续亏损 3 笔或回撤 10% 预警；中长线默认止损 −20%；六项默认全开，可在设置里逐项关闭或调整。
 13. **自动降权**——**【已定 2026-11-01】（架构师默认）**：默认开启；α=10、β=0.6、γ=0.4，权重 0.3–1.2；样本 n < 20 时不调整权重（这是降权门槛，与展示阈值无关，见 2.12.3）；统计窗口按 5 日跟踪期。
 14. **模拟跟踪口径**——**【已定 2026-11-01】（架构师默认）**：基准沪深300（可选行业指数），跟踪 T+1/5/20；全站匿名汇总只对登录用户在策略页展示（单用户期间等同本人统计）。hold 的阈值见 C(7)。
@@ -3010,7 +3116,7 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 **G. 策略分层、可解释性、存储、内部评估**
 25. **策略卡字段**——**【已定 2026-11-01】vision.md 定稿的全部字段都保留**；8 项必填是晋级 L2 的门槛，其余为选填，原样保存并在详情页展示（2.5.0A、2.5.14 B/H）。
 26. **内部评估模块**——**【已定 2026-11-01】要做，放在第三阶段**（T-B40）。先做单因子检验与事件研究，再做参数稳健度。用户可见部分按**方案 A**【编排者默认，见 C(6)】。
-27. **开发证书**——**【已定 2026-11-01】（架构师默认）**：暂不购买，等需要并行开发时再定。
+27. **开发证书**——**【已定 2026-11-01】（架构师默认）**：暂不购买，等需要并行开发时再定。T-A07：开发与生产的互斥改为按证书执行（2.1B 第 3 点）；朋友的证书不离开生产，开发联调只用用户本人的证书并先在后台暂停。
 28. **行情保留期**——**【已定 2026-11-01】（架构师默认）**：1 分钟 K 全市场保留 1 年、跟踪池保留 3 年；日 K 和因子全部保留；业务数据永久保留；磁盘 ≥ 300 GB、内存 16 GB。
 29. **计划确认的严格程度**——**【已定 2026-11-01】（架构师默认）**：人工判断清单必答 3 条；超出草案区间需二次确认。
 30. **冷却与有效期**——**【已定 2026-11-01】（架构师默认）**：同模板同证券冷却 3 个交易日；候选信号有效期 做T 当日 14:50、短线 1 日、波段 5 日、中长线 20 日。
@@ -3043,11 +3149,13 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 45. **账号删除**——**【用户已定 2026-11-02】**：管理员手动清理，不设自动留存期（7.3）。
 46. **更换 LLM 供应商**——**【用户已定 2026-11-02】**：只发站内通知，不要求重新同意（7.3）。
 47. **T-A05 合规部分**——**【用户已定 2026-11-02】**：35f4880 中的问卷、同意、文书版本设计全部作废（研究员文件保留，顶部标“已停用”）；T-F02 D1–D10 中与同意无关的部分（D1、D3、D5、D6 的 CSRF、D7、D8、D9 的 `/account-status`）保留。
-48. **【风险提示，未决，供用户知悉，不阻断】朋友属于第三方**：① 麦蕊数据再分发——问题 2 已定“授权到手前只供用户本人使用，任何第三方访问都不行”，朋友使用按字面仍属“交由第三方使用/再次分发”（7.1）；② 朋友的交割单与持仓属于敏感个人信息，由本人代为保存与处理，取消单独同意后合规依据更弱（7.3）；③ 证券投资咨询资质（7.2）：免费、封闭可降低但不消除风险；④ 愿景与问题 1 原要求“对第三方开放前取得律师书面意见”。本项只记录风险，不作决定，由用户自行权衡。
+48. **【风险提示，未决，供用户知悉，不阻断】朋友属于第三方**：① 麦蕊数据再分发——**【用户已定 2026-11-02】改由每人自用证书解决（问题 49）**：每位朋友用自己的证书、只看自己证书取到的数据；剩余风险（证书须以朋友本人名义申请、由用户服务器代为调用、同一 IP 多证书、共享缓存）均【待麦蕊书面确认】（问题 50，7.1）；② 朋友的交割单与持仓属于敏感个人信息，由本人代为保存与处理，取消单独同意后合规依据更弱（7.3）；③ 证券投资咨询资质（7.2）：免费、封闭可降低但不消除风险；④ 愿景与问题 1 原要求“对第三方开放前取得律师书面意见”。本项只记录风险，不作决定，由用户自行权衡。
+49. **每用户自用麦蕊证书**——**【用户已定 2026-11-02】**：用户为每位朋友单独购买一张麦蕊证书；每位用户在“设置 → 数据证书”录入自己的证书，只用自己的证书取数（2.1B，契约 v0.2.6）。架构取舍（架构师，T-A07）：证书 HPKE 加密、只有 `ingest` 能解密、从不回显；每证书令牌桶与 P0>P1>P2 队列、证书之间轮转；默认 `data_sharing.mode=per_licence`；证书不可用时**不回退**到他人或管理员的证书；生产不再使用全站 `MAIRUI_LICENCE`。建议朋友买**钻石版 + Quant Pro**（全市场快照只限包年/钻石或 Quant Pro，1 分钟 K 需 Quant Pro），并以朋友本人账号申请。
+50. **【待麦蕊书面确认，未决，不阻断开发】证书归属与共享**：请用户向麦蕊书面询问（QQ 3826425416 或 https://www.mairuiapi.com/linkmeans 的企业顾问表单，保留记录）：① 用户付费、以朋友本人账号申请的证书，由用户的服务器代朋友调用，是否允许；② 同一台服务器（同一出口 IP）同时使用多位不同持有人的证书是否允许，“60 秒 2 个 IP”是否按证书单独计算；③ 用 A 的证书取到的行情（含派生指标）缓存后展示给同样持有证书的 B，是否允许（即 `shared_cache`）；④ 如需书面授权或企业版，范围与费用。答复前一律 `per_licence`，`shared_cache` 禁用；答复存档后由用户拍板。
 
 **I. 编排者默认（2026-11-01 12:32）——【编排者默认，用户可否决】**
 - **C(1) 首批 P0 策略**：G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01（研究员 `docs/strategies/catalog.md` 第 2 节总表；取代早期方案中 2.5.10 的 ①–⑨ MVP 模板清单）。引擎接口覆盖核对与缺口见 2.5.11A。
-- **C(2) S-03**（高风险短线情绪类）：以模板形式随附，但**默认不启用**、不被分类器推荐，`risk_level: high`；用户手动启用前须确认风险。
+- **C(2) S-03**（高风险短线情绪类）：以模板形式随附，但**默认不启用**、不被分类器推荐，`risk_level: high`；手动启用不需要确认，启用开关旁固定展示风险说明（T006e，取代问题 11 的逐项确认）。
 - **C(3) H-01 持仓风险监控**：默认挂到**全部持仓**（`strategy_instances.origin=system`、`status=active`），用户可对单只或全部暂停；只产生 weakening/exit_signal（reduce/sell 候选），从不产生买入。
 - **C(4) N-01 风险公告否决**：公告数据缺失或过期时，**阻断买入方向的计划草案**，原因码 `KEY_DATA_MISSING`（附缺失字段 `f.ann_risk_count_10d`），解除条件：该字段在新快照中非空**且**公告数据源状态为 `verified_live`（2.5.11A）。卖出方向不受影响。
 - **C(5) T-01 做T**：在实测盘中延迟之前**只做盘后统计**：不产生盘中候选信号、草案或通知；盘后按规则统计"当日若执行会触发几次、回补率、扣费后单腿结果"，标为模拟（2.5.11A）。延迟实测达标并经用户确认后才开放盘中。
@@ -3066,4 +3174,4 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 - `config/*.yaml` 五个文件的键与默认值见 6.1；文件由后端创建。
 - 仍需运维决定（不属于契约）：nginx `proxy_pass` 尾斜杠导致 `/api` 前缀被去掉（T-B01 §4.1），建议去掉尾斜杠，保持 `/api/v1`。
 
-**仍待定的问题汇总**：77/82/85 个因子的口径【待 T003 补测核实】、交易规则 2023-04-10 之前未建模及深交所条款逐字核对（问题 36）；【风险提示，未决】朋友属于第三方：麦蕊再分发、朋友的敏感个人信息、咨询资质、律师书面意见（问题 48）；（问题 38–42 已于 2026-11-02 作废，见问题 43–47）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法（问题 19，待脱敏范本；分红计入摊薄成本已定）；另见 2.5.14 H（续）末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning，以及 ST 10%、T+1 hold 阈值 1.0%、分红计入摊薄成本已于 2026-11-01 拍板。）
+**仍待定的问题汇总**：77/82/85 个因子的口径【待 T003 补测核实】、交易规则 2023-04-10 之前未建模及深交所条款逐字核对（问题 36）；【风险提示，未决】朋友属于第三方：朋友的敏感个人信息、咨询资质、律师书面意见（问题 48；麦蕊再分发改由每人自用证书解决，问题 49）；**麦蕊证书归属、代运营、同 IP 多证书与共享缓存【待麦蕊书面确认】（问题 50）**；（问题 38–42 已于 2026-11-02 作废，见问题 43–47）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法（问题 19，待脱敏范本；分红计入摊薄成本已定）；另见 2.5.14 H（续）末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning，以及 ST 10%、T+1 hold 阈值 1.0%、分红计入摊薄成本已于 2026-11-01 拍板。）

@@ -1,12 +1,31 @@
 # A股个人投资研究与决策助手 · REST 接口契约（MVP v1）
 
-- 作者：架构师；日期：2026-11-02；版本：**v0.2.5**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b；v0.2.4 为 T-A05 合入研究员 T-B15 合规文书与问卷、前端 T-F02 评审 D1–D7；v0.2.5 为 T-A06 按用户 2026-11-02 决定删除同意流程与风险测评）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
+- 作者：架构师；日期：2026-11-02；版本：**v0.2.6**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b；v0.2.4 为 T-A05 合入研究员 T-B15 合规文书与问卷、前端 T-F02 评审 D1–D7；v0.2.5 为 T-A06 按用户 2026-11-02 决定删除同意流程与风险测评；v0.2.6 为 T-A07 每用户自用麦蕊证书并入 T006e 裁定）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
 - 配套：[`plan.md`](./plan.md)（架构方案）。本契约优先于代码：FastAPI 生成的 `openapi.json` 与本文不一致时**改代码**。
 - **示例值全部虚构**：代码用 `600000.SH / 000001.SZ`，ID 用 `00000000-0000-4000-8000-0000000000xx`，金额为随意整数；不含任何真实账户、股东代码、姓名、金额或委托/成交编号。证券简称一律用“示例银行”“演示电子”这类虚构名称。
 
 ---
 
 ## 0. 变更记录
+
+### v0.2.6（2026-11-02，T-A07：每用户自用麦蕊证书（用户已定，plan 2.1B、第 9 节问题 49–50）；并入 T006e 架构裁定；**含不兼容变更**：`HorizonCap.kind` 删 `requires`、加 `gate`）
+> 证书值**永不出现在任何响应、错误体、SSE、通知或日志中**（也没有末几位或指纹）。示例与测试夹具一律使用运行时生成的虚构值。
+
+| # | 项 | 决定 | 后端改动 | 前端改动 |
+|---|---|---|---|---|
+| 1 | 每用户证书 | 每位用户只用自己的麦蕊证书取数；默认不跨用户共享（`data_sharing.mode=per_licence`；`shared_cache`【待麦蕊书面确认】，禁用）；**不回退**到他人或管理员证书 | `user_data_licences`（HPKE 密文，只有 `ingest` 能解密）、每证书令牌桶与队列、`source_licence_id` | — |
+| 2 | 端点 | 新增 `GET/PUT/PATCH/DELETE /me/data-licence`、`POST /me/data-licence/test`（7.1） | 新增 | “设置 → 数据证书”页：密码型输入、提交后清空、永不回显 |
+| 3 | 管理端 | 新增 `GET /admin/data-licences`、`POST /admin/data-licences/{user_id}/pause` · `/resume`（7.9）；`/admin/ingest/status` 的 `budget` 改为全进程合计 | 新增 | 管理端证书列表（只有状态） |
+| 4 | 共享对象 | 新增 `DataLicenceStatus`、`AdminDataLicence`；`Me` 加 `data_licence_status` | 新增 | 状态徽标、横幅 |
+| 5 | 枚举 | 新增 `data_licence_status`、`data_licence_tier`；`notification_kind` 加 `data_licence`；`gap_reason` 加 `data_licence_unavailable` | 同步 | 文案 |
+| 6 | 错误码 | 新增 `409 DATA_LICENCE_IN_USE`、`409 DATA_LICENCE_NOT_SET`、`409 DATA_LICENCE_UNAVAILABLE` | 新增 | 提示 |
+| 7 | SSE | 新增事件 `data_licence` | 新增 | 实时刷新状态 |
+| 8 | 数据状态 | 本人证书不可用时，行情接口不报错，`data_status` 为 `stale`/`unavailable`、`gaps[].reason="data_licence_unavailable"`；需要触发拉取的写操作返回 `409 DATA_LICENCE_UNAVAILABLE` | 按证书判定 | 横幅“你的数据证书不可用” |
+| 9 | T006e 裁定 1 | `hints[]` 与分数无关：周期已被 `IT0`（无底仓）判 0 分时，`experience=novice` 仍给出 `IT0C` 提示 | 分类器 | — |
+| 10 | T006e 裁定 2 | `HorizonCap.kind` 改为 `"gate" \| "data_missing"`：HG1–HG6 → `gate`（`rule_id` 为 `HGn`，判 0 分的记 `cap: 0`）；`LG0`/`LG0B` 的 `else_cap` → `data_missing`（`rule_id` 为规则 ID，架构师归类）；`IT0` 的 `else_score: 0` 是分数，不进 `caps`；删 `requires` | 分类器输出 | 封顶说明按 `kind` 显示 |
+| 11 | T006e 裁定 3 | 卡片 `fit`：画像不匹配**不降低** `confidence`（置信度只反映信号证据），只给 `warnings[]`/提示文字；相关画像字段未填写时不提示 | 建议生成 | — |
+| 12 | T006e 裁定 4（编排者决定） | `risk_level: high` 的模板（如 S-03）手动启用**不需要逐项确认**，前端在启用开关旁固定展示风险说明（plan 2.5.0A ⑫）；`POST /strategy-instances` 本来没有确认字段，不变 | 无 | 启用开关旁固定文案，不弹窗 |
+| — | `/meta/enums.version` | `"v0.2.5"` → `"v0.2.6"` | 同步 | `CONTRACT_VERSION` |
 
 ### v0.2.5（2026-11-02，T-A06；用户决定：仅朋友间私下使用、非商业；**不做风险测评、不做同意流程**；**含不兼容变更（删除端点、表与错误码）**）
 > 本节列出的项一律**作废**，以本节为准；下文 v0.2.4 及更早的变更记录保留原文只作历史，凡与本节冲突的条目视为作废（条目首列已标 ~~作废~~ 的除外不再逐条修改）。plan 第 9 节问题 43–48。
@@ -180,8 +199,8 @@
 ```json
 {"data_status": "fresh", "data_as_of": "2026-11-02T10:31:00+08:00", "gaps": [{"key": "news", "reason": "no_source", "message": "本产品不提供新闻资讯"}]}
 ```
-- `data_status: "fresh" | "stale" | "pending" | "partial" | "unavailable"`：`stale`=超过刷新间隔 ×2 未更新（0A.3）；`pending`=已投递按需拉取任务；`partial`=部分维度缺数据；`unavailable`=上游不可用。
-- `gaps[]: {key: string, reason: "no_source"|"not_yet_published"|"upstream_error"|"quota_deferred"|"user_input_missing", message: string}`。
+- `data_status: "fresh" | "stale" | "pending" | "partial" | "unavailable"`：`stale`=超过刷新间隔 ×2 未更新（0A.3）；`pending`=已投递按需拉取任务；`partial`=部分维度缺数据；`unavailable`=上游不可用，或本人数据证书不可用且从未取到数据（v0.2.6）。本人证书不可用时行情接口不报错，只把 `data_status` 置为 `stale`/`unavailable` 并在 `gaps` 中给出 `data_licence_unavailable`；**不会用他人证书的数据补齐**。
+- `gaps[]: {key: string, reason: "no_source"|"not_yet_published"|"upstream_error"|"quota_deferred"|"user_input_missing"|"data_licence_unavailable", message: string}`。
 
 ### 1.2 分页（游标）
 - 请求：`?limit=`（默认 50，最大 200）`&cursor=`（不透明字符串）。
@@ -231,7 +250,7 @@
 | `suggestion_status` | `active` `superseded` `invalidated` `expired` |
 | `risk_control` | `stop_take`(RC1) `position_cap`(RC2) `total_exposure`(RC3) `sector_concentration`(RC4) `loss_streak_drawdown`(RC5) `plan_violation`(RC6) |
 | `risk_level` | `info` `warning` `critical`（只用于 `RiskFlag.level`） |
-| `card_risk_level` | `normal` `high`（L1 卡片的策略风险等级，与 `risk_level` 无关；`high` 的卡片在晋级和展示时附加风险提示） |
+| `card_risk_level` | `normal` `high`（L1 卡片的策略风险等级，与 `risk_level` 无关；`high` 的卡片在晋级和展示时附加风险提示；手动启用**不需要确认**，前端在启用开关旁固定展示风险说明，v0.2.6 T006e） |
 | `market_regime` | `uptrend` `range` `downtrend` |
 | `signal_kind` | `rule_flip`（某条规则由不满足变满足或反之） `breakout`（突破区间上沿） `breakdown`（跌破区间下沿） `vwap_deviation`（偏离分时均价） `volume_spike`（放量） `limit_up_touch` `limit_down_touch` `limit_open`（涨跌停打开） `invalidation_near`（接近失效条件或止损位） `stop_hit`（触及止损/止盈价位，只提示） `suspended`（停牌/复牌） `data_stale`（行情变旧） |
 | `market_session` | `non_trading_day` `pre_open` `call_auction` `morning` `lunch_break` `afternoon` `closing_auction` `closed`（北京时间；按交易日历与板块规则计算） |
@@ -239,11 +258,11 @@
 | `bar_adjust` | `none` `qfq` `hfq`（`1m` 只支持 `none`） |
 | `registration_mode` | `closed`（V1 默认）`invite` `open`（保留，V1 不用） |
 | `notification_target_type` | `suggestion` `candidate_signal` `plan_draft` `plan` `daily_report` `import_batch` `reconciliation` `strategy_version` `none` |
-| `notification_kind` | `suggestion_change` `invalidation` `daily_report` `alert` `import` `system` `reason_released` `plan_draft_ready` `plan_triggered` `strategy_health` |
+| `notification_kind` | `suggestion_change` `invalidation` `daily_report` `alert` `import` `system` `reason_released` `plan_draft_ready` `plan_triggered` `strategy_health` `data_licence` |
 | `severity` | `info` `attention` `important` |
 | `channel` | `in_app` `email` `wecom_app`（预留） |
 | `data_status` | `fresh` `stale` `pending` `partial` `unavailable`（含义见 1.1） |
-| `gap_reason` | `no_source` `not_yet_published` `upstream_error` `quota_deferred` `user_input_missing`（`gaps[].reason`，1.1） |
+| `gap_reason` | `no_source` `not_yet_published` `upstream_error` `quota_deferred` `user_input_missing` `data_licence_unavailable`（`gaps[].reason`，1.1；v0.2.6 加 `data_licence_unavailable`） |
 | `data_provider` | `mairui` `user_import` `user_input` `system`（`Evidence.provider`；`system` = 系统计算；v0.2.3 起 `Evidence.provider` 只用此枚举，没有 `local`） |
 | `source_kind` | `market_data` `disclosure` `user_input` `system_calc`（证据来源类别，plan 3.1） |
 | `trade_side` | `buy` `sell` |
@@ -272,6 +291,8 @@
 | `health_status` | `ok` `degraded` `down`（`/health/ready` 的 `status`） |
 | `component_health` | `ok` `error`（`/health/ready` 的 `db`、`redis`） |
 | `ingest_health` | `ok` `stale` `paused` `unknown`（`unknown` = Redis 不可用，无法判断） |
+| `data_licence_status` | `not_set` `pending_verification` `active` `invalid` `expired` `quota_exceeded` `ip_limited` `paused_by_admin`（v0.2.6，plan 2.1B） |
+| `data_licence_tier` | `free` `trial` `monthly` `annual` `diamond` `other`（v0.2.6；用户自报的麦蕊证书档位，决定默认每分钟上限） |
 
 ---
 
@@ -294,6 +315,9 @@
 | 409 | `IDEMPOTENCY_CONFLICT` | 同一幂等键、不同请求体 | — |
 | 409 | `VERSION_CONFLICT` | 乐观锁版本号不符（`If-Match`/`base_version_no`） | `{current_version_no}`；测评时为 `{current_version: string}` |
 | 409 | `IMMUTABLE_RESOURCE` | 试图修改不可变对象（建议、已发布策略版本、日报、成交原记录） | — |
+| 409 | `DATA_LICENCE_IN_USE` | 该证书已绑定到另一个账号（一张证书只能由一位用户使用；v0.2.6） | — |
+| 409 | `DATA_LICENCE_NOT_SET` | 本人尚未设置数据证书（PATCH 或测试证书时） | — |
+| 409 | `DATA_LICENCE_UNAVAILABLE` | 需要触发拉取的写操作（如手动刷新、按需拉取）而本人证书不可用；读接口不返回此错误，改用 `data_status` + `gaps` | `{status: data_licence_status}` |
 | 422 | `IMPORT_FILE_ERRORS` | 文件级 error：上传阶段（空文件、过大、类型不符、行数超限，此时**不创建批次**），或确认时批次仍有文件级 error | `{findings: ImportFinding[]}`（code 见 §4.1） |
 | 422 | `IMPORT_ROW_ERRORS` | `mode=all` 确认时仍有 error 行 | `{error_rows: int}` |
 | 422 | `IMPORT_WARNINGS_UNACKNOWLEDGED` | 有未处理的 `needs_action` warning，且 `acknowledge_warnings≠true` | `{codes: string[], count: int}` |
@@ -424,8 +448,10 @@
 | `Notification` | `{id, kind: notification_kind, severity, title: string, body: string \| null, created_at: string(datetime), read_at: string(datetime) \| null, security_code: string \| null, name: string \| null, target: {type: notification_target_type, id: string \| null, route: string \| null}}`。`target.route` 是前端路由（如 `/suggestions/{id}`、`/daily-reports/2026-11-02`），`type=none` 时 `id` 与 `route` 为 `null`。`route` 由服务端生成，前端直接跳转（v0.2.3）：`suggestion` → `/suggestions/{id}`；`candidate_signal` → `/candidate-signals/{id}`；`plan_draft` → `/plan-drafts/{id}`；`plan` → `/plans/{id}`；`daily_report` → `/daily-reports/{date}`（`id` 为日期）；`import_batch` → `/portfolio/import?batch={id}`；`reconciliation` → `/portfolio?tab=reconciliation&account_id={id}`；`strategy_version` → `/strategies/{strategy_id}?version={id}`（`id` 为版本 id） |
 | `TerminalRow` | `{security_code, name, in_watchlist: boolean, focus: boolean, quote: {price, change_pct, amount: string(decimal), t: string(datetime)} \| null, holding: {qty: string(decimal), sellable_qty: string(decimal), cost_price: string(decimal), weight_pct: string(decimal), pnl: string(decimal), pnl_pct: string(decimal)} \| null, suggestion: SuggestionSummary \| null, active_reason_count: int, max_risk_level: risk_level \| null, data_status: data_status, data_as_of: string(datetime) \| null}`。`cost_price` 为摊薄成本（plan 3.5A）；`data_as_of` 为该行行情与建议中较旧者的数据时点，完全无数据时为 `null`（v0.2.3） |
 | `SuggestionSummary` | `{id, created_at, status: suggestion_status, consensus: consensus_status, actions: [{strategy_key, strategy_name, action, t_leg: t_leg \| null}], executability_status: executability_status, divergent_dimensions: dimension[], top_score: int \| null}`。终端表格的动作徽标与分歧标记只读这里，不再逐只请求 `/suggestions/{id}` |
-| `HorizonHint` | `{horizon: horizon, rule_id: string, text: string}`（v0.2.5）。画像类 `requires` 规则（`mode: hint`）在画像**已填写且不满足**时给出的提示，如 `{horizon:"short", rule_id:"SH0C", text:"短线需要盯盘与止损纪律，您自报的经验为新手"}`；画像未填写不产生提示；不影响分数与 `suitable`。`rule_id` 不是 `reason_code` |
-| `HorizonCap` | `{horizon: horizon, cap: int(0–100), kind: "data_missing" \| "requires", rule_id: string \| null, inputs_missing: string[]}`（v0.2.3）。`data_missing`：必需特征缺失导致封顶（`rule_id=null`，`inputs_missing` 为该周期缺失的 `f.*` 键）；`requires`：某条 `mode: cap` 的 `requires` 规则不满足导致封顶（`rule_id` 如 `IT0`、`LG0`，`inputs_missing` 可为 `[]`；v0.2.5 起画像类规则 `SH0`/`SH0B`/`SH0C`/`IT0B`/`IT0C` 为 `mode: hint`，不再出现在 `caps` 中）。`rule_id` 是 `horizon_classifier.yaml` 的规则 ID，**不是** `reason_code`，不进 `/meta/enums`（v0.2.3 #23）。同一周期多个封顶都列出，生效值取最小 |
+| `HorizonHint` | `{horizon: horizon, rule_id: string, text: string}`（v0.2.5）。画像类 `requires` 规则（`mode: hint`）在画像**已填写且不满足**时给出的提示，如 `{horizon:"short", rule_id:"SH0C", text:"短线需要盯盘与止损纪律，您自报的经验为新手"}`；画像未填写不产生提示；不影响分数与 `suitable`。**提示与分数无关**：即使该周期已被 `IT0` 等判为 0 分，仍按画像给出提示（v0.2.6，T006e）。`rule_id` 不是 `reason_code` |
+| `HorizonCap` | `{horizon: horizon, cap: int(0–100), kind: "gate" \| "data_missing", rule_id: string \| null, inputs_missing: string[]}`（v0.2.3；**v0.2.6 改 `kind` 取值，T006e**）。`gate`：hard gate 命中（`rule_id` 为 `HG1`–`HG6`，判 0 分的 HG1–HG3 记 `cap: 0`，`inputs_missing` 为 `[]`）；`data_missing`：数据缺失或不足导致封顶——必需特征缺失时 `rule_id=null`、`inputs_missing` 为该周期缺失的 `f.*` 键；`LG0`（财报不足 12 期）、`LG0B`（ROE 缺失）的 `else_cap` 也记为 `data_missing`，`rule_id` 为规则 ID。`requires` 取值 v0.2.6 删除：画像类规则只进 `hints[]`（v0.2.5）；`IT0`（无底仓）的 `else_score: 0` 是分数而非封顶，不进 `caps`，只在 `reasons[]` 中给出反向理由。`rule_id` 是 `horizon_classifier.yaml` 的规则 ID，**不是** `reason_code`，不进 `/meta/enums`（v0.2.3 #23）。同一周期多个封顶都列出，生效值取最小 |
+| `DataLicenceStatus` | `{status: data_licence_status, tier: data_licence_tier \| null, has_quant_pro: boolean \| null, expires_on: string(date) \| null（用户填写）, days_to_expiry: int \| null, set_at: datetime \| null, last_verified_at: datetime \| null, last_error_code: "101" \| "102" \| "103" \| "429" \| "503" \| "network" \| "http_5xx" \| null, last_error_at: datetime \| null, paused_until: datetime \| null}`（v0.2.6）。**不含证书值或其任何片段**；未设置时 `status: "not_set"`、其余字段为 null |
+| `AdminDataLicence` | `DataLicenceStatus` 全部字段 + `{user_id: uuid, username, display_name, per_minute_limit: int, calls_last_minute: int, calls_today: int, queue_depth: {p0: int, p1: int, p2: int}}`（v0.2.6；同样不含证书值） |
 
 **可解释性强制规则（P1）**：在任何返回 `CandidateSignal`、`Suggestion` 中策略结论的响应里，`rule_refs`、`evidence`、`counter_evidence`、`invalidation` 都是**非空数组**；`model_refs[*].role == "auxiliary"`。服务端写入时校验，不满足的不写入（内部记 `SIGNAL_NOT_EXPLAINABLE`）；契约测试检查所有示例和响应（T-T17）。
 
@@ -520,8 +546,13 @@
 | POST | `/auth/login` | 登录 | `{username, password}` → `200 {user: Me, csrf_token}` + Set-Cookie；可能返回 `401 INVALID_CREDENTIALS`、`403 ACCOUNT_NOT_APPROVED{status, reason?}`、`403 ACCOUNT_LOCKED{retry_after_s}` |
 | POST | `/auth/logout` 🔒 | 注销 | → `204` |
 | POST | `/auth/password` 🔒 | 修改密码，同时注销其他会话并轮换当前会话 | `{old_password, new_password}` → `204` + Set-Cookie（新 `sid`、新 `csrf_token`；前端从 Cookie 重读 CSRF 令牌）；旧密码错误 → `400 VALIDATION_ERROR`（`field: old_password`），计入 T-B03a 限速 |
-| GET | `/me` 🔒 | 当前用户 | → `Me {id, username, display_name, role, status, entitlements: {key: value}}`（v0.2.5 删 `consents`、`risk_assessment`） |
+| GET | `/me` 🔒 | 当前用户 | → `Me {id, username, display_name, role, status, entitlements: {key: value}, data_licence_status: data_licence_status}`（v0.2.5 删 `consents`、`risk_assessment`；v0.2.6 加 `data_licence_status`） |
 | GET/PUT | `/me/profile` 🔒 | 投资画像（版本化，PUT 生成新版本；全部由用户自报） | `{horizon_pref: horizon[], effort: "low"\|"medium"\|"high" \| null, risk_tolerance: int(1–5) \| null, experience: "novice"\|"intermediate"\|"advanced" \| null, max_single_position_pct: string(decimal，5–50，最多 2 位小数)}` → `{version_no, ...}`；无画像时 GET → `404 NOT_FOUND`（分类器按未填写处理）。三个自报字段为 null 表示未填写：分类器不封顶、不提示（plan 2.5.3、2.5.14）。v0.2.5 删 `assessment_id`、`questionnaire_version` 与 `exceeds_assessment` 校验 |
+| GET | `/me/data-licence` 🔒 | 本人数据证书状态（v0.2.6，plan 2.1B） | → `200 DataLicenceStatus`；**永不返回证书值** |
+| PUT | `/me/data-licence` 🔒 | 设置或替换本人麦蕊证书：服务端用 `ingest` 公钥加密后存库，并投递一次验证 | `{licence: string（去首尾空白后 16–64 位，`^[A-Za-z0-9-]+$`，【待核实 T-B05】）, tier: data_licence_tier, has_quant_pro: boolean, expires_on: string(date) \| null}` → `202 DataLicenceStatus`（`status: "pending_verification"`）；同一证书已绑定其他账号 → `409 DATA_LICENCE_IN_USE`；格式不符 → `400 VALIDATION_ERROR`（`field: "licence"`，消息不含输入值）；10 次/小时 → `429 RATE_LIMITED` |
+| PATCH | `/me/data-licence` 🔒 | 只改元数据（不改证书） | `{tier?, has_quant_pro?, expires_on?}` → `200 DataLicenceStatus`；未设置 → `409 DATA_LICENCE_NOT_SET` |
+| DELETE | `/me/data-licence` 🔒 | 删除本人证书（密文清除，`ingest` 15 秒内停止使用；该证书名下的行情数据按保留策略清理） | → `204`；未设置也 `204`（幂等） |
+| POST | `/me/data-licence/test` 🔒 | 让 `ingest` 用本人证书调用一次轻量接口 | → `202 {verification_id: uuid}`，结果经 SSE `data_licence` 与 `GET /me/data-licence` 获取；未设置 → `409 DATA_LICENCE_NOT_SET`；5 次/小时 → `429 RATE_LIMITED`；采集暂停 → `503 INGEST_PAUSED` |
 | GET/PATCH | `/admin/users` 🛡 · `/admin/users/{id}` 🛡 | 审核和停用账号 | GET 列表分页（§1.2）`?status=&q=`，元素 `AdminUser {id, username, display_name, status: account_status, role, apply_note: string \| null, created_at, register_ip_region: string \| null（粗粒度）, same_ip_registrations: int, same_ip_flag: boolean（超过 plan 6.1 `admin.same_ip_highlight_threshold`，只作提示）, review_reason: string \| null, reviewed_at: string(datetime) \| null, last_login_at: string(datetime) \| null}`；PATCH `{status: "approved"\|"rejected"\|"disabled", reason: string(≤200) \| null}`：`rejected`、`disabled`，以及从 `disabled` 恢复为 `approved` 时 `reason` 必填，否则 `400 VALIDATION_ERROR`（v0.2.4 #12） |
 
 ### 7.2 账户、成交与导入（只返回掩码字段）
@@ -579,7 +610,7 @@
 ### 7.5 L3 实例、限制与风控
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET/POST | `/strategy-instances` 🔒 | POST `{strategy_version_id, scope: "account"\|"security"\|"watch_group", account_id, security_code: string \| null, horizon, param_overrides: object \| null, budget_amount: string(decimal) \| null}` → `201 {id, status:"active", derived_strategy_version_id: uuid \| null, warnings: string[]}`。按 I1–I7 校验，可能返回 `STRATEGY_VERSION_NOT_RUNNABLE`、`STRATEGY_HORIZON_MISMATCH`、`STRATEGY_PARAM_OUT_OF_RANGE`、`ENTITLEMENT_LIMIT_REACHED`、`INSTANCE_SCOPE_INVALID`。周期分类判定不适合或画像低于卡片 `fit` 下限时正常 201，`warnings[]` 给出中文说明（v0.2.5：`fit_ack` 作废） |
+| GET/POST | `/strategy-instances` 🔒 | POST `{strategy_version_id, scope: "account"\|"security"\|"watch_group", account_id, security_code: string \| null, horizon, param_overrides: object \| null, budget_amount: string(decimal) \| null}` → `201 {id, status:"active", derived_strategy_version_id: uuid \| null, warnings: string[]}`。按 I1–I7 校验，可能返回 `STRATEGY_VERSION_NOT_RUNNABLE`、`STRATEGY_HORIZON_MISMATCH`、`STRATEGY_PARAM_OUT_OF_RANGE`、`ENTITLEMENT_LIMIT_REACHED`、`INSTANCE_SCOPE_INVALID`。周期分类判定不适合或画像低于卡片 `fit` 下限时正常 201，`warnings[]` 给出中文说明（v0.2.5：`fit_ack` 作废）；画像相关字段未填写时不给画像提示；画像不匹配不降低后续建议的 `confidence`（v0.2.6，T006e）；`risk_level: high` 的模板也无需确认字段 |
 | GET/PATCH | `/strategy-instances/{id}` 🔒 | PATCH `{param_overrides?, budget_amount?}`；改参会生成新的派生版本 |
 | POST | `/strategy-instances/{id}/confirm` 🔒 | `proposed → active` |
 | POST | `/strategy-instances/{id}/pause` · `/resume` · `/archive` 🔒 | 状态跃迁 |
@@ -647,8 +678,10 @@
 ### 7.9 管理端（🛡；非管理员（含未登录）访问任何 `/admin/*` 一律返回 404，不暴露其存在，见 §1.3）
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/admin/ingest/status` 🛡 | 只读：`{leader: {instance_id, egress_ip_masked: "203.0.113.x", lease_expires_at}, budget: {per_minute_limit: int, used_last_minute: int}, queues: [{priority: "p0_intraday"\|"p1_daily"\|"p2_backfill", depth: int, oldest_age_s: int}], errors_24h: [{upstream_code: string, count: int}], ip_limit_alerts_24h: int, freshness: [{dataset, data_as_of, data_status}], licence: {expires_on: string(date), days_left: int}}`。**不返回 licence 内容**；`per_minute_limit` 等数值 **待 T003 验证** |
+| GET | `/admin/ingest/status` 🛡 | 只读：`{leader: {instance_id, egress_ip_masked: "203.0.113.x", lease_expires_at}, budget: {per_minute_limit: int, used_last_minute: int}（v0.2.6：全进程合计；按证书的明细见 `/admin/data-licences`）, queues: [{priority: "p0_intraday"\|"p1_daily"\|"p2_backfill", depth: int, oldest_age_s: int}], errors_24h: [{upstream_code: string, count: int}], ip_limit_alerts_24h: int, freshness: [{dataset, data_as_of, data_status}], licence: {expires_on: string(date), days_left: int}}`。**不返回 licence 内容**；`per_minute_limit` 等数值 **待 T003 验证** |
 | POST | `/admin/ingest/pause` · `/admin/ingest/resume` 🛡 | 暂停或恢复外呼（迁移和冷备切换时使用，写审计） |
+| GET | `/admin/data-licences` 🛡 | 全部用户的数据证书状态（v0.2.6，分页）→ `AdminDataLicence[]`；**不返回证书值或任何片段** |
+| POST | `/admin/data-licences/{user_id}/pause` · `/admin/data-licences/{user_id}/resume` 🛡 | `{reason: string(1–200)}` → `204`；暂停后状态为 `paused_by_admin`，恢复后为 `pending_verification` 并重新验证；写审计；未设置 → `409 DATA_LICENCE_NOT_SET` |
 | GET/POST | `/admin/invites` 🛡 | 邀请码（v0.2.3 #27，T-B03c）：POST `{ttl_h: int \| null（默认 168，≤ 720）, bound_username: string \| null, note: string(≤200) \| null}` → `201 {id, code, expires_at, bound_username, note}`，**`code` 明文只在此响应出现一次**；GET 列表（分页）`{id, status: "active"\|"used"\|"expired"\|"revoked", created_by, created_at, expires_at, used_at, used_by, bound_username, note}`，不含明文或摘要；均写审计 |
 | DELETE | `/admin/invites/{id}` 🛡 | 吊销邀请码 → `204`；已用或已吊销 → `409 INVALID_STATE_TRANSITION`；只改状态，不物理删除 |
 | GET/PUT | `/admin/realtime-settings` 🛡 | 刷新间隔、分层上限（默认值 **待 T003 验证**） |
@@ -669,7 +702,7 @@
 - **ingest 心跳**（ingest 写、api 读）：leader 每 15 秒 `SET ingest:heartbeat <json> EX 600`，JSON 为 `{"ts": int(Unix 秒), "instance_id": string, "leader": true, "version": string, "budget_used_last_minute": int, "queue_depth": {"p0": int, "p1": int, "p2": int}}`；api 只依赖 `ts`，其余字段供 `/admin/ingest/status` 展示。判定顺序：Redis 不可用 → `unknown`；`ingest:paused` 存在（值为 JSON `{"by", "at", "reason"}`，管理员暂停时写入）→ `paused`；心跳缺失、无法解析或 `now - ts > 120` → `stale`；否则 `ok`。键名与阈值可配置（plan 6.1 `config/ingest.yaml`，环境变量 `INGEST_HEARTBEAT_KEY`、`INGEST_PAUSED_KEY`、`INGEST_STALE_AFTER_S`）。
 - **`/meta/enums` 结构**（取值全部来自后端的集中定义，路由里不写死）：
 ```json
-{"version": "v0.2.5",
+{"version": "v0.2.6",
  "enums": {"horizon": ["intraday_t", "short", "swing", "long"], "...": []},
  "reason_codes": [{"code": "T1_NOT_SELLABLE", "release_kinds": ["time"], "check_on": ["daily_close"], "manually_releasable": false, "note": "…"}],
  "error_codes": [{"code": "NOT_FOUND", "http_status": 404, "scope": "http"}],
@@ -699,6 +732,7 @@
 | `notification` | `Notification`（§5.1） | |
 | `report` | `{date}` | 日报已生成 |
 | `data_status` | `{dataset, data_status, data_as_of}` | 数据变旧或恢复（例如采集暂停） |
+| `data_licence` | `{status: data_licence_status, verification_id: uuid \| null, last_error_code: string \| null, at: datetime}` | 本人证书状态变化或验证完成（v0.2.6；不含证书值） |
 
 ---
 
@@ -727,11 +761,23 @@
   - OpenAPI schema 与所有响应示例中不得出现 provider 值 `local`；`Evidence.provider` ∈ `data_provider`；`cash_available` 只出现在 `/terminal.account`。
   - 所有 `RuleRef.dimension` 非空。
   - `POST /notifications/{id}/read`、`/notifications/read-all` 返回 204 且无响应体。
+- **v0.2.6**：
+  - 任何响应（含 `/me/data-licence`、`/admin/data-licences`、错误体、SSE、通知）、日志与 `ops.ingest_request_log` 中都找不到测试证书字符串及其任意 ≥ 4 位的子串（测试证书为运行时生成的虚构值）；`DataLicenceStatus` 无 `licence`、`masked`、`last4` 类键。
+  - `api` 进程环境中没有 `DATA_LICENCE_SEAL_PRIVATE_KEYS`；仅凭 `api` 的配置无法解密库中密文；`api` 数据库角色 SELECT `ciphertext` 被拒。
+  - 两个用户 PUT 同一证书 → 第二个 `409 DATA_LICENCE_IN_USE`；第一个 DELETE 后第二个可设置。PUT 含 `/`、`?`、空白的值 → 400，消息不含输入值。
+  - 回放模式：上游 102 → `invalid`，之后该证书外呼次数为 0，其他证书不受影响；101 → `quota_exceeded`，`paused_until` 为次日 00:01（北京时间）；103 → `ip_limited`，暂停 120 秒，1 小时内第 3 次 → 暂停 1 小时并产生 `data_licence` 通知。
+  - 用户 B 证书 `invalid` 时：B 的行情接口 `data_status ∈ {stale, unavailable}` 且 `gaps` 含 `data_licence_unavailable`；`manual_refresh` → `409 DATA_LICENCE_UNAVAILABLE`；`ingest` 没有用 A 或管理员的证书为 B 发出任何请求。
+  - `per_licence` 模式下，A 读到的所有行情行的 `source_licence_id` 都是 A 的证书。
+  - 公平：A 积压 10,000 个 P1、B 有 1 个 P0 → B 的 P0 在下一个调度轮发出；A、B 各有 P1 时交替发出；每证书每分钟调用数不超过其上限。
+  - 分类器：无底仓时 `intraday_t` 分数为 0 且 `caps` 中没有 `IT0`；同时 `experience=novice` → `hints` 仍含 `IT0C`；`caps[].kind` 只出现 `gate`、`data_missing`；ST 股 → `caps` 含 `{kind: "gate", rule_id: "HG4", cap: 59}`；财报不足 12 期 → 含 `{kind: "data_missing", rule_id: "LG0", cap: 59}`。
+  - 画像不匹配时建议卡的 `confidence` 与画像匹配时相同；画像相关字段未填写时 `warnings` 中没有画像提示。
+  - 创建 `risk_level: high` 模板的实例不需要任何确认字段 → 201。
+  - `/meta/enums.version == "v0.2.6"`，含 `data_licence_status`、`data_licence_tier`；`error_codes` 含三个 `DATA_LICENCE_*`。
 - **v0.2.5**：
   - `/meta/consent-docs`、`/legal/terms`、`POST /me/consents`、`/me/risk-assessment*` → 404；`/meta/enums` 不含 `consent_key`、`legal_doc_key`、`consent_presentation`、`assessment_status`，`reason_codes` 为 22 个且不含 `PROFILE_OR_CONSENT_MISSING`，`error_codes` 不含 `CONSENT_REQUIRED`、`STRATEGY_FIT_ACK_REQUIRED`。
   - 注册带或不带 `agreements` 都 201，库中不产生同意记录；`Me` 无 `consents`、`risk_assessment` 键。
   - 无画像、或画像不满足任何条件时，⚖ 接口、`POST /imports`、`POST /trades` 均不返回 403。
-  - 分类器 1.2.0：画像全空时 `short`/`intraday_t` 分数与“画像全满足”时相比只差加分项（不出现 59 封顶）、`hints=[]`；`experience=novice` 时 `hints` 含 `SH0C`、`IT0C`，`caps` 不含二者，`suitable` 与 novice 前相同（其他条件不变）；`risk_tolerance=2` → `hints` 含 `SH0`；`effort=low` → 含 `SH0B`、`IT0B`。`IT0`（无底仓）仍为 `caps` 中 `kind=requires`。
+  - 分类器 1.2.0：画像全空时 `short`/`intraday_t` 分数与“画像全满足”时相比只差加分项（不出现 59 封顶）、`hints=[]`；`experience=novice` 时 `hints` 含 `SH0C`、`IT0C`，`caps` 不含二者，`suitable` 与 novice 前相同（其他条件不变）；`risk_tolerance=2` → `hints` 含 `SH0`；`effort=low` → 含 `SH0B`、`IT0B`。~~`IT0`（无底仓）仍为 `caps` 中 `kind=requires`~~（v0.2.6 作废：`IT0` 判 0 分不进 `caps`，见 v0.2.6）。
   - `POST /strategy-instances` 对不适合的周期 → 201 且 `warnings` 非空；请求带 `fit_ack` 被忽略。
 - **v0.2.4**：
   - `apply_note` 201 字 → 400。（`agreements` 相关用例 v0.2.5 作废）

@@ -2,8 +2,10 @@
 #   1) 麦蕊回放模式：ingest 强制 MAIRUI_MODE=replay，并把 MAIRUI_LICENCE 置空——
 #      即使开发者 shell 或 .env 里有真实 licence，本地容器也拿不到（plan §2.1A：本地/CI 不持有真实 licence）。
 #      回放数据读 tests/fixtures（只读挂载），录制的麦蕊样本约定放在 tests/fixtures/mairui/。
-#   2) 热重载：把源码只读挂载进容器，并打开 *_RELOAD 开关；业务入口落地后（T-B01）
-#      api 用 `uvicorn app.main:app --reload`，worker/beat/ingest/signal-rt 用 watchfiles 重启。
+#   2) 热重载：把源码只读挂载进容器（覆盖镜像内 /app/src/backend；依赖在镜像 /opt/venv，不受影响）。
+#      api 已用 `uvicorn app.main:app --reload`（T-O01a，只监视 app/，轮询模式）；
+#      worker/beat/ingest/signal-rt 入口落地后用 watchfiles 重启。
+#      注意：改 pyproject/uv.lock 后需重新构建镜像（up.sh 默认带 --build）。
 #   3) 便于调试：postgres / redis 只在 127.0.0.1 上暴露端口。
 # 需要真实联调时（仅"当前唯一调用方"主机）：AIA_PROFILE=live deploy/scripts/up.sh（不叠加本文件）。
 
@@ -15,6 +17,8 @@ x-dev-env: &dev-env
 
 services:
   api:
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*",
+              "--reload", "--reload-dir", "/app/src/backend/app"]
     environment:
       <<: *dev-env
     volumes:

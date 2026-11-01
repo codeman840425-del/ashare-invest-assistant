@@ -1,0 +1,10 @@
+# BuildKit 专用：与 backend.Dockerfile 同名的 ignore 文件，作用于构建上下文 src/backend
+# （src/backend 下没有 .dockerignore，部署侧不改 src/，故放在这里）。白名单方式：
+*
+!pyproject.toml
+!uv.lock
+!app/
+**/__pycache__
+**/*.py[cod]
+**/.env
+**/.env.*

@@ -3,8 +3,9 @@
 #
 # 硬约束：MAIRUI_LICENCE 只出现在 ingest 的 environment 中；其他服务不得引用它，
 #         且任何服务都不使用 env_file（避免把 .env 整体注入）。CI（T-O02）会检查。
-# 业务服务目前是占位入口（python:3.13 slim 镜像的 http.server，只回 200），不含业务代码；
-# 后续由 deploy/docker/backend.Dockerfile 构建同一镜像、不同启动命令替换。
+# api 已是真实应用（T-O01a）：deploy/docker/backend.Dockerfile 构建（上下文 src/backend），uvicorn app.main:app。
+# worker/beat/ingest/signal-rt 后端尚无入口，仍是占位（python:3.13 slim 的 http.server，只回 200）；
+# 入口落地后改为复用 *backend-build / *backend-image，仅替换 command 与 healthcheck。
 
 name: ${COMPOSE_PROJECT_NAME:-aia}
 
@@ -14,6 +15,12 @@ x-placeholder-image: &placeholder-image python:3.13.18-slim-trixie@sha256:76baad
 
 # 占位入口：监听 8000，任意路径返回 200
 x-placeholder-cmd: &placeholder-cmd ["python", "-m", "http.server", "8000", "--bind", "0.0.0.0", "--directory", "/tmp"]
+
+# 后端镜像（T-O01a）。dockerfile 路径相对 context；上下文过滤见 deploy/docker/backend.Dockerfile.dockerignore
+x-backend-image: &backend-image ${AIA_BACKEND_IMAGE:-aia-backend:local}
+x-backend-build: &backend-build
+  context: ../../src/backend
+  dockerfile: ../../deploy/docker/backend.Dockerfile
 
 x-placeholder-healthcheck: &placeholder-healthcheck
   test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).status == 200 else 1)"]
@@ -28,6 +35,9 @@ x-app-env: &app-env
   DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aia}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置}@postgres:5432/${POSTGRES_DB:-aia}
   REDIS_URL: redis://redis:6379/0
   TZ: Asia/Shanghai
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  # 业务配置目录（仓库 config/ 只读挂载到这里；后端 Settings.config_dir）
+  CONFIG_DIR: /app/config
 
 x-app-depends: &app-depends
   postgres:
@@ -54,12 +64,16 @@ services:
       start_period: 5s
 
   api:
-    image: *placeholder-image
-    command: *placeholder-cmd
+    image: *backend-image
+    build: *backend-build
+    # 入口以 src/backend/app/main.py 为准；--proxy-headers 信任 nginx 的 X-Forwarded-*
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
     restart: unless-stopped
     environment:
       <<: *app-env
       SERVICE_NAME: api
+      API_PREFIX: ${API_PREFIX:-/api/v1}
+      HEALTH_CHECK_TIMEOUT_S: ${HEALTH_CHECK_TIMEOUT_S:-1.0}
       APP_MASTER_KEY: ${APP_MASTER_KEY:?APP_MASTER_KEY 未设置}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
@@ -67,8 +81,15 @@ services:
       IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
     volumes:
       - imports:/var/lib/aia-dev/imports
+      - ../../config:/app/config:ro
     depends_on: *app-depends
-    healthcheck: *placeholder-healthcheck
+    # /health 恒返回 200（依赖异常体现在 body 的 status=degraded），这里只判活；判就绪看 body
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request,sys; u='http://127.0.0.1:8000'+os.environ.get('API_PREFIX','/api/v1')+'/health'; sys.exit(0 if urllib.request.urlopen(u, timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   worker:
     image: *placeholder-image

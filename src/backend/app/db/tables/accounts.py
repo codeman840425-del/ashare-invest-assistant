@@ -1,0 +1,303 @@
+"""账户、持仓、成交、导入与对账（plan §3.3「账户/持仓/成交」、§3.5、§3.5A）。
+
+隐私（§3.5A）：股东代码只存 HMAC 与掩码，不存明文；``raw_line`` 由应用层加密后写入。
+"""
+
+from __future__ import annotations
+
+from sqlalchemy import BigInteger, Column, PrimaryKeyConstraint, Table, UniqueConstraint, text
+
+from app.db.base import (
+    APP,
+    created_at,
+    day,
+    integer,
+    jsonb,
+    metadata,
+    money,
+    one_of,
+    pk_uuid,
+    text_array,
+    ts,
+    txt,
+    user_fk,
+    uuid_col,
+)
+from app.schemas.enums import (
+    DedupStatus,
+    ImportRowStatus,
+    ImportStatus,
+    ReconciliationItemKind,
+    ReconciliationStatus,
+    TradeSide,
+)
+
+accounts = Table(
+    "accounts",
+    metadata,
+    pk_uuid(),
+    user_fk(),
+    txt("name", nullable=False),
+    txt("broker_label", comment="自由文本，不存券商账号"),
+    txt("base_currency", nullable=False, server_default=text("'CNY'")),
+    created_at(),
+    ts("archived_at"),
+    schema=APP,
+)
+
+opening_positions = Table(
+    "opening_positions",
+    metadata,
+    pk_uuid(),
+    uuid_col("account_id", nullable=False, fk="app.accounts.id"),
+    txt("security_code", nullable=False),
+    money("quantity", nullable=False),
+    money("cost_price"),
+    day("as_of_date", nullable=False),
+    txt("epistemic_type", nullable=False, server_default=text("'fact'")),
+    txt("source_kind", nullable=False, server_default=text("'user_input'")),
+    schema=APP,
+)
+
+cash_movements = Table(
+    "cash_movements",
+    metadata,
+    pk_uuid(),
+    uuid_col("account_id", nullable=False, fk="app.accounts.id"),
+    txt("kind", nullable=False),
+    money("amount", nullable=False),
+    ts("occurred_at", nullable=False),
+    txt("note"),
+    one_of("kind", ["deposit", "withdraw", "dividend", "fee", "adjust"]),
+    schema=APP,
+)
+
+import_batches = Table(
+    "import_batches",
+    metadata,
+    pk_uuid(),
+    user_fk(),
+    uuid_col("account_id", nullable=False, fk="app.accounts.id"),
+    txt("status", nullable=False),
+    txt("parser_id"),
+    txt("parser_version"),
+    txt("detected_encoding"),
+    txt("encoding_override"),
+    jsonb("mapping"),
+    ts("snapshot_as_of"),
+    jsonb("file_findings"),
+    jsonb("summary"),
+    created_at(),
+    ts("committed_at"),
+    ts("reverted_at"),
+    one_of("status", ImportStatus),
+    schema=APP,
+)
+
+import_files = Table(
+    "import_files",
+    metadata,
+    pk_uuid(),
+    uuid_col("batch_id", nullable=False, fk="app.import_batches.id"),
+    txt("original_filename"),
+    Column("size_bytes", BigInteger),
+    txt("sha256"),
+    txt("storage_path"),
+    ts("retained_until"),
+    ts("deleted_at"),
+    schema=APP,
+)
+
+trades = Table(
+    "trades",
+    metadata,
+    pk_uuid(),
+    uuid_col("account_id", nullable=False, fk="app.accounts.id"),
+    user_fk(),
+    txt("security_code", nullable=False),
+    txt("side", nullable=False),
+    money("quantity", nullable=False),
+    money("price", nullable=False),
+    money("amount"),
+    money("commission"),
+    money("stamp_tax"),
+    money("transfer_fee"),
+    money("other_fee"),
+    money("net_amount"),
+    ts("traded_at"),
+    day("trade_date", nullable=False),
+    txt("broker_trade_no"),
+    txt("order_no"),
+    txt("declare_no"),
+    money("cash_balance_after"),
+    txt("shareholder_code_hmac"),
+    txt("shareholder_code_masked"),
+    uuid_col("plan_version_id", fk="app.plan_versions.id"),
+    txt("source", nullable=False),
+    uuid_col("import_batch_id", fk="app.import_batches.id"),
+    integer("import_row_no"),
+    txt("dedup_key"),
+    ts("voided_at"),
+    txt("void_reason"),
+    uuid_col("replaces_trade_id", fk="app.trades.id"),
+    txt("epistemic_type", nullable=False, server_default=text("'execution'")),
+    created_at(),
+    one_of("side", TradeSide),
+    one_of("source", ["manual", "import", "csv_template"]),
+    # plan：epistemic_type 恒为 execution
+    one_of("epistemic_type", ["execution"]),
+    UniqueConstraint("account_id", "dedup_key"),
+    schema=APP,
+    comment="成交事实；只允许改 voided_at / void_reason / plan_version_id（触发器）",
+)
+
+account_events = Table(
+    "account_events",
+    metadata,
+    pk_uuid(),
+    uuid_col("account_id", nullable=False, fk="app.accounts.id"),
+    txt("kind", nullable=False),
+    txt("security_code"),
+    money("quantity"),
+    money("amount"),
+    day("occurred_on", nullable=False),
+    uuid_col("import_batch_id", fk="app.import_batches.id"),
+    txt("dedup_key"),
+    one_of(
+        "kind",
+        [
+            "dividend",
+            "bonus_share",
+            "rights",
+            "transfer_in",
+            "transfer_out",
+            "ipo_allot",
+            "fee",
+            "interest",
+            "other",
+        ],
+    ),
+    UniqueConstraint("account_id", "dedup_key"),
+    schema=APP,
+)
+
+import_rows = Table(
+    "import_rows",
+    metadata,
+    pk_uuid(),
+    uuid_col("batch_id", nullable=False, fk="app.import_batches.id"),
+    uuid_col("file_id", fk="app.import_files.id"),
+    integer("row_no", nullable=False),
+    txt("raw_line", comment="应用层加密；对外只给掩码后的行"),
+    txt("kind", nullable=False),
+    txt("status", nullable=False),
+    jsonb("normalized"),
+    jsonb("findings"),
+    txt("dedup_key"),
+    txt("dedup_status"),
+    uuid_col("committed_trade_id", fk="app.trades.id"),
+    uuid_col("committed_event_id", fk="app.account_events.id"),
+    one_of("kind", ["trade", "event", "ignored"]),
+    one_of("status", ImportRowStatus),
+    one_of("dedup_status", DedupStatus),
+    schema=APP,
+)
+
+import_mappings = Table(
+    "import_mappings",
+    metadata,
+    pk_uuid(),
+    user_fk(),
+    txt("name", nullable=False),
+    txt("parser_id"),
+    jsonb("mapping"),
+    created_at(),
+    schema=APP,
+)
+
+holdings = Table(
+    "holdings",
+    metadata,
+    uuid_col("account_id", nullable=False, fk="app.accounts.id"),
+    txt("security_code", nullable=False),
+    money("quantity", nullable=False),
+    money("avg_cost"),
+    money("realized_pnl"),
+    ts("last_trade_at"),
+    ts("rebuilt_at"),
+    uuid_col("rebuild_batch_id"),
+    PrimaryKeyConstraint("account_id", "security_code"),
+    schema=APP,
+    comment="派生表：由 opening_positions + trades + account_events 全量重放重建",
+)
+
+broker_position_snapshots = Table(
+    "broker_position_snapshots",
+    metadata,
+    pk_uuid(),
+    uuid_col("account_id", nullable=False, fk="app.accounts.id"),
+    uuid_col("import_batch_id", fk="app.import_batches.id"),
+    ts("as_of"),
+    txt("currency"),
+    money("cash_balance"),
+    money("cash_available"),
+    money("cash_withdrawable"),
+    money("market_value_ref"),
+    money("total_assets_ref"),
+    money("pnl_ref"),
+    integer("version_no", nullable=False),
+    created_at(),
+    UniqueConstraint("account_id", "version_no"),
+    schema=APP,
+    comment="券商口径快照（epistemic_type=fact），只追加",
+)
+
+broker_position_snapshot_items = Table(
+    "broker_position_snapshot_items",
+    metadata,
+    pk_uuid(),
+    uuid_col("snapshot_id", nullable=False, fk="app.broker_position_snapshots.id"),
+    txt("security_code", nullable=False),
+    money("quantity"),
+    money("sellable_quantity"),
+    money("broker_cost_price"),
+    money("last_price_ref"),
+    money("market_value_ref"),
+    money("unrealized_pnl_ref"),
+    money("unrealized_pnl_pct_ref"),
+    txt("shareholder_code_hmac"),
+    txt("shareholder_code_masked"),
+    schema=APP,
+    comment="随快照只追加",
+)
+
+reconciliation_runs = Table(
+    "reconciliation_runs",
+    metadata,
+    pk_uuid(),
+    uuid_col("account_id", nullable=False, fk="app.accounts.id"),
+    uuid_col("snapshot_id", fk="app.broker_position_snapshots.id"),
+    txt("trigger"),
+    txt("status", nullable=False),
+    created_at(),
+    # plan 写 ok/has_diffs；以契约 reconciliation_status 为准（见报告）
+    one_of("status", ReconciliationStatus),
+    schema=APP,
+)
+
+reconciliation_items = Table(
+    "reconciliation_items",
+    metadata,
+    pk_uuid(),
+    uuid_col("run_id", nullable=False, fk="app.reconciliation_runs.id"),
+    txt("kind", nullable=False),
+    txt("security_code"),
+    jsonb("ours"),
+    jsonb("broker"),
+    jsonb("diff"),
+    text_array("possible_causes"),
+    text_array("suggested_actions"),
+    jsonb("resolution"),
+    one_of("kind", ReconciliationItemKind),
+    schema=APP,
+)

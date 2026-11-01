@@ -1,4 +1,4 @@
-"""plan v0.2.2 §6.1：``config/*.yaml`` 的键与默认值（“YAML 默认值 == 本节表格”，归测试）。
+"""plan v0.2.3 §6.1：``config/*.yaml`` 的键与默认值（“YAML 默认值 == 本节表格”，归测试）。
 
 T-T01b 起对齐 plan/契约 v0.2.2（T-A02）：§6.1 由 5 个文件变为 6 个（新增 ``llm.yaml``），
 ``market_rules.yaml`` 增加 ``modeled_from`` / ``impact_cost.adv_basis`` / ``risk_warning`` 且第二段起始日改为
@@ -8,8 +8,8 @@ T-T01b 起对齐 plan/契约 v0.2.2（T-A02）：§6.1 由 5 个文件变为 6 �
 四层比对：
 1. 测试内快照 ``config_defaults/*.yaml``（plan §6.1 代码块原文）自身可解析、关键默认值正确、
    跨字段一致（不依赖文档、不依赖后端）；
-2. 快照 == plan §6.1 代码块（需 v0.2.2 文档：``AIA_DOCS_DIR``，否则 skip）；
-3. 快照能被后端 pydantic 模型接受（``app.config_files``）；后端模型未跟上 v0.2.2 的文件 → xfail，原因写明后端任务；
+2. 快照 == plan §6.1 代码块（需 v0.2.3 文档：``AIA_DOCS_DIR``，否则 skip）；
+3. 快照能被后端 pydantic 模型接受（``app.config_files``）；后端模型未跟上 v0.2.3 的文件 → xfail，原因写明后端任务；
 4. 仓库 ``config/*.yaml``（``AIA_CONFIG_DIR``）== 快照；T-A02 改动的文件不一致时 xfail 并写明负责任务，
    其余文件不一致直接失败。
 
@@ -37,8 +37,8 @@ CONFIG_DIR = Path(os.environ.get("AIA_CONFIG_DIR", REPO_ROOT / "config")).resolv
 
 #: T-A02 改动的文件 → 负责同步仓库文件与后端模型的任务
 OWNER = {
-    "market_rules": "后端 T-B36（交易规则模块：modeled_from / adv_basis / risk_warning，第二段 2023-04-10）",
-    "horizon_classifier": "后端 T-B30（周期分类：f.* 特征、recompute 加 position_open_close、rules 全文）",
+    "market_rules": "后端 T-B36（交易规则模块：modeled_from / adv_basis / risk_warning，第二段 2023-04-10；v0.2.3 applies_to_boards 加 chinext、新增 limit_order_only_exchanges）",
+    "horizon_classifier": "后端 T-B30（周期分类：f.* 特征、recompute 加 position_open_close、rules 全文；v0.2.3 version_no 2 / classifier_version 1.1.0 / SH0C）",
     "llm": "后端 T-B25（LLM 网关：config/llm.yaml 与其模型）",
 }
 HORIZONS = ("intraday_t", "short", "swing", "long")
@@ -141,7 +141,9 @@ def test_key_defaults_market_rules():
     caps = [t["max_participation_pct"] for t in ic["tiers"]]
     assert caps[-1] is None and caps[:-1] == sorted(caps[:-1])
     rw = first["risk_warning"]
-    assert rw == {"daily_buy_cap_shares": 500000, "limit_order_only": True, "applies_to_boards": ["main_board"]}
+    # v0.2.3（T-A03）：50 万股上限扩到创业板；限价申报只作用于沪市
+    assert rw == {"daily_buy_cap_shares": 500000, "limit_order_only": True,
+                  "applies_to_boards": ["main_board", "chinext"], "limit_order_only_exchanges": ["SH"]}
 
 
 def test_market_rules_second_segment_written_in_full():
@@ -184,7 +186,9 @@ def test_key_defaults_risk_controls():
 
 def test_key_defaults_horizon_classifier():
     d = snap("horizon_classifier")
-    assert (d["version_no"], d["suitable_threshold"], d["reasons_per_horizon"]) == (1, 60, [2, 4])
+    # v0.2.3（T-A03，问题 37 方案 A）：新增 SH0C 发新版本 version_no 2 / classifier_version 1.1.0
+    assert (d["version_no"], d["classifier_version"], d["suitable_threshold"], d["reasons_per_horizon"]) == (2, "1.1.0", 60, [2, 4])
+    assert re.fullmatch(r"\d+\.\d+\.\d+", d["classifier_version"])
     assert d["recompute"]["on"] == ["import_confirm", "watchlist_add", "weekly", "position_open_close"]
     assert True not in d["recompute"], "YAML 1.1 把裸 on 读成 true：plan 要求加引号"
     feats = d["features"]
@@ -265,7 +269,7 @@ def test_snapshot_equals_plan_block(docs_dir, name):
     assert load12(blocks[name]) == snap(name), f"plan §6.1 的 {name}.yaml 已变，请同步快照"
 
 
-# ---------------- 3. 后端模型接受 plan v0.2.2 快照 ----------------
+# ---------------- 3. 后端模型接受 plan v0.2.3 快照 ----------------
 def _models(cfgtools):
     names = cfgtools.business_files()
     if not names:
@@ -295,7 +299,7 @@ def test_backend_model_accepts_plan_snapshot(cfgtools, name):
     except Exception as exc:  # pydantic.ValidationError
         if name in OWNER:
             locs = sorted({".".join(map(str, e["loc"])) for e in getattr(exc, "errors", list)()})[:8]
-            pytest.xfail(f"后端模型拒绝 plan v0.2.2 的 {name}.yaml（{locs}）：{OWNER[name]}")
+            pytest.xfail(f"后端模型拒绝 plan v0.2.3 的 {name}.yaml（{locs}）：{OWNER[name]}")
         raise
 
 
@@ -306,7 +310,7 @@ def _repo_file(name: str) -> Path:
         if p.is_file():
             return p
     if name in OWNER and any((CONFIG_DIR / f"{n}.yaml").is_file() for n in NAMES):
-        pytest.xfail(f"{CONFIG_DIR.name}/{name}.yaml 未创建（plan v0.2.2 §6.1）：{OWNER[name]}")
+        pytest.xfail(f"{CONFIG_DIR.name}/{name}.yaml 未创建（plan v0.2.3 §6.1）：{OWNER[name]}")
     pytest.skip(f"{CONFIG_DIR}/{name}.yaml 尚未创建（依赖 T-B01 后续 / T-B02：plan §6.1 文件由后端创建）")
 
 
@@ -315,7 +319,7 @@ def test_repo_yaml_equals_plan_defaults(name):
     got = load12(_repo_file(name).read_text(encoding="utf-8"))
     diffs = diff_paths(got, snap(name))
     if diffs and name in OWNER:
-        pytest.xfail(f"仓库 config/{name}.yaml 与 plan v0.2.2 不一致 {diffs[:8]}：{OWNER[name]}")
+        pytest.xfail(f"仓库 config/{name}.yaml 与 plan v0.2.3 不一致 {diffs[:8]}：{OWNER[name]}")
     assert diffs == []
 
 

@@ -1,6 +1,7 @@
-# plan v0.2.2 §6.1 `config/horizon_classifier.yaml` 代码块原文快照（测试维护，T-T01b）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。
+# plan v0.2.3 §6.1 `config/horizon_classifier.yaml` 代码块原文快照（测试维护，T-T01b 建立，T-T01c 同步 v0.2.3）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。
 schema_version: 1
-version_no: 1
+version_no: 2                    # T-A03：问题 37 方案 A 新增 SH0C，发新版本（v1 不可变，保留）
+classifier_version: "1.1.0"     # T-A03 新增键：对外的语义化版本（契约 /horizon-assessments.classifier_version，正则见契约 §7.4 `/horizon-assessments`）；v1 = "1.0.0"
 suitable_threshold: 60          # int，0–100 分 ≥ 60 列为“适合”
 reasons_per_horizon: [2, 4]     # 每个周期给 2–4 条理由
 recompute:
@@ -79,6 +80,8 @@ rules:
            reason: "短线波动大，画像风险承受 < 3 或未填写"}
         - {id: SH0B, input: profile.effort, op: in, value: [medium, high], else_cap: 59,
            reason: "短线需要每日跟踪，画像精力为低或未填写"}
+        - {id: SH0C, input: profile.experience, op: in, value: [intermediate, advanced], else_cap: 59,
+           reason: "短线需要盯盘与止损纪律，画像经验为新手或未填写"}   # 【已定 2026-11-01，问题 37 方案 A】；用户可经 fit_ack 覆盖
       components:
         - {id: SH1, input: f.amount_20d_avg, unit: CNY,
            bands: [{op: ge, value: 300000000, pts: 20}, {op: ge, value: 100000000, pts: 10}],

@@ -373,7 +373,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 
 | 模块（包名） | 职责 | 服务的能力 |
 |---|---|---|
-| `identity` | 用户名注册、登录、会话、账号状态机（pending/approved/rejected/disabled）、防滥用（限速、锁定）、固定免责提示（无同意流程，T-A06）、数据导出；账号删除由管理员手动处理（T-A06） | 全部 |
+| `identity` | 用户名注册、登录、会话、账号状态机（pending/approved/rejected/disabled）、防滥用（限速、锁定）、固定免责提示（无同意流程，T-A06）、~~数据导出~~（T-B16 移除）；账号删除由管理员手动处理（T-A06） | 全部 |
 | `admin` | 管理员审核后台：待审核列表、批准、驳回（附理由）、禁用/恢复、重置密码、审计日志查看；管理员角色 | 平台运营 |
 | `importing` | 交割单导入：文件接收与留存、编码识别、券商解析器插件、列映射、预览确认、去重幂等、错误行报告、导入批次 | 1、5 |
 | `profile` | 投资画像：资金规模区间、投资期限、风险承受、可投入精力（小时/周）、关注方向；全部由用户确认，带 `confirmed_at` | 1/2/3 |
@@ -458,7 +458,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 
 ### 2.4 前端信息架构（页面）
 深色交易终端风格、仅桌面（2.10）。新增主线页面：`/terminal`（交易终端，**不是首页**——首页为 `/today`，`/` 重定向到 `/today`，契约 v0.2.8：自选/持仓实时表 + K 线/分时 + 建议卡 + 信号流；固定三栏 + 底部面板，分隔条可调宽、可折叠，见 2.10）· `/suggestions`（建议列表，按状态筛选，契约 v0.2.7）· `/suggestions/:id`（建议详情：维度×策略矩阵、证据、反证、失效条件、风控标记、建议链）· `/daily-reports`、`/daily-reports/:date`（盘后日报；旧路径 `/reports`、`/reports/:date` 只做重定向，契约 v0.2.3）· `/strategies`、`/strategies/:id`（策略库：规则清单、数据来源、版本、改参、胜率/盈亏、降权开关）· `/risk-controls`（六项风控开关与阈值；“事件”页签 `?tab=events` 列出生效中的风控事件，契约 v0.2.7）· `/notifications`（通知中心与偏好）· `/strategy-cards`（L1 卡片库，第二阶段）· `/strategy-instances`（我的策略实例：列表筛选、确认、暂停、恢复、归档、改参；状态机见契约 §6.0A）· `/candidate-signals`（候选信号列表，含“今日解除”页签 `?tab=released`，契约 v0.2.7）· `/candidate-signals/:id`（候选信号与不可执行原因）· `/plan-drafts`（草案列表，按状态筛选，契约 v0.2.7）· `/plan-drafts/:id`（计划草案确认页）· `/restrictions`（禁投、冷静期、屏蔽）· `/admin/llm`、`/admin/realtime`、`/admin/ingest`（采集状态）、`/admin/promotions`（模板审核与生命周期）、`/admin/evaluation`（内部评估，问题 26 获批后）、`/admin/plans`（管理端）。
-原有页面保留：`/register`（注册，提交后显示"等待管理员审核"）· `/login` · `/account-status`（待审核、驳回、停用说明；T-A05 D9）·（`/onboarding` 已作废：没有同意与测评步骤，画像在 `/settings` 中选填，T-A06）· `/today`（今日关注，**首页**；`/` 重定向到此）· `/portfolio`（账户/持仓/成交）· `/market`（市场概览）· `/stocks/:code`（个股档案：行情、财务、资金流、因子、公告、问董秘、各策略适配与周期分类）· `/discover`（策略筛选，入口并入 `/strategies`）· `/candidates`（研究候选）· `/plans`（行动计划，含版本对比）· `/alerts`（提醒中心与规则）· `/reviews`（复盘）· `/settings`（画像、通知、隐私、数据导出/注销）· `/portfolio/import`（上传→预览→确认→结果）· `/admin/*`（管理员后台：注册审核、用户管理、审计日志，仅 admin 角色可见）。
+原有页面保留：`/register`（注册，提交后显示"等待管理员审核"）· `/login` · `/account-status`（待审核、驳回、停用说明；T-A05 D9）·（`/onboarding` 已作废：没有同意与测评步骤，画像在 `/settings` 中选填，T-A06）· `/today`（今日关注，**首页**；`/` 重定向到此）· `/portfolio`（账户/持仓/成交）· `/market`（市场概览）· `/stocks/:code`（个股档案：行情、财务、资金流、因子、公告、问董秘、各策略适配与周期分类）· `/discover`（策略筛选，入口并入 `/strategies`）· `/candidates`（研究候选）· `/plans`（行动计划，含版本对比）· `/alerts`（提醒中心与规则）· `/reviews`（复盘）· `/settings`（画像、通知、隐私；~~数据导出/注销~~ T-B16 裁定移除导出，注销由管理员线下处理）· `/portfolio/import`（上传→预览→确认→结果）· `/admin/*`（管理员后台：注册审核、用户管理、审计日志，仅 admin 角色可见）。
 
 所有页面固定位置展示免责提示（前端 `RiskDisclosure` 组件；页面底部、候选信号与行动计划卡片处）："本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。"——文案以 `docs/strategies/compliance/disclaimer.md`（1.0，2026-11-02 定稿）为准，代码与该文件逐字一致。**只展示，不需要用户勾选或确认，不记录同意**（T-A06，第 9 节问题 43）。
 

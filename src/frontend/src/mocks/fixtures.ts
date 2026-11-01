@@ -13,7 +13,7 @@ import type {
   Bar, BarsResponse, CandidateSignal, DailyReport, DailyReportListItem, DimensionCell, DimensionMatrixRow, DimensionViewEntry,
   Evidence, Gap, HealthReady, Me, NonExecutableReason, Notification, Portfolio, QuoteItem, ReleaseCondition, RiskFlag, RuleRef,
   SignalEvent, StrategyConclusion, Suggestion, SuggestionListItem, SuggestionSummary, TerminalAccount, TerminalRow,
-  TextWithEvidence, WatchlistItem, WatchlistResponse, Divergence, HorizonAssessment, HorizonReason,
+  TextWithEvidence, WatchlistItem, WatchlistResponse, Divergence, HorizonAssessment, HorizonCap, HorizonReason,
 } from '../api/types';
 
 export const SAMPLE_LABEL = '示例数据';
@@ -30,6 +30,8 @@ const f2 = (n: number) => n.toFixed(2);
 // ---------------- 策略（L2 模板，名称为示例） ----------------
 /** v0.2.2 DimensionCell.rules_passed/rules_total/key_evidence_ids 只统计的规则角色 */
 export const COUNTED_ROLES: ReadonlySet<string> = new Set(['entry', 'filter', 'hold']);
+/** v0.2.3：exit_hits/exit_total 统计 role ∈ {weakening, exit} 且已求值的规则 */
+export const EXIT_ROLES: ReadonlySet<string> = new Set(['weakening', 'exit']);
 
 interface StrategyMeta { key: string; name: string; horizon: Horizon; version_no: number; lifecycle: Lifecycle; priority_weight: string; version_id: string; instance_id: string }
 const STRATEGY_LIST: Omit<StrategyMeta, 'version_id' | 'instance_id'>[] = [
@@ -409,7 +411,8 @@ SPECS.forEach((s, si) => {
 
   const actions: Partial<Record<Action, number>> = {};
   strategies.forEach((x) => (actions[x.action] = (actions[x.action] ?? 0) + 1));
-  const distinct = Object.keys(actions).length;
+  // v0.2.3：≥ 2 个策略且 (action, t_leg) 全部相同 → unanimous
+  const distinct = new Set(strategies.map((x) => `${x.action}|${x.t_leg ?? ''}`)).size;
   const consensusStatus = strategies.length === 0 ? 'none' : strategies.length === 1 ? 'single' : distinct === 1 ? 'unanimous' : 'divergent';
 
   const dimension_matrix: DimensionMatrixRow[] = DIMENSIONS.map((d) => {
@@ -421,6 +424,8 @@ SPECS.forEach((s, si) => {
         key_evidence_ids: dv.rules.filter((ru) => COUNTED_ROLES.has(ru.role) && ru.passed === true).flatMap((ru) => ru.evidence_ids).slice(0, 3),
         rules_passed: dv.rules.filter((ru) => COUNTED_ROLES.has(ru.role) && ru.passed === true).length,
         rules_total: dv.rules.filter((ru) => COUNTED_ROLES.has(ru.role)).length,
+        exit_hits: dv.rules.filter((ru) => EXIT_ROLES.has(ru.role) && ru.passed === true).length,
+        exit_total: dv.rules.filter((ru) => EXIT_ROLES.has(ru.role) && ru.passed !== null).length,
       };
     });
     return { dimension: d, divergent: isDivergent(cells.map((c) => c.view)), cells };
@@ -465,10 +470,9 @@ SPECS.forEach((s, si) => {
   });
 });
 
-/** 维度分歧：排除 unknown 后，各策略观点不止一种（契约“不同向”的口径见遗留问题） */
+/** 维度分歧（v0.2.3）：同时存在 bullish 与 bearish；neutral、unknown 不参与 */
 export function isDivergent(views: DimensionView[]): boolean {
-  const known = new Set(views.filter((v) => v !== 'unknown'));
-  return views.length > 1 && known.size > 1;
+  return views.includes('bullish') && views.includes('bearish');
 }
 
 export function summarize(sg: Suggestion): SuggestionSummary {
@@ -503,7 +507,7 @@ export const TERMINAL_ROWS: TerminalRow[] = (() => {
       holding: pos ? { qty: pos.qty, sellable_qty: pos.sellable_qty, cost_price: pos.cost_price, weight_pct: pos.weight_pct, pnl: pos.pnl, pnl_pct: pos.pnl_pct } : null,
       suggestion: summarize(sg),
       active_reason_count: REASONS.filter((r) => r.status === 'active' && sg.candidate_signal_ids.includes(r.signal_id)).length,
-      max_risk_level: maxLevel, data_status: s.data_status,
+      max_risk_level: maxLevel, data_status: s.data_status, data_as_of: s.data_status === 'unavailable' ? null : s.data_as_of,
       _w: pos ? Number(pos.weight_pct) : -1, _added: SPECS.indexOf(s),
     };
   });
@@ -646,7 +650,13 @@ export const DAILY_REPORTS: DailyReport[] = [(() => {
     );
     const first = sg.strategies[0];
     return {
-      security_code: s.code, name: s.name, suggestion_id: sg.id, suggestion: summarize(sg),
+      security_code: s.code, name: s.name,
+      // v0.2.3：日报所属交易日收盘价/涨跌幅；无数据为 null
+      close: s.data_status === 'unavailable' ? null : f2(s.prev_close),
+      change_pct: s.data_status === 'unavailable' ? null : f2(((s.seed % 9) - 4) * 0.61),
+      data_status: (s.data_status === 'unavailable' ? 'unavailable' : 'fresh') as DataStatus,
+      max_risk_level: sg.risk_flags.reduce<RiskLevel | null>((m, f) => (m === null || LEVEL_RANK[f.level] > LEVEL_RANK[m] ? f.level : m), null),
+      suggestion_id: sg.id, suggestion: summarize(sg),
       change_from_previous: (s.code === '600000.SH' ? 'changed' : s.code === '300001.SZ' ? 'new' : 'unchanged') as 'changed' | 'new' | 'unchanged',
       highlights: [
         { text: `收盘 ${f2(s.prev_close)}，量比 ${ev[4].value}`, expr: null, evidence_ids: [e1, e2] },
@@ -721,7 +731,11 @@ SUGGESTIONS.forEach((sg, i) => {
     reasons.push({ horizon: h, polarity: 'for', text: HZ_TEXT[h].for[0], expr: null, evidence_ids: [HZ_TEXT[h].for[1]] });
     reasons.push({ horizon: h, polarity: 'against', text: HZ_TEXT[h].against[0], expr: null, evidence_ids: [HZ_TEXT[h].against[1]] });
   }
+  // v0.2.3：证据只在本响应内解析；封顶原因写入 caps[]
+  const used = new Set(reasons.flatMap((x) => x.evidence_ids));
+  const caps: HorizonCap[] = missing.length ? [{ horizon: 'long', cap: 59, kind: 'data_missing', rule_id: null, inputs_missing: [...missing] }] : [];
   HORIZON_ASSESSMENTS[sg.security_code] = {
-    suitable: sg.horizon_assessment.suitable, scores, reasons, inputs_missing: missing, classifier_version: 'horizon_classifier v1（示例）',
+    suitable: sg.horizon_assessment.suitable, scores, reasons, inputs_missing: [...new Set(missing)].sort(), caps, classifier_version: '1.1.0',
+    snapshot_id: sg.snapshot_id, evidence: sg.evidence.filter((e) => used.has(e.id)),
   };
 });

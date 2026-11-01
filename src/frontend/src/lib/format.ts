@@ -1,4 +1,4 @@
-import type { Evidence } from '../api/types';
+import type { DimensionCell, Evidence } from '../api/types';
 import { PROVIDER } from '../i18n/labels';
 /** 契约时间均为 +08:00；界面统一按北京时间显示 */
 export const fmtTime = (t: string) => t.replace('T', ' ').replace(/\+08:00$/, '').replace(/:00$/, '');
@@ -25,4 +25,9 @@ export const bjToChartTime = (t: string) => {
 };
 
 /** 证据来源：数据源 + 接口路径 */
-export const providerText = (e: Evidence) => `${PROVIDER[e.provider]}${e.endpoint ? ' ' + e.endpoint : ''}`;
+export const providerText = (e: Evidence) =>
+  `${(PROVIDER as Record<string, string | undefined>)[e.provider] ?? e.provider}${e.endpoint ? ' ' + e.endpoint : ''}`;
+
+/** 维度单元格规则计数：入场类 “规则 x/y”；纯离场策略（rules_total = 0）显示 “离场 x/y”（v0.2.3 #20） */
+export const ruleCountText = (c: Pick<DimensionCell, 'rules_passed' | 'rules_total' | 'exit_hits' | 'exit_total'>) =>
+  c.rules_total ? `规则 ${c.rules_passed}/${c.rules_total}` : c.exit_total ? `离场 ${c.exit_hits}/${c.exit_total}` : '规则 —';

@@ -8,7 +8,7 @@ import type {
   DataStatus, Dimension, DimensionView, EpistemicType, ExecutabilityStatus, GapReason, HealthStatus, Horizon, IngestHealth,
   Lifecycle, MarketRegime, MarketSession, NotificationKind, NotificationTargetType, ReasonCode, ReasonStatus,
   ReconciliationStatus, RegistrationMode, ReleaseKind, RiskControl, RiskLevel, Role, AccountStatus, RuleRole, Severity,
-  SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg,
+  SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus,
 } from './enums';
 
 export type Decimal = string;
@@ -30,7 +30,7 @@ export interface Evidence {
   key: string;
   value: string | number | boolean | null;
   unit: string | null;
-  /** 契约 §5.1 写 mairui|local|user_import，§3 data_provider 写 mairui|user_import|user_input|system；按 §3（遗留问题 #1） */
+  /** v0.2.3：统一为 data_provider 枚举（无 local）；展示层对未知值兜底显示原值 */
   provider: DataProvider;
   endpoint: string | null;
   data_as_of: DateTime;
@@ -52,6 +52,8 @@ export interface RuleRef {
 export interface ModelRef { model_key: string; version: string; role: 'auxiliary'; output: Record<string, unknown>; evidence_ids: string[] }
 export interface TextWithEvidence { text: string; expr: string | null; evidence_ids: string[] }
 /** v0.2.2 `GET /horizon-assessments?security_code=` 周期分类结果（版本化） */
+/** v0.2.3 §5.1 HorizonCap */
+export interface HorizonCap { horizon: Horizon; cap: number; kind: 'data_missing' | 'requires'; rule_id: string | null; inputs_missing: string[] }
 export type HorizonReason = TextWithEvidence & { horizon: Horizon; polarity: 'for' | 'against' };
 export interface HorizonAssessment {
   suitable: Horizon[];
@@ -61,7 +63,13 @@ export interface HorizonAssessment {
   reasons: HorizonReason[];
   /** 缺失的 f.* 输入键，用来区分“真 0 分”与“缺数据被封顶” */
   inputs_missing: string[];
+  /** v0.2.3：哪个周期因什么被封顶；同一周期多个封顶取最小 */
+  caps: HorizonCap[];
+  /** v0.2.3：语义化版本，如 "1.1.0" */
   classifier_version: string;
+  snapshot_id: string;
+  /** v0.2.3：reasons[].evidence_ids 只在本响应的 evidence[] 内解析 */
+  evidence: Evidence[];
 }
 export interface Stat { value: Decimal | null; n: number; window: string; small_sample: boolean }
 export interface ReleaseCondition {
@@ -165,6 +173,8 @@ export interface TerminalRow {
   active_reason_count: number;
   max_risk_level: RiskLevel | null;
   data_status: DataStatus;
+  /** v0.2.3：该行行情与建议中较旧者的数据时点；完全无数据为 null */
+  data_as_of: DateTime | null;
 }
 
 // ---------- §5.2 ----------
@@ -202,6 +212,9 @@ export interface DimensionCell {
   key_evidence_ids: string[];
   rules_passed: number;
   rules_total: number;
+  /** v0.2.3：role ∈ {weakening, exit} 且已求值的规则数 / 其中命中数；纯离场策略显示“离场 x/y” */
+  exit_hits: number;
+  exit_total: number;
 }
 export interface DimensionMatrixRow { dimension: Dimension; divergent: boolean; cells: DimensionCell[] }
 export interface Divergence {
@@ -240,6 +253,11 @@ export interface SuggestionListItem extends SuggestionSummary { security_code: s
 export interface DailyReportStock {
   security_code: string;
   name: string;
+  /** v0.2.3：日报所属交易日收盘价与涨跌幅（停牌或缺数据为 null） */
+  close: Decimal | null;
+  change_pct: Decimal | null;
+  data_status: DataStatus;
+  max_risk_level: RiskLevel | null;
   suggestion_id: Uuid | null;
   suggestion: SuggestionSummary | null;
   change_from_previous: 'new' | 'changed' | 'unchanged' | 'removed';
@@ -385,6 +403,8 @@ export interface TerminalAccount {
 }
 export interface TerminalResponse {
   server_time: DateTime;
+  /** v0.2.3：行情所属交易日（非交易日为最近一个交易日） */
+  trade_date: DateStr;
   session: MarketSession;
   account: TerminalAccount | null;
   rows: TerminalRow[];
@@ -400,4 +420,33 @@ export interface HealthReady {
   ingest: IngestHealth;
   checked_at: DateTime;
   version: string;
+}
+
+// ---------- v0.2.3 §7.3 /market/overview（最小结构） ----------
+export interface MarketIndexQuote { security_code: string; name: string; price: Decimal | null; change_pct: Decimal | null; amount: Decimal | null; t: DateTime | null }
+export interface MarketOverview extends DataStatusBlock {
+  trade_date: DateStr;
+  session: MarketSession;
+  indices: MarketIndexQuote[];
+  breadth: { up: number; down: number; flat: number; limit_up: number; limit_down: number } | null;
+  regime: MarketRegime | null;
+  regime_position_range: RegimePositionRange | null;
+  turnover_total: Decimal | null;
+}
+
+// ---------- §7.3 /today 首页聚合（ETag） ----------
+export interface MoreList<T> { items: T[]; more: boolean }
+export interface TodayResponse {
+  server_time: DateTime;
+  trade_date: DateStr;
+  session: MarketSession;
+  market: { regime: MarketRegime | null; regime_position_range: RegimePositionRange | null; data_status: DataStatus };
+  focus: MoreList<TerminalRow>;
+  pending_plan_drafts: MoreList<{ id: Uuid; security_code: string; name: string; action: Action; valid_until: DateTime | null; status: PlanDraftStatus }>;
+  released_reasons: MoreList<{ reason_id: Uuid; signal_id: Uuid; code: ReasonCode; security_code: string; name: string; released_at: DateTime }>;
+  risk_flags: MoreList<RiskFlag & { security_code: string | null; name: string | null }>;
+  invalidations_today: MoreList<{ suggestion_id: Uuid; security_code: string; name: string; strategy_key: string; text: string; at: DateTime }>;
+  daily_report: { date: DateStr; status: 'ready' | 'generating' | 'not_yet' };
+  reconciliation: { status: ReconciliationStatus; as_of: DateTime | null; diff_count: number; important_count: number };
+  unread_notifications: number;
 }

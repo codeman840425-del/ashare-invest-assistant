@@ -14,8 +14,13 @@ export const qk = {
   suggestion: (id: string) => ['suggestion', id] as const,
   candidateSignals: (code: string) => ['candidate-signals', code] as const,
   candidateSignal: (id: string) => ['candidate-signal', id] as const,
-  reasons: (signalId: string) => ['non-executable-reasons', signalId] as const,
+  reasons: (signalId: string) => ['non-executable-reasons', 'signal', signalId] as const,
+  /** v0.2.3 #17：按建议卡批量取原因（失效时用前缀 ['non-executable-reasons']） */
+  reasonsBySuggestion: (suggestionId: string) => ['non-executable-reasons', 'suggestion', suggestionId] as const,
   signals: ['signals'] as const,
+  /** v0.2.3 #6：分时标记必须带 security_code（与 since） */
+  signalsOf: (code: string, since: string) => ['signals', code, since] as const,
+  suggestions: (status: string) => ['suggestions', status] as const,
   notifications: ['notifications'] as const,
   unread: ['notifications', 'unread-count'] as const,
   dailyReports: ['daily-reports'] as const,
@@ -66,6 +71,17 @@ export const useReasons = (signalId: string | null | undefined) =>
     enabled: !!signalId,
   });
 
+/** 分时标记：只取本证券、本交易日以来的规则事件（v0.2.3 #6，不再拉全市场再过滤） */
+export const useSecuritySignals = (code: string | undefined, tradeDate: string | null) => {
+  const since = tradeDate ? `${tradeDate}T09:15:00+08:00` : '';
+  return useQuery({
+    queryKey: qk.signalsOf(code ?? '', since),
+    queryFn: ({ signal }) => apiGet<Paged<SignalEvent>>('/signals', { security_code: code, since, limit: 200 }, signal),
+    enabled: !!code && !!since,
+    refetchInterval: 15_000,
+  });
+};
+
 export const useSignals = () =>
   useQuery({ queryKey: qk.signals, queryFn: ({ signal }) => apiGet<Paged<SignalEvent>>('/signals', { limit: 50 }, signal), refetchInterval: 15_000 });
 
@@ -97,20 +113,21 @@ export function useMarkNotificationRead() {
   });
 }
 
-/** 全部 active 的不可执行原因（终端右栏按 signal_id 本地分组，避免逐条请求） */
-export const useActiveReasons = () =>
+/** 一张建议卡下全部候选信号的生效原因：一次请求、不分页（v0.2.3 #17，替代拉全量再前端过滤） */
+export const useSuggestionReasons = (suggestionId: string | undefined) =>
   useQuery({
-    queryKey: qk.reasons('*'),
-    queryFn: ({ signal }) => apiGet<Paged<NonExecutableReason>>('/non-executable-reasons', { status: 'active', limit: 200 }, signal),
+    queryKey: qk.reasonsBySuggestion(suggestionId ?? ''),
+    queryFn: ({ signal }) => apiGet<{ items: NonExecutableReason[] }>('/non-executable-reasons', { status: 'active', suggestion_id: suggestionId }, signal),
+    enabled: !!suggestionId,
   });
 
 export const useSuggestions = () =>
   useQuery({
-    queryKey: ['suggestions', 'active'] as const,
+    queryKey: qk.suggestions('active'),
     queryFn: ({ signal }) => apiGet<Paged<SuggestionListItem>>('/suggestions', { status: 'active', limit: 100 }, signal),
   });
 
-/** v0.2.2 周期分类结果 */
+/** v0.2.2 周期分类结果（v0.2.3：evidence 取自本响应自带的 evidence[]） */
 export const useHorizonAssessment = (code: string | undefined) =>
   useQuery({
     queryKey: qk.horizon(code ?? ''),

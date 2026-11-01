@@ -1,7 +1,7 @@
 import { Alert, Button, Select, Tag, Tooltip } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router';
-import { useActiveReasons, useCandidateSignals, useHorizonAssessment, useSuggestion, useSuggestions } from '../api/queries';
+import { useCandidateSignals, useSuggestionReasons, useHorizonAssessment, useSuggestion, useSuggestions } from '../api/queries';
 import { ENUMS } from '../api/enums';
 import type { DimensionMatrixRow, Evidence, StrategyConclusion, Suggestion } from '../api/types';
 import { DataGrid, type DataColumn } from '../components/DataGrid';
@@ -11,7 +11,7 @@ import {
   ACTION_SHORT, CHECK_ON, DIMENSION, EPISTEMIC, EVAL_STATE, EXECUTABILITY, GAP_REASON, HORIZON, LIFECYCLE, ORIGIN, REASON_CODE,
   RELEASE_KIND, RISK_CONTROL, RISK_LEVEL, SIGNAL_STATE, VIEW,
 } from '../i18n/labels';
-import { fmtTime, providerText } from '../lib/format';
+import { fmtTime, providerText, ruleCountText } from '../lib/format';
 
 function matrixColumns(sg: Suggestion): DataColumn<DimensionMatrixRow>[] {
   return [
@@ -32,7 +32,7 @@ function matrixColumns(sg: Suggestion): DataColumn<DimensionMatrixRow>[] {
           <div className={`mx-cell v-${c.view}`}>
             <span className="mx-view" style={{ color: VIEW[c.view].color }}>{VIEW[c.view].text}</span>
             <span className="mono mx-score">{c.score ?? '—'}</span>
-            <span className="mono muted small">规则 {c.rules_total ? `${c.rules_passed}/${c.rules_total}` : '—'}</span>
+            <span className="mono muted small">{ruleCountText(c)}</span>
             <EvidenceChips ids={c.key_evidence_ids} evidence={sg.evidence} />
           </div>
         );
@@ -51,7 +51,7 @@ const evidenceColumns: DataColumn<Evidence>[] = [
   { key: 'fetched', header: '抓取时间', width: 130, value: (e) => e.fetched_at, render: (e) => <span className="mono small">{fmtTime(e.fetched_at)}</span> },
 ];
 
-/** v0.2.2 周期分类：按周期分组展示“支持 / 不支持”理由与缺失输入 */
+/** v0.2.2/v0.2.3 周期分类：按周期分组展示“支持 / 不支持”理由与缺失输入 */
 function HorizonPanel({ sg }: { sg: Suggestion }) {
   const q = useHorizonAssessment(sg.security_code);
   const a = q.data;
@@ -72,12 +72,17 @@ function HorizonPanel({ sg }: { sg: Suggestion }) {
                 {(['for', 'against'] as const).map((pol) => rs.filter((x) => x.polarity === pol).map((x, i) => (
                   <div key={`${pol}-${i}`} className={`hz-reason ${pol}`}>
                     <span className="hz-pol">{pol === 'for' ? '支持' : '不支持'}</span>{x.text}
-                    <EvidenceChips ids={x.evidence_ids} evidence={sg.evidence} />
+                    <EvidenceChips ids={x.evidence_ids} evidence={a.evidence} />
                   </div>
                 )))}
               </div>
             );
           })}
+          {a.caps.map((c, i) => (
+            <div key={`cap-${i}`} className="hz-missing">
+              {HORIZON[c.horizon]} 封顶 {c.cap}：{c.kind === 'data_missing' ? `缺少输入 ${c.inputs_missing.join('、')}` : `规则 ${c.rule_id ?? '—'} 不满足`}
+            </div>
+          ))}
           {a.inputs_missing.length ? (
             <div className="hz-missing">缺失输入（相关周期分数按封顶处理，不是真 0 分）：<span className="mono">{a.inputs_missing.join('、')}</span></div>
           ) : null}
@@ -89,7 +94,7 @@ function HorizonPanel({ sg }: { sg: Suggestion }) {
 
 function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
   const signals = useCandidateSignals(sg.security_code);
-  const reasons = useActiveReasons();
+  const reasons = useSuggestionReasons(sg.id);
   const sig = s.candidate_signal_id ? signals.data?.items.find((c) => c.id === s.candidate_signal_id) : undefined;
   const rs = (reasons.data?.items ?? []).filter((r) => r.signal_id === s.candidate_signal_id);
   return (

@@ -60,7 +60,7 @@ export function TerminalPage() {
         <span className="panel-title">交易终端</span>
         {terminal.data ? (
           <span className="muted small">
-            {SESSION[terminal.data.session]} · 服务器时间 {fmtTime(terminal.data.server_time)}{terminal.data.truncated ? " · 列表已截断" : ""}
+            {SESSION[terminal.data.session]} · 交易日 {terminal.data.trade_date} · 服务器时间 {fmtTime(terminal.data.server_time)}{terminal.data.truncated ? " · 列表已截断" : ""}
           </span>
         ) : null}
         <span className="spacer" />
@@ -115,7 +115,7 @@ export function TerminalPage() {
               <Separator className="rz-sep h" data-testid="sep-left" />
               <Panel id="center" minSize="26">
                 <section className="panel center center-body">
-                  <ChartPanel row={current} suggestion={sug.data} />
+                  <ChartPanel row={current} suggestion={sug.data} tradeDate={terminal.data?.trade_date ?? null} />
                 </section>
               </Panel>
               <Separator className="rz-sep h" data-testid="sep-right" />

@@ -1,4 +1,7 @@
 import { Tag, Tooltip } from 'antd';
+import { Link } from 'react-router';
+import { ApiError } from '../api/client';
+import { errorText } from '../api/errorPolicy';
 import type { Action, ConsensusStatus, DataStatus, TLeg } from '../api/enums';
 import type { Confidence, Gap } from '../api/types';
 import { ACTION_COLOR, ACTION_FULL, ACTION_SHORT, CONF_LEVEL, DATA_STATUS, GAP_REASON } from '../i18n/labels';
@@ -59,12 +62,16 @@ export function Loading({ text = '加载中…' }: { text?: string }) {
   return <div className="loading-box">{text}</div>;
 }
 
-export function ErrorBox({ error }: { error: unknown }) {
-  const e = error as { message?: string; code?: string; requestId?: string | null };
+/** 按错误码显示中文文案（评审 M2）；附错误码与 request_id 便于排查 */
+export function ErrorBox({ error, prefix = '加载失败' }: { error: unknown; prefix?: string }) {
+  const e = error instanceof ApiError ? error : null;
+  const fresh = e?.code === 'FRESH_DATA_REQUIRED';
   return (
-    <div className="error-box" role="alert">
-      加载失败：{e?.message ?? String(error)}
-      {e?.code ? <span className="muted mono">（{e.code}{e.requestId ? ` · ${e.requestId}` : ''}）</span> : null}
+    <div className={`error-box${fresh ? ' refreshing' : ''}`} role="alert" data-code={e?.code}>
+      {fresh ? '' : `${prefix}：`}{errorText(error)}
+      {e?.code === 'CONSENT_REQUIRED' ? <> <Link to="/onboarding">去完成 ›</Link></> : null}
+      {e?.code === 'AUTH_REQUIRED' ? <> <Link to="/login">去登录 ›</Link></> : null}
+      {e ? <span className="muted mono">（{e.code}{e.requestId ? ` · ${e.requestId}` : ''}）</span> : null}
     </div>
   );
 }

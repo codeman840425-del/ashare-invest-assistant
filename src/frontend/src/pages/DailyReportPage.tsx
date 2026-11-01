@@ -4,7 +4,7 @@ import { useDailyReport, useDailyReports } from '../api/queries';
 import type { DailyReport, TextWithEvidence } from '../api/types';
 import { ActionBadge, ConsensusBadge, DataStatusTag, ErrorBox, Loading } from '../components/common';
 import { EvidenceChips } from '../components/EvidenceChips';
-import { DIMENSION, EXECUTABILITY, GAP_REASON, RECONCILIATION, REGIME } from '../i18n/labels';
+import { DIMENSION, EXECUTABILITY, GAP_REASON, RECONCILIATION, REGIME, RISK_LEVEL } from '../i18n/labels';
 import { fmtNum, fmtTime, pctClass, signed } from '../lib/format';
 
 const CHANGE = { new: { t: '新增', c: 'blue' }, changed: { t: '有变化', c: 'orange' }, unchanged: { t: '无变化', c: 'default' }, removed: { t: '已移出', c: 'default' } } as const;
@@ -66,7 +66,7 @@ export function DailyReportPage() {
             <>
               <div className="stat-grid">
                 <div><label>总资产</label><b className="mono">{fmtNum(a.total_assets)}</b></div>
-                <div><label>现金</label><b className="mono">{fmtNum(a.cash)}</b></div>
+                <div><label>现金余额</label><b className="mono">{fmtNum(a.cash)}</b></div>
                 <div><label>总仓位</label><b className="mono">{fmtNum(a.position_pct, 1)}%</b></div>
                 <div><label>当日盈亏</label><b className={`mono ${pctClass(a.pnl_day)}`}>{signed(a.pnl_day)}</b></div>
               </div>
@@ -110,6 +110,12 @@ export function DailyReportPage() {
               <b>{s.name}</b><span className="mono muted small">{s.security_code}</span>
               <Tag color={CHANGE[s.change_from_previous].c}>{CHANGE[s.change_from_previous].t}</Tag>
               <span className="spacer" />
+              {/* v0.2.3 #3：收盘价、涨跌幅、数据状态、最高风险级别 */}
+              <span className={`mono small ${pctClass(s.change_pct)}`} data-testid="stc-close">
+                {s.close ?? '—'} {s.change_pct != null ? `${signed(s.change_pct)}%` : ''}
+              </span>
+              <DataStatusTag status={s.data_status} />
+              {s.max_risk_level ? <Tag color={RISK_LEVEL[s.max_risk_level].color}>风险 {RISK_LEVEL[s.max_risk_level].text}</Tag> : null}
               {s.suggestion ? <ConsensusBadge status={s.suggestion.consensus} /> : null}
             </div>
             {s.suggestion?.actions.length ? (

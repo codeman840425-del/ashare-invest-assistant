@@ -1,8 +1,12 @@
-import { QueryClient } from '@tanstack/react-query';
+import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
+import { handleGlobalError, retryDelay, shouldRetry } from '../api/errorPolicy';
 
 export function makeQueryClient(test = false) {
   return new QueryClient({
-    defaultOptions: { queries: { retry: test ? false : 1, refetchOnWindowFocus: false, staleTime: 5_000 } },
+    queryCache: new QueryCache({ onError: handleGlobalError }),
+    mutationCache: new MutationCache({ onError: handleGlobalError }),
+    defaultOptions: {
+      queries: { retry: test ? false : shouldRetry, retryDelay, refetchOnWindowFocus: false, staleTime: 5_000 },
+    },
   });
 }
-

@@ -3,7 +3,7 @@
  * 运行时以 `GET /meta/enums` 为准；这里的常量用于类型推导与 mock 校验。
  */
 /** 与 `/meta/enums.version` 对齐的契约版本 */
-export const CONTRACT_VERSION = 'v0.2.2';
+export const CONTRACT_VERSION = 'v0.2.3';
 
 export const ENUMS = {
   account_status: ['pending', 'approved', 'rejected', 'disabled'],
@@ -99,6 +99,7 @@ export type DataStatus = E<'data_status'>;
 export type GapReason = E<'gap_reason'>;
 export type DataProvider = E<'data_provider'>;
 export type ReconciliationStatus = E<'reconciliation_status'>;
+export type PlanDraftStatus = E<'plan_draft_status'>;
 export type Lifecycle = E<'lifecycle'>;
 export type CandidateSignalState = E<'candidate_signal_state'>;
 export type ReasonStatus = E<'reason_status'>;

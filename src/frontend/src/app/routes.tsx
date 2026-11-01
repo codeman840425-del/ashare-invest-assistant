@@ -6,6 +6,7 @@ import { SuggestionDetailPage } from '../pages/SuggestionDetailPage';
 import { SuggestionIndex } from '../pages/SuggestionIndex';
 import { DailyReportIndex, DailyReportPage } from '../pages/DailyReportPage';
 import { NotFoundPage, PlaceholderPage } from '../pages/PlaceholderPage';
+import { AdminGate } from './AdminGate';
 
 /** 契约 §4 / plan 规划的页面；未实现的先给占位 */
 export const PLACEHOLDERS: [string, string][] = [
@@ -31,12 +32,13 @@ export const PLACEHOLDERS: [string, string][] = [
   ['settings', '设置'],
   ['candidates', '候选池'],
   ['discover', '发现'],
-  ['admin/*', '管理后台'],
 ];
 
 export const routes: RouteObject[] = [
   { path: '/login', element: <PlaceholderPage title="登录" /> },
   { path: '/register', element: <PlaceholderPage title="注册（邀请制）" /> },
+  // 403 CONSENT_REQUIRED 的落点（风险测评 + 风险揭示同意，T-F02 实现）
+  { path: '/onboarding', element: <PlaceholderPage title="开通引导：风险测评与风险揭示同意" /> },
   {
     path: '/',
     element: <AppShell />,
@@ -50,6 +52,7 @@ export const routes: RouteObject[] = [
       { path: 'reports', element: <ReportRedirect /> },
       { path: 'reports/:date', element: <ReportRedirect /> },
       ...PLACEHOLDERS.map(([path, title]) => ({ path, element: <PlaceholderPage title={title} /> })),
+      { path: 'admin/*', element: <AdminGate><PlaceholderPage title="管理后台" /></AdminGate> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

@@ -1,7 +1,7 @@
 // T-F01 验收截图：构建示例数据包（build:mock）后用 vite preview 起本地服务，
 // Playwright 1440×900 截主要页面，并验证分栏拖拽/持久化/恢复默认、收集控制台错误。
 // 只访问 127.0.0.1；所有 /api/v1 请求由页面内 MSW Service Worker 返回示例数据。
-// 用法：npm run build:mock && npm run screenshot [-- 输出目录]
+// 用法：pnpm run build:mock && pnpm run screenshot [输出目录]
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -12,7 +12,7 @@ const PORT = 4173;
 const BASE = `http://127.0.0.1:${PORT}`;
 mkdirSync(OUT, { recursive: true });
 
-const server = spawn('npx', ['vite', 'preview', '--mode', 'mock', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], {
+const server = spawn('pnpm', ['exec', 'vite', 'preview', '--mode', 'mock', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], {
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 await new Promise((ok, fail) => {

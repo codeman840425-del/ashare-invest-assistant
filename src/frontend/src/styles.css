@@ -233,6 +233,7 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .list-row.read { opacity: 0.55; }
 .loading-box, .error-box { padding: 24px; text-align: center; color: var(--muted); }
 .error-box { color: #ff7b72; }
+.error-box.refreshing { color: #e3b341; }
 .page-scroll { height: 100%; overflow: auto; }
 
 /* 日报逐股卡片的小节 */

@@ -7,7 +7,8 @@ import { IS_MOCK } from '../lib/env';
 import { fmtTime } from '../lib/format';
 import { RiskDisclosure } from './RiskDisclosure';
 import { DesktopGuard } from './DesktopGuard';
-import { NAV_MAIN, NAV_MORE } from '../app/nav';
+import { navMoreFor, NAV_MAIN } from '../app/nav';
+import { useApiErrorRedirect } from '../app/useApiErrorRedirect';
 
 function NotificationPanel({ onNavigate }: { onNavigate: (route: string) => void }) {
   const { data } = useNotifications();
@@ -48,7 +49,9 @@ export function AppShell() {
   const { pathname } = useLocation();
   const unread = useUnreadCount();
   const me = useMe();
-  const moreActive = NAV_MORE.some((n) => pathname === n.path || pathname.startsWith(n.path + '/'));
+  useApiErrorRedirect();
+  const navMore = navMoreFor(me.data?.role);
+  const moreActive = navMore.some((n) => pathname === n.path || pathname.startsWith(n.path + '/'));
   return (
     <DesktopGuard>
       <div className="shell">
@@ -62,7 +65,7 @@ export function AppShell() {
             {NAV_MAIN.map((n) => (
               <NavLink key={n.path} to={n.path} className={({ isActive }) => (isActive ? 'active' : '')}>{n.label}</NavLink>
             ))}
-            <Dropdown menu={{ items: NAV_MORE.map((n) => ({ key: n.path, label: n.label })), onClick: ({ key }) => navigate(key) }}>
+            <Dropdown menu={{ items: navMore.map((n) => ({ key: n.path, label: n.label })), onClick: ({ key }) => navigate(key) }}>
               <a className={moreActive ? 'active' : ''}>更多 ▾</a>
             </Dropdown>
           </nav>
@@ -78,7 +81,7 @@ export function AppShell() {
         </header>
         {IS_MOCK ? (
           <div className="sample-banner" data-testid="sample-banner">
-            <b>示例数据</b>：当前由 MSW 返回虚构的证券、行情、持仓、策略与候选信号（按契约 v0.2.2 结构），仅用于开发联调；不连接真实后端、不联网取数。
+            <b>示例数据</b>：当前由 MSW 返回虚构的证券、行情、持仓、策略与候选信号（按契约 v0.2.3 结构），仅用于开发联调；不连接真实后端、不联网取数。
           </div>
         ) : null}
         <main className="content">

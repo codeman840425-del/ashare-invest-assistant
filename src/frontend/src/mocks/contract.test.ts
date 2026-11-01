@@ -1,5 +1,5 @@
 /**
- * Mock 字段校验：示例数据的字段名必须与契约 v0.2.x（当前 v0.2.2，docs/api-contract.md，只读）逐字一致。
+ * Mock 字段校验：示例数据的字段名必须与契约 v0.2.x（当前 v0.2.3，docs/api-contract.md，只读）逐字一致。
  * 字段清单直接从契约文本解析（§5.1 内联结构、§5.2 字段表、StrategyConclusion / DimensionCell / DailyReport 定义），
  * 契约改动后这里会第一时间失败。
  */
@@ -69,14 +69,14 @@ function tableFields(heading: string): string[] {
 const sorted = (a: Iterable<string>) => [...a].sort();
 const keysOf = (o: object) => sorted(Object.keys(o));
 
-describe('契约 v0.2.2 字段解析自检', () => {
+describe(`契约 ${CONTRACT_VERSION} 字段解析自检`, () => {
   it('能从契约解析出关键结构', () => {
     expect(inlineShape('TerminalRow')).toContain('active_reason_count');
     expect(tableFields('### 5.2')).toContain('dimension_matrix');
   });
 });
 
-describe('Mock 字段与契约 v0.2.2 逐字一致', () => {
+describe(`Mock 字段与契约 ${CONTRACT_VERSION} 逐字一致`, () => {
   const sg = SUGGESTIONS[0];
   const st = sg.strategies[0];
   const cases: [string, () => object[]][] = [
@@ -117,7 +117,12 @@ describe('Mock 字段与契约 v0.2.2 逐字一致', () => {
 
   it('StrategyConclusion / DimensionCell', () => {
     const sc = sorted(proseShape('`StrategyConclusion`'));
-    const dc = sorted(proseShape('`DimensionCell`'));
+    // [待契约确认] v0.2.3 的 DimensionCell 定义里 `}` 位置有误（exit_hits/exit_total 写在第一个 `}` 之后），
+    // 这里把紧随其后的 `, exit_*: int` 也算进字段清单
+    const dcLine = CONTRACT.split('\n').find((l) => l.startsWith('`DimensionCell`'))!;
+    const dcExtra = [...dcLine.matchAll(/,\s*(exit_\w+):\s*int/g)].map((m) => m[1]);
+    expect(dcExtra).toEqual(['exit_hits', 'exit_total']);
+    const dc = sorted([...proseShape('`DimensionCell`'), ...dcExtra]);
     for (const s of SUGGESTIONS) {
       for (const x of s.strategies) expect(keysOf(x)).toEqual(sc);
       for (const row of s.dimension_matrix) for (const c of row.cells) expect(keysOf(c)).toEqual(dc);
@@ -191,24 +196,29 @@ describe('Mock 业务一致性', () => {
     }
   });
 
-  it('v0.2.2：契约版本与 /meta/enums.version 示例一致', () => {
+  it('v0.2.3：契约版本与 /meta/enums.version 示例一致', () => {
     expect(CONTRACT).toContain(`版本：**${CONTRACT_VERSION}**`);
     expect(CONTRACT).toContain(`{"version": "${CONTRACT_VERSION}"`);
   });
 
-  it('v0.2.2：/horizon-assessments 字段、四周期分数非空、每周期 2–4 条理由、证据可解析、缺数据封顶', () => {
+  it('v0.2.3：/horizon-assessments 字段、四周期分数非空、每周期 2–4 条理由、证据可解析、缺数据封顶', () => {
     const line = CONTRACT.split('\n').find((l) => l.includes('`/horizon-assessments?security_code=`'))!;
     const shape = line.slice(line.indexOf('周期分类结果'));
-    expect(sorted(topKeys(shape))).toEqual(sorted(['suitable', 'scores', 'reasons', 'inputs_missing', 'classifier_version']));
+    const HZ_KEYS = ['suitable', 'scores', 'reasons', 'inputs_missing', 'caps', 'classifier_version', 'snapshot_id', 'evidence'];
+    expect(sorted(topKeys(shape))).toEqual(sorted(HZ_KEYS));
     expect(sorted(topKeys(shape.slice(shape.indexOf('scores:') + 7)))).toEqual(sorted(ENUMS.horizon));
     expect(Object.keys(HORIZON_ASSESSMENTS)).toHaveLength(SUGGESTIONS.length);
     let capped = 0;
     for (const s of SUGGESTIONS) {
       const a = HORIZON_ASSESSMENTS[s.security_code];
-      expect(keysOf(a)).toEqual(sorted(['suitable', 'scores', 'reasons', 'inputs_missing', 'classifier_version']));
+      expect(keysOf(a)).toEqual(sorted(HZ_KEYS));
+      expect(a.classifier_version).toMatch(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/);
+      expect(a.inputs_missing).toEqual([...new Set(a.inputs_missing)].sort());
+      for (const c of a.caps) expect(a.scores[c.horizon]).toBeLessThanOrEqual(c.cap);
       expect(keysOf(a.scores)).toEqual(sorted(ENUMS.horizon));
       expect(a.suitable).toEqual(s.horizon_assessment.suitable);
-      const ids = new Set(s.evidence.map((e) => e.id));
+      // v0.2.3：只在本响应的 evidence[] 内解析
+      const ids = new Set(a.evidence.map((e) => e.id));
       for (const h of ENUMS.horizon) {
         expect(Number.isInteger(a.scores[h])).toBe(true);
         expect(a.scores[h]).toBeGreaterThanOrEqual(0);
@@ -251,6 +261,39 @@ describe('Mock 业务一致性', () => {
     expect([...COUNTED_ROLES].sort()).toEqual(['entry', 'filter', 'hold']);
   });
 
+  it('v0.2.3 #11：行级 divergent 当且仅当同时存在 bullish 与 bearish（neutral/unknown 不参与）', () => {
+    expect(isDivergent(['bullish', 'neutral'])).toBe(false);
+    expect(isDivergent(['bullish', 'unknown', 'neutral'])).toBe(false);
+    expect(isDivergent(['bullish', 'bearish'])).toBe(true);
+    expect(isDivergent(['bearish', 'neutral', 'bullish'])).toBe(true);
+  });
+
+  it('v0.2.3 #20：exit_hits/exit_total 只统计 weakening/exit 且已求值的规则', () => {
+    for (const s of SUGGESTIONS) {
+      for (const row of s.dimension_matrix) {
+        for (const c of row.cells) {
+          const x = s.strategies.find((st) => st.strategy_version_id === c.strategy_version_id)!;
+          const rules = x.dimension_views.find((v) => v.dimension === row.dimension)!.rules.filter((r) => ['weakening', 'exit'].includes(r.role) && r.passed !== null);
+          expect(c.exit_total).toBe(rules.length);
+          expect(c.exit_hits).toBe(rules.filter((r) => r.passed === true).length);
+        }
+      }
+    }
+  });
+
+  it('v0.2.3 #15：RuleRef.dimension 必填', () => {
+    for (const cs of CANDIDATE_SIGNALS) for (const r of cs.rule_refs) expect(ENUMS.dimension).toContain(r.dimension);
+    for (const s of SUGGESTIONS) for (const x of s.strategies) for (const r of x.rule_refs) expect(ENUMS.dimension).toContain(r.dimension);
+  });
+
+  it('v0.2.3 #3：日报逐股含 close/change_pct/data_status/max_risk_level', () => {
+    for (const st of DAILY_REPORTS[0].stocks) {
+      expect(ENUMS.data_status).toContain(st.data_status);
+      expect(st.max_risk_level === null || ENUMS.risk_level.includes(st.max_risk_level)).toBe(true);
+      expect(st.close === null || /^-?\d+\.\d{2}$/.test(st.close)).toBe(true);
+    }
+  });
+
   it('矩阵 divergent 与各策略维度观点一致；共识计数与动作一致', () => {
     for (const s of SUGGESTIONS) {
       expect(s.dimension_matrix.map((r) => r.dimension)).toEqual([...ENUMS.dimension]);
@@ -261,7 +304,8 @@ describe('Mock 业务一致性', () => {
       const counts: Record<string, number> = {};
       for (const x of s.strategies) counts[x.action] = (counts[x.action] ?? 0) + 1;
       expect(s.consensus.actions).toEqual(counts);
-      const distinct = Object.keys(counts).length;
+      // v0.2.3 #11：按 (action, t_leg) 判断是否全部相同
+      const distinct = new Set(s.strategies.map((x) => `${x.action}|${x.t_leg ?? ''}`)).size;
       expect(s.consensus.status).toBe(s.strategies.length === 0 ? 'none' : s.strategies.length === 1 ? 'single' : distinct === 1 ? 'unanimous' : 'divergent');
     }
   });

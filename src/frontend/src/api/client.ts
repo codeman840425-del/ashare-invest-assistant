@@ -1,11 +1,13 @@
 import type { ApiErrorBody } from './types';
+import { ERROR_CODES, isErrorCode, type AnyErrorCode } from './errorCodes';
 
 /** 后端基础路径（契约 §1）。只走同源相对路径；开发/测试由 MSW 拦截，生产由 nginx 反代到后端。 */
 export const API_BASE = '/api/v1';
 
+/** 契约 §4 错误信封映射成的异常；`code` 为带类型的错误码（未知码保留原值，按 HTTP 状态归类） */
 export class ApiError extends Error {
   readonly status: number;
-  readonly code: string;
+  readonly code: AnyErrorCode;
   readonly details: Record<string, unknown> | null;
   readonly requestId: string | null;
 
@@ -13,10 +15,28 @@ export class ApiError extends Error {
     super(message);
     this.name = 'ApiError';
     this.status = status;
-    this.code = code;
+    this.code = code as AnyErrorCode;
     this.details = details;
     this.requestId = requestId;
   }
+  /** 契约里登记过的码（未登记的码多半是前后端版本不一致） */
+  get known(): boolean {
+    return isErrorCode(this.code);
+  }
+  /** 契约 §4 规定的 HTTP 状态（未登记的码为 null） */
+  get contractStatus(): number | null {
+    return isErrorCode(this.code) ? ERROR_CODES[this.code] : null;
+  }
+}
+
+/**
+ * 弱 ETag 缓存（契约 §7.3、§9：`/terminal`、`/today` 带 If-None-Match，未变返回 304）。
+ * 304 时返回上一次 200 的响应体，而不是 undefined（评审 M1：否则 TanStack Query 会把空值写进缓存，表格瞬间变空）。
+ * 键为完整 URL（含查询参数）；登出时调用 clearEtagCache()。
+ */
+const etagCache = new Map<string, { etag: string; data: unknown }>();
+export function clearEtagCache() {
+  etagCache.clear();
 }
 
 function isErrorBody(x: unknown): x is ApiErrorBody {
@@ -46,19 +66,31 @@ export async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DEL
   // 浏览器里相对地址即可；jsdom/Node 的 fetch 需要绝对 URL，取当前页面同源
   const url = typeof window !== 'undefined' ? new URL(rel, window.location.origin).toString() : rel;
   const headers: Record<string, string> = { Accept: 'application/json' };
+  const cached = method === 'GET' ? etagCache.get(rel) : undefined;
+  if (cached) headers['If-None-Match'] = cached.etag;
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET') {
     const t = csrfToken();
     if (t) headers['X-CSRF-Token'] = t;
   }
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-    credentials: 'same-origin',
-    signal: opts.signal,
-  });
-  if (res.status === 204 || res.status === 304) return undefined as T;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      credentials: 'same-origin',
+      signal: opts.signal,
+    });
+  } catch (e) {
+    if ((e as Error)?.name === 'AbortError') throw e;
+    throw new ApiError(0, 'NETWORK_ERROR', '网络连接失败，请检查网络或稍后重试', null, null);
+  }
+  if (res.status === 304) {
+    if (cached) return cached.data as T;
+    throw new ApiError(304, 'NOT_MODIFIED', '服务端返回 304，但本地没有可复用的数据', null, res.headers.get('X-Request-Id'));
+  }
+  if (res.status === 204) return undefined as T;
   const text = await res.text();
   let data: unknown;
   try {
@@ -73,6 +105,8 @@ export async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DEL
     }
     throw new ApiError(res.status, 'HTTP_ERROR', `HTTP ${res.status}`, null, res.headers.get('X-Request-Id'));
   }
+  const etag = method === 'GET' ? res.headers.get('ETag') : null;
+  if (etag) etagCache.set(rel, { etag, data });
   return data as T;
 }
 

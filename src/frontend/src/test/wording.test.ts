@@ -2,7 +2,7 @@
  * 合规自查：源码与示例数据中不得出现荐股措辞；风险揭示里的“不保证收益”是否定语境，单独放行。
  * 也检查依赖中没有 ag-grid-enterprise（禁止任何企业版包或功能）。
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const ROOT = resolve(__dirname, '../..');
@@ -37,9 +37,11 @@ describe('合规措辞', () => {
 });
 
 describe('依赖', () => {
-  it('package.json 与 lock 中没有 ag-grid-enterprise', () => {
+  it('package.json 与 pnpm-lock.yaml 中没有 ag-grid-enterprise；只用 pnpm', () => {
     const pkg = readFileSync(join(ROOT, 'package.json'), 'utf8');
-    const lock = readFileSync(join(ROOT, 'package-lock.json'), 'utf8');
+    const lock = readFileSync(join(ROOT, 'pnpm-lock.yaml'), 'utf8');
+    expect(existsSync(join(ROOT, 'package-lock.json'))).toBe(false);
+    expect(JSON.parse(pkg).packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
     expect(pkg).not.toContain('ag-grid-enterprise');
     expect(lock).not.toContain('ag-grid-enterprise');
     const deps = JSON.parse(pkg).dependencies as Record<string, string>;

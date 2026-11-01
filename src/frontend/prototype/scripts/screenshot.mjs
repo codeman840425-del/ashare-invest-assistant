@@ -1,5 +1,5 @@
 // 用 Playwright（headless chromium）以 file:// 打开 dist/index.html，1440×900 截三页。
-// 用法：npm run build && npm run screenshot [-- 输出目录]
+// 用法：pnpm run build && pnpm run screenshot [输出目录]
 import { chromium } from 'playwright';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';

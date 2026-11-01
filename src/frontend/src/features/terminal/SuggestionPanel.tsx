@@ -1,6 +1,6 @@
 import { Button, Tag, Tooltip } from 'antd';
 import { useNavigate } from 'react-router';
-import { useActiveReasons, useCandidateSignals } from '../../api/queries';
+import { useCandidateSignals, useSuggestionReasons } from '../../api/queries';
 import type { CandidateSignal, Suggestion, TerminalRow } from '../../api/types';
 import { ActionBadge, ConfidenceTag, ErrorBox, Loading } from '../../components/common';
 import { ACTION_FULL, ACTION_SHORT, HORIZON, REASON_CODE, RISK_CONTROL, RISK_LEVEL, SIGNAL_STATE } from '../../i18n/labels';
@@ -10,7 +10,7 @@ const shortAction = (a: keyof typeof ACTION_FULL) => ACTION_FULL[a].replace(/^่ง
 export function SuggestionPanel({ row, suggestion, loading, error }: { row: TerminalRow | undefined; suggestion: Suggestion | undefined; loading: boolean; error: unknown }) {
   const navigate = useNavigate();
   const cs = useCandidateSignals(row?.security_code);
-  const reasons = useActiveReasons();
+  const reasons = useSuggestionReasons(suggestion?.id);
   const signalOf = (id: string | null): CandidateSignal | undefined => (id ? cs.data?.items.find((c) => c.id === id) : undefined);
 
   const head = (

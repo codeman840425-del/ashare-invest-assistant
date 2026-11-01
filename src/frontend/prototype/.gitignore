@@ -1,2 +1,4 @@
 node_modules/
 *.tsbuildinfo
+# 构建产物不入库（需要时 pnpm build 重建；T-F00 截图在 /workspace/team/reports/T-F00/）
+dist/

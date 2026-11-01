@@ -12,17 +12,17 @@ describe('api client', () => {
 
   it('GET /terminal 返回契约结构（MSW 示例数据）', async () => {
     const t = await apiGet<TerminalResponse>('/terminal', { scope: 'all' });
-    expect(Object.keys(t).sort()).toEqual(['account', 'rows', 'server_time', 'session', 'truncated', 'unread_notifications']);
+    expect(Object.keys(t).sort()).toEqual(['account', 'rows', 'server_time', 'session', 'trade_date', 'truncated', 'unread_notifications']);
     expect(t.rows.length).toBeGreaterThan(0);
   });
 
-  it('scope 非法 → 422 VALIDATION_ERROR 信封解析为 ApiError', async () => {
+  it('scope 非法 → 400 VALIDATION_ERROR 信封解析为 ApiError', async () => {
     const err = await apiGet('/terminal', { scope: 'bad' }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     const e = err as ApiError;
-    expect(e.status).toBe(422);
+    expect(e.status).toBe(400);
     expect(e.code).toBe('VALIDATION_ERROR');
-    expect(e.details).toEqual({ field: 'scope' });
+    expect(e.details).toEqual({ fields: [{ field: 'scope', issue: expect.any(String) as unknown }] });
     expect(e.requestId).toMatch(/^mock-/);
   });
 

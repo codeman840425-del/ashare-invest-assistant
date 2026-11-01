@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import { server } from '../mocks/server';
 import { resetMockState } from '../mocks/handlers';
+import { clearEtagCache } from '../api/client';
 
 // jsdom 缺少的浏览器 API（antd / AG Grid / react-resizable-panels 需要）
 if (!window.matchMedia) {
@@ -30,6 +31,7 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   resetMockState();
+  clearEtagCache();
   localStorage.clear();
 });
 afterAll(() => server.close());

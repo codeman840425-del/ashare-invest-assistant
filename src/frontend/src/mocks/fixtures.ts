@@ -138,6 +138,13 @@ const LEVEL_RANK: Record<RiskLevel, number> = { info: 1, warning: 2, critical: 3
 export const SECURITY_CODES = SPECS.map((s) => s.code);
 const specOf = (code: string) => SPECS.find((s) => s.code === code);
 export const nameOf = (code: string) => specOf(code)?.name ?? code;
+/** T-F03：个股档案 mock 复用的证券规格摘要（只读） */
+export const specBrief = (code: string) => {
+  const s = specOf(code);
+  return s
+    ? { code: s.code, name: s.name, sector: s.sector, prev_close: s.prev_close, price: s.price, volume_lots: s.volume_lots, data_status: s.data_status, data_as_of: s.data_as_of, seed: s.seed }
+    : null;
+};
 
 function quoteGaps(s: SecSpec): Gap[] {
   if (s.data_status === 'stale') return [{ key: 'quote', reason: 'quota_deferred', message: '超过刷新间隔 ×2 未更新（示例）' }];
@@ -523,7 +530,7 @@ export const TERMINAL_ROWS: TerminalRow[] = (() => {
 })();
 
 // ---------------- K 线 / 分时 ----------------
-function tradingDays(end: string, n: number): string[] {
+export function tradingDays(end: string, n: number): string[] {
   const out: string[] = [];
   const d = new Date(`${end}T00:00:00Z`);
   while (out.length < n) {

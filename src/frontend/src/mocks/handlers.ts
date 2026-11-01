@@ -3,7 +3,8 @@
  * 未实现的端点统一返回 404 + 契约错误信封（code=NOT_FOUND），便于发现漏接。
  */
 import { http, HttpResponse, delay, matchRequestUrl } from 'msw';
-import type { MarketOverview, Notification, TerminalScope, TodayResponse } from '../api/types';
+import type { Notification, TerminalScope, TodayResponse } from '../api/types';
+import type { SectorKind } from '../api/marketTypes';
 import { accountHandlers } from './accountHandlers';
 import { resetStrategies, strategyHandlers } from './strategyHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
@@ -12,6 +13,9 @@ import {
   ACCOUNT_ID, CANDIDATE_SIGNALS, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOTIFICATIONS, NOW, PORTFOLIO, QUOTES, REASONS,
   SIGNAL_EVENTS, SUGGESTIONS, SUGGESTION_LIST, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, WATCHLIST, dailyBars, intradayBars,
 } from './fixtures';
+import {
+  MARKET_OVERVIEW, announcements, factors, financials, fundFlows, indexBars, searchSecurities, sectorFlows, securityProfile, toWeekly,
+} from './marketFixtures';
 
 export { errorBody };
 
@@ -30,18 +34,6 @@ export function resetMockState() {
 const lag = () => (typeof window !== 'undefined' && import.meta.env.MODE !== 'test' ? delay(80) : Promise.resolve());
 
 const LEVEL: Record<string, number> = { info: 1, warning: 2, critical: 3 };
-
-/** v0.2.3 #9 §7.3 最小结构（示例数据） */
-const MARKET_OVERVIEW: MarketOverview = {
-  trade_date: TRADE_DATE, session: 'morning',
-  indices: [
-    { security_code: '000001.SH', name: '上证指数（示例）', price: '3268.12', change_pct: '0.42', amount: '412300000000', t: NOW },
-    { security_code: '399001.SZ', name: '深证成指（示例）', price: '10432.55', change_pct: '-0.18', amount: '538100000000', t: NOW },
-  ],
-  breadth: { up: 2861, down: 2104, flat: 213, limit_up: 47, limit_down: 9 },
-  regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, turnover_total: '950400000000',
-  data_status: 'fresh', data_as_of: NOW, gaps: [],
-};
 
 /** v0.2.3 #12：/today 首页聚合 mock（契约 §7.3；每个列表 ≤ 50，more 表示是否截断） */
 function todayBody(): TodayResponse {
@@ -108,7 +100,7 @@ const routeHandlers = [
   }),
   http.get(`${API}/quotes`, ({ request }) => {
     const codes = (new URL(request.url).searchParams.get('codes') ?? '').split(',').filter(Boolean);
-    if (codes.length > 50) return validation('codes', 'codes 最多 50 个');
+    if (codes.length > 200) return validation('codes', 'codes 最多 200 个');
     return HttpResponse.json({ items: codes.length ? QUOTES.filter((q) => codes.includes(q.security_code)) : QUOTES });
   }),
   http.get(`${API}/securities/:code/bars`, async ({ params, request }) => {
@@ -118,11 +110,57 @@ const routeHandlers = [
     const adjust = url.searchParams.get('adjust') ?? (freq === '1m' ? 'none' : 'qfq');
     if (!['1m', 'd', 'w'].includes(freq)) return validation('freq', 'freq 取值为 1m|d|w');
     if (freq === '1m' && adjust !== 'none') return validation('adjust', '1m 只支持 adjust=none');
-    if (freq === 'w') return notFound('周线（示例数据未提供）');
-    const res = freq === '1m' ? intradayBars(String(params.code)) : dailyBars(String(params.code));
+    const code = String(params.code);
+    // 个股用 fixtures 规格，指数用 marketFixtures；周线由日线聚合（T-F03）
+    const day = dailyBars(code) ?? indexBars(code, 'd');
+    const res = freq === '1m' ? intradayBars(code) ?? indexBars(code, '1m') : freq === 'w' ? day && toWeekly(day) : day;
     if (!res) return notFound('证券');
     const limit = Number(url.searchParams.get('limit') ?? 0);
     return HttpResponse.json(limit > 0 ? { ...res, items: res.items.slice(-limit) } : res);
+  }),
+
+  // ---- T-F03 个股档案 / 市场概览 ----
+  // 契约 §7.3：证券搜索（不分页，最多 20 条）
+  http.get(`${API}/securities`, async ({ request }) => {
+    await lag();
+    const q = new URL(request.url).searchParams.get('q') ?? '';
+    if (!q.trim()) return validation('q', 'q 必填');
+    return HttpResponse.json(searchSecurities(q));
+  }),
+  // [待契约确认] 以下端点契约 v0.2.6 仍未定义，结构见 api/marketTypes.ts
+  http.get(`${API}/securities/:code`, async ({ params }) => {
+    await lag();
+    const p = securityProfile(String(params.code));
+    return p ? HttpResponse.json(p) : notFound('证券');
+  }),
+  http.get(`${API}/securities/:code/financials`, async ({ params }) => {
+    await lag();
+    const f = financials(String(params.code));
+    return f ? HttpResponse.json(f) : notFound('证券');
+  }),
+  http.get(`${API}/securities/:code/fund-flows`, async ({ params, request }) => {
+    await lag();
+    const days = Number(new URL(request.url).searchParams.get('days') ?? 60) || 60;
+    const f = fundFlows(String(params.code), days);
+    return f ? HttpResponse.json(f) : notFound('证券');
+  }),
+  http.get(`${API}/securities/:code/factors`, async ({ params }) => {
+    await lag();
+    const f = factors(String(params.code));
+    return f ? HttpResponse.json(f) : notFound('证券');
+  }),
+  http.get(`${API}/securities/:code/announcements`, async ({ params, request }) => {
+    await lag();
+    const list = announcements(String(params.code));
+    if (!list) return notFound('证券');
+    return HttpResponse.json({ ...page(list, new URL(request.url)), data_status: 'fresh', data_as_of: '2026-11-01T21:00:00+08:00', gaps: [] });
+  }),
+  http.get(`${API}/market/sector-flows`, async ({ request }) => {
+    await lag();
+    const url = new URL(request.url);
+    const kind = (url.searchParams.get('kind') ?? 'industry') as SectorKind;
+    if (!['industry', 'concept'].includes(kind)) return validation('kind', 'kind 取值为 industry|concept');
+    return HttpResponse.json(sectorFlows(kind, Number(url.searchParams.get('limit') ?? 20) || 20));
   }),
 
   http.get(`${API}/suggestions`, ({ request }) => {

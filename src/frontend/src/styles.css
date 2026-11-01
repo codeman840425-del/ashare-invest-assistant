@@ -294,3 +294,69 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .imp-handling { margin-top: 2px; }
 .imp-resolve { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .imp-confirm { border: 1px solid var(--line); border-radius: 4px; padding: 12px 16px; background: var(--panel); }
+
+/* ---------- T-F03 个股档案 / 市场概览 ---------- */
+.dense-table.static .ant-table-tbody > tr { cursor: default; }
+.search-opt { display: flex; gap: 8px; }
+.ext-link { display: inline-flex; align-items: center; gap: 3px; }
+.ext-icon { font-size: 10px; opacity: 0.7; }
+.track { position: relative; display: inline-block; height: 6px; background: #1a2230; border-radius: 3px; overflow: hidden; }
+.track .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; }
+.up-bg { background: var(--up); } .down-bg { background: var(--down); } .flat-bg { background: #59636e; }
+.stock-page, .market-page { padding: 6px 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.stock-head { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; }
+.sh-id, .sh-quote { display: flex; align-items: baseline; gap: 8px; }
+.sh-id .ant-tag { margin: 0; }
+.sh-quote .q-price { font-size: 22px; }
+.sh-stats { display: grid; grid-template-columns: repeat(9, auto); gap: 2px 18px; margin-left: auto; }
+.sh-stats label, .flow-stats label { display: block; color: var(--muted); font-size: 10px; }
+.sh-stats b { font-size: 12px; font-weight: 500; }
+.stock-top { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 6px; }
+.stock-side, .mk-side { display: flex; flex-direction: column; gap: 6px; }
+.price-chart { display: flex; flex-direction: column; padding-bottom: 6px; }
+.price-chart .ant-segmented { font-size: 11px; }
+.kv { margin: 0; padding: 4px 10px 8px; }
+.kv > div { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px dashed #1a2230; }
+.kv dt { width: 64px; flex: none; color: var(--muted); }
+.kv dd { margin: 0; color: #c9d1d9; }
+.hz-empty { padding: 12px 10px; }
+.hz-line { display: grid; grid-template-columns: 52px 1fr 26px 44px auto auto; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px dashed #1f2a38; }
+.hz-line .track { width: 100%; }
+.hz-line.ok .fill { background: #58a6ff; }
+.hz-line:not(.ok) .fill { background: #3a4452; }
+.hz-line .ant-tag { margin: 0; }
+.hz-score { text-align: right; color: #c9d1d9; }
+.stock-tabs { padding: 0 8px 8px; }
+.stock-tabs .ant-tabs-nav { margin-bottom: 6px; }
+.tab-head { display: flex; align-items: center; gap: 8px; padding: 2px 0 6px; color: var(--muted); font-size: 11px; }
+.gap-note { color: #e3a008; padding: 0 0 6px; }
+.fin-col { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.3; }
+.fin-label { color: #c9d1d9; }
+.flow-stats { display: flex; gap: 28px; padding: 2px 0 8px; }
+.flow-stats b { font-size: 14px; }
+.flow-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 8px; align-items: start; }
+.flow-grid .chart-wrap { margin: 0; }
+.pct-bar { display: inline-flex; align-items: center; gap: 6px; }
+.pct-bar .track { width: 120px; }
+.ann-alert { margin-bottom: 6px; padding: 6px 10px !important; }
+.mk-head { display: flex; align-items: center; gap: 10px; }
+.mk-head .page-title { margin: 0; }
+.mk-head .ant-tag { margin: 0; }
+.index-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.index-card { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.index-card:hover { border-color: #2f4566; }
+.index-card.active { border-color: var(--accent); box-shadow: inset 0 2px 0 var(--accent); background: #111a28; }
+.ic-name { color: #c9d1d9; font-weight: 600; }
+.ic-price { font-size: 17px; font-weight: 700; }
+.mk-grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 6px; }
+.chart-caption { padding: 0 2px 4px; }
+.breadth { padding: 6px 10px 2px; }
+.breadth-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: #1a2230; }
+.breadth-bar .seg { height: 100%; }
+.breadth-nums { display: flex; justify-content: space-between; padding: 6px 0 2px; }
+.stat-grid.two { grid-template-columns: repeat(2, 1fr); padding: 6px 0; }
+.sector-panel { padding-bottom: 4px; }
+.flow-cell { display: flex; align-items: center; gap: 8px; }
+.flow-cell > .mono { width: 84px; text-align: right; }
+.flow-track { flex: 1; max-width: 220px; height: 6px; background: #1a2230; border-radius: 3px; overflow: hidden; }
+.flow-fill { display: block; height: 100%; opacity: 0.75; }

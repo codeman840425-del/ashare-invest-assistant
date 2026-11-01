@@ -14,8 +14,6 @@ const lazyPage = <M,>(load: () => Promise<M>, pick: (m: M) => React.ComponentTyp
 /** 契约 §4 / plan 规划的页面；未实现的先给占位 */
 export const PLACEHOLDERS: [string, string][] = [
   ['today', '今日关注'],
-  ['market', '市场概览'],
-  ['stocks/:code', '个股'],
   ['strategies/:id', '策略详情'],
   ['strategy-cards', '策略知识卡'],
   ['strategy-instances', '我的策略实例'],
@@ -53,6 +51,8 @@ export const routes: RouteObject[] = [
       { path: 'portfolio', lazy: lazyPage(() => import('../pages/portfolio/PortfolioPage'), (m) => m.PortfolioPage) },
       { path: 'portfolio/import', lazy: lazyPage(() => import('../pages/portfolio/ImportWizardPage'), (m) => m.ImportWizardPage) },
       { path: 'portfolio/import/:batchId', lazy: lazyPage(() => import('../pages/portfolio/ImportWizardPage'), (m) => m.ImportWizardPage) },
+      { path: 'market', lazy: lazyPage(() => import('../pages/market/MarketPage'), (m) => m.MarketPage) },
+      { path: 'stocks/:code', lazy: lazyPage(() => import('../pages/stock/StockPage'), (m) => m.StockPage) },
       { path: 'settings', element: <Navigate to="/settings/profile" replace /> },
       { path: 'settings/profile', lazy: lazyPage(() => import('../pages/settings/ProfilePage'), (m) => m.ProfilePage) },
       { path: 'settings/data-licence', lazy: lazyPage(() => import('../pages/settings/DataLicencePage'), (m) => m.DataLicencePage) },

@@ -1,5 +1,5 @@
-import { Badge, Button, Dropdown, Input, List, Popover, Tag } from 'antd';
-import { BellOutlined, DownOutlined, SearchOutlined } from '@ant-design/icons';
+import { Badge, Button, Dropdown, List, Popover, Tag } from 'antd';
+import { BellOutlined, DownOutlined } from '@ant-design/icons';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useMe, useMarkNotificationRead, useNotifications, useUnreadCount } from '../api/queries';
 import { NOTIFY_KIND, SEVERITY } from '../i18n/labels';
@@ -7,6 +7,7 @@ import { IS_MOCK } from '../lib/env';
 import { fmtTime } from '../lib/format';
 import { RiskDisclosure } from './RiskDisclosure';
 import { DesktopGuard } from './DesktopGuard';
+import { SecuritySearch } from './SecuritySearch';
 import { navMoreFor, NAV_MAIN } from '../app/nav';
 import { useApiErrorRedirect } from '../app/useApiErrorRedirect';
 import { useLogout } from '../api/accountQueries';
@@ -84,7 +85,7 @@ export function AppShell() {
             </Dropdown>
           </nav>
           <div className="topbar-right">
-            <Input size="small" prefix={<SearchOutlined />} placeholder="代码/简称" style={{ width: 170 }} aria-label="证券搜索" />
+            <SecuritySearch />
             <Popover content={<NotificationPanel onNavigate={(r) => navigate(r)} />} title="通知" trigger="click" placement="bottomRight">
               <Badge count={unread.data?.count ?? 0} size="small" offset={[-2, 2]}>
                 <Button size="small" type="text" icon={<BellOutlined style={{ fontSize: 16 }} />} aria-label="通知" />

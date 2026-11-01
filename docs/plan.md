@@ -1455,7 +1455,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 **快照与行情**（麦蕊来源按证书隔离，见本节“数据归属”；只有证券公开主数据全站一份）
 | 表 | 关键字段 |
 |---|---|
-| `data_snapshots` | id, created_at, purpose(candidate/plan/alert/review/screen), items(jsonb: [{key（如 quote.{symbol}.close）, value, unit, data_as_of, fetched_at, provider, endpoint, raw_payload_id}]), known_events(jsonb: 当时已知的公告/事件 id 列表), hash |
+| `data_snapshots` | id, created_at, purpose(candidate/plan/alert/review/screen), items(jsonb: [{key（如 quote.{symbol}.close）, value, unit, data_as_of, fetched_at, provider, endpoint, raw_payload_id}]), known_events(jsonb: 当时已知的公告/事件 id 列表), hash；**user_id**(FK→users，可空；含持仓、成交、账户或其派生内容时必填), **licence_id**(可空；用某用户证书取到的数据时填)（T-B16 裁定：带 user_id 的快照在删除用户时物理删除；user_id 为空的快照只允许存市场级内容，见 7.3） |
 | `market.securities` | ~~code, name, exchange, board, list_date, status, industry_codes, updated_at~~ → v0.2.7：security_id, code("600000.SH"), type(stock/cdr/etf/index；契约 v0.2.8 加 etf), name, exchange(SH/SZ/BJ), board, list_date, list_date_basis, delist_date, listing_status, risk_flag, name_norm, name_initials(text[]), master_source, master_as_of, updated_at。**证券公开主数据，全站一份**（第 9 节问题 51：只含代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示；不存公司全称）；`master_source` 来源【待问题 52 / T-A04 补测】，确认前只用交易所公开列表。行业、概念、股本移到按证书的表（带 `source_licence_id`，2.1B）。另建 `security_name_history`、`security_code_history`、`security_risk_flag_history`（T007 §5）；索引 `gin (name_norm gin_trgm_ops)`、`gin (name_initials)`（迁移中 `CREATE EXTENSION IF NOT EXISTS pg_trgm`） |
 | `market.trading_calendar` | date, is_open |
 | `market.daily_bars` | code, trade_date, open, high, low, close, volume, amount, adj_type, fetched_at（按年分区） |
@@ -2830,22 +2830,30 @@ admin:
 - 注册只收集用户名、密码与可选申请说明；邮箱为可选（仅用于通知），不收集手机号。
 - 用户权利：查阅、更正；~~导出（`GET /me/export`，JSON+CSV）~~（T-B16 裁定 2026-11-02：不是用户需求，本版不做，契约中没有此端点）；**删除账号由管理员手动处理**（用户线下提出，管理员用 CLI 删除该用户数据与原始文件，审计日志保留脱敏记录），**不设自动留存期、不提供 `DELETE /me`**（T-A06，第 9 节问题 45）。
 - **删除用户数据 CLI 规则**（T-B16 裁定，架构师 2026-11-02）：
-  - **不放行维护会话**：不得使用会话变量、`session_replication_role`、专用角色绕过禁删或不可变触发器。
-  - **按数据状态放行**：迁移把相关触发器改为，仅当 `app.users.status = 'purging'` 时，允许对该用户的行执行 DELETE 或规定的匿名化 UPDATE；其他情况仍拒绝。`purging` 只在 CLI 的单个事务内出现：先设为 `purging`，处理全部子表，最后删除 `users` 行。另加一个延迟约束触发器：提交时如果还有 `status='purging'` 的行，就报错回滚，保证这个状态不会被提交、不会留下放行窗口。api 代码里没有任何设置 `purging` 的路径。
+  - **不放行维护会话**：不得使用会话变量、`session_replication_role`、专用角色绕过禁删或不可变触发器。此条不变：下面的 `aia_maint` 只拥有写入 `purging` 的权限，触发器对它的判定与其他角色相同（同样只在 `purging` 时放行规定的 DELETE 与匿名化 UPDATE）。
+  - **按数据状态放行**：迁移把相关触发器改为，仅当 `app.users.status = 'purging'` 时，允许对该用户的行执行 DELETE 或规定的匿名化 UPDATE；其他情况仍拒绝。`purging` 只在 CLI 的单个事务内出现：先设为 `purging`，处理全部子表，最后删除 `users` 行。另加一个延迟约束触发器，**按行检查**（见下条第 3 点），保证这个状态不会被提交、不会留下放行窗口。api 代码里没有任何设置 `purging` 的路径。
+  - **`purging` 的写入权（架构师裁定 2026-11-02，评审 45589c2 B1；与上文冲突时以此为准）**：
+    1. 新增专用数据库角色 `aia_maint`，只供删除用户数据 CLI 使用；`api`、`ingest` 进程不得持有它的凭据。
+    2. `app.users` 加 BEFORE INSERT/UPDATE 触发器：写入 `status='purging'` 只允许 `current_user = 'aia_maint'`，且只能用 UPDATE；INSERT 直接写成 `purging` 一律拒绝。`status` 一旦是 `purging`，就不能再改成任何其他值，处于 `purging` 的用户行只能被 DELETE。
+    3. 延迟约束触发器按行检查：某行只要在本事务中被置为过 `purging`，提交时这个 `id` 就必须已不存在于 `app.users`，否则拒绝提交（不再依赖“全表是否还有 `purging` 行”的检查）。
+    4. “不得用维护会话或专用角色绕过触发器”不变；`aia_maint` 只是能写入 `purging`，不影响触发器对它的判定。
+    5. 运维更新 `deploy/db/roles/grants.sql` 与 `verify-roles.sh`：`aia_maint` 只授予 CLI 必需的权限；`aia_api`、`aia_ingest` 对 `ops.pending_file_purges` 没有任何权限；`verify-roles.sh` 断言 `aia_api` 在一个事务里执行“置 `purging` → 删除 → 改回 → 提交”会失败。
   - **物理删除**（个人财务数据和由它派生的数据）：持仓、成交（`app.trades`）、导入批次与解析行、证书（`ops.data_licences`，含密文）、画像（`app.user_profiles`）、自选、策略实例、候选信号（含各分区）、`signal_events`、`suggestions`、`suggestion_user_actions`、`plan_drafts`、`plan_draft_confirmations`、`risk_events`、风控设置及其历史、`claims`、`symbol_horizon_assessments`、`daily_reports`、通知、会话。另外删除用该用户证书取到的 `market.*` 行（按 `source_licence_id`）以及对应的 Redis 键。
   - **匿名化保留**（有不可变要求的审计和日志表）：`app.audit_logs`、`app.account_reviews`、`ops.data_licence_events`、`ops.ingest_request_log`。
     - 断开关联：`user_id`、`actor_id`、`target_id` 中指向该用户的值置为 NULL，相关列由迁移改为可空。
     - 清空：用户名、显示名、申请说明、`user_agent`；IP 截断到 IPv4 /24、IPv6 /48。
-    - `detail` 或 JSON 列删除以下键：`security_code`、`name`、金额与数量类、文件名或路径、证书掩码或后缀、`email`。
-    - 保留：动作名、时间、结果码、行数。
+    - `detail` 或 JSON 列删除以下键：`security_code`、`name`、金额与数量类、文件名或路径、证书掩码或后缀、`email`；以及下文「匿名化细则」中审计 `detail` 一条列出的键。
+    - 保留：动作名、时间、结果码、行数，以及审计 `detail` 一条允许保留的字段。
     - 匿名化 UPDATE 由触发器校验：只允许上述列发生变化，并且只允许改成上述值。
   - **原始导入文件**：数据库事务提交后，再删除 `/srv/aia/imports/` 下该用户的文件。删除失败的，写入 `ops.pending_file_purges`（只含路径、尝试次数、最近错误，不含 user_id），下次运行 CLI 时先重试这些记录，并在 dry-run 中列出。
   - **执行方式**：默认 dry-run，按表列出行数，并标出删除或匿名化；加 `--execute` 后要求手动输入完整的 user-id 确认；全部在单个事务内完成；写一条 `admin.user_data_deleted` 审计，`detail` 只含各表行数。
   - **匿名化细则（架构师裁定，2026-11-02，契约 v0.2.8 补充）**：
     - **IP**：`app.audit_logs` 只有 `ip_hash`，没有明文 IP。`actor` 是被删除用户本人或为 NULL 的行，`ip_hash` 置 NULL；管理员操作行的 `ip_hash` 保留。有明文 IP 的表仍按上面的截断规则处理（IPv4 /24、IPv6 /48）。
-    - **`app.account_reviews.reason`**：清空；该列可为空就置 NULL，否则写 `'[已清除]'`。
-    - **`data_snapshots`**：不按用户区分，只允许存市场级内容，删除用户时不处理。
-    - **`llm_calls`**：只被该用户引用的行物理删除；被多人共享的行保留，共享行不得含个人数据。
+    - **审计 `detail`（评审 45589c2 M2）**：匿名化时从 `detail` 中删除所有指向被删用户的键，包括 `user_id`、`target_user_id`、`username`、`licence_id`，以及用户自己填写的 `reason`、`note`、`comment` 一类自由文本；管理员填写的 `reason` 也清空（其中可能引用了用户的话）。只保留 `action`、时间、管理员本人的 `actor`、不含个人信息的枚举字段（状态、理由码）。
+    - **`app.account_reviews.reason`**：置 NULL（评审 45589c2 M1；取代上次“不可为空时写 `'[已清除]'`”的写法）。
+    - **`data_snapshots`（评审 45589c2 B2；推翻上次“不按用户区分、删除时不处理”的写法）**：含持仓、成交、账户或由它们派生内容的快照，必须带 `user_id`，按需带 `licence_id`，删除用户时物理删除；只含市场级内容的快照可以保留，前提是不含任何个人内容。表结构见 3.3 `data_snapshots` 行。此条必须在快照写入方上线之前完成。
+    - **Redis 会话（评审 45589c2 M3）**：先调用现有的 `SessionStore.revoke_user(uid)` 删除会话本体，再按键名删除会话索引和其他含该用户的键。
+    - **`llm_calls`（评审 45589c2 M4）**：只要被该用户的任何行引用，就算与他相关；引用方包括 `suggestions`、`daily_reports`、`target_type`/`target_id` 关联、`llm_strategy_drafts`，以及以后新增的引用方，CLI 动态发现引用列，不写死清单。只被该用户引用的调用物理删除；同时被他人引用的调用保留元数据（模型、token、耗时、时间），`request_body`、`response_body` 置 NULL 或写 `'[已清除]'`；不被任何用户引用的市场级调用保留，写入方必须保证其中不含个人数据。
     - **`invite_codes`**：`bound_username` 置 NULL；`used_by` 一类指向该用户的列解除关联（置 NULL）。
     - **`ops.pending_file_purges`**：`path` 可以含 uid 目录名；重试删除文件成功后删除该行。
     - **管理员账号**：被删除的账号是管理员，且被不可变列或 NOT NULL 列引用时，CLI 拒绝执行，由人工处理。

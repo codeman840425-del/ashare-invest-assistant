@@ -106,7 +106,10 @@ start_db() {  # 临时 timescale（+ redis），导出 DATABASE_URL / REDIS_URL
 
 job_ignored-sources() { python3 scripts/ci/check_ignored_sources.py; }
 job_fixtures()        { pyrun scripts/ci/check_fixtures.py; }
-job_gateway-limits()  { pyrun scripts/ci/check_gateway_limits.py; }
+job_gateway-limits()  {  # 与 CI 同步（T-O10）：静态规则 + 有 docker 时跑 nginx 限流运行时冒烟
+  pyrun scripts/ci/check_gateway_limits.py || return 1
+  if docker info >/dev/null 2>&1; then bash scripts/ci/nginx_limits_smoke.sh both; else echo "（没有 docker，跳过 nginx_limits_smoke.sh；CI 会跑）"; fi
+}
 job_secret-boundary() { pyrun scripts/ci/check_secret_boundary.py; }
 job_secret-scan() {
   gitleaks_bin
@@ -159,7 +162,12 @@ job_migrations() {
   [ -f src/backend/alembic.ini ] || { echo "没有 alembic.ini，跳过"; return 0; }
   start_db
   (cd src/backend && uv sync -q --frozen && .venv/bin/alembic upgrade head && .venv/bin/alembic downgrade base \
-     && .venv/bin/alembic upgrade head && .venv/bin/alembic check)
+     && .venv/bin/alembic upgrade head && .venv/bin/alembic check) || return 1
+  # 与 CI 同步（T-O10）：分库角色幂等两次 + 验收（口令目录是临时目录，随 RUNNER_TEMP 删除）
+  local hp; hp="$(docker port "$tag-db" 5432/tcp | head -1)"
+  PGHOST="${hp%:*}" PGPORT="${hp##*:}" PGUSER=aia PGPASSWORD=ci-only PGDATABASE=aia AIA_DB_ROLE_PASSWORD_DIR="$RUNNER_TEMP/db-roles" \
+    bash -c 'bash deploy/scripts/db-role-passwords.sh "$AIA_DB_ROLE_PASSWORD_DIR" && bash deploy/db/roles/apply-roles.sh \
+             && bash deploy/db/roles/apply-roles.sh && bash deploy/db/roles/verify-roles.sh'
 }
 job_contract() {
   local rc=0

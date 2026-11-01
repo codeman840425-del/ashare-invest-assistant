@@ -1,7 +1,7 @@
 """契约 §3 枚举、§4.1 导入提示码与 §6.1 不可执行原因码表 —— **全仓唯一来源**。
 
 ``GET /meta/enums`` 直接下发本模块内容；其他模块需要枚举时从这里导入，不要另行定义。
-已同步到契约 :data:`CONTRACT_VERSION`（v0.2.7；v0.2 为 T-A01 定稿，原 ``PENDING_T_A01`` 标记已解除；
+已同步到契约 :data:`CONTRACT_VERSION`（v0.2.8；v0.2 为 T-A01 定稿，原 ``PENDING_T_A01`` 标记已解除；
 v0.2.1–v0.2.3 未改 §3 枚举、§4 错误码与 §6.1 原因码的取值；v0.2.4 新增的 ``consent_key``、
 ``legal_doc_key``、``consent_presentation``、``assessment_status`` 在 v0.2.5（T-A06）作废并删除，
 同时删除原因码 ``PROFILE_OR_CONSENT_MISSING``（23 → 22）与错误码 ``CONSENT_REQUIRED``、
@@ -9,7 +9,8 @@ v0.2.1–v0.2.3 未改 §3 枚举、§4 错误码与 §6.1 原因码的取值；
 ``data_licence_tier``，``notification_kind`` 加 ``data_licence``、``gap_reason`` 加
 ``data_licence_unavailable``，错误码加三个 ``DATA_LICENCE_*``。v0.2.7（T-A08）新增 18 个枚举、
 ``data_provider`` 加 ``exchange``；``security_type`` 按编排者 Q3 裁定多一个 ``etf``（契约 §3 该行由
-T-A09 同步），错误码与原因码不变。
+T-A09 同步），错误码与原因码不变。v0.2.8（T-A09）：``security_type`` 顺序 ``stock cdr etf index``，
+``gap_reason`` 加 ``not_applicable``；错误码与原因码不变（``INSTANCE_SCOPE_INVALID`` 详情加键）。
 
 ``CONTRACT_ENUMS`` 只登记契约 §3 的命名枚举；契约里以内联字面量出现的取值（如 ``/me/profile`` 的
 ``effort``、``experience``）在本模块文末“非 §3 取值”一节集中定义，供 DB CHECK 与请求模型复用，
@@ -285,6 +286,7 @@ class GapReason(StrEnum):
     QUOTA_DEFERRED = "quota_deferred"
     USER_INPUT_MISSING = "user_input_missing"
     DATA_LICENCE_UNAVAILABLE = "data_licence_unavailable"  # v0.2.6（T-A07）
+    NOT_APPLICABLE = "not_applicable"  # v0.2.8（T-A09）：该证券类型没有此类数据（本版只用于 ETF）
 
 
 class DataProvider(StrEnum):  # Evidence.provider
@@ -574,14 +576,14 @@ DATA_LICENCE_ERROR_CODES: Final[tuple[str, ...]] = (
 
 
 class SecurityType(StrEnum):
-    """证券类型。ETF 按编排者 2026-11-02 裁定纳入（契约 v0.2.7 Q3 / plan 第 9 节 53）：
-    可出现在搜索与持仓中，但**策略不对 ETF 运行**（见 :mod:`app.strategy.eligibility`）；
-    可转债本版不纳入。"""
+    """证券类型（契约 v0.2.8 §3，顺序 ``stock cdr etf index``）。ETF 按编排者 2026-11-02 裁定纳入
+    （plan 第 9 节 53）：可出现在搜索与持仓中，但**策略不对 ETF 运行**（见
+    :mod:`app.strategy.eligibility`）；可转债本版不纳入。"""
 
     STOCK = "stock"
     CDR = "cdr"
-    INDEX = "index"
     ETF = "etf"
+    INDEX = "index"
 
 
 #: 策略、候选信号可以作用的证券类型（ETF、指数都不在内；plan 第 9 节 53）
@@ -715,7 +717,7 @@ class InstancePausedBy(StrEnum):  # StrategyInstance.paused_by（契约 §5.1 �
 # ---------------------------------------------------------------------------
 
 #: 本模块对应的契约版本（``/meta/enums`` 的 ``version``）
-CONTRACT_VERSION: Final = "v0.2.7"
+CONTRACT_VERSION: Final = "v0.2.8"
 
 #: ``/meta/enums`` 的 ``enums``：契约 §3 各表名 → 取值（顺序同 §3）。``reason_code`` 不在其中，
 #: 只在 ``reason_codes`` 里带解除条件展开（契约 §7.10；评审 M7）。

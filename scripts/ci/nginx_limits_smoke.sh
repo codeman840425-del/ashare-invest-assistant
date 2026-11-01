@@ -37,9 +37,14 @@ burst() {  # $1 方法 $2 路径 $3 次数
   for _ in $(seq 1 "$3"); do printf 'url = "http://127.0.0.1:%s%s"\noutput = "/dev/null"\nwrite-out = "%%{http_code}\\n"\n' "$port" "$2" >> "$cfg"; done
   curl -s -X "$1" -K "$cfg" | sort | uniq -c | awk '{printf "%s×%s ", $2, $1}'
 }
-check_429() {  # $1 方法 $2 路径 $3 期望 retry
-  local h="$work/h" b
-  b="$(curl -s -X "$1" -D "$h" "http://127.0.0.1:$port$2")"
+check_429() {  # $1 方法 $2 路径 $3 期望 retry [$4 = 全局桶：不是 429 就先连发 150 次再试，最多 5 次，避免令牌回补造成的偶发]
+  local h="$work/h" b t
+  for t in 1 2 3 4 5; do
+    b="$(curl -s -X "$1" -D "$h" "http://127.0.0.1:$port$2")"
+    grep -q '^HTTP/1.1 429' "$h" && break
+    [ -n "${4:-}" ] || break
+    burst "$1" "$2" 150 >/dev/null
+  done
   grep -q '^HTTP/1.1 429' "$h" || { bad "$1 $2 预期 429，实际 $(head -1 "$h")"; return; }
   grep -qi "^Retry-After: $3"$'\r'"\?$" "$h" || bad "$1 $2 Retry-After 应为 $3：$(grep -i retry-after "$h" || echo 无)"
   grep -qi '^Content-Type: application/json' "$h" || bad "$1 $2 429 不是 JSON"
@@ -63,7 +68,7 @@ run_prod() {
   sleep 6   # 让全局桶回满（20r/s × 6s ≥ burst 100）
   r="$(burst GET /api/v1/meta/enums 400)"
   [[ "$r" == *"429×"* && "$r" == *"200×"* ]] && ok "全局 /api/ 400 次连发：$r" || bad "全局 /api/ 应部分 429：$r"
-  check_429 GET /api/v1/meta/enums 1
+  check_429 GET /api/v1/meta/enums 1 refill
   r="$(burst GET /healthz 50)"; [[ "$r" == "200×50 " ]] && ok "反例：/healthz 不限流" || bad "/healthz 被限：$r"
   sleep 6
   head -c 30000000 /dev/zero > "$work/big"
@@ -75,7 +80,8 @@ run_dev() {
   start_gw "$ROOT/deploy/nginx/limits.dev.conf"
   r="$(burst POST /api/v1/auth/login 60)"; [[ "$r" == "200×60 " ]] && ok "反例：dev 下登录 60 次不触发 429" || bad "dev 登录被限：$r"
   r="$(burst GET /api/v1/meta/enums 600)"; [[ "$r" == "200×600 " ]] && ok "反例：dev 下 /api/ 600 次连发不触发 429" || bad "dev 全局被限：$r"
-  docker logs "$id-gw" 2>&1 | grep -q 'limiting requests, dry run' && ok "dev 限流 zone 生效（dry run 只记日志）" || bad "dev 日志里没有 dry run 记录"
+  docker logs "$id-gw" > "$work/gw.log" 2>&1 || true   # 先落文件再 grep：管道里 grep -q 提前退出会让 docker logs 吃 SIGPIPE，pipefail 下误判
+  grep -q 'limiting requests, dry run' "$work/gw.log" && ok "dev 限流 zone 生效（dry run 只记日志）" || bad "dev 日志里没有 dry run 记录"
 }
 case "${1:-both}" in
   prod) run_prod ;; dev) run_dev ;; both) run_prod; run_dev ;;

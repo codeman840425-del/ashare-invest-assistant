@@ -34,6 +34,7 @@
 | 18 | 建议卡“当前” | 不新增 `current`；`status=active` 即当前卡，同一用户同一证券**至多 1 张** `active` | 加唯一约束 | 无 |
 | — | T006b 交易规则（plan 2.13、6.1） | 风险警示 50 万股/日买入上限只适用主板与创业板，不适用科创板；“只能限价申报”只适用沪市；沪 3.3.17、深 3.3.19 涨跌停价舍入已核实（含两条边界规则）；2023-04-10 之前不建模【已定】 | 改 `config/market_rules.yaml`（后端负责） | 草案/通知文案按交易所区分 |
 | — | 问题 37【已定 A】 | novice（或画像未填）用户的 `short` 分数封顶 59，用户可用 `fit_ack` 覆盖；`intraday_t` 暂不封顶（待定） | `horizon_classifier.yaml` 发 1.1.0 | `caps[]` 展示 |
+| 22 | 请求体过大（同日补充，回应 review-T-B02） | 应用层超限（导入文件超过 `import.max_file_bytes` 等）仍按 `422 IMPORT_FILE_ERRORS` + `IMPORT_*` 码返回、不创建批次；新增 `413 PAYLOAD_TOO_LARGE` 只用于**请求体超过网关/框架上限**（nginx `client_max_body_size`，须略大于应用上限），响应仍是 §4 错误信封（nginx 用 `error_page 413` 返回 JSON，`request_id` 照常） | 框架层兜底映射 | 运维 nginx JSON 错误页 | 按通用错误处理，提示“文件过大” |
 | — | `/meta/enums.version` | `"v0.2.2"` → `"v0.2.3"` | 改常量 | `CONTRACT_VERSION`、契约测试 |
 
 ### v0.2.2（2026-11-01，T-A02；合入研究员 T006a：周期分类器 v1、规则语义、交易规则核实；不改字段名，只放宽一处类型、补两处字段与说明）
@@ -233,6 +234,7 @@
 | 403 | `ENTITLEMENT_LIMIT_REACHED` | 超出套餐权益上限（自选数、重点关注数、导入次数、LLM 解释次数等） | `{key, limit, current}` |
 | 404 | `NOT_FOUND` | 资源不存在或不属于当前用户 | — |
 | 405 | `METHOD_NOT_ALLOWED` | 路径存在但方法不支持；响应头 `Allow`。非管理员（含未登录）访问 `/admin/*` 一律按 `404 NOT_FOUND` 返回，不带 `Allow` 头 | `{allowed: string[]}` |
+| 413 | `PAYLOAD_TOO_LARGE` | 请求体超过网关/框架上限（v0.2.3 补充）；应用层文件超限仍用 `422 IMPORT_FILE_ERRORS` | `{max_bytes}`（nginx 返回时可省略） |
 | 409 | `CONFLICT` | 唯一约束冲突（如用户名已存在） | `{field}` |
 | 409 | `IDEMPOTENCY_CONFLICT` | 同一幂等键、不同请求体 | — |
 | 409 | `VERSION_CONFLICT` | 乐观锁版本号不符（`If-Match`/`base_version_no`） | `{current_version_no}` |

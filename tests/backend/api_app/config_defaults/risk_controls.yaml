@@ -1,5 +1,4 @@
-# 快照：docs/plan.md v0.2 §6.1 `config/risk_controls.yaml` 代码块原文（T-T01a）。
-# 改默认值先改 plan §6.1，再同步本文件；test_config_yaml_defaults.py 会比对两处。
+# plan v0.2.2 §6.1 `config/risk_controls.yaml` 代码块原文快照（测试维护，T-T01b）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。
 schema_version: 1
 rc1_stop_take:                  # 每笔建议带止损/止盈
   enabled: true

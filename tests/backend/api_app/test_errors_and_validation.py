@@ -188,4 +188,4 @@ def test_405_code_registered(backend):
 
 
 def test_admin_wrong_method_is_404():
-    pytest.skip("非管理员对 /admin/* 用错方法 → 404（契约 v0.2 §9）：依赖鉴权与 /admin 路由（T-B 鉴权任务）")
+    pytest.skip("非管理员（已登录普通用户 / 未 approved）对 /admin/* 用错方法 → 404（契约 v0.2.1 起统一 404）：依赖 T-B03 鉴权与 /admin 路由；未登录场景已由 test_contract_v022.py 覆盖")

@@ -62,12 +62,60 @@ def test_page_limit_default_gt_max_rejected(backend, clean_env):
         backend.config.Settings(page_limit_default=300, page_limit_max=200)
 
 
-def test_env_overrides_yaml_business(backend, clean_env, monkeypatch):
-    (clean_env / "realtime.yaml").write_text("schema_version: 1\nintervals: {quote_interval_s: 15}\n", encoding="utf-8")
-    assert backend.config.Settings().business["realtime"]["intervals"]["quote_interval_s"] == 15
-    # 环境变量优先于 yaml；pydantic-settings 对嵌套映射做深合并（只覆盖给出的键）
+def _write_realtime(cfgtools, cfg: Path) -> dict:
+    """写入完整的 realtime.yaml（plan §6.1 默认值），返回其内容。"""
+    import yaml
+
+    text = cfgtools.source("realtime").read_text(encoding="utf-8")
+    (cfg / "realtime.yaml").write_text(text, encoding="utf-8")
+    return yaml.safe_load(text)
+
+
+def test_env_overrides_yaml_business(backend, cfgtools, clean_env, monkeypatch):
+    """plan v0.2.2 §6.1：三层深合并（逐键递归），只覆盖给出的键，兄弟键保留。"""
+    base = _write_realtime(cfgtools, clean_env)
+    bd = cfgtools.business_dict
+    assert bd(backend.config.Settings())["realtime"]["intervals"]["quote_interval_s"] == 15
     monkeypatch.setenv("BUSINESS", '{"realtime": {"intervals": {"quote_interval_s": 30}}}')
-    assert backend.config.Settings().business == {"realtime": {"schema_version": 1, "intervals": {"quote_interval_s": 30}}}
+    got = bd(backend.config.Settings())["realtime"]
+    want = {**base, "intervals": {**base["intervals"], "quote_interval_s": 30}}
+    assert got == want
+
+
+def test_business_list_replaced_wholesale(backend, cfgtools, clean_env, monkeypatch):
+    """架构师已定（T-T01b）：列表整体替换，不按元素合并。"""
+    base = _write_realtime(cfgtools, clean_env)
+    assert base["universe"]["tier1_priority"] != ["focus"] and len(base["universe"]["tier1_priority"]) > 1
+    monkeypatch.setenv("BUSINESS", '{"realtime": {"universe": {"tier1_priority": ["focus"]}}}')
+    got = cfgtools.business_dict(backend.config.Settings())["realtime"]["universe"]
+    assert got["tier1_priority"] == ["focus"]
+    assert {k: v for k, v in got.items() if k != "tier1_priority"} == {
+        k: v for k, v in base["universe"].items() if k != "tier1_priority"}
+
+
+def test_business_null_means_not_overridden(backend, cfgtools, clean_env, monkeypatch):
+    """plan v0.2.2 §6.1：上层值显式为 null 视为“未覆盖”，保留下层值。"""
+    from pydantic import ValidationError
+
+    _write_realtime(cfgtools, clean_env)
+    monkeypatch.setenv("BUSINESS", '{"realtime": {"intervals": {"quote_interval_s": null}}}')
+    try:
+        got = cfgtools.business_dict(backend.config.Settings())["realtime"]["intervals"]["quote_interval_s"]
+    except (ValidationError, ValueError):
+        pytest.xfail("后端 T-B02（plan §6.1 合并规则）未实现：上层 null 覆盖了 yaml 值并导致校验失败")
+    if got is None:
+        pytest.xfail("后端 T-B02（plan §6.1 合并规则）未实现：上层 null 覆盖了 yaml 值")
+    assert got == 15
+
+
+def test_business_merged_result_validated(backend, cfgtools, clean_env, monkeypatch):
+    """合并后的结果整体走 pydantic 校验：环境变量带入未知键 → 启动失败。"""
+    _write_realtime(cfgtools, clean_env)
+    if not cfgtools.business_files():
+        pytest.xfail("T-B02（config/*.yaml 的 pydantic 模型）未实现：合并结果未校验（plan §6.1）")
+    monkeypatch.setenv("BUSINESS", '{"realtime": {"intervalz": {}}}')
+    with pytest.raises(ValueError):
+        backend.config.Settings()
 
 
 def test_mairui_env_ignored(backend, clean_env, monkeypatch, caplog):
@@ -92,19 +140,48 @@ def test_secrets_not_in_repr(backend, clean_env):
 
 
 # ---------------- config/*.yaml 加载 ----------------
-def test_yaml_dir_loading(backend, clean_env):
-    (clean_env / "a.yaml").write_text("schema_version: 1\nk: 1\n", encoding="utf-8")
-    (clean_env / "b.yml").write_text("", encoding="utf-8")
+def test_yaml_dir_loading(backend, cfgtools, clean_env):
+    """只读一层 *.yaml / *.yml；子目录（strategies/）与其他扩展名忽略。"""
     (clean_env / "note.txt").write_text("ignored", encoding="utf-8")
     sub = clean_env / "strategies"
     sub.mkdir()
     (sub / "s.yaml").write_text("x: 1\n", encoding="utf-8")
-    assert backend.config.Settings().business == {"a": {"schema_version": 1, "k": 1}, "b": {}}
+    names = cfgtools.business_files()
+    if not names:  # 旧后端：任意文件名都读入
+        (clean_env / "a.yaml").write_text("schema_version: 1\nk: 1\n", encoding="utf-8")
+        (clean_env / "b.yml").write_text("", encoding="utf-8")
+        assert backend.config.Settings().business == {"a": {"schema_version": 1, "k": 1}, "b": {}}
+        return
+    first = clean_env / f"{names[0]}.yaml"
+    first.rename(first.with_suffix(".yml"))  # .yml 同样识别
+    assert set(cfgtools.business_dict(backend.config.Settings())) == set(names)
 
 
-def test_missing_config_dir_is_empty(backend, clean_env, monkeypatch, tmp_path):
+def test_extra_yaml_file_rejected_plan_6_1(backend, cfgtools, clean_env):
+    """plan §6.1：config/ 顶层只允许约定文件，多余文件 → 启动失败。"""
+    (clean_env / "a.yaml").write_text("schema_version: 1\nk: 1\n", encoding="utf-8")
+    if not cfgtools.business_files():
+        pytest.xfail("T-B02（config/*.yaml 的 pydantic 模型）未实现：多余文件未被拒绝（plan §6.1）")
+    with pytest.raises(backend.config.ConfigError, match="多余"):
+        backend.config.Settings()
+
+
+def test_missing_yaml_file_rejected_plan_6_1(backend, cfgtools, clean_env):
+    names = cfgtools.business_files()
+    if not names:
+        pytest.xfail("T-B02（config/*.yaml 的 pydantic 模型）未实现：缺文件未被拒绝（plan §6.1）")
+    (clean_env / f"{names[-1]}.yaml").unlink()
+    with pytest.raises(backend.config.ConfigError, match="缺少"):
+        backend.config.Settings()
+
+
+def test_missing_config_dir(backend, cfgtools, clean_env, monkeypatch, tmp_path):
     monkeypatch.setenv("CONFIG_DIR", str(tmp_path / "nope"))
-    assert backend.config.Settings().business == {}
+    if not cfgtools.business_files():
+        assert backend.config.Settings().business == {}
+        return
+    with pytest.raises(backend.config.ConfigError, match="缺少"):
+        backend.config.Settings()
 
 
 @pytest.mark.parametrize(
@@ -130,14 +207,43 @@ def test_bad_yaml_error_has_no_content(backend, clean_env):
     assert "secret_marker_value" not in str(ei.value)
 
 
-def test_unknown_yaml_key_rejected_plan_6_1(backend, clean_env):
-    """plan v0.2 §6.1：未知键 → 启动失败（extra=forbid），每个文件必须 schema_version: 1。"""
-    (clean_env / "realtime.yaml").write_text("schema_version: 1\nintervalz: {}\n", encoding="utf-8")
+def test_unknown_yaml_key_rejected_plan_6_1(backend, cfgtools, clean_env):
+    """plan §6.1：未知键 → 启动失败（extra=forbid），每个文件必须 schema_version: 1。"""
+    _write_realtime(cfgtools, clean_env)
+    with (clean_env / "realtime.yaml").open("a", encoding="utf-8") as fh:
+        fh.write("intervalz: {}\n")
     try:
         backend.config.Settings()
     except (backend.config.ConfigError, ValueError):
         return
-    pytest.xfail("T-B02（config/*.yaml 的 pydantic 模型）未实现：未知键未被拒绝（plan v0.2 §6.1）")
+    pytest.xfail("T-B02（config/*.yaml 的 pydantic 模型）未实现：未知键未被拒绝（plan §6.1）")
+
+
+def test_sensitive_yaml_key_rejected(backend, cfgtools, clean_env):
+    """plan §6.1：yaml 只放非敏感参数；疑似敏感键名 → 启动失败，错误信息不回显取值。"""
+    _write_realtime(cfgtools, clean_env)
+    with (clean_env / "realtime.yaml").open("a", encoding="utf-8") as fh:
+        fh.write("licence: FAKE_NOT_A_REAL_VALUE\n")
+    try:
+        backend.config.Settings()
+    except (backend.config.ConfigError, ValueError) as exc:
+        assert "FAKE_NOT_A_REAL_VALUE" not in str(exc)
+        return
+    pytest.xfail("T-B02（config/*.yaml 的 pydantic 模型）未实现：敏感键未被拒绝（plan §6.1）")
+
+
+def test_llm_api_key_env_name_is_not_sensitive(backend, cfgtools, clean_env):
+    """plan v0.2.2 §6.1 llm.yaml 用 ``api_key_env`` 写**变量名**（不是值），不能被敏感键检查误杀。"""
+    if not cfgtools.business_files():
+        pytest.skip("旧后端无 plan §6.1 文件集校验（T-B02）")
+    src = (cfgtools.snapshot_dir / "llm.yaml").read_text(encoding="utf-8")
+    (clean_env / "llm.yaml").write_text(src, encoding="utf-8")
+    try:
+        cfgtools.business_dict(backend.config.Settings())
+    except (backend.config.ConfigError, ValueError) as exc:
+        msg = str(exc)
+        why = "敏感键检查把 api_key_env（变量名）当成密钥" if "敏感键" in msg else "不认识 llm.yaml（多余文件/无模型）"
+        pytest.xfail(f"后端 T-B25/T-B02：plan v0.2.2 的 llm.yaml 无法加载——{why}")
 
 
 # ---------------- 10. API 前缀 ----------------

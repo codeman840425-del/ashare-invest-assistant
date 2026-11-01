@@ -1,6 +1,6 @@
-"""``GET /meta/enums``：T-B01 报告 §6 建议 7 + 契约 v0.2 §3/§4/§6.1/§7.10/§9。
+"""``GET /meta/enums``：T-B01 报告 §6 建议 7 + 契约 v0.2.2 §3/§4/§6.1/§7.10/§9。
 
-- 与契约逐项比对的用例需要 v0.2 文档（``AIA_DOCS_DIR``），否则 skip；
+- 与契约逐项比对的用例需要 v0.2.2 文档（``AIA_DOCS_DIR``），否则 skip；
 - 后端尚未同步 v0.2 的差异（新增枚举、改名的取值/错误码、version、import_codes）在运行时
   算出差异后 ``pytest.xfail``，原因列出差异并写明“T-B01 v0.2 修订”；
 - 不依赖 v0.2 文档的行为（ETag/304/Cache-Control、命名规则、命名空间不重名）直接断言。
@@ -23,8 +23,10 @@ ENUM_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 #: 契约 §1：gate（G1–G7）与 reason_code 属于“码类取值”，用大写（reason_code 在 v0.2 中不应出现在 enums 里，
 #: 由 test_enum_names_and_values_match_contract 负责；这里只管命名）
 UPPER_CODE_ENUMS = {"gate", "reason_code"}
-IMPORT_CODES_JSON = Path(__file__).resolve().parents[1] / "unit" / "import_codes_v0_2.json"
+IMPORT_CODES_JSON = Path(__file__).resolve().parents[1] / "unit" / "import_codes.json"
 TODO = "T-B01 v0.2 修订未完成（契约 v0.2）"
+#: 本组测试对齐的契约版本（T-T01b）；/meta/enums.version 必须等于它
+CONTRACT_VERSION = "v0.2.2"
 
 
 # ---------------- 契约 markdown 解析 ----------------
@@ -82,7 +84,13 @@ def payload(client) -> dict[str, Any]:
     return resp.json()
 
 
-# ---------------- 解析器自检（文档 v0.2） ----------------
+# ---------------- 解析器自检（文档 v0.2.2） ----------------
+def test_contract_header_version(contract):
+    m = re.search(r"版本：\*\*(v[0-9.]+)\*\*", contract)
+    assert m and m.group(1) == CONTRACT_VERSION
+    assert contract.index("### v0.2.2") < contract.index("### v0.2.1")
+
+
 def test_contract_parsers_sanity(contract):
     enums = parse_enums(contract)
     assert "reason_code" in enums and len(enums) >= 50
@@ -93,7 +101,7 @@ def test_contract_parsers_sanity(contract):
     assert len(parse_reason_codes(contract)) == 23
 
 
-# ---------------- 逐项比对（文档 v0.2） ----------------
+# ---------------- 逐项比对（文档 v0.2.2） ----------------
 def _diff_or_xfail(diff: list[str], what: str) -> None:
     if diff:
         pytest.xfail(f"{TODO}：{what} 与契约不一致：" + "; ".join(diff[:12]) + (" …" if len(diff) > 12 else ""))
@@ -132,12 +140,15 @@ def test_error_codes_match_contract(payload, contract):
 def test_version_and_import_codes(payload):
     if "version" not in payload or "import_codes" not in payload:
         pytest.xfail(f"{TODO}：/meta/enums 缺 version / import_codes（契约 v0.2 §7.10）")
-    assert payload["version"] == "v0.2"
+    if payload["version"] != CONTRACT_VERSION and re.fullmatch(r"v0\.2(\.[01])?", payload["version"]):
+        pytest.xfail(f"后端 T-B01：app/schemas/enums.py 的 CONTRACT_VERSION 仍为 {payload['version']}，应改为 {CONTRACT_VERSION}")
+    assert payload["version"] == CONTRACT_VERSION
     want = {c["code"]: c for c in json.loads(IMPORT_CODES_JSON.read_text(encoding="utf-8"))["codes"]}
     got = {c["code"]: c for c in payload["import_codes"]}
     assert set(got) == set(want)
     for code, spec in want.items():
         assert (got[code]["severity"], got[code]["scope"]) == (spec["severity"], spec["scope"]), code
+        assert isinstance(got[code].get("needs_action"), bool), code  # 契约 §7.10 / ImportFinding
 
 
 # ---------------- 不依赖文档的规则 ----------------

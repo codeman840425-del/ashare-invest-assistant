@@ -1,6 +1,6 @@
-"""健康检查：契约 v0.2 §7.10 / §9 + T-B01 报告 §6 建议 6。
+"""健康检查：契约 v0.2.2 §7.10 / §9（与 v0.2 相同）+ T-B01 报告 §6 建议 6。
 
-v0.2 期望：
+期望：
 - ``GET /health/live`` → 200 ``{status:"ok"}``，不访问任何依赖；
 - ``GET /health/ready`` → ``{status, db, redis, ingest, checked_at, version}``；db 或 redis 为 error → 503 + ``down``；
   只有 ingest 非 ok → 200 + ``degraded``；``/health`` 为别名；响应不用错误外壳；
@@ -9,6 +9,7 @@ v0.2 期望：
 
 T-B01 现状只有 ``GET /health``（恒 200、心跳为纯数字、Redis 挂时 ingest=stale）。
 凡 v0.2 行为未实现的用例在**运行时检测**后 ``pytest.xfail``，原因写明“T-B01 v0.2 修订”。
+新后端（main a42bce7）用 ``ping`` + ``pipeline(transaction=False)`` 读 Redis，``FakeRedis`` 两种方式都支持。
 依赖探测一律打桩（``stub_health``）或用假的 Redis 客户端 / 本机关闭端口，不连真实服务。
 """
 
@@ -170,6 +171,9 @@ class FakeRedis:
         flat = keys[0] if len(keys) == 1 and isinstance(keys[0], list | tuple) else keys
         return [self.store.get(k) for k in flat]
 
+    def pipeline(self, transaction: bool = True) -> FakePipeline:
+        return FakePipeline(self)
+
     async def aclose(self) -> None:
         return None
 
@@ -183,10 +187,41 @@ class FakeRedis:
         return None
 
 
+class FakePipeline:
+    """redis.asyncio 管道的最小替身：exists/get 排队，execute 按顺序返回结果。"""
+
+    def __init__(self, redis: FakeRedis) -> None:
+        self.redis = redis
+        self.ops: list[tuple[str, tuple[Any, ...]]] = []
+
+    def exists(self, *keys: str) -> FakePipeline:
+        self.ops.append(("exists", keys))
+        return self
+
+    def get(self, key: str) -> FakePipeline:
+        self.ops.append(("get", (key,)))
+        return self
+
+    async def execute(self) -> list[Any]:
+        if self.redis.hang:
+            await asyncio.sleep(10)
+        if self.redis.down:
+            raise ConnectionError("fake redis down")
+        out = [await getattr(self.redis, op)(*args) for op, args in self.ops]
+        self.ops.clear()
+        return out
+
+    async def __aenter__(self) -> FakePipeline:
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        return None
+
+
 @pytest.fixture
 def with_fake_redis(backend, monkeypatch):
-    async def db_ok(settings: Any) -> str:
-        return "ok"
+    async def db_ok(settings: Any) -> Any:
+        return getattr(backend.health, "ComponentHealth", str)("ok")
 
     if hasattr(backend.health, "check_db"):
         monkeypatch.setattr(backend.health, "check_db", db_ok)

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml==6.0.3"]
+# ///
 """交割单夹具一致性检查（plan.md §7.4A 夹具豁免条件 1–5；§3.5A-2 CI 一致性检查 ①–③）。
 
 对 tests/fixtures/broker_statements/ 下每个夹具目录：

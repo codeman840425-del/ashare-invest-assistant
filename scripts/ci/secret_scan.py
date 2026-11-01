@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml==6.0.3"]
+# ///
 """密钥与敏感信息扫描 S1–S9（plan.md §7.4A；与 .gitleaks.toml 同一套规则，gitleaks 做不到的判定在这里做）。
 
 gitleaks 负责正则类规则与其默认规则集；本脚本负责全部 S1–S9，额外覆盖：
@@ -8,6 +12,10 @@ gitleaks 负责正则类规则与其默认规则集；本脚本负责全部 S1�
 输出只有 ``path:line:rule 掩码值``（保留前 2 个字符，其余为 *），任何 block 级命中退出码 1。
 
 用法：
+  依赖：pyyaml==6.0.3（固定版本；与上面 PEP 723 头、两个 workflow 的 PYYAML_VERSION、.pre-commit-config.yaml 一致，
+  scripts/ci/tests/test_deps_pinned.py 校验）。本地运行：uv run --script scripts/ci/secret_scan.py <模式>
+  （或 scripts/ci/secret_scan.sh <模式>）；CI：uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python …；
+  pre-commit：additional_dependencies。缺少 pyyaml 时启动即报错退出 2，不会扫到一半才失败。
   secret_scan.py tree                 # 当前检出的全部已跟踪文件（读磁盘）
   secret_scan.py commit REV           # 某个提交的完整文件树（读 git 对象，不受工作区改动影响）
   secret_scan.py staged               # 暂存区中新增/修改的文件（pre-commit）
@@ -42,6 +50,15 @@ import sys
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+
+try:
+    import yaml  # 唯一的第三方依赖，固定 pyyaml==6.0.3（见模块说明）
+except ModuleNotFoundError:  # pragma: no cover - 由 test_deps_pinned 在无 pyyaml 环境里验证
+    sys.stderr.write(
+        "secret_scan.py 需要 pyyaml==6.0.3：uv run --script scripts/ci/secret_scan.py …，"
+        "或 uv run --no-project --with pyyaml==6.0.3 python scripts/ci/secret_scan.py …\n"
+    )
+    raise SystemExit(2)
 
 BLOCK, WARN = "block", "warn"
 
@@ -167,7 +184,6 @@ def load_allow(path: Path | None, text: str | None = None) -> AllowList:
             al.errors.append(f"允许清单不存在：{path}")
             return al
         text = path.read_text(encoding="utf-8")
-    import yaml  # 只在这里需要第三方库
 
     data = yaml.safe_load(text) or {}
     for i, e in enumerate(data.get("entries") or []):

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml==6.0.3"]
+# ///
 """把 gitleaks JSON 报告转成 plan §7.4A 要求的输出：`路径:行号:规则号 掩码值`（保留前 2 个字符）。
 
 gitleaks 在 CI 中只写 JSON 报告到 $RUNNER_TEMP（不加 -v，不在日志打出命中值），再由本脚本掩码输出。

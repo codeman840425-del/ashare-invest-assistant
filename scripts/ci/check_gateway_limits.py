@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml==6.0.3"]
+# ///
 """网关请求体上限与应用上限的一致性（T-O03；契约 v0.2.3 #22、§4 413，plan 6.1 config/imports.yaml）。
 
 规则（以 plan 6.1 / 契约为准，7c62f59 架构师定夺）：

@@ -9,6 +9,12 @@
   只用于“同一证书不能绑两个账号”（部分唯一索引）。不对外返回，也不作为指纹显示。
   未配置 ``APP_MASTER_KEY``（只允许 local/test）时用进程内临时密钥（与分页游标同口径；重启后
   旧行的去重失效，仅开发环境）。
+- 冷却指纹（T-B03e，契约 v0.2.8 #13 补充）：
+  ``cooldown_fingerprint = HMAC-SHA256(K2, user_id || 0x00 || licence_hmac)``，
+  ``K2 = HKDF-SHA256(APP_MASTER_KEY, info="data-licence-cooldown-fp-v1")``。
+  api 拿不到明文（只有 ingest 能解封），DELETE 时只能从去重 HMAC 派生；PUT 时由明文先算去重 HMAC
+  再派生，两边一致。与去重 HMAC 不同值、绑定用户，只存在 ``app.user_data_licence_cooldowns``，
+  恢复、换证或到期后删除；不对外返回。
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ from app.licences import hpke
 HPKE_INFO: Final = b"aia/data-licence/v1"
 AAD_PREFIX: Final = "mairui-licence|v1|"
 DEDUP_INFO: Final = b"data-licence-dedup-v1"
+COOLDOWN_FP_INFO: Final = b"data-licence-cooldown-fp-v1"
 #: 进程内临时去重密钥：仅 local/test 且未设置 APP_MASTER_KEY 时使用
 _EPHEMERAL_DEDUP_KEY: Final = secrets.token_bytes(32)
 
@@ -66,12 +73,26 @@ def open_licence(
     return raw.decode("utf-8")
 
 
+def _derive(settings: Settings, info: bytes) -> bytes:
+    if settings.app_master_key is None:
+        return hmac.new(_EPHEMERAL_DEDUP_KEY, info, hashlib.sha256).digest()
+    master = settings.app_master_key.get_secret_value().encode("utf-8")
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=info).derive(master)
+
+
 def dedup_key(settings: Settings) -> bytes:
     if settings.app_master_key is None:
         return _EPHEMERAL_DEDUP_KEY
-    master = settings.app_master_key.get_secret_value().encode("utf-8")
-    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=DEDUP_INFO).derive(master)
+    return _derive(settings, DEDUP_INFO)
 
 
 def licence_hmac(settings: Settings, licence: str) -> bytes:
     return hmac.new(dedup_key(settings), licence.encode("utf-8"), hashlib.sha256).digest()
+
+
+def cooldown_fingerprint(settings: Settings, user_id: uuid.UUID, dedup_digest: bytes) -> bytes:
+    """删除后重提的冷却判定用指纹（带密钥、绑定用户；不存明文，也不等于去重 HMAC）。
+
+    ``dedup_digest`` 是 :func:`licence_hmac` 的结果（DELETE 时取自证书行，PUT 时由明文算出）。"""
+    msg = str(user_id).encode("ascii") + b"\x00" + dedup_digest
+    return hmac.new(_derive(settings, COOLDOWN_FP_INFO), msg, hashlib.sha256).digest()

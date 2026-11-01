@@ -220,6 +220,7 @@ STEPS: Final[tuple[Step, ...]] = (
     _d("app.entitlement_overrides"),
     _d("app.user_subscriptions"),
     _d("app.user_data_licence_holds"),
+    _d("app.user_data_licence_cooldowns"),
     # 证书行（含密文）放在 market 删除之后，见 run_purge
     # 其他行里指向该用户的引用（行本身不是该用户的数据）
     _u("app.users", "reviewed_by", "reviewed_by = :uid AND id <> :uid"),
@@ -287,7 +288,7 @@ HANDLED_FK: Final[frozenset[str]] = frozenset(
                 "app.action_plans", "app.plan_draft_confirmations", "app.reviews", "app.trades",
                 "app.alert_rules", "app.risk_events", "app.suggestion_user_actions",
                 "app.alerts", "app.user_data_licences", "ops.data_licence_events",
-                "app.user_data_licence_holds",
+                "app.user_data_licence_holds", "app.user_data_licence_cooldowns",
             )
         ),
         "app.users.reviewed_by", "app.account_reviews.admin_id", "app.invite_codes.created_by",

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime as dt
 import functools
+import hmac
 import logging
 import uuid
 from collections.abc import Mapping
@@ -35,6 +36,7 @@ from app.common.errors import AppError, ErrorCode
 from app.config import Settings
 from app.db.tables.licences import (
     data_licence_events,
+    user_data_licence_cooldowns,
     user_data_licence_holds,
     user_data_licence_status,
 )
@@ -42,7 +44,7 @@ from app.db.tables.licences import user_data_licences as udl
 from app.db.tables.ops import ingest_request_log
 from app.db.tables.users import users
 from app.licences.keys import parse_public_keys
-from app.licences.seal import licence_hmac, seal_licence
+from app.licences.seal import cooldown_fingerprint, licence_hmac, seal_licence
 from app.schemas.enums import DataLicenceStatus, DataLicenceTier
 
 logger = logging.getLogger(__name__)
@@ -230,6 +232,54 @@ def hmac_in_use_by_other(conn: Connection, user_id: uuid.UUID, digest: bytes) ->
     )
 
 
+#: 删除时可保留的冷却状态（``paused_by_admin`` 由用户级暂停记录负责，不在此列）
+_COOLDOWN_KEEP: Final = frozenset({S.ACTIVE.value, *COOLDOWN_STATUSES})
+
+
+def _remember_cooldown(
+    conn: Connection, settings: Settings, row: Row[Any], digest: bytes, now: dt.datetime
+) -> bool:
+    """T-B03e（契约 v0.2.8 #13 补充）：冷却中 DELETE → 记下指纹与删除前状态（覆盖旧记录）；
+    否则清除该用户的旧记录。返回是否记下。"""
+    cd = user_data_licence_cooldowns
+    conn.execute(delete(cd).where(cd.c.user_id == row.user_id))
+    if row.status not in _COOLDOWN_KEEP or not keeps_state(row, now):
+        return False
+    conn.execute(
+        insert(cd).values(
+            user_id=row.user_id,
+            fingerprint=cooldown_fingerprint(settings, row.user_id, digest),
+            status=row.status,
+            paused_until=row.paused_until,
+            last_error_code=row.last_error_code,
+            last_error_at=row.last_error_at,
+            consecutive_failures=row.consecutive_failures,
+            deleted_at=now,
+        )
+    )
+    return True
+
+
+def _take_cooldown(
+    conn: Connection, settings: Settings, user_id: uuid.UUID, digest: bytes, now: dt.datetime
+) -> Row[Any] | None:
+    """取出并删除该用户的冷却记录；指纹相同且未到期时返回它（``paused_until`` 为空的
+    quota_exceeded/ip_limited 与证书行上的语义一致：不按时间到期，直到换证）。"""
+    cd = user_data_licence_cooldowns
+    rec = conn.execute(delete(cd).where(cd.c.user_id == user_id).returning(*cd.c)).first()
+    if rec is None:
+        return None
+    fp = cooldown_fingerprint(settings, user_id, digest)
+    if not hmac.compare_digest(bytes(rec.fingerprint), fp):
+        return None
+    until: dt.datetime | None = rec.paused_until
+    if until is not None and until <= now:
+        return None
+    if until is None and rec.status not in COOLDOWN_STATUSES:
+        return None
+    return rec
+
+
 def set_licence(
     conn: Connection,
     settings: Settings,
@@ -266,9 +316,20 @@ def set_licence(
         kept = live_row(conn, user_id)
         assert kept is not None  # noqa: S101
         return SetResult(row=kept, verification_id=None)
+    # 冷却中 DELETE 后、到期前 PUT 同一证书（T-B03e，#13 补充）→ 恢复删除前的状态与 paused_until，
+    # 不验证。记录总是取出删除：换证、到期或不匹配都作废（与证书行“换证即清除”一致）
+    restored = _take_cooldown(conn, settings, user_id, digest, now) if old is None else None
+    if old is not None:
+        conn.execute(
+            delete(user_data_licence_cooldowns).where(
+                user_data_licence_cooldowns.c.user_id == user_id
+            )
+        )
     # 新证书（或同一证书但无须保留状态）：换新行。暂停按用户记录（#12），新行仍为
     # paused_by_admin、不验证；DELETE 后再 PUT 同样如此
     status_value = S.PAUSED_BY_ADMIN.value if held else S.PENDING_VERIFICATION.value
+    if restored is not None and not held:
+        status_value = str(restored.status)
     verify = status_value == S.PENDING_VERIFICATION.value
     if old is not None:
         conn.execute(
@@ -293,6 +354,13 @@ def set_licence(
         "created_at": now,
         "updated_at": now,
     }
+    if restored is not None:
+        values.update(
+            paused_until=restored.paused_until,
+            last_error_code=restored.last_error_code,
+            last_error_at=restored.last_error_at,
+            consecutive_failures=restored.consecutive_failures,
+        )
     conn.execute(insert(udl).values(**values))
     if old is not None:
         record_event(
@@ -336,12 +404,23 @@ def patch_licence(conn: Connection, *, user_id: uuid.UUID, changes: Mapping[str,
     return row
 
 
-def delete_licence(conn: Connection, *, user_id: uuid.UUID, actor: str = "user") -> bool:
-    """软删除并清除密文；未设置时返回 ``False``（路由仍 204，幂等）。"""
+def delete_licence(
+    conn: Connection,
+    *,
+    user_id: uuid.UUID,
+    actor: str = "user",
+    settings: Settings | None = None,
+) -> bool:
+    """软删除并清除密文；未设置时返回 ``False``（路由仍 204，幂等）。
+
+    给了 ``settings`` 时（用户 DELETE），冷却中删除会记下指纹与删除前状态（T-B03e）。"""
     old = live_row(conn, user_id, lock=True)
     if old is None:
         return False
     now = now_utc()
+    if settings is not None:
+        digest = conn.execute(select(udl.c.licence_hmac).where(udl.c.id == old.id)).scalar_one()
+        _remember_cooldown(conn, settings, old, bytes(digest), now)
     conn.execute(
         update(udl)
         .where(udl.c.id == old.id)

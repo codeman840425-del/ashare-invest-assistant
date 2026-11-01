@@ -170,9 +170,9 @@ def patch_licence(
 
 
 @router.delete("/me/data-licence", status_code=204)
-def delete_licence(auth: AuthDep, engine: EngineDep) -> Response:
+def delete_licence(auth: AuthDep, settings: SettingsDep, engine: EngineDep) -> Response:
     with engine.begin() as conn:
-        service.delete_licence(conn, user_id=auth.user_id)
+        service.delete_licence(conn, user_id=auth.user_id, settings=settings)
     return Response(status_code=204)
 
 
@@ -306,10 +306,20 @@ def _admin_transition(
     暂停按用户记录（``app.user_data_licence_holds``，review M1）：pause 要求已设置证书
     （否则 409 NOT_SET，契约不变）；resume 先删暂停记录，用户已 DELETE 证书时只解除暂停
     （204，``licence_id`` 为 None），否则把 ``paused_by_admin`` 行转 ``pending_verification``。
+
+    重复暂停幂等（契约 v0.2.8 #17⑤，T-B03e）：已处于管理员暂停（有暂停记录，或证书行已是
+    ``paused_by_admin``）时再次 pause → 204，不论证书是否已删除；状态不变，**不写审计、不写事件**。
+    只缺暂停记录的旧数据（0010 之前）顺手补上记录（状态本来就是暂停，不算变化）。
     """
     verification_id: uuid.UUID | None = None
     with engine.begin() as conn:
         row = service.live_row(conn, user_id, lock=True)
+        if pause:
+            held = service.is_held(conn, user_id)
+            if held or (row is not None and row.status == S.PAUSED_BY_ADMIN):
+                if not held:
+                    service.hold(conn, user_id)
+                return (None if row is None else row.id), None
         released = False if pause else service.release_hold(conn, user_id)
         if row is None:
             if not released:

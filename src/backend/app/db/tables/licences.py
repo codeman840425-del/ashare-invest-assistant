@@ -122,6 +122,30 @@ user_data_licence_holds = Table(
     schema=APP,
 )
 
+#: T-B03e（契约 v0.2.8 #13 补充，T-B04a-x）：冷却中
+#: （quota_exceeded / ip_limited / paused_until 未到期）DELETE 证书时，保留删除前的冷却状态
+#: 与带密钥的证书指纹（不是明文、也不是去重 HMAC）；到期前 PUT 同一证书 → 恢复。
+#: 每用户最多一行；恢复、换证或到期后删除。迁移 0012。
+user_data_licence_cooldowns = Table(
+    "user_data_licence_cooldowns",
+    metadata,
+    uuid_col("user_id", nullable=False, fk="app.users.id", primary_key=True),
+    Column("fingerprint", BYTEA, nullable=False, comment="HMAC(K_cooldown, user_id||licence)"),
+    txt("status", nullable=False),
+    ts("paused_until"),
+    txt("last_error_code"),
+    ts("last_error_at"),
+    integer("consecutive_failures", nullable=False, server_default=text("0")),
+    ts("deleted_at", nullable=False, default_now=True),
+    one_of("status", ("active", "quota_exceeded", "ip_limited")),
+    one_of("last_error_code", DATA_LICENCE_ERROR_CODES),
+    CheckConstraint("octet_length(fingerprint) = 32", name="fingerprint_len"),
+    CheckConstraint(
+        "status <> 'active' OR paused_until IS NOT NULL", name="active_needs_paused_until"
+    ),
+    schema=APP,
+)
+
 data_licence_events = Table(
     "data_licence_events",
     metadata,

@@ -1,12 +1,12 @@
 import { Button, Result, Tabs, Tag, Tooltip } from 'antd';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ApiError } from '../../api/client';
 import { ENUMS } from '../../api/enums';
 import { CODE_RE, useBarsOf, useQuote, useSecurityProfile } from '../../api/marketQueries';
 import type { Board, SecurityProfile } from '../../api/marketTypes';
 import { useHorizonAssessment } from '../../api/queries';
-import type { Bar, QuoteItem } from '../../api/types';
-import { DataStatusTag, ErrorBox, Loading } from '../../components/common';
+import type { Bar, BarsResponse, QuoteItem } from '../../api/types';
+import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../components/common';
 import { CAP_KIND_TEXT, capExplanation } from '../../i18n/horizonCaps';
 import { HORIZON } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
@@ -19,10 +19,15 @@ type TabKey = (typeof TABS)[number];
 
 /** /stocks/:code 个股档案（plan §2.4）：行情头 + 深色分时/日K/周K + 周期分类 + 财务/资金/因子/公告外链 */
 export function StockPage() {
-  const { code = '' } = useParams();
+  const { code: raw = '' } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
+  // 评审 T-F22a m13：先去空格、转大写再校验；合法但写法不规范时改写为规范 URL
+  const code = raw.trim().toUpperCase();
   const valid = CODE_RE.test(code);
-  const profile = useSecurityProfile(code);
+  const profile = useSecurityProfile(valid && code === raw ? code : undefined);
+
+  if (valid && code !== raw) return <Navigate to={`/stocks/${encodeURIComponent(code)}${location.search}`} replace />;
 
   if (!valid) {
     return (
@@ -82,14 +87,29 @@ function todayBar(bars: Bar[] | undefined, q: QuoteItem | null | undefined) {
   return last && q && last.t.slice(0, 10) === q.t.slice(0, 10) ? last : null;
 }
 
+/** 1m 响应顶层 pre_close（契约 v0.2.6 Bar 响应）；只在与行情同一交易日时使用 */
+function intradayPreClose(res: BarsResponse | undefined, q: QuoteItem | null | undefined) {
+  if (!res?.pre_close || !q) return null;
+  const day = (res.items[0]?.t ?? res.data_as_of).slice(0, 10);
+  return day === q.t.slice(0, 10) ? res.pre_close : null;
+}
+
+/**
+ * 市值 = 价格 × 股本。评审 T-F22a m19：A 股价格 < 1e5、股本 < 1e12，乘积 < 1e17，
+ * 双精度相对误差约 1e-16，展示只保留到 0.01 亿（1e6 元），浮点误差远小于展示精度，因此保留 Number 乘法。
+ */
+const capOf = (price: string, shares: number) => Number(price) * shares;
+
 function StockHeader({ profile }: { profile: SecurityProfile }) {
   const code = profile.security_code;
   const quote = useQuote(code);
   const daily = useBarsOf(code, 'd', 250);
+  // 评审 T-F22a m12：日 K 还没有当日 bar 时，用 1m 响应的 pre_close 作昨收（与分时图共用缓存）
+  const intraday = useBarsOf(code, '1m', 240);
   const q = quote.data;
   const tb = todayBar(daily.data?.items, q);
   const suspended = profile.status === 'suspended';
-  const preClose = tb?.pre_close ?? (suspended && q ? q.price : null);
+  const preClose = tb?.pre_close ?? intradayPreClose(intraday.data, q) ?? (suspended && q ? q.price : null);
   const float = profile.float_shares ? Number(profile.float_shares) : null;
   const stats: [string, React.ReactNode][] = [
     ['今开', tb ? <span className={pctClass(preClose ? Number(tb.open) - Number(preClose) : 0)}>{tb.open}</span> : '—'],
@@ -99,8 +119,8 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
     ['成交量', q ? `${fmtAmount(Number(q.volume) / 100)}手` : '—'],
     ['成交额', q ? fmtAmount(q.amount) : '—'],
     ['换手率', q && float ? `${fmtNum((Number(q.volume) / float) * 100)}%` : '—'],
-    ['总市值', q && profile.total_shares ? fmtAmount(Number(q.price) * Number(profile.total_shares)) : '—'],
-    ['流通市值', q && float ? fmtAmount(Number(q.price) * float) : '—'],
+    ['总市值', q && profile.total_shares ? fmtAmount(capOf(q.price, Number(profile.total_shares))) : '—'],
+    ['流通市值', q && float ? fmtAmount(capOf(q.price, float)) : '—'],
   ];
   return (
     <header className="stock-head" data-testid="stock-head">
@@ -122,6 +142,7 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
           <DataStatusTag status={q.data_status} asOf={q.data_as_of} gaps={q.gaps} />
         </div>
       ) : <span className="muted">无行情缓存</span>}
+      {q ? <GapNote status={q.data_status} gaps={q.gaps} asOf={q.data_as_of} testId="quote-gap-note" /> : null}
       <div className="sh-stats">
         {stats.map(([k, v]) => (
           <div key={k}>
@@ -186,15 +207,12 @@ function HorizonPanel({ code }: { code: string }) {
                 <span className="track"><span className="fill" style={{ width: `${score}%` }} /></span>
                 <span className="mono hz-score">{score}</span>
                 {ok ? <Tag color="blue" variant="outlined">适合</Tag> : <span className="hz-tag-gap" />}
+                {/* 评审 T-F22a m10：封顶/提示可 Tab 聚焦、Enter/Space 打开，读屏读到全文 */}
                 {caps.length ? (
-                  <Tooltip title={caps.map((c) => `封顶 ${c.cap}（${CAP_KIND_TEXT[c.kind]}）：${capExplanation(c)}`).join('；')}>
-                    <span className="warn small" data-testid={`cap-${h}`}>封顶</span>
-                  </Tooltip>
+                  <KeyTip lines={caps.map((c) => `封顶 ${c.cap}（${CAP_KIND_TEXT[c.kind]}）：${capExplanation(c)}`)} className="warn small" testId={`cap-${h}`}>封顶</KeyTip>
                 ) : null}
                 {hints.length ? (
-                  <Tooltip title={hints.map((x) => x.text).join('；')}>
-                    <span className="muted small" data-testid={`hint-${h}`}>提示</span>
-                  </Tooltip>
+                  <KeyTip lines={hints.map((x) => x.text)} className="muted small" testId={`hint-${h}`}>提示</KeyTip>
                 ) : null}
               </div>
             );

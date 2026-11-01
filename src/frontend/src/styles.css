@@ -373,3 +373,9 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .today-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
 .today-list li:last-child { border-bottom: none; }
 .today-sg { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+
+/* T-F22a M2：数据状态可键盘查看；隐藏说明供读屏 */
+.focusable { cursor: help; border-radius: 3px; }
+.focusable:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.chart-empty .gap-note { padding: 0; max-width: 80%; text-align: center; }

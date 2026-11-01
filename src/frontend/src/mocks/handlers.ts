@@ -9,6 +9,10 @@ import { accountHandlers } from './accountHandlers';
 import { resetStrategies, strategyHandlers } from './strategyHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
 import { currentUser, resetSession } from './session';
+import { licenceState } from './licenceStore';
+import { LICENCE_UNAVAILABLE } from '../i18n/licenceLabels';
+import type { DataStatus } from '../api/enums';
+import type { Gap } from '../api/types';
 import {
   ACCOUNT_ID, CANDIDATE_SIGNALS, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOTIFICATIONS, NOW, PORTFOLIO, QUOTES, REASONS,
   SIGNAL_EVENTS, SUGGESTIONS, SUGGESTION_LIST, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, WATCHLIST, dailyBars, intradayBars,
@@ -34,6 +38,23 @@ export function resetMockState() {
 const lag = () => (typeof window !== 'undefined' && import.meta.env.MODE !== 'test' ? delay(80) : Promise.resolve());
 
 const LEVEL: Record<string, number> = { info: 1, warning: 2, critical: 3 };
+
+/**
+ * 契约 v0.2.6：用户数据证书不可用时，行情读取接口仍返回缓存，但 data_status 为 stale / unavailable，
+ * gaps 带 reason=data_licence_unavailable（评审 T-F22a M2）。用 setMockLicence(uid, {status:'expired'}) 等切换。
+ */
+function licenceOut(): boolean {
+  const u = currentUser();
+  return !!u && LICENCE_UNAVAILABLE.includes(licenceState(u.id));
+}
+const licenceGap = (key: string): Gap => ({ key, reason: 'data_licence_unavailable', message: '你的数据证书不可用，展示的是缓存数据（示例）' });
+type Block = { data_status: DataStatus; gaps: Gap[] };
+/** stale：保留缓存内容；unavailable：清空列表（没有可用缓存） */
+function degrade<T extends Block>(body: T, key: string, mode: 'stale' | 'unavailable' = 'stale'): T {
+  if (!licenceOut()) return body;
+  const out = { ...body, data_status: mode, gaps: [...body.gaps, licenceGap(key)] };
+  return mode === 'unavailable' && 'items' in out ? { ...out, items: [] } : out;
+}
 
 /** v0.2.3 #12：/today 首页聚合 mock（契约 §7.3；每个列表 ≤ 50，more 表示是否截断） */
 function todayBody(): TodayResponse {
@@ -82,7 +103,7 @@ const routeHandlers = [
     await lag();
     return jsonWithEtag(request, todayBody());
   }),
-  http.get(`${API}/market/overview`, () => HttpResponse.json(MARKET_OVERVIEW)),
+  http.get(`${API}/market/overview`, () => HttpResponse.json(degrade(MARKET_OVERVIEW, 'market.overview'))),
   http.get(`${API}/watchlist`, () => HttpResponse.json(WATCHLIST)),
   http.get(`${API}/horizon-assessments`, async ({ request }) => {
     await lag();
@@ -101,12 +122,15 @@ const routeHandlers = [
   http.get(`${API}/quotes`, ({ request }) => {
     const codes = (new URL(request.url).searchParams.get('codes') ?? '').split(',').filter(Boolean);
     if (codes.length > 200) return validation('codes', 'codes 最多 200 个');
-    return HttpResponse.json({ items: codes.length ? QUOTES.filter((q) => codes.includes(q.security_code)) : QUOTES });
+    const items = codes.length ? QUOTES.filter((q) => codes.includes(q.security_code)) : QUOTES;
+    return HttpResponse.json({ items: items.map((q) => degrade(q, `quote.${q.security_code}`)) });
   }),
   http.get(`${API}/securities/:code/bars`, async ({ params, request }) => {
     await lag();
     const url = new URL(request.url);
-    const freq = url.searchParams.get('freq') ?? 'd';
+    // 评审 T-F22a m16：契约规定 freq 必填
+    const freq = url.searchParams.get('freq');
+    if (!freq) return validation('freq', 'freq 必填');
     const adjust = url.searchParams.get('adjust') ?? (freq === '1m' ? 'none' : 'qfq');
     if (!['1m', 'd', 'w'].includes(freq)) return validation('freq', 'freq 取值为 1m|d|w');
     if (freq === '1m' && adjust !== 'none') return validation('adjust', '1m 只支持 adjust=none');
@@ -115,8 +139,15 @@ const routeHandlers = [
     const day = dailyBars(code) ?? indexBars(code, 'd');
     const res = freq === '1m' ? intradayBars(code) ?? indexBars(code, '1m') : freq === 'w' ? day && toWeekly(day) : day;
     if (!res) return notFound('证券');
-    const limit = Number(url.searchParams.get('limit') ?? 0);
-    return HttpResponse.json(limit > 0 ? { ...res, items: res.items.slice(-limit) } : res);
+    // 契约：before + limit 向前翻页，limit 默认 500、最大 2000；截取后 next_before 指向更早一页
+    const limit = Number(url.searchParams.get('limit') ?? 500);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 2000) return validation('limit', 'limit 取值 1–2000');
+    const before = url.searchParams.get('before');
+    const pool = before ? res.items.filter((b) => b.t < before) : res.items;
+    const items = pool.slice(-limit);
+    const body = { ...res, items, next_before: pool.length > items.length ? items[0].t : null };
+    // 证书不可用：分时没有可用缓存 → unavailable；日/周保留缓存 → stale
+    return HttpResponse.json(degrade(body, `bars.${code}.${freq}`, freq === '1m' ? 'unavailable' : 'stale'));
   }),
 
   // ---- T-F03 个股档案 / 市场概览 ----
@@ -131,36 +162,36 @@ const routeHandlers = [
   http.get(`${API}/securities/:code`, async ({ params }) => {
     await lag();
     const p = securityProfile(String(params.code));
-    return p ? HttpResponse.json(p) : notFound('证券');
+    return p ? HttpResponse.json(degrade(p, `profile.${p.security_code}`)) : notFound('证券');
   }),
   http.get(`${API}/securities/:code/financials`, async ({ params }) => {
     await lag();
     const f = financials(String(params.code));
-    return f ? HttpResponse.json(f) : notFound('证券');
+    return f ? HttpResponse.json(degrade(f, 'financials')) : notFound('证券');
   }),
   http.get(`${API}/securities/:code/fund-flows`, async ({ params, request }) => {
     await lag();
     const days = Number(new URL(request.url).searchParams.get('days') ?? 60) || 60;
     const f = fundFlows(String(params.code), days);
-    return f ? HttpResponse.json(f) : notFound('证券');
+    return f ? HttpResponse.json(degrade(f, 'fund_flows')) : notFound('证券');
   }),
   http.get(`${API}/securities/:code/factors`, async ({ params }) => {
     await lag();
     const f = factors(String(params.code));
-    return f ? HttpResponse.json(f) : notFound('证券');
+    return f ? HttpResponse.json(degrade(f, 'factors')) : notFound('证券');
   }),
   http.get(`${API}/securities/:code/announcements`, async ({ params, request }) => {
     await lag();
     const list = announcements(String(params.code));
     if (!list) return notFound('证券');
-    return HttpResponse.json({ ...page(list, new URL(request.url)), data_status: 'fresh', data_as_of: '2026-11-01T21:00:00+08:00', gaps: [] });
+    return HttpResponse.json(degrade({ ...page(list, new URL(request.url)), data_status: 'fresh' as DataStatus, data_as_of: '2026-11-01T21:00:00+08:00', gaps: [] as Gap[] }, 'announcements'));
   }),
   http.get(`${API}/market/sector-flows`, async ({ request }) => {
     await lag();
     const url = new URL(request.url);
     const kind = (url.searchParams.get('kind') ?? 'industry') as SectorKind;
     if (!['industry', 'concept'].includes(kind)) return validation('kind', 'kind 取值为 industry|concept');
-    return HttpResponse.json(sectorFlows(kind, Number(url.searchParams.get('limit') ?? 20) || 20));
+    return HttpResponse.json(degrade(sectorFlows(kind, Number(url.searchParams.get('limit') ?? 20) || 20), `sector_flows.${kind}`, 'unavailable'));
   }),
 
   http.get(`${API}/suggestions`, ({ request }) => {

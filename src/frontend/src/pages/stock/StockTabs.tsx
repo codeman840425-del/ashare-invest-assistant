@@ -2,7 +2,7 @@ import { Alert, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useAnnouncements, useFactors, useFinancials, useFundFlows } from '../../api/marketQueries';
 import type { Announcement, FactorGroup, FactorValue, FinancialPeriod, FundFlowDay } from '../../api/marketTypes';
-import { DataStatusTag, ErrorBox, Loading } from '../../components/common';
+import { DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/common';
 import { ExternalLink } from '../../components/ExternalLink';
 import { FundFlowChart } from '../../components/charts/FundFlowChart';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
@@ -68,6 +68,7 @@ export function FinancialsTab({ code }: { code: string }) {
       <TabHead status={<DataStatusTag status={d.data_status} asOf={d.data_as_of} gaps={d.gaps} />}>
         累计口径（年初至报告期末），金额单位元并简写为万/亿；数据在公告日之后才进入计算
       </TabHead>
+      <GapNote status={d.data_status} gaps={d.gaps} asOf={d.data_as_of} />
       {d.items.length === 0 ? <div className="loading-box">暂无财务数据</div> : (
         <Table className="dense-table fin-table" size="small" rowKey="key" pagination={false} columns={cols} dataSource={FIN_ROWS} scroll={{ x: 'max-content' }} />
       )}
@@ -99,7 +100,7 @@ export function FundFlowTab({ code }: { code: string }) {
       <TabHead status={<DataStatusTag status={d.data_status} asOf={d.data_as_of} gaps={d.gaps} />}>
         主力 = 超大单 + 大单；分档阈值以数据源口径为准
       </TabHead>
-      {d.gaps.length ? <div className="gap-note small">{d.gaps.map((g) => g.message).join('；')}</div> : null}
+      <GapNote status={d.data_status} gaps={d.gaps} asOf={d.data_as_of} />
       <div className="flow-stats">
         {[['近 5 日主力净流入', 5], ['近 20 日', 20], ['近 60 日', 60]].map(([label, n]) => {
           const v = sum(d.items.slice(-Number(n)));
@@ -152,6 +153,7 @@ export function FactorsTab({ code }: { code: string }) {
       <TabHead status={<DataStatusTag status={d.data_status} asOf={d.data_as_of} gaps={d.gaps} />}>
         截面日 {d.trade_date} · 计算版本 {d.calc_version} · 分位 0–100 只表示在截面中的相对位置，不代表方向判断（如 PE 分位高 = 估值相对高）
       </TabHead>
+      <GapNote status={d.data_status} gaps={d.gaps} asOf={d.data_as_of} />
       <Table className="dense-table static" size="small" rowKey="factor_id" pagination={false} columns={cols} dataSource={d.items} />
     </div>
   );
@@ -174,6 +176,7 @@ export function AnnouncementsTab({ code }: { code: string }) {
           <TabHead status={<DataStatusTag status={q.data.data_status} asOf={q.data.data_as_of} gaps={q.data.gaps} />}>
             最近 {q.data.items.length} 条{q.data.next_cursor ? '（更早的请到交易所/巨潮查询）' : ''}
           </TabHead>
+          <GapNote status={q.data.data_status} gaps={q.data.gaps} asOf={q.data.data_as_of} />
           <Table className="dense-table static" size="small" rowKey="id" pagination={false} columns={cols} dataSource={q.data.items} />
         </>
       )}

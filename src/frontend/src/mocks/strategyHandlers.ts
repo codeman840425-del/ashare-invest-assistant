@@ -41,6 +41,11 @@ export function resetStrategies() {
 }
 resetStrategies();
 
+/** 测试辅助：插入一个示例实例（如 proposed），resetMockState 时清除 */
+export function mockAddInstance(x: StrategyInstance) {
+  instances.push(x);
+}
+
 const fail = (status: number, code: string, message: string, details: Record<string, unknown> | null = null) => json(errorBody(code, message, details), status);
 
 export const strategyHandlers = [
@@ -57,8 +62,11 @@ export const strategyHandlers = [
     if (!b.horizon || !(ENUMS.horizon as readonly string[]).includes(b.horizon)) {
       return fail(400, 'VALIDATION_ERROR', '参数校验失败', { fields: [{ field: 'horizon', issue: '取值不合法' }] });
     }
-    if (!t.horizons.includes(b.horizon)) return fail(422, 'STRATEGY_HORIZON_MISMATCH', '模板不适用于该周期', { horizons: t.horizons });
-    if (t.current_version.lifecycle === 'retired') return fail(422, 'STRATEGY_VERSION_NOT_RUNNABLE', '该版本已退役');
+    // 契约 §4：409 {lifecycle}，只有 published / observing 可运行（评审 T-F22a m8）
+    if (!['published', 'observing'].includes(t.current_version.lifecycle)) {
+      return fail(409, 'STRATEGY_VERSION_NOT_RUNNABLE', '该版本暂不可运行（示例）', { lifecycle: t.current_version.lifecycle });
+    }
+    if (!t.horizons.includes(b.horizon)) return fail(422, 'STRATEGY_HORIZON_MISMATCH', '模板不适用于该周期', { strategy_key: t.key, horizons: t.horizons });
     // 请求里即便带了旧的确认字段（如 fit_ack）也忽略；高风险模板同样直接 201
     const warnings: string[] = [];
     const pref = state.profiles.get(currentUser()!.id)?.horizon_pref ?? [];

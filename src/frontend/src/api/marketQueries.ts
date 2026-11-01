@@ -43,12 +43,14 @@ export const useQuote = (code: string | undefined) =>
   });
 
 /** 契约 §7.3 /securities/{code}/bars；日/周默认前复权，1m 只能不复权 */
-export const useBarsOf = (code: string | undefined, freq: BarFreq, limit: number) => {
+export const useBarsOf = (code: string | undefined, freq: BarFreq, limit: number, opts: { keepPrevious?: boolean } = {}) => {
   const adjust: BarAdjust = freq === '1m' ? 'none' : 'qfq';
   return useQuery({
     queryKey: mk.bars(code ?? '', freq, adjust, limit),
     queryFn: ({ signal }) => apiGet<BarsResponse>(`/securities/${enc(code!)}/bars`, { freq, adjust, limit }, signal),
     enabled: opt(code),
+    // 评审 T-F22a m17：同一证券切换周期时保留旧图；换证券时不沿用（key 第二段是证券代码）
+    placeholderData: opts.keepPrevious ? (prev, prevQuery) => (prevQuery?.queryKey[1] === code ? prev : undefined) : undefined,
     refetchInterval: freq === '1m' ? 60_000 : false,
   });
 };
@@ -104,10 +106,13 @@ export const useSectorFlows = (kind: SectorKind) =>
   });
 
 /** 契约 §7.3 /securities?q=（不分页，最多 20 条） */
-export const useSecuritySearch = (q: string) =>
-  useQuery({
+export const useSecuritySearch = (raw: string) => {
+  // 评审 T-F22a m13：queryKey 与请求参数都用去空格后的 q
+  const q = raw.trim();
+  return useQuery({
     queryKey: mk.search(q),
     queryFn: ({ signal }) => apiGet<SecurityHit[]>('/securities', { q }, signal),
-    enabled: q.trim().length > 0,
+    enabled: q.length > 0,
     staleTime: 60_000,
   });
+};

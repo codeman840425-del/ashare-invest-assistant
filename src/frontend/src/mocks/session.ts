@@ -10,7 +10,7 @@ import type {
 import type { Me } from '../api/types';
 import { IMPORT_CODE_MAP, renderTemplate } from '../api/importCodes';
 import { ACCOUNT_ID, NOW, uid } from './fixtures';
-import { licenceState, resetLicences } from './licence';
+import { licenceState, resetLicences } from './licenceStore';
 
 export interface MockUser {
   id: string;

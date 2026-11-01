@@ -1,6 +1,5 @@
 // T-F08 截图：build:mock 后 vite preview（只连 127.0.0.1），Playwright 1440×900 深色；/api/v1 由页内 MSW 返回示例数据。
 // 用法：pnpm run build:mock && node scripts/screenshot-tf08.mjs [输出目录]
-/* global document -- 仅在 page.evaluate 的浏览器上下文中使用 */
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';

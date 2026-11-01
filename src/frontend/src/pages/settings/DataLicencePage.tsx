@@ -40,7 +40,15 @@ export function DataLicencePage() {
   const initial: FormValues = { ...DEFAULTS, tier: s.tier ?? DEFAULTS.tier, has_quant_pro: s.has_quant_pro ?? false, expires_on: s.expires_on ?? '' };
   const meta = (v: FormValues) => ({ tier: v.tier, has_quant_pro: !!v.has_quant_pro, expires_on: v.expires_on || null });
 
-  const reset = () => { setMsg(null); setOther([]); };
+  // 评审 m1：每次操作前清掉四个 mutation 上一次的错误，页面只显示最近一次操作的结果
+  const reset = () => {
+    setMsg(null);
+    setOther([]);
+    put.reset();
+    patch.reset();
+    del.reset();
+    test.reset();
+  };
   const onFinish = (v: FormValues) => {
     reset();
     const licence = (v.licence ?? '').trim();
@@ -90,9 +98,14 @@ export function DataLicencePage() {
       </Descriptions>
 
       <Form<FormValues> form={form} layout="vertical" initialValues={initial} onFinish={onFinish} requiredMark={false} autoComplete="off">
-        <Form.Item name="licence" label={isSet ? '更换证书（留空则只更新下面的档位与到期日）' : '证书'}>
+        <Form.Item
+          name="licence" label={isSet ? '更换证书（留空则只更新下面的档位与到期日）' : '证书'}
+          extra={<span data-testid="licence-no-save">浏览器或密码管理器如果询问是否保存，请选择“不保存”。证书只应保存在本站服务端。</span>}
+        >
           <Input.Password
-            data-testid="licence-input" autoComplete="new-password" visibilityToggle={false} spellCheck={false}
+            data-testid="licence-input" autoComplete="off" visibilityToggle={false} spellCheck={false}
+            // 评审 m2：提示浏览器与常见密码管理器不要保存或自动填充证书
+            data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other"
             placeholder={isSet ? '已设置（不显示）；输入新证书即替换' : '粘贴你的麦蕊证书'} style={{ maxWidth: 420 }}
           />
         </Form.Item>

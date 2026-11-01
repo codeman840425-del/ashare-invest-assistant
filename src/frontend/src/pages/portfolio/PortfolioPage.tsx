@@ -24,7 +24,10 @@ export function PortfolioPage() {
   const accounts = useAccounts();
   const list = accounts.data?.items ?? [];
   // 通知深链用 account_id（契约 Notification.target.route）；旧链接的 account 作为别名（评审 P2）
-  const accountId = sp.get('account_id') ?? sp.get('account') ?? list[0]?.id;
+  const asked = sp.get('account_id') ?? sp.get('account');
+  // 评审 m14：链接里的账户不在本人账户列表中时，回落到第一个账户并提示，不显示原始 uuid
+  const unknownAsked = !!asked && accounts.isSuccess && !list.some((a) => a.id === asked);
+  const accountId = asked && !unknownAsked ? asked : list[0]?.id;
   const tab = (TABS as string[]).includes(sp.get('tab') ?? '') ? (sp.get('tab') as TabKey) : 'positions';
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
@@ -54,9 +57,13 @@ export function PortfolioPage() {
             />
           ) : null}
           <Button onClick={() => setCreating(true)}>新建账户</Button>
-          <Button type="primary" disabled={!accountId} onClick={() => navigate(`/portfolio/import?account_id=${accountId}`)} data-testid="go-import">导入交割单 / 持仓</Button>
+          <Button type="primary" disabled={!accountId} onClick={() => navigate(`/portfolio/import?account_id=${encodeURIComponent(accountId ?? '')}`)} data-testid="go-import">导入交割单 / 持仓</Button>
         </Space>
       </div>
+      {unknownAsked ? (
+        <Alert type="warning" showIcon data-testid="unknown-account" style={{ marginBottom: 12 }}
+          title={list.length ? '链接中的账户不存在或不属于你，已切换到第一个账户。' : '链接中的账户不存在或不属于你。'} />
+      ) : null}
       {!list.length ? (
         <Empty description="还没有券商账户。先新建一个账户，再导入通达信交割单或持仓快照。" />
       ) : (
@@ -313,7 +320,7 @@ function ReconTab({ accountId, onGo }: { accountId: string; onGo: (tab: TabKey) 
       <Alert type="info" showIcon title="成本口径" description={DILUTED_COST_NOTE} style={{ marginBottom: 12 }} data-testid="diluted-cost-note" />
       {r.status === 'not_imported' ? (
         <Empty description="还没有导入券商持仓快照，无法对账。">
-          <Button type="primary" onClick={() => navigate(`/portfolio/import?account_id=${accountId}&kind=positions`)}>导入持仓快照</Button>
+          <Button type="primary" onClick={() => navigate(`/portfolio/import?account_id=${encodeURIComponent(accountId)}&kind=positions`)}>导入持仓快照</Button>
         </Empty>
       ) : (
         <Table<ReconciliationItem>
@@ -331,7 +338,7 @@ function ReconTab({ accountId, onGo }: { accountId: string; onGo: (tab: TabKey) 
               title: '数据整理', key: 'act',
               render: (_v, x) => {
                 const k = RECON_KIND[x.kind];
-                return <Button size="small" type="link" onClick={() => (k.actionTo === 'import' ? navigate(`/portfolio/import?account_id=${accountId}`) : onGo('trades'))}>{k.action}</Button>;
+                return <Button size="small" type="link" onClick={() => (k.actionTo === 'import' ? navigate(`/portfolio/import?account_id=${encodeURIComponent(accountId ?? '')}`) : onGo('trades'))}>{k.action}</Button>;
               },
             },
           ]}

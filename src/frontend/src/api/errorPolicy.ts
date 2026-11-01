@@ -1,5 +1,7 @@
 import { ApiError } from './client';
 import type { AnyErrorCode } from './errorCodes';
+import type { DataLicenceState } from './enums';
+import { LICENCE_STATUS } from '../i18n/licenceLabels';
 
 /**
  * 按错误码给用户看的中文文案（评审 M2）。只覆盖终端/日报/建议卡等页面会遇到的码；
@@ -35,13 +37,25 @@ export const ERROR_TEXT: Partial<Record<AnyErrorCode, string>> = {
   MAINTENANCE: '系统维护中，请稍后再试',
   NETWORK_ERROR: '网络连接失败，请检查网络或稍后重试',
   NOT_MODIFIED: '数据未变化，但本地缓存缺失，请刷新页面',
+  // 契约 v0.2.6 #6（评审 T-F22a m3）
+  DATA_LICENCE_IN_USE: '该证书已绑定到另一个账号；一张证书只能由一位用户使用',
+  DATA_LICENCE_NOT_SET: '你还没有设置数据证书',
+  DATA_LICENCE_UNAVAILABLE: '你的数据证书不可用，暂时无法拉取最新数据',
 };
+
+/** 需要附“去设置数据证书”链接的错误码 */
+export const LICENCE_ERROR_CODES: readonly string[] = ['DATA_LICENCE_IN_USE', 'DATA_LICENCE_NOT_SET', 'DATA_LICENCE_UNAVAILABLE'];
 
 /** 字节数 → “5 MB” / “26 MB” / “512 KB” */
 export function fmtBytes(n: number): string {
   if (n >= 1024 * 1024) return `${+(n / 1024 / 1024).toFixed(1)} MB`;
   if (n >= 1024) return `${Math.round(n / 1024)} KB`;
   return `${n} B`;
+}
+
+/** 秒数 → “30 秒” / “12 分钟” */
+export function fmtWait(s: number): string {
+  return s >= 60 ? `${Math.ceil(s / 60)} 分钟` : `${Math.ceil(s)} 秒`;
 }
 
 export function errorText(e: unknown): string {
@@ -54,6 +68,15 @@ export function errorText(e: unknown): string {
     if (e.code === 'PAYLOAD_TOO_LARGE') {
       const max = Number(e.details?.max_bytes);
       if (Number.isFinite(max) && max > 0) return `文件过大，超过单次上传上限 ${fmtBytes(max)}`;
+    }
+    if (e.code === 'DATA_LICENCE_UNAVAILABLE') {
+      const st = e.details?.status as DataLicenceState | undefined;
+      const label = st && st in LICENCE_STATUS ? LICENCE_STATUS[st].text : null;
+      if (label) return `你的数据证书不可用（${label}），暂时无法拉取最新数据`;
+    }
+    if (e.code === 'RATE_LIMITED') {
+      const s = Number(e.details?.retry_after_s);
+      if (Number.isFinite(s) && s > 0) return `操作过于频繁，请 ${fmtWait(s)}后再试`;
     }
     const t = ERROR_TEXT[e.code];
     if (t) return t;

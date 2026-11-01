@@ -7,7 +7,8 @@ export const DISCLAIMER_TEXT = '本工具仅供个人研究参考，不构成投
 
 export function RiskDisclosure({ showAttribution = true }: { showAttribution?: boolean }) {
   return (
-    <footer className="risk-footer" role="note" aria-label="免责提示" data-testid="risk-disclosure">
+    // 评审 m15：保留 footer 的 contentinfo 地标，不再用 role="note" 覆盖
+    <footer className="risk-footer" aria-label="免责提示" data-testid="risk-disclosure">
       <span>{DISCLAIMER_TEXT}</span>
       {showAttribution ? <span className="muted"> · 图表由 TradingView Lightweight Charts 提供</span> : null}
     </footer>

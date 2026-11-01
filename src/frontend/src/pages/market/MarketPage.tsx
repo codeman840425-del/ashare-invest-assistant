@@ -5,8 +5,8 @@ import { Link } from 'react-router';
 import { useMarketOverview, useSectorFlows } from '../../api/marketQueries';
 import type { SectorFlow, SectorKind } from '../../api/marketTypes';
 import type { MarketOverview } from '../../api/types';
-import { DataStatusTag, ErrorBox, Loading } from '../../components/common';
-import { REGIME, SESSION } from '../../i18n/labels';
+import { DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/common';
+import { GAP_REASON, REGIME, SESSION } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { PriceChartPanel } from '../stock/PriceChartPanel';
 
@@ -28,6 +28,7 @@ export function MarketPage() {
         <DataStatusTag status={m.data_status} asOf={m.data_as_of} gaps={m.gaps} />
         <span className="muted small mono">更新于 {fmtTime(m.data_as_of)}</span>
       </div>
+      <GapNote status={m.data_status} gaps={m.gaps} asOf={m.data_as_of} testId="market-gap-note" />
       <div className="index-strip" role="list" aria-label="主要指数">
         {m.indices.map((i) => (
           <button
@@ -153,7 +154,11 @@ function SectorPanel() {
         {q.data ? <DataStatusTag status={q.data.data_status} asOf={q.data.data_as_of} gaps={q.data.gaps} /> : null}
       </div>
       {q.isPending ? <Loading /> : q.isError ? <ErrorBox error={q.error} /> : (
-        <Table className="dense-table static" size="small" rowKey="sector_id" pagination={false} columns={cols} dataSource={q.data.items} />
+        <>
+          <GapNote status={q.data.data_status} gaps={q.data.gaps} asOf={q.data.data_as_of} testId="sector-gap-note" />
+          <Table className="dense-table static" size="small" rowKey="sector_id" pagination={false} columns={cols} dataSource={q.data.items}
+            locale={{ emptyText: q.data.gaps.length ? `暂无板块资金：${q.data.gaps.map((g) => GAP_REASON[g.reason]).join('、')}` : '暂无板块资金' }} />
+        </>
       )}
     </section>
   );

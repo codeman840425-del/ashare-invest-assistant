@@ -30,7 +30,13 @@ export const qk = {
   horizon: (code: string) => ['horizon-assessments', code] as const,
 };
 
-export const useMe = () => useQuery({ queryKey: qk.me, queryFn: ({ signal }) => apiGet<Me>('/me', undefined, signal) });
+/**
+ * Me.data_licence_status 驱动全站证书横幅（契约 v0.2.6 #8）。SSE data_licence 事件接入前，
+ * 用 60 秒低频轮询兜底，会话中途证书被判为额度用完/暂停时横幅也能出现（评审 T-F22a M1）。
+ */
+export const ME_POLL_MS = 60_000;
+export const useMe = () =>
+  useQuery({ queryKey: qk.me, queryFn: ({ signal }) => apiGet<Me>('/me', undefined, signal), refetchInterval: ME_POLL_MS });
 
 export const useTerminal = (scope: TerminalScope) =>
   useQuery({

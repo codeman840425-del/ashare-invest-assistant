@@ -11,7 +11,7 @@ import { CONTRACT_VERSION } from '../api/enums';
 import { HIGH_RISK_STRATEGY_NOTE } from '../components/StrategyEnableSwitch';
 import { server } from '../mocks/server';
 import { mockLoginAs } from '../mocks/session';
-import { setMockLicence } from '../mocks/licence';
+import { setMockLicence } from '../mocks/licenceStore';
 import { STRATEGY_TEMPLATES } from '../mocks/strategyHandlers';
 import { uid } from '../mocks/fixtures';
 
@@ -85,7 +85,10 @@ describe('T-F22 设置 → 数据证书', () => {
     expect(await screen.findByTestId('licence-banner')).toHaveAttribute('data-status', 'not_set');
     const input = screen.getByTestId('licence-input') as HTMLInputElement;
     expect(input.type).toBe('password');
-    expect(input.autocomplete).toBe('new-password');
+    expect(input.autocomplete).toBe('off');
+    expect(input).toHaveAttribute('data-1p-ignore', 'true');
+    expect(input).toHaveAttribute('data-lpignore', 'true');
+    expect(screen.getByTestId('licence-no-save')).toBeInTheDocument();
     typeLicence(licence);
     fireEvent.click(screen.getByTestId('licence-save'));
     expect(await screen.findByTestId('licence-msg')).toHaveTextContent('正在验证');

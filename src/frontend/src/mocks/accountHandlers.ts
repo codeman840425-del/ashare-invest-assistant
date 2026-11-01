@@ -15,7 +15,7 @@ import {
   type MockBatch, type MockUser,
 } from './session';
 import { errorBody, page } from './handlerUtils';
-import { deleteLicence, licenceOf, patchLicence, putLicence, testLicence } from './licence';
+import { deleteLicence, licenceOf, mockIngestPaused, patchLicence, putLicence, rateHit, testLicence } from './licenceStore';
 import { NOW, uid } from './fixtures';
 
 const API = '/api/v1';
@@ -25,6 +25,9 @@ export const validationError = (fields: { field: string; issue: string }[]) => e
 const notFound = (what: string) => err(404, 'NOT_FOUND', `${what} 不存在（示例数据）`);
 const badTransition = (from: string, to: string) => err(409, 'INVALID_STATE_TRANSITION', `不能从 ${from} 变为 ${to}`, { from, to });
 const noContent = (status = 204) => new HttpResponse(null, { status });
+/** 契约 §2 限速：429 RATE_LIMITED + Retry-After 头 + details.retry_after_s */
+const rateLimited = (s: number) =>
+  HttpResponse.json(errorBody('RATE_LIMITED', '操作过于频繁（示例）', { retry_after_s: s }) as unknown as Record<string, unknown>, { status: 429, headers: { 'Retry-After': String(s) } });
 
 const PUBLIC = [/^\/meta\//, /^\/health/, /^\/auth\/login$/, /^\/auth\/register$/];
 
@@ -125,6 +128,8 @@ export const accountHandlers = [
   // ---------------- §7.1 数据证书（v0.2.6，T-F22）：任何响应都不含证书值 ----------------
   http.get(`${API}/me/data-licence`, () => json(licenceOf(me().id))),
   http.put(`${API}/me/data-licence`, async ({ request }) => {
+    const wait = rateHit('put', me().id);
+    if (wait) return rateLimited(wait);
     const b = (await request.json()) as Partial<DataLicencePut>;
     const licence = typeof b.licence === 'string' ? b.licence.trim() : '';
     const fields: { field: string; issue: string }[] = [];
@@ -157,8 +162,12 @@ export const accountHandlers = [
     deleteLicence(me().id);
     return noContent();
   }),
-  http.post(`${API}/me/data-licence/test`, () =>
-    testLicence(me().id) ? json({ verification_id: uid(4100 + Math.floor(Math.random() * 1000)) }, 202) : err(409, 'DATA_LICENCE_NOT_SET', '尚未设置数据证书')),
+  http.post(`${API}/me/data-licence/test`, () => {
+    const wait = rateHit('test', me().id);
+    if (wait) return rateLimited(wait);
+    if (mockIngestPaused()) return err(503, 'INGEST_PAUSED', '采集服务已暂停（示例）');
+    return testLicence(me().id) ? json({ verification_id: uid(4100 + Math.floor(Math.random() * 1000)) }, 202) : err(409, 'DATA_LICENCE_NOT_SET', '尚未设置数据证书');
+  }),
 
   // ---------------- §7.9 管理端：用户审核 ----------------
   http.get(`${API}/admin/users`, ({ request }) => {

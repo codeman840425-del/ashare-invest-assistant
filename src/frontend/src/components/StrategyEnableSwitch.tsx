@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { Switch } from 'antd';
 import type { CardRiskLevel } from '../api/enums';
 import { isHighRisk } from '../lib/strategyRisk';
@@ -15,7 +16,7 @@ interface Props {
   riskLevel: CardRiskLevel | null | undefined;
   loading?: boolean;
   disabled?: boolean;
-  /** 用于 aria-label 与 data-testid */
+  /** 开关的可访问名称（固定为模板名） */
   name: string;
   testId?: string;
 }
@@ -26,14 +27,16 @@ interface Props {
  */
 export function StrategyEnableSwitch({ checked, onChange, riskLevel, loading, disabled, name, testId }: Props) {
   const high = isHighRisk(riskLevel);
+  const noteId = useId();
   return (
     <span className="strategy-enable" data-testid={testId}>
       <Switch
         size="small" checked={checked} loading={loading} disabled={disabled} onChange={onChange}
-        aria-label={`${checked ? '停用' : '启用'}${name}`} checkedChildren="启用" unCheckedChildren="停用"
+        // 评审 m5：名称固定为模板名，开/关由 aria-checked 表达；风险说明用 aria-describedby 关联
+        aria-label={name} aria-describedby={high ? noteId : undefined} checkedChildren="启用" unCheckedChildren="停用"
       />
       {high ? (
-        <span className="high-risk-note" role="note" aria-label="高风险策略说明" data-testid="high-risk-note">{HIGH_RISK_STRATEGY_NOTE}</span>
+        <span className="high-risk-note" id={noteId} role="note" aria-label="高风险策略说明" data-testid="high-risk-note">{HIGH_RISK_STRATEGY_NOTE}</span>
       ) : null}
     </span>
   );

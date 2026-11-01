@@ -1,0 +1,114 @@
+/**
+ * T-F22：数据证书的 MSW 模拟状态（契约 v0.2.6 §7.1）。
+ * 证书值只用于判断“同一证书已绑定其他账号”：模块内只留一个不可逆摘要，任何响应、日志与导出都不含证书值、摘要或其片段。
+ */
+import type { DataLicenceTier } from '../api/enums';
+import type { DataLicenceStatus } from '../api/licenceTypes';
+import { NOW, uid } from './fixtures';
+
+interface Entry { s: DataLicenceStatus; digest: string | null; pollsLeft: number; verdict: 'active' | 'invalid' }
+
+export const NOT_SET: DataLicenceStatus = {
+  status: 'not_set', tier: null, has_quant_pro: null, expires_on: null, days_to_expiry: null, set_at: null,
+  last_verified_at: null, last_error_code: null, last_error_at: null, paused_until: null,
+};
+const store = new Map<string, Entry>();
+
+/** FNV-1a 两轮，只在内存里比对是否重复；不导出 */
+function digest(v: string) {
+  let a = 0x811c9dc5, b = 0x01000193;
+  for (let i = 0; i < v.length; i++) {
+    a = Math.imul(a ^ v.charCodeAt(i), 16777619) >>> 0;
+    b = Math.imul(b ^ v.charCodeAt(v.length - 1 - i), 2246822519) >>> 0;
+  }
+  return `${a.toString(36)}.${b.toString(36)}.${v.length}`;
+}
+const today = NOW.slice(0, 10);
+export function daysTo(d: string | null) {
+  if (!d) return null;
+  return Math.round((Date.parse(`${d}T00:00:00+08:00`) - Date.parse(`${today}T00:00:00+08:00`)) / 86400000);
+}
+const active = (tier: DataLicenceTier, expires_on: string | null): DataLicenceStatus => ({
+  ...NOT_SET, status: 'active', tier, has_quant_pro: false, expires_on, days_to_expiry: daysTo(expires_on),
+  set_at: '2026-10-08T21:10:00+08:00', last_verified_at: '2026-10-20T09:00:00+08:00',
+});
+
+/** 契约 §7.1 限速：PUT 10 次/小时，POST /test 5 次/小时（评审 T-F22a m4） */
+export const LICENCE_RATE = { put: 10, test: 5 } as const;
+const HOUR_MS = 3600 * 1000;
+const hits = new Map<string, number[]>();
+let ingestPaused = false;
+/** 计一次调用；超限时返回需要等待的秒数，否则 null */
+export function rateHit(kind: keyof typeof LICENCE_RATE, userId: string, now = Date.now()): number | null {
+  const k = `${kind}:${userId}`;
+  const list = (hits.get(k) ?? []).filter((t) => now - t < HOUR_MS);
+  if (list.length >= LICENCE_RATE[kind]) {
+    hits.set(k, list);
+    return Math.max(1, Math.ceil((list[0] + HOUR_MS - now) / 1000));
+  }
+  list.push(now);
+  hits.set(k, list);
+  return null;
+}
+/** 测试/演示开关：模拟管理员暂停采集（/test → 503 INGEST_PAUSED） */
+export const setMockIngestPaused = (on: boolean) => void (ingestPaused = on);
+export const mockIngestPaused = () => ingestPaused;
+
+export function resetLicences() {
+  store.clear();
+  hits.clear();
+  ingestPaused = false;
+  // 示例：演示用户、管理员与新手用户已设置并可用；其余账号未设置
+  store.set(uid(2), { s: active('diamond', '2027-03-31'), digest: 'seed-2', pollsLeft: 0, verdict: 'active' });
+  store.set(uid(3), { s: active('annual', null), digest: 'seed-3', pollsLeft: 0, verdict: 'active' });
+  store.set(uid(13), { s: active('free', '2026-11-05'), digest: 'seed-13', pollsLeft: 0, verdict: 'active' });
+}
+resetLicences();
+
+/** GET：验证中的状态在下一次读取后落定（模拟 ingest 验证） */
+export function licenceOf(userId: string): DataLicenceStatus {
+  const e = store.get(userId);
+  if (!e) return { ...NOT_SET };
+  if (e.s.status === 'pending_verification') {
+    if (e.pollsLeft > 0) e.pollsLeft--;
+    else if (e.verdict === 'active') e.s = { ...e.s, status: 'active', last_verified_at: NOW, last_error_code: null, last_error_at: null };
+    else e.s = { ...e.s, status: 'invalid', last_error_code: '102', last_error_at: NOW };
+  }
+  return { ...e.s };
+}
+/** 只读当前状态（不推进验证），供 Me.data_licence_status 使用 */
+export const licenceState = (userId: string) => store.get(userId)?.s.status ?? 'not_set';
+
+export type PutResult = { ok: true; s: DataLicenceStatus } | { ok: false; code: 'IN_USE' };
+export function putLicence(userId: string, licence: string, meta: { tier: DataLicenceTier; has_quant_pro: boolean; expires_on: string | null }): PutResult {
+  const d = digest(licence);
+  for (const [owner, e] of store) if (owner !== userId && e.digest === d) return { ok: false, code: 'IN_USE' };
+  // 示例约定：以 “X-INVALID-” 开头的虚构证书验证结果为无效（102）
+  const verdict = licence.startsWith('X-INVALID-') ? 'invalid' : 'active';
+  const s: DataLicenceStatus = {
+    ...NOT_SET, status: 'pending_verification', ...meta, days_to_expiry: daysTo(meta.expires_on), set_at: NOW,
+  };
+  store.set(userId, { s, digest: d, pollsLeft: 1, verdict });
+  return { ok: true, s: { ...s } };
+}
+export function patchLicence(userId: string, b: Partial<Pick<DataLicenceStatus, 'tier' | 'has_quant_pro' | 'expires_on'>>): DataLicenceStatus | null {
+  const e = store.get(userId);
+  if (!e) return null;
+  e.s = { ...e.s, ...b };
+  e.s.days_to_expiry = daysTo(e.s.expires_on);
+  return { ...e.s };
+}
+export const deleteLicence = (userId: string) => void store.delete(userId);
+export function testLicence(userId: string): boolean {
+  const e = store.get(userId);
+  if (!e) return false;
+  e.s = { ...e.s, status: 'pending_verification' };
+  e.pollsLeft = 1;
+  return true;
+}
+/** 测试辅助：直接设定某用户的证书状态（不涉及证书值） */
+export function setMockLicence(userId: string, patch: Partial<DataLicenceStatus>) {
+  const e = store.get(userId) ?? { s: active('diamond', null), digest: `seed-${userId}`, pollsLeft: 0, verdict: 'active' as const };
+  e.s = { ...e.s, ...patch };
+  store.set(userId, e);
+}

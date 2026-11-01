@@ -3,8 +3,8 @@ import { CandlestickSeries, HistogramSeries, LineSeries, LineStyle, createChart,
 import type { Bar } from '../../api/types';
 import { DOWN, UP, baseOptions, sma, toSeriesMarker, type ChartMarker } from './chartBase';
 
-/** 日 K（前复权）+ 成交量 + MA5/20/60 + 止损/止盈线 + 候选信号标记 */
-export function KlineChart({ bars, markers, stopLoss, takeProfit }: { bars: Bar[]; markers: ChartMarker[]; stopLoss?: string | null; takeProfit?: string | null }) {
+/** 日 K / 周 K（前复权）+ 成交量 + MA5/20/60 + 止损/止盈线 + 候选信号标记 */
+export function KlineChart({ bars, markers, stopLoss, takeProfit, empty = '无日 K 数据' }: { bars: Bar[]; markers: ChartMarker[]; stopLoss?: string | null; takeProfit?: string | null; empty?: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!ref.current || bars.length === 0) return;
@@ -30,6 +30,6 @@ export function KlineChart({ bars, markers, stopLoss, takeProfit }: { bars: Bar[
     chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, data.length - 90), to: data.length + 3 });
     return () => chart.remove();
   }, [bars, markers, stopLoss, takeProfit]);
-  if (bars.length === 0) return <div className="chart-empty">无日 K 数据</div>;
+  if (bars.length === 0) return <div className="chart-empty" data-testid="chart-empty">{empty}</div>;
   return <div ref={ref} className="chart-box" data-testid="kline" />;
 }

@@ -463,6 +463,10 @@ class Settings(BaseSettings):
     data_licence_seal_public_keys: str | None = None
     #: 新封装使用的公钥版本（``DATA_LICENCE_SEAL_KEY_VERSION``）
     data_licence_seal_key_version: int | None = Field(default=None, ge=1)
+    #: ``DATA_LICENCE_SETTINGS_ENABLED``（review M4 / T-B03d）：证书设置入口（PUT / PATCH / test）
+    #: 是否开放。未设置时 production 关闭、其余环境开启；ingest 每证书调度（T-B04a-x）完成前
+    #: 生产不要打开。见 :attr:`licence_settings_enabled`。
+    data_licence_settings_enabled: bool | None = None
 
     # 认证（plan §3.6 / 契约 §1.3，T-B03）：注册模式与会话 Cookie 的 Secure 标记
     #: ``REGISTRATION_MODE``：closed（默认，``/auth/register`` → 503）/ invite / open
@@ -544,6 +548,12 @@ class Settings(BaseSettings):
         if not self.session_cookie_secure and self.app_env not in _DEV_ENVS:
             raise ValueError("SESSION_COOKIE_SECURE=false 只允许在 APP_ENV=local/test 使用")
         return self
+
+    @property
+    def licence_settings_enabled(self) -> bool:
+        if self.data_licence_settings_enabled is not None:
+            return self.data_licence_settings_enabled
+        return self.app_env != "production"
 
     def with_business_overrides(self, runtime: Mapping[str, Any] | None) -> Settings:
         """叠加管理端运行时覆盖层（存数据库），返回新的 :class:`Settings`；本对象不变。

@@ -112,6 +112,16 @@ Index(
     postgresql_where=text("deleted_at IS NULL"),
 )
 
+#: review-T-B03a… M1：管理员暂停按**用户**记录（不跟证书行走），DELETE 后再 PUT 仍处于暂停；
+#: 只有管理员 resume 删除本行。迁移 0010。
+user_data_licence_holds = Table(
+    "user_data_licence_holds",
+    metadata,
+    uuid_col("user_id", nullable=False, fk="app.users.id", primary_key=True),
+    ts("paused_at", nullable=False, default_now=True),
+    schema=APP,
+)
+
 data_licence_events = Table(
     "data_licence_events",
     metadata,

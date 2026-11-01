@@ -39,6 +39,7 @@ USERNAME_TRIED_MAX: Final = 64
 
 # KEYS = 各窗口键；ARGV = member, 然后每个键一对 (limit, window_ms)。
 # 先检查全部窗口，任一超限则都不记入并返回最长等待秒数；否则全部记入并返回 0。
+# member 为空串 = 只查看（peek）：不记入任何窗口。
 _SLIDING_WINDOW_LUA: Final = """
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
@@ -56,6 +57,7 @@ for i, key in ipairs(KEYS) do
   end
 end
 if wait > 0 then return wait end
+if member == '' then return 0 end
 for i, key in ipairs(KEYS) do
   redis.call('ZADD', key, now, member)
   redis.call('PEXPIRE', key, tonumber(ARGV[2 * i + 1]))
@@ -92,14 +94,29 @@ class RateLimiter:
             args += [w.limit, w.window_s * 1000]
         return int(cast(int, self._script(keys=keys, args=args)))
 
+    def peek(self, key_suffix: str, windows: Sequence[Window]) -> int:
+        """只查看不记入：0 = 当前未超限，否则为需等待的秒数。"""
+        keys = [f"{RL_PREFIX}{w.scope}:{key_suffix}" for w in windows]
+        args: list[Any] = [""]
+        for w in windows:
+            args += [w.limit, w.window_s * 1000]
+        return int(cast(int, self._script(keys=keys, args=args)))
+
     def enforce(self, key_suffix: str, windows: Sequence[Window]) -> None:
-        wait = self.hit(key_suffix, windows)
-        if wait > 0:
-            raise AppError(
-                ErrorCode.RATE_LIMITED,
-                details={"retry_after_s": wait},
-                headers={"Retry-After": str(wait)},
-            )
+        _raise_if_waiting(self.hit(key_suffix, windows))
+
+    def ensure_not_limited(self, key_suffix: str, windows: Sequence[Window]) -> None:
+        """已超限 → 429（不记入）；用于“先查、后验、失败记数”（review M5）。"""
+        _raise_if_waiting(self.peek(key_suffix, windows))
+
+
+def _raise_if_waiting(wait: int) -> None:
+    if wait > 0:
+        raise AppError(
+            ErrorCode.RATE_LIMITED,
+            details={"retry_after_s": wait},
+            headers={"Retry-After": str(wait)},
+        )
 
 
 def login_windows(policy: AuthAbusePolicy) -> list[Window]:

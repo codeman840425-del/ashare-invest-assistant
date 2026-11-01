@@ -2,17 +2,18 @@
 
 同步 ``def`` 路由：数据库（psycopg 同步引擎）与 Redis 都是阻塞调用，FastAPI 放线程池执行。
 防滥用（T-B03a，``app.auth.abuse``）：登录/注册按 IP 限速、改密按用户限速、渐进锁定、pending 上限、
-``login_attempts``；蜜罐与最短填写时间需契约增加请求字段，暂未实现（见报告）。邀请码归 T-B03c。
+``login_attempts``；蜜罐 + 最短填写时间（契约 v0.2.8 §7.1，T-B03d）。邀请码归 T-B03c。
 会话期限、argon2 参数、口令长度取 ``config/auth.yaml``（T-B03b）。
 """
 
 from __future__ import annotations
 
 import re
+import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
 
@@ -42,6 +43,8 @@ RESERVED_USERNAMES = frozenset({"admin", "root", "system"})
 #: 契约 v0.2.4 #2：display_name 1–32、apply_note ≤ 200
 DISPLAY_NAME_MAX = 32
 APPLY_NOTE_MAX = 200
+#: 蜜罐（契约 v0.2.8 §7.1）：最短填写时间，固定规则、不进配置
+HONEYPOT_MIN_FILL_MS = 3000
 
 
 class _Body(BaseModel):
@@ -58,6 +61,11 @@ class RegisterIn(_Body):
     display_name: Annotated[str, Field(min_length=1, max_length=DISPLAY_NAME_MAX)]
     invite_code: Annotated[str | None, Field(max_length=128)] = None
     apply_note: Annotated[str | None, Field(max_length=APPLY_NOTE_MAX)] = None
+    #: 契约 v0.2.8 §7.1 蜜罐：隐藏输入框，正常为空串或不传；不校验内容与长度
+    website: str | None = None
+    #: 契约 v0.2.8：表单首次渲染的毫秒 epoch（前端按服务端时钟校正）；提交距此 < 3 秒视为
+    #: 机器；缺失不检查；不是整数 → 400（StrictInt：不接受字符串、小数、布尔）
+    form_started_at: StrictInt | None = None
     #: 契约 v0.2.5（T-A06）：不做同意流程；旧客户端仍发 ``agreements`` 时忽略
     #: （不校验、不报错、不记录）
     agreements: Annotated[Any, Field(exclude=True)] = None
@@ -111,6 +119,22 @@ def registration_mode(settings: SettingsDep) -> RegistrationModeOut:
     return RegistrationModeOut(mode=settings.registration_mode)
 
 
+def honeypot_trigger(body: RegisterIn, *, now_ms: int) -> str | None:
+    """契约 v0.2.8 §7.1：``website`` 去首尾空白后非空；或 ``form_started_at`` 存在且
+    ``now_ms - form_started_at < 3000``（含未来时间）。两者都中 → ``"both"``。"""
+    by_field = bool((body.website or "").strip())
+    too_fast = (
+        body.form_started_at is not None and now_ms - body.form_started_at < HONEYPOT_MIN_FILL_MS
+    )
+    if by_field and too_fast:
+        return "both"
+    if by_field:
+        return "website"
+    if too_fast:
+        return "too_fast"
+    return None
+
+
 @router.post("/auth/register", status_code=201)
 def register(
     body: RegisterIn,
@@ -120,19 +144,16 @@ def register(
     passwords: PasswordsDep,
     rds: RedisDep,
 ) -> RegisterOut:
-    # closed：一律 503（先于参数业务校验）。invite（T-B03c）：invite_code、apply_note 必填，
-    # 邀请码与建用户同一事务核验。open：契约“保留，V1 不用”，照实现。
+    # 契约 v0.2.8 §7.1 判定顺序：注册模式（closed → 503）→ IP 限速（蜜罐命中同样计数）→
+    # 字段与邀请码校验（400）→ 用户名冲突（409）→ 待审核数上限（503）→ 蜜罐。
     mode = settings.registration_mode
     if mode == RegistrationMode.CLOSED:
         raise AppError(ErrorCode.REGISTRATION_CLOSED)
 
-    # 防滥用（plan §3.6）：同一 IP 每小时/每日上限（每次尝试都计，含校验失败）→ 429；
-    # 全站 pending 达上限 → 503 REGISTRATION_CLOSED（暂停注册）
+    # 防滥用（plan §3.6）：同一 IP 每小时/每日上限（每次尝试都计，含校验失败）→ 429
     policy = settings.auth_abuse
     ip = client_ip(request, settings)
     abuse.RateLimiter(rds).enforce(abuse.ip_key(settings, ip), abuse.register_windows(policy))
-    with engine.connect() as conn:
-        abuse.enforce_pending_cap(conn, policy)
 
     username = body.username.strip().lower()
     fields: list[dict[str, str]] = []
@@ -159,11 +180,14 @@ def register(
         raise _validation(fields)
 
     ih = ip_hash(settings, ip)
-    pw_hash = passwords.hash(body.password)
+    pw_hash = passwords.hash(body.password)  # 蜜罐命中也照样哈希，耗时与正常注册一致
+    trap = honeypot_trigger(body, now_ms=int(service.now_utc().timestamp() * 1000))
     try:
         with engine.begin() as conn:
-            # 先占用邀请码再查重名：没有有效邀请码的人探测不到用户名是否已存在；
-            # 之后任何失败（含 409）整个事务回滚，占用随之撤销
+            # 邀请码、重名、pending 上限放进保存点：蜜罐命中时回滚保存点（不消耗邀请码），
+            # 外层事务只提交审计。先占用邀请码再查重名：没有有效邀请码的人探测不到用户名
+            # 是否已存在；之后任何失败（含 409/503）整个事务回滚，占用随之撤销
+            checks = conn.begin_nested()
             invite_id = (
                 invites.redeem(
                     conn,
@@ -177,6 +201,25 @@ def register(
             )
             if service.username_taken(conn, username):
                 raise AppError(ErrorCode.CONFLICT, details={"field": "username"})
+            abuse.enforce_pending_cap(conn, policy)
+            if trap is not None:
+                # 契约 v0.2.8：与正常注册相同的 201 与响应体，但不建用户、不消耗邀请码、
+                # 不进待审核列表；审计只记 trigger，不记任何表单内容
+                checks.rollback()
+                service.audit(
+                    conn,
+                    action="auth.register_honeypot",
+                    actor_id=None,
+                    actor_role=None,
+                    target_type="registration",
+                    target_id=None,
+                    detail={"trigger": trap},
+                    ip_hash=ih,
+                )
+                return RegisterOut(
+                    id=str(uuid.uuid4()), username=username, status=AccountStatus.PENDING
+                )
+            checks.commit()
             row = conn.execute(
                 insert(users)
                 .values(
@@ -360,11 +403,14 @@ def change_password(
     passwords: PasswordsDep,
     rds: RedisDep,
 ) -> Response:
+    # review M5：先查限速（已超限直接 429，不跑 argon2、不校验旧密码，猜对也不行），
+    # 再校验，失败才记数——与登录一致
+    limiter = abuse.RateLimiter(rds)
+    windows = abuse.password_change_windows(settings.auth_abuse)
+    limiter.ensure_not_limited(str(auth.user_id), windows)
     if not passwords.verify(auth.user.password_hash, body.old_password):
         # 契约 §7.1：旧密码错误计入 T-B03a 限速——按用户计数，超限 429 + Retry-After
-        abuse.RateLimiter(rds).enforce(
-            str(auth.user_id), abuse.password_change_windows(settings.auth_abuse)
-        )
+        limiter.enforce(str(auth.user_id), windows)
         raise _validation([{"field": "old_password", "issue": "incorrect"}])
     fields = [
         {"field": "new_password", "issue": i}

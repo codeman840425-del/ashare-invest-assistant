@@ -1,4 +1,5 @@
-"""每用户数据证书（契约 v0.2.6 §7.1 ``/me/data-licence*``、§7.9 ``/admin/data-licences*``；T-B45）。
+"""每用户数据证书（契约 v0.2.6/v0.2.8 §7.1 ``/me/data-licence*``、§7.9 ``/admin/data-licences*``；
+T-B45、T-B03d）。
 
 安全口径（契约 §5 ``DataLicenceStatus``、§9 v0.2.6 验收）：
 - 任何响应、错误体、日志都**不含证书值或其任何片段**（不回显、不给后四位、不给指纹）。
@@ -35,6 +36,7 @@ from app.auth.deps import (
 from app.common.errors import AppError, ErrorCode
 from app.common.pagination import Page, PageParams, build_page, decode_cursor, page_params
 from app.config import Settings
+from app.db.tables.licences import user_data_licence_holds as holds
 from app.db.tables.licences import user_data_licence_status as v
 from app.db.tables.users import users
 from app.licences import service
@@ -100,6 +102,15 @@ class VerificationOut(BaseModel):
     verification_id: str
 
 
+def _require_settings_enabled(settings: Settings) -> None:
+    """review M4：调度层（T-B04a-x）完成前生产不开放证书设置入口。
+    ``DATA_LICENCE_SETTINGS_ENABLED`` 未设时 production 关闭、其余环境开启；关闭时写操作
+    （PUT / PATCH / test）→ ``503 MAINTENANCE``（与未配置封装公钥同一表现）；GET 与 DELETE
+    始终可用（用户随时能删除自己的证书）。"""
+    if not settings.licence_settings_enabled:
+        raise AppError(ErrorCode.MAINTENANCE)
+
+
 def _limiter(rds: redis.Redis, auth: AuthContext, scope: str, limit: int) -> None:
     RateLimiter(rds).enforce(f"user:{auth.user_id}", [Window(scope, limit, 3600)])
 
@@ -110,7 +121,7 @@ def _limiter(rds: redis.Redis, auth: AuthContext, scope: str, limit: int) -> Non
 @router.get("/me/data-licence")
 def get_licence(auth: AuthDep, engine: EngineDep) -> dict[str, Any]:
     with engine.connect() as conn:
-        return service.status_view(service.live_row(conn, auth.user_id))
+        return service.user_view(conn, auth.user_id)
 
 
 @router.put("/me/data-licence", status_code=202)
@@ -121,6 +132,7 @@ def put_licence(
     engine: EngineDep,
     rds: RedisDep,
 ) -> dict[str, Any]:
+    _require_settings_enabled(settings)
     _limiter(rds, auth, "data_licence:put:1h", PUT_PER_HOUR)
     service.current_public_key(settings)  # 未配置公钥 → 503，先于任何写入
     try:
@@ -144,7 +156,10 @@ def put_licence(
 
 
 @router.patch("/me/data-licence")
-def patch_licence(body: LicencePatch, auth: AuthDep, engine: EngineDep) -> dict[str, Any]:
+def patch_licence(
+    body: LicencePatch, auth: AuthDep, settings: SettingsDep, engine: EngineDep
+) -> dict[str, Any]:
+    _require_settings_enabled(settings)
     changes: dict[str, Any] = {}
     for name in body.model_fields_set:
         value = getattr(body, name)
@@ -165,12 +180,17 @@ def delete_licence(auth: AuthDep, engine: EngineDep) -> Response:
 def test_licence(
     auth: AuthDep, settings: SettingsDep, engine: EngineDep, rds: RedisDep
 ) -> VerificationOut:
+    _require_settings_enabled(settings)
     with engine.connect() as conn:
         row = service.live_row(conn, auth.user_id)
+        held = service.is_held(conn, auth.user_id)
+    # 契约 v0.2.8 #14：暂停期间（含暂停后删除了证书，GET 显示 paused_by_admin）→ 409
+    if held or (row is not None and row.status == S.PAUSED_BY_ADMIN):
+        raise AppError(
+            ErrorCode.DATA_LICENCE_UNAVAILABLE, details={"status": S.PAUSED_BY_ADMIN.value}
+        )
     if row is None:
         raise AppError(ErrorCode.DATA_LICENCE_NOT_SET)
-    if row.status == S.PAUSED_BY_ADMIN:
-        raise AppError(ErrorCode.DATA_LICENCE_UNAVAILABLE, details={"status": row.status})
     limit = settings.business.ingest.licences.verify_rate_limit_per_hour
     try:
         _limiter(rds, auth, "data_licence:test:1h", limit)
@@ -193,10 +213,12 @@ def _admin_item(
     depths: dict[uuid.UUID, dict[str, int]],
 ) -> dict[str, Any]:
     lic = row if row.licence_id is not None else None
-    item = service.status_view(lic)
+    item = service.status_view(lic, held=row.held)
     last_minute, today = counts.get(row.licence_id, (0, 0)) if lic else (0, 0)
     item.update(
         {
+            # 契约 v0.2.8 #2：与 /admin/ingest/status licences[].licence_id 对应；未设置为 null
+            "licence_id": None if lic is None else str(row.licence_id),
             "user_id": str(row.user_pk),
             "username": row.username,
             "display_name": row.display_name,
@@ -229,8 +251,13 @@ def list_licences(
             v.c.id.label("licence_id"),
             *(c for c in v.c if c.name not in {"id", "user_id", "created_at"}),
             v.c.created_at,
+            holds.c.user_id.is_not(None).label("held"),
         )
-        .select_from(users.outerjoin(v, and_(v.c.user_id == u.id, v.c.deleted_at.is_(None))))
+        .select_from(
+            users.outerjoin(v, and_(v.c.user_id == u.id, v.c.deleted_at.is_(None))).outerjoin(
+                holds, holds.c.user_id == u.id
+            )
+        )
         .where(u.deleted_at.is_(None))
         .order_by(u.created_at.desc(), u.id.desc())
         .limit(params.limit + 1)
@@ -273,15 +300,41 @@ def _admin_transition(
     request: Request,
     settings: Settings,
     engine: EngineDep,
-) -> tuple[uuid.UUID, uuid.UUID | None]:
-    """返回 ``(licence_id, verification_id)``；``verification_id`` 只在恢复成功时非空。"""
+) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+    """返回 ``(licence_id, verification_id)``；``verification_id`` 只在恢复成功时非空。
+
+    暂停按用户记录（``app.user_data_licence_holds``，review M1）：pause 要求已设置证书
+    （否则 409 NOT_SET，契约不变）；resume 先删暂停记录，用户已 DELETE 证书时只解除暂停
+    （204，``licence_id`` 为 None），否则把 ``paused_by_admin`` 行转 ``pending_verification``。
+    """
     verification_id: uuid.UUID | None = None
     with engine.begin() as conn:
         row = service.live_row(conn, user_id, lock=True)
+        released = False if pause else service.release_hold(conn, user_id)
         if row is None:
-            raise AppError(ErrorCode.DATA_LICENCE_NOT_SET)
+            if not released:
+                raise AppError(ErrorCode.DATA_LICENCE_NOT_SET)
+            auth_service.audit(
+                conn,
+                action="data_licence.resumed",
+                actor_id=admin.user_id,
+                actor_role=admin.user.role,
+                target_type="user",
+                target_id=str(user_id),
+                detail={
+                    "user_id": str(user_id),
+                    "reason": reason,
+                    "from_status": S.NOT_SET.value,
+                    "to_status": S.NOT_SET.value,
+                    "hold_released": True,
+                },
+                ip_hash=ip_hash(settings, client_ip(request, settings)),
+            )
+            return None, None
         before = str(row.status)
         after = before
+        if pause:
+            service.hold(conn, user_id)
         if pause and before != S.PAUSED_BY_ADMIN:
             service.set_status(conn, row, to=S.PAUSED_BY_ADMIN, event="paused", actor="admin")
             after = S.PAUSED_BY_ADMIN.value
@@ -354,7 +407,7 @@ def resume_licence(
         settings=settings,
         engine=engine,
     )
-    if verification_id is not None:
+    if verification_id is not None and licence_id is not None:
         service.enqueue_verify_best_effort(
             rds, licence_id=licence_id, verification_id=verification_id
         )

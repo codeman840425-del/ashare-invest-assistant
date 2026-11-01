@@ -115,8 +115,14 @@ def test_fixture_value_outside_fake_identifiers_blocks(tmp_repo: Path) -> None:
     ids=["no-marker", "unregistered", "sha-mismatch", "desensitized-unreviewed"],
 )
 def test_fixture_not_exempt(tmp_repo: Path, kw: dict) -> None:
+    # S5/S6 需满足夹具条件；S7 对夹具目录按路径豁免，不受这些条件影响
     path, data = _fixture(tmp_repo, FIX_TXT, fake=["B" + "123456789", "0" + "123456789"], **kw)
-    assert _scan_fixture(tmp_repo, path, data) == {"S5", "S6", "S7"}
+    assert _scan_fixture(tmp_repo, path, data) == {"S5", "S6"}
+
+
+def test_fixture_without_fake_identifiers_blocks_s5_s6(tmp_repo: Path) -> None:
+    path, data = _fixture(tmp_repo, FIX_TXT, fake=None)
+    assert _scan_fixture(tmp_repo, path, data) == {"S5", "S6"}
 
 
 def test_fixture_desensitized_registered(tmp_repo: Path) -> None:
@@ -128,10 +134,23 @@ def test_fixture_desensitized_registered(tmp_repo: Path) -> None:
     assert _scan_fixture(tmp_repo, path, data, allow) == set()
 
 
-def test_fixture_readme_never_exempt(tmp_repo: Path) -> None:
+def test_fixture_readme_s7_exempt_but_not_s5(tmp_repo: Path) -> None:
+    # README.md：S7（表头词、GBK）按目录豁免；S5/S6 仍不享受夹具豁免
     _fixture(tmp_repo, FIX_TXT, fake=["B" + "123456789"])
     p = "tests/fixtures/broker_statements/fmt_t/README.md"
-    assert _scan_fixture(tmp_repo, p, (",".join(W[:3]) + "\n").encode()) == {"S7"}
+    assert _scan_fixture(tmp_repo, p, (",".join(W[:3]) + "\n").encode()) == set()
+    assert _scan_fixture(tmp_repo, p, (",".join(W[:3]) + "\nB" + "123456789\n").encode()) == {"S5"}
+
+
+def test_s7_exempt_paths() -> None:
+    hdr = (",".join(W[:3]) + "\n").encode()
+    gbk = "\u4ea4\u5272\u5355\n".encode("gbk")
+    for p in ["docs/plan.md", "tests/fixtures/broker_statements/fmt_x/new.txt",
+              "tests/fixtures/broker_statements/fmt_x/sub/expected.json"]:
+        assert {f.rule for f in ss.scan_blob(p, hdr, NO_SNAP, ALLOW)} == set(), p
+        assert {f.rule for f in ss.scan_blob(p, gbk, NO_SNAP, ALLOW)} == set(), p
+    for p in ["docs/strategies/x.md", "tests/fixtures/other/x.txt", "tests/fixtures/broker_statements.txt"]:
+        assert {f.rule for f in ss.scan_blob(p, hdr, NO_SNAP, ALLOW)} == {"S7"}, p
 
 
 # ------------------------------------------------------------------ 允许清单
@@ -175,6 +194,13 @@ def test_gitleaks_config_has_s1_to_s9() -> None:
     assert ids == {f"S{i}" for i in range(1, 10)}
     s7 = next(r for r in cfg["rules"] if r["id"].startswith("S7"))
     paths = [p for a in s7["allowlists"] for p in a.get("paths", [])]
+    # 与 secret_scan.S7_EXEMPT_PATH 一致：docs/ 顶层 *.md + 夹具目录整个豁免
+    probes = ["docs/plan.md", "docs/strategies/x.md", "docs/a/b.md",
+              "tests/fixtures/broker_statements/fmt_a/README.md", "tests/fixtures/broker_statements/fmt_a/x.txt",
+              "tests/fixtures/broker_statements/fmt_a/expected.json", "tests/fixtures/other/x.txt",
+              "tests/fixtures/broker_statements.txt", "src/docs/plan.md"]
+    for probe in probes:
+        assert any(re.fullmatch(p, probe) for p in paths) == bool(ss.S7_EXEMPT_PATH.match(probe)), probe
     assert any(re.fullmatch(p, "docs/plan.md") for p in paths)
     assert not any(re.fullmatch(p, "docs/strategies/x.md") for p in paths)
     for r in cfg["rules"]:

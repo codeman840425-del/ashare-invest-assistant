@@ -114,6 +114,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: src/frontend/pnpm-lock.yaml
       - name: pnpm install --frozen-lockfile
+        id: install
         if: steps.detect.outputs.present == 'true'
         working-directory: src/frontend
         run: pnpm install --frozen-lockfile
@@ -122,7 +123,7 @@ jobs:
         working-directory: src/frontend
         run: pnpm exec eslint . --max-warnings=0
       - name: tsc --noEmit
-        if: ${{ !cancelled() && steps.detect.outputs.present == 'true' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: src/frontend
         shell: bash
         run: |
@@ -132,18 +133,18 @@ jobs:
             pnpm exec tsc --noEmit
           fi
       - name: vitest
-        if: ${{ !cancelled() && steps.detect.outputs.present == 'true' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: src/frontend
         run: pnpm exec vitest run
       - name: pnpm audit
-        if: ${{ !cancelled() && steps.detect.outputs.present == 'true' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: src/frontend
         run: pnpm audit --audit-level high
       - name: AG Grid Enterprise（已安装依赖）
-        if: ${{ !cancelled() && steps.detect.outputs.present == 'true' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: python3 scripts/ci/check_licenses.py --node-modules src/frontend/node_modules
       - name: tests/ 下的 vitest（测试角色）
-        if: ${{ !cancelled() && steps.detect.outputs.present == 'true' && hashFiles('tests/package.json') != '' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && hashFiles('tests/package.json') != '' }}
         working-directory: tests
         shell: bash
         run: |

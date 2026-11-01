@@ -94,10 +94,11 @@ description = "S7 同一行出现 3 个以上交割单表头词（文件级与 G
 regex = '''(?:\x{6210}\x{4ea4}\x{65e5}\x{671f}|\x{8bc1}\x{5238}\x{4ee3}\x{7801}|\x{80a1}\x{4e1c}\x{4ee3}\x{7801}|\x{6210}\x{4ea4}\x{7f16}\x{53f7}|\x{59d4}\x{6258}\x{7f16}\x{53f7}|\x{53d1}\x{751f}\x{91d1}\x{989d}|\x{5269}\x{4f59}\x{91d1}\x{989d})(?:[^\n]*?(?:\x{6210}\x{4ea4}\x{65e5}\x{671f}|\x{8bc1}\x{5238}\x{4ee3}\x{7801}|\x{80a1}\x{4e1c}\x{4ee3}\x{7801}|\x{6210}\x{4ea4}\x{7f16}\x{53f7}|\x{59d4}\x{6258}\x{7f16}\x{53f7}|\x{53d1}\x{751f}\x{91d1}\x{989d}|\x{5269}\x{4f59}\x{91d1}\x{989d})){2}'''
 tags = ["S7", "block"]
 [[rules.allowlists]]
-# docs/ 顶层 *.md 只豁免 S7（子目录不豁免）；夹具目录同 S5
+# S7 按路径豁免（与 secret_scan.py 的 S7_EXEMPT_PATH 一致）：docs/ 顶层 *.md（子目录不豁免）
+# + tests/fixtures/broker_statements/ 整个目录（含 README.md、未登记文件）
 paths = [
   '''^docs/[^/]+\.md$''',
-  '''^tests/fixtures/broker_statements/[^/]+/(?:[^/]+\.txt|[^/]+\.py|meta\.json)$''',
+  '''^tests/fixtures/broker_statements/.+$''',
 ]
 
 # ---------------------------------------------------------------- S8 身份证

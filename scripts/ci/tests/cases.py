@@ -85,6 +85,8 @@ def cases() -> list[Case]:
         Case("s7", "data/x.csv", ",".join(W[:3]) + "\n", {"S7"}, set(), {"S7"}),
         Case("s7-docs-top-exempt", "docs/rules.md", ",".join(W[:3]) + "\n", set(), set(), set()),
         Case("s7-docs-sub-not-exempt", "docs/strategies/r.md", ",".join(W[:3]) + "\n", {"S7"}, set(), {"S7"}),
+        Case("s7-fixture-dir-exempt", "tests/fixtures/broker_statements/fmt_z/README.md", ",".join(W[:3]) + "\n",
+             set(), set(), set()),
         Case("s7-file-level", "data/y.md", W[0] + "\n" + W[1] + "\n" + W[2] + "\n", {"S7"}, set(), set()),
         Case("s7-neg-two-words", "data/z.csv", ",".join(W[:2]) + "\n", set(), set(), set()),
         # S8

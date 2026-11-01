@@ -51,8 +51,9 @@ ACCOUNT_RE = re.compile(
 HEADER_CONTEXT_LINES = 20  # S6：文件前 20 行视为“文件表头”
 
 FIXTURE_ROOT = "tests/fixtures/broker_statements/"
-FIXTURE_RULES = {"S5", "S6", "S7"}
-DOCS_TOP_MD = re.compile(r"^docs/[^/]+\.md$")  # S7 只豁免 docs/ 顶层 *.md
+FIXTURE_RULES = {"S5", "S6"}  # 夹具条件豁免（值须在 meta.json.fake_identifiers 中）
+# S7 按路径豁免：docs/ 顶层 *.md（子目录不豁免）+ tests/fixtures/broker_statements/ 整个目录（T-O02 补充要求）
+S7_EXEMPT_PATH = re.compile(r"^(?:docs/[^/]+\.md|tests/fixtures/broker_statements/.+)$")
 FIXTURE_MARKER = "# SYNTHETIC"
 
 A = re.ASCII  # \b 只按 ASCII 判定（与 gitleaks/RE2 一致：中文字符视为非单词字符）
@@ -207,7 +208,7 @@ FIXTURE_NOT_EXEMPT = {"README.md", "expected.json"}  # plan §7.4A：这两类�
 
 
 def fixture_verdict(path: str, data: bytes, snap: Snapshot, allow: AllowList) -> FixtureVerdict | None:
-    """tests/fixtures/broker_statements/** 下文件的 S5/S6/S7 豁免判定（None = 不在夹具目录）。
+    """tests/fixtures/broker_statements/** 下文件的 S5/S6 豁免判定（None = 不在夹具目录；S7 整个目录按路径豁免）。
 
     .txt：meta.json 带 SYNTHETIC 标记、本文件登记在 files[] 且 sha256 一致、脱敏主样本已在允许清单登记；
     其他文件（generate.py、meta.json 等）：所在目录 meta.json 带 SYNTHETIC 标记；
@@ -281,9 +282,8 @@ def scan_blob(path: str, data: bytes, snap: Snapshot, allow: AllowList, where: s
     def add(line: int, rule: str, level: str, value: str) -> None:
         if allow.value_allowed(rule, value) or allow.path_allowed(rule, path, digest):
             return
-        if rule in FIXTURE_RULES and fx is not None and fx.exempt:
-            if rule == "S7" or value in fx.fake_ids:
-                return
+        if rule in FIXTURE_RULES and fx is not None and fx.exempt and value in fx.fake_ids:
+            return
         out.append(Finding(path, line, rule, level, value, where))
 
     fx = fixture_verdict(path, data, snap, allow)
@@ -324,7 +324,7 @@ def scan_blob(path: str, data: bytes, snap: Snapshot, allow: AllowList, where: s
                 add(no, "S9", WARN, m.group(0))
 
     # S7：文件级
-    if not DOCS_TOP_MD.match(path):
+    if not S7_EXEMPT_PATH.match(path):
         hits = [w for w in HEADER_WORDS if w in text]
         if len(hits) >= 3:
             first = next(i for i, ln in enumerate(lines, 1) if any(w in ln for w in hits))

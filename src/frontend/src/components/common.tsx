@@ -7,6 +7,7 @@ import type { Action, ConsensusStatus, DataStatus, TLeg } from '../api/enums';
 import type { Confidence, Gap } from '../api/types';
 import { ACTION_COLOR, ACTION_FULL, ACTION_SHORT, CONF_LEVEL, DATA_STATUS, GAP_REASON } from '../i18n/labels';
 import { fmtTime } from '../lib/format';
+import { isNotApplicable } from '../lib/dataGaps';
 
 /** 策略 + 动作徽标。措辞为“规则信号/候选”，不是投资建议 */
 export function ActionBadge({ action, strategyName, tLeg, size = 'sm' }: { action: Action; strategyName?: string; tLeg?: TLeg | null; size?: 'sm' | 'lg' }) {
@@ -44,8 +45,10 @@ function dataStatusLines(asOf?: string | null, gaps?: Gap[]): string[] {
  * 数据状态徽标。原因同时放在悬浮提示与隐藏说明里（评审 T-F22a M2）：
  * 可 Tab 聚焦，Enter / Space 打开或收起，Esc 收起；读屏经 aria-describedby 读到原因。
  */
+const NOT_APPLICABLE_TAG = { text: '不适用', color: 'var(--text-3, #8c8c8c)' };
+
 export function DataStatusTag({ status, asOf, gaps }: { status: DataStatus; asOf?: string | null; gaps?: Gap[] }) {
-  const d = DATA_STATUS[status];
+  const d = isNotApplicable(gaps) ? NOT_APPLICABLE_TAG : DATA_STATUS[status];
   const lines = dataStatusLines(asOf, gaps);
   const body = (
     <>
@@ -93,6 +96,13 @@ const NOTE_STATUS: readonly DataStatus[] = ['stale', 'partial', 'unavailable'];
  */
 export function GapNote({ status, gaps, asOf, testId = 'gap-note' }: { status: DataStatus; gaps: Gap[]; asOf?: string | null; testId?: string }) {
   if (!gaps.length && !NOTE_STATUS.includes(status)) return null;
+  if (isNotApplicable(gaps)) {
+    return (
+      <div className="gap-note na small" role="note" aria-label="数据状态说明" data-testid={testId} data-status="not_applicable">
+        <b>不适用</b>：该证券类型没有此类数据{gaps[0].message ? `（${gaps[0].message}）` : ''}
+      </div>
+    );
+  }
   const licence = gaps.some((g) => g.reason === 'data_licence_unavailable');
   const head = status === 'unavailable' ? '数据暂不可用' : status === 'stale' ? `数据已过期${asOf ? `（截至 ${fmtTime(asOf)}）` : ''}` : status === 'partial' ? '部分数据缺失' : '数据提示';
   return (

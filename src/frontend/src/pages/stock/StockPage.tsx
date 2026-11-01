@@ -8,7 +8,7 @@ import { useHorizonAssessment } from '../../api/queries';
 import type { Bar, BarsResponse, QuoteItem } from '../../api/types';
 import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../components/common';
 import { CAP_KIND_TEXT, capExplanation } from '../../i18n/horizonCaps';
-import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, SECURITY_RISK_FLAG } from '../../i18n/labels';
+import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, SECURITY_RISK_FLAG, SECURITY_TYPE } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { PriceChartPanel } from './PriceChartPanel';
 import { AnnouncementsTab, FactorsTab, FinancialsTab, FundFlowTab } from './StockTabs';
@@ -112,6 +112,8 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
   const suspended = profile.suspended === true;
   const preClose = tb?.pre_close ?? intradayPreClose(intraday.data, q) ?? (suspended && q ? q.price : null);
   const float = profile.float_shares ? Number(profile.float_shares) : null;
+  // v0.2.8：ETF 价格保留 3 位小数（价格字段是字符串，原样显示即保留；涨跌额也按 3 位）
+  const pd = profile.type === 'etf' ? 3 : 2;
   const stats: [string, React.ReactNode][] = [
     ['今开', tb ? <span className={pctClass(preClose ? Number(tb.open) - Number(preClose) : 0)}>{tb.open}</span> : '—'],
     ['最高', tb ? <span className={pctClass(preClose ? Number(tb.high) - Number(preClose) : 0)}>{tb.high}</span> : '—'],
@@ -128,6 +130,7 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       <div className="sh-id">
         <span className="q-name">{profile.name}</span>
         <span className="mono muted">{code}</span>
+        {profile.type !== 'stock' ? <Tag color="blue" data-testid="security-type-tag">{SECURITY_TYPE[profile.type]}</Tag> : null}
         {profile.board ? <Tag variant="outlined">{BOARD[profile.board]}</Tag> : null}
         {profile.risk_flag ? <Tag color="orange" data-testid="risk-flag-tag">{SECURITY_RISK_FLAG[profile.risk_flag]}</Tag> : null}
         {suspended ? <Tag color="default" data-testid="suspended-tag">停牌</Tag> : null}
@@ -137,7 +140,7 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
         <div className="sh-quote">
           <span className={`q-price mono ${pctClass(q.change_pct)}`}>{q.price}</span>
           <span className={`mono ${pctClass(q.change_pct)}`}>
-            {preClose && !suspended ? `${signed(Number(q.price) - Number(preClose))} ` : ''}({signed(q.change_pct)}%)
+            {preClose && !suspended ? `${signed(Number(q.price) - Number(preClose), pd)} ` : ''}({signed(q.change_pct)}%)
           </span>
           <Tooltip title="行情时间（北京时间）"><span className="muted small mono">{fmtTime(q.t)}</span></Tooltip>
           <DataStatusTag status={q.data_status} asOf={q.data_as_of} gaps={q.gaps} />
@@ -157,17 +160,22 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
 }
 
 function ProfilePanel({ profile }: { profile: SecurityProfile }) {
+  // v0.2.8：ETF 的板块、风险标记、股本、行业为 null、概念为 []，不算数据缺口，显示“不适用”
+  const etf = profile.type === 'etf';
+  const none = etf ? '不适用' : '—';
   const rows: [string, React.ReactNode][] = [
-    ['所属行业', profile.industry ? `${profile.industry.name}（${INDUSTRY_TAXONOMY[profile.industry.taxonomy]}）` : '—'],
-    ['概念', profile.concepts.length ? profile.concepts.map((c) => c.name).join('、') : '—'],
+    ['类型', SECURITY_TYPE[profile.type]],
+    ['所属行业', profile.industry ? `${profile.industry.name}（${INDUSTRY_TAXONOMY[profile.industry.taxonomy]}）` : none],
+    ['概念', profile.concepts.length ? profile.concepts.map((c) => c.name).join('、') : none],
     ['上市日期', profile.list_date ? `${profile.list_date}${profile.list_date_basis === 'neeq_select' ? '（精选层挂牌日）' : ''}` : '—'],
     ...(profile.delist_date ? [['退市日期', profile.delist_date] as [string, React.ReactNode]] : []),
     ...(profile.former_names.length ? [['曾用名', profile.former_names.map((f) => f.name).join('、')] as [string, React.ReactNode]] : []),
     ...(profile.code_history.length
       ? [['原代码', <span className="mono">{profile.code_history.map((c) => c.security_code).join('、')}</span>] as [string, React.ReactNode]]
       : []),
-    ['总股本', profile.total_shares ? `${fmtAmount(profile.total_shares)}股` : '—'],
-    ['流通股本', profile.float_shares ? `${fmtAmount(profile.float_shares)}股` : '—'],
+    ['总股本', profile.total_shares ? `${fmtAmount(profile.total_shares)}股` : none],
+    ['流通股本', profile.float_shares ? `${fmtAmount(profile.float_shares)}股` : none],
+    ...(etf ? [['交易单位', '每手 100 份，价格保留 3 位小数'] as [string, React.ReactNode]] : []),
     ['交易所', profile.exchange === 'SH' ? '上交所' : profile.exchange === 'SZ' ? '深交所' : '北交所'],
   ];
   return (

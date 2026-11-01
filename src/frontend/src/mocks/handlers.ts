@@ -1,5 +1,5 @@
 /**
- * MSW 处理器：按契约 v0.2.7 §7 的路径与响应结构返回示例数据。只拦截同源 `/api/v1/*`。
+ * MSW 处理器：按契约 v0.2.8 §7 的路径与响应结构返回示例数据。只拦截同源 `/api/v1/*`。
  * 未实现的端点统一返回 404 + 契约错误信封（code=NOT_FOUND），便于发现漏接。
  */
 import { http, HttpResponse, delay, matchRequestUrl } from 'msw';
@@ -18,8 +18,8 @@ import {
   SIGNAL_EVENTS, SUGGESTIONS, SUGGESTION_LIST, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, WATCHLIST, dailyBars, intradayBars,
 } from './fixtures';
 import {
-  INDEX_SPECS, MARKET_OVERVIEW, announcements, announcementsMeta, factors, financials, fundFlows, indexBars, searchSecurities, sectorFlows,
-  securityProfile, toWeekly,
+  ETF_QUOTES, INDEX_SPECS, MARKET_OVERVIEW, announcements, announcementsMeta, factors, financials, fundFlows, indexBars, searchSecurities, sectorFlows,
+  etfNotApplicable, isEtf, securityProfile, toWeekly,
 } from './marketFixtures';
 import { ENUMS } from '../api/enums';
 import { TODAY_EVIDENCE, riskEvents, todayAlerts, todayDataGaps, todayPlanTriggers, todaySamples } from './todayFixtures';
@@ -155,7 +155,8 @@ const routeHandlers = [
   http.get(`${API}/quotes`, ({ request }) => {
     const codes = (new URL(request.url).searchParams.get('codes') ?? '').split(',').filter(Boolean);
     if (codes.length > 200) return validation('codes', 'codes 最多 200 个');
-    const items = codes.length ? QUOTES.filter((q) => codes.includes(q.security_code)) : QUOTES;
+    // ETF 只在明确请求时返回（示例自选里没有 ETF）
+    const items = codes.length ? [...QUOTES, ...ETF_QUOTES].filter((q) => codes.includes(q.security_code)) : QUOTES;
     return HttpResponse.json({ items: items.map((q) => degrade(q, `quote.${q.security_code}`)) });
   }),
   http.get(`${API}/securities/:code/bars`, async ({ params, request }) => {
@@ -193,7 +194,7 @@ const routeHandlers = [
     const limit = Number(url.searchParams.get('limit') ?? 20);
     if (!Number.isInteger(limit) || limit < 1 || limit > 50) return validation('limit', 'limit 取值 1–50');
     const types = (url.searchParams.get('types') ?? '').split(',').filter(Boolean);
-    if (types.some((t) => !['stock', 'cdr', 'index'].includes(t))) return validation('types', 'types 取值 stock|cdr|index');
+    if (types.some((t) => !['stock', 'cdr', 'etf', 'index'].includes(t))) return validation('types', 'types 取值 stock|cdr|etf|index');
     return HttpResponse.json(searchSecurities(q, { types, limit }));
   }),
   http.get(`${API}/securities`, async ({ request }) => {
@@ -214,6 +215,7 @@ const routeHandlers = [
     const limit = Number(new URL(request.url).searchParams.get('limit') ?? 8);
     if (!Number.isInteger(limit) || limit < 1 || limit > 40) return validation('limit', 'limit 取值 1–40');
     if (isIndex(code)) return HttpResponse.json(indexEmpty(code, 'financials'));
+    if (isEtf(code)) return HttpResponse.json(etfNotApplicable(code, 'financials'));
     const f = financials(code, limit);
     return f ? HttpResponse.json(degrade(f, 'financials')) : notFound('证券');
   }),
@@ -223,16 +225,25 @@ const routeHandlers = [
     const days = Number(new URL(request.url).searchParams.get('days') ?? 60);
     if (!Number.isInteger(days) || days < 1 || days > 250) return validation('days', 'days 取值 1–250');
     if (isIndex(code)) return HttpResponse.json(indexEmpty(code, 'fund_flows'));
+    if (isEtf(code)) return HttpResponse.json(etfNotApplicable(code, 'fund_flows'));
     const f = fundFlows(code, days);
     return f ? HttpResponse.json(degrade(f, 'fund_flows')) : notFound('证券');
   }),
   http.get(`${API}/securities/:code/factors`, async ({ params }) => {
     await lag();
+    if (isEtf(String(params.code))) {
+      return HttpResponse.json({
+        ...etfNotApplicable(String(params.code), 'factors'), trade_date: '2026-10-30', factor_set_version: 'mr-factors-85（示例）', counts: { total: 0, by_category: {} },
+      });
+    }
     const f = factors(String(params.code));
     return f ? HttpResponse.json(f.items.length ? degrade(f, 'factors') : f) : notFound('证券');
   }),
   http.get(`${API}/securities/:code/announcements`, async ({ params, request }) => {
     await lag();
+    if (isEtf(String(params.code))) {
+      return HttpResponse.json({ ...page([], new URL(request.url)), ...announcementsMeta(), ...etfNotApplicable(String(params.code), 'announcements') });
+    }
     const list = announcements(String(params.code));
     if (!list) return notFound('证券');
     return HttpResponse.json(degrade({ ...page(list, new URL(request.url)), ...announcementsMeta() }, 'announcements'));

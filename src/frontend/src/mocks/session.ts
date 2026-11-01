@@ -47,6 +47,8 @@ function initialUsers(): MockUser[] {
     u(9, 'locked_user', '锁定用户（示例）', 'approved', { locked: true }),
     // 自报经验为新手：短线、日内做T 只出提示（v0.2.5 #2，SH0C / IT0C 进 hints，不封顶）
     u(13, 'novice_user', '新手用户（示例）', 'approved'),
+    // v0.2.8 #12/#14：证书被管理员暂停（演示“测试证书”禁用）
+    u(14, 'paused_user', '证书被暂停用户（示例）', 'approved', { created_at: '2026-10-25T10:00:00+08:00' }),
   ];
 }
 

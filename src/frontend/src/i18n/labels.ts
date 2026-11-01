@@ -86,7 +86,7 @@ export const EPISTEMIC: Record<EpistemicType, { text: string; color: string }> =
   hypothesis: { text: '假设', color: 'purple' }, execution: { text: '执行', color: 'blue' },
 };
 export const GAP_REASON: Record<GapReason, string> = {
-  no_source: '无数据源', not_yet_published: '尚未发布', upstream_error: '上游错误', quota_deferred: '配额顺延', user_input_missing: '待用户录入', data_licence_unavailable: '你的数据证书不可用',
+  no_source: '无数据源', not_yet_published: '尚未发布', upstream_error: '上游错误', quota_deferred: '配额顺延', user_input_missing: '待用户录入', data_licence_unavailable: '你的数据证书不可用', not_applicable: '不适用',
 };
 export const ORIGIN: Record<SuggestionOrigin, string> = {
   daily_batch: '盘后批处理', intraday_event: '盘中事件', manual_refresh: '手动刷新',
@@ -137,7 +137,7 @@ export const TARGET_TYPE: Record<NotificationTargetType, string> = {
 };
 
 // ---- v0.2.7（T-A08）个股数据、策略实例、/today 新增枚举 ----
-export const SECURITY_TYPE: Record<SecurityType, string> = { stock: '股票', cdr: 'CDR', index: '指数' };
+export const SECURITY_TYPE: Record<SecurityType, string> = { stock: '股票', cdr: 'CDR', etf: 'ETF', index: '指数' };
 export const BOARD: Record<Board, string> = { main: '主板', chinext: '创业板', star: '科创板', bse: '北交所' };
 export const LISTING_STATUS: Record<ListingStatus, string> = {
   listed: '上市', delisting_period: '退市整理期', delisted: '已退市', missing_from_list: '交易所列表未收录',

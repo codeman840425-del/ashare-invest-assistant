@@ -3,7 +3,7 @@
  * 运行时以 `GET /meta/enums` 为准；这里的常量用于类型推导与 mock 校验。
  */
 /** 与 `/meta/enums.version` 对齐的契约版本 */
-export const CONTRACT_VERSION = 'v0.2.7';
+export const CONTRACT_VERSION = 'v0.2.8';
 
 export const ENUMS = {
   account_status: ['pending', 'approved', 'rejected', 'disabled'],
@@ -43,7 +43,7 @@ export const ENUMS = {
   severity: ['info', 'attention', 'important'],
   channel: ['in_app', 'email', 'wecom_app'],
   data_status: ['fresh', 'stale', 'pending', 'partial', 'unavailable'],
-  gap_reason: ['no_source', 'not_yet_published', 'upstream_error', 'quota_deferred', 'user_input_missing', 'data_licence_unavailable'],
+  gap_reason: ['no_source', 'not_yet_published', 'upstream_error', 'quota_deferred', 'user_input_missing', 'data_licence_unavailable', 'not_applicable'],
   data_provider: ['mairui', 'user_import', 'user_input', 'system', 'exchange'],
   source_kind: ['market_data', 'disclosure', 'user_input', 'system_calc'],
   trade_side: ['buy', 'sell'],
@@ -68,7 +68,8 @@ export const ENUMS = {
   data_licence_status: ['not_set', 'pending_verification', 'active', 'invalid', 'expired', 'quota_exceeded', 'ip_limited', 'paused_by_admin'],
   data_licence_tier: ['free', 'trial', 'monthly', 'annual', 'diamond', 'other'],
   // v0.2.7（T-A08）：个股数据、策略实例、/today 新增枚举（factor_category 键名待 T003，未列入）
-  security_type: ['stock', 'cdr', 'index'],
+  // v0.2.8：加 etf（顺序 stock cdr etf index）；可转债本版不收录
+  security_type: ['stock', 'cdr', 'etf', 'index'],
   board: ['main', 'chinext', 'star', 'bse'],
   listing_status: ['listed', 'delisting_period', 'delisted', 'missing_from_list'],
   security_risk_flag: ['st', 'star_st', 'delisting'],

@@ -25,5 +25,7 @@ export const NAV_MORE = [
 ];
 /** 管理后台入口只对 role=admin 显示（评审 M4；契约 §1.3：非管理员访问 /admin/* 一律 404） */
 export const NAV_ADMIN = { path: '/admin/users', label: '用户审核（管理）' };
-export const navMoreFor = (role: string | undefined) => (role === 'admin' ? [...NAV_MORE, NAV_ADMIN] : NAV_MORE);
+/** v0.2.8 #1：按证书的采集状态表 */
+export const NAV_ADMIN_INGEST = { path: '/admin/ingest', label: '采集状态（管理）' };
+export const navMoreFor = (role: string | undefined) => (role === 'admin' ? [...NAV_MORE, NAV_ADMIN, NAV_ADMIN_INGEST] : NAV_MORE);
 

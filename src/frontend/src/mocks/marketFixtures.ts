@@ -27,7 +27,7 @@ const MASTER_AS_OF = '2026-11-02';
 const ATTRIBUTION = '证券列表来自上交所、深交所、北交所公开信息（示例）';
 
 // ---------------- 指数 ----------------
-interface IndexSpec { code: string; name: string; prev_close: number; price: number; amount: number; seed: number }
+interface IndexSpec { code: string; name: string; prev_close: number; price: number; amount: number; seed: number; dp?: number }
 export const INDEX_SPECS: IndexSpec[] = [
   { code: '000001.SH', name: '上证指数（示例）', prev_close: 3254.45, price: 3268.12, amount: 412_300_000_000, seed: 101 },
   { code: '399001.SZ', name: '深证成指（示例）', prev_close: 10451.36, price: 10432.55, amount: 538_100_000_000, seed: 103 },
@@ -36,7 +36,23 @@ export const INDEX_SPECS: IndexSpec[] = [
   { code: '000688.SH', name: '科创50（示例）', prev_close: 1012.34, price: 1018.92, amount: 61_200_000_000, seed: 113 },
   { code: '899050.BJ', name: '北证50（示例）', prev_close: 1105.2, price: 1098.47, amount: 15_300_000_000, seed: 127 },
 ];
-const indexOf = (code: string) => INDEX_SPECS.find((s) => s.code === code);
+/** v0.2.8：ETF 示例（价格 3 位小数，每手 100 份）；行情走指数同款生成器，财务/资金流/因子/公告为 not_applicable */
+export const ETF_SPECS: IndexSpec[] = [
+  { code: '510300.SH', name: '示例沪深300ETF', prev_close: 3.912, price: 3.948, amount: 2_130_000_000, seed: 131, dp: 3 },
+];
+export const isEtf = (code: string) => ETF_SPECS.some((s) => s.code === code);
+/** v0.2.8 #8：ETF 行情与股票同口径，价格 3 位小数（示例） */
+export const ETF_QUOTES = ETF_SPECS.map((s) => ({
+  security_code: s.code, name: s.name, price: s.price.toFixed(3), change_pct: f2(((s.price - s.prev_close) / s.prev_close) * 100),
+  volume: String(Math.round(s.amount / s.price / 100) * 100), amount: f2(s.amount * 0.45), t: NOW,
+  data_status: 'fresh' as DataStatus, data_as_of: NOW, gaps: [] as Gap[],
+}));
+/** v0.2.8 #6：ETF 的财务、资金流、因子、公告 → 200 + 空 items + unavailable + not_applicable */
+export const etfNotApplicable = (code: string, key: string) => ({
+  security_code: code, name: ETF_SPECS.find((x) => x.code === code)!.name, items: [] as never[], sources: [] as ProviderRef[],
+  data_status: 'unavailable' as DataStatus, data_as_of: NOW, gaps: [{ key, reason: 'not_applicable', message: 'ETF 没有该项数据（示例）' }] as Gap[],
+});
+const indexOf = (code: string) => INDEX_SPECS.find((s) => s.code === code) ?? ETF_SPECS.find((s) => s.code === code);
 
 /** v0.2.3 #9 §7.3 最小结构（示例数据） */
 export const MARKET_OVERVIEW: MarketOverview = {
@@ -51,6 +67,7 @@ export const MARKET_OVERVIEW: MarketOverview = {
 
 function indexDaily(s: IndexSpec): BarsResponse {
   const r = rng(s.seed * 31);
+  const f2 = (n: number) => n.toFixed(s.dp ?? 2);
   const days = tradingDays(TRADE_DATE, 120);
   const closes: number[] = new Array(days.length);
   closes[days.length - 1] = s.price;
@@ -62,7 +79,7 @@ function indexDaily(s: IndexSpec): BarsResponse {
     const amount = s.amount * (0.7 + r() * 0.6) * (i === days.length - 1 ? 0.45 : 1);
     return {
       t, open: f2(open), high: f2(Math.max(open, close) * (1 + r() * 0.007)), low: f2(Math.min(open, close) * (1 - r() * 0.007)), close: f2(close),
-      pre_close: i === 0 ? null : f2(closes[i - 1]), volume: String(Math.round(amount / close / 100) * 100), amount: f2(amount), avg_price: null,
+      pre_close: i === 0 ? null : f2(closes[i - 1]), volume: String(Math.round(amount / close / 100) * 100), amount: amount.toFixed(2), avg_price: null,
       // 盘中：当日 K 线尚未收盘
       is_final: t !== TRADE_DATE,
     };
@@ -71,6 +88,7 @@ function indexDaily(s: IndexSpec): BarsResponse {
 }
 function indexIntraday(s: IndexSpec): BarsResponse {
   const r = rng(s.seed * 17);
+  const f2 = (n: number) => n.toFixed(s.dp ?? 2);
   const mins = minuteEnds();
   const n = mins.indexOf('10:31') + 1;
   let p = s.prev_close;
@@ -82,7 +100,7 @@ function indexIntraday(s: IndexSpec): BarsResponse {
     const amount = (s.amount / 240) * (0.5 + r() * (i < 15 ? 2.2 : 0.9));
     items.push({
       t: `${TRADE_DATE}T${mins[i]}:00+08:00`, open: f2(prev), high: f2(Math.max(prev, p) * 1.0003), low: f2(Math.min(prev, p) * 0.9997), close: f2(p),
-      pre_close: null, volume: String(Math.round(amount / p / 100) * 100), amount: f2(amount), avg_price: null, is_final: i < n - 1,
+      pre_close: null, volume: String(Math.round(amount / p / 100) * 100), amount: amount.toFixed(2), avg_price: null, is_final: i < n - 1,
     });
     prev = p;
   }
@@ -98,6 +116,7 @@ export const indexBars = (code: string, freq: '1m' | 'd') => {
  * 第一根的 pre_close 取该周第一根日 K 的 pre_close，之后为上一根周 K 的 close；整周无交易（全周停牌）不出 K 线；
  * is_final 只在该周最后一个交易日已收盘时为 true（这里以“该周所有日 K 都 is_final 且已不是本周”为准）。
  */
+const dpOf = (v: string) => (v.split('.')[1] ?? '').length || 2;
 export function toWeekly(daily: BarsResponse): BarsResponse {
   const groups = new Map<string, Bar[]>();
   for (const b of daily.items) {
@@ -120,7 +139,8 @@ export function toWeekly(daily: BarsResponse): BarsResponse {
     if (!g.length) continue;
     const bar: Bar = {
       t: g[g.length - 1].t, open: g[0].open, close: g[g.length - 1].close,
-      high: f2(Math.max(...g.map((x) => Number(x.high)))), low: f2(Math.min(...g.map((x) => Number(x.low)))),
+      // 小数位跟随日线（ETF 为 3 位）
+      high: Math.max(...g.map((x) => Number(x.high))).toFixed(dpOf(g[0].open)), low: Math.min(...g.map((x) => Number(x.low))).toFixed(dpOf(g[0].open)),
       pre_close: items.length === 0 ? g[0].pre_close : prevClose,
       volume: String(g.reduce((a, x) => a + Number(x.volume), 0)), amount: f2(g.reduce((a, x) => a + Number(x.amount), 0)), avg_price: null,
       is_final: wk !== currentWeek && g.every((x) => x.is_final),
@@ -135,6 +155,7 @@ export function toWeekly(daily: BarsResponse): BarsResponse {
 const boardOf = (code: string): Board => (code.endsWith('.BJ') ? 'bse' : code.startsWith('688') ? 'star' : code.startsWith('300') ? 'chinext' : 'main');
 const exchangeOf = (code: string) => code.slice(-2) as SecurityHit['exchange'];
 const CONCEPTS = ['高股息（示例）', '人工智能（示例）', '半导体（示例）', '储能（示例）', '创新药（示例）', '数据要素（示例）', '机器人（示例）'];
+const TYPE_ORDER: SecurityHit['type'][] = ['stock', 'cdr', 'etf', 'index'];
 const MATCH_ORDER: SecurityHit['match_kind'][] = ['code_exact', 'name_exact', 'initials_exact', 'code_prefix', 'name_prefix', 'initials_prefix', 'name_contains', 'former_name', 'former_code', 'fuzzy'];
 
 /**
@@ -147,10 +168,15 @@ export function searchSecurities(q: string, opts: { types?: string[]; limit?: nu
   const up = raw.toUpperCase();
   const m = /^(?:SH|SZ|BJ)?(\d{1,6})(?:\.(?:SH|SZ|BJ))?$/.exec(up);
   const k = m ? m[1] : up;
-  const types = opts.types?.length ? opts.types : ['stock', 'cdr'];
+  // v0.2.8 #4：默认 stock,cdr,etf；仍不含指数
+  const types = opts.types?.length ? opts.types : ['stock', 'cdr', 'etf'];
   const pool: SecurityHit[] = [
     ...SECURITY_CODES.map((c): SecurityHit => ({
       security_code: c, name: specBrief(c)!.name, type: 'stock', exchange: exchangeOf(c), board: boardOf(c), listing_status: 'listed',
+      risk_flag: null, match_kind: 'fuzzy', matched_text: null, quote_missing: false,
+    })),
+    ...ETF_SPECS.map((s): SecurityHit => ({
+      security_code: s.code, name: s.name, type: 'etf', exchange: exchangeOf(s.code), board: null, listing_status: 'listed',
       risk_flag: null, match_kind: 'fuzzy', matched_text: null, quote_missing: false,
     })),
     ...INDEX_SPECS.map((s): SecurityHit => ({
@@ -169,7 +195,7 @@ export function searchSecurities(q: string, opts: { types?: string[]; limit?: nu
   const items = pool
     .map((h) => ({ ...h, match_kind: kindOf(h) }))
     .filter((h): h is SecurityHit => h.match_kind !== null)
-    .sort((a, b) => MATCH_ORDER.indexOf(a.match_kind) - MATCH_ORDER.indexOf(b.match_kind) || a.security_code.localeCompare(b.security_code))
+    .sort((a, b) => MATCH_ORDER.indexOf(a.match_kind) - MATCH_ORDER.indexOf(b.match_kind) || TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || a.security_code.localeCompare(b.security_code))
     .slice(0, Math.min(Math.max(opts.limit ?? 20, 1), 50));
   return { items, master_as_of: MASTER_AS_OF };
 }
@@ -182,6 +208,17 @@ export function securityProfile(code: string): SecurityProfile | null {
       security_code: idx.code, name: idx.name, type: 'index', exchange: exchangeOf(idx.code), board: null, list_date: null, list_date_basis: null,
       delist_date: null, listing_status: 'listed', risk_flag: null, former_names: [], code_history: [], master_as_of: MASTER_AS_OF, attribution: ATTRIBUTION,
       industry: null, concepts: [], total_shares: null, float_shares: null, suspended: null,
+      sources: [{ provider: 'exchange', endpoint: null, fetched_at: '2026-11-02T08:00:00+08:00' }],
+      data_status: 'fresh', data_as_of: '2026-11-02T08:30:00+08:00', gaps: [],
+    };
+  }
+  const etf = ETF_SPECS.find((x) => x.code === code);
+  if (etf) {
+    // v0.2.8 #5：ETF 的板块、上市依据、风险标记、股本、行业为 null，概念为 []，不计入缺失、不出 gap
+    return {
+      security_code: etf.code, name: etf.name, type: 'etf', exchange: exchangeOf(etf.code), board: null, list_date: '2012-05-28', list_date_basis: null,
+      delist_date: null, listing_status: 'listed', risk_flag: null, former_names: [], code_history: [], master_as_of: MASTER_AS_OF, attribution: ATTRIBUTION,
+      industry: null, concepts: [], total_shares: null, float_shares: null, suspended: false,
       sources: [{ provider: 'exchange', endpoint: null, fetched_at: '2026-11-02T08:00:00+08:00' }],
       data_status: 'fresh', data_as_of: '2026-11-02T08:30:00+08:00', gaps: [],
     };

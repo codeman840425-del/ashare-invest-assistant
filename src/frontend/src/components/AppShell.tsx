@@ -57,7 +57,7 @@ export function AppShell() {
   const userMenu = [
     { key: '/settings/profile', label: '投资画像' },
     { key: '/settings/data-licence', label: '数据证书' },
-    ...(me.data?.role === 'admin' ? [{ key: '/admin/users', label: '用户审核（管理）' }] : []),
+    ...(me.data?.role === 'admin' ? [{ key: '/admin/users', label: '用户审核（管理）' }, { key: '/admin/ingest', label: '采集状态（管理）' }] : []),
     { type: 'divider' as const },
     { key: 'logout', label: '退出登录', danger: true },
   ];
@@ -98,7 +98,7 @@ export function AppShell() {
         </header>
         {IS_MOCK ? (
           <div className="sample-banner" data-testid="sample-banner">
-            <b>示例数据</b>：当前由 MSW 返回虚构的证券、行情、持仓、策略与候选信号（按契约 v0.2.7 结构），仅用于开发联调；不连接真实后端、不联网取数。
+            <b>示例数据</b>：当前由 MSW 返回虚构的证券、行情、持仓、策略与候选信号（按契约 v0.2.8 结构），仅用于开发联调；不连接真实后端、不联网取数。
           </div>
         ) : null}
         <LicenceBanner status={me.data?.data_licence_status} onOpen={() => navigate('/settings/data-licence')} />

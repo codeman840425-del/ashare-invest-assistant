@@ -175,7 +175,13 @@ const positionsRaw = SPECS.filter((s) => s.holding).map((s) => {
   return { s, h, mv, pnl: (s.price - h.cost) * h.qty };
 });
 const MV = positionsRaw.reduce((a, p) => a + p.mv, 0);
-const TOTAL = CASH + MV;
+/**
+ * 示例可转债持仓（编排者 2026-11-02 裁定 Q63）：本版没有可转债行情，后端按成本估算市值、盈亏为 0。
+ * 不放进 SPECS（没有行情、自选与个股页数据）；前端按代码前缀识别后显示“可转债·无行情”。
+ */
+const CB = { code: '113050.SH', name: '示例转债', qty: 100, sellable: 100, cost: 118.5 };
+const CB_MV = CB.qty * CB.cost;
+const TOTAL = CASH + MV + CB_MV;
 
 export const PORTFOLIO: Portfolio = {
   cash: f2(CASH),
@@ -185,6 +191,10 @@ export const PORTFOLIO: Portfolio = {
       security_code: s.code, name: s.name, qty: String(h.qty), sellable_qty: String(h.sellable), cost_price: f2(h.cost),
       market_value: f2(mv), pnl: f2(pnl), pnl_pct: f2(((s.price - h.cost) / h.cost) * 100), weight_pct: f2((mv / TOTAL) * 100),
     }))
+    .concat([{
+      security_code: CB.code, name: CB.name, qty: String(CB.qty), sellable_qty: String(CB.sellable), cost_price: CB.cost.toFixed(3),
+      market_value: f2(CB_MV), pnl: '0.00', pnl_pct: '0.00', weight_pct: f2((CB_MV / TOTAL) * 100),
+    }])
     .sort((a, b) => Number(b.weight_pct) - Number(a.weight_pct)),
   exposure: {
     sector: Object.entries(

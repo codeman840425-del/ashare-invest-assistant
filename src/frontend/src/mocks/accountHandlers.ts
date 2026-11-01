@@ -1,12 +1,13 @@
 /**
  * MSW 处理器（T-F02 / T-F02a / T-F04）：认证、画像、管理端用户审核、券商账户、成交、导入、对账。
- * 后端目前只实现了 /health* 与 /meta/enums（src/backend/app/api/v1），其余都在这里按契约 v0.2.7 模拟（v0.2.6 加本人数据证书；v0.2.5 起无同意流程与风险测评，§1.3 只剩登录与审核状态两道门槛）。
+ * 后端目前只实现了 /health* 与 /meta/enums（src/backend/app/api/v1），其余都在这里按契约 v0.2.8 模拟（v0.2.6 加本人数据证书；v0.2.5 起无同意流程与风险测评，§1.3 只剩登录与审核状态两道门槛）。
  */
 import { http, HttpResponse } from 'msw';
 import type {
   AdminUserPatch, BrokerAccountCreate, ImportConfirmRequest, ImportOptions, LoginRequest, ProfileInput, RegisterRequest,
   ImportBatchSummary, ResolveFindingRequest, Trade, TradeCreate,
 } from '../api/accountTypes';
+import type { AdminIngestStatus, IngestLicenceStatus } from '../api/adminTypes';
 import { ENUMS } from '../api/enums';
 import { LICENCE_RE, type DataLicencePatch, type DataLicencePut } from '../api/licenceTypes';
 import { OVERRIDE_CHOICES } from '../i18n/importLabels';
@@ -15,7 +16,7 @@ import {
   type MockBatch, type MockUser,
 } from './session';
 import { errorBody, page } from './handlerUtils';
-import { deleteLicence, licenceOf, mockIngestPaused, patchLicence, putLicence, rateHit, testLicence } from './licenceStore';
+import { deleteLicence, licenceEntries, licenceOf, licenceState, mockIngestPaused, mockLicenceSettingsEnabled, patchLicence, putLicence, rateHit, testLicence } from './licenceStore';
 import { NOW, uid } from './fixtures';
 
 const API = '/api/v1';
@@ -144,6 +145,7 @@ export const accountHandlers = [
   // ---------------- §7.1 数据证书（v0.2.6，T-F22）：任何响应都不含证书值 ----------------
   http.get(`${API}/me/data-licence`, () => json(licenceOf(me().id))),
   http.put(`${API}/me/data-licence`, async ({ request }) => {
+    if (!mockLicenceSettingsEnabled()) return err(503, 'MAINTENANCE', '设置暂未开放（示例）');
     const wait = rateHit('put', me().id);
     if (wait) return rateLimited(wait);
     const b = (await request.json()) as Partial<DataLicencePut>;
@@ -160,6 +162,7 @@ export const accountHandlers = [
     return json(r.s, 202);
   }),
   http.patch(`${API}/me/data-licence`, async ({ request }) => {
+    if (!mockLicenceSettingsEnabled()) return err(503, 'MAINTENANCE', '设置暂未开放（示例）');
     const b = (await request.json()) as DataLicencePatch & { licence?: unknown };
     const fields: { field: string; issue: string }[] = [];
     if ('licence' in b) fields.push({ field: 'licence', issue: 'PATCH 不能修改证书，请用 PUT' });
@@ -179,13 +182,58 @@ export const accountHandlers = [
     return noContent();
   }),
   http.post(`${API}/me/data-licence/test`, () => {
+    if (!mockLicenceSettingsEnabled()) return err(503, 'MAINTENANCE', '设置暂未开放（示例）');
     const wait = rateHit('test', me().id);
     if (wait) return rateLimited(wait);
+    // v0.2.8 #14：管理员暂停期间测试 → 409 DATA_LICENCE_UNAVAILABLE{status:"paused_by_admin"}
+    if (licenceState(me().id) === 'paused_by_admin') return err(409, 'DATA_LICENCE_UNAVAILABLE', '管理员已暂停该证书，暂不能测试', { status: 'paused_by_admin' });
     if (mockIngestPaused()) return err(503, 'INGEST_PAUSED', '采集服务已暂停（示例）');
     return testLicence(me().id) ? json({ verification_id: uid(4100 + Math.floor(Math.random() * 1000)) }, 202) : err(409, 'DATA_LICENCE_NOT_SET', '尚未设置数据证书');
   }),
 
   // ---------------- §7.9 管理端：用户审核 ----------------
+  // v0.2.8 #1：/admin/ingest/status 按证书一行（示例数值；不含证书值、密文、HMAC 或其片段）
+  http.get(`${API}/admin/ingest/status`, () => {
+    const order = ['invalid', 'ip_limited', 'quota_exceeded', 'expired', 'paused_by_admin', 'pending_verification', 'active'];
+    const rows: IngestLicenceStatus[] = licenceEntries()
+      .filter((e) => e.s.status !== 'not_set')
+      .map((e, i) => {
+        const u = state.users.find((x) => x.id === e.userId);
+        const live = e.s.status === 'active';
+        return {
+          licence_id: e.licence_id, user_id: e.userId, username: u?.username ?? '—', display_name: u?.display_name ?? '—',
+          status: e.s.status, tier: e.s.tier, has_quant_pro: e.s.has_quant_pro, expires_on: e.s.expires_on, days_left: e.s.days_to_expiry,
+          calls_today: e.s.status === 'quota_exceeded' ? 200 : live ? 1180 + 37 * i : 0,
+          daily_limit: e.s.status === 'quota_exceeded' ? 200 : null,
+          per_minute_limit: e.s.tier === 'diamond' ? 300 : e.s.tier === 'free' ? 30 : 120,
+          calls_last_minute: live ? 12 + 5 * i : 0,
+          queue_depth: live ? { p0: 0, p1: 3 + i, p2: 40 + 10 * i } : { p0: 0, p1: 0, p2: 0 },
+          paused_until: e.s.paused_until, last_error_code: e.s.last_error_code, last_error_at: e.s.last_error_at,
+        };
+      })
+      .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status)
+        || (a.days_left ?? Infinity) - (b.days_left ?? Infinity)
+        || a.username.localeCompare(b.username));
+    const body: AdminIngestStatus = {
+      leader: { instance_id: 'ingest-示例-1', egress_ip_masked: '203.0.113.x', lease_expires_at: '2026-11-02T10:00:30+08:00' },
+      budget: { per_minute_limit: rows.reduce((t, r) => t + r.per_minute_limit, 0), used_last_minute: rows.reduce((t, r) => t + r.calls_last_minute, 0) },
+      queues: [
+        { priority: 'p0_intraday', depth: 0, oldest_age_s: 0 },
+        { priority: 'p1_daily', depth: rows.reduce((t, r) => t + r.queue_depth.p1, 0), oldest_age_s: 42 },
+        { priority: 'p2_backfill', depth: rows.reduce((t, r) => t + r.queue_depth.p2, 0), oldest_age_s: 1260 },
+      ],
+      errors_24h: [{ upstream_code: '101', count: 1 }, { upstream_code: 'http_5xx', count: 3 }],
+      ip_limit_alerts_24h: 0,
+      freshness: [
+        { dataset: 'quotes_rt', data_as_of: '2026-11-02T09:59:57+08:00', data_status: 'fresh' },
+        { dataset: 'bars_daily', data_as_of: '2026-10-30', data_status: 'fresh' },
+        { dataset: 'financials', data_as_of: '2026-10-30', data_status: 'stale' },
+      ],
+      licences: rows.slice(0, 500),
+      licences_truncated: rows.length > 500,
+    };
+    return json(body);
+  }),
   http.get(`${API}/admin/users`, ({ request }) => {
     const url = new URL(request.url);
     const status = url.searchParams.get('status');

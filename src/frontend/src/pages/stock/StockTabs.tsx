@@ -5,6 +5,7 @@ import { useAnnouncements, useFactors, useFinancials, useFundFlows } from '../..
 import type { Announcement, FactorValue, FinancialPeriod, FundFlowDay } from '../../api/marketTypes';
 import { ANNOUNCEMENT_CATEGORY, factorCategoryLabel, PROVIDER, REPORT_PERIOD } from '../../i18n/labels';
 import { DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/common';
+import { NOT_APPLICABLE_TEXT, isNotApplicable } from '../../lib/dataGaps';
 import { ExternalLink } from '../../components/ExternalLink';
 import { FundFlowChart } from '../../components/charts/FundFlowChart';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
@@ -76,7 +77,7 @@ export function FinancialsTab({ code }: { code: string }) {
         累计口径（年初至报告期末），金额单位元并简写为万/亿；数据在公告日之后才进入计算 <SourcesNote sources={d.sources} />
       </TabHead>
       <GapNote status={d.data_status} gaps={d.gaps} asOf={d.data_as_of} />
-      {d.items.length === 0 ? <div className="loading-box">暂无财务数据</div> : (
+      {d.items.length === 0 ? <div className="loading-box" data-testid="fin-empty">{isNotApplicable(d.gaps) ? NOT_APPLICABLE_TEXT : '暂无财务数据'}</div> : (
         <Table className="dense-table fin-table" size="small" rowKey="key" pagination={false} columns={cols} dataSource={FIN_ROWS} scroll={{ x: 'max-content' }} />
       )}
     </div>
@@ -112,6 +113,8 @@ export function FundFlowTab({ code }: { code: string }) {
         主力 = 超大单 + 大单；分档阈值以数据源口径为准；“—”为该档无数据 <SourcesNote sources={d.sources} />
       </TabHead>
       <GapNote status={d.data_status} gaps={d.gaps} asOf={d.data_as_of} />
+      {/* v0.2.8：ETF 等没有资金流时显示“不适用”，不画 0 值统计与空图 */}
+      {isNotApplicable(d.gaps) && d.items.length === 0 ? <div className="loading-box" data-testid="flow-empty">{NOT_APPLICABLE_TEXT}</div> : (<>
       <div className="flow-stats">
         {[['近 5 日主力净流入', 5], ['近 20 日', 20], ['近 60 日', 60]].map(([label, n]) => {
           const v = sum(d.items.slice(-Number(n)));
@@ -129,6 +132,7 @@ export function FundFlowTab({ code }: { code: string }) {
         </div>
         <Table className="dense-table static" size="small" rowKey="trade_date" pagination={false} columns={cols} dataSource={recent.slice(0, 10)} />
       </div>
+      </>)}
     </div>
   );
 }
@@ -170,7 +174,7 @@ export function FactorsTab({ code }: { code: string }) {
           {Object.entries(d.counts.by_category).map(([k, n]) => <span key={k}>{factorCategoryLabel(k)} {n}</span>)}
         </div>
       ) : null}
-      {d.items.length === 0 ? <div className="loading-box">暂无因子数据</div> : <Table className="dense-table static" size="small" rowKey="factor_id" pagination={false} columns={cols} dataSource={d.items} />}
+      {d.items.length === 0 ? <div className="loading-box" data-testid="factor-empty">{isNotApplicable(d.gaps) ? NOT_APPLICABLE_TEXT : '暂无因子数据'}</div> : <Table className="dense-table static" size="small" rowKey="factor_id" pagination={false} columns={cols} dataSource={d.items} />}
     </div>
   );
 }
@@ -200,7 +204,9 @@ export function AnnouncementsTab({ code }: { code: string }) {
             最近 {q.items.length} 条
           </TabHead>
           <GapNote status={q.first.data_status} gaps={q.first.gaps} asOf={q.first.data_as_of} />
-          <Table className="dense-table static" size="small" rowKey="id" pagination={false} columns={cols} dataSource={q.items} />
+          {isNotApplicable(q.first.gaps) && q.items.length === 0 ? <div className="loading-box" data-testid="ann-empty">{NOT_APPLICABLE_TEXT}</div> : (
+            <Table className="dense-table static" size="small" rowKey="id" pagination={false} columns={cols} dataSource={q.items} />
+          )}
           {/* T-F21：§1.2 游标“加载更多”取更早的公告 */}
           <CursorPager query={q} loaded={q.items.length} testId="ann-pager" />
         </>

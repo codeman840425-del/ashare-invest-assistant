@@ -74,6 +74,12 @@ export function errorText(e: unknown): string {
       const label = st && st in LICENCE_STATUS ? LICENCE_STATUS[st].text : null;
       if (label) return `你的数据证书不可用（${label}），暂时无法拉取最新数据`;
     }
+    if (e.code === 'INSTANCE_SCOPE_INVALID') {
+      // v0.2.8 #10 / 补充裁定②：按 details.issue 给出具体原因
+      const issue = e.details?.issue;
+      if (issue === 'security_type_not_supported') return e.details?.security_type === 'etf' ? 'ETF 暂不支持建策略实例' : '该证券类型暂不支持建策略实例';
+      if (issue === 'unknown_security') return '证券代码不存在';
+    }
     if (e.code === 'RATE_LIMITED') {
       const s = Number(e.details?.retry_after_s);
       if (Number.isFinite(s) && s > 0) return `操作过于频繁，请 ${fmtWait(s)}后再试`;

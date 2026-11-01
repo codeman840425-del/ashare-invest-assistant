@@ -69,6 +69,13 @@ export const routes: RouteObject[] = [
           return { element: <AdminGate><AdminUsersPage /></AdminGate> };
         },
       },
+      {
+        path: 'admin/ingest',
+        lazy: async () => {
+          const { AdminIngestPage } = await import('../pages/admin/AdminIngestPage');
+          return { element: <AdminGate><AdminIngestPage /></AdminGate> };
+        },
+      },
       { path: 'admin/*', element: <AdminGate><PlaceholderPage title="管理后台" /></AdminGate> },
       { path: '*', element: <NotFoundPage /> },
     ],

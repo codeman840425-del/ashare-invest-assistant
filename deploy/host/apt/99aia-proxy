@@ -1,0 +1,8 @@
+// Managed by ashare-invest-assistant deploy/host/apt (T-O08). 卸载：sudo deploy/host/apt/uninstall.sh
+//
+// 根因：本机出网经透明代理，外部域名统一解析为 198.18.0.1（fake-IP）。apt 默认先查
+// SRV 记录 _http._tcp.deb.debian.org，得到 debian.map.fastlydns.net 并直连该主机名，
+// 代理无法按原始域名路由 → http 返回 500、https 握手 EOF，apt-get update 失败。
+// 关闭 SRV 查询后 apt 直接连接 sources 中写的主机名（deb.debian.org 等），代理正常转发。
+// 本文件只新增这一项，不修改/覆盖任何已有 sources 或 apt 配置。
+Acquire::EnableSrvRecords "false";

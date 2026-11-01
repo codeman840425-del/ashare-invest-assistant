@@ -1,0 +1,6 @@
+# /etc/profile.d/zz-aia-dockerd.sh —— 由 ashare-invest-assistant deploy/host/dockerd-autostart/install.sh 安装（T-O08）
+# 作用：登录 shell 启动时，若 dockerd 未运行或当前用户无法访问 docker.sock，则在后台拉起 dockerd 并补 ACL。
+# 卸载：sudo @REPO@/deploy/host/dockerd-autostart/uninstall.sh（或直接 sudo rm 本文件）
+if [ -x "@REPO@/deploy/scripts/ensure-dockerd.sh" ]; then
+  "@REPO@/deploy/scripts/ensure-dockerd.sh" >/dev/null 2>&1 || true
+fi

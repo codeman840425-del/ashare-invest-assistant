@@ -1,0 +1,10 @@
+# T-O08：数据库备份产物绝不入库（db-backup.sh 默认输出到 deploy/backups/）
+backups/
+*.dump
+*.meta.json
+*.sql.gz
+*.tar.gz
+# 演练记录（deploy/drills/*.md|json，仅含行数/校验和/版本/耗时，无数据与口令）入库作为证据；
+# 演练 dump 与工作目录只在 /tmp，脚本退出即删除。以下兜底防止误放：
+drills/**/*.dump
+drills/work/

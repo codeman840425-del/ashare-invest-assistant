@@ -3,12 +3,14 @@
 #
 # 硬约束：MAIRUI_LICENCE 只出现在 ingest 的 environment 中；其他服务不得引用它，
 #         且任何服务都不使用 env_file（避免把 .env 整体注入）。CI（T-O02）会检查。
-# 业务服务目前是占位入口（python:3.13-slim 的 http.server，只回 200），不含业务代码；
+# 业务服务目前是占位入口（python:3.13 slim 镜像的 http.server，只回 200），不含业务代码；
 # 后续由 deploy/docker/backend.Dockerfile 构建同一镜像、不同启动命令替换。
 
 name: ${COMPOSE_PROJECT_NAME:-aia}
 
-x-placeholder-image: &placeholder-image python:3.13-slim
+# 镜像全部固定到精确 tag + digest（T-O08）。升级流程：改 tag → docker buildx imagetools inspect <tag>
+# 取新 digest → 本地 up.sh + db-restore-drill.sh 验证 → 提交。PG/TimescaleDB 升级还需按官方流程 ALTER EXTENSION。
+x-placeholder-image: &placeholder-image python:3.13.18-slim-trixie@sha256:76baad6037690d6e8c4397fbcaef17bca6f19eecef822b708fe8fa3417d30bb5
 
 # 占位入口：监听 8000，任意路径返回 200
 x-placeholder-cmd: &placeholder-cmd ["python", "-m", "http.server", "8000", "--bind", "0.0.0.0", "--directory", "/tmp"]
@@ -35,7 +37,7 @@ x-app-depends: &app-depends
 
 services:
   nginx:
-    image: nginx:1.31.2-alpine
+    image: nginx:1.31.2-alpine3.23@sha256:54f2a904c251d5a34adf545a72d32515a15e08418dae0266e23be2e18c66fefa
     restart: unless-stopped
     ports:
       - "127.0.0.1:${NGINX_HTTP_PORT:-8080}:80"
@@ -132,8 +134,13 @@ services:
     healthcheck: *placeholder-healthcheck
 
   postgres:
-    image: timescale/timescaledb:2.31.0-pg16
+    # TimescaleDB 2.31.0 + PostgreSQL 16.15（digest 固定 PG 小版本；plan §3A.1 避开 16.5/17.1）
+    image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
     restart: unless-stopped
+    # 运行参数集中在 deploy/postgres/conf/postgresql.conf（T-O08 调优 + WAL）
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    shm_size: 1gb
+    stop_grace_period: 60s
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-aia}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置}
@@ -142,6 +149,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ../postgres/initdb/001-timescaledb.sql:/docker-entrypoint-initdb.d/zz-001-aia-timescaledb.sql:ro
+      - ../postgres/conf/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     # 走 TCP（初始化阶段只监听 unix socket），并确认 timescaledb 扩展已启用
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" && psql -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -tAc \"select 1 from pg_extension where extname='timescaledb'\" | grep -q 1"]
@@ -151,7 +159,7 @@ services:
       start_period: 30s
 
   redis:
-    image: redis:7.4.12-alpine
+    image: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:

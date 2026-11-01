@@ -1,0 +1,139 @@
+{
+  "run_id": "20261101T195920Z",
+  "result": "PASS",
+  "image": "timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731",
+  "source": {
+    "container": "aia-drill-src-20261101t195920z",
+    "db": "aia_drill",
+    "version": "16.15 / timescaledb 2.31.0"
+  },
+  "target": {
+    "container": "aia-drill-dst-20261101t195920z",
+    "db": "aia_drill_restored",
+    "version": "16.15 / timescaledb 2.31.0"
+  },
+  "sample": {
+    "securities": 100,
+    "trading_days": 25,
+    "minute_rows": 600000
+  },
+  "dump": {
+    "size_bytes": 17174207,
+    "sha256": "a619f6e8f2e6470bba5ec11c5d28365808b0c93e0e699e3e0826b19457c3e2ec",
+    "kept": false
+  },
+  "compression": {
+    "minute_bars_before_bytes": 96829440,
+    "minute_bars_after_bytes": 16990208,
+    "ratio": "5.7"
+  },
+  "apply_second_run_non_ok_changes": 0,
+  "duration_seconds": 43,
+  "checks": {
+    "rows.market.minute_bars": {
+      "source": "600000",
+      "restored": "600000",
+      "pass": true
+    },
+    "rows.market.realtime_quotes": {
+      "source": "28800",
+      "restored": "28800",
+      "pass": true
+    },
+    "rows.market.daily_bars": {
+      "source": "2500",
+      "restored": "2500",
+      "pass": true
+    },
+    "rows.market.factor_values": {
+      "source": "25000",
+      "restored": "25000",
+      "pass": true
+    },
+    "rows.ops.ingest_request_log": {
+      "source": "1000",
+      "restored": "1000",
+      "pass": true
+    },
+    "rows.market.bars_5m": {
+      "source": "120000",
+      "restored": "120000",
+      "pass": true
+    },
+    "rows.market.bars_daily_from_1m": {
+      "source": "2500",
+      "restored": "2500",
+      "pass": true
+    },
+    "md5.market.minute_bars": {
+      "source": "54023bbf82e2e72b832350c229de4f12",
+      "restored": "54023bbf82e2e72b832350c229de4f12",
+      "pass": true
+    },
+    "md5.market.realtime_quotes": {
+      "source": "a875cff5a19b8dd23713f1ca7a541160",
+      "restored": "a875cff5a19b8dd23713f1ca7a541160",
+      "pass": true
+    },
+    "md5.market.daily_bars": {
+      "source": "8e2628e9a6f2acbd938f00d45613f55a",
+      "restored": "8e2628e9a6f2acbd938f00d45613f55a",
+      "pass": true
+    },
+    "md5.market.factor_values": {
+      "source": "b2af3b959af15e43e6d88c31f03afb3c",
+      "restored": "b2af3b959af15e43e6d88c31f03afb3c",
+      "pass": true
+    },
+    "md5.ops.ingest_request_log": {
+      "source": "feaf7e3a87ec474e5910b485e738e558",
+      "restored": "feaf7e3a87ec474e5910b485e738e558",
+      "pass": true
+    },
+    "md5.market.bars_5m": {
+      "source": "5441e6b83558c9524c1a2ba1a2a0c492",
+      "restored": "5441e6b83558c9524c1a2ba1a2a0c492",
+      "pass": true
+    },
+    "md5.market.bars_daily_from_1m": {
+      "source": "9fa8a549ec3bf4df0e9629b7a1e0473d",
+      "restored": "9fa8a549ec3bf4df0e9629b7a1e0473d",
+      "pass": true
+    },
+    "hypertables": {
+      "source": "market.minute_bars(compression=true),market.realtime_quotes(compression=true),market.daily_bars(compression=false),market.factor_values(compression=true),ops.ingest_request_log(compression=false)",
+      "restored": "market.minute_bars(compression=true),market.realtime_quotes(compression=true),market.daily_bars(compression=false),market.factor_values(compression=true),ops.ingest_request_log(compression=false)",
+      "pass": true
+    },
+    "chunks.total": {
+      "source": "60",
+      "restored": "60",
+      "pass": true
+    },
+    "chunks.compressed": {
+      "source": "21",
+      "restored": "21",
+      "pass": true
+    },
+    "chunks.compressed.minute_bars": {
+      "source": "20",
+      "restored": "20",
+      "pass": true
+    },
+    "caggs": {
+      "source": "market.bars_5m(materialized_only=true,compression=true),market.bars_daily_from_1m(materialized_only=true,compression=false)",
+      "restored": "market.bars_5m(materialized_only=true,compression=true),market.bars_daily_from_1m(materialized_only=true,compression=false)",
+      "pass": true
+    },
+    "jobs": {
+      "source": "policy_compression@market.bars_5m every 12:00:00 {\"compress_after\": \"30 days\"} scheduled=true ; policy_compression@market.factor_values every 12:00:00 {\"compress_after\": \"90 days\"} scheduled=true ; policy_compression@market.minute_bars every 12:00:00 {\"compress_after\": \"7 days\"} scheduled=true ; policy_compression@market.realtime_quotes every 12:00:00 {\"compress_after\": \"7 days\"} scheduled=true ; policy_refresh_continuous_aggregate@market.bars_5m every 00:05:00 {\"end_offset\": \"00:05:00\", \"start_offset\": \"3 days\"} scheduled=true ; policy_refresh_continuous_aggregate@market.bars_daily_from_1m every 01:00:00 {\"end_offset\": \"01:00:00\", \"start_offset\": \"10 days\"} scheduled=true ; policy_retention@market.minute_bars every 1 day {\"drop_after\": \"1095 days\"} scheduled=true ; policy_retention@market.realtime_quotes every 1 day {\"drop_after\": \"21 days\"} scheduled=true ; policy_retention@ops.ingest_request_log every 1 day {\"drop_after\": \"30 days\"} scheduled=true",
+      "restored": "policy_compression@market.bars_5m every 12:00:00 {\"compress_after\": \"30 days\"} scheduled=true ; policy_compression@market.factor_values every 12:00:00 {\"compress_after\": \"90 days\"} scheduled=true ; policy_compression@market.minute_bars every 12:00:00 {\"compress_after\": \"7 days\"} scheduled=true ; policy_compression@market.realtime_quotes every 12:00:00 {\"compress_after\": \"7 days\"} scheduled=true ; policy_refresh_continuous_aggregate@market.bars_5m every 00:05:00 {\"end_offset\": \"00:05:00\", \"start_offset\": \"3 days\"} scheduled=true ; policy_refresh_continuous_aggregate@market.bars_daily_from_1m every 01:00:00 {\"end_offset\": \"01:00:00\", \"start_offset\": \"10 days\"} scheduled=true ; policy_retention@market.minute_bars every 1 day {\"drop_after\": \"1095 days\"} scheduled=true ; policy_retention@market.realtime_quotes every 1 day {\"drop_after\": \"21 days\"} scheduled=true ; policy_retention@ops.ingest_request_log every 1 day {\"drop_after\": \"30 days\"} scheduled=true",
+      "pass": true
+    },
+    "jobs.count": {
+      "source": "9",
+      "restored": "9",
+      "pass": true
+    }
+  }
+}

@@ -17,6 +17,12 @@ if [ ! -f "$ENV_FILE" ]; then
   chmod 600 "$ENV_FILE"
 fi
 
+# daemon 没起来（机器重启后）或 docker.sock ACL 丢失（dockerd 被别处重启）时，自动修复一次（T-O08）。
+if ! docker info >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null)" != "systemd" ] \
+   && command -v dockerd >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  "$ROOT/deploy/scripts/start-dockerd.sh" >&2 || true
+fi
+
 if docker info >/dev/null 2>&1; then
   DOCKER=(docker)
 elif sudo -n docker info >/dev/null 2>&1; then

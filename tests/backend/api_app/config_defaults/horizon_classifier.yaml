@@ -1,6 +1,6 @@
 # plan v0.2.3 §6.1 `config/horizon_classifier.yaml` 代码块原文快照（测试维护，T-T01b 建立，T-T01c 同步 v0.2.3）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。
 schema_version: 1
-version_no: 2                    # T-A03：问题 37 方案 A 新增 SH0C，发新版本（v1 不可变，保留）
+version_no: 2                    # T-A03：问题 37 方案 A 新增 SH0C、IT0C，发新版本（v1 不可变，保留）
 classifier_version: "1.1.0"     # T-A03 新增键：对外的语义化版本（契约 /horizon-assessments.classifier_version，正则见契约 §7.4 `/horizon-assessments`）；v1 = "1.0.0"
 suitable_threshold: 60          # int，0–100 分 ≥ 60 列为“适合”
 reasons_per_horizon: [2, 4]     # 每个周期给 2–4 条理由
@@ -58,6 +58,8 @@ rules:
            reason: "做T 需要已有底仓（T+1：当日买入不能当日卖出）"}
         - {id: IT0B, input: profile.effort, op: in, value: [medium, high], else_cap: 59,
            reason: "做T 需要盘中盯盘，画像精力为低或未填写"}
+        - {id: IT0C, input: profile.experience, op: in, value: [intermediate, advanced], else_cap: 59,
+           reason: "做T 需要盘中决断与纪律，画像经验为新手或未填写"}   # 【编排者默认，用户可否决，2026-11-01】口径同 SH0C；用户可经 fit_ack 覆盖
       components:
         - {id: IT1, input: f.intraday_amplitude_20d, transform: rank_pct,
            bands: [{op: ge, value: 0.7, pts: 30}, {op: ge, value: 0.5, pts: 20}, {op: ge, value: 0.3, pts: 10}],

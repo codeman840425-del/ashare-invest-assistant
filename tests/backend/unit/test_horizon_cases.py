@@ -4,9 +4,9 @@
   按 horizon_classifier.md §3/§4 的判定顺序计算：闸门（score 0 优先，其次最小 cap）→ requires（else_score / else_cap）
   → components 取第一条命中的档位 → 数据缺失封顶 → suitable（≥ suitable_threshold，按分数降序，同分按 tie_order）。
 - 用例 E（novice，次新股）：问题 37 方案 A（SH0C，classifier 1.1.0）后 short 85 → 59，suitable [short] → []；
-  intraday_t 无底仓为 0（同样 ≤ 59）。
-- 编排者要求（T-T01c）：novice 的 intraday_t 也按同样方式封顶 59。plan v0.2.3 只定了 short（intraday_t 部分
-  “待定，研究员建议暂不加”），规则里没有对应条目，所以该断言是 strict xfail，原因写明谁需要做什么。
+  intraday_t 无底仓为 0（同样 ≤ 59）。与 horizon_classifier.md §7 用例 E 行一致。
+- novice（或未填经验）的 intraday_t 同样封顶 59：plan §2.5.3 / §6.1 规则 IT0C（编排者默认，用户可否决，
+  origin/main fce21bb/fb583bf）。若用户否决 IT0C，删去对应用例并同步快照。
 - 后端分类器（T-B30）落地后，应以同一组输入调用后端实现并比对；目前后端没有分类器，只做规则层期望。
 
 全部为示例数值，不联网、不依赖后端。
@@ -28,14 +28,6 @@ RULES = CFG["rules"]
 THRESHOLD = CFG["suitable_threshold"]
 HORIZONS = ("intraday_t", "short", "swing", "long")
 NOVICE_CAP = 59
-
-INTRADAY_NOVICE_REASON = (
-    "编排者（T-T01c）要求 novice 的 intraday_t 同样封顶 59，但 plan v0.2.3 问题 37 只定了 short（SH0C），"
-    "intraday_t 部分仍“待定，研究员建议暂不加”，horizon_classifier.yaml 没有对应 requires 规则。"
-    "需用户拍板后由架构师在 plan §6.1 / horizon_classifier.md 增加规则（如 IT0C）并升 classifier_version，"
-    "后端 T-B30 实现；届时同步本测试快照，本用例转为通过"
-)
-
 
 def _cond(op: str, actual: Any, value: Any) -> bool:
     if op == "not_null":
@@ -124,10 +116,11 @@ CASE_E = {
 }
 
 
-def test_snapshot_is_classifier_1_1_0_with_sh0c():
+@pytest.mark.parametrize(("horizon", "rule_id"), [("short", "SH0C"), ("intraday_t", "IT0C")])
+def test_snapshot_is_classifier_1_1_0_with_novice_caps(horizon, rule_id):
     assert (CFG["version_no"], CFG["classifier_version"]) == (2, "1.1.0")
-    sh0c = next(q for q in RULES["horizons"]["short"]["requires"] if q["id"] == "SH0C")
-    assert (sh0c["input"], sh0c["op"], sh0c["value"], sh0c["else_cap"]) == (
+    rule = next(q for q in RULES["horizons"][horizon]["requires"] if q["id"] == rule_id)
+    assert (rule["input"], rule["op"], rule["value"], rule["else_cap"]) == (
         "profile.experience", "in", ["intermediate", "advanced"], NOVICE_CAP)
 
 
@@ -168,10 +161,10 @@ def test_novice_short_capped_even_when_otherwise_full_score():
     assert r["scores"]["short"] == NOVICE_CAP and "short" not in r["suitable"]
 
 
-@pytest.mark.xfail(strict=True, reason=INTRADAY_NOVICE_REASON)
-def test_novice_intraday_t_capped_like_short():
-    """编排者要求：novice（或未填写）用户的 intraday_t 同样最高 59、不列为适合。"""
-    for exp in ("novice", None):
-        r = evaluate({**CASE_B, "profile.experience": exp})
-        assert r["scores"]["intraday_t"] <= NOVICE_CAP, exp
-        assert "intraday_t" not in r["suitable"], exp
+@pytest.mark.parametrize("experience", ["novice", None])
+def test_novice_intraday_t_capped_like_short(experience):
+    """IT0C：novice（或未填写）用户的 intraday_t 同样最高 59、不列为适合（用例 B 本为 100）。"""
+    r = evaluate({**CASE_B, "profile.experience": experience})
+    assert r["scores"]["intraday_t"] == NOVICE_CAP and r["caps"]["intraday_t"] == ["IT0C"]
+    assert r["scores"]["short"] == NOVICE_CAP and r["caps"]["short"] == ["SH0C"]
+    assert r["suitable"] == ["swing"]

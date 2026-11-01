@@ -24,7 +24,7 @@
 | 规模与部署 | V1 面向 10–100 名用户：单机，**不用 k8s，不拆微服务**。先在本地测试，之后买服务器迁移（1.3 节附迁移手册）。域名**未备案**：对公网开放前必须解决（第 9 节问题 4）。 |
 | 数据接入 | 只有**行情采集服务 `ingest`**（单副本、单活锁、licence 只在此容器）能调用麦蕊：固定出口 IP、全局令牌桶（默认每分钟 3,000，可配置）、优先队列（盘中实时 > 日批 > 历史回补）、singleflight、原始响应留存；故障切换只做冷备；其他服务和用户只读缓存和数据库（2.1A）。数据全站共享。盘中按"去重后的系统证券池"分层刷新。 |
 | 刷新与上限 | 由配额推导，参数全部可配置（0A.6、0A.7）：<br>• 多股快照默认 **15 秒**一轮（N ≤ 2,000）；<br>• Tier-1 **1,500 只每分钟**取 Pro 1 分钟 K，Tier-2 每 5 分钟；<br>• 系统 universe **硬上限 4,000**；<br>• 每用户自选 **100**、重点关注 **20**。<br>以上依据官网文档推导，**【待 T003 验证】**，实测后调到上限。 |
-| LLM | 供应商无关的网关，**先接 DeepSeek**（OpenAI 兼容适配器，第 9 节问题 16）：管理员配置 provider、base_url、模型和**加密 API key**，按任务路由，带超时、重试、备用链和预算，记录 token 与成本，提示词模板版本化。输入是证据，输出是带 `[E#]` 引用的解释；**不决定动作**，失败时回落到模板。 |
+| LLM | 供应商无关的网关，**先接 DeepSeek**（OpenAI 兼容适配器，第 9 节问题 16）：base_url、模型、超时与重试写在 `config/llm.yaml`（6.1），DeepSeek 的 key 只从环境变量 `DEEPSEEK_API_KEY` 读取（2.7.1，已按官方文档核实），按任务路由，带超时、重试、备用链和预算，记录 token 与成本，提示词模板版本化。输入是证据，输出是带 `[E#]` 引用的解释；**不决定动作**，失败时回落到模板。 |
 | 账号 | 用户名 + 密码（argon2id），**无验证码**。V1 **注册默认关闭**（`REGISTRATION_MODE=closed`，本人账号由 CLI 创建）；以后开放为邀请制，注册后为 `pending`，管理员批准后才能使用。防滥用靠限速和锁定（第 9 节问题 1）。 |
 | 持仓来源 | 主要导入通达信（TDX）导出的交割单与持仓 .txt（插件化解析器、GBK/UTF-8 识别、46 个 `IMPORT_*` 提示码、预览确认、去重、以摊薄成本对账，3.5A），手动录入为辅。持仓一律由成交重建。**股东代码等敏感标识做 HMAC + 掩码，原始文件加密后存放在仓库外并做访问控制。** |
 | 数据模型关键 | `epistemic_type ∈ {fact, estimate, hypothesis, execution}`。研究、计划、复盘、建议、策略版本、日报都是"头表 + 不可变版本"，并绑定 `data_snapshot`（`data_as_of` / `fetched_at`）。行情表带 `first_seen_at`，支持按原貌回看。 |
@@ -137,7 +137,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
    - 不决定动作、分数、置信度，不新增事实；输入只含证据 JSON（含证据 `id`），要求每句以 `[E12]` 形式引用证据；
    - **防幻觉校验**：输出中所有数字必须能在输入证据中找到（数值与单位精确匹配或按约定四舍五入），所有引用 ID 必须存在；出现未引用句子、新数字、新股票代码、禁用词（"保证/必涨/稳赚"等）→ 丢弃，按网关策略重试/切换备用模型，仍失败则回退到**模板解释**（模板始终可用，LLM 不可用不影响建议生成）；
    - 原始 prompt/输出/模型/token/成本存 `llm_calls`；用户可一键查看"原始结构化证据"；
-   - **用量估算**：每条解释约 1.5k 输入 + 0.3k 输出 tokens；100 用户 × 平均 30 只股票 × 每日 1 次（盘后）≈ 3,000 次/日 ≈ 5.4M tokens/日；盘中只对翻转事件生成（估计 ≤ 盘后量的 30%）；同一 (code, method_version, snapshot) 的共享部分（个股事实解读）全站缓存复用，只有涉及个人持仓的段落按用户生成。金额按所选供应商公开价目计算【待核实，取决于管理员配置的供应商】，网关按调用记录成本并设日预算上限。
+   - **用量估算**：每条解释约 1.5k 输入 + 0.3k 输出 tokens；100 用户 × 平均 30 只股票 × 每日 1 次（盘后）≈ 3,000 次/日 ≈ 5.4M tokens/日；盘中只对翻转事件生成（估计 ≤ 盘后量的 30%）；同一 (code, method_version, snapshot) 的共享部分（个股事实解读）全站缓存复用，只有涉及个人持仓的段落按用户生成。按 2.7.1 的 `deepseek-flash` 官方价目（2026-11-01 核实）估算：每日约 4.5M 输入 + 0.9M 输出 tokens，全部按高峰价且缓存全未命中时 ≈ 4.5×2 + 0.9×8 ≈ 16.2 元/日，空闲时段减半，缓存命中部分更低；价目可能变动，以官方价目页和账单为准。网关按调用记录成本并设日预算上限。
 5. **不可变存档**：`suggestions` 行写入后禁止 UPDATE/DELETE（触发器）；头表 `suggestion_threads`（每用户每股票一条）只保存当前指针与状态。
 
 ### 0A.5 盘后批处理流水线（交易日）
@@ -934,20 +934,71 @@ class NotificationChannel(Protocol):
 ```python
 class LLMProvider(Protocol):
     key: str                                   # openai_compatible / anthropic / ...（适配器）
-    async def complete(self, req: LLMRequest) -> LLMResponse   # messages, model, max_tokens, temperature, response_format(json_schema), timeout
+    async def complete(self, req: LLMRequest) -> LLMResponse   # messages, model, max_tokens, temperature, response_format({type: json_object})（DeepSeek 只支持 json_object，schema 由本地 pydantic 校验，2.7.1）, thinking, user_id, timeout
 class LLMGateway:
     async def run(self, task: str, evidence: EvidencePack, *, user_id: int | None) -> ExplanationResult
     # task → 查 llm_task_routes（主模型、备用模型链、超时、重试、预算）→ 渲染 prompt_template（版本）→ 调用 → 校验 → 记录 llm_calls
 ```
-- **管理员配置**（后台，非代码）：`llm_providers`（名称、类型、`base_url`、API key **AES-256-GCM 加密存储**，密钥加密主密钥来自环境变量/密钥文件，接口只返回掩码 `sk-…abcd`）、`llm_models`（模型名、上下文长度、每千 tokens 输入/输出单价——由管理员按供应商价目填写）、`llm_task_routes`（任务 → 主模型 + 备用链、超时（默认 30 秒）、重试（默认 2 次，指数退避，仅对超时/429/5xx）、温度、最大输出、日预算）。保存配置时可"测试连接"。
+- **配置来源**（v2026-11-01 修订）：默认值在 `config/llm.yaml`（6.1）；管理端运行时覆盖存数据库（`llm_task_routes`、`llm_models` 价目等，标“可热调”的键）。`llm_providers` 记录名称、类型、`base_url`、`api_key_source`（`env`/`db`）。**DeepSeek 的 key 只来自环境变量 `DEEPSEEK_API_KEY`**（`api_key_source=env`），不入库、不经接口写入、任何接口和日志都不返回 key 或其片段（契约 v0.2.1 §7.9 只返回 `api_key_set`）；以后接入的其他供应商若在后台录入 key，才用 AES-256-GCM 加密入库（`api_key_source=db`）。`env` 来源供应商的 `base_url` 不可热调，只能改 YAML 并重启，且必须是 https 且主机在白名单内（防止管理员误配把 key 发往他处）。`llm_models`（模型名、上下文长度、最大输出、每百万 tokens 的缓存命中/未命中输入价与输出价、空闲时段折扣）、`llm_task_routes`（任务 → 主模型 + 备用链、单次超时（默认 30 秒）、重试（默认 2 次，指数退避加抖动，只对网络错误/超时/429/500/503，见 2.7.2）、温度、最大输出、日预算）。保存配置时可“测试连接”。
 - **任务类型**：`suggestion_rationale`（建议理由）、`daily_report_stock`（日报个股段落）、`daily_report_summary`（日报总览）、`strategy_divergence`（分歧说明）、`announcement_title_digest`（只基于公告标题的要点，不读原文）。
 - **提示词模板版本化**：`prompt_templates(task, version, system_text, user_template, output_schema, status draft/active/retired)`；激活新版本不影响历史记录；每条生成记录 `prompt_template_id + version`。
 - **输入/输出契约**：输入 = `EvidencePack{evidence[{id, key, value, unit, as_of, source}], action, score, confidence, reasons, counter_evidence, invalidation}`（不含用户名、股东代码、账户号；持仓只给比例与成本价）；输出 JSON `{paragraphs:[{text, cites: string[]}]}`；校验见 0A.4（数字/引用/禁用词），校验失败计入 `llm_calls.validation_status` 并回退模板。
 - **记录与成本**：`llm_calls` 记录 task、provider、model、prompt 版本、输入/输出 tokens、耗时、状态、估算成本（tokens × 管理员填写单价）、关联对象（suggestion_id / report_id）；后台按日/任务/模型汇总，超日预算自动降级到模板。
-- **合规与数据**：只发送去标识化的结构化证据；供应商须境内可用并签数据处理条款，境外供应商涉及个人信息出境（见 7.3，问题列表）；输出同样过禁用词校验。
+- **合规与数据**：只发送去标识化的结构化证据；DeepSeek 的条款要点与我方义务见 2.7.1、7.3；境外供应商涉及个人信息出境，接入前另行评估（问题列表）；输出同样过禁用词校验。
 
 - **守卫（0B P1a）**：LLM 输出中的每个数字、每个断言都必须引用证据 `id`，且数值与证据一致；不允许出现动作词、目标价或收益承诺；不允许引入证据之外的事实。任一项不通过就丢弃 LLM 输出、回退模板，并记录到 `llm_calls.validation_status`。`model_refs` 的输出只能写成"辅助参考"。
 - **LLM 策略草稿（第三阶段，T-B39）**：LLM 根据用户描述只输出 JSON（卡片字段、DSL、参数 schema），自动跑 G1–G6，最多修正 3 轮；结果永远只是 `draft`，必须经过 G7 人工审核（2.5.0）。
+
+#### 2.7.1 DeepSeek 接入事实（2026-11-01 按官方文档核实；T-B25 以此为准）
+官方文档会更新，T-B25 开工和每次升级前重新核对本表；与文档不一致时以文档为准并回改本表。未在官方文档中找到的事项标【待核实】，不得自行假设。
+
+| 项 | 核实结果 | 来源 |
+|---|---|---|
+| 协议与 base_url | OpenAI 兼容格式：`https://api.deepseek.com`（对话接口 `POST /chat/completions`）；另有 Anthropic 兼容格式 `https://api.deepseek.com/anthropic`（我们不用） | [首次调用 API](https://api-docs.deepseek.com/zh-cn/)、[模型 & 价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing) |
+| 认证头 | HTTP Bearer：`Authorization: Bearer <key>`；官方示例从环境变量 `DEEPSEEK_API_KEY` 读取 key | [DeepSeek API（Authentication）](https://api-docs.deepseek.com/zh-cn/api/deepseek-api)、[首次调用 API](https://api-docs.deepseek.com/zh-cn/) |
+| key 格式/前缀 | **官方文档未说明 key 的格式、长度或前缀**。因此配置校验只检查“非空”（去掉首尾空白后长度 > 0），**不做任何前缀/长度正则**；key 的有效性只靠“测试连接”（401 即无效）判断 | 同上（文档仅写“创建 API key”） |
+| key 保管 | 服务协议 2.4：API key 是调用凭证，须妥善保管、不得共享或公开、不得暴露在浏览器或其他客户端代码中；泄露造成的费用由开发者承担 | [开放平台服务协议](https://cdn.deepseek.com/policies/zh-CN/deepseek-open-platform-terms-of-service.html)（更新 2026-04-22，生效 2026-04-29） |
+| 当前模型名 | `deepseek-flash`（现为 DeepSeek-V4.1-Flash-1017）、`deepseek-v4-pro`（DeepSeek-V4-Pro-0813）。旧名 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 仍可调用，但由 Flash 新模型提供并按 Flash 计费——**配置中只写 `deepseek-flash` / `deepseek-v4-pro`** | [模型 & 价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing) |
+| 上下文与最大输出 | 上下文长度 1M；输出长度最大 384K（价目表中两个模型共用同一单元格） | 同上 |
+| 思考模式 | 两个模型都支持思考/非思考，**默认开启思考**（effort 默认 `high`）；OpenAI 格式用 `{"thinking": {"type": "enabled"\|"disabled"}}`（SDK 放 `extra_body`）。思考模式下 `temperature`、`presence_penalty`、`frequency_penalty` 不生效；思维链在 `reasoning_content` 返回。思维链 tokens 是否计入输出计费，文档未单独说明【待核实，以账单为准】 | [思考模式](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode) |
+| JSON 输出 | `response_format: {"type": "json_object"}`（文档未提供 `json_schema` 类型）；system 或 user prompt 必须含 “json” 字样并给出输出样例；须合理设置 `max_tokens` 防截断；无法识别为 JSON 时，非 JSON 内容被替换为空格，`content` 可能只有空格而 `finish_reason` 仍为 `stop` → 需兜底（重试） | [JSON Output](https://api-docs.deepseek.com/zh-cn/guides/json_mode) |
+| 工具调用 | 两个模型都支持 Tool Calls（思考与非思考模式均可）；思考模式下带 `tools` 的请求，后续请求必须完整回传 `reasoning_content`，否则返回 400；`strict` 模式（Beta）需改用 `https://api.deepseek.com/beta`。V1 的解释任务**不用工具调用**（T-B39 策略草稿如需再评估） | [Tool Calls](https://api-docs.deepseek.com/zh-cn/guides/tool_calls)、[思考模式](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode) |
+| 价格（元 / 百万 tokens） | `deepseek-flash`：输入缓存命中 0.04、缓存未命中 2、输出 8（高峰）；空闲时段 0.02 / 1 / 4。`deepseek-v4-pro`：0.30 / 9.0 / 27.0（高峰）；空闲时段 0.15 / 4.5 / 13.5。费用 = token 数 × 单价，从充值或赠送余额扣减（优先扣赠送余额）；DeepSeek 保留调价权利 | [模型 & 价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing) |
+| 空闲时段折扣 | 空闲时段价格为高峰价的一半。高峰 = 北京时间周一至周五（不含法定节假日）9:00–12:00、14:00–18:00；其余时段（含周末、法定节假日全天）为空闲时段 | 同上 |
+| 价目不一致提示 | 官网营销页 [deepseek.com/platform](https://www.deepseek.com/platform/) 在核实时展示的价格与“预计 7 月中旬采用峰谷定价”的说法，与文档价目页不一致（例如 Flash 输出价、Pro 各项价格）。**以文档价目页为准**，实际单价【待核实，以首月账单对账】 | 两页对比 |
+| 上下文缓存 | 默认对所有用户开启、无需改代码；只有完整匹配已落盘的前缀单元才算命中；`usage.prompt_cache_hit_tokens` / `usage.prompt_cache_miss_tokens` 给出命中情况；“尽力而为”，不保证命中；缓存不再使用后一般几小时到几天自动清空 | [上下文硬盘缓存](https://api-docs.deepseek.com/zh-cn/guides/kv_cache) |
+| 限速 | **按账号计并发**（与 key 无关）：`deepseek-flash` 2500、`deepseek-v4-pro` 500；超过并发返回 HTTP 429；可提工单免费扩容。文档没有 RPM/TPM 配额，也没有说明 429 是否带 `Retry-After` 头【待核实】 | [限速与隔离](https://api-docs.deepseek.com/zh-cn/quick_start/rate_limit) |
+| `user_id` 参数 | 可传字符串 `user_id`（建议只用字母、数字、`_`、`-`，UTF-8 ≤ 512 字节），用于内容安全隔离、KVCache 隔离（隐私管理）和调度隔离；文档明确要求**不要在 `user_id` 中包含用户隐私信息** | 同上 |
+| 长连接保活 | 等待期间：非流式持续返回空行，流式返回 `: keep-alive` 注释；10 分钟后仍未开始推理则服务器关闭连接 | 同上 |
+| 错误码 | 400 格式错误、401 认证失败（key 错误）、402 余额不足、422 参数错误、429 速率/并发达上限、500 服务器故障（“等待后重试”）、503 服务器繁忙（“稍后重试”） | [错误码](https://api-docs.deepseek.com/zh-cn/quick_start/error_codes) |
+| 数据：我方角色 | 服务协议 3.5：开发者是数据处理者/个人信息处理者，须向终端用户告知个人信息处理规则，并就“委托我们（深度求索）处理个人信息”取得同意或其他合法性基础；3.6 须采取访问控制、加密等措施；3.4 须对输入输出做内容审查；3.7 须按《人工智能生成合成内容标识办法》对生成文本做标识；4.1 输入不得侵犯他人隐私和个人信息权益；5.5 终端用户的个人信息不在 DeepSeek 隐私政策范围内 | [开放平台服务协议](https://cdn.deepseek.com/policies/zh-CN/deepseek-open-platform-terms-of-service.html) |
+| 数据：训练与存储地 | 隐私政策（更新/生效 2026-02-10，适用范围含 API）：在加密和去标识化前提下，可能把输入及对应输出用于模型训练和服务优化，可在“产品内”关闭“数据用于优化体验”退出；建议不要输入个人敏感信息。境内运营中收集的个人信息存储在中华人民共和国境内，目前不传输至境外。**API 调用是否也受该训练条款约束、API 账号在哪里关闭**【待核实，向 api-service@deepseek.com 书面确认】 | [隐私政策](https://cdn.deepseek.com/policies/zh-CN/deepseek-privacy-policy.html) |
+| 数据：保留期 | 隐私政策只写“为提供服务所必需的期间”，网络日志按《网络安全法》不少于 6 个月；**API 请求/响应内容的具体保留期限未说明**【待核实】。是否提供单独的数据处理协议（DPA）【待核实】 | 同上 |
+| 适用法律 | 中华人民共和国大陆地区法律；争议由深度求索住所地法院管辖 | [开放平台服务协议](https://cdn.deepseek.com/policies/zh-CN/deepseek-open-platform-terms-of-service.html) 第 9 条 |
+
+#### 2.7.2 网关实现要求（T-B25 按此实现）
+- **key**：进程启动时读取环境变量 `DEEPSEEK_API_KEY`；只检查非空，为空则 DeepSeek 供应商标记 `unconfigured`，所有任务回落模板，`/health/ready` 不因此失败（LLM 不是就绪依赖）。key 只注入运行 LLM 网关的 `api` 与 `worker` 容器，不注入 `ingest`、前端、nginx、数据库。不写入数据库、YAML、日志、异常信息、`llm_calls.request_body`；HTTP 客户端日志关闭请求头输出，`Authorization` 一律脱敏为 `***`。
+- **请求**：`POST {base_url}/chat/completions`，`model` 取自 `config/llm.yaml`；解释类任务**显式关闭思考模式**（`thinking: {type: "disabled"}`，因为默认开启；关闭后 `temperature` 才生效，延迟和输出 tokens 更可控）◇；`response_format: {type: "json_object"}`，system prompt 含 “json” 字样和输出样例；`max_tokens` 按任务配置；`stream: false`。
+- **user_id**：传 `"u_" + HMAC-SHA256(服务端密钥, 用户 UUID)` 的前 16 位十六进制（不可逆、不含任何个人信息）；全站共享的个股事实段落传固定值 `"shared"`。
+- **缓存友好**：消息顺序固定为“版本化 system 模板 → 任务说明与输出样例 → 证据 JSON”，可变内容放最后，提高前缀命中；`llm_calls` 记录 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`。
+- **发送前守卫**：渲染后的 prompt 先跑 7.4A 的 S5、S6、S8、S9 规则和用户名/邮箱精确匹配；任一命中 → 不发送、记 `validation_status=blocked_pii`、回落模板并告警。只允许发送 `EvidencePack` 中的结构化证据（证券代码、指标、规则结果、持仓比例与成本价），**禁止**发送股东代码、资金账号/客户号、用户名、姓名、邮箱、成交编号/委托编号、持仓数量与金额、交割单原文。
+- **超时**：连接超时 5 秒；单次读超时 = 任务 `timeout_s`（默认 30 秒，日报总览 60 秒）；单次调用总截止时间（含重试与退避）90 秒 ◇。响应体解析前去掉保活空行。
+- **重试**（与 2.7.1 错误码一致）：
+
+| 情况 | 处理 |
+|---|---|
+| 连接失败、读超时 | 重试，最多 2 次，指数退避 1 s、2 s（上限 8 s）加全抖动 |
+| 429 | 同上；若响应带 `Retry-After` 则按其等待（是否提供【待核实】）；同时把网关并发信号量减半 5 分钟 ◇ |
+| 500、503 | 同上；连续 5 次 5xx → 熔断该供应商 300 秒 ◇，期间直接回落模板 |
+| JSON 模式返回空或全空格 `content`、JSON 解析失败 | 重试 1 次；再失败 → `validation_failed`、回落模板 |
+| 400、422 | 不重试；记录错误信息（不含 prompt 原文）、回落模板；同一模板版本 1 小时内 ≥ 5 次 → 告警（多为模板或参数错误） |
+| 401 | 不重试；供应商置 `auth_failed`、全部任务回落模板、管理员告警；“测试连接”成功后恢复 |
+| 402 | 不重试；供应商置 `insufficient_balance`、全部任务回落模板、管理员告警（提示充值）；“测试连接”成功后恢复 |
+
+- **并发**：网关进程内信号量，默认 8 ◇（远低于账号并发上限 2500），可热调。
+- **成本**：`cost = hit_tokens × 命中价 + miss_tokens × 未命中价 + output_tokens × 输出价`，再按调用时刻是否处于空闲时段乘 0.5；空闲判断用北京时间与交易日历近似“法定节假日”（只用于估算，月底以账单对账）。
+- **生成内容标识**：前端展示 LLM 文本时标注“AI 生成”（服务协议 3.7），模板文本不标。
+- **测试**：用本地桩服务回放 400/401/402/422/429/500/503、保活空行、空 JSON 内容，CI 不访问真实 DeepSeek；真实联调只在本机用环境变量，不入库。
 
 ### 2.8 建议的模拟跟踪（替代回测）
 - **不做回测**。每条 `buy/add/sell/reduce/hold/wait` 建议生成时记录**参考价**（生成时刻快照的最新价、`data_as_of`）与基准（默认沪深300，可选所属行业指数）。
@@ -1296,11 +1347,11 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 **LLM 网关**
 | 表 | 关键字段 |
 |---|---|
-| `llm_providers` | id, name, kind(openai_compatible/anthropic/…), base_url, api_key_ciphertext, api_key_last4, key_version, enabled, created_by, updated_at |
-| `llm_models` | id, provider_id, model_name, context_window, price_input_per_1k, price_output_per_1k, currency, enabled |
+| `llm_providers` | id, name, kind(openai_compatible/anthropic/…), base_url, api_key_source(env/db), api_key_env(变量名，如 `DEEPSEEK_API_KEY`；source=env 时必填), api_key_ciphertext(source=db 时才有), key_version, status(ok/unconfigured/auth_failed/insufficient_balance/circuit_open), enabled, created_by, updated_at |
+| `llm_models` | id, provider_id, model_name, context_window, max_output_tokens, thinking(enabled/disabled), price_input_cache_hit_per_1m, price_input_cache_miss_per_1m, price_output_per_1m（高峰价）, offpeak_multiplier, currency, price_checked_at, enabled |
 | `llm_task_routes` | task(primary key), primary_model_id, fallback_model_ids(uuid[]), timeout_s, max_retries, temperature, max_output_tokens, daily_budget, enabled, prompt_template_id |
 | `prompt_templates` | id, task, version_no, system_text, user_template, output_schema(jsonb), status(draft/active/retired), created_by, created_at — 激活后不可修改 |
-| `llm_calls` | id, task, provider_id, model_id, prompt_template_id, input_tokens, output_tokens, latency_ms, status(ok/timeout/error/validation_failed/fallback_template), validation_errors(jsonb), cost_estimate, target_type, target_id, request_hash, request_body(加密/保留 90 天), response_body, created_at |
+| `llm_calls` | id, task, provider_id, model_id, prompt_template_id, input_tokens, cache_hit_tokens, cache_miss_tokens, output_tokens, latency_ms, http_status, retries, pricing_period(peak/offpeak), status(ok/timeout/error/validation_failed/blocked_pii/fallback_template), validation_errors(jsonb), cost_estimate, target_type, target_id, request_hash, request_body(加密/保留 90 天), response_body, created_at |
 
 **通知**（取代旧 `alert_deliveries` / `notification_settings`）
 | 表 | 关键字段 |
@@ -2071,7 +2122,7 @@ ashare-invest-assistant/
 ```
 
 约定：
-- **秘密**：麦蕊 licence（**只注入 `ingest` 容器**）、数据库密码、SMTP 密码只经环境变量/服务器上的 `.env`（不入库、不进日志；网关日志中 URL 的 licence 段替换为 `***`）。
+- **秘密**：麦蕊 licence（**只注入 `ingest` 容器**）、DeepSeek key `DEEPSEEK_API_KEY`（只注入 `api`、`worker`，2.7.2）、数据库密码、SMTP 密码只经环境变量/服务器上的 `.env`（不入库、不进日志；网关日志中 URL 的 licence 段替换为 `***`）。
 - 分支：`main` 受保护；功能分支 `feat/T0xx-*`；PR 必须 CI 通过。
 - 后端 Python 包名 `app`，运行目录 `src/backend`；前端运行目录 `src/frontend`；测试从仓库根目录执行（`pytest tests/backend`、`pnpm -C src/frontend test` 指向 `tests/frontend`）。
 
@@ -2279,6 +2330,70 @@ rules: {}                       # 各周期打分规则：由策略研究员在 
 ```
 `rules` 为空时分类器不输出“适合”，前端显示“周期分类规则未配置”，用户可手动选择周期。
 
+**`config/llm.yaml`**（LLM 网关，2.7、2.7.1、2.7.2；`tasks.*`、`models.*.price_*`、`gateway.max_concurrency` 可热调，其余改 YAML 后重启）
+```yaml
+schema_version: 1
+providers:
+  deepseek:
+    kind: openai_compatible
+    base_url: "https://api.deepseek.com"   # 官方 OpenAI 格式 base_url；不可热调；必须 https 且主机在 allowed_hosts 内
+    allowed_hosts: ["api.deepseek.com"]
+    api_key_env: DEEPSEEK_API_KEY          # 只写变量名；值只在环境变量中，只校验非空（官方未公布 key 格式，不做前缀/长度正则）
+    user_id_mode: hmac                     # 传 "u_" + HMAC 前 16 位十六进制；共享段落传 "shared"
+models:
+  deepseek-flash:
+    provider: deepseek
+    context_window_tokens: 1000000         # 官方：1M
+    max_output_tokens_cap: 384000          # 官方：最大 384K
+    thinking: disabled                     # ◇ 解释任务显式关闭（官方默认开启）
+    json_output: true                      # response_format: {type: json_object}
+    currency: CNY
+    price_per_1m_peak: {input_cache_hit: "0.04", input_cache_miss: "2", output: "8"}       # 官方价目，2026-11-01 核实
+    offpeak_multiplier: "0.5"              # 官方：空闲时段为高峰价一半
+    price_checked_at: 2026-11-01
+  deepseek-v4-pro:                         # V1 不路由到它；保留给 T-B39 策略草稿评估
+    provider: deepseek
+    context_window_tokens: 1000000
+    max_output_tokens_cap: 384000
+    thinking: disabled
+    json_output: true
+    currency: CNY
+    price_per_1m_peak: {input_cache_hit: "0.30", input_cache_miss: "9.0", output: "27.0"}
+    offpeak_multiplier: "0.5"
+    price_checked_at: 2026-11-01
+pricing_calendar:                          # 只用于成本估算；月底按账单对账
+  timezone: Asia/Shanghai
+  peak_weekdays: [mon, tue, wed, thu, fri] # 不含法定节假日（用交易日历近似）
+  peak_windows: ["09:00-12:00", "14:00-18:00"]
+gateway:
+  connect_timeout_s: 5                     # ◇
+  call_deadline_s: 90                      # ◇ 单次调用含重试与退避的总截止时间
+  max_concurrency: 8                       # ◇ 远低于官方账号并发（flash 2500）
+  retry:
+    max_retries: 2                         # 与 2.7 已定默认一致
+    backoff_base_s: 1
+    backoff_max_s: 8
+    jitter: full
+    retry_on_status: [429, 500, 503]       # 官方错误码页：500“等待后重试”、503“稍后重试”；429 为速率/并发上限
+    retry_on_network_error: true           # 连接失败、读超时
+    retry_on_empty_json: 1                 # JSON 模式返回空/全空格 content 时重试 1 次
+    no_retry_status: [400, 401, 402, 422]  # 401/402 另置供应商状态并告警（2.7.2）
+  circuit_breaker:
+    consecutive_5xx: 5                     # ◇
+    open_s: 300                            # ◇
+  on_429_halve_concurrency_s: 300          # ◇
+tasks:                                     # 默认路由；管理端覆盖存 llm_task_routes
+  suggestion_rationale:      {model: deepseek-flash, fallback_models: [], timeout_s: 30, max_output_tokens: 800,  temperature: 0.3}
+  daily_report_stock:        {model: deepseek-flash, fallback_models: [], timeout_s: 30, max_output_tokens: 800,  temperature: 0.3}
+  daily_report_summary:      {model: deepseek-flash, fallback_models: [], timeout_s: 60, max_output_tokens: 1500, temperature: 0.3}
+  strategy_divergence:       {model: deepseek-flash, fallback_models: [], timeout_s: 30, max_output_tokens: 800,  temperature: 0.3}
+  announcement_title_digest: {model: deepseek-flash, fallback_models: [], timeout_s: 30, max_output_tokens: 600,  temperature: 0.2}
+budget:
+  daily_budget_cny: null                   # 由管理员在后台设定（问题 16）；null = 不限，但仍记录成本
+  prefer_offpeak_for_batch: false          # ◇ true 时盘后日报的 LLM 段落推迟到 18:00 后生成（半价，但日报晚约 30 分钟）
+```
+`max_output_tokens`、`temperature`（◇）是本节给的工程默认值；`timeout_s` 30 秒与 `max_retries` 2 次沿用 2.7。`fallback_models` 为空表示失败直接回落模板（同一供应商内切换模型不能应对供应商故障）。环境变量只有 `DEEPSEEK_API_KEY` 一项，不允许用环境变量改 `base_url`。
+
 ---
 
 ## 7. 风险与合规（验收项 7）
@@ -2332,7 +2447,7 @@ rules: {}                       # 各周期打分规则：由策略研究员在 
 - 隐私政策、用户协议、风险揭示须由用户/法务定稿；版本号记入 `consents.doc_version`。
 - 未成年人：注册时声明已满 18 周岁。
 - 网站运营：境内对外网站需 **ICP 备案**（用户域名**尚未备案**，第 9 节问题 4）；备案完成前只在本地/VPN 内测；如收费可能需 ICP 经营许可证；等保备案（建议二级）【待核实具体义务】。
-- **LLM 数据**：发给 LLM 的只有证据摘要（证券代码、指标、规则结果），**不发送**用户名、账户、股东代码、成交编号、持仓数量与金额；持仓只以占总资产比例和成本价出现（与 2.7 一致）。优先选择境内可用、签数据处理协议的供应商；`llm_calls` 只存哈希与摘要，保留 90 天【待拍板】。
+- **LLM 数据**：发给 LLM 的只有证据摘要（证券代码、指标、规则结果），**不发送**用户名、账户、股东代码、成交编号、持仓数量与金额；持仓只以占总资产比例和成本价出现（与 2.7 一致）。发送前由网关做 PII 守卫（2.7.2）。**DeepSeek 条款要点（2026-11-01 核实，详见 2.7.1）**：我方是个人信息处理者，须在隐私政策中告知“委托深度求索处理（去标识化的）证据数据”并取得同意（纳入 `consents` 文案，由用户/法务定稿）；DeepSeek 声明境内收集的个人信息存储于中国境内、目前不出境；其隐私政策称输入输出可能在加密和去标识化后用于训练——API 是否适用及如何关闭【待核实，书面询问 api-service@deepseek.com】，API 请求数据的保留期限与是否提供 DPA【待核实】；在核实前我们按“发送内容可能被保留和用于训练”设计，因此只发结构化证据。LLM 生成文本在页面标注“AI 生成”（服务协议 3.7）。`llm_calls` 只存哈希与摘要，保留 90 天（已定，问题 16）。
 
 ### 7.4 数据安全
 - 传输 TLS 1.2+；HSTS；Cookie Secure/HttpOnly/SameSite；CSRF；CSP。
@@ -2358,12 +2473,12 @@ rules: {}                       # 各周期打分规则：由策略研究员在 
 | # | 检测对象 | 规则（正则为 RE2 / Python 语法） | 级别 | 夹具豁免 |
 |---|---|---|---|---|
 | S1 | 麦蕊 licence | ① URL 末段：`(?i)mairuiapi\.com/\S+/[A-Za-z0-9-]{16,}`；② 赋值：`(?i)(mairui[_-]?)?licen[cs]e\s*[:=]\s*["']?[A-Za-z0-9-]{16,}`。licence 的实际长度与字符集【待核实】，T-B05 拿到真实 licence 后收紧长度并在本地钩子中增加"真实值精确匹配"（值只从本机环境变量读取，不入库） | 阻断 | 不豁免 |
-| S2 | LLM / 第三方 API key | ① `\bsk-[A-Za-z0-9_-]{20,}\b`（DeepSeek、OpenAI 风格；DeepSeek 的确切 key 格式【待核实】）；② 通用赋值：`(?i)\b(api[_-]?key\|secret\|token\|passwd\|password)\b\s*[:=]\s*["'][^"'\s]{12,}["']` | 阻断 | 不豁免 |
+| S2 | LLM / 第三方 API key | ① `\bsk-[A-Za-z0-9_-]{20,}\b`（OpenAI 风格的常见写法，只作扫描启发式；**DeepSeek 官方文档未公布 key 格式**（2.7.1），所以运行时配置只校验非空，不用此正则）；③ 本地 pre-commit 与手动检查：若本机设置了 `DEEPSEEK_API_KEY`，用不打印的精确比对 `git grep -qF -- "$DEEPSEEK_API_KEY"` 检查真实值未入库（值只从环境变量读取，命中只输出 FOUND）；② 通用赋值：`(?i)\b(api[_-]?key\|secret\|token\|passwd\|password)\b\s*[:=]\s*["'][^"'\s]{12,}["']` | 阻断 | 不豁免 |
 | S3 | 私钥 | `-----BEGIN [A-Z ]*PRIVATE KEY-----` | 阻断 | 不豁免 |
 | S4 | 环境变量文件 | 除 `.env.example` 外，任何 `.env*` 文件都不得入库；`.env.example` 中 `APP_MASTER_KEY`、`MAIRUI_LICENCE`、`*_PASSWORD`、`*_API_KEY`、`DATABASE_URL` 的值只能为空或占位符（`changeme`、`<...>`、`example`） | 阻断 | 不豁免 |
 | S5 | 沪市股东代码 | `\b[A-Z]\d{9}\b` | 阻断 | 见下方豁免 |
 | S6 | 深市股东代码 | `\b0\d{9}\b`，且同一行或同一文件表头含"股东"（避免与时间戳、金额误报） | 阻断 | 见下方豁免 |
-| S7 | 疑似真实交割单 | 文件中同时出现以下表头中的 ≥ 3 个：`成交日期`、`证券代码`、`股东代码`、`成交编号`、`委托编号`、`发生金额`、`剩余金额`；或文件是 GBK/GB18030 编码的文本 | 阻断 | 见下方豁免 |
+| S7 | 疑似真实交割单 | 文件中同时出现以下表头中的 ≥ 3 个：`成交日期`、`证券代码`、`股东代码`、`成交编号`、`委托编号`、`发生金额`、`剩余金额`；或文件是 GBK/GB18030 编码的文本 | 阻断 | 见下方豁免；`docs/*.md` 不适用 S7（见下方“docs 例外”） |
 | S8 | 身份证号、手机号 | 身份证：`\b\d{17}[\dXx]\b` 且校验位正确；手机号：`\b1[3-9]\d{9}\b` | 身份证阻断；手机号警告 | 不豁免 |
 | S9 | 银行卡号、资金账号 | 银行卡：`\b\d{16,19}\b` 且通过 Luhn 校验 → 警告；资金账号：`(资金账号\|资金帐号\|客户号)\s*[:：]?\s*\d{6,}` → 阻断 | 见左 | 不豁免 |
 
@@ -2372,7 +2487,8 @@ rules: {}                       # 各周期打分规则：由策略研究员在 
 - 新增允许项需要架构师或测试负责人审核（CODEOWNERS 覆盖该文件）。
 
 **夹具豁免（只针对 S5、S6、S7，严格模式）**
-- 适用路径：`tests/fixtures/broker_statements/**`。其他路径（含 `docs/`）中出现 S5–S7 一律阻断。
+- 适用路径：`tests/fixtures/broker_statements/**`。其他路径中出现 S5–S7 一律阻断，唯一例外见下条。
+- **docs 例外（2026-11-01 定，只针对 S7）**：S7 会命中文档里的列名和规则正文（例如本节的 S7 规则行、3.5A 的交割单列映射），并非真实交割单。因此 `docs/*.md`（只限 `docs/` 目录下直接的 `.md` 文件，不含子目录）**只豁免 S7**；S1–S6、S8、S9 照常对 `docs/*.md` 生效并阻断，所以文档中真实的股东代码、证件号、资金账号等仍会被拦下。文档示例值只能用 7.4A 允许清单中的虚构值。子目录（如 `docs/strategies/`）如需同样豁免，另行审核后再加。
 - 条件全部满足才豁免，任何一条不满足都按普通文件扫描：
   1. 同目录有 `meta.json`，其 `"marker"` 为 `"# SYNTHETIC"`，`"synthetic": true`；
   2. 目录中每个 `.txt` 都在 `meta.json.files[]` 中按 `file` 登记，且**登记的 sha256 与文件实际内容一致**（改动任何字节都要同步更新 sha256，否则失败）；没登记的文件不豁免；
@@ -2397,7 +2513,7 @@ rules: {}                       # 各周期打分规则：由策略研究员在 
 | 公告盘后更新 | 提醒滞后 | 文案明示；评估巨潮授权 |
 | Quant Pro / 钻石版到期（2027-09-11，用户已确认） | 无 1 分钟 K、每日 2 万次 → 实时链路无法维持 | 到期前 60 天提醒；`realtime.yaml` 预置降级档（只刷持仓、60 秒快照、关闭 Tier-2） |
 | 配额规则与文档不一致（6000/分钟按接口还是按证书、`/hsrl/ssjy/all` 每分钟次数、并发是否限制） | 429 或刷新变慢 | T003 已实测触发 2 IP 限制，其余仍待补测（4.0；T-B05）；令牌桶预算可热调；429 自适应退避并告警 |
-| LLM 供应商故障/超预算 | 无解释文本 | 备用链 + 模板兜底；**建议本身不受影响**（LLM 不决定动作） |
+| LLM 供应商故障/超预算/余额不足 | 无解释文本 | 按 2.7.2 重试与熔断；401/402 立即告警管理员；模板兜底；**建议本身不受影响**（LLM 不决定动作） |
 | 规则引擎错误导致错误建议 | 用户误判 | golden/回放测试、策略版本不可变、灰度发布新版本、一键停用策略 |
 
 ### 7.6 开源许可证（采纳 T002 调研 §0、§4）
@@ -2465,7 +2581,7 @@ rules: {}                       # 各周期打分规则：由策略研究员在 
 | T-F03 | 个股档案（深色 K 线、分时、财务、资金、因子、公告外链）与市场概览 | 前端 | T-B06/T-B07 |
 | T-F04 | 账户/持仓/成交、导入向导（预览着色、映射、撤销）、对账结果 | 前端 | T-B08/T-B18/T-B19 |
 | T-T02 | 网关测试：限流、退避、错误映射、licence 不入日志、回放 | 测试 | T-B04/T-B05 |
-| T-T03 | 认证与越权测试（A 不能访问 B；非 admin 403；锁定；禁用即失效） | 测试 | T-B03* |
+| T-T03 | 认证与越权测试（A 不能访问 B；非 admin（含未登录）访问 `/admin/*` 一律 404（契约 v0.2.1）；锁定；禁用即失效） | 测试 | T-B03* |
 | T-T09 | 导入测试（**仅合成样本**，GBK/UTF-8/BOM、定宽 CJK 宽度、幂等、撤销、对账属性测试） | 测试 | T-B18/T-B19 |
 
 **里程碑 M1**：本地一条命令启动；能登录、导入（合成样本）并看到由成交重建的持仓；行情与因子来自共享缓存。
@@ -2480,7 +2596,7 @@ rules: {}                       # 各周期打分规则：由策略研究员在 
 | T-B22 | **盘中实时链路**：universe 与刷新计划（生成 P0 拉取计划交给 `ingest`）+ `signal-rt` 计算进程、`intraday_universe`（去重、Tier-1/2/3、硬上限 4,000）、`ssjy_more` 批量轮询、`/hsrl/ssjy/all` 每分钟、Pro 1 分钟 K（Tier-1 每分钟 lt=2、Tier-2 每 5 分钟 lt=5）、自适应间隔与退避、stale 判定、`config/realtime.yaml` + `realtime_settings` | 后端 | T-B05, T-B06 |
 | T-B23 | 信号与翻转：共享 `signal_states`、用户 `user_signal_states`（失效条件/计划条件）、`signal_events`、翻转→新建议（盘中）、通知节奏合并 | 后端 | T-B22, T-B21 |
 | T-B24 | **盘后流水线与日报**：0A.5 时间表、`pipeline_runs`（可重跑、幂等）、`daily_reports`/`daily_report_items`（不可变、revision）、数据缺口汇总 | 后端 | T-B21, T-B07 |
-| T-B25 | **LLM 网关 + 管理后台接口**：供应商适配器（OpenAI 兼容 / 其他）、AES-256-GCM 密钥、任务路由、超时/重试/备用链、预算、提示词模板版本、证据引用与数字校验、模板兜底、`llm_calls` 与用量统计、`/admin/llm/*` | 后端 | T-B01, T-O05 |
+| T-B25 | **LLM 网关 + 管理后台接口**：供应商适配器（OpenAI 兼容 / 其他；先实现 DeepSeek，按 2.7.1/2.7.2 与 `config/llm.yaml`，key 只从 `DEEPSEEK_API_KEY` 读取并只校验非空）、AES-256-GCM 密钥（仅 `api_key_source=db` 的供应商）、任务路由、超时/重试/熔断（按官方错误码）、发送前 PII 守卫、预算、提示词模板版本、证据引用与数字校验、模板兜底、`llm_calls` 与用量统计、`/admin/llm/*` | 后端 | T-B01, T-O05 |
 | T-B26 | 通知：`notifications`、SSE `/stream`（心跳、`Last-Event-ID` 续传）、轮询兜底、渠道适配器接口（站内 + 邮件）、偏好/免打扰/频控、投递日志与重试 | 后端 | T-B23, T-B24 |
 | T-B27 | **模拟跟踪与自动降权**：`suggestion_tracking` T+1/5/20 vs 基准、`strategy_tracking_stats`（本人/全站匿名）、`user_strategy_weights`（2.5.7 公式，开关；与健康度合并见 T-B27a）、`/tracking*` | 后端 | T-B21, T-B06 |
 | T-B28 | 会员权益预留：`plans`/`plan_entitlements`/`user_subscriptions`/`entitlement_overrides`、`EntitlementService`、所有上限改走权益、`/admin/plans*` | 后端 | T-B03 |
@@ -2609,7 +2725,7 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 15. **周期分类**——**【已定 2026-11-01】只推荐，由用户确认后启用**。唯一例外是系统组件 H-01（持仓风险监控）默认挂到全部持仓，见 C(3)；它只产生减仓/卖出方向的候选信号，不产生买入。
 
 **D. LLM、通知、账号**
-16. **LLM 供应商**——**【已定 2026-11-01】先接 DeepSeek**，经 LLM 网关的 `openai_compatible` 适配器接入（2.7）。base_url、模型名和单价由管理员在后台按 DeepSeek 官方文档填写（本文不写价格）。默认开启"解释"，失败回落模板；日预算由管理员设定；`llm_calls` 保留 90 天（架构师默认）。DeepSeek 的数据处理条款【待核实】，发送内容已按 7.3 去标识化。
+16. **LLM 供应商**——**【已定 2026-11-01】先接 DeepSeek**，经 LLM 网关的 `openai_compatible` 适配器接入（2.7）。base_url（`https://api.deepseek.com`）、模型名（`deepseek-flash`）、上下文/输出上限和单价已按官方文档核实（2026-11-01，2.7.1），写入 `config/llm.yaml`（6.1）；key 只从环境变量 `DEEPSEEK_API_KEY` 读取，官方未公布 key 格式，只校验非空。默认开启"解释"，失败回落模板；日预算由管理员设定；`llm_calls` 保留 90 天（架构师默认）。DeepSeek 服务协议与隐私政策已核实（2.7.1、7.3）；仍【待核实】：API 输入输出是否用于训练及关闭方式、API 数据保留期限、是否提供 DPA、思维链是否计费、429 是否带 `Retry-After`、官网营销页与文档价目页的价格差异（以账单为准）。发送内容已按 7.3 去标识化。
 17. **通知渠道**——**【已定 2026-11-01】（架构师默认）**：MVP 只做站内 + 可选邮件；企业微信自建应用放第二步。
 18. **账号审核细节**——**【已定 2026-11-01】（架构师默认）**：`invite` 模式下注册须填邀请码和申请说明；待审核只在管理端显示角标；被驳回的用户最多重新申请 3 次；**对其他人开放前**管理员必须启用 TOTP（单用户期间可不启用）。当前为 `closed` 模式，这些规则先实现、不生效。
 
@@ -2666,4 +2782,4 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 - `config/*.yaml` 五个文件的键与默认值见 6.1；文件由后端创建。
 - 仍需运维决定（不属于契约）：nginx `proxy_pass` 尾斜杠导致 `/api` 前缀被去掉（T-B01 §4.1），建议去掉尾斜杠，保持 `/api/v1`。
 
-**仍待定的问题汇总**：C(7) 中 T+1 hold 阈值；ST 涨跌幅变更与 77/82/85 个因子的口径【待 T003 补测核实】（问题 36）；LLM API key 的确切格式与 DeepSeek 数据处理条款【待核实】（问题 16、7.4A S2）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法与分红是否冲减摊薄成本（问题 19，待脱敏范本）；另见 2.5.14 H 末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning 已于 2026-11-01 拍板。）
+**仍待定的问题汇总**：C(7) 中 T+1 hold 阈值；ST 涨跌幅变更与 77/82/85 个因子的口径【待 T003 补测核实】（问题 36）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法与分红是否冲减摊薄成本（问题 19，待脱敏范本）；另见 2.5.14 H 末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning 已于 2026-11-01 拍板。）

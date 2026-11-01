@@ -1,12 +1,19 @@
 # A股个人投资研究与决策助手 · REST 接口契约（MVP v1）
 
-- 作者：架构师；日期：2026-11-01；版本：**v0.2**；状态：**已评审修订（T-A01，2026-11-01）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
+- 作者：架构师；日期：2026-11-01；版本：**v0.2.1**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
 - 配套：[`plan.md`](./plan.md)（架构方案）。本契约优先于代码：FastAPI 生成的 `openapi.json` 与本文不一致时**改代码**。
 - **示例值全部虚构**：代码用 `600000.SH / 000001.SZ`，ID 用 `00000000-0000-4000-8000-0000000000xx`，金额为随意整数；不含任何真实账户、股东代码、姓名、金额或委托/成交编号。证券简称一律用“示例银行”“演示电子”这类虚构名称。
 
 ---
 
 ## 0. 变更记录
+
+### v0.2.1（2026-11-01，T-A01 小修；不改任何字段名和枚举）
+| 项 | 决定 | 后端改动 |
+|---|---|---|
+| `/admin/*` 访问控制自相矛盾（v0.2 的 §1.3、§9 写 403，§4、§7.9、变更记录写 404） | **统一为 404**（隐藏存在性）：凡不是“已登录且 `role=admin`”的请求（含未登录、普通用户、账号非 `approved`）访问任何 `/admin/*` 路径（含不存在的子路径、用错方法），一律 `404 NOT_FOUND`，响应体与普通不存在路径相同，不带 `Allow` 头。该判断先于 CSRF、同意、405、422 等其他校验。`403 FORBIDDEN` 保留在错误码表中，但 `/admin/*` 不再使用 | 管理端依赖从 403 改为 404；未登录访问 `/admin/*` 从 401 改为 404 |
+| LLM 供应商 key 来源（配合 plan 2.7.1 DeepSeek 核实） | `/admin/llm/providers` 响应增加 `api_key_source: "env" \| "db"`；DeepSeek 的 key 只从环境变量 `DEEPSEEK_API_KEY` 读取（`api_key_source:"env"`），接口不可写入，PATCH 带 `api_key` → `422 VALIDATION_ERROR`；`api_key_set` 只表示进程内该值非空，任何接口都不返回 key 或其片段 | providers 序列化加字段 |
+| `/meta/enums.version` | `"v0.2"` → `"v0.2.1"` | 改常量 |
 
 ### v0.2（2026-11-01，T-A01；处理前端原型评审 T-F00 §6 的 12 项与 T006 契约问题）
 **改名 / 改口径**（客户端和后端须同步修改；原型 `src/types/contract.ts` 按此调整）
@@ -86,7 +93,7 @@
 ### 1.3 认证与安全
 - **会话 Cookie** `sid`：`HttpOnly; Secure; SameSite=Lax; Path=/`；服务端会话存 Redis，空闲 7 天过期（可配置）。
 - **CSRF**：登录成功后响应体与 Cookie `csrf_token`（非 HttpOnly）给出令牌；所有 `POST/PUT/PATCH/DELETE` 必须带头 `X-CSRF-Token`，缺失或不符 → `403 CSRF_FAILED`。
-- **权限**：未登录 → `401 AUTH_REQUIRED`；账号非 `approved` → `403 ACCOUNT_NOT_APPROVED`；`/admin/*` 需 `role=admin` → 否则 `403 FORBIDDEN`。用户只能访问自己的资源，访问他人资源一律 `404 NOT_FOUND`（不泄露存在性）。
+- **权限**：未登录 → `401 AUTH_REQUIRED`；账号非 `approved` → `403 ACCOUNT_NOT_APPROVED`（以上两条均不适用于 `/admin/*`）；`/admin/*`：不是已登录的 `role=admin` 时（含未登录）一律 `404 NOT_FOUND`，与不存在的路径无法区分（不泄露管理端存在性；先于本节其他校验，v0.2.1）。用户只能访问自己的资源，访问他人资源一律 `404 NOT_FOUND`（不泄露存在性）。
 - **合规门槛**：建议类接口（标 ⚖：`/today`、`/suggestions*`、`/daily-reports*`、`/signals*`、`/candidate-signals*`、`/plan-drafts*` 的生成与确认、`/stream` 中标 ⚖ 的事件）要求用户已完成风险测评并同意 `signal_risk_disclosure`，否则 `403 CONSENT_REQUIRED`（`details.required: ["signal_risk_disclosure"]`）。
 - **限速**：超限 `429 RATE_LIMITED`，头 `Retry-After`（秒）。
 - 敏感字段一律掩码输出（如 `shareholder_code_masked: "A00****000"` 为格式示意），任何接口都不返回原始股东代码、资金账号或原始上传文件内容。
@@ -180,11 +187,11 @@
 | 403 | `ACCOUNT_NOT_APPROVED` | 账号待审核/已驳回/已禁用 | `{status}` |
 | 403 | `ACCOUNT_LOCKED` | 连续失败临时锁定 | `{retry_after_s}` |
 | 403 | `CSRF_FAILED` | CSRF 令牌缺失/不符 | — |
-| 403 | `FORBIDDEN` | 角色不足 | — |
+| 403 | `FORBIDDEN` | 角色不足（保留；`/admin/*` 不使用，一律 404，见 §1.3） | — |
 | 403 | `CONSENT_REQUIRED` | 缺少必要同意或风险测评 | `{required:[string]}` |
 | 403 | `ENTITLEMENT_LIMIT_REACHED` | 超出套餐权益上限（自选数、重点关注数、导入次数、LLM 解释次数等） | `{key, limit, current}` |
 | 404 | `NOT_FOUND` | 资源不存在或不属于当前用户 | — |
-| 405 | `METHOD_NOT_ALLOWED` | 路径存在但方法不支持；响应头 `Allow`。非管理员访问 `/admin/*` 一律按 `404 NOT_FOUND` 返回 | `{allowed: string[]}` |
+| 405 | `METHOD_NOT_ALLOWED` | 路径存在但方法不支持；响应头 `Allow`。非管理员（含未登录）访问 `/admin/*` 一律按 `404 NOT_FOUND` 返回，不带 `Allow` 头 | `{allowed: string[]}` |
 | 409 | `CONFLICT` | 唯一约束冲突（如用户名已存在） | `{field}` |
 | 409 | `IDEMPOTENCY_CONFLICT` | 同一幂等键、不同请求体 | — |
 | 409 | `VERSION_CONFLICT` | 乐观锁版本号不符（`If-Match`/`base_version_no`） | `{current_version_no}` |
@@ -519,13 +526,13 @@
 | GET | `/notifications` 🔒 · `/notifications/unread-count` 🔒 · POST `/notifications/{id}/read` 🔒 · POST `/notifications/read-all` 🔒 | 通知中心：列表 `?unread=&kind=` 元素为 `Notification`；`unread-count` → `{count: int}` |
 | GET/PUT | `/notification-preferences` 🔒 · `/channels` 🔒 | 渠道与免打扰设置 |
 
-### 7.9 管理端（🛡；普通用户访问 `/admin/evaluation/*` 返回 404，不暴露其存在）
+### 7.9 管理端（🛡；非管理员（含未登录）访问任何 `/admin/*` 一律返回 404，不暴露其存在，见 §1.3）
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/admin/ingest/status` 🛡 | 只读：`{leader: {instance_id, egress_ip_masked: "203.0.113.x", lease_expires_at}, budget: {per_minute_limit: int, used_last_minute: int}, queues: [{priority: "p0_intraday"\|"p1_daily"\|"p2_backfill", depth: int, oldest_age_s: int}], errors_24h: [{upstream_code: string, count: int}], ip_limit_alerts_24h: int, freshness: [{dataset, data_as_of, data_status}], licence: {expires_on: string(date), days_left: int}}`。**不返回 licence 内容**；`per_minute_limit` 等数值 **待 T003 验证** |
 | POST | `/admin/ingest/pause` · `/admin/ingest/resume` 🛡 | 暂停或恢复外呼（迁移和冷备切换时使用，写审计） |
 | GET/PUT | `/admin/realtime-settings` 🛡 | 刷新间隔、分层上限（默认值 **待 T003 验证**） |
-| GET/POST/PATCH | `/admin/llm/providers` · `/admin/llm/models` · `/admin/llm/routes` · `/admin/llm/prompts` 🛡；POST `/admin/llm/test`；GET `/admin/llm/usage` | API key 只写不读（响应返回 `api_key_set: true`） |
+| GET/POST/PATCH | `/admin/llm/providers` · `/admin/llm/models` · `/admin/llm/routes` · `/admin/llm/prompts` 🛡；POST `/admin/llm/test`；GET `/admin/llm/usage` | API key 只写不读：响应只返回 `api_key_source: "env"\|"db"` 与 `api_key_set: bool`，不返回 key 或任何片段；`env` 来源（DeepSeek：`DEEPSEEK_API_KEY`，plan 2.7.1）不可经接口写入，PATCH 带 `api_key` → `422 VALIDATION_ERROR` |
 | GET/POST/PATCH | `/admin/plans` · `/admin/subscriptions` 🛡 | 套餐与权益（不接支付） |
 | GET/POST | `/admin/evaluation/runs` 🛡 · GET `/admin/evaluation/runs/{id}` 🛡 | 第三阶段启用（plan 第 9 节问题 26 已定），启用前返回 `404`。用户侧只通过模板版本的 `internal_check` 看到元信息（方案 A）。POST `{kind: "factor_ic"\|"event_study"\|"param_robustness"\|"daily_revalidation", target: {strategy_version_id? , feature_key?}, data_range: {from, to}, params: object}` → `202 {run_id}`；结果中 `metrics` 的每一项都是 `Stat` |
 | GET | `/admin/audit-logs` 🛡 | 审计 |
@@ -542,7 +549,7 @@
 - **ingest 心跳**（ingest 写、api 读）：leader 每 15 秒 `SET ingest:heartbeat <json> EX 600`，JSON 为 `{"ts": int(Unix 秒), "instance_id": string, "leader": true, "version": string, "budget_used_last_minute": int, "queue_depth": {"p0": int, "p1": int, "p2": int}}`；api 只依赖 `ts`，其余字段供 `/admin/ingest/status` 展示。判定顺序：Redis 不可用 → `unknown`；`ingest:paused` 存在（值为 JSON `{"by", "at", "reason"}`，管理员暂停时写入）→ `paused`；心跳缺失、无法解析或 `now - ts > 120` → `stale`；否则 `ok`。键名与阈值可配置（plan 6.1 `config/ingest.yaml`，环境变量 `INGEST_HEARTBEAT_KEY`、`INGEST_PAUSED_KEY`、`INGEST_STALE_AFTER_S`）。
 - **`/meta/enums` 结构**（取值全部来自后端的集中定义，路由里不写死）：
 ```json
-{"version": "v0.2",
+{"version": "v0.2.1",
  "enums": {"horizon": ["intraday_t", "short", "swing", "long"], "...": []},
  "reason_codes": [{"code": "T1_NOT_SELLABLE", "release_kinds": ["time"], "check_on": ["daily_close"], "manually_releasable": false, "note": "…"}],
  "error_codes": [{"code": "NOT_FOUND", "http_status": 404, "scope": "http"}],
@@ -579,7 +586,7 @@
 - 所有响应示例都能用 OpenAPI schema 校验通过；所有统计字段都带 `n`，缺少即失败。
 - 候选信号和建议的响应中，P1 要求的四个数组都非空，`model_refs[*].role == "auxiliary"`。
 - 不存在任何 `POST /candidate-signals/{id}/convert` 一类的接口；只有 `/plan-drafts/{id}/confirm` 能创建 `origin=plan_draft` 的计划。
-- 普通用户访问 `/admin/evaluation/*` 返回 404，访问其他 `/admin/*` 返回 403。
+- 未登录、普通用户、非 `approved` 账号访问任何 `/admin/*`（含 `/admin/evaluation/*`、不存在的子路径、用错方法、缺 CSRF）一律 404，响应体与不存在的普通路径逐字节相同（`request_id` 除外），不带 `Allow` 头；全文不得再出现“`/admin/*` 返回 403”。
 - 任何响应、日志和错误信息中都不出现 licence、原始股东代码或资金账号（用虚构 fixture 做扫描）。
 - 行情类接口在采集服务暂停时返回 `data_status:"stale"`，而不是 5xx，也不会触发上游调用。
 - **命名（v0.2）**：OpenAPI schema 与所有示例中不得出现字段名 `evidence_id`、`pass`（规则结果）、平铺的 `stop_loss`/`take_profit`（必须在 `stops` 内）；所有 `score` 字段为 0–100 整数或 `null`；凡含 `security_code` 的对象都有 `name`。
@@ -591,4 +598,4 @@
 - 命名空间：`error_codes`、`reason_codes`、`import_codes` 三者没有重名；码类取值全部匹配 `^[A-Z][A-Z0-9_]*$`，其他枚举取值匹配 `^[a-z0-9][a-z0-9_]*$`。
 - `/meta/enums`：`enums` 的键集合与第 3 节表名一致，每个取值与本文逐项一致（从 markdown 解析做快照对比）。
 - 健康检查：停 db 或 redis → `/health/ready` 返回 503、`status: "down"`；只停 ingest 心跳 → 200、`degraded`、`ingest: "stale"`；写入 `ingest:paused` → `paused` 优先；`/health/live` 在依赖全停时仍 200。
-- 405：`DELETE /api/v1/health` → `405 METHOD_NOT_ALLOWED` + `Allow` 头；非管理员对 `/admin/*` 用错方法 → 404。
+- 405：`DELETE /api/v1/health` → `405 METHOD_NOT_ALLOWED` + `Allow` 头；非管理员（含未登录）对 `/admin/*` 用错方法 → 404，无 `Allow` 头。

@@ -215,6 +215,37 @@ class IngestOnDemand(_Strict):
     priority: Annotated[str, Field(pattern=r"^p[0-2]_[a-z_]+$")]
 
 
+#: plan §3.5“单文件 ≤ 5 MB，单次 ≤ 5 个文件”（MB 按 MiB 计，与 nginx 的 ``26m`` 同口径）
+IMPORT_MAX_FILE_BYTES_DEFAULT = 5 * 1024 * 1024
+IMPORT_MAX_FILES_DEFAULT = 5
+#: 网关/框架层请求体上限 = nginx ``client_max_body_size 26m``
+#: （deploy/nginx/nginx.conf，契约 §4 413）
+IMPORT_MAX_REQUEST_BYTES_DEFAULT = 26 * 1024 * 1024
+
+
+class IngestImports(_Strict):
+    """交割单上传与请求体上限（T-B02a 补充；plan §6.1 尚无此块，见 reports/T-B02a.md）。
+
+    - ``max_file_bytes`` / ``max_files_per_upload``：应用层上限，超限按契约走
+      ``422 IMPORT_FILE_ERRORS`` + ``IMPORT_FILE_TOO_LARGE``（导入接口实现时使用）。
+    - ``max_request_bytes``：框架层请求体上限，超限 ``413 PAYLOAD_TOO_LARGE {max_bytes}``；
+      必须 ≥ 单次上传的文件总量（契约：网关上限须略大于应用上限），默认与 nginx 26m 一致。
+    """
+
+    max_file_bytes: PosInt = IMPORT_MAX_FILE_BYTES_DEFAULT
+    max_files_per_upload: PosInt = IMPORT_MAX_FILES_DEFAULT
+    max_request_bytes: PosInt = IMPORT_MAX_REQUEST_BYTES_DEFAULT
+
+    @model_validator(mode="after")
+    def _request_covers_upload(self) -> IngestImports:
+        if self.max_request_bytes <= self.max_file_bytes * self.max_files_per_upload:
+            raise ValueError(
+                "max_request_bytes 必须大于 max_file_bytes × max_files_per_upload"
+                "（网关/框架上限须略大于应用上限，契约 §4 413）"
+            )
+        return self
+
+
 class IngestConfig(_File):
     budget: IngestBudget
     backoff: IngestBackoff
@@ -222,6 +253,8 @@ class IngestConfig(_File):
     heartbeat: IngestHeartbeat
     egress: IngestEgress
     on_demand: IngestOnDemand
+    #: 有默认值：plan §6.1 的 ingest.yaml 代码块还没有这一块，旧快照缺它也能加载
+    imports: IngestImports = Field(default_factory=IngestImports)
 
 
 # ---------------------------------------------------------------------------

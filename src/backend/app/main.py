@@ -7,9 +7,9 @@ import logging
 from fastapi import FastAPI
 
 from app.api.v1 import router as v1_router
-from app.common.errors import ErrorResponse, install_exception_handlers
+from app.common.errors import ErrorResponse, Utf8JSONResponse, install_exception_handlers
 from app.common.logging import configure_logging
-from app.common.middleware import RequestIdMiddleware
+from app.common.middleware import BodySizeLimitMiddleware, RequestIdMiddleware
 from app.config import Settings, get_settings
 from app.config_files import BUSINESS_FILES
 from app.version import APP_VERSION
@@ -34,12 +34,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url=f"{cfg.api_prefix}/docs" if cfg.app_env in {"local", "test"} else None,
         redoc_url=None,
         responses=_ERROR_RESPONSES,
+        default_response_class=Utf8JSONResponse,
     )
     if settings is not None:
         app.dependency_overrides[get_settings] = lambda: settings
 
     app.state.api_prefix = cfg.api_prefix
     install_exception_handlers(app)
+    # add_middleware 后加的在外层：RequestId 在最外，413 也带 X-Request-Id
+    app.add_middleware(
+        BodySizeLimitMiddleware, max_bytes=cfg.business.ingest.imports.max_request_bytes
+    )
     app.add_middleware(RequestIdMiddleware)
     app.include_router(v1_router, prefix=cfg.api_prefix)
 

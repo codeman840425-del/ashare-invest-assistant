@@ -13,7 +13,7 @@ import time
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.common.errors import ErrorCode, error_response
+from app.common.errors import ErrorCode, PayloadTooLarge, error_response
 from app.common.request_id import (
     REQUEST_ID_HEADER,
     accept_or_generate,
@@ -69,3 +69,69 @@ class RequestIdMiddleware:
                 elapsed_ms,
             )
             reset_request_id(token)
+
+
+class BodySizeLimitMiddleware:
+    """框架层请求体上限（契约 §4 ``413 PAYLOAD_TOO_LARGE {max_bytes}``）。
+
+    nginx 的 ``client_max_body_size`` 是第一道（同值 26m）；这里兜底直连 api
+    或 nginx 配置漂移的情况：
+    - ``Content-Length`` 超限：不进路由，直接回 413；
+    - 分块/无长度：边读边计数，超限时抛 :class:`PayloadTooLarge`。路由读体时抛出的会经异常处理器
+      渲染为 413；在处理器之外抛出且尚未开始响应的，在这里渲染。
+    应用层的文件超限（单文件 5 MB 等）不在这里，按契约走 ``422 IMPORT_FILE_ERRORS``。
+    放在 :class:`RequestIdMiddleware` 内层，413 照常带 ``X-Request-Id``。
+    """
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        limit = self.max_bytes
+        declared = Headers(scope=scope).get("content-length")
+        if declared is not None:
+            try:
+                too_large = int(declared) > limit
+            except ValueError:
+                too_large = False  # 非法长度交给服务器/框架处理
+            if too_large:
+                await self._reject(scope, receive, send)
+                return
+
+        received = 0
+        started = False
+
+        async def limited_receive() -> Message:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit:
+                    raise PayloadTooLarge(limit)
+            return message
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, send_wrapper)
+        except PayloadTooLarge:
+            if started:
+                raise
+            await self._reject(scope, receive, send)
+
+    async def _reject(self, scope: Scope, receive: Receive, send: Send) -> None:
+        response = error_response(
+            ErrorCode.PAYLOAD_TOO_LARGE,
+            details={"max_bytes": self.max_bytes},
+            request_id=scope.get("state", {}).get("request_id"),
+            headers={"Connection": "close"},
+        )
+        await response(scope, receive, send)

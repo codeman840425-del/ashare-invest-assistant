@@ -30,3 +30,9 @@ egress:
 on_demand:
   coalesce_window_s: 5          # ◇ 按需拉取“同证券同接口”合并窗口
   priority: p1_daily
+# ---- 以下一块不在 plan §6.1（T-B02a 补充）。按“键与默认值以 plan §6.1 为准”先以注释形式给出，
+# 实际默认值在 app/config_files.py IngestImports（值相同）；架构师把它补进 §6.1 后去掉注释即生效。
+# imports:                      # 交割单上传与请求体上限
+#   max_file_bytes: 5242880     # int，单文件 ≤ 5 MB（plan §3.5），超限 422 IMPORT_FILE_ERRORS/IMPORT_FILE_TOO_LARGE
+#   max_files_per_upload: 5     # int，单次 ≤ 5 个文件（plan §3.5）
+#   max_request_bytes: 27262976 # int，框架层请求体上限 = nginx client_max_body_size 26m；超限 413 PAYLOAD_TOO_LARGE

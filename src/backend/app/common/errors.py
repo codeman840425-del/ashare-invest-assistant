@@ -229,6 +229,27 @@ def error_payload(
     }
 
 
+JSON_MEDIA_TYPE: Final = "application/json; charset=utf-8"
+
+
+class Utf8JSONResponse(JSONResponse):
+    """契约 §1：``Content-Type: application/json; charset=utf-8``。
+
+    Starlette 只给 ``text/*`` 自动补 charset，``JSONResponse`` 默认是裸 ``application/json``；
+    错误信封与默认响应类（``create_app`` 的 ``default_response_class``）都用这个类。
+    """
+
+    media_type = JSON_MEDIA_TYPE
+
+
+class PayloadTooLarge(StarletteHTTPException):
+    """请求体超过框架层上限（``ingest.imports.max_request_bytes``）→ ``413 PAYLOAD_TOO_LARGE``。"""
+
+    def __init__(self, max_bytes: int) -> None:
+        super().__init__(status_code=413)
+        self.max_bytes = max_bytes
+
+
 def error_response(
     code: ErrorCode,
     message: str | None = None,
@@ -243,7 +264,7 @@ def error_response(
     rid = payload["error"]["request_id"]
     if rid:
         hdrs["X-Request-Id"] = rid
-    return JSONResponse(
+    return Utf8JSONResponse(
         payload,
         status_code=status_code or ERROR_CODES[code].http_status,
         headers=hdrs,
@@ -347,7 +368,8 @@ async def _http_exception_handler(request: Request, exc: Exception) -> JSONRespo
         logger.warning("unmapped http status %s", exc.status_code)
         code = E.VALIDATION_ERROR if 400 <= exc.status_code < 500 else E.INTERNAL_ERROR
     headers = {k: v for k, v in (exc.headers or {}).items() if k.lower() != "allow"}
-    return error_response(code, headers=headers)
+    details = {"max_bytes": exc.max_bytes} if isinstance(exc, PayloadTooLarge) else None
+    return error_response(code, details=details, headers=headers)
 
 
 def install_exception_handlers(app: FastAPI) -> None:

@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
+from app.common.errors import Utf8JSONResponse
 from app.config import Settings, get_settings
 from app.schemas.enums import ComponentHealth, HealthStatus, IngestHealth
 from app.version import APP_VERSION
@@ -179,7 +180,7 @@ async def _ready(settings: Settings) -> JSONResponse:
         checked_at=dt.datetime.now(BEIJING).replace(microsecond=0),
         version=APP_VERSION,
     )
-    return JSONResponse(
+    return Utf8JSONResponse(
         body.model_dump(mode="json"),
         status_code=503 if status is HealthStatus.DOWN else 200,
     )

@@ -52,11 +52,13 @@ rules:
        reason: "上市不足 20 个交易日：历史太短"}
     - {id: HG6, input: f.list_days, op: lt, value: 60, horizons: [swing, long], cap: 59,
        reason: "上市不足 60 个交易日：60 日趋势与动量无法计算"}
+    # T006e（契约 v0.2.6）：gates 命中写入 caps[]，kind: gate、rule_id: HGn；判 0 分的 HG1–HG3 记 cap: 0
   horizons:
     intraday_t:
       requires:
         - {id: IT0, input: user.has_position, op: eq, value: true, else_score: 0,
            reason: "做T 需要已有底仓（T+1：当日买入不能当日卖出）"}
+        # T006e（契约 v0.2.6）：IT0 的 else_score: 0 是分数，不进 caps[]，只写 reasons[]；hints[] 与分数无关，判 0 分的周期照样给 IT0C 提示
         # T-A06：requires 规则新增可选键 mode: cap（默认）| hint。hint 规则不得带 else_cap/else_score；输入未填写时跳过（不提示、不封顶）；
         #        不满足时只写入输出 hints[]（{horizon, rule_id, text}），不改分数、不进 caps[]。画像类规则全部为 hint（用户 2026-11-02 决定）
         - {id: IT0B, input: profile.effort, op: in, value: [medium, high], mode: hint,
@@ -142,6 +144,7 @@ rules:
            reason: "已披露财报不足 12 期（或缺失）：基本面历史不完整"}
         - {id: LG0B, input: f.roe_ttm, op: not_null, else_cap: 59,
            reason: "ROE(TTM) 缺失：无法判断质量"}
+        # T006e（契约 v0.2.6，架构师归类）：LG0/LG0B 的 else_cap 属于数据不足，写入 caps[] 时 kind: data_missing、rule_id: LG0/LG0B
       components:
         - {id: LG1, input: f.fin_report_count, unit: count,
            bands: [{op: ge, value: 12, pts: 15}],

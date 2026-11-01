@@ -121,8 +121,11 @@ engine_policies = Table(
     comment="不可变（触发器）",
 )
 
-#: HorizonCap.kind（契约 v0.2.3；enums 未单列，只用于 CHECK）
-HORIZON_CAP_KINDS = ("data_missing", "requires")
+#: HorizonCap.kind（契约 v0.2.3；enums 未单列，只用于 CHECK）。
+#: v0.2.6（T-A07 / T006e 裁定 2，迁移 0006）：删 ``requires``、加 ``gate``——HG1–HG6 命中为
+#: ``gate``（rule_id 为 HGn，inputs_missing 为 []）；LG0/LG0B 的 else_cap 为 ``data_missing``；
+#: IT0 的 else_score: 0 是分数，不进 caps
+HORIZON_CAP_KINDS = ("gate", "data_missing")
 
 horizon_classifier_versions = Table(
     "horizon_classifier_versions",
@@ -150,6 +153,10 @@ HORIZON_CAP_BAD_ITEM = (
     f" || !{jsonpath_one_of('@.kind', HORIZON_CAP_KINDS)}"
     ' || !(@.rule_id.type() == "string" || @.rule_id.type() == "null")'
     ' || !(@.inputs_missing.type() == "array")'
+    # v0.2.6：gate 的 rule_id 必须是 HG1–HG6，且 inputs_missing 为空数组
+    ' || (@.kind == "gate"'
+    ' && !(@.rule_id.type() == "string" && @.rule_id like_regex "^HG[1-6]$"))'
+    ' || (@.kind == "gate" && @.inputs_missing.size() != 0)'
 )
 
 #: HorizonHint（契约 v0.2.5 §5.1）：{horizon, rule_id 非空字符串, text 非空字符串}

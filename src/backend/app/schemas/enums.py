@@ -1,13 +1,15 @@
 """契约 §3 枚举、§4.1 导入提示码与 §6.1 不可执行原因码表 —— **全仓唯一来源**。
 
 ``GET /meta/enums`` 直接下发本模块内容；其他模块需要枚举时从这里导入，不要另行定义。
-已同步到契约 :data:`CONTRACT_VERSION`（v0.2.6；v0.2 为 T-A01 定稿，原 ``PENDING_T_A01`` 标记已解除；
+已同步到契约 :data:`CONTRACT_VERSION`（v0.2.7；v0.2 为 T-A01 定稿，原 ``PENDING_T_A01`` 标记已解除；
 v0.2.1–v0.2.3 未改 §3 枚举、§4 错误码与 §6.1 原因码的取值；v0.2.4 新增的 ``consent_key``、
 ``legal_doc_key``、``consent_presentation``、``assessment_status`` 在 v0.2.5（T-A06）作废并删除，
 同时删除原因码 ``PROFILE_OR_CONSENT_MISSING``（23 → 22）与错误码 ``CONSENT_REQUIRED``、
 ``STRATEGY_FIT_ACK_REQUIRED``）。v0.2.6（T-A07）新增 ``data_licence_status``、
 ``data_licence_tier``，``notification_kind`` 加 ``data_licence``、``gap_reason`` 加
-``data_licence_unavailable``，错误码加三个 ``DATA_LICENCE_*``。
+``data_licence_unavailable``，错误码加三个 ``DATA_LICENCE_*``。v0.2.7（T-A08）新增 18 个枚举、
+``data_provider`` 加 ``exchange``；``security_type`` 按编排者 Q3 裁定多一个 ``etf``（契约 §3 该行由
+T-A09 同步），错误码与原因码不变。
 
 ``CONTRACT_ENUMS`` 只登记契约 §3 的命名枚举；契约里以内联字面量出现的取值（如 ``/me/profile`` 的
 ``effort``、``experience``）在本模块文末“非 §3 取值”一节集中定义，供 DB CHECK 与请求模型复用，
@@ -290,6 +292,8 @@ class DataProvider(StrEnum):  # Evidence.provider
     USER_IMPORT = "user_import"
     USER_INPUT = "user_input"
     SYSTEM = "system"
+    #: v0.2.7：沪深北交易所公开证券列表，只用于证券公开主数据（契约 §3，待 Q2 / T-A04 确认来源）
+    EXCHANGE = "exchange"
 
 
 class SourceKind(StrEnum):  # 证据来源类别（plan 3.1）
@@ -565,11 +569,153 @@ DATA_LICENCE_ERROR_CODES: Final[tuple[str, ...]] = (
 
 
 # ---------------------------------------------------------------------------
+# v0.2.7（T-A08）：证券、个股数据、策略实例、/today 相关枚举（契约 §3，18 个）
+# ---------------------------------------------------------------------------
+
+
+class SecurityType(StrEnum):
+    """证券类型。ETF 按编排者 2026-11-02 裁定纳入（契约 v0.2.7 Q3 / plan 第 9 节 53）：
+    可出现在搜索与持仓中，但**策略不对 ETF 运行**（见 :mod:`app.strategy.eligibility`）；
+    可转债本版不纳入。"""
+
+    STOCK = "stock"
+    CDR = "cdr"
+    INDEX = "index"
+    ETF = "etf"
+
+
+#: 策略、候选信号可以作用的证券类型（ETF、指数都不在内；plan 第 9 节 53）
+STRATEGY_ELIGIBLE_SECURITY_TYPES: Final[frozenset[SecurityType]] = frozenset(
+    {SecurityType.STOCK, SecurityType.CDR}
+)
+
+
+class Board(StrEnum):
+    MAIN = "main"
+    CHINEXT = "chinext"
+    STAR = "star"
+    BSE = "bse"
+
+
+class ListingStatus(StrEnum):  # 停牌不是上市状态（SecurityProfile.suspended）
+    LISTED = "listed"
+    DELISTING_PERIOD = "delisting_period"
+    DELISTED = "delisted"
+    MISSING_FROM_LIST = "missing_from_list"
+
+
+class SecurityRiskFlag(StrEnum):  # 同时命中取最高：delisting > star_st > st
+    ST = "st"
+    STAR_ST = "star_st"
+    DELISTING = "delisting"
+
+
+class SecurityMatchKind(StrEnum):  # 定义顺序即排序层级
+    CODE_EXACT = "code_exact"
+    NAME_EXACT = "name_exact"
+    INITIALS_EXACT = "initials_exact"
+    CODE_PREFIX = "code_prefix"
+    NAME_PREFIX = "name_prefix"
+    INITIALS_PREFIX = "initials_prefix"
+    NAME_CONTAINS = "name_contains"
+    FORMER_NAME = "former_name"
+    FORMER_CODE = "former_code"
+    FUZZY = "fuzzy"
+
+
+class ReportPeriod(StrEnum):
+    Q1 = "q1"
+    H1 = "h1"
+    Q3 = "q3"
+    FY = "fy"
+
+
+class FactorCategory(StrEnum):
+    """麦蕊因子的 11 个分类：契约 v0.2.7 写明键名【待 T003 补测】，定稿前为空（``/meta/enums``
+    下发空列表，与契约 §3 当前的零个取值一致）。"""
+
+
+class AnnouncementCategory(StrEnum):
+    PERIODIC_REPORT = "periodic_report"
+    OTHER = "other"
+
+
+class SectorKind(StrEnum):
+    INDUSTRY = "industry"
+    CONCEPT = "concept"
+
+
+class IndustryTaxonomy(StrEnum):
+    SW_L1 = "sw_l1"
+    SW_L2 = "sw_l2"
+    CSRC = "csrc"
+
+
+class InstanceOrigin(StrEnum):
+    CLASSIFIER = "classifier"
+    USER = "user"
+    SYSTEM = "system"
+
+
+class InstanceEventKind(StrEnum):
+    CREATED = "created"
+    CONFIRMED = "confirmed"
+    PAUSED = "paused"
+    RESUMED = "resumed"
+    PARAMS_CHANGED = "params_changed"
+    ARCHIVED = "archived"
+
+
+class InstanceSort(StrEnum):
+    CREATED_AT_DESC = "created_at_desc"  # 默认
+    UPDATED_AT_DESC = "updated_at_desc"
+    STRATEGY_NAME_ASC = "strategy_name_asc"
+
+
+class SectorSort(StrEnum):
+    MAIN_NET_DESC = "main_net_desc"  # 默认
+    MAIN_NET_ASC = "main_net_asc"
+    CHANGE_PCT_DESC = "change_pct_desc"
+    CHANGE_PCT_ASC = "change_pct_asc"
+
+
+class AlertOrigin(StrEnum):
+    PLAN_CONDITION = "plan_condition"
+    HOLDING_EVENT = "holding_event"
+    USER_CUSTOM = "user_custom"
+
+
+class AlertStatus(StrEnum):
+    NEW = "new"
+    READ = "read"
+    CHECKED = "checked"
+    ACTED = "acted"
+    DISMISSED = "dismissed"
+
+
+class PlanConditionKind(StrEnum):
+    TRIGGER = "trigger"
+    INVALIDATION = "invalidation"
+
+
+class DataGapScope(StrEnum):
+    USER = "user"
+    ACCOUNT = "account"
+    SECURITY = "security"
+    MARKET = "market"
+
+
+class InstancePausedBy(StrEnum):  # StrategyInstance.paused_by（契约 §5.1 内联字面量，非 §3）
+    USER = "user"
+    SYSTEM = "system"
+
+
+# ---------------------------------------------------------------------------
 # /meta/enums 注册表：契约 §3 的枚举名 → 枚举类（顺序与契约表格一致）
 # ---------------------------------------------------------------------------
 
 #: 本模块对应的契约版本（``/meta/enums`` 的 ``version``）
-CONTRACT_VERSION: Final = "v0.2.6"
+CONTRACT_VERSION: Final = "v0.2.7"
 
 #: ``/meta/enums`` 的 ``enums``：契约 §3 各表名 → 取值（顺序同 §3）。``reason_code`` 不在其中，
 #: 只在 ``reason_codes`` 里带解除条件展开（契约 §7.10；评审 M7）。
@@ -633,6 +779,25 @@ CONTRACT_ENUMS: Final[dict[str, type[StrEnum]]] = {
     "ingest_health": IngestHealth,
     "data_licence_status": DataLicenceStatus,
     "data_licence_tier": DataLicenceTier,
+    # v0.2.7（T-A08 #14）
+    "security_type": SecurityType,
+    "board": Board,
+    "listing_status": ListingStatus,
+    "security_risk_flag": SecurityRiskFlag,
+    "security_match_kind": SecurityMatchKind,
+    "report_period": ReportPeriod,
+    "factor_category": FactorCategory,
+    "announcement_category": AnnouncementCategory,
+    "sector_kind": SectorKind,
+    "industry_taxonomy": IndustryTaxonomy,
+    "instance_origin": InstanceOrigin,
+    "instance_event_kind": InstanceEventKind,
+    "instance_sort": InstanceSort,
+    "sector_sort": SectorSort,
+    "alert_origin": AlertOrigin,
+    "alert_status": AlertStatus,
+    "plan_condition_kind": PlanConditionKind,
+    "data_gap_scope": DataGapScope,
 }
 
 

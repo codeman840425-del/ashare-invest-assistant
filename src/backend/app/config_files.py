@@ -3,7 +3,8 @@
 - 每个文件对应一个 pydantic 模型，全部 ``extra="forbid"``、``frozen=True``：未知键、缺键、
   类型或取值不符 → :class:`pydantic.ValidationError`，进程启动即失败（plan §6.1 通用规则）。
 - 默认值**只在 YAML 里**（plan §6.1 是唯一出处），这里不写默认值，只写类型与取值范围；
-  因此八个文件缺一不可，``config/`` 顶层也不允许出现其他 yaml 文件（防止文件名拼错被忽略）。
+  因此九个文件（v0.2.7 加 ``securities.yaml``）缺一不可，``config/`` 顶层也不允许出现
+  其他 yaml 文件（防止文件名拼错被忽略）。
 - 范围约束只取 plan 明文给出的（如 ``quote_interval_s`` 下限 5、``per_minute_budget`` 热调上限
   5400、RC2 用户可调范围 5–50）以及“数值本身必须有意义”的约束（正数、上下界有序）。
 - ``config/strategies/`` 不在本模块范围（由导入器处理，plan §2.5.14）。
@@ -1057,12 +1058,55 @@ class AuthConfig(_File):
 
 
 # ---------------------------------------------------------------------------
+# config/securities.yaml（契约 v0.2.7，plan §6.1；由 api 读取）
+# ---------------------------------------------------------------------------
+
+
+class SecuritiesSearch(_Strict):
+    #: pg_trgm 相似度下限
+    similarity_threshold: Annotated[float, Field(gt=0, le=1)]
+    initials_max_variants: PosInt
+    limit_default: PosInt
+    limit_max: PosInt
+
+    @model_validator(mode="after")
+    def _check(self) -> SecuritiesSearch:
+        if self.limit_default > self.limit_max:
+            raise ValueError("search.limit_default 不能大于 limit_max")
+        return self
+
+
+class SecuritiesAnnouncements(_Strict):
+    #: 只有 https 且主机在此列表内的公告原文链接才返回给前端（契约 §5.1 ``Announcement.url``）
+    url_host_allowlist: tuple[StrictStr, ...]
+
+    @field_validator("url_host_allowlist")
+    @classmethod
+    def _hosts(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        if not v:
+            raise ValueError("announcements.url_host_allowlist 不能为空")
+        for host in v:
+            if host != host.lower() or not host or any(c in host for c in "/:@ *"):
+                raise ValueError(
+                    f"url_host_allowlist 只能写小写主机名（不带协议、端口、通配符）：{host!r}"
+                )
+        if len(set(v)) != len(v):
+            raise ValueError("announcements.url_host_allowlist 有重复主机")
+        return v
+
+
+class SecuritiesConfig(_File):
+    search: SecuritiesSearch
+    announcements: SecuritiesAnnouncements
+
+
+# ---------------------------------------------------------------------------
 # 汇总
 # ---------------------------------------------------------------------------
 
 
 class BusinessConfig(_Strict):
-    """``config/`` 顶层八个文件；键为文件名（不含扩展名）。"""
+    """``config/`` 顶层九个文件；键为文件名（不含扩展名）。"""
 
     realtime: RealtimeConfig
     ingest: IngestConfig
@@ -1072,6 +1116,8 @@ class BusinessConfig(_Strict):
     llm: LlmConfig
     imports: ImportsConfig
     auth: AuthConfig
+    #: v0.2.7（T-A08）
+    securities: SecuritiesConfig
 
 
 BUSINESS_FILES: tuple[str, ...] = tuple(BusinessConfig.model_fields)

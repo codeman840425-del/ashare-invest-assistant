@@ -2,7 +2,7 @@
 
 - 运行参数（数据库、Redis、密钥、端口等）只来自环境变量，与
   ``deploy/compose/docker-compose.yml`` 中 ``api`` 服务的 ``environment`` 同名。
-- 业务配置（``config/realtime.yaml``、``ingest.yaml``、``llm.yaml`` 等八个文件，plan §6.1）
+- 业务配置（``config/realtime.yaml``、``ingest.yaml``、``llm.yaml`` 等九个文件，plan §6.1）
   只读加载到 :attr:`Settings.business`，并按 :mod:`app.config_files` 严格校验：未知键、缺文件、
   多余文件、取值越界 → 启动失败。``config/strategies/`` 子目录不在这里加载：L2 模板要经
   导入器成为不可变 DB 版本，放文件不会激活（plan §2.5.13）。
@@ -351,7 +351,7 @@ class SealPublicKeysSource(PydanticBaseSettingsSource):
 
 
 def check_config_dir_files(found: dict[str, Any], config_dir: Path) -> None:
-    """``config/`` 顶层只允许八个约定文件（缺失或多余都失败）。"""
+    """``config/`` 顶层只允许九个约定文件（缺失或多余都失败）。"""
     missing = sorted(set(BUSINESS_FILES) - set(found))
     extra = sorted(set(found) - set(BUSINESS_FILES))
     if missing or extra:

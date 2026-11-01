@@ -1,0 +1,17 @@
+# 证券搜索与公告外链（plan §6.1 `config/securities.yaml`，契约 v0.2.7；由 api 读取）
+# 取值照抄 plan §6.1；◇ 为 plan 给出的工程默认值。
+schema_version: 1
+search:
+  similarity_threshold: 0.3     # ◇ pg_trgm 相似度下限；查询中至少 2 个汉字才启用模糊匹配
+  initials_max_variants: 16     # ◇ 多音字拼音首字母组合上限
+  limit_default: 20             # ◇
+  limit_max: 50                 # ◇
+announcements:
+  url_host_allowlist:           # ◇ 只有 https 且主机在此列表内的原文链接才返回给前端
+    - www.sse.com.cn
+    - static.sse.com.cn
+    - www.szse.cn
+    - disc.szse.cn
+    - www.bse.cn
+    - www.cninfo.com.cn
+    - static.cninfo.com.cn

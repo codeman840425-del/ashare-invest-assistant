@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, PrimaryKeyConstraint, Table, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Index, PrimaryKeyConstraint, Table, UniqueConstraint, text
 
 from app.config_files import SEMVER_PATTERN
 from app.db.base import (
@@ -41,8 +41,11 @@ from app.schemas.enums import (
     FeatureStatus,
     Horizon,
     HorizonAssessmentTrigger,
+    InstanceOrigin,
+    InstancePausedBy,
     InstanceStatus,
     Lifecycle,
+    ReasonCode,
     RiskControl,
     RiskLevel,
     RuleRole,
@@ -475,11 +478,36 @@ strategy_instances = Table(
     boolean("auto_downweight", nullable=False, server_default=text("true")),
     created_at(),
     ts("confirmed_at"),
+    # v0.2.7（契约 §5.1 StrategyInstance、§6.0A；迁移 0009）
+    txt("horizon"),  # 旧行为空；T-B32 写入时必填
+    txt("paused_by"),
+    txt("pause_reason_code"),
+    ts("paused_until"),
+    ts("updated_at", nullable=False, default_now=True),
+    ts("archived_at"),
     one_of("scope", ["account", "security", "watch_group"]),
     one_of("status", InstanceStatus),
-    one_of("origin", ["classifier", "user"]),
+    one_of("origin", InstanceOrigin),
+    one_of("horizon", Horizon),
+    one_of("paused_by", InstancePausedBy),
+    one_of("pause_reason_code", ReasonCode),
+    CheckConstraint(
+        "(status = 'paused' AND paused_by IS NOT NULL"
+        " AND (paused_by = 'system' OR (pause_reason_code IS NULL AND paused_until IS NULL)))"
+        " OR (status <> 'paused' AND paused_by IS NULL AND pause_reason_code IS NULL"
+        " AND paused_until IS NULL)",
+        name="pause_fields",
+    ),
+    CheckConstraint("(status = 'archived') = (archived_at IS NOT NULL)", name="archived_at"),
     schema=APP,
-    comment="L3 头表",
+    comment="L3 头表",  # security_code 只能是 stock/cdr（迁移 0009 触发器，ETF 不运行策略）
+)
+Index(
+    "ix_strategy_instances_user_status_created",
+    strategy_instances.c.user_id,
+    strategy_instances.c.status,
+    strategy_instances.c.created_at.desc(),
+    strategy_instances.c.id.desc(),
 )
 
 strategy_instance_events = Table(

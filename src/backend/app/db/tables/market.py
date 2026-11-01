@@ -14,8 +14,10 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
+    ForeignKeyConstraint,
     Index,
     PrimaryKeyConstraint,
     Table,
@@ -37,26 +39,97 @@ from app.db.base import (
     txt,
     uuid_col,
 )
-from app.schemas.enums import BarAdjust
+from app.schemas.enums import BarAdjust, Board, ListingStatus, SecurityRiskFlag, SecurityType
 
 
 def _now(name: str) -> Column[Any]:
     return ts(name, nullable=False, default_now=True)
 
 
+# 证券公开主数据，全站一份（v0.2.7 #19；不存公司全称）
 securities = Table(
     "securities",
     metadata,
     txt("code", nullable=False, primary_key=True),
+    txt("type", nullable=False),  # security_type；ETF 纳入但策略不运行（v0.2.7 Q3）
     txt("name", nullable=False),
     txt("exchange", nullable=False),
     txt("board"),
     day("list_date"),
-    txt("status"),
-    text_array("industry_codes"),
+    txt("listing_status"),
     _now("updated_at"),
+    txt("list_date_basis"),
+    day("delist_date"),
+    txt("risk_flag"),
+    txt("name_norm"),
+    text_array("name_initials"),
+    txt("master_source"),  # 来源待 plan 第 9 节问题 52 / T-A04
+    ts("master_as_of"),
     one_of("exchange", ["SH", "SZ", "BJ"]),
+    one_of("type", SecurityType),
+    one_of("board", Board),
+    one_of("listing_status", ListingStatus),
+    one_of("list_date_basis", ["listing", "neeq_select"]),
+    one_of("risk_flag", SecurityRiskFlag),
     schema=MARKET,
+)
+Index(
+    "ix_securities_name_norm_trgm",
+    securities.c.name_norm,
+    postgresql_using="gin",
+    postgresql_ops={"name_norm": "gin_trgm_ops"},
+)
+Index("ix_securities_name_initials", securities.c.name_initials, postgresql_using="gin")
+
+security_name_history = Table(
+    "security_name_history",
+    metadata,
+    txt("code", nullable=False, primary_key=True),
+    txt("name", nullable=False, primary_key=True),
+    txt("name_norm"),
+    day("valid_from"),
+    day("valid_until"),
+    txt("master_source"),
+    _now("recorded_at"),
+    ForeignKeyConstraint(["code"], ["market.securities.code"]),
+    schema=MARKET,
+    comment="曾用名（契约 SecurityProfile.former_names；T007 §5）",
+)
+Index(
+    "ix_security_name_history_name_norm_trgm",
+    security_name_history.c.name_norm,
+    postgresql_using="gin",
+    postgresql_ops={"name_norm": "gin_trgm_ops"},
+)
+
+security_code_history = Table(
+    "security_code_history",
+    metadata,
+    txt("old_code", nullable=False, primary_key=True),
+    txt("code", nullable=False),
+    day("valid_until"),
+    txt("master_source"),
+    _now("recorded_at"),
+    CheckConstraint("old_code <> code", name="differs"),
+    ForeignKeyConstraint(["code"], ["market.securities.code"]),
+    schema=MARKET,
+    comment="旧代码 → 新代码（北交所代码切换等；SecurityProfile.code_history、former_code）",
+)
+Index("ix_security_code_history_code", security_code_history.c.code)
+
+security_risk_flag_history = Table(
+    "security_risk_flag_history",
+    metadata,
+    txt("code", nullable=False, primary_key=True),
+    txt("risk_flag"),
+    day("valid_from", nullable=False, primary_key=True),
+    day("valid_until"),
+    txt("master_source"),
+    _now("recorded_at"),
+    one_of("risk_flag", SecurityRiskFlag),
+    ForeignKeyConstraint(["code"], ["market.securities.code"]),
+    schema=MARKET,
+    comment="风险警示变化历史（risk_flag 为 null 表示摘帽）",
 )
 
 trading_calendar = Table(

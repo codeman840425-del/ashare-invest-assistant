@@ -5,6 +5,8 @@
  * 校正后的 form_started_at 只会偏早、不会偏晚，正常用户不会因为时钟误差被判为“填写太快”。
  */
 let offsetMs = 0;
+/** 是否已用有效的 Date 头校正过（评审 8249d6e m1）：没校正时不传 form_started_at，避免本地时钟偏快被误判为“未来时间” */
+let calibrated = false;
 
 /** 由响应头 Date 和本地收到时刻求差值；没有或解析失败时返回 null（不改动已有差值） */
 export function clockOffsetFromDate(dateHeader: string | null, receivedAtMs: number): number | null {
@@ -14,13 +16,21 @@ export function clockOffsetFromDate(dateHeader: string | null, receivedAtMs: num
 
 export function noteServerDate(res: Response, receivedAtMs = Date.now()) {
   const o = clockOffsetFromDate(res.headers.get('Date'), receivedAtMs);
-  if (o !== null) offsetMs = o;
+  if (o !== null) {
+    offsetMs = o;
+    calibrated = true;
+  }
 }
 
 /** 按服务端时钟校正后的当前毫秒时间（Unix epoch ms，整数） */
 export const serverNowMs = () => Math.floor(Date.now() + offsetMs);
 
+/** 已校正时返回服务端毫秒时间；没拿到有效 Date 头时返回 null（契约 v0.2.8 #11：不传则不做最短填写时间检查） */
+export const calibratedServerNowMs = (): number | null => (calibrated ? serverNowMs() : null);
+export const isServerClockCalibrated = () => calibrated;
+
 /** 测试用 */
 export const resetServerClock = () => {
   offsetMs = 0;
+  calibrated = false;
 };

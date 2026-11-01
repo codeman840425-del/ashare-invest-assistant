@@ -6,7 +6,7 @@ import { useRegister, useRegistrationMode } from '../../api/accountQueries';
 import { errorText } from '../../api/errorPolicy';
 import { Loading, ErrorBox } from '../../components/common';
 import { DISCLAIMER_TEXT } from '../../components/RiskDisclosure';
-import { serverNowMs } from '../../lib/serverClock';
+import { calibratedServerNowMs } from '../../lib/serverClock';
 import { AuthLayout } from './AuthLayout';
 
 interface FormValues {
@@ -75,8 +75,11 @@ function RegisterForm({ mode, onDone, onClosed }: { mode: 'invite' | 'open'; onD
   const [form] = Form.useForm<FormValues>();
   const [err, setErr] = useState<string | null>(null);
   const websiteRef = useRef<HTMLInputElement | null>(null);
-  /** v0.2.8 #11：表单首次渲染时的毫秒时间（按服务端时钟校正）；出错后重试沿用同一个值 */
-  const [startedAt] = useState(() => serverNowMs());
+  /**
+   * v0.2.8 #11：表单首次渲染时的毫秒时间（按服务端时钟校正）；出错后重试沿用同一个值。
+   * /meta/registration 没有有效 Date 头时为 null，提交时不带该字段（评审 8249d6e m1）。
+   */
+  const [startedAt] = useState(() => calibratedServerNowMs());
 
   const onFinish = (v: FormValues) => {
     setErr(null);
@@ -85,9 +88,9 @@ function RegisterForm({ mode, onDone, onClosed }: { mode: 'invite' | 'open'; onD
         username: v.username.toLowerCase(), password: v.password, display_name: v.display_name.trim(),
         invite_code: mode === 'invite' ? v.invite_code?.trim() || null : null,
         apply_note: v.apply_note?.trim() || null,
-        // v0.2.8 #11：两个蜜罐字段总是一起提交；有值也照常提交，由服务端判定
+        // v0.2.8 #11：蜜罐字段照常提交，由服务端判定；时钟未校正时不传 form_started_at（不传则服务端不做此项检查）
         website: websiteRef.current?.value ?? '',
-        form_started_at: startedAt,
+        ...(startedAt === null ? {} : { form_started_at: startedAt }),
       },
       {
         onSuccess: (r) => onDone(r.username),

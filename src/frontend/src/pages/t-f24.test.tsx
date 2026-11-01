@@ -4,7 +4,8 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
-import { clockOffsetFromDate, noteServerDate, resetServerClock, serverNowMs } from '../lib/serverClock';
+import { calibratedServerNowMs, clockOffsetFromDate, isServerClockCalibrated, noteServerDate, resetServerClock, serverNowMs } from '../lib/serverClock';
+import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { MOCK_INVITE_CODES, mockLoginAs, setRegistrationMode, state } from '../mocks/session';
 
@@ -214,5 +215,34 @@ describe('服务端时钟校正', () => {
     expect(serverNowMs()).toBe(serverNow); // 下界：Date 只到秒，丢掉的 400 毫秒按 0 计
     vi.advanceTimersByTime(1000);
     expect(serverNowMs()).toBe(serverNow + 1000);
+  });
+
+  it('评审 8249d6e m1：没有有效 Date 头时未校正，calibratedServerNowMs 返回 null；坏 Date 头不算校正', () => {
+    expect(isServerClockCalibrated()).toBe(false);
+    expect(calibratedServerNowMs()).toBeNull();
+    noteServerDate(new Response(null));
+    noteServerDate(new Response(null, { headers: { Date: 'not a date' } }));
+    expect(calibratedServerNowMs()).toBeNull();
+    noteServerDate(new Response(null, { headers: { Date: new Date().toUTCString() } }));
+    expect(typeof calibratedServerNowMs()).toBe('number');
+  });
+
+  it('评审 8249d6e m1：/meta/registration 缺 Date 头时，提交不带 form_started_at（服务端不做最短填写时间检查），照常建用户', async () => {
+    server.use(http.get('/api/v1/meta/registration', () => new HttpResponse(JSON.stringify({ mode: 'invite' }), { headers: { 'content-type': 'application/json' } })));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const bodies = captureRegister();
+    renderAt('/register');
+    await screen.findByTestId('register-page');
+    fillBasics('tf24_nodate');
+    fireEvent.change(screen.getByTestId('reg-invite'), { target: { value: CODE } });
+    fireEvent.change(screen.getByTestId('reg-apply-note'), { target: { value: '示例：自用研究' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    submit();
+    expect(await screen.findByTestId('register-done')).toBeInTheDocument();
+    expect(bodies).toHaveLength(1);
+    expect('form_started_at' in bodies[0]).toBe(false);
+    expect(bodies[0].website).toBe('');
+    expect(state.users.some((u) => u.username === 'tf24_nodate')).toBe(true);
+    expect(state.honeypotHits).toEqual([]);
   });
 });

@@ -21,6 +21,8 @@ export const PLACEHOLDERS: [string, string][] = [
   ['plan-drafts', '计划草案'],
   ['plan-drafts/:id', '计划草案详情'],
   ['plans', '计划'],
+  // 契约 §5 Notification.target.route 与 /today 计划条件都会跳到 /plans/{id}；计划页（T-F 后续任务）实现前先接占位页，不落 404（评审 8249d6e / 7afbc06 m4）
+  ['plans/:id', '计划详情'],
   ['risk-controls', '风控'],
   ['restrictions', '禁投 / 冷静期 / 屏蔽'],
   ['notifications', '通知中心'],

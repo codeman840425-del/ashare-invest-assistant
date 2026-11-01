@@ -2,7 +2,7 @@ import type {
   Action, CandidateSignalState, CheckOn, ConfidenceLevel, DataStatus, Dimension, DimensionView,
   EpistemicType, GapReason, Horizon, Lifecycle, MarketRegime, NotificationKind, ReasonCode,
   ReleaseKind, RiskControl, RiskLevel, Severity, SuggestionOrigin, RuleRole, StrategyEvalState, MarketSession, SignalKind,
-  DataProvider, ExecutabilityStatus, ConsensusStatus, ReconciliationStatus, NotificationTargetType,
+  DataProvider, ExecutabilityStatus, ConsensusStatus, ReconciliationStatus, NotificationTargetType, PlanDraftStatus,
 } from '../api/enums';
 
 /** 动作：短标签（徽标用）与完整措辞（plan §2.5.0 措辞约定：规则信号 + 候选） */
@@ -102,6 +102,11 @@ export const RULE_ROLE: Record<RuleRole, string> = {
 export const EVAL_STATE: Record<StrategyEvalState, string> = {
   entry_ok: '入场条件满足', not_triggered: '未触发', hold_ok: '持有条件维持', weakening: '转弱', exit_signal: '离场条件满足',
   vetoed: '被否决', insufficient_data: '数据不足',
+};
+/** plan_draft_status（契约 §3；T-F08） */
+export const PLAN_DRAFT_STATUS: Record<PlanDraftStatus, { text: string; color: string }> = {
+  pending: { text: '待确认', color: 'gold' }, confirmed: { text: '已确认', color: 'green' }, discarded: { text: '已放弃', color: 'default' },
+  expired: { text: '已过期', color: 'default' }, stale: { text: '条件已变', color: 'orange' },
 };
 export const SESSION: Record<MarketSession, string> = {
   non_trading_day: '非交易日', pre_open: '盘前', call_auction: '集合竞价', morning: '上午连续竞价', lunch_break: '午间休市',

@@ -13,7 +13,6 @@ const lazyPage = <M,>(load: () => Promise<M>, pick: (m: M) => React.ComponentTyp
 
 /** 契约 §4 / plan 规划的页面；未实现的先给占位 */
 export const PLACEHOLDERS: [string, string][] = [
-  ['today', '今日关注'],
   ['strategies/:id', '策略详情'],
   ['strategy-cards', '策略知识卡'],
   ['strategy-instances', '我的策略实例'],
@@ -41,6 +40,7 @@ export const routes: RouteObject[] = [
     element: <AppShell />,
     children: [
       { index: true, element: <Navigate to="/terminal" replace /> },
+      { path: 'today', lazy: lazyPage(() => import('../pages/today/TodayPage'), (m) => m.TodayPage) },
       { path: 'terminal', lazy: lazyPage(() => import('../features/terminal/TerminalPage'), (m) => m.TerminalPage) },
       { path: 'suggestions', lazy: lazyPage(() => import('../pages/SuggestionIndex'), (m) => m.SuggestionIndex) },
       { path: 'suggestions/:id', lazy: lazyPage(() => import('../pages/SuggestionDetailPage'), (m) => m.SuggestionDetailPage) },

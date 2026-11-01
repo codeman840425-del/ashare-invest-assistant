@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { apiGet, apiPost } from './client';
 import type {
   BarsResponse, CandidateSignal, DailyReport, DailyReportListItem, HorizonAssessment, Me, NonExecutableReason, Notification, Paged, Portfolio,
-  SignalEvent, Suggestion, SuggestionListItem, TerminalResponse, TerminalScope, UnreadCount,
+  SignalEvent, Suggestion, SuggestionListItem, TerminalResponse, TerminalScope, TodayResponse, UnreadCount,
 } from './types';
 import type { BarAdjust, BarFreq } from './enums';
 
@@ -10,6 +10,7 @@ import type { BarAdjust, BarFreq } from './enums';
 export const qk = {
   me: ['me'] as const,
   terminal: (scope: TerminalScope) => ['terminal', scope] as const,
+  today: ['today'] as const,
   bars: (code: string, freq: BarFreq, adjust: BarAdjust) => ['bars', code, freq, adjust] as const,
   suggestion: (id: string) => ['suggestion', id] as const,
   candidateSignals: (code: string) => ['candidate-signals', code] as const,
@@ -37,6 +38,15 @@ export const useTerminal = (scope: TerminalScope) =>
     queryFn: ({ signal }) => apiGet<TerminalResponse>('/terminal', { scope }, signal),
     placeholderData: keepPreviousData,
     // SSE 未接入前的兜底轮询：契约 §8 要求 ≥ 15 秒
+    refetchInterval: 15_000,
+  });
+
+/** T-F08：首页聚合 GET /today（契约 §7.3，弱 ETag；SSE 未接入前按 §8 每 ≥ 15 秒带 If-None-Match 轮询） */
+export const useToday = () =>
+  useQuery({
+    queryKey: qk.today,
+    queryFn: ({ signal }) => apiGet<TodayResponse>('/today', undefined, signal),
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
 

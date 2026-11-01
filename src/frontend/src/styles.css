@@ -360,3 +360,16 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .flow-cell > .mono { width: 84px; text-align: right; }
 .flow-track { flex: 1; max-width: 220px; height: 6px; background: #1a2230; border-radius: 3px; overflow: hidden; }
 .flow-fill { display: block; height: 100%; opacity: 0.75; }
+
+/* T-F08 今日关注 */
+.today .card-disclaimer { margin-bottom: 6px; }
+.today-status { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+.today-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.today-card { background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 6px 8px; }
+.today-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.today-card-title { font-weight: 600; }
+.today-empty { padding: 4px 0; }
+.today-list { list-style: none; margin: 0; padding: 0; }
+.today-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+.today-list li:last-child { border-bottom: none; }
+.today-sg { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }

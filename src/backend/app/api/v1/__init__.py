@@ -1,0 +1,11 @@
+"""``/api/v1`` 路由汇总。"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter
+
+from app.api.v1 import health, meta
+
+router = APIRouter()
+router.include_router(health.router)
+router.include_router(meta.router)

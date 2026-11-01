@@ -1,0 +1,111 @@
+"""``GET /meta/enums``（契约 §7.10）：§3 全部枚举、§6.1 原因码表（含默认解除条件）、错误码列表。
+
+不分页、可缓存、不需要登录。内容全部来自 :mod:`app.schemas.enums` 与
+:mod:`app.common.errors`，本文件不定义任何取值。
+
+契约未规定响应的外层结构，本实现采用（见 reports/T-B01.md）::
+
+    {"enums": {name: [value, ...]},
+     "reason_codes": [{code, release_kinds, check_on, manually_releasable, note}],
+     "error_codes": [{code, http_status, scope}],
+     "risk_control_labels": {value: "RC1".."RC6"}}
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from functools import lru_cache
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Header, Response
+from pydantic import BaseModel, ConfigDict
+
+from app.common.errors import ERROR_CODES, ErrorCode, ErrorScope
+from app.schemas.enums import (
+    CONTRACT_ENUMS,
+    REASON_CODE_TABLE,
+    RISK_CONTROL_LABELS,
+    CheckOn,
+    ReasonCode,
+    ReleaseKind,
+)
+
+router = APIRouter(tags=["meta"])
+
+CACHE_CONTROL = "public, max-age=300"
+
+
+class ReasonCodeOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: ReasonCode
+    release_kinds: list[ReleaseKind]
+    check_on: list[CheckOn]
+    manually_releasable: bool
+    note: str | None
+
+
+class ErrorCodeOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: ErrorCode
+    http_status: int
+    scope: ErrorScope
+
+
+class EnumsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enums: dict[str, list[str]]
+    reason_codes: list[ReasonCodeOut]
+    error_codes: list[ErrorCodeOut]
+    risk_control_labels: dict[str, str]
+
+
+def build_enums() -> EnumsResponse:
+    return EnumsResponse(
+        enums={name: [m.value for m in enum] for name, enum in CONTRACT_ENUMS.items()},
+        reason_codes=[
+            ReasonCodeOut(
+                code=s.code,
+                release_kinds=list(s.release_kinds),
+                check_on=list(s.check_on),
+                manually_releasable=s.manually_releasable,
+                note=s.note,
+            )
+            for s in REASON_CODE_TABLE
+        ],
+        error_codes=[
+            ErrorCodeOut(code=code, http_status=spec.http_status, scope=spec.scope)
+            for code, spec in ERROR_CODES.items()
+        ],
+        risk_control_labels={k.value: v for k, v in RISK_CONTROL_LABELS.items()},
+    )
+
+
+@lru_cache(maxsize=1)
+def _cached() -> tuple[bytes, str]:
+    payload: dict[str, Any] = build_enums().model_dump(mode="json")
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    etag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+    return body, etag
+
+
+@router.get(
+    "/meta/enums",
+    response_model=EnumsResponse,
+    summary="枚举、原因码与错误码（不分页，可缓存）",
+)
+async def meta_enums(
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> Response:
+    body, etag = _cached()
+    headers = {"ETag": etag, "Cache-Control": CACHE_CONTROL}
+    if if_none_match is not None and etag in {t.strip() for t in if_none_match.split(",")}:
+        return Response(status_code=304, headers=headers)
+    return Response(
+        content=body,
+        media_type="application/json; charset=utf-8",
+        headers=headers,
+    )

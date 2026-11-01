@@ -1,11 +1,12 @@
 # config/market_rules.yaml —— 内容逐字取自 docs/plan.md §6.1（默认值唯一出处，改值先改 plan）。
 # 校验：src/backend/app/config_files.py（pydantic，extra="forbid"，未知键启动失败）。
 schema_version: 1
+modeled_from: "2023-04-10"            # 规则只建模到此日；更早的行情回看时 market_rule_version = null，评估结果标“交易规则未建模”，不得作为晋级依据（T-A02，第 9 节问题 36）
 segments:
-  - effective_from: "2026-07-06"      # 沪深主板 ST/*ST 涨跌幅改为 10% 的生效日（此前段为 5%，另列一段）【待 T003 补测核实】
-    price_limit_pct:                  # 前收 × (1 ± pct)，四舍五入到 0.01 元【精确舍入以交易所为准，待核实】
+  - effective_from: "2026-07-06"      # 【已定，已核实】沪深主板 ST/*ST 涨跌幅由 5% 改为 10% 的施行日（上证发〔2026〕41 号、深证上〔2026〕551 号）；此前一段为 5%
+    price_limit_pct:                  # 前收 × (1 ± pct)，按四舍五入取至价格最小变动单位（A 股 0.01 元）：沪已核实（上交所交易规则第 3.3.17 条），深交所同类条款【待逐字核对】
       main_board: 10
-      main_board_st: 10
+      main_board_st: 10               # 【已定，已核实】沪深主板 ST/*ST：10%（上证发〔2026〕41 号、深证上〔2026〕551 号，2026-04-24 发布，2026-07-06 起施行；出处见 docs/strategies/market_rules_check.md O1–O8）
       chinext: 20                     # 创业板（含风险警示）
       star: 20                        # 科创板（含风险警示）
       bse: 30                         # 北交所（含风险警示）
@@ -32,7 +33,8 @@ segments:
       commission_min_yuan: 5          # 单笔最低（券商常见做法，以用户实际为准）
       slippage_default_pct: 0.1       # 模板参数默认值
     impact_cost:                      # 【编排者默认，用户可否决；初值待校准】第 9 节 C(7)
-      adv_window_days: 20             # 参与率 = 订单数量 ÷ 近 20 日日均成交量
+      adv_basis: amount               # 【已定 T-A02】成交额口径：参与率 = 拟成交额（计划数量 × 参考价）÷ 近 N 个有效交易日日成交额均值（停牌日不计），与 _template.md §18 一致
+      adv_window_days: 20             # N
       tiers:                          # 参与率上界（%，含） → 成本（bp）
         - {max_participation_pct: 0.1, bp: 0}    # I1
         - {max_participation_pct: 0.5, bp: 5}    # I2
@@ -43,10 +45,14 @@ segments:
       one_price_limit_up_blocks_buy: true
       one_price_limit_down_blocks_sell: true
       skip_suspended: true
-  - effective_from: "2000-01-01"      # 2026-07-06 之前：除 main_board_st: 5 外，其余键与上一段相同（文件中写全，不做继承）
-    price_limit_pct:                  # 前收 × (1 ± pct)，四舍五入到 0.01 元【精确舍入以交易所为准，待核实】
+    risk_warning:                     # 风险警示股票（ST/*ST）的额外约束（T-A02 新增，market_rules_check.md M5/M6）
+      daily_buy_cap_shares: 500000    # 单只当日累计买入 ≤ 50 万股：沪已核实（第 4.4.10 条），深【待逐字核对】；计划草案数量上限截断到此值并在草案中提示
+      limit_order_only: true          # 只能限价申报（沪第 4.4.9 条）；本产品不下单，只用于草案与通知文案“请使用限价委托”
+      applies_to_boards: [main_board] # 创业板、科创板风险警示股票的同类约束未核对，暂不建模；北交所 V1 不扫描（C(8)）
+  - effective_from: "2023-04-10"      # 2023-04-10 ～ 2026-07-05：除 main_board_st: 5 外与上一段相同（文件中写全，不做继承）。起始日取沪深主板注册制新股首批上市日【待核实官方出处】；更早的规则（创业板 2020-08-24 前为 10%、主板新股首日 44% 等）未建模
+    price_limit_pct:                  # 同上一段
       main_board: 10
-      main_board_st: 5
+      main_board_st: 5                # 【已核实】2026-07-06 之前沪深主板 ST/*ST 为 5%（出处同上一段）
       chinext: 20                     # 创业板（含风险警示）
       star: 20                        # 科创板（含风险警示）
       bse: 30                         # 北交所（含风险警示）
@@ -73,7 +79,8 @@ segments:
       commission_min_yuan: 5          # 单笔最低（券商常见做法，以用户实际为准）
       slippage_default_pct: 0.1       # 模板参数默认值
     impact_cost:                      # 【编排者默认，用户可否决；初值待校准】第 9 节 C(7)
-      adv_window_days: 20             # 参与率 = 订单数量 ÷ 近 20 日日均成交量
+      adv_basis: amount
+      adv_window_days: 20
       tiers:                          # 参与率上界（%，含） → 成本（bp）
         - {max_participation_pct: 0.1, bp: 0}    # I1
         - {max_participation_pct: 0.5, bp: 5}    # I2
@@ -84,3 +91,7 @@ segments:
       one_price_limit_up_blocks_buy: true
       one_price_limit_down_blocks_sell: true
       skip_suspended: true
+    risk_warning:
+      daily_buy_cap_shares: 500000    # 本段是否同样适用【待核实】；只影响回看，不影响当前草案
+      limit_order_only: true
+      applies_to_boards: [main_board]

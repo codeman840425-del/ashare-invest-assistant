@@ -6,6 +6,7 @@ from sqlalchemy import CheckConstraint, PrimaryKeyConstraint, Table, UniqueConst
 
 from app.db.base import (
     APP,
+    array_subset,
     boolean,
     created_at,
     integer,
@@ -20,7 +21,7 @@ from app.db.base import (
     user_fk,
     uuid_col,
 )
-from app.schemas.enums import AccountStatus, Role
+from app.schemas.enums import AccountStatus, Horizon, ProfileEffort, ProfileExperience, Role
 
 users = Table(
     "users",
@@ -127,18 +128,28 @@ user_profiles = Table(
     pk_uuid(),
     user_fk(),
     integer("version_no", nullable=False),
-    # 取值（<10万/10–50万/50–200万/>200万）的存储编码未定 → TODO(架构师)，暂不加 CHECK
-    txt("capital_range"),
-    txt("horizon"),
+    # 前五个字段与契约 /me/profile 一一对应（v0.2.2 / T-A02；迁移 0002）。只追加表、历史行可能
+    # 不含这些字段，故列可空，非空由 PUT /me/profile 的请求模型保证。
+    text_array("horizon_pref"),
+    txt("effort"),
     integer("risk_tolerance"),
+    txt("experience"),
+    num("max_single_position_pct"),
+    # 选填（契约暂未暴露，仅内部使用）。capital_range 的存储编码未定 → TODO(架构师)，暂不加 CHECK
+    txt("capital_range"),
     num("max_drawdown_pct"),
-    num("weekly_hours"),
     text_array("focus_areas"),
     ts("confirmed_at"),
     created_at(),
     UniqueConstraint("user_id", "version_no"),
-    one_of("horizon", ["short", "medium", "long"]),
+    array_subset("horizon_pref", Horizon),
+    one_of("effort", ProfileEffort),
+    one_of("experience", ProfileExperience),
     CheckConstraint("risk_tolerance BETWEEN 1 AND 5", name="risk_tolerance_range"),
+    CheckConstraint(
+        "max_single_position_pct > 0 AND max_single_position_pct <= 100",
+        name="max_single_position_pct_range",
+    ),
     schema=APP,
     comment="只追加：最新版本为当前画像（触发器禁止 UPDATE/DELETE）",
 )

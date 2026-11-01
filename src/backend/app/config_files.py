@@ -16,7 +16,17 @@ import itertools
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    field_validator,
+    model_validator,
+)
 
 PosInt = Annotated[int, Field(gt=0)]
 NonNegInt = Annotated[int, Field(ge=0)]
@@ -276,6 +286,8 @@ class ImpactTier(_Strict):
 
 
 class ImpactCost(_Strict):
+    #: 参与率口径（T-A02 定）：只支持成交额口径 ``amount``
+    adv_basis: Literal["amount"]
     adv_window_days: PosInt
     tiers: Annotated[list[ImpactTier], Field(min_length=1)]
 
@@ -296,6 +308,23 @@ class Unfillable(_Strict):
     skip_suspended: bool
 
 
+Board = Literal["main_board", "chinext", "star", "bse"]
+
+
+class RiskWarning(_Strict):
+    """风险警示股票（ST/*ST）额外约束（T-A02，market_rules_check.md M5/M6）。"""
+
+    daily_buy_cap_shares: PosInt
+    limit_order_only: bool
+    applies_to_boards: Annotated[list[Board], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def _check(self) -> RiskWarning:
+        if len(set(self.applies_to_boards)) != len(self.applies_to_boards):
+            raise ValueError("risk_warning.applies_to_boards 不能重复")
+        return self
+
+
 class MarketRuleSegment(_Strict):
     effective_from: dt.date
     price_limit_pct: PriceLimitPct
@@ -306,9 +335,12 @@ class MarketRuleSegment(_Strict):
     fees: Fees
     impact_cost: ImpactCost
     unfillable: Unfillable
+    risk_warning: RiskWarning
 
 
 class MarketRulesConfig(_File):
+    #: 规则只建模到此日（T-A02）；更早的日期 :meth:`segment_for` 返回 ``None``（“交易规则未建模”）
+    modeled_from: dt.date
     segments: Annotated[list[MarketRuleSegment], Field(min_length=1)]
 
     @model_validator(mode="after")
@@ -316,10 +348,15 @@ class MarketRulesConfig(_File):
         dates = [s.effective_from for s in self.segments]
         if len(set(dates)) != len(dates):
             raise ValueError("segments.effective_from 不能重复")
+        if min(dates) != self.modeled_from:
+            raise ValueError("modeled_from 必须等于最早一段的 effective_from（每段写全，不做继承）")
         return self
 
     def segment_for(self, day: dt.date) -> MarketRuleSegment | None:
-        """``day`` 当天有效的规则段（effective_from ≤ day 中最晚的一段）。"""
+        """``day`` 当天有效的规则段（effective_from ≤ day 中最晚的一段）。
+
+        早于 ``modeled_from`` 返回 ``None``（交易规则未建模）。
+        """
         eligible = [s for s in self.segments if s.effective_from <= day]
         return max(eligible, key=lambda s: s.effective_from) if eligible else None
 
@@ -423,30 +460,225 @@ class RiskControlsConfig(_File):
 # config/horizon_classifier.yaml
 # ---------------------------------------------------------------------------
 
-FeatureKey = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.]*$")]
+#: 分类器输入键（T-A02 统一前缀）：``f.*`` 须登记在 feature_catalog（导入器检查，需要数据库），
+#: ``sec.*`` / ``user.*`` / ``profile.*`` 由系统提供
+FeatureKey = Annotated[str, Field(pattern=r"^(f|sec|user|profile)\.[a-z][a-z0-9_]*$")]
 Weekday = Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+HorizonName = Literal["intraday_t", "short", "swing", "long"]
+HORIZON_NAMES: tuple[HorizonName, ...] = ("intraday_t", "short", "swing", "long")
+RecomputeTrigger = Literal["import_confirm", "watchlist_add", "weekly", "position_open_close"]
+RuleId = Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9]*$")]
+Score = Annotated[int, Field(ge=0, le=100)]
+#: 规则比较值：不做类型强转（``"true"`` 不会变成 ``True``；YAML 1.2 布尔见 app.config）
+Scalar = StrictBool | StrictInt | StrictFloat | StrictStr
+RuleOp = Literal["eq", "ne", "gt", "ge", "lt", "le", "in", "contains", "between", "not_null"]
 
 
 class Recompute(_Strict):
-    on: list[Literal["import_confirm", "watchlist_add", "weekly"]]
+    on: Annotated[list[RecomputeTrigger], Field(min_length=1)]
     weekly_day: Weekday
+
+    @model_validator(mode="after")
+    def _check(self) -> Recompute:
+        if len(set(self.on)) != len(self.on):
+            raise ValueError("recompute.on 不能重复")
+        return self
+
+
+def _check_op_value(op: RuleOp, value: object, has_value: bool) -> None:
+    """horizon_classifier.md §4「边界与比较语义」：按 op 校验 value 的形状。
+
+    ``value: null`` 与不写等价（深合并里 null 表示“未覆盖”，且 model_dump 会写出 None）。
+    """
+    if op == "not_null":
+        if has_value:
+            raise ValueError("op=not_null 不带 value")
+        return
+    if not has_value:
+        raise ValueError(f"op={op} 必须给 value")
+    if op == "between":
+        if not (isinstance(value, list) and len(value) == 2):
+            raise ValueError("op=between 的 value 必须是 [下界, 上界]")
+        lo, hi = value
+        if (
+            isinstance(lo, bool)
+            or isinstance(hi, bool)
+            or not all(isinstance(x, int | float) for x in (lo, hi))
+        ):
+            raise ValueError("op=between 的上下界必须是数值")
+        if lo > hi:
+            raise ValueError("op=between：下界不能大于上界")
+    elif op == "in":
+        if not (isinstance(value, list) and value):
+            raise ValueError("op=in 的 value 必须是非空列表")
+    else:
+        if isinstance(value, list):
+            raise ValueError(f"op={op} 的 value 必须是标量")
+        if op in {"gt", "ge", "lt", "le"} and (
+            isinstance(value, bool) or not isinstance(value, int | float)
+        ):
+            raise ValueError(f"op={op} 的 value 必须是数值")
+
+
+class _Cond(_Strict):
+    id: RuleId
+    input: FeatureKey
+    op: RuleOp
+    value: Scalar | list[Scalar] | None = None
+
+    @model_validator(mode="after")
+    def _check_cond(self) -> _Cond:
+        _check_op_value(self.op, self.value, self.value is not None)
+        return self
+
+
+class ClassifierGate(_Cond):
+    """闸门（HG*）：条件为真时 ``score: 0`` 或 ``cap``，二选一。"""
+
+    horizons: Literal["all"] | Annotated[list[HorizonName], Field(min_length=1)]
+    score: Literal[0] | None = None
+    cap: Score | None = None
+    reason: Annotated[str, Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def _check(self) -> ClassifierGate:
+        if (self.score is None) == (self.cap is None):
+            raise ValueError(f"闸门 {self.id}：score 与 cap 必须且只能给一个")
+        return self
+
+
+class ClassifierRequire(_Cond):
+    """周期前提：条件为假（或输入为 null，not_null 除外）时 ``else_score: 0`` 或 ``else_cap``。"""
+
+    else_score: Literal[0] | None = None
+    else_cap: Score | None = None
+    reason: Annotated[str, Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def _check(self) -> ClassifierRequire:
+        if (self.else_score is None) == (self.else_cap is None):
+            raise ValueError(f"前提 {self.id}：else_score 与 else_cap 必须且只能给一个")
+        return self
+
+
+class ClassifierBand(_Strict):
+    op: RuleOp
+    value: Scalar | list[Scalar] | None = None
+    pts: Annotated[int, Field(gt=0, le=100)]
+
+    @model_validator(mode="after")
+    def _check(self) -> ClassifierBand:
+        if self.op == "not_null":
+            raise ValueError("分档不支持 op=not_null")
+        _check_op_value(self.op, self.value, self.value is not None)
+        return self
+
+
+class ClassifierComponent(_Strict):
+    id: RuleId
+    input: FeatureKey
+    transform: Literal["rank_pct"] | None = None
+    #: 与 feature_catalog.unit 一致性由导入器检查（不一致拒绝导入，不静默换算）
+    unit: Annotated[str, Field(min_length=1)] | None = None
+    bands: Annotated[list[ClassifierBand], Field(min_length=1)]
+    text: Annotated[str, Field(min_length=1)]
+
+    @property
+    def max_pts(self) -> int:
+        return max(b.pts for b in self.bands)
+
+    @model_validator(mode="after")
+    def _check(self) -> ClassifierComponent:
+        pts = [b.pts for b in self.bands]
+        if pts != sorted(pts, reverse=True):
+            raise ValueError(f"组件 {self.id}：分档须按 pts 从高到低排列（取第一个命中的分档）")
+        if self.transform == "rank_pct":
+            for b in self.bands:
+                vals = b.value if isinstance(b.value, list) else [b.value]
+                if any(
+                    not isinstance(v, int | float) or isinstance(v, bool) or not 0 <= v <= 1
+                    for v in vals
+                ):
+                    raise ValueError(f"组件 {self.id}：rank_pct 分档取值须在 [0, 1]")
+        return self
+
+
+class HorizonRuleSet(_Strict):
+    requires: list[ClassifierRequire]
+    components: Annotated[list[ClassifierComponent], Field(min_length=1)]
+
+
+class HorizonRuleSets(_Strict):
+    intraday_t: HorizonRuleSet
+    short: HorizonRuleSet
+    swing: HorizonRuleSet
+    long: HorizonRuleSet
+
+
+class DataMissingCap(_Strict):
+    missing_points_ge: Annotated[int, Field(gt=0, le=100)]
+    cap: Score
+
+
+class HorizonRules(_Strict):
+    """``rules`` 块，rule_schema 1（plan §6.1、horizon_classifier.md §3–§4，T-A02）。"""
+
+    rule_schema: Literal[1]
+    calibration: Annotated[str, Field(min_length=1)]
+    rank_pct_universe: Annotated[str, Field(min_length=1)]
+    data_missing_cap: DataMissingCap
+    tie_order: list[HorizonName]
+    gates: list[ClassifierGate]
+    horizons: HorizonRuleSets
+
+    @model_validator(mode="after")
+    def _check(self) -> HorizonRules:
+        if sorted(self.tie_order) != sorted(HORIZON_NAMES):
+            raise ValueError("tie_order 必须恰好包含四个周期各一次")
+        ids = [g.id for g in self.gates]
+        for h in HORIZON_NAMES:
+            rs: HorizonRuleSet = getattr(self.horizons, h)
+            ids += [r.id for r in rs.requires] + [c.id for c in rs.components]
+            total = sum(c.max_pts for c in rs.components)
+            if total != 100:
+                raise ValueError(f"周期 {h}：components 满分合计须为 100（当前 {total}）")
+        dup = sorted({i for i in ids if ids.count(i) > 1})
+        if dup:
+            raise ValueError(f"规则 id 重复：{dup}")
+        return self
+
+    def inputs(self) -> set[str]:
+        used = {g.input for g in self.gates}
+        for h in HORIZON_NAMES:
+            rs: HorizonRuleSet = getattr(self.horizons, h)
+            used |= {r.input for r in rs.requires} | {c.input for c in rs.components}
+        return used
 
 
 class HorizonClassifierConfig(_File):
     version_no: PosInt
-    suitable_threshold: Annotated[int, Field(ge=0, le=100)]
+    suitable_threshold: Score
     reasons_per_horizon: tuple[PosInt, PosInt]
     recompute: Recompute
-    #: 必须都在 feature_catalog 中（plan §6.1）；该检查需要数据库，留给导入器（见报告 TODO）
+    #: ``f.*`` 必须都在 feature_catalog 中（plan §6.1）；该检查需要数据库，留给导入器（见报告 TODO）
     features: Annotated[list[FeatureKey], Field(min_length=1)]
-    #: 规则正文由策略研究员给出后由导入器写入；结构未定，这里只要求是映射
-    rules: dict[str, Any]
+    #: ``{}`` 表示规则未配置（分类器不输出“适合”，plan §6.1），解析为 ``None``
+    rules: HorizonRules | None
+
+    @field_validator("rules", mode="before")
+    @classmethod
+    def _empty_rules(cls, value: object) -> object:
+        return None if value == {} else value
 
     @model_validator(mode="after")
     def _check(self) -> HorizonClassifierConfig:
         _ordered_pair(self.reasons_per_horizon, "reasons_per_horizon")
         if len(set(self.features)) != len(self.features):
             raise ValueError("features 不能重复")
+        if self.rules is not None:
+            undeclared = sorted(self.rules.inputs() - set(self.features))
+            if undeclared:
+                raise ValueError(f"rules 用到未在 features 中声明的输入：{undeclared}")
         return self
 
 

@@ -6,9 +6,14 @@
   :attr:`Settings.business`，并按 :mod:`app.config_files` 严格校验：未知键、缺文件、
   多余文件、取值越界 → 启动失败。``config/strategies/`` 子目录不在这里加载：L2 模板要经
   导入器成为不可变 DB 版本，放文件不会激活（plan §2.5.13）。
-- ingest 心跳键名与过期阈值的优先级：环境变量 ``INGEST_HEARTBEAT_KEY`` /
-  ``INGEST_PAUSED_KEY`` / ``INGEST_STALE_AFTER_S`` > ``ingest.yaml`` 的 ``heartbeat`` 段
-  （plan §6.1、契约 §7.10）。
+- 三层优先级与合并口径（plan §6.1，T-A02）：环境变量（只限白名单键）> 管理端运行时覆盖
+  （:meth:`Settings.with_business_overrides`）> YAML。三层按 :func:`deep_merge` **深合并**：
+  映射逐键递归，列表与标量整体替换，``null`` 视为未覆盖；合并结果再整体走严格校验
+  （``extra="forbid"`` + ``schema_version``），未知键出现在任何一层都失败。
+- 环境变量白名单（plan §6.1 注明的键）：``INGEST_HEARTBEAT_KEY`` / ``INGEST_PAUSED_KEY`` /
+  ``INGEST_STALE_AFTER_S``，以及等价的嵌套写法 ``BUSINESS__INGEST__HEARTBEAT__KEY`` /
+  ``…__PAUSED_KEY`` / ``…__STALE_AFTER_S``（分隔符 ``__``）。其他 ``BUSINESS__*`` 或整块
+  ``BUSINESS`` 环境变量 → 启动失败（见 :func:`business_env_layer`）。
 - 本服务**不读取** ``MAIRUI_LICENCE``：licence 只注入 ``ingest`` 容器（plan §2.1A）；
   未声明的环境变量一律忽略（``extra="ignore"``）。
 """
@@ -17,6 +22,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -122,8 +128,95 @@ def load_yaml_dir(config_dir: Path) -> dict[str, Any]:
     return result
 
 
+def deep_merge(base: Mapping[str, Any], *overrides: Mapping[str, Any] | None) -> dict[str, Any]:
+    """按 plan §6.1 合并口径把 ``overrides`` 依次叠到 ``base`` 上（后者优先），返回新字典。
+
+    - 两侧都是映射 → 逐键递归，未覆盖的同级键保留；
+    - 列表、标量、类型不同 → 覆盖值整体替换（列表不按元素合并）；
+    - 覆盖值为 ``None`` → 视为未覆盖（不能用来删除键）；新增键下嵌套的 ``None`` 一并剔除。
+
+    不修改入参。未知键不在这里拦截：合并结果交给严格模型校验（``extra="forbid"``）。
+    """
+    result: dict[str, Any] = {k: _copy_tree(v) for k, v in base.items()}
+    for layer in overrides:
+        if not layer:
+            continue
+        for key, value in layer.items():
+            if value is None:
+                continue
+            current = result.get(key)
+            if isinstance(current, Mapping) and isinstance(value, Mapping):
+                result[key] = deep_merge(current, value)
+            else:
+                result[key] = _strip_none(value)
+    return result
+
+
+def _copy_tree(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {k: _copy_tree(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_copy_tree(v) for v in value]
+    return value
+
+
+def _strip_none(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {k: _strip_none(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_copy_tree(v) for v in value]
+    return value
+
+
+#: 环境变量白名单 → business 中的路径（plan §6.1 注明的键；嵌套写法与扁平别名等价）
+_BUSINESS_ENV_KEYS: Final[dict[str, tuple[str, ...]]] = {
+    "BUSINESS__INGEST__HEARTBEAT__KEY": ("ingest", "heartbeat", "key"),
+    "BUSINESS__INGEST__HEARTBEAT__PAUSED_KEY": ("ingest", "heartbeat", "paused_key"),
+    "BUSINESS__INGEST__HEARTBEAT__STALE_AFTER_S": ("ingest", "heartbeat", "stale_after_s"),
+    "INGEST_HEARTBEAT_KEY": ("ingest", "heartbeat", "key"),
+    "INGEST_PAUSED_KEY": ("ingest", "heartbeat", "paused_key"),
+    "INGEST_STALE_AFTER_S": ("ingest", "heartbeat", "stale_after_s"),
+}
+
+
+def business_env_layer(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """从环境变量取 business 覆盖层（只认白名单）；返回嵌套字典，供 :func:`deep_merge`。
+
+    出现白名单之外的 ``BUSINESS__*``、或整块 ``BUSINESS`` → :class:`ConfigError`
+    （防止拼写错误被静默忽略、也防止整块 JSON 绕过深合并把 YAML 整体顶掉）。
+    空字符串视为未设置。同一路径同时给了嵌套写法与扁平别名时，嵌套写法优先。
+    错误消息只含变量名，不含取值。
+    """
+    env = os.environ if environ is None else environ
+    upper = {k.upper(): v for k, v in env.items()}
+    bad = sorted(
+        k
+        for k in upper
+        if (k == "BUSINESS" or k.startswith("BUSINESS__")) and k not in _BUSINESS_ENV_KEYS
+    )
+    if bad:
+        raise ConfigError(
+            f"不允许的业务配置环境变量 {bad}：plan §6.1 只允许 {sorted(_BUSINESS_ENV_KEYS)}"
+        )
+    layer: dict[str, Any] = {}
+    # 扁平别名先写、嵌套写法后写 → 嵌套写法优先
+    for name in sorted(_BUSINESS_ENV_KEYS, key=lambda n: n.startswith("BUSINESS__")):
+        raw = upper.get(name)
+        if raw is None or raw.strip() == "":
+            continue
+        node = layer
+        *parents, leaf = _BUSINESS_ENV_KEYS[name]
+        for part in parents:
+            node = node.setdefault(part, {})
+        node[leaf] = raw.strip()
+    return layer
+
+
 class YamlDirSettingsSource(PydanticBaseSettingsSource):
-    """把 ``config/*.yaml`` 作为 ``business`` 字段的来源（优先级低于环境变量与初始化参数）。"""
+    """``business`` 字段的来源：``config/*.yaml`` 深合并环境变量白名单层（见 :func:`deep_merge`）。
+
+    初始化参数里直接给 ``business`` 时以初始化参数为准（测试用），不经本来源。
+    """
 
     def __init__(self, settings_cls: type[BaseSettings], config_dir: Path) -> None:
         super().__init__(settings_cls)
@@ -137,7 +230,7 @@ class YamlDirSettingsSource(PydanticBaseSettingsSource):
     def __call__(self) -> dict[str, Any]:
         found = load_yaml_dir(self._config_dir)
         check_config_dir_files(found, self._config_dir)
-        return {"business": found}
+        return {"business": deep_merge(found, business_env_layer())}
 
 
 def check_config_dir_files(found: dict[str, Any], config_dir: Path) -> None:
@@ -238,6 +331,24 @@ class Settings(BaseSettings):
             raise ValueError("APP_MASTER_KEY 至少 32 个字符")
         return self
 
+    def with_business_overrides(self, runtime: Mapping[str, Any] | None) -> Settings:
+        """叠加管理端运行时覆盖层（存数据库），返回新的 :class:`Settings`；本对象不变。
+
+        优先级：环境变量白名单 > ``runtime`` > 当前 business（YAML）。合并后整体严格校验，
+        不合法抛 :class:`ConfigError`（消息不含取值）。“只限可热调的键”的白名单由各管理端
+        接口负责（T-B 后续任务），这里只做结构合法性与敏感键检查。
+        """
+        if not runtime:
+            return self
+        if hits := _sensitive_key_paths(runtime):
+            raise ConfigError(f"运行时覆盖含疑似敏感键 {hits}：licence/密码/密钥只能走环境变量")
+        merged = deep_merge(self.business.model_dump(), runtime, business_env_layer())
+        try:
+            business = BusinessConfig.model_validate(merged)
+        except ValidationError as exc:
+            raise ConfigError(f"运行时覆盖校验失败：{_describe(exc, 'business')}") from None
+        return self.model_copy(update={"business": business})
+
     @classmethod
     def settings_customise_sources(
         cls,
@@ -267,8 +378,14 @@ def get_settings() -> Settings:
     try:
         return Settings()
     except ValidationError as exc:
-        problems = "; ".join(
-            f"{'.'.join(str(p) for p in err['loc']) or '<root>'}: {err['msg']}"
-            for err in exc.errors(include_input=False, include_url=False)
-        )
-        raise ConfigError(f"配置校验失败：{problems}") from None
+        raise ConfigError(f"配置校验失败：{_describe(exc)}") from None
+
+
+def _describe(exc: ValidationError, prefix: str = "") -> str:
+    """校验错误 → “字段路径: 说明; …”，不回显取值。"""
+    problems = []
+    for err in exc.errors(include_input=False, include_url=False):
+        parts = [prefix] if prefix else []
+        parts += [str(p) for p in err["loc"]]
+        problems.append(f"{'.'.join(parts) or '<root>'}: {err['msg']}")
+    return "; ".join(problems)

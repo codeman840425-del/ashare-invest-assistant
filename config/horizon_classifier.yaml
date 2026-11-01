@@ -5,22 +5,155 @@ version_no: 1
 suitable_threshold: 60          # int，0–100 分 ≥ 60 列为“适合”
 reasons_per_horizon: [2, 4]     # 每个周期给 2–4 条理由
 recompute:
-  on: [import_confirm, watchlist_add, weekly]
+  "on": [import_confirm, watchlist_add, weekly, position_open_close]   # 键加引号（YAML 1.1 会把裸 on 读成 true）；position_open_close：某证券持仓由 0 变为 > 0 或清零时重算该证券（T-A02 采纳研究员建议，intraday_t 依赖 user.has_position）
   weekly_day: saturday
-features:                       # 分类器可用特征（必须都在 feature_catalog 中，否则启动失败）
-  - turnover_20d_avg
-  - amihud_20d
-  - volatility_20d
-  - intraday_amplitude_20d
-  - ma_trend
-  - momentum_60d
-  - roe_ttm
-  - profit_cagr_3y
-  - dividend_continuous_years
-  - limit_up_count_20d
+features:                       # 分类器输入（T-A02 统一前缀）：f.* 必须都在 feature_catalog 中，否则启动失败；sec.*（证券主数据）、user.*（导入成交/持仓统计）、profile.*（/me/profile）由系统提供，不进 feature_catalog
+  - f.amount_20d_avg            # 新增：成交额 20 日均值（元）
+  - f.turnover_20d_avg
+  - f.amihud_20d                # v1 规则未用，保留
+  - f.volatility_20d
+  - f.intraday_amplitude_20d
+  - f.ma_trend
+  - f.momentum_60d
+  - f.roe_ttm
+  - f.profit_cagr_3y
+  - f.dividend_continuous_years
+  - f.limit_up_count_20d
+  - f.fin_report_count          # 新增：已披露财报期数
+  - f.list_days                 # 已用于 G-01
+  - f.is_st                     # 新增或与 G-01 共用：风险警示状态
+  - f.is_delisting_period       # 新增：退市整理期
+  - sec.type                    # 新增：证券类型（主数据，不是时间序列特征）
+  - sec.board                   # 新增：板块
+  - user.has_position           # 新增：当前是否有持仓
   - user.avg_holding_days
   - user.has_t_trades
   - profile.horizon_pref
   - profile.effort
-rules: {}                       # 各周期打分规则：由策略研究员在 docs/strategies/ 给出后由导入器写入；
-                                # 2.5.3 中的阈值（振幅 ≥ 3%、成交额 ≥ 2 亿、≥ 12 期财报）只是示例，不作为默认值
+  - profile.risk_tolerance      # 新增（契约 /me/profile 已有）
+  - profile.experience          # 新增（契约 /me/profile 已有）
+rules:
+  rule_schema: 1                     # 本规则块的结构版本（T-A02 已确认导入器按此结构解析）
+  calibration: initial_values        # 全部阈值与分值为初值，待模拟跟踪/内部评估校准；不是统计结论
+  rank_pct_universe: "T−1 日盘后落库截面：沪深 A 股股票，剔除北交所、停牌、上市 < 20 个交易日；平均秩 / N，取值 [0, 1]"
+  data_missing_cap: {missing_points_ge: 40, cap: 59}   # 某周期中因 f.* 缺失而拿不到的满分合计 ≥ 40 → 该周期最高 59 分
+  tie_order: [long, swing, short, intraday_t]          # suitable[] 同分时的排序
+  gates:                             # 按顺序全部求值；score 取 0 优先，其次取最小 cap
+    - {id: HG1, input: sec.type, op: ne, value: stock, horizons: all, score: 0,
+       reason: "分类器只覆盖 A 股股票（ETF、可转债等不分类）"}
+    - {id: HG2, input: sec.board, op: eq, value: bse, horizons: all, score: 0,
+       reason: "首版不含北交所（plan 第 9 节 C(8)）"}
+    - {id: HG3, input: f.is_delisting_period, op: eq, value: true, horizons: all, score: 0,
+       reason: "退市整理期：不分类"}
+    - {id: HG4, input: f.is_st, op: eq, value: true, horizons: all, cap: 59,
+       reason: "风险警示股票（ST/*ST）：可交易性闸门阻断买入方向，不列为适合"}
+    - {id: HG5, input: f.list_days, op: lt, value: 20, horizons: all, cap: 59,
+       reason: "上市不足 20 个交易日：历史太短"}
+    - {id: HG6, input: f.list_days, op: lt, value: 60, horizons: [swing, long], cap: 59,
+       reason: "上市不足 60 个交易日：60 日趋势与动量无法计算"}
+  horizons:
+    intraday_t:
+      requires:
+        - {id: IT0, input: user.has_position, op: eq, value: true, else_score: 0,
+           reason: "做T 需要已有底仓（T+1：当日买入不能当日卖出）"}
+        - {id: IT0B, input: profile.effort, op: in, value: [medium, high], else_cap: 59,
+           reason: "做T 需要盘中盯盘，画像精力为低或未填写"}
+      components:
+        - {id: IT1, input: f.intraday_amplitude_20d, transform: rank_pct,
+           bands: [{op: ge, value: 0.7, pts: 30}, {op: ge, value: 0.5, pts: 20}, {op: ge, value: 0.3, pts: 10}],
+           text: "近 20 日日内振幅位于全市场 {v:pct} 分位"}
+        - {id: IT2, input: f.amount_20d_avg, unit: CNY,
+           bands: [{op: ge, value: 500000000, pts: 25}, {op: ge, value: 200000000, pts: 15}, {op: ge, value: 100000000, pts: 5}],
+           text: "近 20 日日均成交额 {v:yi} 亿元"}
+        - {id: IT3, input: profile.effort,
+           bands: [{op: eq, value: high, pts: 20}, {op: eq, value: medium, pts: 10}],
+           text: "画像精力：{v}"}
+        - {id: IT4, input: user.has_t_trades,
+           bands: [{op: eq, value: true, pts: 15}],
+           text: "该股导入成交中{v:has}同日买卖（做T）记录"}
+        - {id: IT5, input: profile.experience,
+           bands: [{op: eq, value: advanced, pts: 10}, {op: eq, value: intermediate, pts: 5}],
+           text: "画像经验：{v}"}
+    short:
+      requires:
+        - {id: SH0, input: profile.risk_tolerance, op: ge, value: 3, else_cap: 59,
+           reason: "短线波动大，画像风险承受 < 3 或未填写"}
+        - {id: SH0B, input: profile.effort, op: in, value: [medium, high], else_cap: 59,
+           reason: "短线需要每日跟踪，画像精力为低或未填写"}
+      components:
+        - {id: SH1, input: f.amount_20d_avg, unit: CNY,
+           bands: [{op: ge, value: 300000000, pts: 20}, {op: ge, value: 100000000, pts: 10}],
+           text: "近 20 日日均成交额 {v:yi} 亿元"}
+        - {id: SH2, input: f.turnover_20d_avg, transform: rank_pct,
+           bands: [{op: ge, value: 0.6, pts: 15}, {op: ge, value: 0.4, pts: 8}],
+           text: "近 20 日平均换手率位于全市场 {v:pct} 分位"}
+        - {id: SH3, input: f.limit_up_count_20d, unit: count,
+           bands: [{op: ge, value: 2, pts: 15}, {op: ge, value: 1, pts: 10}],
+           text: "近 20 日涨停 {v} 次"}
+        - {id: SH4, input: f.volatility_20d, transform: rank_pct,
+           bands: [{op: between, value: [0.4, 0.9], pts: 10}],
+           text: "近 20 日波动率位于全市场 {v:pct} 分位（0.4–0.9 加分，过低或过高不加）"}
+        - {id: SH5, input: f.ma_trend, unit: sign,
+           bands: [{op: gt, value: 0, pts: 10}],
+           text: "均线趋势值 {v}（> 0 为多头排列）"}
+        - {id: SH6, input: profile.horizon_pref,
+           bands: [{op: contains, value: short, pts: 15}],
+           text: "画像周期偏好：{v}"}
+        - {id: SH7, input: profile.effort,
+           bands: [{op: eq, value: high, pts: 10}, {op: eq, value: medium, pts: 5}],
+           text: "画像精力：{v}"}
+        - {id: SH8, input: user.avg_holding_days, unit: trading_days,
+           bands: [{op: le, value: 5, pts: 5}],
+           text: "该股历史平均持有 {v} 个交易日"}
+    swing:
+      requires: []
+      components:
+        - {id: SW1, input: f.amount_20d_avg, unit: CNY,
+           bands: [{op: ge, value: 100000000, pts: 15}, {op: ge, value: 50000000, pts: 8}],
+           text: "近 20 日日均成交额 {v:yi} 亿元"}
+        - {id: SW2, input: f.ma_trend, unit: sign,
+           bands: [{op: gt, value: 0, pts: 20}],
+           text: "均线趋势值 {v}（> 0 为多头排列）"}
+        - {id: SW3, input: f.momentum_60d, unit: sign,
+           bands: [{op: gt, value: 0, pts: 15}],
+           text: "近 60 日动量 {v}（> 0 为上涨）"}
+        - {id: SW4, input: f.volatility_20d, transform: rank_pct,
+           bands: [{op: le, value: 0.8, pts: 10}],
+           text: "近 20 日波动率位于全市场 {v:pct} 分位（≤ 0.8 加分）"}
+        - {id: SW5, input: f.roe_ttm, unit: pct,
+           bands: [{op: gt, value: 0, pts: 10}],
+           text: "ROE(TTM) {v}%"}
+        - {id: SW6, input: profile.horizon_pref,
+           bands: [{op: contains, value: swing, pts: 20}],
+           text: "画像周期偏好：{v}"}
+        - {id: SW7, input: user.avg_holding_days, unit: trading_days,
+           bands: [{op: between, value: [5, 60], pts: 10}],
+           text: "该股历史平均持有 {v} 个交易日"}
+    long:
+      requires:
+        - {id: LG0, input: f.fin_report_count, op: ge, value: 12, else_cap: 59,
+           reason: "已披露财报不足 12 期（或缺失）：基本面历史不完整"}
+        - {id: LG0B, input: f.roe_ttm, op: not_null, else_cap: 59,
+           reason: "ROE(TTM) 缺失：无法判断质量"}
+      components:
+        - {id: LG1, input: f.fin_report_count, unit: count,
+           bands: [{op: ge, value: 12, pts: 15}],
+           text: "已披露财报 {v} 期"}
+        - {id: LG2, input: f.roe_ttm, unit: pct,
+           bands: [{op: ge, value: 10, pts: 20}, {op: ge, value: 5, pts: 10}],
+           text: "ROE(TTM) {v}%"}
+        - {id: LG3, input: f.profit_cagr_3y, unit: pct,
+           bands: [{op: gt, value: 0, pts: 15}],
+           text: "近 3 年净利润复合增速 {v}%"}
+        - {id: LG4, input: f.dividend_continuous_years, unit: years,
+           bands: [{op: ge, value: 3, pts: 15}, {op: ge, value: 1, pts: 8}],
+           text: "连续分红 {v} 年"}
+        - {id: LG5, input: f.volatility_20d, transform: rank_pct,
+           bands: [{op: le, value: 0.6, pts: 10}, {op: le, value: 0.8, pts: 5}],
+           text: "近 20 日波动率位于全市场 {v:pct} 分位"}
+        - {id: LG6, input: profile.horizon_pref,
+           bands: [{op: contains, value: long, pts: 20}],
+           text: "画像周期偏好：{v}"}
+        - {id: LG7, input: user.avg_holding_days, unit: trading_days,
+           bands: [{op: ge, value: 60, pts: 5}],
+           text: "该股历史平均持有 {v} 个交易日"}

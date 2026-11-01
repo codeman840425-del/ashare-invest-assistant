@@ -1,8 +1,12 @@
 """契约 §3 枚举、§4.1 导入提示码与 §6.1 不可执行原因码表 —— **全仓唯一来源**。
 
 ``GET /meta/enums`` 直接下发本模块内容；其他模块需要枚举时从这里导入，不要另行定义。
-已同步到契约 :data:`CONTRACT_VERSION`（v0.2，T-A01 定稿；原 ``PENDING_T_A01`` 标记已解除，
-那 21 个枚举的取值 v0.2 未变）。
+已同步到契约 :data:`CONTRACT_VERSION`（v0.2.2；v0.2 为 T-A01 定稿，原 ``PENDING_T_A01`` 标记已解除；
+v0.2.1、v0.2.2 未改 §3 枚举、§4 错误码与 §6.1 原因码的取值）。
+
+``CONTRACT_ENUMS`` 只登记契约 §3 的命名枚举；契约里以内联字面量出现的取值（如 ``/me/profile`` 的
+``effort``、``experience``）在本模块文末“非 §3 取值”一节集中定义，供 DB CHECK 与请求模型复用，
+不进入 ``/meta/enums``。
 """
 
 from __future__ import annotations
@@ -520,7 +524,7 @@ class IngestHealth(StrEnum):
 # ---------------------------------------------------------------------------
 
 #: 本模块对应的契约版本（``/meta/enums`` 的 ``version``）
-CONTRACT_VERSION: Final = "v0.2.1"
+CONTRACT_VERSION: Final = "v0.2.2"
 
 #: ``/meta/enums`` 的 ``enums``：契约 §3 各表名 → 取值（顺序同 §3）。``reason_code`` 不在其中，
 #: 只在 ``reason_codes`` 里带解除条件展开（契约 §7.10；评审 M7）。
@@ -730,3 +734,33 @@ IMPORT_CODE_TABLE: Final[tuple[ImportCodeSpec, ...]] = (
     ImportCodeSpec("IMPORT_TIME_OUTSIDE_SESSION", _WA, _RO, False),
     ImportCodeSpec("IMPORT_LOT_SIZE_IRREGULAR", _WA, _RO, False),
 )
+
+
+# ---------------------------------------------------------------------------
+# 非 §3 取值（契约内联字面量 / plan §3 表字段；不进入 /meta/enums）
+# ---------------------------------------------------------------------------
+
+
+class ProfileEffort(StrEnum):
+    """契约 §7.1 ``/me/profile.effort``（v0.2.2 起 plan ``user_profiles.effort`` 与之一致）。"""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class ProfileExperience(StrEnum):
+    """契约 §7.1 ``/me/profile.experience``。"""
+
+    NOVICE = "novice"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+
+
+class HorizonAssessmentTrigger(StrEnum):
+    """plan §3 ``symbol_horizon_assessments.trigger``（T-A02 新增 ``position_open_close``）。"""
+
+    IMPORT = "import"
+    WATCHLIST_ADD = "watchlist_add"
+    WEEKLY = "weekly"
+    POSITION_OPEN_CLOSE = "position_open_close"

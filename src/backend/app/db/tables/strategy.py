@@ -36,6 +36,7 @@ from app.schemas.enums import (
     Dimension,
     FeatureStatus,
     Horizon,
+    HorizonAssessmentTrigger,
     InstanceStatus,
     Lifecycle,
     RiskControl,
@@ -141,9 +142,11 @@ symbol_horizon_assessments = Table(
     jsonb("reasons"),
     uuid_array("recommended_strategy_version_ids"),
     txt("trigger"),
+    #: 缺失的 f.* 输入键（契约 v0.2.2 /horizon-assessments.inputs_missing；plan §3 未列，见报告）
+    text_array("inputs_missing", nullable=False, server_default=text("'{}'::text[]")),
     created_at(),
     array_subset("suitable_horizons", Horizon),
-    one_of("trigger", ["import", "watchlist_add", "weekly"]),
+    one_of("trigger", HorizonAssessmentTrigger),
     schema=APP,
     comment="只追加（触发器）",
 )

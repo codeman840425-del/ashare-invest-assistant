@@ -28,7 +28,7 @@ if str(HERE) not in sys.path:
 import common as c  # noqa: E402
 
 ORDER = ["p01_realtime", "p02_kline", "p03_moneyflow", "p04_lhb_pool_auction", "p05_fundamental",
-         "p06_factors", "p07_sector_index", "p08_news", "p10_stability", "p09_ratelimit"]
+         "p06_factors", "p07_sector_index", "p08_news", "p11_gaps", "p10_stability", "p09_ratelimit"]
 
 
 def select(want: list) -> list:
@@ -118,6 +118,26 @@ def _scan_dir_for_licence(d: Path) -> int:
     return hits
 
 
+def _check_gaps(check, run_dir, expect_latency, want):
+    """检查 p11_gaps 结果：7 项（GAP1–GAP7）均有结构化结论字段。"""
+    if "p11_gaps" not in want:
+        return
+    files = sorted(run_dir.glob("p11_gaps*.json"))
+    items = {}
+    if files:
+        for x in json.loads(files[-1].read_text(encoding="utf-8")):
+            if isinstance(x, dict) and str(x.get("name", "")).startswith("GAP") and "status" in x:
+                items[x["name"].split("_")[0]] = x
+    need = [f"GAP{i}" for i in range(1, 8)]
+    struct_ok = all(k in items and isinstance(items[k].get("conclusion"), dict) and items[k]["status"] in (
+        "measured", "skipped", "inconclusive") and "limits" in items[k] for k in need)
+    check(f"p11：7 项补测均输出结构化结论（status/conclusion/evidence/limits）", struct_ok,
+          ", ".join(f"{k}={items[k]['status']}" if k in items else f"{k}=缺失" for k in need))
+    g1 = items.get("GAP1")
+    check(f"p11：快照延迟项状态 = {expect_latency}", g1 is not None and g1["status"] == expect_latency,
+          (g1 or {}).get("conclusion", {}).get("summary", "")[:120])
+
+
 def dry_run(args) -> int:
     import dryrun_mock as m
 
@@ -143,8 +163,11 @@ def dry_run(args) -> int:
         stable, ips = c.check_egress_stable(3)
         check("出口自检（模拟 myip.ipip.net，同一 Session）：3 次 IP 一致 → 放行", stable and ips[0] == "203.0.113.7",
               f"ips={ips} 回显服务连接数={st_echo.connections}")
+        import p11_gaps
+        p11_gaps.FORCE_SESSION = True          # 阶段 1 强制走“盘中采样”分支（仅 dry-run 生效）
         ok1 = run_probes(select(args.probes))
         s1 = c.close_run()
+        _check_gaps(check, ctx1.run_dir, expect_latency="measured", want=select(args.probes))
         check("全流程跑完未熔断", ok1)
         check("客户端调用数 = 服务端请求数", s1["calls"] == st_api.requests + st_pro.requests,
               f"client={s1['calls']} server={st_api.requests}+{st_pro.requests}")
@@ -164,6 +187,24 @@ def dry_run(args) -> int:
               st_api.bad_licence == 0 and st_pro.bad_licence == 0 and not (st_api.saw_real_licence or st_pro.saw_real_licence))
         n_files = sum(1 for f in ctx1.run_dir.rglob("*") if f.is_file())
         check("输出文件不含证书（假证书/真实证书）", _scan_dir_for_licence(ctx1.run_dir) == 0, f"扫描 {n_files} 个文件")
+        # ---- 阶段 1b：p11 盘后分支（强制视为盘后）→ 快照延迟项记“盘后无法测”，不发采样请求
+        if "p11_gaps" in select(args.probes):
+            p11_gaps.FORCE_SESSION = False
+            ctx1b = c.init_run(dry_run=True, base=base_api, pro_base=base_pro, min_interval=args.dry_interval,
+                               skip_pro_host=args.skip_pro_host, no_env_proxy=args.no_env_proxy,
+                               egress_url=echo_url, tag="dryrun-p11-afterhours")
+            print(f"[dry-run] 阶段 1b p11 盘后分支，输出目录 {ctx1b.run_dir}")
+            run_probes(["p11_gaps"])
+            s1b = c.close_run()
+            _check_gaps(check, ctx1b.run_dir, expect_latency="skipped", want=["p11_gaps"])
+            names = [json.loads(x).get("name", "") for x in ctx1b.call_log.read_text(encoding="utf-8").splitlines()]
+            check("p11 盘后：不发快照延迟采样请求（lat_*/tcalendar 为 0）",
+                  not any(n.startswith("lat_") or n.startswith("tcalendar") for n in names),
+                  f"本阶段调用 {s1b['calls']} 次")
+            check("p11 输出不含证书", _scan_dir_for_licence(ctx1b.run_dir) == 0)
+            p11_gaps.FORCE_SESSION = None
+            for n_, ok_, d_ in p11_gaps.selftest_pure():
+                check("p11 纯函数单测：" + n_, ok_, d_)
         # ---- 阶段 2：熔断（第 3 个请求起返回 429 + 103）
         ctx2 = c.init_run(dry_run=True, base=base_api, pro_base=base_pro, min_interval=args.dry_interval,
                           tag="dryrun-limit", no_env_proxy=args.no_env_proxy, egress_url=echo_url)

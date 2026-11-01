@@ -82,6 +82,64 @@ def _rows(n, **extra):
              "v": 1000 + i, **extra} for i in range(n)]
 
 
+# --------------------------------------------------------------------------- p11_gaps 用的伪造响应
+def _bj_now_str(minus_s: float = 0.0) -> str:
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone(timedelta(hours=8))) - timedelta(seconds=minus_s)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+# 量纲按 T003 实测样例伪造：real/time v=手、cje=元；ssjy v=万手；日线 v=手、a=元
+_MOCK_FIN = [  # (jzrq, plrq)；含 1 个同期两行（修订）与早期 plrq 空值
+    ("2001-06-30", None), ("2001-12-31", "2002-03-28"), ("2024-12-31", "2025-04-03"),
+    ("2025-03-31", "2025-04-29"), ("2025-06-30", "2025-08-13"), ("2025-09-30", "2025-10-25"),
+    ("2025-12-31", "2026-04-02"), ("2026-03-31", "2026-04-28"), ("2026-06-30", "2026-08-12"),
+    ("2026-06-30", "2026-09-01"), ("2026-09-30", "2026-10-28")]
+_MOCK_FACTORS = ["pe_ttm", "pb", "roe_ttm", "profit_yoy", "momentum_20d", "north_5d_net", "north_20d_net",
+                 "north_holding_ratio", "attention_score", "intraday_vol_20d", "mock_extra_factor"]
+
+
+def _gap_routes(path, segs, q, js):
+    from datetime import date, timedelta
+    if path.startswith("/tcalendar/list/"):
+        return js(["20260105", _bj_now_str()[:10].replace("-", ""), "20261231"])
+    if len(segs) == 4 and segs[:2] == ["hsrl", "ssjy"]:
+        return js({"t": _bj_now_str(30), "p": 11.64, "o": 11.53, "h": 11.67, "l": 11.4, "v": 186.42,
+                   "cje": 2152393886.36})
+    if "real" in segs and "time" in segs:
+        return js({"p": 11.64, "o": 11.53, "h": 11.67, "l": 11.4, "cje": 2152393900, "v": 1864245,
+                   "pv": 186424507, "tv": 33388, "t": _bj_now_str(3)})
+    if path.startswith("/hsstock/latest/") and "/d/" in path:
+        return js([{"t": "2026-10-30", "o": 11.53, "h": 11.67, "l": 11.4, "c": 11.64, "v": 1864245.0,
+                    "a": 2152393900.0, "pc": 11.54, "sf": 0}])
+    if path.startswith("/hsstock/financial/") and segs[2] in ("income", "balance", "cashflow"):
+        return js([{"jzrq": j, "plrq": p, "jlr": 100.0 + i} for i, (j, p) in enumerate(_MOCK_FIN)])
+    if path.startswith("/hslt/list/"):
+        return js([{"dm": f"{i:06d}", "mc": f"股票{i}", "jys": "sz"} for i in range(1, 50)]
+                  + [{"dm": "600519", "mc": "贵州茅台", "jys": "sh"}])
+    if path.startswith("/hsstock/announcement/"):
+        return js([{"t": "2026-10-30 00:00:00", "zt": "公告A", "nr": "http://example.invalid/a"},
+                   {"t": "2026-10-29 00:00:00", "zt": "公告B", "nr": "http://example.invalid/b"}])
+    if path.startswith("/factor/list/"):
+        return js({"code": 200, "msg": "success", "data": {"list": [{"factor_id": f} for f in _MOCK_FACTORS]}})
+    if path.startswith("/factor/all/"):
+        d = {"code": segs[2], "name": "mock", "trade_date": "20261030", "update_time": "2026-10-30 17:00:00",
+             "calc_version": "1.0"}
+        for f in _MOCK_FACTORS:
+            d[f] = None if f.startswith("north") or f == "attention_score" else 1.0
+            d[f + "_rank"] = None
+        return js({"code": 200, "msg": "success", "data": d})
+    if path.startswith("/factor/history/"):
+        st = date(2025, 5, 6)
+        out, v = [], 10.0
+        for i in range(365):
+            dd = st + timedelta(days=i)
+            if dd.isoformat() in ("2025-08-14", "2025-10-27", "2026-04-03"):
+                v += 1.0               # 在披露日之后跳变（模拟“按时点”）
+            out.append({"trade_date": dd.strftime("%Y%m%d"), "value": v})
+        return js({"code": 200, "msg": "success", "data": {"list": out}})
+    return None
+
+
 def route(state: MockState, method: str, raw_path: str, body: bytes):
     """返回 (status, content_type, bytes)。"""
     import os
@@ -119,10 +177,11 @@ def route(state: MockState, method: str, raw_path: str, body: bytes):
         except ValueError:
             return js({"detail": "bad json"}, 400)
         return js({"code": 200, "data": {"list": [{"code": "600519", "pe_ttm": 25.1, "roe_ttm": None}]}})
+    gap = _gap_routes(path, segs, q, js)        # p11_gaps 新增接口的伪造响应
+    if gap is not None:
+        return gap
     if path.startswith("/factor/"):
         return js({"code": "600519", "trade_date": "2026-10-30", "pe_ttm": 25.1, "pb": None, "roe_ttm": 30.2})
-    if "real" in segs and "time" in segs:
-        return js({"p": 10.2, "t": "2026-10-30 15:00:00", "v": 12345})
     return js(_rows(5))
 
 

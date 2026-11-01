@@ -145,6 +145,26 @@ def one_of(
     return CheckConstraint(f"{column} IN ({_sql_list(vals)})", name=name or column)
 
 
+def jsonpath_one_of(path: str, values: Iterable[str] | type[StrEnum]) -> str:
+    """SQL/JSON path 谓词：``path`` 等于取值之一（缺键、类型不符均为假）。"""
+    vals = [m.value for m in values] if isinstance(values, type) else list(values)
+    return "(" + " || ".join(f'{path} == "{v}"' for v in vals) + ")"
+
+
+def jsonb_array_items(column: str, bad_item: str, *, nullable: bool = False) -> str:
+    """``column`` 是 JSON 数组，且没有元素满足 ``bad_item``。
+
+    ``bad_item`` 是 SQL/JSON path 过滤谓词，``@`` 为元素。
+
+    用 ``jsonb_path_exists`` 写成 CHECK 表达式（不需要自定义函数）。``nullable=True`` 时 NULL 通过。
+    """
+    expr = (
+        f"jsonb_typeof({column}) = 'array' AND NOT jsonb_path_exists("
+        f"{column}, '$[*] ? ({bad_item})')"
+    )
+    return f"({column} IS NULL OR ({expr}))" if nullable else expr
+
+
 def array_subset(
     column: str, values: Iterable[str] | type[StrEnum], *, name: str | None = None
 ) -> CheckConstraint:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from sqlalchemy import CheckConstraint, PrimaryKeyConstraint, Table, UniqueConstraint, text
 
+from app.config_files import SEMVER_PATTERN
 from app.db.base import (
     APP,
     array_subset,
@@ -18,6 +19,8 @@ from app.db.base import (
     day,
     integer,
     jsonb,
+    jsonb_array_items,
+    jsonpath_one_of,
     metadata,
     money,
     num,
@@ -30,6 +33,7 @@ from app.db.base import (
     uuid_array,
     uuid_col,
 )
+from app.db.tables.signals import EVIDENCE_BAD_ITEM
 from app.schemas.enums import (
     BarAdjust,
     CardCompleteness,
@@ -117,16 +121,35 @@ engine_policies = Table(
     comment="不可变（触发器）",
 )
 
+#: HorizonCap.kind（契约 v0.2.3；enums 未单列，只用于 CHECK）
+HORIZON_CAP_KINDS = ("data_missing", "requires")
+
 horizon_classifier_versions = Table(
     "horizon_classifier_versions",
     metadata,
     pk_uuid(),
     integer("version_no", nullable=False, unique=True),
+    #: 契约 classifier_version（plan §3.3 T-A03；迁移 0003）
+    txt("semver", nullable=False, unique=True),
     jsonb("config", nullable=False),
     ts("published_at"),
     created_at(),
+    CheckConstraint(f"semver ~ '{SEMVER_PATTERN}'", name="semver_format"),
     schema=APP,
     comment="不可变（触发器）",
+)
+
+#: HorizonCap（契约 v0.2.3 §5.1）：{horizon, cap 0–100 整数, kind, rule_id 字符串或 null,
+#: inputs_missing 字符串数组}；SQL/JSON path 过滤谓词，命中即为坏元素（先判类型再比值）
+HORIZON_CAP_BAD_ITEM = (
+    '@.type() != "object"'
+    ' || !(@.horizon.type() == "string")'
+    f" || !{jsonpath_one_of('@.horizon', Horizon)}"
+    ' || !(@.cap.type() == "number") || @.cap < 0 || @.cap > 100 || @.cap != @.cap.floor()'
+    ' || !(@.kind.type() == "string")'
+    f" || !{jsonpath_one_of('@.kind', HORIZON_CAP_KINDS)}"
+    ' || !(@.rule_id.type() == "string" || @.rule_id.type() == "null")'
+    ' || !(@.inputs_missing.type() == "array")'
 )
 
 symbol_horizon_assessments = Table(
@@ -142,11 +165,25 @@ symbol_horizon_assessments = Table(
     jsonb("reasons"),
     uuid_array("recommended_strategy_version_ids"),
     txt("trigger"),
-    #: 缺失的 f.* 输入键（契约 v0.2.2 /horizon-assessments.inputs_missing；plan §3 未列，见报告）
+    #: 缺失的 f.* 输入键（契约 v0.2.3：只含 feature_catalog 键，去重升序，无缺失为空数组）
     text_array("inputs_missing", nullable=False, server_default=text("'{}'::text[]")),
+    #: 每个周期的封顶原因 HorizonCap[]（契约 v0.2.3；迁移 0003）
+    jsonb("caps", nullable=False, server_default=text("'[]'::jsonb")),
+    #: 理由引用的证据 Evidence[]（契约 v0.2.3；plan 未写 NOT NULL，可空；迁移 0003）
+    jsonb("evidence"),
     created_at(),
     array_subset("suitable_horizons", Horizon),
     one_of("trigger", HorizonAssessmentTrigger),
+    # plan §3.3 T-A03：每项匹配 ^f\.[a-z0-9_]+$（写成 [.] 免转义）；NULL 元素也拒绝
+    CheckConstraint(
+        "NOT jsonb_path_exists(to_jsonb(inputs_missing),"
+        ' \'$[*] ? (@.type() != "string" || !(@ like_regex "^f[.][a-z0-9_]+$"))\')',
+        name="inputs_missing_keys",
+    ),
+    CheckConstraint(jsonb_array_items("caps", HORIZON_CAP_BAD_ITEM), name="caps_shape"),
+    CheckConstraint(
+        jsonb_array_items("evidence", EVIDENCE_BAD_ITEM, nullable=True), name="evidence_shape"
+    ),
     schema=APP,
     comment="只追加（触发器）",
 )

@@ -18,6 +18,8 @@ from app.db.base import (
     created_at,
     integer,
     jsonb,
+    jsonb_array_items,
+    jsonpath_one_of,
     metadata,
     money,
     num,
@@ -35,14 +37,40 @@ from app.schemas.enums import (
     CandidateSignalState,
     CheckOn,
     ConfidenceLevel,
+    DataProvider,
+    Dimension,
     EpistemicType,
     Horizon,
     PlanDraftStatus,
     ReasonCode,
     ReasonStatus,
     RestrictionKind,
+    RuleRole,
     TLeg,
 )
+
+# 下面三个是 SQL/JSON path 过滤谓词（``@`` 为数组元素），命中即为坏元素。先判类型再比值：
+# lax 模式下类型不符的比较得 unknown，``!unknown`` 仍是 unknown，单靠取值比较会漏判。
+#: RuleRef（契约 §5.1 / v0.2.3 #15）：对象；rule_id 非空字符串；role ∈ rule_role；
+#: dimension ∈ dimension（所有 role 必填）；passed 键必须存在且为布尔或 null
+RULE_REF_BAD_ITEM = (
+    '@.type() != "object"'
+    ' || !(@.rule_id.type() == "string") || @.rule_id == ""'
+    ' || !(@.role.type() == "string")'
+    f" || !{jsonpath_one_of('@.role', RuleRole)}"
+    ' || !(@.dimension.type() == "string")'
+    f" || !{jsonpath_one_of('@.dimension', Dimension)}"
+    ' || !(@.passed.type() == "boolean" || @.passed.type() == "null")'
+)
+#: Evidence（契约 §5.1 / v0.2.3 #1）：对象；id 非空字符串；provider ∈ data_provider（没有 local）
+EVIDENCE_BAD_ITEM = (
+    '@.type() != "object"'
+    ' || !(@.id.type() == "string") || @.id == ""'
+    ' || !(@.provider.type() == "string")'
+    f" || !{jsonpath_one_of('@.provider', DataProvider)}"
+)
+#: TextWithEvidence（契约 §5.1）：对象；text 非空字符串
+TEXT_WITH_EVIDENCE_BAD_ITEM = '@.type() != "object" || !(@.text.type() == "string") || @.text == ""'
 
 candidate_signals = Table(
     "candidate_signals",
@@ -94,6 +122,18 @@ candidate_signals = Table(
         "jsonb_typeof(model_refs) = 'array' AND NOT jsonb_path_exists("
         "model_refs, '$[*] ? (@.role != \"auxiliary\")')",
         name="model_refs_auxiliary",
+    ),
+    # 契约 v0.2.3 §7.6 CandidateSignal 正式结构（迁移 0003）
+    CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+    CheckConstraint(jsonb_array_items("rule_refs", RULE_REF_BAD_ITEM), name="rule_refs_shape"),
+    CheckConstraint(jsonb_array_items("evidence", EVIDENCE_BAD_ITEM), name="evidence_shape"),
+    CheckConstraint(
+        jsonb_array_items("counter_evidence", TEXT_WITH_EVIDENCE_BAD_ITEM),
+        name="counter_evidence_shape",
+    ),
+    CheckConstraint(
+        jsonb_array_items("invalidation", TEXT_WITH_EVIDENCE_BAD_ITEM),
+        name="invalidation_shape",
     ),
     schema=APP,
     postgresql_partition_by="RANGE (created_at)",

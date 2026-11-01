@@ -2,13 +2,14 @@
 
 - 运行参数（数据库、Redis、密钥、端口等）只来自环境变量，与
   ``deploy/compose/docker-compose.yml`` 中 ``api`` 服务的 ``environment`` 同名。
-- 业务配置（``config/realtime.yaml``、``ingest.yaml`` 等五个文件，plan §6.1）只读加载到
-  :attr:`Settings.business`，并按 :mod:`app.config_files` 严格校验：未知键、缺文件、
+- 业务配置（``config/realtime.yaml``、``ingest.yaml``、``llm.yaml`` 等六个文件，plan §6.1）
+  只读加载到 :attr:`Settings.business`，并按 :mod:`app.config_files` 严格校验：未知键、缺文件、
   多余文件、取值越界 → 启动失败。``config/strategies/`` 子目录不在这里加载：L2 模板要经
   导入器成为不可变 DB 版本，放文件不会激活（plan §2.5.13）。
 - 三层优先级与合并口径（plan §6.1，T-A02）：环境变量（只限白名单键）> 管理端运行时覆盖
   （:meth:`Settings.with_business_overrides`）> YAML。三层按 :func:`deep_merge` **深合并**：
-  映射逐键递归，列表与标量整体替换，``null`` 视为未覆盖；合并结果再整体走严格校验
+  映射逐键递归，列表与标量整体替换，``null`` 视为未覆盖（“值显式为 null 视为未覆盖，不能用来
+  删除键”；构造参数 ``Settings(business={...})`` 这一层同样适用）；合并结果再整体走严格校验
   （``extra="forbid"`` + ``schema_version``），未知键出现在任何一层都失败。
 - 环境变量白名单（plan §6.1 注明的键）：``INGEST_HEARTBEAT_KEY`` / ``INGEST_PAUSED_KEY`` /
   ``INGEST_STALE_AFTER_S``，以及等价的嵌套写法 ``BUSINESS__INGEST__HEARTBEAT__KEY`` /
@@ -81,15 +82,32 @@ _SENSITIVE_KEY_PARTS: Final = frozenset(
 )
 
 
+#: 只存**环境变量名**的键：键名以 ``_env`` 结尾、值是环境变量名
+#: （如 plan §6.1 llm.yaml 的 ``api_key_env: DEEPSEEK_API_KEY``）。值必须形如
+#: ``^[A-Z][A-Z0-9_]*$``，否则（例如把密钥值本身写进来）仍按敏感键拦截。
+_ENV_NAME_RE: Final = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def _is_env_name_ref(key: str, value: object) -> bool:
+    if not key.lower().endswith("_env") or not isinstance(value, str):
+        return False
+    return bool(_ENV_NAME_RE.match(value))
+
+
 def _sensitive_key_paths(data: object, path: str = "") -> list[str]:
-    """递归找出键名分段（按 ``_`` / ``-`` / ``.`` 切分）命中敏感词的键路径；只返回路径，不含值。"""
+    """递归找出键名分段（按 ``_`` / ``-`` / ``.`` 切分）命中敏感词的键路径；只返回路径，不含值。
+
+    例外：``*_env`` 键且值是环境变量名（只引用变量名、不含密钥值）不算敏感键，
+    见 :func:`_is_env_name_ref`。
+    """
     hits: list[str] = []
-    if isinstance(data, dict):
+    if isinstance(data, Mapping):
         for key, value in data.items():
             k = str(key)
             here = f"{path}.{k}" if path else k
             parts = set(re.split(r"[_\-.]", k.lower()))
-            if parts & _SENSITIVE_KEY_PARTS or "api_key" in k.lower():
+            sensitive = bool(parts & _SENSITIVE_KEY_PARTS) or "api_key" in k.lower()
+            if sensitive and not _is_env_name_ref(k, value):
                 hits.append(here)
             hits.extend(_sensitive_key_paths(value, here))
     elif isinstance(data, list):
@@ -184,7 +202,7 @@ def business_env_layer(environ: Mapping[str, str] | None = None) -> dict[str, An
 
     出现白名单之外的 ``BUSINESS__*``、或整块 ``BUSINESS`` → :class:`ConfigError`
     （防止拼写错误被静默忽略、也防止整块 JSON 绕过深合并把 YAML 整体顶掉）。
-    空字符串视为未设置。同一路径同时给了嵌套写法与扁平别名时，嵌套写法优先。
+    空字符串视为未设置。同一路径同时给了嵌套写法与扁平别名时取值必须相同，否则失败（F5）。
     错误消息只含变量名，不含取值。
     """
     env = os.environ if environ is None else environ
@@ -198,8 +216,21 @@ def business_env_layer(environ: Mapping[str, str] | None = None) -> dict[str, An
         raise ConfigError(
             f"不允许的业务配置环境变量 {bad}：plan §6.1 只允许 {sorted(_BUSINESS_ENV_KEYS)}"
         )
+    # review-T-B02 F5：同一路径两种写法都给了且取值不同 → 启动失败
+    # （否则 Settings.ingest_* 取扁平别名、business 取嵌套写法，两处不一致）。错误消息只含变量名。
+    given = {
+        name: upper[name].strip()
+        for name in _BUSINESS_ENV_KEYS
+        if upper.get(name) is not None and upper[name].strip() != ""
+    }
+    by_path: dict[tuple[str, ...], dict[str, str]] = {}
+    for name, value in given.items():
+        by_path.setdefault(_BUSINESS_ENV_KEYS[name], {})[name] = value
+    conflicts = sorted(sorted(names) for names in by_path.values() if len(set(names.values())) > 1)
+    if conflicts:
+        raise ConfigError(f"业务配置环境变量取值冲突（同一键的两种写法取值不同）：{conflicts}")
     layer: dict[str, Any] = {}
-    # 扁平别名先写、嵌套写法后写 → 嵌套写法优先
+    # 扁平别名先写、嵌套写法后写（两者取值相同时结果一样）
     for name in sorted(_BUSINESS_ENV_KEYS, key=lambda n: n.startswith("BUSINESS__")):
         raw = upper.get(name)
         if raw is None or raw.strip() == "":
@@ -234,7 +265,7 @@ class YamlDirSettingsSource(PydanticBaseSettingsSource):
 
 
 def check_config_dir_files(found: dict[str, Any], config_dir: Path) -> None:
-    """``config/`` 顶层只允许五个约定文件（缺失或多余都失败）。"""
+    """``config/`` 顶层只允许六个约定文件（缺失或多余都失败）。"""
     missing = sorted(set(BUSINESS_FILES) - set(found))
     extra = sorted(set(found) - set(BUSINESS_FILES))
     if missing or extra:
@@ -242,6 +273,40 @@ def check_config_dir_files(found: dict[str, Any], config_dir: Path) -> None:
             f"config 目录 {config_dir} 文件不符合 plan §6.1："
             f"缺少 {missing or '无'}，多余 {extra or '无'}"
         )
+
+
+#: Settings 顶层心跳字段 ↔ ``business.ingest.heartbeat`` 的键
+_INGEST_FIELD_KEYS: Final = (
+    ("ingest_heartbeat_key", "key"),
+    ("ingest_paused_key", "paused_key"),
+    ("ingest_stale_after_s", "stale_after_s"),
+)
+
+
+class _InitNoneIsUnset(PydanticBaseSettingsSource):
+    """构造参数层：``business`` 里值为 ``None`` 的键视为未覆盖（plan §6.1 null 语义）。
+
+    pydantic-settings 会把构造参数深合并到 YAML 之上，但 ``None`` 叶子会顶掉 YAML 的值；
+    这里先剔除 ``None``，与 :func:`deep_merge` 口径一致。其他字段原样透传。
+    """
+
+    def __init__(self, settings_cls: type[BaseSettings], inner: PydanticBaseSettingsSource) -> None:
+        super().__init__(settings_cls)
+        self._inner = inner
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        data = dict(self._inner())
+        business = data.get("business")
+        if isinstance(business, Mapping):
+            if hits := _sensitive_key_paths(business):
+                raise ConfigError(
+                    f"business 覆盖含疑似敏感键 {hits}：licence/密码/密钥只能走环境变量"
+                )
+            data["business"] = _strip_none(business)
+        return data
 
 
 class Settings(BaseSettings):
@@ -258,8 +323,8 @@ class Settings(BaseSettings):
     app_env: AppEnv = "local"
     service_name: str = "api"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-    #: 契约 §1 基础路径。注意：T-O01 的 nginx 以 ``proxy_pass http://api_upstream/;`` 反代
-    #: ``/api/``，会去掉 ``/api`` 前缀；两者对齐前可用环境变量覆盖（见 reports/T-B01.md）。
+    #: 契约 §1 基础路径；nginx 以 ``proxy_pass http://api_upstream;``（不带 URI）原样转发
+    #: ``/api/v1/...``，两者一致（运维 96c1c8e 修复 B1 后；review-T-B02 F6）。
     api_prefix: str = "/api/v1"
 
     # --- 依赖 ---
@@ -301,12 +366,7 @@ class Settings(BaseSettings):
             if isinstance(ingest, dict):
                 heartbeat = ingest.get("heartbeat")
         if isinstance(heartbeat, dict):
-            pairs = (
-                ("ingest_heartbeat_key", "key"),
-                ("ingest_paused_key", "paused_key"),
-                ("ingest_stale_after_s", "stale_after_s"),
-            )
-            for field, key in pairs:
+            for field, key in _INGEST_FIELD_KEYS:
                 if data.get(field) is None and key in heartbeat:
                     data = {**data, field: heartbeat[key]}
         return data
@@ -347,7 +407,14 @@ class Settings(BaseSettings):
             business = BusinessConfig.model_validate(merged)
         except ValidationError as exc:
             raise ConfigError(f"运行时覆盖校验失败：{_describe(exc, 'business')}") from None
-        return self.model_copy(update={"business": business})
+        # F5：ingest_* 三个字段原本取自 business.ingest.heartbeat 的，跟着新 business 刷新；
+        # 构造时显式给了不同值的（测试用）保持不变。
+        old_hb, new_hb = self.business.ingest.heartbeat, business.ingest.heartbeat
+        update: dict[str, Any] = {"business": business}
+        for field, key in _INGEST_FIELD_KEYS:
+            if getattr(self, field) == getattr(old_hb, key):
+                update[field] = getattr(new_hb, key)
+        return self.model_copy(update=update)
 
     @classmethod
     def settings_customise_sources(
@@ -362,7 +429,7 @@ class Settings(BaseSettings):
         config_dir = Path(raw_dir) if raw_dir else _default_config_dir()
         # 不启用 dotenv：.env 只用于 compose 变量插值，不整体注入进程（T-O01 约定）
         return (
-            init_settings,
+            _InitNoneIsUnset(settings_cls, init_settings),
             env_settings,
             YamlDirSettingsSource(settings_cls, config_dir),
         )

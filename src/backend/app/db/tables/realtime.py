@@ -166,6 +166,14 @@ suggestions = Table(
     comment="除 status、superseded_by_id 外不可变（触发器）",
 )
 Index("ix_suggestions_user_created", suggestions.c.user_id, suggestions.c.created_at.desc())
+#: 契约 v0.2.3 #18：每个用户每只证券至多 1 张 active 建议卡（部分唯一索引；迁移 0003）
+Index(
+    "ux_suggestions_user_security_active",
+    suggestions.c.user_id,
+    suggestions.c.security_code,
+    unique=True,
+    postgresql_where=text("status = 'active'"),
+)
 
 suggestion_user_actions = Table(
     "suggestion_user_actions",

@@ -41,6 +41,7 @@ class ErrorCode(StrEnum):
     ENTITLEMENT_LIMIT_REACHED = "ENTITLEMENT_LIMIT_REACHED"
     NOT_FOUND = "NOT_FOUND"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
+    PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
     CONFLICT = "CONFLICT"
     IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
     VERSION_CONFLICT = "VERSION_CONFLICT"
@@ -117,6 +118,8 @@ ERROR_CODES: Final[dict[ErrorCode, ErrorSpec]] = {
     E.ENTITLEMENT_LIMIT_REACHED: ErrorSpec(403, "已达到套餐权益上限"),
     E.NOT_FOUND: ErrorSpec(404, "资源不存在"),
     E.METHOD_NOT_ALLOWED: ErrorSpec(405, "该路径不支持此请求方法"),
+    #: 请求体超过网关/框架上限（契约 v0.2.3 §4）；应用层文件超限仍用 422 IMPORT_FILE_ERRORS
+    E.PAYLOAD_TOO_LARGE: ErrorSpec(413, "请求体过大"),
     E.CONFLICT: ErrorSpec(409, "数据冲突"),
     E.IDEMPOTENCY_CONFLICT: ErrorSpec(409, "同一幂等键对应了不同的请求内容"),
     E.VERSION_CONFLICT: ErrorSpec(409, "版本号不一致，请刷新后重试"),
@@ -247,7 +250,7 @@ def error_response(
     )
 
 
-# 框架层 HTTPException 的状态码 → 契约错误码（405 单独处理；413/415 等契约无专用码，见报告）
+# 框架层 HTTPException 的状态码 → 契约错误码（405 单独处理；415 等契约无专用码，见报告）
 _HTTP_STATUS_TO_CODE: Final[dict[int, ErrorCode]] = {
     400: E.VALIDATION_ERROR,
     401: E.AUTH_REQUIRED,
@@ -255,6 +258,7 @@ _HTTP_STATUS_TO_CODE: Final[dict[int, ErrorCode]] = {
     404: E.NOT_FOUND,
     405: E.METHOD_NOT_ALLOWED,
     409: E.CONFLICT,
+    413: E.PAYLOAD_TOO_LARGE,
     422: E.VALIDATION_ERROR,
     429: E.RATE_LIMITED,
     503: E.MAINTENANCE,
@@ -339,7 +343,7 @@ async def _http_exception_handler(request: Request, exc: Exception) -> JSONRespo
         return _method_not_allowed(request, exc)
     code = _HTTP_STATUS_TO_CODE.get(exc.status_code)
     if code is None:
-        # 未映射的框架状态码（如 413/415）：按契约只能落到已定义的错误码，记录原状态便于排查
+        # 未映射的框架状态码（如 415）：按契约只能落到已定义的错误码，记录原状态便于排查
         logger.warning("unmapped http status %s", exc.status_code)
         code = E.VALIDATION_ERROR if 400 <= exc.status_code < 500 else E.INTERNAL_ERROR
     headers = {k: v for k, v in (exc.headers or {}).items() if k.lower() != "allow"}

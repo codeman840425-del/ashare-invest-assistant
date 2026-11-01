@@ -3,7 +3,7 @@
 - 每个文件对应一个 pydantic 模型，全部 ``extra="forbid"``、``frozen=True``：未知键、缺键、
   类型或取值不符 → :class:`pydantic.ValidationError`，进程启动即失败（plan §6.1 通用规则）。
 - 默认值**只在 YAML 里**（plan §6.1 是唯一出处），这里不写默认值，只写类型与取值范围；
-  因此五个文件缺一不可，``config/`` 顶层也不允许出现其他 yaml 文件（防止文件名拼错被忽略）。
+  因此六个文件缺一不可，``config/`` 顶层也不允许出现其他 yaml 文件（防止文件名拼错被忽略）。
 - 范围约束只取 plan 明文给出的（如 ``quote_interval_s`` 下限 5、``per_minute_budget`` 热调上限
   5400、RC2 用户可调范围 5–50）以及“数值本身必须有意义”的约束（正数、上下界有序）。
 - ``config/strategies/`` 不在本模块范围（由导入器处理，plan §2.5.14）。
@@ -15,6 +15,7 @@ import datetime as dt
 import itertools
 from decimal import Decimal
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
@@ -309,20 +310,39 @@ class Unfillable(_Strict):
 
 
 Board = Literal["main_board", "chinext", "star", "bse"]
+#: 交易所（证券代码后缀 ``.SH`` / ``.SZ`` / ``.BJ``，契约 security_code）
+Exchange = Literal["SH", "SZ", "BJ"]
 
 
 class RiskWarning(_Strict):
     """风险警示股票（ST/*ST）额外约束（T-A02，market_rules_check.md M5/M6）。"""
 
     daily_buy_cap_shares: PosInt
-    limit_order_only: bool
+    #: 50 万股上限（``daily_buy_cap_shares``）的适用板块（T006b §7：主板与创业板，科创板不适用）
     applies_to_boards: Annotated[list[Board], Field(min_length=1)]
+    limit_order_only: bool
+    #: ``limit_order_only`` 只作用于这些交易所的证券（T-A03：仅沪 4.4.9 → ``[SH]``）
+    limit_order_only_exchanges: list[Exchange]
 
     @model_validator(mode="after")
     def _check(self) -> RiskWarning:
         if len(set(self.applies_to_boards)) != len(self.applies_to_boards):
             raise ValueError("risk_warning.applies_to_boards 不能重复")
+        if len(set(self.limit_order_only_exchanges)) != len(self.limit_order_only_exchanges):
+            raise ValueError("risk_warning.limit_order_only_exchanges 不能重复")
+        if self.limit_order_only and not self.limit_order_only_exchanges:
+            raise ValueError(
+                "risk_warning.limit_order_only=true 时 limit_order_only_exchanges 不能为空"
+            )
         return self
+
+    def daily_buy_cap_for(self, board: Board) -> int | None:
+        """该板块风险警示股票的单日累计买入上限（股）；不适用返回 ``None``。"""
+        return self.daily_buy_cap_shares if board in self.applies_to_boards else None
+
+    def limit_order_only_for(self, exchange: Exchange) -> bool:
+        """该交易所风险警示股票是否只能限价申报。"""
+        return self.limit_order_only and exchange in self.limit_order_only_exchanges
 
 
 class MarketRuleSegment(_Strict):
@@ -655,8 +675,14 @@ class HorizonRules(_Strict):
         return used
 
 
+#: 语义化版本（plan §3.3 horizon_classifier_versions.semver 的同一正则）
+SEMVER_PATTERN = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
+
+
 class HorizonClassifierConfig(_File):
     version_no: PosInt
+    #: 对外的语义化版本（T-A03；契约 ``/horizon-assessments.classifier_version``）
+    classifier_version: Annotated[str, Field(pattern=SEMVER_PATTERN)]
     suitable_threshold: Score
     reasons_per_horizon: tuple[PosInt, PosInt]
     recompute: Recompute
@@ -683,18 +709,180 @@ class HorizonClassifierConfig(_File):
 
 
 # ---------------------------------------------------------------------------
+# config/llm.yaml（plan §6.1、2.7、2.7.1、2.7.2）
+# ---------------------------------------------------------------------------
+
+#: 只存**环境变量名**的键（``*_env``）的取值形状；密钥值本身永远不进 YAML
+EnvVarName = Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]*$")]
+#: 价目等金额：YAML 里写字符串（plan 原样 "0.04"），按 Decimal 解析，不经过浮点
+Price = Annotated[Decimal, Field(ge=0)]
+#: plan §6.1 只给出的取值；新增取值须先改 plan
+#: （TODO：其他适配器类型 / user_id_mode / jitter 的取值由 T-B25 定）
+LlmProviderKind = Literal["openai_compatible"]
+LlmUserIdMode = Literal["hmac"]
+#: DeepSeek ``thinking.type`` 的两种取值（plan 2.7.2：解释任务显式 disabled，官方默认 enabled）
+LlmThinking = Literal["disabled", "enabled"]
+LlmWeekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+_HHMM = r"([01][0-9]|2[0-3]):[0-5][0-9]"
+TimeWindow = Annotated[str, Field(pattern=rf"^{_HHMM}-{_HHMM}$")]
+HttpStatus = Annotated[int, Field(ge=100, le=599)]
+
+
+class LlmProvider(_Strict):
+    kind: LlmProviderKind
+    #: 不可热调；必须 https 且主机在 ``allowed_hosts`` 内（plan 2.7：防止把 key 发往他处）
+    base_url: StrictStr
+    allowed_hosts: Annotated[list[StrictStr], Field(min_length=1)]
+    #: 只写变量名（如 ``DEEPSEEK_API_KEY``）；值只在环境变量中，由网关读取并只校验非空
+    api_key_env: EnvVarName
+    user_id_mode: LlmUserIdMode
+
+    @model_validator(mode="after")
+    def _check(self) -> LlmProvider:
+        url = urlsplit(self.base_url)
+        if url.scheme != "https" or not url.hostname:
+            raise ValueError("base_url 必须是 https:// 开头的完整地址")
+        if url.username or url.password:
+            raise ValueError("base_url 不能内嵌用户名或密码")
+        if url.hostname.lower() not in {h.lower() for h in self.allowed_hosts}:
+            raise ValueError(f"base_url 主机 {url.hostname!r} 不在 allowed_hosts 内")
+        return self
+
+
+class LlmPricePerMillion(_Strict):
+    input_cache_hit: Price
+    input_cache_miss: Price
+    output: Price
+
+
+class LlmModel(_Strict):
+    provider: StrictStr
+    context_window_tokens: PosInt
+    max_output_tokens_cap: PosInt
+    thinking: LlmThinking
+    json_output: StrictBool
+    currency: Literal["CNY"]
+    price_per_1m_peak: LlmPricePerMillion
+    offpeak_multiplier: Annotated[Decimal, Field(gt=0, le=1)]
+    price_checked_at: dt.date
+
+    @model_validator(mode="after")
+    def _check(self) -> LlmModel:
+        if self.max_output_tokens_cap > self.context_window_tokens:
+            raise ValueError("max_output_tokens_cap 不能大于 context_window_tokens")
+        return self
+
+
+class LlmPricingCalendar(_Strict):
+    timezone: Literal["Asia/Shanghai"]
+    peak_weekdays: list[LlmWeekday]
+    peak_windows: list[TimeWindow]
+
+    @model_validator(mode="after")
+    def _check(self) -> LlmPricingCalendar:
+        if len(set(self.peak_weekdays)) != len(self.peak_weekdays):
+            raise ValueError("pricing_calendar.peak_weekdays 不能重复")
+        for w in self.peak_windows:
+            start, end = w.split("-")
+            if start >= end:
+                raise ValueError(f"pricing_calendar.peak_windows {w!r}：开始须早于结束")
+        return self
+
+
+class LlmRetry(_Strict):
+    max_retries: NonNegInt
+    backoff_base_s: Annotated[float, Field(gt=0)]
+    backoff_max_s: Annotated[float, Field(gt=0)]
+    jitter: Literal["full"]
+    retry_on_status: list[HttpStatus]
+    retry_on_network_error: StrictBool
+    retry_on_empty_json: NonNegInt
+    no_retry_status: list[HttpStatus]
+
+    @model_validator(mode="after")
+    def _check(self) -> LlmRetry:
+        _ordered_pair((self.backoff_base_s, self.backoff_max_s), "retry.backoff_base_s/max_s")
+        both = sorted(set(self.retry_on_status) & set(self.no_retry_status))
+        if both:
+            raise ValueError(f"retry_on_status 与 no_retry_status 不能重叠：{both}")
+        return self
+
+
+class LlmCircuitBreaker(_Strict):
+    consecutive_5xx: PosInt
+    open_s: PosInt
+
+
+class LlmGateway(_Strict):
+    connect_timeout_s: Annotated[float, Field(gt=0)]
+    call_deadline_s: Annotated[float, Field(gt=0)]
+    max_concurrency: PosInt
+    retry: LlmRetry
+    circuit_breaker: LlmCircuitBreaker
+    on_429_halve_concurrency_s: PosInt
+
+    @model_validator(mode="after")
+    def _check(self) -> LlmGateway:
+        if self.connect_timeout_s > self.call_deadline_s:
+            raise ValueError("connect_timeout_s 不能大于 call_deadline_s")
+        return self
+
+
+class LlmTaskRoute(_Strict):
+    model: StrictStr
+    fallback_models: list[StrictStr]
+    timeout_s: Annotated[float, Field(gt=0)]
+    max_output_tokens: PosInt
+    temperature: Annotated[float, Field(ge=0, le=2)]
+
+
+class LlmBudget(_Strict):
+    #: ``null`` = 不限（仍记录成本）；由管理员在后台设定（plan 问题 16）
+    daily_budget_cny: Annotated[Decimal, Field(gt=0)] | None
+    prefer_offpeak_for_batch: StrictBool
+
+
+class LlmConfig(_File):
+    providers: Annotated[dict[StrictStr, LlmProvider], Field(min_length=1)]
+    models: Annotated[dict[StrictStr, LlmModel], Field(min_length=1)]
+    pricing_calendar: LlmPricingCalendar
+    gateway: LlmGateway
+    #: 任务键集合 plan §6.1 未封闭（TODO：T-B25 定是否限定为枚举），这里只校验路由引用
+    tasks: Annotated[dict[StrictStr, LlmTaskRoute], Field(min_length=1)]
+    budget: LlmBudget
+
+    @model_validator(mode="after")
+    def _check(self) -> LlmConfig:
+        for name, m in self.models.items():
+            if m.provider not in self.providers:
+                raise ValueError(f"models.{name}.provider={m.provider!r} 未在 providers 中定义")
+        for name, t in self.tasks.items():
+            for ref in (t.model, *t.fallback_models):
+                if ref not in self.models:
+                    raise ValueError(f"tasks.{name} 引用了未定义的模型 {ref!r}")
+            chain = [t.model, *t.fallback_models]
+            if len(set(chain)) != len(chain):
+                raise ValueError(f"tasks.{name}.fallback_models 不能重复或包含主模型")
+            cap = self.models[t.model].max_output_tokens_cap
+            if t.max_output_tokens > cap:
+                raise ValueError(f"tasks.{name}.max_output_tokens 超过模型上限 {cap}")
+        return self
+
+
+# ---------------------------------------------------------------------------
 # 汇总
 # ---------------------------------------------------------------------------
 
 
 class BusinessConfig(_Strict):
-    """``config/`` 顶层五个文件；键为文件名（不含扩展名）。"""
+    """``config/`` 顶层六个文件；键为文件名（不含扩展名）。"""
 
     realtime: RealtimeConfig
     ingest: IngestConfig
     market_rules: MarketRulesConfig
     risk_controls: RiskControlsConfig
     horizon_classifier: HorizonClassifierConfig
+    llm: LlmConfig
 
 
 BUSINESS_FILES: tuple[str, ...] = tuple(BusinessConfig.model_fields)

@@ -1,0 +1,61 @@
+# config/llm.yaml —— 内容逐字取自 docs/plan.md §6.1（默认值唯一出处，改值先改 plan）。
+# 校验：src/backend/app/config_files.py（pydantic，extra="forbid"，未知键启动失败）。
+schema_version: 1
+providers:
+  deepseek:
+    kind: openai_compatible
+    base_url: "https://api.deepseek.com"   # 官方 OpenAI 格式 base_url；不可热调；必须 https 且主机在 allowed_hosts 内
+    allowed_hosts: ["api.deepseek.com"]
+    api_key_env: DEEPSEEK_API_KEY          # 只写变量名；值只在环境变量中，只校验非空（官方未公布 key 格式，不做前缀/长度正则）
+    user_id_mode: hmac                     # 传 "u_" + HMAC 前 16 位十六进制；共享段落传 "shared"
+models:
+  deepseek-flash:
+    provider: deepseek
+    context_window_tokens: 1000000         # 官方：1M
+    max_output_tokens_cap: 384000          # 官方：最大 384K
+    thinking: disabled                     # ◇ 解释任务显式关闭（官方默认开启）
+    json_output: true                      # response_format: {type: json_object}
+    currency: CNY
+    price_per_1m_peak: {input_cache_hit: "0.04", input_cache_miss: "2", output: "8"}       # 官方价目，2026-11-01 核实
+    offpeak_multiplier: "0.5"              # 官方：空闲时段为高峰价一半
+    price_checked_at: 2026-11-01
+  deepseek-v4-pro:                         # V1 不路由到它；保留给 T-B39 策略草稿评估
+    provider: deepseek
+    context_window_tokens: 1000000
+    max_output_tokens_cap: 384000
+    thinking: disabled
+    json_output: true
+    currency: CNY
+    price_per_1m_peak: {input_cache_hit: "0.30", input_cache_miss: "9.0", output: "27.0"}
+    offpeak_multiplier: "0.5"
+    price_checked_at: 2026-11-01
+pricing_calendar:                          # 只用于成本估算；月底按账单对账
+  timezone: Asia/Shanghai
+  peak_weekdays: [mon, tue, wed, thu, fri] # 不含法定节假日（用交易日历近似）
+  peak_windows: ["09:00-12:00", "14:00-18:00"]
+gateway:
+  connect_timeout_s: 5                     # ◇
+  call_deadline_s: 90                      # ◇ 单次调用含重试与退避的总截止时间
+  max_concurrency: 8                       # ◇ 远低于官方账号并发（flash 2500）
+  retry:
+    max_retries: 2                         # 与 2.7 已定默认一致
+    backoff_base_s: 1
+    backoff_max_s: 8
+    jitter: full
+    retry_on_status: [429, 500, 503]       # 官方错误码页：500“等待后重试”、503“稍后重试”；429 为速率/并发上限
+    retry_on_network_error: true           # 连接失败、读超时
+    retry_on_empty_json: 1                 # JSON 模式返回空/全空格 content 时重试 1 次
+    no_retry_status: [400, 401, 402, 422]  # 401/402 另置供应商状态并告警（2.7.2）
+  circuit_breaker:
+    consecutive_5xx: 5                     # ◇
+    open_s: 300                            # ◇
+  on_429_halve_concurrency_s: 300          # ◇
+tasks:                                     # 默认路由；管理端覆盖存 llm_task_routes
+  suggestion_rationale:      {model: deepseek-flash, fallback_models: [], timeout_s: 30, max_output_tokens: 800,  temperature: 0.3}
+  daily_report_stock:        {model: deepseek-flash, fallback_models: [], timeout_s: 30, max_output_tokens: 800,  temperature: 0.3}
+  daily_report_summary:      {model: deepseek-flash, fallback_models: [], timeout_s: 60, max_output_tokens: 1500, temperature: 0.3}
+  strategy_divergence:       {model: deepseek-flash, fallback_models: [], timeout_s: 30, max_output_tokens: 800,  temperature: 0.3}
+  announcement_title_digest: {model: deepseek-flash, fallback_models: [], timeout_s: 30, max_output_tokens: 600,  temperature: 0.2}
+budget:
+  daily_budget_cny: null                   # 由管理员在后台设定（问题 16）；null = 不限，但仍记录成本
+  prefer_offpeak_for_batch: false          # ◇ true 时盘后日报的 LLM 段落推迟到 18:00 后生成（半价，但日报晚约 30 分钟）

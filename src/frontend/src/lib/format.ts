@@ -1,0 +1,28 @@
+import type { Evidence } from '../api/types';
+import { PROVIDER } from '../i18n/labels';
+/** 契约时间均为 +08:00；界面统一按北京时间显示 */
+export const fmtTime = (t: string) => t.replace('T', ' ').replace(/\+08:00$/, '').replace(/:00$/, '');
+export const fmtNum = (v: string | number | null | undefined, digits = 2) =>
+  v === null || v === undefined || v === '' || Number.isNaN(Number(v))
+    ? '—'
+    : Number(v).toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+export const pctClass = (v: string | number | null | undefined) =>
+  v === null || v === undefined ? 'flat' : Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : 'flat';
+export const signed = (v: string | number | null | undefined, digits = 2) =>
+  v === null || v === undefined ? '—' : (Number(v) > 0 ? '+' : '') + fmtNum(v, digits);
+/** 金额简写：≥1 亿 → 亿，≥1 万 → 万 */
+export const fmtAmount = (v: string | number | null | undefined) => {
+  if (v === null || v === undefined) return '—';
+  const n = Number(v);
+  if (Math.abs(n) >= 1e8) return `${(n / 1e8).toFixed(2)}亿`;
+  if (Math.abs(n) >= 1e4) return `${(n / 1e4).toFixed(1)}万`;
+  return n.toFixed(0);
+};
+/** 北京时间 → lightweight-charts 的 UTCTimestamp（把北京时间当作 UTC 显示，避免浏览器时区影响） */
+export const bjToChartTime = (t: string) => {
+  const m = t.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2})?)/);
+  return m ? Math.floor(Date.parse(`${m[1]}T${m[2].length === 5 ? m[2] + ':00' : m[2]}Z`) / 1000) : 0;
+};
+
+/** 证据来源：数据源 + 接口路径 */
+export const providerText = (e: Evidence) => `${PROVIDER[e.provider]}${e.endpoint ? ' ' + e.endpoint : ''}`;

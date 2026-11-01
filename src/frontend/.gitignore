@@ -1,0 +1,9 @@
+# 正式前端包（src/frontend）的产物；prototype/ 有自己的 .gitignore（其 dist/ 保留提交）
+node_modules/
+/dist/
+/dist-mock/
+*.tsbuildinfo
+coverage/
+playwright-report/
+test-results/
+.vite/

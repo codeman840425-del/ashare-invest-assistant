@@ -754,7 +754,7 @@
 - 健康检查：停 db 或 redis → `/health/ready` 返回 503、`status: "down"`；只停 ingest 心跳 → 200、`degraded`、`ingest: "stale"`；写入 `ingest:paused` → `paused` 优先；`/health/live` 在依赖全停时仍 200。
 - 405：`DELETE /api/v1/health` → `405 METHOD_NOT_ALLOWED` + `Allow` 头；非管理员（含未登录）对 `/admin/*` 用错方法 → 404，无 `Allow` 头。
 - **v0.2.3**：
-  - `/horizon-assessments`：每条 `reasons[].evidence_ids` 都能在同一响应的 `evidence[]` 中找到；`classifier_version` 匹配语义化版本正则；`inputs_missing` 非 null、去重、升序、每项以 `f.` 开头；每个分数 ≤ 对应周期 `caps[].cap` 的最小值；novice 夹具的 `short` ≤ 59 且 `caps` 含 `{horizon: "short", kind: "requires", rule_id: "SH0C"}`；同一夹具的 `intraday_t` ≤ 59 且 `caps` 含 `{horizon: "intraday_t", kind: "requires", rule_id: "IT0C"}`；`SH0C`/`IT0C` 不出现在 `/meta/enums.reason_codes`（#23）。
+  - `/horizon-assessments`：每条 `reasons[].evidence_ids` 都能在同一响应的 `evidence[]` 中找到；`classifier_version` 匹配语义化版本正则；`inputs_missing` 非 null、去重、升序、每项以 `f.` 开头；每个分数 ≤ 对应周期 `caps[].cap` 的最小值；~~novice 夹具 `caps` 含 `kind: "requires"` 的 SH0C/IT0C~~（v0.2.5/v0.2.6 作废：画像类规则只进 `hints[]`，`kind` 只有 `gate`、`data_missing`，见 v0.2.6 验收）；`SH0C`/`IT0C` 不出现在 `/meta/enums.reason_codes`（#23）。
   - 认证（#24–#27）：用户名 3 位 → 400；~~consents 两项~~（v0.2.5 作废）；改密后旧 `sid` 401、响应带新 `sid`；超过绝对过期的会话 401；邀请码各类无效情形返回完全相同的响应体。
   - 纯离场策略：未持有的证券不出现 H-01 类结论；持有时其 `state`/`action` 只在 §5.2 允许的集合内；其单元格 `rules_total == 0`、`score == null`、`exit_hits ≤ exit_total`。
   - `consensus.status` 与行级 `divergent` 按 §5.2 的定义可由 `strategies[]` 重算得出。

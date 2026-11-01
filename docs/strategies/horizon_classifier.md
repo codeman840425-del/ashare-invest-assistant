@@ -57,9 +57,9 @@
 
 ## 2. 输出（与契约一致）
 
-`GET /horizon-assessments` 返回 `{suitable: horizon[], scores: {horizon: int}, reasons: [TextWithEvidence], classifier_version}`。（契约现行版本另有 `inputs_missing`、`caps: HorizonCap[]`、`hints: HorizonHint[]`、`snapshot_id`、`evidence`，以契约 §7.4 为准。）
+`GET /horizon-assessments` 返回 `{suitable: horizon[], scores: {horizon: int}, reasons: [TextWithEvidence], classifier_version}`。（契约现行版本另有 `inputs_missing`、`caps: HorizonCap[]`（v0.2.6：`kind = gate | data_missing`）、`hints: HorizonHint[]`、`snapshot_id`、`evidence`，以契约 §7.4 为准。）
 
-- `hints`（v0.2.5，永不为 null）：元素 `HorizonHint {horizon, rule_id, text}`，由 `mode: hint` 的 requires 规则在输入已填写且不满足时产生；`text` 取规则的 `reason`。不改分数、不进 `caps`、不影响 `suitable`。`rule_id` 不是 `reason_code`。
+- `hints`（v0.2.5，永不为 null）：元素 `HorizonHint {horizon, rule_id, text}`，由 `mode: hint` 的 requires 规则在输入已填写且不满足时产生；`text` 取规则的 `reason`。不改分数、不进 `caps`、不影响 `suitable`。hints 与分数无关：周期已被判 0（如 `IT0` 无底仓）时照常给出（v0.2.6）。`rule_id` 不是 `reason_code`。
 
 - `scores`：四个周期都要给。值为 0–100 的**整数**。
 - `suitable`：`scores ≥ suitable_threshold`（60）的周期。按分数降序；同分时按 `tie_order` 排：long → swing → short → intraday_t（偏保守的在前）。
@@ -74,14 +74,16 @@
 对每个周期 h ∈ [intraday_t, short, swing, long] 都执行以下步骤：
 
 1. **闸门 `gates`**：按顺序全部求值，适用周期包含 h 且条件为真的都记录下来。
-   - 带 `score: 0` 的：h 的最终分数记为 0。
-   - 带 `cap` 的：记入封顶集合。
+   - 带 `score: 0` 的：h 的最终分数记为 0，并记入 `caps[]`（`kind: gate`，`rule_id: HGn`，`cap: 0`）。
+   - 带 `cap` 的：记入封顶集合，并记入 `caps[]`（`kind: gate`，`rule_id: HGn`）。
 2. **周期前提 `requires`**：按规则的 `mode` 处理（可选键，默认 `cap`；1.2.0 起）。
-   - `mode: cap`（默认）：条件为假时，或者输入为 null 时（`not_null` 除外），执行 `else_score: 0` 或 `else_cap`，并记入 `caps[]`（`kind: requires`）。
+   - `mode: cap`（默认）：条件为假时，或者输入为 null 时（`not_null` 除外），执行 `else_score: 0` 或 `else_cap`（契约 v0.2.6 删除 `kind: requires`，T-A07 §4）：
+     - `else_score: 0`（`IT0`）：是分数，**不进 `caps[]`**，只写不适合理由。
+     - `else_cap`（`LG0`、`LG0B`，cap 59）：记入 `caps[]`，`kind: data_missing`，`rule_id` 为 `LG0`/`LG0B`，含义为“财报历史/数据不足”。
    - `mode: hint`：不得带 `else_cap`/`else_score`。输入为 null（画像未填写）→ 跳过，不提示、不封顶；输入已填写且条件为假 → 只写入 `hints[]`（`{horizon, rule_id, text: reason}`），不改分数、不进 `caps[]`、不影响 `suitable`，也不进第 7 步的理由。
    - 画像类规则 `SH0`、`SH0B`、`SH0C`、`IT0B`、`IT0C` 全部为 `mode: hint`；非画像的 `IT0`、`LG0`、`LG0B` 仍为 `cap`。
 3. **组件打分 `components`**：每个组件的 `bands` 自上而下取**第一条**为真的分档，得到 pts；都不满足则 0 分。输入为 null 时得 0 分；如果输入是 `f.*`，就把该组件的满分计入 `missing_points`。
-4. **数据缺失封顶**：`missing_points ≥ 40` 时 cap 59。
+4. **数据缺失封顶**：`missing_points ≥ 40` 时 cap 59，记入 `caps[]`（`kind: data_missing`，`rule_id: null`）。
 5. **合成**：`raw = Σ pts`（四个周期的满分都是 100）。
    - 任一处给出 score 0 → `score = 0`。
    - 否则 `score = min(raw, 所有 cap)`。
@@ -95,7 +97,7 @@
    - 不足 2 条时，补一条“【h】得分 X/100（阈值 60）”，`evidence_ids` 取空数组，`expr` 填 `score >= 60` 或 `score < 60`。
 8. **之后的策略匹配**（plan §2.5.3 的后续步骤，不属于分类器打分）：
    - 范围：每个 suitable 周期下的策略模板，按 `applicability` / `fit_dimensions` 匹配。
-   - 排除：`risk_level: high` 的卡（Q11，例如 S-03）；不可执行的卡（N-03）。
+   - 排除：`risk_level: high` 的卡（例如 S-03；仍默认不启用、不自动推荐，用户可手动启用，启用开关旁固定展示风险说明，不再逐项确认，契约 v0.2.6，T-A07 §4）；不可执行的卡（N-03）。
    - 系统组件 H-01 / G-01 / N-01 不经分类器，由系统挂载（C(3)）。
    - 结果生成 `status=proposed` 的实例，用户确认后才生效（Q15）。
 9. **用户覆盖**：用户可以自由为任何周期创建实例，不需要确认（契约 v0.2.5：`fit_ack` 与 `STRATEGY_FIT_ACK_REQUIRED` 作废）。所选周期不在 suitable 中、或画像低于卡片 `fit` 下限时，`POST /strategy-instances` 照常返回 201，只在 `warnings[]` 中给出中文说明（I3 只校验模板 `horizons`）。用户修改后系统不再自动改动，之后重算不改用户的选择；suitable 集合变化时只提示“系统建议已变化”。
@@ -111,7 +113,7 @@ rules:
   rank_pct_universe: "T−1 日盘后落库截面：沪深 A 股股票，剔除北交所、停牌、上市 < 20 个交易日；平均秩 / N，取值 [0, 1]"
   data_missing_cap: {missing_points_ge: 40, cap: 59}   # 某周期中因 f.* 缺失而拿不到的满分合计 ≥ 40 → 该周期最高 59 分
   tie_order: [long, swing, short, intraday_t]          # suitable[] 同分时的排序
-  gates:                             # 按顺序全部求值；score 取 0 优先，其次取最小 cap
+  gates:                             # 按顺序全部求值；score 取 0 优先，其次取最小 cap；命中均记 caps[] kind: gate（v0.2.6）
     - {id: HG1, input: sec.type, op: ne, value: stock, horizons: all, score: 0,
        reason: "分类器只覆盖 A 股股票（ETF、可转债等不分类）"}
     - {id: HG2, input: sec.board, op: eq, value: bse, horizons: all, score: 0,
@@ -312,7 +314,7 @@ plan §2.5.3 还提到 ATR% 和“交易频率”。v1 规则未使用：ATR% �
 | E 次新（上市 40 日） | 振幅分位 0.7、成交额 4 亿、换手分位 0.9、涨停 1 次、波动分位 0.85、ma_trend>0、mom 缺失、ROE 8%、增速缺失、财报 6 期；无持仓、无成交记录；偏好 [swing, short]、精力 medium、风险 3、经验 novice | 0（无底仓） | 85（raw 85，不封顶；SH0C 只提示） | 59（HG6，raw 65） | 10 | [short] |
 | F 无持仓 + 画像未填 + 财务缺失 | 振幅分位 0.5、成交额 1.5 亿、换手分位 0.5、波动分位 0.5、ma_trend<0、mom<0；ROE、增速、分红、财报期数都缺失；无持仓 | 0 | 28 | 25 | 10（缺失 65 分，封顶） | [] |
 
-> 用例 E 说明（1.2.0，契约 v0.2.5）：novice 只提示、不封顶。short = raw 85（SH1 20 + SH2 15 + SH3 10 + SH4 10 + SH5 10 + SH6 15 + SH7 5），列为“适合”，`suitable = [short]`；`caps` 中不出现 SH0C/IT0C，非画像项照旧（intraday_t 的 IT0、long 的 LG0，以及 HG6 对 swing/long 的闸门封顶）。`hints` = `[{horizon: short, rule_id: SH0C, text: "短线需要盯盘与止损纪律，您自报的经验为新手"}, {horizon: intraday_t, rule_id: IT0C, text: "做T 需要盘中决断与纪律，您自报的经验为新手"}]`（风险 3、精力 medium 满足 SH0/SH0B/IT0B，不提示）。intraday_t 因无底仓（IT0）仍为 0。1.1.0 下本例 short 为 59、suitable 为 []，已被取代。
+> 用例 E 说明（1.2.0，契约 v0.2.5）：novice 只提示、不封顶。short = raw 85（SH1 20 + SH2 15 + SH3 10 + SH4 10 + SH5 10 + SH6 15 + SH7 5），列为“适合”，`suitable = [short]`；`caps` 中不出现 SH0C/IT0C，`caps` 只含非画像项：long 的 LG0（`kind: data_missing`）和 HG6 对 swing/long 的闸门封顶（`kind: gate`）；intraday_t 的 IT0 是 0 分，不进 `caps`（v0.2.6）。`hints` = `[{horizon: short, rule_id: SH0C, text: "短线需要盯盘与止损纪律，您自报的经验为新手"}, {horizon: intraday_t, rule_id: IT0C, text: "做T 需要盘中决断与纪律，您自报的经验为新手"}]`（风险 3、精力 medium 满足 SH0/SH0B/IT0B，不提示）。intraday_t 因无底仓（IT0）仍为 0，但 IT0C 提示照常给出。1.1.0 下本例 short 为 59、suitable 为 []，已被取代。
 >
 > 用例 A、F 的分数在 1.2.0 下不变（原封顶均未生效）：A 的 `hints` 为 IT0B、SH0、SH0B；F 画像未填，`hints=[]`。
 

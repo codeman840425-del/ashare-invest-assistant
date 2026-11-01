@@ -1730,7 +1730,7 @@ class BrokerStatementParser(Protocol):
 | 43 | `IMPORT_CASH_CHAIN_BREAK` | warning | row | 剩余金额链在本行断开，差额 {diff} 元 | 仅提示（日间可能有非成交资金流水） | `trades_duplicates_in_file.txt` 行 8；`trades_reimport_overlap.txt` |
 | 44 | `IMPORT_NON_TRADING_DAY` | warning | row | 成交日期 {date} 不是交易日 | 仅提示 | 生成器 |
 | 45 | `IMPORT_TIME_OUTSIDE_SESSION` | warning | row | 成交时间不在交易时段内 | 仅提示 | 生成器 |
-| 46 | `IMPORT_LOT_SIZE_IRREGULAR` | warning | row | 买入数量不符合整手规则 | 仅提示（科创板 200 股起、按 1 股递增等规则按板块处理） | 生成器 |
+| 46 | `IMPORT_LOT_SIZE_IRREGULAR` | warning | row | 买入数量不符合整手规则 | 仅提示（科创板 200 股起、按 1 股递增等规则按板块处理；ETF 按 100 份整数倍，v0.2.8） | 生成器 |
 
 **判定顺序与规则（回应 T004 报告和夹具 README §8 的疑点）**
 1. 文件级先判：大小、类型、空文件 → 编码 → 格式识别 → 必填列 → 账户匹配。任何文件级 error 都让整个文件进入 `failed`（上传阶段的前 4 个码直接 422、不建批次）。
@@ -2841,6 +2841,16 @@ admin:
     - 匿名化 UPDATE 由触发器校验：只允许上述列发生变化，并且只允许改成上述值。
   - **原始导入文件**：数据库事务提交后，再删除 `/srv/aia/imports/` 下该用户的文件。删除失败的，写入 `ops.pending_file_purges`（只含路径、尝试次数、最近错误，不含 user_id），下次运行 CLI 时先重试这些记录，并在 dry-run 中列出。
   - **执行方式**：默认 dry-run，按表列出行数，并标出删除或匿名化；加 `--execute` 后要求手动输入完整的 user-id 确认；全部在单个事务内完成；写一条 `admin.user_data_deleted` 审计，`detail` 只含各表行数。
+  - **匿名化细则（架构师裁定，2026-11-02，契约 v0.2.8 补充）**：
+    - **IP**：`app.audit_logs` 只有 `ip_hash`，没有明文 IP。`actor` 是被删除用户本人或为 NULL 的行，`ip_hash` 置 NULL；管理员操作行的 `ip_hash` 保留。有明文 IP 的表仍按上面的截断规则处理（IPv4 /24、IPv6 /48）。
+    - **`app.account_reviews.reason`**：清空；该列可为空就置 NULL，否则写 `'[已清除]'`。
+    - **`data_snapshots`**：不按用户区分，只允许存市场级内容，删除用户时不处理。
+    - **`llm_calls`**：只被该用户引用的行物理删除；被多人共享的行保留，共享行不得含个人数据。
+    - **`invite_codes`**：`bound_username` 置 NULL；`used_by` 一类指向该用户的列解除关联（置 NULL）。
+    - **`ops.pending_file_purges`**：`path` 可以含 uid 目录名；重试删除文件成功后删除该行。
+    - **管理员账号**：被删除的账号是管理员，且被不可变列或 NOT NULL 列引用时，CLI 拒绝执行，由人工处理。
+    - **迁移 0011**：已有匿名化数据时 `downgrade` 失败，这是有意为之。
+    - **CLI 用法**：默认 dry-run；加 `--execute` 并手动输入完整的 user-id 确认后才执行。退出码：`0` 成功；`1` 拒绝执行或数据库错误；`2` 用法错误；`3` 已提交但有残留（例如文件删除失败已写入 `ops.pending_file_purges`）。
 - **境内存储**：服务器与备份均在中国境内（同时满足麦蕊条款 5.7）；不向境外第三方服务传输个人信息（V1 不用 Sentry；以后如需错误追踪只考虑境内自托管；邮件服务选境内）。
 - 不设隐私政策、用户协议等需同意的文书，也不做版本管理（T-A06）；只有固定免责提示 `disclaimer.md`。
 - 未成年人：注册时声明已满 18 周岁。

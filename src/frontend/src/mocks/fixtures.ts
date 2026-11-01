@@ -706,7 +706,7 @@ export const DAILY_REPORT_LIST: DailyReportListItem[] = DAILY_REPORTS.map((d) =>
 // ---------------- 账号 / 健康 ----------------
 export const ME: Me = {
   id: uid(2), username: 'demo_user', display_name: '示例用户', role: 'user', status: 'approved',
-  entitlements: { 'watchlist.per_user_cap': 50 },
+  entitlements: { 'watchlist.per_user_cap': 50 }, data_licence_status: 'active',
 };
 export const HEALTH_READY: HealthReady = { status: 'ok', db: 'ok', redis: 'ok', ingest: 'ok', checked_at: NOW, version: 'mock-0.2' };
 
@@ -722,12 +722,14 @@ export const HORIZON_ASSESSMENTS: Record<string, HorizonAssessment> = {};
 SUGGESTIONS.forEach((sg, i) => {
   const r = rng(9000 + i);
   const missing: string[] = i % 3 === 2 ? [HZ_TEXT.long.key] : [];
+  // v0.2.6（T006e）：LG0 的 else_cap 记为 data_missing、rule_id = LG0（只给第 2 只示例股）
+  const lg0 = i === 1;
   const scores = {} as Record<Horizon, number>;
   const reasons: HorizonReason[] = [];
   for (const h of ENUMS.horizon) {
     const suitable = sg.horizon_assessment.suitable.includes(h);
     let sc = Math.round(suitable ? 60 + r() * 35 : 15 + r() * 40);
-    if (missing.includes(HZ_TEXT[h].key)) sc = Math.min(sc, 59);
+    if (missing.includes(HZ_TEXT[h].key) || (lg0 && h === 'long')) sc = Math.min(sc, 59);
     scores[h] = sc;
     reasons.push({ horizon: h, polarity: 'for', text: HZ_TEXT[h].for[0], expr: null, evidence_ids: [HZ_TEXT[h].for[1]] });
     reasons.push({ horizon: h, polarity: 'against', text: HZ_TEXT[h].against[0], expr: null, evidence_ids: [HZ_TEXT[h].against[1]] });
@@ -735,6 +737,7 @@ SUGGESTIONS.forEach((sg, i) => {
   // v0.2.3：证据只在本响应内解析；封顶原因写入 caps[]
   const used = new Set(reasons.flatMap((x) => x.evidence_ids));
   const caps: HorizonCap[] = missing.length ? [{ horizon: 'long', cap: 59, kind: 'data_missing', rule_id: null, inputs_missing: [...missing] }] : [];
+  if (lg0) caps.push({ horizon: 'long', cap: 59, kind: 'data_missing', rule_id: 'LG0', inputs_missing: [] });
   HORIZON_ASSESSMENTS[sg.security_code] = {
     suitable: sg.horizon_assessment.suitable, scores, reasons, inputs_missing: [...new Set(missing)].sort(), caps, hints: [], classifier_version: '1.2.0',
     snapshot_id: sg.snapshot_id, evidence: sg.evidence.filter((e) => used.has(e.id)),

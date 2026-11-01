@@ -5,7 +5,7 @@
  */
 import type {
   Action, BarAdjust, BarFreq, CandidateSignalState, CheckOn, ComponentHealth, ConfidenceLevel, ConsensusStatus, DataProvider,
-  DataStatus, Dimension, DimensionView, EpistemicType, ExecutabilityStatus, GapReason, HealthStatus, Horizon, IngestHealth,
+  DataStatus, Dimension, DimensionView, EpistemicType, ExecutabilityStatus, DataLicenceState, GapReason, HealthStatus, Horizon, IngestHealth,
   Lifecycle, MarketRegime, MarketSession, NotificationKind, NotificationTargetType, ReasonCode, ReasonStatus,
   ReconciliationStatus, RegistrationMode, ReleaseKind, RiskControl, RiskLevel, Role, AccountStatus, RuleRole, Severity,
   SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus,
@@ -52,7 +52,8 @@ export interface RuleRef {
 export interface ModelRef { model_key: string; version: string; role: 'auxiliary'; output: Record<string, unknown>; evidence_ids: string[] }
 export interface TextWithEvidence { text: string; expr: string | null; evidence_ids: string[] }
 /** v0.2.3 §5.1 HorizonCap */
-export interface HorizonCap { horizon: Horizon; cap: number; kind: 'data_missing' | 'requires'; rule_id: string | null; inputs_missing: string[] }
+/** v0.2.6（T006e）：kind 只有 gate（HG1–HG6）与 data_missing（特征缺失，或 LG0 / LG0B）；IT0 判 0 分是分数，不进 caps */
+export interface HorizonCap { horizon: Horizon; cap: number; kind: 'gate' | 'data_missing'; rule_id: string | null; inputs_missing: string[] }
 /** v0.2.5 §5.1 HorizonHint：画像类规则（mode: hint）已填写且不满足时的提示；不影响分数与 suitable */
 export interface HorizonHint { horizon: Horizon; rule_id: string; text: string }
 export type HorizonReason = TextWithEvidence & { horizon: Horizon; polarity: 'for' | 'against' };
@@ -355,6 +356,8 @@ export interface Me {
   role: Role;
   status: AccountStatus;
   entitlements: Record<string, unknown>;
+  /** v0.2.6：本人数据证书状态（不含证书值） */
+  data_licence_status: DataLicenceState;
 }
 /** GET /meta/registration */
 export interface RegistrationMeta { mode: RegistrationMode }

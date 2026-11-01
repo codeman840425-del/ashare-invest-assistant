@@ -31,6 +31,10 @@ a { color: #58a6ff; cursor: pointer; }
 .user { color: var(--muted); }
 .sample-banner { height: 24px; flex: none; line-height: 24px; padding: 0 12px; font-size: 12px; color: #1a1300; background: repeating-linear-gradient(45deg, #e3a008, #e3a008 14px, #d29500 14px, #d29500 28px); white-space: nowrap; overflow: hidden; }
 .sample-banner b { background: #1a1300; color: #e3a008; padding: 1px 6px; border-radius: 2px; margin-right: 6px; }
+.licence-banner { flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 28px; font-size: 12px; color: #d8dee6; background: #1c2431; border-bottom: 1px solid var(--line); }
+.licence-banner.bad { background: #3a1d1d; color: #ffd8d8; }
+.strategy-enable { display: inline-flex; align-items: flex-start; gap: 8px; }
+.high-risk-note { font-size: 12px; line-height: 18px; color: #ffb4a8; max-width: 520px; }
 .content { flex: 1; min-height: 0; overflow: auto; }
 .risk-footer { height: 24px; flex: none; line-height: 24px; padding: 0 12px; font-size: 11px; color: #9aa4b0; background: #0d121a; border-top: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .watermark { position: fixed; inset: 0; pointer-events: none; z-index: 900; display: grid; place-items: center; font-size: 140px; font-weight: 900; letter-spacing: 30px; color: rgba(227, 160, 8, 0.055); transform: rotate(-18deg); user-select: none; }

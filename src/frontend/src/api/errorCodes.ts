@@ -1,5 +1,5 @@
 /**
- * 契约 §4 错误码表（HTTP 错误码，58 个）。运行时以 `/meta/enums.error_codes` 为准；
+ * 契约 §4 错误码表（HTTP 错误码，61 个；v0.2.6 加 DATA_LICENCE_*）。运行时以 `/meta/enums.error_codes` 为准；
  * 本表由契约逐行抄录，`errors.test.ts` 解析 docs/api-contract.md 校验一致。
  */
 export const ERROR_CODES = {
@@ -19,6 +19,9 @@ export const ERROR_CODES = {
   IDEMPOTENCY_CONFLICT: 409,
   VERSION_CONFLICT: 409,
   IMMUTABLE_RESOURCE: 409,
+  DATA_LICENCE_IN_USE: 409,
+  DATA_LICENCE_NOT_SET: 409,
+  DATA_LICENCE_UNAVAILABLE: 409,
   IMPORT_FILE_ERRORS: 422,
   IMPORT_ROW_ERRORS: 422,
   IMPORT_WARNINGS_UNACKNOWLEDGED: 422,

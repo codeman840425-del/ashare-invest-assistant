@@ -1,10 +1,11 @@
 /**
- * MSW 处理器：按契约 v0.2.5 §7 的路径与响应结构返回示例数据。只拦截同源 `/api/v1/*`。
+ * MSW 处理器：按契约 v0.2.6 §7 的路径与响应结构返回示例数据。只拦截同源 `/api/v1/*`。
  * 未实现的端点统一返回 404 + 契约错误信封（code=NOT_FOUND），便于发现漏接。
  */
 import { http, HttpResponse, delay, matchRequestUrl } from 'msw';
 import type { MarketOverview, Notification, TerminalScope, TodayResponse } from '../api/types';
 import { accountHandlers } from './accountHandlers';
+import { resetStrategies, strategyHandlers } from './strategyHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
 import { currentUser, resetSession } from './session';
 import {
@@ -22,6 +23,7 @@ const notifications = (): Notification[] => NOTIFICATIONS.map((n) => ({ ...n, re
 export function resetMockState() {
   readAt.clear();
   resetSession();
+  resetStrategies();
 }
 
 /** 浏览器里加一点延迟让加载态可见；测试（node）里不延迟 */
@@ -69,6 +71,8 @@ function todayBody(): TodayResponse {
 const routeHandlers = [
   // 鉴权、账号、券商账户、成交、导入、对账（T-F02/T-F02a/T-F04，见 accountHandlers.ts）
   ...accountHandlers,
+  // 策略库最小模拟（T-F22，见 strategyHandlers.ts）
+  ...strategyHandlers,
   http.get(`${API}/health/ready`, () => HttpResponse.json(HEALTH_READY)),
 
   http.get(`${API}/terminal`, async ({ request }) => {

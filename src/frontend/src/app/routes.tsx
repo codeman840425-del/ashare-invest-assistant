@@ -16,7 +16,6 @@ export const PLACEHOLDERS: [string, string][] = [
   ['today', '今日关注'],
   ['market', '市场概览'],
   ['stocks/:code', '个股'],
-  ['strategies', '策略库'],
   ['strategies/:id', '策略详情'],
   ['strategy-cards', '策略知识卡'],
   ['strategy-instances', '我的策略实例'],
@@ -56,6 +55,8 @@ export const routes: RouteObject[] = [
       { path: 'portfolio/import/:batchId', lazy: lazyPage(() => import('../pages/portfolio/ImportWizardPage'), (m) => m.ImportWizardPage) },
       { path: 'settings', element: <Navigate to="/settings/profile" replace /> },
       { path: 'settings/profile', lazy: lazyPage(() => import('../pages/settings/ProfilePage'), (m) => m.ProfilePage) },
+      { path: 'settings/data-licence', lazy: lazyPage(() => import('../pages/settings/DataLicencePage'), (m) => m.DataLicencePage) },
+      { path: 'strategies', lazy: lazyPage(() => import('../pages/strategies/StrategiesPage'), (m) => m.StrategiesPage) },
       ...PLACEHOLDERS.map(([path, title]) => ({ path, element: <PlaceholderPage title={title} /> })),
       { path: 'admin', element: <AdminGate><Navigate to="/admin/users" replace /></AdminGate> },
       {

@@ -84,7 +84,7 @@ export const EPISTEMIC: Record<EpistemicType, { text: string; color: string }> =
   hypothesis: { text: '假设', color: 'purple' }, execution: { text: '执行', color: 'blue' },
 };
 export const GAP_REASON: Record<GapReason, string> = {
-  no_source: '无数据源', not_yet_published: '尚未发布', upstream_error: '上游错误', quota_deferred: '配额顺延', user_input_missing: '待用户录入',
+  no_source: '无数据源', not_yet_published: '尚未发布', upstream_error: '上游错误', quota_deferred: '配额顺延', user_input_missing: '待用户录入', data_licence_unavailable: '你的数据证书不可用',
 };
 export const ORIGIN: Record<SuggestionOrigin, string> = {
   daily_batch: '盘后批处理', intraday_event: '盘中事件', manual_refresh: '手动刷新',
@@ -92,7 +92,7 @@ export const ORIGIN: Record<SuggestionOrigin, string> = {
 export const REGIME: Record<MarketRegime, string> = { uptrend: '上行', range: '震荡', downtrend: '下行' };
 export const NOTIFY_KIND: Record<NotificationKind, string> = {
   suggestion_change: '候选信号变化', invalidation: '失效条件触发', daily_report: '日报', alert: '提醒', import: '导入',
-  system: '系统', reason_released: '原因已解除', plan_draft_ready: '计划草案待确认', plan_triggered: '计划条件已满足', strategy_health: '策略健康度',
+  system: '系统', reason_released: '原因已解除', plan_draft_ready: '计划草案待确认', plan_triggered: '计划条件已满足', strategy_health: '策略健康度', data_licence: '数据证书',
 };
 export const SEVERITY: Record<Severity, string> = { info: 'blue', attention: 'orange', important: 'red' };
 export const RULE_ROLE: Record<RuleRole, string> = {

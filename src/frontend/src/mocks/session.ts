@@ -10,6 +10,7 @@ import type {
 import type { Me } from '../api/types';
 import { IMPORT_CODE_MAP, renderTemplate } from '../api/importCodes';
 import { ACCOUNT_ID, NOW, uid } from './fixtures';
+import { licenceState, resetLicences } from './licence';
 
 export interface MockUser {
   id: string;
@@ -358,13 +359,14 @@ export function resetSession() {
   state.batches = initialBatches();
   state.reconciled = new Set([ACCOUNT_ID]);
   state.tradeIdem = new Map();
+  resetLicences();
 }
 resetSession();
 
 export const currentUser = (): MockUser | null => state.users.find((x) => x.id === state.currentUserId) ?? null;
 export const toMe = (x: MockUser): Me => ({
   id: x.id, username: x.username, display_name: x.display_name, role: x.role, status: x.status,
-  entitlements: { 'watchlist.per_user_cap': 50 },
+  entitlements: { 'watchlist.per_user_cap': 50 }, data_licence_status: licenceState(x.id),
 });
 export const toAdminUser = (x: MockUser): AdminUser => ({
   id: x.id, username: x.username, display_name: x.display_name, role: x.role, status: x.status, apply_note: x.apply_note, created_at: x.created_at,

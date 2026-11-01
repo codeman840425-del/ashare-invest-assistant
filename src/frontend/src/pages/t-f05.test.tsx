@@ -35,9 +35,9 @@ describe('T-F05 删除项', () => {
     await screen.findByTestId('terminal');
     expect(screen.queryByText('风险测评')).toBeNull();
   });
-  it('Me 只有契约 v0.2.5 的六个字段', async () => {
+  it('Me 只有契约字段（v0.2.5 删 consents / risk_assessment；v0.2.6 加 data_licence_status）', async () => {
     const me = await (await fetch('/api/v1/me')).json();
-    expect(Object.keys(me).sort()).toEqual(['display_name', 'entitlements', 'id', 'role', 'status', 'username']);
+    expect(Object.keys(me).sort()).toEqual(['data_licence_status', 'display_name', 'entitlements', 'id', 'role', 'status', 'username']);
   });
 });
 

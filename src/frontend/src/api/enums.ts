@@ -1,9 +1,9 @@
 /**
- * 契约 v0.2.5 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。
+ * 契约 v0.2.6 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。
  * 运行时以 `GET /meta/enums` 为准；这里的常量用于类型推导与 mock 校验。
  */
 /** 与 `/meta/enums.version` 对齐的契约版本 */
-export const CONTRACT_VERSION = 'v0.2.5';
+export const CONTRACT_VERSION = 'v0.2.6';
 
 export const ENUMS = {
   account_status: ['pending', 'approved', 'rejected', 'disabled'],
@@ -38,12 +38,12 @@ export const ENUMS = {
   ],
   notification_kind: [
     'suggestion_change', 'invalidation', 'daily_report', 'alert', 'import', 'system', 'reason_released', 'plan_draft_ready',
-    'plan_triggered', 'strategy_health',
+    'plan_triggered', 'strategy_health', 'data_licence',
   ],
   severity: ['info', 'attention', 'important'],
   channel: ['in_app', 'email', 'wecom_app'],
   data_status: ['fresh', 'stale', 'pending', 'partial', 'unavailable'],
-  gap_reason: ['no_source', 'not_yet_published', 'upstream_error', 'quota_deferred', 'user_input_missing'],
+  gap_reason: ['no_source', 'not_yet_published', 'upstream_error', 'quota_deferred', 'user_input_missing', 'data_licence_unavailable'],
   data_provider: ['mairui', 'user_import', 'user_input', 'system'],
   source_kind: ['market_data', 'disclosure', 'user_input', 'system_calc'],
   trade_side: ['buy', 'sell'],
@@ -64,6 +64,9 @@ export const ENUMS = {
   health_status: ['ok', 'degraded', 'down'],
   component_health: ['ok', 'error'],
   ingest_health: ['ok', 'stale', 'paused', 'unknown'],
+  // v0.2.6（plan 2.1B）：每用户自用数据证书
+  data_licence_status: ['not_set', 'pending_verification', 'active', 'invalid', 'expired', 'quota_exceeded', 'ip_limited', 'paused_by_admin'],
+  data_licence_tier: ['free', 'trial', 'monthly', 'annual', 'diamond', 'other'],
 } as const;
 
 /** §6.1 不可执行原因码（v0.2.5：22 个） */
@@ -103,6 +106,8 @@ export type NotificationKind = E<'notification_kind'>;
 export type Severity = E<'severity'>;
 export type DataStatus = E<'data_status'>;
 export type GapReason = E<'gap_reason'>;
+export type DataLicenceState = E<'data_licence_status'>;
+export type DataLicenceTier = E<'data_licence_tier'>;
 export type DataProvider = E<'data_provider'>;
 export type ReconciliationStatus = E<'reconciliation_status'>;
 export type ReconciliationItemKind = E<'reconciliation_item_kind'>;
@@ -114,6 +119,8 @@ export type DedupStatus = E<'dedup_status'>;
 export type TradeSide = E<'trade_side'>;
 export type PlanDraftStatus = E<'plan_draft_status'>;
 export type Lifecycle = E<'lifecycle'>;
+export type CardRiskLevel = E<'card_risk_level'>;
+export type InstanceStatus = E<'instance_status'>;
 export type CandidateSignalState = E<'candidate_signal_state'>;
 export type ReasonStatus = E<'reason_status'>;
 export type CheckOn = E<'check_on'>;

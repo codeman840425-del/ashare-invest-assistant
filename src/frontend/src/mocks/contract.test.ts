@@ -1,5 +1,5 @@
 /**
- * Mock 字段校验：示例数据的字段名必须与契约 v0.2.x（当前 v0.2.5，docs/api-contract.md，只读）逐字一致。
+ * Mock 字段校验：示例数据的字段名必须与契约 v0.2.x（当前 v0.2.6，docs/api-contract.md，只读）逐字一致。
  * 字段清单直接从契约文本解析（§5.1 内联结构、§5.2 字段表、StrategyConclusion / DimensionCell / DailyReport 定义），
  * 契约改动后这里会第一时间失败。
  */
@@ -193,8 +193,8 @@ describe('Mock 业务一致性', () => {
     }
   });
 
-  it('v0.2.5：前端对齐的契约版本与契约文本、/meta/enums.version 示例一致', () => {
-    expect(CONTRACT_VERSION).toBe('v0.2.5');
+  it('v0.2.6：前端对齐的契约版本与契约文本、/meta/enums.version 示例一致', () => {
+    expect(CONTRACT_VERSION).toBe('v0.2.6');
     expect(CONTRACT).toContain(`版本：**${CONTRACT_VERSION}**`);
     expect(CONTRACT).toContain(`{"version": "${CONTRACT_VERSION}"`);
   });
@@ -237,6 +237,18 @@ describe('Mock 业务一致性', () => {
       }
     }
     expect(capped).toBeGreaterThan(0);
+  });
+
+  it('v0.2.6 T006e：caps[].kind 只有 gate / data_missing；LG0 记 data_missing；IT0 与画像类规则不进 caps', () => {
+    const line = CONTRACT.split('\n').find((l) => l.startsWith('| `HorizonCap` |'))!;
+    expect(line).toContain('kind: "gate" \\| "data_missing"');
+    const all = Object.values(HORIZON_ASSESSMENTS).flatMap((a) => a.caps);
+    for (const c of all) {
+      expect(['gate', 'data_missing']).toContain(c.kind);
+      expect(['IT0', 'SH0', 'SH0B', 'SH0C', 'IT0B', 'IT0C']).not.toContain(c.rule_id);
+      if (c.kind === 'gate') expect(c.rule_id).toMatch(/^HG[1-6]$/);
+    }
+    expect(all.some((c) => c.kind === 'data_missing' && c.rule_id === 'LG0' && c.inputs_missing.length === 0)).toBe(true);
   });
 
   it('v0.2.2 G-01：停牌/一字涨停等可执行性原因只进 gate_results 与不可执行原因，策略状态不改为 vetoed', () => {

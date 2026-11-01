@@ -1,4 +1,4 @@
-import { capExplanation } from '../i18n/horizonCaps';
+import { CAP_KIND_TEXT, capExplanation } from '../i18n/horizonCaps';
 import { Alert, Button, Select, Tag, Tooltip } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router';
@@ -83,8 +83,8 @@ function HorizonPanel({ sg }: { sg: Suggestion }) {
           })}
           {a.caps.map((c, i) => (
             <div key={`cap-${i}`} className="hz-missing" data-testid={`cap-${c.horizon}-${c.rule_id ?? "missing"}`}>
-              {HORIZON[c.horizon]} 封顶 {c.cap}：{capExplanation(c)}
-              {c.kind === 'requires' && c.rule_id ? <span className="mono muted">（{c.rule_id}）</span> : null}
+              {HORIZON[c.horizon]} 封顶 {c.cap}（{CAP_KIND_TEXT[c.kind]}）：{capExplanation(c)}
+              {c.rule_id ? <span className="mono muted">（{c.rule_id}）</span> : null}
             </div>
           ))}
           {/* v0.2.5 #2/#3：画像类规则只提示，不影响分数与 suitable */}

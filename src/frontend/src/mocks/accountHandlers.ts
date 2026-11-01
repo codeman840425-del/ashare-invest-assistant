@@ -1,6 +1,6 @@
 /**
  * MSW 处理器（T-F02 / T-F02a / T-F04）：认证、画像、管理端用户审核、券商账户、成交、导入、对账。
- * 后端目前只实现了 /health* 与 /meta/enums（src/backend/app/api/v1），其余都在这里按契约 v0.2.5 模拟（v0.2.5 起无同意流程与风险测评，§1.3 只剩登录与审核状态两道门槛）。
+ * 后端目前只实现了 /health* 与 /meta/enums（src/backend/app/api/v1），其余都在这里按契约 v0.2.6 模拟（v0.2.6 加本人数据证书；v0.2.5 起无同意流程与风险测评，§1.3 只剩登录与审核状态两道门槛）。
  */
 import { http, HttpResponse } from 'msw';
 import type {
@@ -8,12 +8,14 @@ import type {
   ImportBatchSummary, ResolveFindingRequest, Trade, TradeCreate,
 } from '../api/accountTypes';
 import { ENUMS } from '../api/enums';
+import { LICENCE_RE, type DataLicencePatch, type DataLicencePut } from '../api/licenceTypes';
 import { OVERRIDE_CHOICES } from '../i18n/importLabels';
 import {
   MOCK_INVITE_CODES, emptyStats, finding, applyParse, currentUser, publicBatch, reconciliationFor, state, toAdminUser, toMe,
   type MockBatch, type MockUser,
 } from './session';
 import { errorBody, page } from './handlerUtils';
+import { deleteLicence, licenceOf, patchLicence, putLicence, testLicence } from './licence';
 import { NOW, uid } from './fixtures';
 
 const API = '/api/v1';
@@ -119,6 +121,44 @@ export const accountHandlers = [
     state.profiles.set(me().id, p);
     return json(p);
   }),
+
+  // ---------------- §7.1 数据证书（v0.2.6，T-F22）：任何响应都不含证书值 ----------------
+  http.get(`${API}/me/data-licence`, () => json(licenceOf(me().id))),
+  http.put(`${API}/me/data-licence`, async ({ request }) => {
+    const b = (await request.json()) as Partial<DataLicencePut>;
+    const licence = typeof b.licence === 'string' ? b.licence.trim() : '';
+    const fields: { field: string; issue: string }[] = [];
+    // 消息不含输入值（契约 §7.1）
+    if (!LICENCE_RE.test(licence)) fields.push({ field: 'licence', issue: '格式不符：应为 16–64 位字母、数字或连字符' });
+    if (!b.tier || !(ENUMS.data_licence_tier as readonly string[]).includes(b.tier)) fields.push({ field: 'tier', issue: '取值不合法' });
+    if (typeof b.has_quant_pro !== 'boolean') fields.push({ field: 'has_quant_pro', issue: '必须为布尔值' });
+    if (b.expires_on != null && !/^\d{4}-\d{2}-\d{2}$/.test(b.expires_on)) fields.push({ field: 'expires_on', issue: '日期格式 YYYY-MM-DD' });
+    if (fields.length) return validationError(fields);
+    const r = putLicence(me().id, licence, { tier: b.tier!, has_quant_pro: b.has_quant_pro!, expires_on: b.expires_on ?? null });
+    if (!r.ok) return err(409, 'DATA_LICENCE_IN_USE', '该证书已绑定到另一个账号');
+    return json(r.s, 202);
+  }),
+  http.patch(`${API}/me/data-licence`, async ({ request }) => {
+    const b = (await request.json()) as DataLicencePatch & { licence?: unknown };
+    const fields: { field: string; issue: string }[] = [];
+    if ('licence' in b) fields.push({ field: 'licence', issue: 'PATCH 不能修改证书，请用 PUT' });
+    if (b.tier !== undefined && !(ENUMS.data_licence_tier as readonly string[]).includes(b.tier)) fields.push({ field: 'tier', issue: '取值不合法' });
+    if (b.has_quant_pro !== undefined && typeof b.has_quant_pro !== 'boolean') fields.push({ field: 'has_quant_pro', issue: '必须为布尔值' });
+    if (b.expires_on != null && !/^\d{4}-\d{2}-\d{2}$/.test(b.expires_on)) fields.push({ field: 'expires_on', issue: '日期格式 YYYY-MM-DD' });
+    if (fields.length) return validationError(fields);
+    const patch: DataLicencePatch = {};
+    if (b.tier !== undefined) patch.tier = b.tier;
+    if (b.has_quant_pro !== undefined) patch.has_quant_pro = b.has_quant_pro;
+    if (b.expires_on !== undefined) patch.expires_on = b.expires_on;
+    const s = patchLicence(me().id, patch);
+    return s ? json(s) : err(409, 'DATA_LICENCE_NOT_SET', '尚未设置数据证书');
+  }),
+  http.delete(`${API}/me/data-licence`, () => {
+    deleteLicence(me().id);
+    return noContent();
+  }),
+  http.post(`${API}/me/data-licence/test`, () =>
+    testLicence(me().id) ? json({ verification_id: uid(4100 + Math.floor(Math.random() * 1000)) }, 202) : err(409, 'DATA_LICENCE_NOT_SET', '尚未设置数据证书')),
 
   // ---------------- §7.9 管理端：用户审核 ----------------
   http.get(`${API}/admin/users`, ({ request }) => {

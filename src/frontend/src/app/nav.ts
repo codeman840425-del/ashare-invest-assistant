@@ -21,6 +21,7 @@ export const NAV_MORE = [
   { path: '/notifications', label: '通知中心' },
   { path: '/portfolio/import', label: '交割单导入' },
   { path: '/settings/profile', label: '投资画像' },
+  { path: '/settings/data-licence', label: '数据证书' },
 ];
 /** 管理后台入口只对 role=admin 显示（评审 M4；契约 §1.3：非管理员访问 /admin/* 一律 404） */
 export const NAV_ADMIN = { path: '/admin/users', label: '用户审核（管理）' };

@@ -1,8 +1,12 @@
 """契约 §3 枚举、§4.1 导入提示码与 §6.1 不可执行原因码表 —— **全仓唯一来源**。
 
 ``GET /meta/enums`` 直接下发本模块内容；其他模块需要枚举时从这里导入，不要另行定义。
-已同步到契约 :data:`CONTRACT_VERSION`（v0.2.3；v0.2 为 T-A01 定稿，原 ``PENDING_T_A01`` 标记已解除；
-v0.2.1、v0.2.2、v0.2.3 未改 §3 枚举、§4 错误码与 §6.1 原因码的取值）。
+已同步到契约 :data:`CONTRACT_VERSION`（v0.2.4；v0.2 为 T-A01 定稿，原 ``PENDING_T_A01`` 标记已解除；
+v0.2.1–v0.2.3 未改 §3 枚举、§4 错误码与 §6.1 原因码的取值；v0.2.4 新增 §3 的 ``consent_key``、
+``legal_doc_key``、``consent_presentation``、``assessment_status``，§4 错误码不变）。
+
+注：这四个 v0.2.4 枚举只在 ``/meta/enums`` 下发，尚无业务代码使用；同意流程与风险测评已由用户取消，
+待架构师 T-A06（契约 v0.2.5）给出删除清单后随版本一并删除。
 
 ``CONTRACT_ENUMS`` 只登记契约 §3 的命名枚举；契约里以内联字面量出现的取值（如 ``/me/profile`` 的
 ``effort``、``experience``）在本模块文末“非 §3 取值”一节集中定义，供 DB CHECK 与请求模型复用，
@@ -30,6 +34,35 @@ class AccountStatus(StrEnum):
 class Role(StrEnum):
     USER = "user"
     ADMIN = "admin"
+
+
+class ConsentKey(StrEnum):  # v0.2.4：需用户同意的文书
+    TERMS = "terms"
+    PRIVACY = "privacy"
+    SIGNAL_RISK_DISCLOSURE = "signal_risk_disclosure"
+    SENSITIVE_FINANCIAL_INFO = "sensitive_financial_info"
+
+
+class LegalDocKey(StrEnum):  # v0.2.4：consent_key + 只展示的 site_risk_notice
+    TERMS = "terms"
+    PRIVACY = "privacy"
+    SIGNAL_RISK_DISCLOSURE = "signal_risk_disclosure"
+    SENSITIVE_FINANCIAL_INFO = "sensitive_financial_info"
+    SITE_RISK_NOTICE = "site_risk_notice"
+
+
+class ConsentPresentation(StrEnum):  # v0.2.4
+    CHECKBOX_UNTICKED = "checkbox_unticked"
+    SCROLL_AND_CONFIRM = "scroll_and_confirm"
+    MODAL = "modal"
+
+
+class AssessmentStatus(StrEnum):  # v0.2.4：服务端按时间计算，不存库
+    VALID = "valid"
+    EXPIRING = "expiring"
+    GRACE = "grace"
+    EXPIRED = "expired"
+    SUPERSEDED = "superseded"
 
 
 # ---------------------------------------------------------------------------
@@ -524,13 +557,17 @@ class IngestHealth(StrEnum):
 # ---------------------------------------------------------------------------
 
 #: 本模块对应的契约版本（``/meta/enums`` 的 ``version``）
-CONTRACT_VERSION: Final = "v0.2.3"
+CONTRACT_VERSION: Final = "v0.2.4"
 
 #: ``/meta/enums`` 的 ``enums``：契约 §3 各表名 → 取值（顺序同 §3）。``reason_code`` 不在其中，
 #: 只在 ``reason_codes`` 里带解除条件展开（契约 §7.10；评审 M7）。
 CONTRACT_ENUMS: Final[dict[str, type[StrEnum]]] = {
     "account_status": AccountStatus,
     "role": Role,
+    "consent_key": ConsentKey,
+    "legal_doc_key": LegalDocKey,
+    "consent_presentation": ConsentPresentation,
+    "assessment_status": AssessmentStatus,
     "epistemic_type": EpistemicType,
     "horizon": Horizon,
     "dimension": Dimension,

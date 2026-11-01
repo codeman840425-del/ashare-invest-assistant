@@ -1,9 +1,9 @@
-"""``GET /meta/enums``（契约 §7.10，v0.2.3）：§3 枚举、§6.1 原因码、§4 错误码、§4.1 导入提示码。
+"""``GET /meta/enums``（契约 §7.10，v0.2.4）：§3 枚举、§6.1 原因码、§4 错误码、§4.1 导入提示码。
 
 不分页、可缓存、不需要登录。内容全部来自 :mod:`app.schemas.enums` 与
 :mod:`app.common.errors`，本文件不定义任何取值。结构（契约 §7.10）::
 
-    {"version": "v0.2.3",
+    {"version": "v0.2.4",
      "enums": {name: [value, ...]},
      "reason_codes": [{code, release_kinds, check_on, manually_releasable, note}],
      "error_codes": [{code, http_status, scope: "http"|"internal"}],

@@ -25,8 +25,10 @@ ENUM_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 UPPER_CODE_ENUMS = {"gate", "reason_code"}
 IMPORT_CODES_JSON = Path(__file__).resolve().parents[1] / "unit" / "import_codes.json"
 TODO = "后端 /meta/enums 未同步契约（T-B01 v0.2 修订；v0.2.3 由后端按 T-A03 同步：version、PAYLOAD_TOO_LARGE 等）"
-#: 本组测试对齐的契约版本（T-T01b）；/meta/enums.version 必须等于它
-CONTRACT_VERSION = "v0.2.3"
+#: 本组测试对齐的契约版本（T-T01d 升到 v0.2.4，架构师 35f4880）；/meta/enums.version 必须等于它
+CONTRACT_VERSION = "v0.2.4"
+#: origin/main 的 docs 仍是 v0.2.3（35f4880 未推到 origin）：文档版本落后一个小版本时 xfail 而不是失败
+DOCS_PENDING = "docs 仍为 v0.2.3：契约 v0.2.4（T-A05 35f4880）未推到 origin（运维推送）"
 
 
 # ---------------- 契约 markdown 解析 ----------------
@@ -87,8 +89,11 @@ def payload(client) -> dict[str, Any]:
 # ---------------- 解析器自检（文档 v0.2.3） ----------------
 def test_contract_header_version(contract):
     m = re.search(r"版本：\*\*(v[0-9.]+)\*\*", contract)
-    assert m and m.group(1) == CONTRACT_VERSION
+    assert m and m.group(1) in {"v0.2.3", CONTRACT_VERSION}, m and m.group(1)
     assert contract.index("### v0.2.3") < contract.index("### v0.2.2") < contract.index("### v0.2.1")
+    if m.group(1) != CONTRACT_VERSION:
+        pytest.xfail(DOCS_PENDING)
+    assert contract.index("### v0.2.4") < contract.index("### v0.2.3")
 
 
 def test_contract_parsers_sanity(contract):
@@ -151,8 +156,8 @@ def test_error_codes_match_contract(payload, contract):
 def test_version_and_import_codes(payload):
     if "version" not in payload or "import_codes" not in payload:
         pytest.xfail(f"{TODO}：/meta/enums 缺 version / import_codes（契约 v0.2 §7.10）")
-    if payload["version"] != CONTRACT_VERSION and re.fullmatch(r"v0\.2(\.[0-2])?", payload["version"]):
-        pytest.xfail(f"后端（T-B01 / v0.2.3 同步）：app/schemas/enums.py 的 CONTRACT_VERSION 仍为 {payload['version']}，应改为 {CONTRACT_VERSION}")
+    if payload["version"] != CONTRACT_VERSION and re.fullmatch(r"v0\.2(\.[0-3])?", payload["version"]):
+        pytest.xfail(f"后端（T-B01 / v0.2.3、v0.2.4 同步）：app/schemas/enums.py 的 CONTRACT_VERSION 仍为 {payload['version']}，应改为 {CONTRACT_VERSION}")
     assert payload["version"] == CONTRACT_VERSION
     want = {c["code"]: c for c in json.loads(IMPORT_CODES_JSON.read_text(encoding="utf-8"))["codes"]}
     got = {c["code"]: c for c in payload["import_codes"]}

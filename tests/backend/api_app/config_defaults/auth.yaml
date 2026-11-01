@@ -17,10 +17,5 @@ invite:
   default_ttl_h: 168            # int，默认 7 天过期
   max_ttl_h: 720                # int，管理员可设的最长有效期 30 天
   max_uses: 1                   # int，V1 只支持单次使用（模型只接受 1）
-consents:
-  doc_versions:                 # 各文书当前版本；null = 未定稿，存为 "unversioned"
-    terms: null
-    privacy: null
-    risk_disclosure: null
-    signal_risk_disclosure: null
-    sensitive_financial_info: null
+admin:
+  same_ip_highlight_threshold: 3   # int ◇，审核列表中同 IP 注册数超过此值时高亮，只作提示（3.6，T-A05 D8）

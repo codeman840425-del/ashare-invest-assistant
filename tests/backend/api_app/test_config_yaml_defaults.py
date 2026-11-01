@@ -16,6 +16,8 @@ T-T01b 起对齐 plan/契约 v0.2.2（T-A02）：§6.1 由 5 个文件变为 6 �
 T-T01d（T-A05，7c62f59，契约 #22）：§6.1 由 6 个文件变为 8 个（新增 ``imports.yaml``、``auth.yaml``）；
 交割单上传上限的键路径改为 ``imports.max_file_bytes`` 等（``Settings.business.imports.*``），
 T-B02a 暂放的 ``ingest.imports.*`` 作废，``ingest.yaml`` 不得再有 ``imports`` 段。
+契约 v0.2.4（35f4880）：``auth.yaml`` 去掉 ``consents.doc_versions``（改由 ``legal_documents`` 表），
+新增 ``admin.same_ip_highlight_threshold``；快照按 35f4880 的 plan §6.1 原文。
 
 YAML 一律按 1.2 布尔规则读取（只认 true/false），与后端 ``config_files`` 一致；plan 已把 ``"on"`` 加引号。
 """
@@ -49,7 +51,7 @@ OWNER = {
     "horizon_classifier": "后端 T-B30（周期分类：f.* 特征、recompute 加 position_open_close、rules 全文；v0.2.3 version_no 2 / classifier_version 1.1.0 / SH0C）",
     "llm": "后端 T-B25（LLM 网关：config/llm.yaml 与其模型）",
     "imports": "后端 T-B02a 跟进（T-A05：新建 config/imports.yaml 与模型，键路径 imports.*，删除 ingest.imports.*）",
-    "auth": "后端 T-B03 跟进（T-A05：新建 config/auth.yaml 与模型：password/password_hash/session/invite/consents）",
+    "auth": "后端 T-B03 跟进（T-A05：新建 config/auth.yaml 与模型：password/password_hash/session/invite/admin；v0.2.4 无 consents 段）",
 }
 HORIZONS = ("intraday_t", "short", "swing", "long")
 
@@ -287,8 +289,9 @@ def test_key_defaults_auth():
     inv = d["invite"]
     assert (inv["code_bytes"], inv["default_ttl_h"], inv["max_ttl_h"], inv["max_uses"]) == (16, 168, 720, 1)
     assert inv["default_ttl_h"] <= inv["max_ttl_h"]
-    assert d["consents"]["doc_versions"] == dict.fromkeys(
-        ("terms", "privacy", "risk_disclosure", "signal_risk_disclosure", "sensitive_financial_info"))
+    # 契约 v0.2.4 #3（35f4880）：文书版本改由 legal_documents 表提供，auth.yaml 删除 consents 段；新增审核提示阈值
+    assert "consents" not in d and "doc_versions" not in str(d)
+    assert d["admin"] == {"same_ip_highlight_threshold": 3}
     keys = [p for p in diff_paths(d, {}) if re.search(r"(?i)(secret|master_key|api_key|pepper)", p)]
     assert keys == [], "auth.yaml 不放密钥（APP_MASTER_KEY 只来自环境变量）"
 

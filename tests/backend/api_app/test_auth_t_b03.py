@@ -7,6 +7,10 @@
 - 契约 v0.2.3 #24–#27（T-A05，架构师 7c62f59，尚未推到 origin）：用户名 4–32、会话绝对 30 天 + 改密轮换、
   同意书 ``doc_versions`` / ``sensitive_financial_info`` / ``CONSENT_REQUIRED``、注册 ``apply_note`` 与邀请码。
   后端未实现的条目用 ``xfail(strict=True)``，原因写明负责任务（T-B03 跟进 / T-B03c）。
+- 同意书（consents）相关用例按用户决定暂停：标 ``skip``，原因 ``on hold pending T-A06 (v0.2.5)``；
+  不新增契约 v0.2.4 的同意书/风险测评用例（T-T01d 范围调整）。CSRF 用例借 ``/me/consents`` 作非安全方法载体，
+  只断言 CSRF 拒绝，不涉及同意书语义，保留。
+- 契约 v0.2.4（35f4880，未推到 origin）：``apply_note`` ≤ 200；CSRF 双提交以 Cookie 为准（头、Cookie、会话令牌三者一致）。
 - 防暴力（限速/渐进锁定，plan §3.6 数值）归 T-B03a：用 ``xfail(strict=True)`` 固化契约预期，实现后会 XPASS 失败提醒转正。
 """
 
@@ -50,6 +54,10 @@ ABSOLUTE_TTL_S = 2592000  # 契约 #25 / plan 6.1 auth.yaml session.absolute_ttl
 DOC_KEYS = ("terms", "privacy", "risk_disclosure", "signal_risk_disclosure", "sensitive_financial_info")
 #: 后端未跟上 v0.2.3 #24–#27 的负责任务
 T_B03_FU = "T-B03 跟进（契约 v0.2.3 #25/#26，T-A05 7c62f59）：后端尚未实现"
+#: 用户取消（T-T01d 范围调整）：同意书与 v0.2.4 风险测评用例暂停
+ON_HOLD = "on hold pending T-A06 (v0.2.5)"
+#: 后端未跟上契约 v0.2.4（T-A05 35f4880）的负责任务
+T_B03_V024 = "T-B03 跟进（契约 v0.2.4，T-A05 35f4880）：后端尚未实现"
 T_B03C = "T-B03c（契约 #27 邀请码）：未实现前 invite 模式按 closed 返回 503"
 AGREEMENTS = ["terms", "privacy", "risk_disclosure"]
 ME_KEYS = {"id", "username", "display_name", "role", "status", "entitlements", "consents", "risk_assessment"}
@@ -243,7 +251,7 @@ def test_meta_registration_reports_mode(app_client: Callable[..., Any], mode: st
     assert set(r.json()) <= {"mode", "doc_versions"}
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（/meta/registration 无 doc_versions）")
+@pytest.mark.skip(reason=ON_HOLD)
 def test_meta_registration_reports_doc_versions(app_client: Callable[..., Any]) -> None:
     """#26：``doc_versions`` 五个键，值为 string；auth.yaml 默认 null → ``"unversioned"``。"""
     body = app_client("closed").get(f"{API}/meta/registration").json()
@@ -335,15 +343,16 @@ def test_register_password_length_bounds_accepted(app_client: Callable[..., Any]
 
 @pytest.mark.xfail(strict=True, reason=T_B03_FU + "（RegisterIn 无 apply_note，extra=forbid → 400）")
 def test_register_accepts_apply_note(app_client: Callable[..., Any], sql: Callable[..., Any]) -> None:
-    """#27：注册体增加 ``apply_note: string(≤500) | null``（open 模式可选）。"""
+    """#27：注册体增加 ``apply_note``（open 模式可选）；v0.2.4 #2 上限由 500 改为 200。"""
     c = app_client("open")
-    for note in ("测试申请说明", "x" * 500, None):
+    for note in ("测试申请说明", "x" * 200, None):
         r = c.post(f"{API}/auth/register", json=reg(new_name(), new_pw(), apply_note=note))
         assert r.status_code == 201, r.text[:300]
 
 
-def test_register_apply_note_over_500_is_400(app_client: Callable[..., Any]) -> None:
-    r = app_client("open").post(f"{API}/auth/register", json=reg(new_name(), new_pw(), apply_note="x" * 501))
+def test_register_apply_note_over_200_is_400(app_client: Callable[..., Any]) -> None:
+    """契约 v0.2.4 §9：``apply_note`` 201 字 → 400（现后端因未知字段返回 400，字段名同样是 apply_note）。"""
+    r = app_client("open").post(f"{API}/auth/register", json=reg(new_name(), new_pw(), apply_note="x" * 201))
     assert "apply_note" in fields(assert_err(r, 400, "VALIDATION_ERROR"))
 
 
@@ -722,6 +731,33 @@ def test_csrf_double_submit_cookie_forgery_rejected(session: Callable[..., Simpl
     assert_err(r, 403, "CSRF_FAILED")
 
 
+def test_csrf_header_and_cookie_agree_but_not_session_is_403(session: Callable[..., SimpleNamespace]) -> None:
+    """契约 v0.2.4 §9：请求头与 Cookie 一致、但与会话内令牌不符 → ``403 CSRF_FAILED``（用别的会话的真令牌，非随机串）。"""
+    s, other = session(), session()
+    sid = s.client.cookies.get("sid")
+    s.client.cookies.clear()
+    s.client.cookies.set("sid", sid)
+    s.client.cookies.set("csrf_token", other.csrf)
+    r = s.client.post(f"{API}/auth/logout", headers={"X-CSRF-Token": other.csrf})
+    assert_err(r, 403, "CSRF_FAILED")
+    assert s.client.get(f"{API}/me").status_code == 200
+
+
+@pytest.mark.xfail(strict=True, reason=T_B03_V024 + "（CSRF 只比对请求头与会话令牌，不看 Cookie）")
+@pytest.mark.parametrize("cookie", ["mismatch", "absent"])
+def test_csrf_double_submit_requires_cookie_to_match(session: Callable[..., SimpleNamespace], cookie: str) -> None:
+    """契约 v0.2.4 #13 / §1.3：双提交以 Cookie 为准，头、Cookie、会话令牌三者须一致；头 = 会话令牌但 Cookie 不符或缺失 → 403。"""
+    s = session()
+    jar = s.client.cookies
+    sid = jar.get("sid")
+    jar.clear()
+    jar.set("sid", sid)
+    if cookie == "mismatch":
+        jar.set("csrf_token", secrets.token_urlsafe(32))
+    r = s.client.post(f"{API}/auth/logout", headers={"X-CSRF-Token": s.csrf})
+    assert_err(r, 403, "CSRF_FAILED")
+
+
 def test_csrf_failure_has_no_side_effect(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
     s = session()
     r = s.client.post(f"{API}/me/consents", json={"key": "signal_risk_disclosure", "version": "v-csrf"})
@@ -851,10 +887,8 @@ def current_doc_version(client: Any, key: str) -> str:
     return client.get(f"{API}/meta/registration").json().get("doc_versions", {}).get(key, "unversioned")
 
 
-@pytest.mark.parametrize("key", [
-    "signal_risk_disclosure", "privacy", "terms",
-    pytest.param("sensitive_financial_info", marks=pytest.mark.xfail(strict=True, reason=T_B03_FU + "（consent key 无 sensitive_financial_info）")),
-])
+@pytest.mark.skip(reason=ON_HOLD)
+@pytest.mark.parametrize("key", ["signal_risk_disclosure", "privacy", "terms", "sensitive_financial_info"])
 def test_post_consent_and_me_reflects_latest(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], key: str) -> None:
     s = session()
     ver = current_doc_version(s.client, key)
@@ -874,13 +908,14 @@ def test_post_consent_and_me_reflects_latest(session: Callable[..., SimpleNamesp
     [{"key": "marketing", "version": "v1"}, {"key": "privacy"}, {"version": "v1"}, {"key": "privacy", "version": "v1", "granted": False}],
     ids=["unknown-key", "no-version", "no-key", "extra-field"],
 )
+@pytest.mark.skip(reason=ON_HOLD)
 def test_post_consent_invalid_is_400(session: Callable[..., SimpleNamespace], payload: dict[str, Any]) -> None:
     s = session()
     r = s.client.post(f"{API}/me/consents", json=payload, headers={"X-CSRF-Token": s.csrf})
     assert_err(r, 400, "VALIDATION_ERROR")
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（version 未与 doc_versions 比对）")
+@pytest.mark.skip(reason=ON_HOLD)
 @pytest.mark.parametrize("key", ["privacy", "signal_risk_disclosure"])
 def test_post_consent_version_mismatch_is_400(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], key: str) -> None:
     """#26：``version`` 必须等于当前 ``doc_versions[key]``，否则 ``400 VALIDATION_ERROR``（field: version），且不落库。"""
@@ -891,7 +926,7 @@ def test_post_consent_version_mismatch_is_400(session: Callable[..., SimpleNames
     assert sql("SELECT count(*) FROM app.consents WHERE user_id=:i AND doc_version=:v", i=s.user.id, v=bad)[0][0] == 0
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（无 /accounts、/imports 写接口与 sensitive_financial_info 门槛）")
+@pytest.mark.skip(reason=ON_HOLD)
 @pytest.mark.parametrize("path,body", [
     ("/imports", None),
     ("/accounts", {"name": "测试账户", "broker": "示例证券", "account_type": "cash"}),

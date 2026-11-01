@@ -33,3 +33,10 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-push]
+      - id: clean-check-quick
+        name: 干净检出自检（HEAD，quick：ignored-sources/secret-boundary/gateway-limits/secret-scan，约 5 秒）
+        entry: bash scripts/ci/clean_check.sh quick
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

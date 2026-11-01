@@ -401,3 +401,18 @@ jobs:
           version: ${{ env.UV_VERSION }}
       - name: check_secret_boundary.py
         run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_secret_boundary.py
+
+  # 源码不得被 .gitignore 误伤（T-O09a）：已跟踪源码被规则命中、相对引用指向被忽略的文件、
+  # 敏感词文件名探针（licence.ts 等）被宽规则命中，都失败。正反例在 scripts/ci/tests/test_ignored_sources.py。
+  # 所有 job 都在 actions/checkout 的干净检出上运行；setup-uv / setup-node 的缓存只缓存依赖下载（uv 缓存、pnpm store），
+  # 不恢复工作区文件，所以未跟踪文件不会被带进 CI。本地复现同样条件：scripts/ci/clean_check.sh。
+  ignored-sources:
+    name: ignored-sources (源码不被 .gitignore 误伤)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: check_ignored_sources.py
+        run: python3 scripts/ci/check_ignored_sources.py

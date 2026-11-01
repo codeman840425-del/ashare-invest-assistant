@@ -61,6 +61,19 @@ description = "S3 不允许提交证书封装私钥文件（seal-keygen.sh 产�
 path = '''(^|/)data_licence_seal_private_keys[^/]*$'''
 tags = ["S3", "block"]
 
+[[rules]]
+id = "S3-key-file"
+description = "S3 私钥容器文件（*.key/*.p12/*.pfx/*.jks/*.keystore、id_rsa/id_ecdsa/id_ed25519），按文件名拦（T-O09a：不再靠 .gitignore）"
+path = '''(?i)(^|/)([^/]+\.(key|p12|pfx|jks|keystore)|id_(rsa|ecdsa|ed25519))$'''
+tags = ["S3", "block"]
+
+# ---------------------------------------------------------------- S1 证书文件（按文件名）
+[[rules]]
+id = "S1-licence-file"
+description = "S1 证书落盘文件（*.lic/*.licence、mairui*licence*.txt 等），按文件名拦（T-O09a：不再靠 .gitignore）"
+path = '''(?i)(^|/)([^/]+\.(lic|licence)|[^/]*mairui[^/]*licen[cs]e[^/]*\.(txt|ini|cfg|conf|json|ya?ml|key|dat)|[^/]*mairui[^/]*licen[cs]e)$'''
+tags = ["S1", "block"]
+
 # ---------------------------------------------------------------- S4 环境文件
 [[rules]]
 id = "S4-env-file"

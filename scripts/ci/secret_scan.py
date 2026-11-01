@@ -123,6 +123,9 @@ ENV_FILE_RE = re.compile(r"(^|/)\.env[^/]*$")
 ENV_EXAMPLE = ".env.example"
 # 证书封装私钥文件（deploy/scripts/seal-keygen.sh 的产物，T-O09）：任何路径、任何后缀都不得入库
 SEAL_KEY_FILE_RE = re.compile(r"(^|/)data_licence_seal_private_keys[^/]*$")
+# 私钥容器 / 证书落盘文件（T-O09a）：按文件名拦，不靠 .gitignore（.gitignore 的宽规则会误伤同名源码）
+KEY_FILE_RE = re.compile(r"(?i)(^|/)([^/]+\.(key|p12|pfx|jks|keystore)|id_(rsa|ecdsa|ed25519))$")
+LICENCE_FILE_RE = re.compile(r"(?i)(^|/)([^/]+\.(lic|licence)|[^/]*mairui[^/]*licen[cs]e[^/]*\.(txt|ini|cfg|conf|json|ya?ml|key|dat)|[^/]*mairui[^/]*licen[cs]e)$")
 ENV_SENSITIVE_KEY = re.compile(r"^(APP_MASTER_KEY|MAIRUI_LICENCE|DATA_LICENCE_SEAL_PRIVATE_KEYS|DATABASE_URL|[A-Z0-9_]*_PASSWORD|[A-Z0-9_]*_API_KEY)$")
 ENV_PLACEHOLDER = re.compile(r"^(|changeme[A-Za-z0-9_.-]*|example[A-Za-z0-9_.-]*|<[^<>]+>)$")
 
@@ -382,6 +385,10 @@ def scan_blob(path: str, data: bytes, snap: Snapshot, allow: AllowList, where: s
     # S3：证书封装私钥文件（按文件名，内容为空也拦）
     if SEAL_KEY_FILE_RE.search(path):
         add(0, "S3", BLOCK, base, "S3-seal-private-key-file")
+    elif KEY_FILE_RE.search(path):
+        add(0, "S3", BLOCK, base, "S3-key-file")
+    if LICENCE_FILE_RE.search(path):
+        add(0, "S1", BLOCK, base, "S1-licence-file")
 
     text, is_gbk = decode(data)
     if text is None:

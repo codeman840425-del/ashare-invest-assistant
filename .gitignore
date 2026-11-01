@@ -13,14 +13,23 @@ src/backend/probes/samples/
 !.env.example
 !**/.env.example
 
-# --- 证书 / 密钥 / 麦蕊 licence ---
-# 麦蕊证书由用户在网页录入、HPKE 加密存库（plan §2.1B），部署配置里不再有全站证书变量（T-O09）；
-# 任何把证书落盘的文件形态都排除（另由 secret 扫描兜底）。
-# 证书封装密钥（deploy/scripts/seal-keygen.sh 生成）默认在仓库外 ~/.config/aia/secrets/；
-# 万一被放进工作树，下面几条也会排除（私钥文件另有 S3 扫描规则 S3-seal-private-key-file / S3-x25519-pkcs8）。
-data_licence_seal_*
-*_private_keys*
+# --- 证书 / 密钥：只按路径或扩展名精确匹配（T-O09a） ---
+# 麦蕊证书由用户在网页录入、HPKE 加密存库（plan §2.1B），部署配置里没有全站证书变量（T-O09）。
+# 证书内容不靠 .gitignore 防，由密钥扫描拦：S1（证书赋值/URL、*.lic / *.licence / mairui*licence* 文件）、
+# S3（私钥 PEM/PKCS#8、*.key/*.p12/*.pfx/*.jks/*.keystore、id_rsa/id_ed25519、封装私钥文件），
+# 外加本机 check_real_secrets.sh 的真实值精确比对。
+# 这里不要再加 licence.* / *licence* 一类按“词”匹配的宽规则：会把同名源码（如 src/frontend/src/mocks/licence.ts）
+# 一起忽略，本地能跑、提交里却缺文件。CI 的 ignored-sources job（scripts/ci/check_ignored_sources.py）会拦这种情况。
+# 证书封装密钥（deploy/scripts/seal-keygen.sh 生成）默认在仓库外 ~/.config/aia/secrets/；万一放进工作树：
 deploy/secrets/
+/secrets/
+/.secrets/
+data_licence_seal_private_keys
+data_licence_seal_private_keys.*
+data_licence_seal_public_keys
+data_licence_seal_public_keys.*
+data_licence_seal_keys.meta.json
+# 私钥 / 证书文件格式（扩展名）
 *.pem
 *.key
 *.crt
@@ -31,27 +40,13 @@ deploy/secrets/
 *.pfx
 *.jks
 *.keystore
+*.gpg
 *.lic
 *.licence
-*.license
-licence
-licence.*
-licence_*
-licence-*
-mairui*licen[cs]e*
-MAIRUI*LICEN[CS]E*
-*licen[cs]e*.txt
-*licen[cs]e*.json
-*licen[cs]e*.ini
-*licen[cs]e*.cfg
-*licen[cs]e*.yaml
-*licen[cs]e*.yml
-id_rsa*
-id_ed25519*
-*.gpg
-*.asc
-secrets/
-.secrets/
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
 
 # --- 原始交割单（真实范本永不入库；plan §3.5 ①、§3.5A 隐私规则） ---
 # 上传原始文件的存储路径 imports/{user_id}/{batch_id}/{sha256}
@@ -95,6 +90,7 @@ venv/
 .ruff_cache/
 .pytest_cache/
 .hypothesis/
+.schemathesis/
 .coverage
 .coverage.*
 htmlcov/

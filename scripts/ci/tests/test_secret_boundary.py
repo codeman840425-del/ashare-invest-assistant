@@ -104,7 +104,6 @@ def test_env_example_private_key(repo: Path) -> None:
     "data_licence_seal_private_keys",
     "deploy/x/data_licence_seal_public_keys",
     "backup/data_licence_seal_private_keys.20261102",
-    "x/seal_private_keys.json",
 ])
 def test_gitignore_blocks_seal_key_files(path: str) -> None:
     r = subprocess.run(["git", "-C", str(REPO), "check-ignore", "-q", "--no-index", path])

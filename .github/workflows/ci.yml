@@ -367,3 +367,20 @@ jobs:
           version: ${{ env.UV_VERSION }}
       - name: check_fixtures.py
         run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_fixtures.py
+
+  # 网关上限一致性（T-O03）：nginx client_max_body_size = config/imports.yaml max_request_bytes
+  # > max_file_bytes × max_files_per_upload，且 = 413 信封 max_bytes。imports.yaml 不存在时明确失败。
+  # 正反例在 scripts/ci/tests/test_gateway_limits.py（secret-scan.yml selftest job 运行）。
+  gateway-limits:
+    name: gateway-limits (nginx client_max_body_size ↔ config/imports.yaml)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: check_gateway_limits.py
+        run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_gateway_limits.py

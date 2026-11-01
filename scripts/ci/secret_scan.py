@@ -12,11 +12,15 @@ gitleaks 负责正则类规则与其默认规则集；本脚本负责全部 S1�
   secret_scan.py commit REV           # 某个提交的完整文件树（读 git 对象，不受工作区改动影响）
   secret_scan.py staged               # 暂存区中新增/修改的文件（pre-commit）
   secret_scan.py range A..B           # 区间内每个提交新增/修改的每个文件版本（PR 全提交扫描、push 扫描）
-  secret_scan.py history              # 全部历史（每日全量扫描）
+  secret_scan.py history              # 全部历史（每日全量扫描；不跳过构建产物）
   secret_scan.py files P [P ...]      # 指定的磁盘文件（自测用）
   --repo DIR                          # 仓库目录（默认当前目录）
   --allow FILE                        # 允许清单（默认 <repo>/.secretscan-allow.yaml）
   --ignore FILE                       # 指纹豁免（默认 <repo>/.gitleaksignore，与 gitleaks 共用同一个文件）
+
+构建产物（T-O03）：tree/commit/staged/range 模式跳过 BUILD_OUTPUT_RE 匹配的路径（src/frontend 下任意层级的
+dist/，与根 .gitignore 一致）；history 全量扫描与 files 模式不跳过，旧 dist 提交的 S9 告警照旧只告警不阻断。
+gitleaks 一侧的同一排除在 scripts/ci/gitleaks_run.sh 里（git log pathspec，history 同样不排除）。
 
 指纹豁免（commit/range/history 模式）：.gitleaksignore 每行 ``完整提交sha:文件:gitleaks规则ID:行号``。
 本脚本的命中先换算成对应的 gitleaks 规则 ID（LINE_RULE_GL_IDS 等），再用 ``git blame`` 找出这一行是
@@ -398,6 +402,14 @@ def scan_blob(path: str, data: bytes, snap: Snapshot, allow: AllowList, where: s
 
 
 # --------------------------------------------------------------------------- 扫描目标
+# 构建产物目录：src/frontend 下任意层级的 dist/（含 src/frontend/dist/）。只在 tree/commit/staged/range 跳过。
+BUILD_OUTPUT_RE = re.compile(r"^src/frontend/(?:[^/]+/)*dist/")
+
+
+def skip_build_output(it: Iterable[tuple[str, bytes, Snapshot, str]]) -> Iterator[tuple[str, bytes, Snapshot, str]]:
+    return (t for t in it if not BUILD_OUTPUT_RE.match(t[0]))
+
+
 def iter_tree(repo: Path) -> Iterator[tuple[str, bytes, Snapshot, str]]:
     snap = Snapshot(lambda p: (repo / p).read_bytes() if (repo / p).is_file() else None)
     for p in git(repo, "ls-files", "-z").decode().split("\0"):
@@ -485,6 +497,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         snap = Snapshot(lambda p: (repo / p).read_bytes() if (repo / p).is_file() else None)
         it = ((p, (repo / p).read_bytes(), snap, "") for p in args.targets)
+    if args.mode in ("tree", "commit", "staged", "range"):
+        it = skip_build_output(it)
 
     blocks = warns = scanned = 0
     for path, data, snap, where in it:

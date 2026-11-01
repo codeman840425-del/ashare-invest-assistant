@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -73,6 +74,73 @@ def test_range_scan_catches_added_then_deleted(tmp_repo: Path) -> None:
     r = subprocess.run([sys.executable, str(CI_DIR / "secret_scan.py"), "commit", head, "--repo", str(tmp_repo)],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout
+
+
+# ------------------------------------------------------------------ 构建产物 dist/（T-O03）
+DIST_FILES = ["src/frontend/dist/assets/a.js", "src/frontend/prototype/dist/b.js", "src/frontend/x/y/dist/c.js"]
+
+
+def _dist_repo(tmp_repo: Path) -> tuple[str, str]:
+    """dist/ 下放会命中 S2 的文件（-f 强制入库，模拟误提交的构建产物），dist 外放一个同样的对照文件。"""
+    write(tmp_repo, "README", "x\n")
+    base = commit_all(tmp_repo)
+    leak = "k = '" + "s" + "k-" + fake_token(24) + "'\n"
+    for p in DIST_FILES + ["src/frontend/src/leak.js"]:
+        write(tmp_repo, p, leak)
+    git(tmp_repo, "add", "-f", "-A")
+    git(tmp_repo, "commit", "-q", "-m", "dist")
+    return base, git(tmp_repo, "rev-parse", "HEAD").strip()
+
+
+def _ss(tmp_repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, str(CI_DIR / "secret_scan.py"), *args, "--repo", str(tmp_repo)],
+                          capture_output=True, text=True)
+
+
+def test_build_output_regex() -> None:
+    for p in DIST_FILES:
+        assert ss.BUILD_OUTPUT_RE.match(p), p
+    for p in ["dist/a.js", "src/backend/dist/a.py", "src/frontend/src/distx/a.js", "src/frontend/xdist/a.js",
+              "src/frontend/src/dist.ts"]:
+        assert not ss.BUILD_OUTPUT_RE.match(p), p
+
+
+def test_worktree_and_range_scans_skip_dist(tmp_repo: Path) -> None:
+    base, head = _dist_repo(tmp_repo)
+    for args in (["tree"], ["commit", head], ["range", f"{base}..{head}"]):
+        r = _ss(tmp_repo, *args)
+        assert r.returncode == 1 and "src/frontend/src/leak.js:1:S2" in r.stdout, (args, r.stdout)
+        assert "/dist/" not in r.stdout, (args, r.stdout)
+    # 暂存区（pre-commit）同样跳过
+    for p in DIST_FILES:
+        write(tmp_repo, p, "k = '" + "s" + "k-" + fake_token(30) + "'\n")
+    git(tmp_repo, "add", "-f", *DIST_FILES)
+    r = _ss(tmp_repo, "staged")
+    assert r.returncode == 0 and "/dist/" not in r.stdout, r.stdout
+
+
+def test_history_scan_still_covers_dist(tmp_repo: Path) -> None:
+    _dist_repo(tmp_repo)
+    r = _ss(tmp_repo, "history")
+    assert r.returncode == 1, r.stdout
+    for p in DIST_FILES:
+        assert f"{p}:1:S2" in r.stdout, r.stdout
+
+
+def test_gitleaks_run_range_skips_dist_history_does_not(tmp_repo: Path) -> None:
+    gl = gitleaks_bin()
+    if not gl:
+        pytest.skip("未安装 gitleaks（CI 中由 GITLEAKS_BIN 提供）")
+    base, head = _dist_repo(tmp_repo)
+    env = {**os.environ, "GITLEAKS_BIN": gl}
+    got = {}
+    for mode, args in (("range", [f"{base}..{head}"]), ("history", [])):
+        rpt = tmp_repo.parent / f"gl-{mode}.json"
+        subprocess.run(["bash", str(CI_DIR / "gitleaks_run.sh"), mode, *args, str(rpt)], cwd=tmp_repo, env=env,
+                       check=True, capture_output=True)
+        got[mode] = {f["File"] for f in json.loads(rpt.read_text() or "[]") or []}
+    assert got["range"] == {"src/frontend/src/leak.js"}, got
+    assert got["history"] == set(DIST_FILES) | {"src/frontend/src/leak.js"}, got
 
 
 # ------------------------------------------------------------------ 夹具豁免

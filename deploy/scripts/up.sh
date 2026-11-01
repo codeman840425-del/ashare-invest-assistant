@@ -7,6 +7,8 @@
 #   AIA_UP_BUILD=0 可跳过构建
 # - 启动顺序：postgres/redis → migrate（alembic upgrade head）→ timescale-apply（策略）→ 应用服务 → nginx；
 #   一次性服务失败时 --wait 返回非 0，用 `compose.sh logs migrate timescale-apply` 看原因
+# - 项目名/卷名优先级见 compose.sh 头部注释：只认 deploy/env/.env（缺省按工作树目录名派生），
+#   shell 里导出的 COMPOSE_PROJECT_NAME 不生效（T-O03）；启动前先打印解析结果
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,6 +18,8 @@ if ! docker info >/dev/null 2>&1 && ! sudo -n docker info >/dev/null 2>&1; then
     "$HERE/start-dockerd.sh"
   fi
 fi
+
+"$HERE/compose.sh" --resolve
 
 build_flag=()
 [ "${AIA_UP_BUILD:-1}" = "1" ] && build_flag=(--build)

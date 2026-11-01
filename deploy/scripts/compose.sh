@@ -3,7 +3,17 @@
 #   deploy/scripts/compose.sh ps
 #   deploy/scripts/compose.sh logs -f ingest
 #   deploy/scripts/compose.sh down -v
-# AIA_PROFILE=dev（默认，叠加 docker-compose.dev.yml = 麦蕊回放模式）| live（只用基础文件）
+# AIA_PROFILE=dev（默认，叠加 docker-compose.dev.yml = 麦蕊回放模式）| live（只用基础文件；生产/live 要求 SESSION_COOKIE_SECURE=true）
+#   deploy/scripts/compose.sh --resolve   # 只打印解析出的 项目名 / 卷前缀 / 后端镜像 及来源，不调用 docker
+#
+# 项目名与卷名的优先级（T-O03；多个工作树共用一个 compose 项目“aia”就是因为 shell 里导出的
+# COMPOSE_PROJECT_NAME 盖过了 .env）：
+#   COMPOSE_PROJECT_NAME：deploy/env/.env 的值 > 由工作树目录名派生的 aia-<目录名>；
+#                         shell 里导出的 COMPOSE_PROJECT_NAME 一律不用（不一致时告警），并以 -p 显式传给 compose。
+#   AIA_VOLUME_PREFIX   ：deploy/env/.env 的值 > 项目名；同样不认 shell。数据卷显式命名为 <前缀>_pgdata/_redisdata/_imports，
+#                         改项目名时把前缀设成旧项目名即可沿用原有数据卷（不删卷、不迁数据）。
+#   AIA_BACKEND_IMAGE   ：shell > .env > aia-backend:<项目名>（每个项目各自的镜像 tag，构建不会互相覆盖）。
+#   其余变量按 docker compose 默认：shell 导出 > .env > compose 文件里的默认值。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -15,6 +25,46 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "未找到 deploy/env/.env，从 .env.example 生成（仅占位值，请按需修改）。" >&2
   cp "$ENV_EXAMPLE" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
+fi
+
+# 读 .env 里某个键的最后一个赋值（不 source，不展开；去掉首尾空白和成对引号）
+env_get() {
+  local v
+  v="$(sed -n "s/^[[:space:]]*$1[[:space:]]*=//p" "$ENV_FILE" | tail -n 1)"
+  v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+  case "$v" in \"*\") v="${v:1:${#v}-2}" ;; \'*\') v="${v:1:${#v}-2}" ;; esac
+  printf '%s' "$v"
+}
+valid_name() { [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; }
+
+shell_project="${COMPOSE_PROJECT_NAME-}"
+shell_prefix="${AIA_VOLUME_PREFIX-}"
+project="$(env_get COMPOSE_PROJECT_NAME)"; project_src="deploy/env/.env"
+if [ -z "$project" ]; then
+  base="$(basename "$ROOT" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-')"
+  project="aia-${base%-}"; project_src="工作树目录名派生"
+fi
+valid_name "$project" || { echo "COMPOSE_PROJECT_NAME=$project 不合法（只能小写字母/数字/-/_，字母或数字开头）" >&2; exit 2; }
+prefix="$(env_get AIA_VOLUME_PREFIX)"; prefix_src="deploy/env/.env"
+[ -n "$prefix" ] || { prefix="$project"; prefix_src="= 项目名"; }
+valid_name "$prefix" || { echo "AIA_VOLUME_PREFIX=$prefix 不合法" >&2; exit 2; }
+if [ -n "$shell_project" ] && [ "$shell_project" != "$project" ]; then
+  echo "警告：忽略 shell 中导出的 COMPOSE_PROJECT_NAME=$shell_project，使用 $project（$project_src）。" >&2
+fi
+if [ -n "$shell_prefix" ] && [ "$shell_prefix" != "$prefix" ]; then
+  echo "警告：忽略 shell 中导出的 AIA_VOLUME_PREFIX=$shell_prefix，使用 $prefix（$prefix_src）。" >&2
+fi
+export COMPOSE_PROJECT_NAME="$project" AIA_VOLUME_PREFIX="$prefix"
+image_src="shell"
+if [ -z "${AIA_BACKEND_IMAGE-}" ]; then
+  if [ -n "$(env_get AIA_BACKEND_IMAGE)" ]; then image_src="deploy/env/.env"; AIA_BACKEND_IMAGE="$(env_get AIA_BACKEND_IMAGE)"
+  else image_src="项目名派生"; AIA_BACKEND_IMAGE="aia-backend:$project"; fi
+  export AIA_BACKEND_IMAGE
+fi
+
+if [ "${1-}" = "--resolve" ]; then
+  echo "compose 项目：$project（$project_src）；数据卷前缀：$prefix（$prefix_src）；后端镜像：$AIA_BACKEND_IMAGE（$image_src）；profile：$PROFILE"
+  exit 0
 fi
 
 # daemon 没起来（机器重启后）或 docker.sock ACL 丢失（dockerd 被别处重启）时，自动修复一次（T-O08）。
@@ -39,4 +89,4 @@ case "$PROFILE" in
   *) echo "未知 AIA_PROFILE=$PROFILE（可选 dev|live）" >&2; exit 2 ;;
 esac
 
-exec "${DOCKER[@]}" compose --project-directory "$ROOT/deploy/compose" --env-file "$ENV_FILE" "${FILES[@]}" "$@"
+exec "${DOCKER[@]}" compose -p "$project" --project-directory "$ROOT/deploy/compose" --env-file "$ENV_FILE" "${FILES[@]}" "$@"

@@ -1,0 +1,110 @@
+# =====================================================================
+# 敏感数据（硬约束，见 docs/plan.md §2.1A、§3.5、§3.5A、§6、§7.4）
+# =====================================================================
+
+# --- 麦蕊探针运行产物（T003）：结果与样例不入库，只提交脚本与 README ---
+src/backend/probes/results/
+src/backend/probes/samples/
+
+# --- 环境变量文件：任何 .env 都不入库，只保留 .env.example ---
+.env
+.env.*
+*.env
+!.env.example
+!**/.env.example
+
+# --- 证书 / 密钥 / 麦蕊 licence ---
+# 麦蕊 licence 是一段字符串，只经环境变量 MAIRUI_LICENCE 注入 ingest；
+# 任何把它落盘的文件形态都排除（另由 secret 扫描兜底）。
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.csr
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.lic
+*.licence
+*.license
+licence
+licence.*
+licence_*
+licence-*
+mairui*licen[cs]e*
+MAIRUI*LICEN[CS]E*
+*licen[cs]e*.txt
+*licen[cs]e*.json
+*licen[cs]e*.ini
+*licen[cs]e*.cfg
+*licen[cs]e*.yaml
+*licen[cs]e*.yml
+id_rsa*
+id_ed25519*
+*.gpg
+*.asc
+secrets/
+.secrets/
+
+# --- 原始交割单（真实范本永不入库；plan §3.5 ①、§3.5A 隐私规则） ---
+# 上传原始文件的存储路径 imports/{user_id}/{batch_id}/{sha256}
+imports/
+uploads/
+# 券商交易软件导出的 .txt/.csv（格式 A：GBK 定宽 成交明细 / 资金持仓快照）
+# 仓库内唯一允许的交割单目录是合成夹具 tests/fixtures/broker_statements/
+broker_statements/
+!tests/fixtures/broker_statements/
+statements/
+*交割单*
+*对账单*
+*成交明细*
+*资金持仓*
+*持仓快照*
+*资金流水*
+*委托明细*
+*.xls
+*.xlsx
+# 仓库根目录与 data/ 下不放任何 .txt/.csv 数据
+/*.txt
+/*.csv
+data/
+# /workspace/team/samples 的任何拷贝（文件名 trades_sample.txt / positions_sample.txt）
+# 合成夹具同名文件位于 tests/fixtures/broker_statements/fmt_a/，单独放行
+team/samples/
+/samples/
+trades_sample.txt
+positions_sample.txt
+!tests/fixtures/broker_statements/**/trades_sample.txt
+!tests/fixtures/broker_statements/**/positions_sample.txt
+
+# =====================================================================
+# 工程产物
+# =====================================================================
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.egg-info/
+build/
+# 前端产物只忽略正式前端的 dist；src/frontend/prototype 的 dist 由其自身 .gitignore 管理
+node_modules/
+.pnpm-store/
+src/frontend/dist/
+playwright-report/
+test-results/
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

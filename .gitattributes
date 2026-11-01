@@ -1,0 +1,3 @@
+# 交割单/麦蕊夹具保持字节原样（另见 tests/fixtures/.gitattributes）
+tests/fixtures/** -text
+*.sh text eol=lf

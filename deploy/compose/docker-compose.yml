@@ -1,0 +1,169 @@
+# ashare-invest-assistant —— 基础编排（plan §1.3、§2.1A、§6）
+# 一键启动（本地默认叠加 docker-compose.dev.yml = 回放模式）：deploy/scripts/up.sh
+#
+# 硬约束：MAIRUI_LICENCE 只出现在 ingest 的 environment 中；其他服务不得引用它，
+#         且任何服务都不使用 env_file（避免把 .env 整体注入）。CI（T-O02）会检查。
+# 业务服务目前是占位入口（python:3.13-slim 的 http.server，只回 200），不含业务代码；
+# 后续由 deploy/docker/backend.Dockerfile 构建同一镜像、不同启动命令替换。
+
+name: ${COMPOSE_PROJECT_NAME:-aia}
+
+x-placeholder-image: &placeholder-image python:3.13-slim
+
+# 占位入口：监听 8000，任意路径返回 200
+x-placeholder-cmd: &placeholder-cmd ["python", "-m", "http.server", "8000", "--bind", "0.0.0.0", "--directory", "/tmp"]
+
+x-placeholder-healthcheck: &placeholder-healthcheck
+  test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).status == 200 else 1)"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
+
+# 所有应用服务共享的非敏感变量（不含 MAIRUI_*）
+x-app-env: &app-env
+  APP_ENV: ${APP_ENV:-local}
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aia}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置}@postgres:5432/${POSTGRES_DB:-aia}
+  REDIS_URL: redis://redis:6379/0
+  TZ: Asia/Shanghai
+
+x-app-depends: &app-depends
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+
+services:
+  nginx:
+    image: nginx:1.31.2-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${NGINX_HTTP_PORT:-8080}:80"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  api:
+    image: *placeholder-image
+    command: *placeholder-cmd
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      SERVICE_NAME: api
+      APP_MASTER_KEY: ${APP_MASTER_KEY:?APP_MASTER_KEY 未设置}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      IMPORT_STORAGE_BACKEND: ${IMPORT_STORAGE_BACKEND:-local}
+      IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
+    volumes:
+      - imports:/var/lib/aia-dev/imports
+    depends_on: *app-depends
+    healthcheck: *placeholder-healthcheck
+
+  worker:
+    image: *placeholder-image
+    command: *placeholder-cmd
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      SERVICE_NAME: worker
+      APP_MASTER_KEY: ${APP_MASTER_KEY:?APP_MASTER_KEY 未设置}
+      IMPORT_STORAGE_BACKEND: ${IMPORT_STORAGE_BACKEND:-local}
+      IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    volumes:
+      - imports:/var/lib/aia-dev/imports
+    depends_on: *app-depends
+    healthcheck: *placeholder-healthcheck
+
+  # 行情采集服务：全站唯一调用麦蕊、唯一持有 licence（plan §2.1A）
+  ingest:
+    image: *placeholder-image
+    command: *placeholder-cmd
+    restart: unless-stopped
+    deploy:
+      replicas: 1
+    environment:
+      <<: *app-env
+      SERVICE_NAME: ingest
+      MAIRUI_MODE: ${MAIRUI_MODE:-replay}
+      MAIRUI_REPLAY_DIR: ${MAIRUI_REPLAY_DIR:-/fixtures/mairui}
+      MAIRUI_LICENCE: ${MAIRUI_LICENCE:-}
+      MAIRUI_BASE_URL: ${MAIRUI_BASE_URL:-https://api.mairuiapi.com}
+      MAIRUI_PRO_BASE_URL: ${MAIRUI_PRO_BASE_URL:-https://pro.mairuiapi.com}
+      MAIRUI_EGRESS_IP_EXPECTED: ${MAIRUI_EGRESS_IP_EXPECTED:-}
+    depends_on: *app-depends
+    healthcheck: *placeholder-healthcheck
+
+  # 盘中信号计算：单实例，无 licence
+  signal-rt:
+    image: *placeholder-image
+    command: *placeholder-cmd
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      SERVICE_NAME: signal-rt
+    depends_on: *app-depends
+    healthcheck: *placeholder-healthcheck
+
+  # Celery beat：全站唯一
+  beat:
+    image: *placeholder-image
+    command: *placeholder-cmd
+    restart: unless-stopped
+    deploy:
+      replicas: 1
+    environment:
+      <<: *app-env
+      SERVICE_NAME: beat
+    depends_on: *app-depends
+    healthcheck: *placeholder-healthcheck
+
+  postgres:
+    image: timescale/timescaledb:2.31.0-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置}
+      POSTGRES_DB: ${POSTGRES_DB:-aia}
+      TZ: UTC
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../postgres/initdb/001-timescaledb.sql:/docker-entrypoint-initdb.d/zz-001-aia-timescaledb.sql:ro
+    # 走 TCP（初始化阶段只监听 unix socket），并确认 timescaledb 扩展已启用
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" && psql -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -tAc \"select 1 from pg_extension where extname='timescaledb'\" | grep -q 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7.4.12-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  pgdata:
+  redisdata:
+  imports:

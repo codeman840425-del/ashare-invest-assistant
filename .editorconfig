@@ -1,0 +1,32 @@
+# https://editorconfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_size = 4
+max_line_length = 120
+
+[*.{md,markdown}]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
+
+[*.{sh,bash}]
+indent_size = 2
+
+# 交割单测试夹具：GBK、CRLF、行尾空格都是被测特征，编辑器不得改写
+[tests/fixtures/**]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+indent_style = unset
+indent_size = unset

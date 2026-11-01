@@ -1,0 +1,62 @@
+# 本地开发叠加层（deploy/scripts/up.sh 默认叠加）：
+#   1) 麦蕊回放模式：ingest 强制 MAIRUI_MODE=replay，并把 MAIRUI_LICENCE 置空——
+#      即使开发者 shell 或 .env 里有真实 licence，本地容器也拿不到（plan §2.1A：本地/CI 不持有真实 licence）。
+#      回放数据读 tests/fixtures（只读挂载），录制的麦蕊样本约定放在 tests/fixtures/mairui/。
+#   2) 热重载：把源码只读挂载进容器，并打开 *_RELOAD 开关；业务入口落地后（T-B01）
+#      api 用 `uvicorn app.main:app --reload`，worker/beat/ingest/signal-rt 用 watchfiles 重启。
+#   3) 便于调试：postgres / redis 只在 127.0.0.1 上暴露端口。
+# 需要真实联调时（仅"当前唯一调用方"主机）：AIA_PROFILE=live deploy/scripts/up.sh（不叠加本文件）。
+
+x-dev-env: &dev-env
+  APP_ENV: local
+  APP_RELOAD: "true"
+  WATCHFILES_FORCE_POLLING: "true"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+services:
+  api:
+    environment:
+      <<: *dev-env
+    volumes:
+      - ../../src/backend:/app/src/backend:ro
+      - ../../config:/app/config:ro
+
+  worker:
+    environment:
+      <<: *dev-env
+    volumes:
+      - ../../src/backend:/app/src/backend:ro
+      - ../../config:/app/config:ro
+
+  ingest:
+    environment:
+      <<: *dev-env
+      MAIRUI_MODE: replay
+      MAIRUI_LICENCE: ""
+      MAIRUI_REPLAY_DIR: /fixtures/mairui
+    volumes:
+      - ../../src/backend:/app/src/backend:ro
+      - ../../config:/app/config:ro
+      - ../../tests/fixtures:/fixtures:ro
+
+  signal-rt:
+    environment:
+      <<: *dev-env
+    volumes:
+      - ../../src/backend:/app/src/backend:ro
+      - ../../config:/app/config:ro
+
+  beat:
+    environment:
+      <<: *dev-env
+    volumes:
+      - ../../src/backend:/app/src/backend:ro
+      - ../../config:/app/config:ro
+
+  postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-56379}:6379"

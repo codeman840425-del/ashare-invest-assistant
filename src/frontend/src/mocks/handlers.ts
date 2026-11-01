@@ -4,9 +4,11 @@
  */
 import { http, HttpResponse, delay, matchRequestUrl } from 'msw';
 import type { MarketOverview, Notification, TerminalScope, TodayResponse } from '../api/types';
+import { accountHandlers } from './accountHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
+import { resetSession } from './session';
 import {
-  CANDIDATE_SIGNALS, DAILY_REPORTS, HORIZON_ASSESSMENTS, DAILY_REPORT_LIST, HEALTH_READY, ME, NOTIFICATIONS, NOW, PORTFOLIO, QUOTES, REASONS,
+  CANDIDATE_SIGNALS, DAILY_REPORTS, HORIZON_ASSESSMENTS, DAILY_REPORT_LIST, HEALTH_READY, NOTIFICATIONS, NOW, PORTFOLIO, QUOTES, REASONS,
   SIGNAL_EVENTS, SUGGESTIONS, SUGGESTION_LIST, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, WATCHLIST, dailyBars, intradayBars,
 } from './fixtures';
 
@@ -19,6 +21,7 @@ const readAt = new Map<string, string>();
 const notifications = (): Notification[] => NOTIFICATIONS.map((n) => ({ ...n, read_at: n.read_at ?? readAt.get(n.id) ?? null }));
 export function resetMockState() {
   readAt.clear();
+  resetSession();
 }
 
 /** 浏览器里加一点延迟让加载态可见；测试（node）里不延迟 */
@@ -64,9 +67,9 @@ function todayBody(): TodayResponse {
 }
 
 const routeHandlers = [
-  http.get(`${API}/meta/registration`, () => HttpResponse.json({ mode: 'invite' })),
+  // 鉴权、账号、券商账户、成交、导入、对账（T-F02/T-F02a/T-F04，见 accountHandlers.ts）
+  ...accountHandlers,
   http.get(`${API}/health/ready`, () => HttpResponse.json(HEALTH_READY)),
-  http.get(`${API}/me`, () => HttpResponse.json(ME)),
 
   http.get(`${API}/terminal`, async ({ request }) => {
     await lag();

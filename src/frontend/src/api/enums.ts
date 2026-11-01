@@ -47,7 +47,13 @@ export const ENUMS = {
   data_provider: ['mairui', 'user_import', 'user_input', 'system'],
   source_kind: ['market_data', 'disclosure', 'user_input', 'system_calc'],
   trade_side: ['buy', 'sell'],
+  import_status: ['uploaded', 'parsing', 'previewed', 'committed', 'failed', 'discarded', 'reverted'],
+  import_severity: ['error', 'warning'],
+  import_scope: ['file', 'row', 'field'],
+  import_row_status: ['ok', 'warning', 'error', 'skipped'],
+  dedup_status: ['new', 'duplicate_in_db', 'duplicate_in_file', 'possible_duplicate_of_manual'],
   reconciliation_status: ['matched', 'diff', 'not_imported'],
+  reconciliation_item_kind: ['quantity_mismatch', 'missing_in_broker', 'missing_in_ours', 'cost_differs', 'cash_gap', 'cash_chain_break'],
   lifecycle: ['draft', 'simulating', 'published', 'observing', 'retired'],
   instance_status: ['proposed', 'active', 'paused', 'archived'],
   candidate_signal_state: ['open', 'drafted', 'blocked', 'released', 'confirmed', 'dismissed', 'expired', 'invalidated', 'superseded'],
@@ -99,6 +105,13 @@ export type DataStatus = E<'data_status'>;
 export type GapReason = E<'gap_reason'>;
 export type DataProvider = E<'data_provider'>;
 export type ReconciliationStatus = E<'reconciliation_status'>;
+export type ReconciliationItemKind = E<'reconciliation_item_kind'>;
+export type ImportStatus = E<'import_status'>;
+export type ImportSeverity = E<'import_severity'>;
+export type ImportScope = E<'import_scope'>;
+export type ImportRowStatus = E<'import_row_status'>;
+export type DedupStatus = E<'dedup_status'>;
+export type TradeSide = E<'trade_side'>;
 export type PlanDraftStatus = E<'plan_draft_status'>;
 export type Lifecycle = E<'lifecycle'>;
 export type CandidateSignalState = E<'candidate_signal_state'>;

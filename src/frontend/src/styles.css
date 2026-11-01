@@ -248,3 +248,48 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .hz-reason.for .hz-pol { color: #4f9cf9; background: rgba(79, 156, 249, 0.12); }
 .hz-reason.against .hz-pol { color: #a0aec0; background: rgba(160, 174, 192, 0.12); }
 .hz-missing { margin-top: 4px; color: #e3a008; }
+
+/* ---------- 通用页面（T-F02） ---------- */
+.page { padding: 16px 20px 32px; }
+.page.narrow { max-width: 880px; }
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.page-title { font-size: 16px; font-weight: 600; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.page-head .page-title { margin: 0; }
+.kv-line { display: flex; align-items: center; margin: 8px 0 12px; }
+.form-hint { margin: -16px 0 16px; }
+.row-voided td { color: var(--muted) !important; text-decoration: line-through; }
+
+/* ---------- 登录 / 注册 / 开通引导 ---------- */
+.auth-page { height: 100vh; overflow: auto; display: flex; flex-direction: column; align-items: center; padding: 48px 16px 0; background: radial-gradient(ellipse at top, #121a26 0%, var(--bg) 60%); }
+.auth-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; margin-bottom: 20px; }
+.auth-card { width: 400px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 24px 28px; }
+.auth-card.wide { width: 720px; }
+.auth-title { font-size: 18px; font-weight: 600; margin: 0 0 16px; }
+.auth-links { display: flex; justify-content: space-between; margin-top: 12px; }
+.auth-foot { width: 100%; margin-top: auto; padding-top: 24px; }
+.consent-item { padding: 8px 0; border-bottom: 1px dashed var(--line); }
+.consent-item:last-of-type { margin-bottom: 16px; }
+.consent-summary { margin: 4px 0 0 24px; line-height: 1.6; }
+.risk-q { padding: 8px 0; border-bottom: 1px dashed var(--line); }
+.risk-q:last-of-type { margin-bottom: 16px; }
+.risk-q-title { margin-bottom: 6px; }
+
+/* ---------- 导入预览着色（api/importCodes.ts IMPORT_TONE.rowClass） ---------- */
+.imp-error td, .imp-finding.imp-error { background: rgba(245, 56, 74, 0.12) !important; }
+.imp-action td, .imp-finding.imp-action { background: rgba(250, 140, 22, 0.13) !important; }
+.imp-info td, .imp-finding.imp-info { background: rgba(227, 160, 8, 0.07) !important; }
+.imp-skip td { color: var(--muted) !important; background: rgba(125, 135, 148, 0.08) !important; }
+.imp-finding.imp-skip { background: rgba(125, 135, 148, 0.08); }
+.imp-error td:first-child { box-shadow: inset 3px 0 0 #f5384a; }
+.imp-action td:first-child { box-shadow: inset 3px 0 0 #fa8c16; }
+.imp-info td:first-child { box-shadow: inset 3px 0 0 #e3a008; }
+.imp-skip td:first-child { box-shadow: inset 3px 0 0 #7d8794; }
+.imp-section { margin-top: 16px; }
+.imp-section h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+.imp-legend { margin-top: 8px; }
+.imp-finding { border: 1px solid var(--line); border-radius: 3px; padding: 6px 10px; margin-bottom: 6px; }
+.imp-finding-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.imp-handling { margin-top: 2px; }
+.imp-resolve { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.imp-confirm { border: 1px solid var(--line); border-radius: 4px; padding: 12px 16px; background: var(--panel); }
+.agree-group { display: flex; flex-direction: column; gap: 4px; }

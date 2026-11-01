@@ -56,29 +56,47 @@ export function buildUrl(path: string, params?: QueryParams): string {
   return `${API_BASE}${path}${q ? `?${q}` : ''}`;
 }
 
+let memoryCsrf: string | null = null;
+/** 登录响应里的 csrf_token；Cookie 读不到（如 HttpOnly 或跨路径）时用它兜底 // [待契约确认] CSRF 以 Cookie 还是响应体为准 */
+export function setCsrfToken(t: string | null) {
+  memoryCsrf = t;
+}
 function csrfToken(): string | null {
   const m = typeof document !== 'undefined' ? document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/) : null;
-  return m ? decodeURIComponent(m[1]) : null;
+  return m ? decodeURIComponent(m[1]) : memoryCsrf;
 }
 
-export async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, opts: { params?: QueryParams; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
+export interface RequestOptions {
+  params?: QueryParams;
+  /** JSON 请求体；传 FormData 时按 multipart 发送（不手写 Content-Type，交给浏览器带 boundary） */
+  body?: unknown;
+  signal?: AbortSignal;
+  /** 契约 §1：写操作可带 Idempotency-Key，重试时复用同一个值 */
+  idempotencyKey?: string;
+}
+
+/** 相对地址转成可 fetch 的地址（jsdom/Node 需要绝对 URL，取当前页面同源） */
+export const fetchUrl = (rel: string) => (typeof window !== 'undefined' ? new URL(rel, window.location.origin).toString() : rel);
+
+export async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, opts: RequestOptions = {}): Promise<T> {
   const rel = buildUrl(path, opts.params);
-  // 浏览器里相对地址即可；jsdom/Node 的 fetch 需要绝对 URL，取当前页面同源
-  const url = typeof window !== 'undefined' ? new URL(rel, window.location.origin).toString() : rel;
+  const url = fetchUrl(rel);
   const headers: Record<string, string> = { Accept: 'application/json' };
   const cached = method === 'GET' ? etagCache.get(rel) : undefined;
   if (cached) headers['If-None-Match'] = cached.etag;
-  if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+  const isForm = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+  if (opts.body !== undefined && !isForm) headers['Content-Type'] = 'application/json';
   if (method !== 'GET') {
     const t = csrfToken();
     if (t) headers['X-CSRF-Token'] = t;
   }
+  if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
   let res: Response;
   try {
     res = await fetch(url, {
       method,
       headers,
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      body: opts.body === undefined ? undefined : isForm ? (opts.body as FormData) : JSON.stringify(opts.body),
       credentials: 'same-origin',
       signal: opts.signal,
     });
@@ -111,4 +129,15 @@ export async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DEL
 }
 
 export const apiGet = <T>(path: string, params?: QueryParams, signal?: AbortSignal) => request<T>('GET', path, { params, signal });
-export const apiPost = <T>(path: string, body?: unknown) => request<T>('POST', path, { body });
+export const apiPost = <T>(path: string, body?: unknown, opts: Omit<RequestOptions, 'body'> = {}) => request<T>('POST', path, { ...opts, body });
+export const apiPut = <T>(path: string, body?: unknown) => request<T>('PUT', path, { body });
+export const apiPatch = <T>(path: string, body?: unknown) => request<T>('PATCH', path, { body });
+export const apiDelete = <T>(path: string) => request<T>('DELETE', path);
+/** multipart 上传（POST /imports） */
+export const apiUpload = <T>(path: string, form: FormData) => request<T>('POST', path, { body: form });
+
+/** 生成幂等键；不依赖外部库，环境不支持 randomUUID 时退化为时间戳 + 随机数 */
+export function newIdempotencyKey(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  return c?.randomUUID ? c.randomUUID() : `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}

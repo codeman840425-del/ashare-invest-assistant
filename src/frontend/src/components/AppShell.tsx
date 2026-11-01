@@ -1,5 +1,5 @@
 import { Badge, Button, Dropdown, Input, List, Popover, Tag } from 'antd';
-import { BellOutlined, SearchOutlined } from '@ant-design/icons';
+import { BellOutlined, DownOutlined, SearchOutlined } from '@ant-design/icons';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useMe, useMarkNotificationRead, useNotifications, useUnreadCount } from '../api/queries';
 import { NOTIFY_KIND, SEVERITY } from '../i18n/labels';
@@ -9,6 +9,7 @@ import { RiskDisclosure } from './RiskDisclosure';
 import { DesktopGuard } from './DesktopGuard';
 import { navMoreFor, NAV_MAIN } from '../app/nav';
 import { useApiErrorRedirect } from '../app/useApiErrorRedirect';
+import { useLogout } from '../api/accountQueries';
 
 function NotificationPanel({ onNavigate }: { onNavigate: (route: string) => void }) {
   const { data } = useNotifications();
@@ -49,7 +50,19 @@ export function AppShell() {
   const { pathname } = useLocation();
   const unread = useUnreadCount();
   const me = useMe();
+  const logout = useLogout();
   useApiErrorRedirect();
+  const userMenu = [
+    { key: '/settings/profile', label: '投资画像' },
+    { key: '/onboarding?next=/settings/profile', label: '风险测评' },
+    ...(me.data?.role === 'admin' ? [{ key: '/admin/users', label: '用户审核（管理）' }] : []),
+    { type: 'divider' as const },
+    { key: 'logout', label: '退出登录', danger: true },
+  ];
+  const onUserMenu = ({ key }: { key: string }) => {
+    if (key === 'logout') logout.mutate(undefined, { onSettled: () => navigate('/login', { replace: true }) });
+    else navigate(key);
+  };
   const navMore = navMoreFor(me.data?.role);
   const moreActive = navMore.some((n) => pathname === n.path || pathname.startsWith(n.path + '/'));
   return (
@@ -76,7 +89,9 @@ export function AppShell() {
                 <Button size="small" type="text" icon={<BellOutlined style={{ fontSize: 16 }} />} aria-label="通知" />
               </Badge>
             </Popover>
-            <span className="user">{me.data?.display_name ?? '—'}</span>
+            <Dropdown menu={{ items: userMenu, onClick: onUserMenu }} trigger={['click']}>
+              <a className="user" data-testid="user-menu">{me.data?.display_name ?? '—'} <DownOutlined style={{ fontSize: 10 }} /></a>
+            </Dropdown>
           </div>
         </header>
         {IS_MOCK ? (

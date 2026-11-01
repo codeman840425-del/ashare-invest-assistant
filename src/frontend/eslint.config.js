@@ -28,7 +28,7 @@ export default tseslint.config(
   },
   {
     // Playwright 的 page.evaluate 回调在浏览器里执行
-    files: ['scripts/screenshot.mjs'],
+    files: ['scripts/screenshot.mjs', 'scripts/screenshot-tf02.mjs'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 );

@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
-import { ME } from '../mocks/fixtures';
+import { mockLoginAs } from '../mocks/session';
 import { AppProviders } from './AppProviders';
 import { makeQueryClient } from './queryClient';
 import { routes } from './routes';
@@ -20,7 +20,7 @@ function renderAt(path: string) {
   );
   return router;
 }
-const asAdmin = () => server.use(http.get('/api/v1/me', () => HttpResponse.json({ ...ME, role: 'admin' })));
+const asAdmin = () => mockLoginAs('admin');
 const err = (status: number, code: string) => () => HttpResponse.json({ error: { code, message: 'x', details: null, request_id: 'r' } }, { status });
 
 describe('M2 全局错误处理', () => {
@@ -50,13 +50,13 @@ describe('M4 管理后台入口', () => {
     expect(await screen.findByTestId('not-found')).toBeInTheDocument();
     fireEvent.mouseEnter(screen.getByText(/更多/));
     await screen.findByText('市场概览');
-    expect(screen.queryByText('管理后台')).toBeNull();
+    expect(screen.queryByText('用户审核（管理）')).toBeNull();
   });
-  it('管理员：/admin/users 为占位页，更多菜单含“管理后台”', async () => {
+  it('管理员：/admin/users 为用户审核页，更多菜单含管理入口', async () => {
     asAdmin();
     renderAt('/admin/users');
-    expect(await screen.findByTestId('placeholder')).toBeInTheDocument();
+    expect(await screen.findByTestId('admin-users')).toBeInTheDocument();
     fireEvent.mouseEnter(screen.getByText(/更多/));
-    expect(await screen.findByText('管理后台')).toBeInTheDocument();
+    expect(await screen.findByText('用户审核（管理）')).toBeInTheDocument();
   });
 });

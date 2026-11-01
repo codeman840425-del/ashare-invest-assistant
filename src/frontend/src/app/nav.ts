@@ -20,9 +20,9 @@ export const NAV_MORE = [
   { path: '/reviews', label: '复盘' },
   { path: '/notifications', label: '通知中心' },
   { path: '/portfolio/import', label: '交割单导入' },
-  { path: '/settings', label: '设置' },
+  { path: '/settings/profile', label: '投资画像' },
 ];
 /** 管理后台入口只对 role=admin 显示（评审 M4；契约 §1.3：非管理员访问 /admin/* 一律 404） */
-export const NAV_ADMIN = { path: '/admin', label: '管理后台' };
+export const NAV_ADMIN = { path: '/admin/users', label: '用户审核（管理）' };
 export const navMoreFor = (role: string | undefined) => (role === 'admin' ? [...NAV_MORE, NAV_ADMIN] : NAV_MORE);
 

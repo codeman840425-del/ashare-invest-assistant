@@ -24,8 +24,10 @@ def main(res):
     res.append(c.summarize(r) | {"note": "测试超过 20 只的行为", "raw_head": r.text[:300]})
     r = c.call("ssjy_all_broker", "/hsrl/ssjy/all/{licence}")
     s = c.summarize(r); res.append(s); c.save_sample("p01_ssjy_all", r, 3)
+    c.keep("hsrl_ssjy_all", r)            # p12 复用完整 dm 集合（批量接口约 1 次/分钟，不重复调用）
     r = c.call("real_all_network", "/hsrl/real/all/{licence}")
     res.append(c.summarize(r)); c.save_sample("p01_real_all", r, 3)
+    c.keep("hsrl_real_all", r)
     r = c.call("real_time_invalid_code", "/hsstock/real/time/999999/{licence}")
     res.append(c.summarize(r) | {"raw_head": r.text[:300]})
 

@@ -28,7 +28,8 @@ if str(HERE) not in sys.path:
 import common as c  # noqa: E402
 
 ORDER = ["p01_realtime", "p02_kline", "p03_moneyflow", "p04_lhb_pool_auction", "p05_fundamental",
-         "p06_factors", "p07_sector_index", "p08_news", "p11_gaps", "p10_stability", "p09_ratelimit"]
+         "p06_factors", "p07_sector_index", "p08_news", "p11_gaps", "p12_code_lists", "p10_stability",
+         "p09_ratelimit"]
 
 
 def select(want: list) -> list:
@@ -138,6 +139,56 @@ def _check_gaps(check, run_dir, expect_latency, want):
           (g1 or {}).get("conclusion", {}).get("summary", "")[:120])
 
 
+def _check_codes(check, run_dir, want, expect_calls, label):
+    """检查 p12_code_lists：5 个接口原始响应 + codes.csv + dm 文本可被 compare_mairui_codes.py 直接读取。"""
+    if "p12_code_lists" not in want:
+        return
+    import csv
+    import hashlib
+    import p12_code_lists as p12
+    files = sorted(run_dir.glob("p12_code_lists*.json"))
+    items = json.loads(files[-1].read_text(encoding="utf-8")) if files else []
+    per = {x["name"][6:]: x for x in items if isinstance(x, dict) and str(x.get("name", "")).startswith("CODES_")
+           and x["name"] != "CODES_SUMMARY"}
+    summ = next((x for x in items if isinstance(x, dict) and x.get("name") == "CODES_SUMMARY"), {})
+    keys = [e[0] for e in p12.ENDPOINTS]
+    check(f"p12（{label}）：5 个接口均有记录且成功", all(k in per and per[k]["ok"] for k in keys),
+          ", ".join(f"{k}={per[k]['rows']}行/{per[k]['source']}" if k in per else f"{k}=缺失" for k in keys))
+    raw_ok, dm_ok, detail = True, True, []
+    for k in keys:
+        x = per.get(k) or {}
+        rp = run_dir / (x.get("raw_file") or "_missing_")
+        try:
+            b = rp.read_bytes()
+            json.loads(b.decode("utf-8"))
+            raw_ok &= hashlib.sha256(b).hexdigest() == x.get("sha256")
+        except (OSError, ValueError):
+            raw_ok = False
+        dp = run_dir / (x.get("dm_file") or "_missing_")
+        try:
+            # 与 /tmp/t7/compare_mairui_codes.py 完全相同的读法：每行一个 dm，strip 后去空行
+            m = {ln.strip() for ln in open(dp, encoding="utf-8") if ln.strip()}
+            dm_ok &= len(m) == x.get("codes_6digit") and all(len(v) == 6 and v.isdigit() for v in m)
+            detail.append(f"{k}={len(m)}")
+        except OSError:
+            dm_ok = False
+    check(f"p12（{label}）：原始响应 JSON 可解析且 sha256 与记录一致", raw_ok)
+    lists = {ln.strip() for ln in open(run_dir / (summ.get("lists_union_file") or "_x_"), encoding="utf-8")
+             if ln.strip()} if summ.get("lists_union_file") else set()
+    check(f"p12（{label}）：dm 文本按 compare 脚本读法得到 6 位代码集合", dm_ok and len(lists) == summ.get("lists_union_n"),
+          "; ".join(detail) + f"; lists∪={len(lists)}")
+    try:
+        with open(run_dir / summ["csv_file"], encoding="utf-8", newline="") as f:
+            rd = csv.DictReader(f)
+            n_csv, hdr = sum(1 for _ in rd), rd.fieldnames
+    except (OSError, KeyError):
+        n_csv, hdr = -1, None
+    check(f"p12（{label}）：codes.csv 表头与行数正确", hdr == p12.CSV_FIELDS and n_csv == sum(
+        per[k]["rows"] for k in keys if k in per), f"rows={n_csv}")
+    check(f"p12（{label}）：实际调用 {expect_calls} 次（其余复用）", summ.get("calls_made") == expect_calls,
+          f"calls_made={summ.get('calls_made')} reused={summ.get('reused')}")
+
+
 def dry_run(args) -> int:
     import dryrun_mock as m
 
@@ -205,6 +256,32 @@ def dry_run(args) -> int:
             p11_gaps.FORCE_SESSION = None
             for n_, ok_, d_ in p11_gaps.selftest_pure():
                 check("p11 纯函数单测：" + n_, ok_, d_)
+        # ---- p12：阶段 1 中复用 p01/p11 的响应，只新增 2 次调用
+        sel = select(args.probes)
+        exp12 = 5 - ("p01_realtime" in sel) * 2 - ("p11_gaps" in sel)
+        _check_codes(check, ctx1.run_dir, sel, exp12, "全流程")
+        if "p12_code_lists" in sel:
+            import p12_code_lists
+            n12 = [json.loads(x).get("name", "") for x in ctx1.call_log.read_text(encoding="utf-8").splitlines()]
+            check("p12（全流程）：/hslt/list、两个全市场接口在本次运行中各只调用 1 次",
+                  all(sum(1 for n in n12 if n == nm) == 1 for nm in
+                      ("delisted_stock_list", "ssjy_all_broker", "real_all_network"))
+                  and not any(n in ("code_list_hslt_list", "code_list_hsrl_ssjy_all", "code_list_hsrl_real_all")
+                              for n in n12))
+            # ---- 阶段 1c：单独运行 p12（没有可复用的响应）→ 自己调用 5 次
+            ctx1c = c.init_run(dry_run=True, base=base_api, pro_base=base_pro, min_interval=args.dry_interval,
+                               skip_pro_host=args.skip_pro_host, no_env_proxy=args.no_env_proxy,
+                               egress_url=echo_url, tag="dryrun-p12-alone")
+            print(f"[dry-run] 阶段 1c 单独运行 p12，输出目录 {ctx1c.run_dir}")
+            a0 = st_api.requests
+            run_probes(["p12_code_lists"])
+            s1c = c.close_run()
+            _check_codes(check, ctx1c.run_dir, ["p12_code_lists"], 5, "单独运行")
+            check("p12（单独运行）：客户端 5 次 = 服务端 +5", s1c["calls"] == 5 and st_api.requests - a0 == 5,
+                  f"client={s1c['calls']} server=+{st_api.requests - a0}")
+            check("p12 输出不含证书", _scan_dir_for_licence(ctx1c.run_dir) == 0)
+            for n_, ok_, d_ in p12_code_lists.selftest_pure():
+                check("p12 纯函数单测：" + n_, ok_, d_)
         # ---- 阶段 2：熔断（第 3 个请求起返回 429 + 103）
         ctx2 = c.init_run(dry_run=True, base=base_api, pro_base=base_pro, min_interval=args.dry_interval,
                           tag="dryrun-limit", no_env_proxy=args.no_env_proxy, egress_url=echo_url)

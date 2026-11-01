@@ -494,6 +494,7 @@ def item3_plrq(res, shared):
 def item4_delisted(res, shared):
     name, item = "GAP4_delisted_survivorship", "退市股：股票列表是否含退市股、日线/财务是否可得、幸存者偏差"
     lst = probe(res, "delisted_stock_list", "/hslt/list/{licence}")
+    c.keep("hslt_list", lst)               # p12 复用完整股票列表（不重复调用 /hslt/list）
     rows = c.rows(lst.data)
     dms = {str(r.get("dm", "")).split(".")[0] for r in rows if isinstance(r, dict)}
     tui = [r for r in rows if isinstance(r, dict) and "退" in str(r.get("mc", ""))][:10]

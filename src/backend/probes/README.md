@@ -34,6 +34,7 @@
 | `scan_licence.py` | 发送结果前的证书泄漏扫描（只输出命中/未命中） |
 | `p01_realtime.py` … `p10_stability.py` | 10 项探针（p09 限流温和实测放在最后跑） |
 | `p11_gaps.py` | 第 11 项：catalog §5 缺口补测（快照延迟、cje/v 单位、plrq、退市股、公告时间精度、因子空值/时点性、因子数量），排在 p08 之后、p10 之前 |
+| `p12_code_lists.py` | 第 12 项：麦蕊完整代码集合落盘（`docs/strategies/security_master.md` §7 第 1 条），排在 p11 之后、p10 之前；复用 p01/p11 已取的响应 |
 | `results/` | 历史结果（含 `STOP` 熔断文件，见第 5 节）；新结果写入 `results/run-<时间戳>/` |
 | `samples/` | 历史脱敏样例；新样例写入 `samples/run-<时间戳>/` |
 
@@ -105,6 +106,7 @@ py -3 run_all.py --dry-run          # Linux/macOS: python3 run_all.py --dry-run
 另外模拟 `myip.ipip.net`（IP 一致放行、不一致拒绝），并把假的 `HTTP(S)_PROXY`/`ALL_PROXY` 指向本地记录端口，
 确认默认模式下代理端口收到 0 个请求、`--use-env-proxy` 时请求改走代理；
 另对 p11 分别强制走“盘中采样”和“盘后跳过”两个分支，检查 7 项都输出结构化结论、盘后不发采样请求，并离线单测时段判定、单位推断、时间精度和时点判定逻辑。
+对 p12 检查：全流程只新增 2 次调用（`/hslt/list` 与两个全市场接口全程各只调 1 次）、单独运行（阶段 1c）调用 5 次；原始响应可解析且 sha256 一致；`codes.csv` 表头/行数正确；`mairui_dm_*.txt` 按 compare 脚本的读法得到 6 位代码集合；输出不含证书。
 最后应看到 **“全部通过”**，退出码 0。dry-run 输出在 `results/dryrun/run-*-dryrun*/`（可删除，不需要回传）。
 （Windows 防火墙一般不会对只绑定 127.0.0.1 的程序弹窗；如弹窗，选择“取消/不允许”也不影响本地自检。）
 
@@ -130,7 +132,8 @@ py -3 run_all.py                    # Linux/macOS: python3 run_all.py
 - `p01 p02 ...`：只跑指定前缀的探针。`--min-interval 0.5`：加大串行间隔（默认 0.25 秒）。
 - 环境变量 `PROBE_STABILITY_N`：p10 每个接口重复次数（默认 12）。
 
-**预期调用量与时长**（dry-run 实测计数）：全部探针约 **266 次**（`api.mairuiapi.com` 264 次 + `pro.mairuiapi.com` 2 次）。
+**预期调用量与时长**（dry-run 实测计数）：全部探针约 **268 次**（`api.mairuiapi.com` 266 次 + `pro.mairuiapi.com` 2 次；`--skip-pro-host` 时 266 次全在 api）。
+p12 新增 **2 次**（`/bj/list/all`、`/kc/list/all`，api 主机）；`/hslt/list` 与两个全市场接口复用 p11/p01 的响应，不重复调用。盘后运行总计约 257 次。
 其中原 p01–p10 共 222 次（p10 稳定性 60 次、p09 限流实测 31 次），新增 p11 **44 次**（盘后运行时 33 次，全部在 api 主机）。
 单次 0.25–1.3 秒（全市场接口约 1.9 MB），加上 0.25 秒间隔；p11 的快照延迟采样含约 25 秒等待。**总计约 4–8 分钟**（p11 约 1–1.5 分钟）。
 按计费权重算（因子接口 all/history 各计 5 次、batch 计 10 次），p11 约占 73 个计数单位，远低于分钟限额。
@@ -150,11 +153,36 @@ py -3 run_all.py                    # Linux/macOS: python3 run_all.py
 建议在北京时间交易时段内运行（例如北京时间周一 09:55 开始），GAP1 才能实测；盘后运行其它项不受影响。
 单独重跑 p11：`py -3 run_all.py p11`（同样受 STOP、冷却、熔断约束）。
 
+**p12 代码集合**（security_master.md §7 第 1 条；§7 未规定格式，按“原始响应 + 规范化清单”保存，约 5 秒、写 4–8 MB）。输出在 `results/run-<…>/code_lists/`：
+
+| 文件 | 内容 |
+|---|---|
+| `raw_<接口>.json`（hslt_list / bj_list_all / kc_list_all / hsrl_ssjy_all / hsrl_real_all） | 原始响应文本（全部字段、全部行；写盘前断言不含证书） |
+| `codes.csv` | 规范化清单（UTF-8 无 BOM，LF）：`endpoint,dm_raw,code6,mc,jys,suffix`，五个接口的全部行 |
+| `mairui_dm_<接口>.txt` | 每行一个 6 位代码（去重、排序），即 compare 脚本的输入格式 |
+| `mairui_dm_lists.txt` | 三个列表接口（hslt/list ∪ bj/list/all ∪ kc/list/all）的并集 |
+| `mairui_dm_union_all.txt` | 五个接口的并集 |
+
+`results/run-<…>/p12_code_lists.json` 每个接口一条 `CODES_<接口>`：脱敏 URL、来源（`called` / `reused:p01_realtime` / `reused:p11_gaps(GAP4)`）、取得时刻（UTC）、状态、行数、6 位代码数、重复行、无法规范化的 dm 样例、`jys`/前 3 位分布、sha256、文件名；末尾 `CODES_SUMMARY`。
+- 复用：批量接口文档限约 1 次/分钟，重复调用可能 429 → 熔断，所以同一次运行内直接复用 p01/p11 的完整响应。单独运行 `py -3 run_all.py p12` 时会自己调用 5 次（含 2 次批量接口）。所有调用不重试。
+- `/bj/list/all`、`/kc/list/all` 的路径只出现在 `docs/plan.md`，本地文档缓存未收录、未经验证；返回错误时照常记录并保存原始响应（若返回 429/103 等限流响应仍会按规则熔断）。
+
+**回传结果后运行对比脚本**（在有 `/tmp/t7/official_codes.json` 的开发 box 上运行，不访问麦蕊）。脚本只接受 1 个参数（每行一个 6 位 dm 的文本），
+且每次都会**覆盖** `/tmp/t7/mairui_diff.json`，所以每跑一个文件后先另存：
+```bash
+R=src/backend/probes/results/run-<YYYYmmdd-HHMMSS>/code_lists
+for k in lists hslt_list hsrl_ssjy_all hsrl_real_all union_all; do
+  python3 /tmp/t7/compare_mairui_codes.py "$R/mairui_dm_$k.txt" && cp /tmp/t7/mairui_diff.json "$R/../diff_$k.json"
+done
+```
+（`mairui_dm_bj_list_all.txt`、`mairui_dm_kc_list_all.txt` 单独比对时其余板块都会显示为“缺”，只看对应板块即可。）
+
 连接：每个主机 1 条长连接（共 1–2 条，`--skip-pro-host` 时 1 条），全部串行，无并发、无子进程。
 
 **输出位置**（每次运行新建目录，永不覆盖旧结果）：
 - `results/run-<YYYYmmdd-HHMMSS>/calls.jsonl`：每次调用的脱敏 URL（证书为 `***`）、状态、耗时、字节、当前连接数、错误摘要
-- `results/run-<…>/p01_realtime.json` … `p11_gaps.json`：各探针结果；`summary.json`：调用总数、各主机累计 TCP 连接数
+- `results/run-<…>/code_lists/`：p12 的完整代码集合（见上文）
+- `results/run-<…>/p01_realtime.json` … `p12_code_lists.json`：各探针结果；`summary.json`：调用总数、各主机累计 TCP 连接数
 - `samples/run-<…>/`：脱敏、截断后的接口样例
 - 如果 `summary.json` 或控制台提示某主机连接数 > 1（服务端关闭了空闲连接后重连），出口 IP 固定时不影响，但请在回传时说明。
 
@@ -180,6 +208,6 @@ py -3 run_all.py                    # Linux/macOS: python3 run_all.py
 
 ## 安全与限流约束（脚本内已强制）
 - 证书只从 `os.environ["MAIRUI_LICENCE"]` 读取；控制台、日志、样例、结果中的 URL 一律替换成 `***`，写盘前断言不含证书。dry-run 用假证书。
-- 严格串行（in-flight 计数断言 + 连接池 `pool_maxsize=1, pool_block=True`），调用间隔与冷却都用 `time.sleep`；不做压测，总量约 266 次。
+- 严格串行（in-flight 计数断言 + 连接池 `pool_maxsize=1, pool_block=True`），调用间隔与冷却都用 `time.sleep`；不做压测，总量约 268 次。
 - 不使用 subprocess / fork / signal；路径全部基于脚本所在目录（pathlib）；文件读写显式 UTF-8；控制台输出 `reconfigure(encoding='utf-8', errors='replace')`，GBK 终端不会因中文崩溃（个别字符可能显示为乱码/问号，不影响结果文件）。
 - 结果文件以独占方式创建（同名自动加 `.2`、`.3` 后缀），每次运行独立目录，绝不覆盖旧结果。

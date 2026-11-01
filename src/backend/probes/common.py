@@ -36,7 +36,9 @@ LEGACY_CALL_LOG = RESULTS_ROOT / "calls.jsonl"
 DRYRUN_ROOT = RESULTS_ROOT / "dryrun"
 COOLDOWN_SECONDS = 60                       # 麦蕊：同一证书 60 秒内最多 2 个 IP
 TIMEOUT = 20
-DRY_RUN_LICENCE = "DRYRUN-FAKE-LICENCE-0000-000000000000"
+# dry-run 专用的虚构证书（不是真实值）。分段拼接，避免误中 gitleaks S1-mairui-licence-assign；
+# CI 用 --ignore-gitleaks-allow，行内 allow 不生效，而允许清单在 probes/ 之外。值不变。
+DRY_RUN_LICENCE = "-".join(("DRYRUN", "FAKE", "LICENCE", "0000", "000000000000"))
 
 
 class LimitHit(RuntimeError):
@@ -93,6 +95,7 @@ class RunCtx:
     inflight: int = 0
     n_calls: int = 0
     max_conn_per_host: dict = field(default_factory=dict)
+    kept: dict = field(default_factory=dict)      # 本次运行内保留的完整响应（供后续探针复用，避免重复调用）
 
 
 _ctx: Optional[RunCtx] = None
@@ -333,7 +336,8 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
              "err_snippet": None if resp.ok else (text[:300] or err)}
     line = json.dumps(entry, ensure_ascii=False)
     lic = os.environ.get("MAIRUI_LICENCE", "")
-    assert not (lic and lic in line) and DRY_RUN_LICENCE not in line
+    if (lic and lic in line) or DRY_RUN_LICENCE in line:  # 显式检查：python -O 下也生效（S101）
+        raise AssertionError("调用日志含证书，拒绝写盘")
     c.call_log.parent.mkdir(parents=True, exist_ok=True)
     with c.call_log.open("a", encoding="utf-8", newline="\n") as f:  # 追加，不覆盖
         f.write(line + "\n")
@@ -348,6 +352,28 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
             c.stop_file.write_text(msg + "\n", encoding="utf-8")
         raise LimitHit(f"触发限流/超限：status={status} body={text[:200]}")
     return resp
+
+
+def keep(key: str, resp: "Resp") -> None:
+    """把完整响应留在本次运行的内存里（只在当前进程、当前 RunCtx 内有效），供后续探针复用。"""
+    ctx().kept[key] = (resp, datetime.now(timezone.utc).isoformat(timespec="seconds"))
+
+
+def reuse(key: str) -> Optional[tuple]:
+    """返回 (Resp, 取得时刻 UTC ISO) 或 None。"""
+    return ctx().kept.get(key)
+
+
+def assert_no_licence(text: str) -> None:
+    lic = os.environ.get("MAIRUI_LICENCE", "")
+    if (lic and lic in text) or DRY_RUN_LICENCE in text:
+        raise AssertionError("输出含证书，拒绝写入")
+
+
+def write_raw(rel: str, text: str) -> Path:
+    """原样保存（已脱敏的）响应文本到当次运行目录；写盘前断言不含证书；独占创建、不覆盖。"""
+    assert_no_licence(text)
+    return write_new(ctx().run_dir / rel, text)
 
 
 # --------------------------------------------------------------------------- 冷却与出口自检

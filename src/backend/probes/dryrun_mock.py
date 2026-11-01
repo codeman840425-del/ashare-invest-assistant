@@ -169,6 +169,12 @@ def route(state: MockState, method: str, raw_path: str, body: bytes):
         if len(codes) > 20:
             return js({"error": "最多 20 只（mock）"})
         return js([{"dm": cd, "p": 10.0, "t": "2026-10-30 15:00:00"} for cd in codes])
+    if path.startswith("/bj/list/all/"):        # p12：京市列表（路径来自 plan.md；字段按 /hslt/list 伪造）
+        return js([{"dm": f"920{i:03d}", "mc": f"京股{i}", "jys": "bj"} for i in range(30)]
+                  + [{"dm": "832000", "mc": "旧码样例", "jys": "bj"}])
+    if path.startswith("/kc/list/all/"):        # p12：科创板列表
+        return js([{"dm": f"688{i:03d}", "mc": f"科创{i}", "jys": "sh"} for i in range(20)]
+                  + [{"dm": "689009", "mc": "CDR样例", "jys": "sh"}])
     if "all" in segs[:-1] and not path.startswith("/factor/"):
         return js([{"dm": f"{i:06d}", "p": 10.0, "t": "2026-10-30 15:00:00"} for i in range(1500)])
     if method == "POST":

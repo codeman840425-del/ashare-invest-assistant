@@ -23,6 +23,9 @@ from app.db.base import (
 )
 from app.schemas.enums import AccountStatus, Horizon, ProfileEffort, ProfileExperience, Role
 
+#: 只存在于删除用户数据事务内部的状态（plan §7.3）；不属于契约 account_status
+PURGING_STATUS = "purging"
+
 users = Table(
     "users",
     metadata,
@@ -46,7 +49,9 @@ users = Table(
     CheckConstraint("username ~ '^[a-z0-9_]{4,32}$'", name="username_format"),
     one_of("role", Role),
     # 契约 account_status 无 deleted（plan §3.3 有）→ 以契约为准；注销用 deleted_at 表示（见报告）
-    one_of("status", AccountStatus),
+    # T-B16-core（迁移 0011）：库内另有 purging（删除用户数据 CLI 事务内的数据状态门，
+    # 可延迟约束触发器保证它永远提交不了；API 不写、契约不含）
+    one_of("status", [*(s.value for s in AccountStatus), PURGING_STATUS]),
     CheckConstraint("failed_login_count >= 0", name="failed_login_count_nonneg"),
     schema=APP,
 )
@@ -55,10 +60,11 @@ account_reviews = Table(
     "account_reviews",
     metadata,
     pk_uuid(),
-    user_fk(),
+    # T-B16-core（迁移 0011）：删除用户数据时指向该用户的值匿名化为 NULL（plan §7.3）
+    user_fk(nullable=True),
     txt("action", nullable=False),
     txt("reason"),
-    uuid_col("admin_id", nullable=False, fk="app.users.id"),
+    uuid_col("admin_id", fk="app.users.id"),
     created_at(),
     one_of("action", ["approve", "reject", "disable", "enable", "reset_password"]),
     schema=APP,

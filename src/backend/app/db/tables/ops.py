@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Index, PrimaryKeyConstraint, Table, text
+from sqlalchemy import Index, PrimaryKeyConstraint, Table, UniqueConstraint, text
 
-from app.db.base import OPS, integer, metadata, one_of, pk_uuid, ts, txt, uuid_col
+from app.db.base import OPS, created_at, integer, metadata, one_of, pk_uuid, ts, txt, uuid_col
 
 ingest_request_log = Table(
     "ingest_request_log",
@@ -52,4 +52,18 @@ ingest_leases = Table(
     txt("end_reason"),
     schema=OPS,
     comment="单活锁历史（审计「任何时刻只有一个调用方」）",
+)
+
+pending_file_purges = Table(
+    "pending_file_purges",
+    metadata,
+    pk_uuid(),
+    txt("path", nullable=False),
+    integer("attempts", nullable=False, server_default=text("0")),
+    txt("last_error"),
+    ts("last_attempt_at"),
+    created_at(),
+    UniqueConstraint("path"),
+    schema=OPS,
+    comment="删除用户数据后未删成功的原始导入文件（plan §7.3）；不含 user_id，下次运行先重试",
 )

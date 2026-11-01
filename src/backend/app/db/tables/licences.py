@@ -126,8 +126,9 @@ data_licence_events = Table(
     "data_licence_events",
     metadata,
     pk_uuid(),
-    uuid_col("licence_id", nullable=False, fk="app.user_data_licences.id"),
-    user_fk(),
+    # T-B16-core（迁移 0011）：删除用户数据时匿名化为 NULL（plan §7.3），故可空
+    uuid_col("licence_id", fk="app.user_data_licences.id"),
+    user_fk(nullable=True),
     txt("event", nullable=False),
     txt("actor", nullable=False),
     txt("from_status"),

@@ -5,39 +5,35 @@ import { Link } from 'react-router';
 import { useToday } from '../../api/queries';
 import type { TerminalRow, TodayResponse } from '../../api/types';
 import { ActionBadge, ConsensusBadge, DataStatusTag, ErrorBox, Loading } from '../../components/common';
+import { EvidenceChips } from '../../components/EvidenceChips';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
 import {
-  ACTION_SHORT, EXECUTABILITY, PLAN_DRAFT_STATUS, REASON_CODE, RECONCILIATION, REGIME, RISK_CONTROL, RISK_LEVEL, SESSION,
+  ACTION_SHORT, ALERT_STATUS, DATA_GAP_SCOPE, EXECUTABILITY, GAP_REASON, PLAN_CONDITION_KIND, PLAN_DRAFT_STATUS, REASON_CODE, RECONCILIATION, REGIME,
+  RISK_CONTROL, RISK_LEVEL, SESSION, SEVERITY, SEVERITY_TEXT,
 } from '../../i18n/labels';
 import { fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
+import { MORE_ROUTE, safeInternalRoute, type TodayListKey as ListKey } from './todayRoutes';
 
 /**
- * T-F08 今日关注（GET /today，契约 v0.2.6 §7.3 ⚖）。
- * 只展示契约里给出的字段；列表顺序按服务端返回（plan 2.4：按与用户的相关度排序，不按“股票好坏”）。
- * 每个列表最多 50 条，more=true 时给出对应列表页的入口。
+ * T-F08 今日关注（GET /today，契约 v0.2.7 §7.3 ⚖ 及“/today 补充”）。
+ * 只展示契约里给出的字段；列表顺序一律按服务端返回，前端不重排（plan 2.4：按与用户的相关度，不按“股票好坏”）。
+ * 每个列表最多 50 条，more=true 时按契约“查看全部”去向表给出列表页入口（data_gaps 没有列表页）。
  */
 
-/** more=true 时去哪个列表页查看（契约只说“到对应列表接口查看”，页面对应关系见 T-F08.md 遗留问题） */
-const MORE_ROUTE = {
-  focus: '/terminal',
-  pending_plan_drafts: '/plan-drafts',
-  released_reasons: '/candidate-signals',
-  risk_flags: '/risk-controls',
-  invalidations_today: '/suggestions',
-} as const;
-
-type ListKey = keyof typeof MORE_ROUTE;
-
-function Section({ title, k, data, testId, children }: { title: string; k: ListKey; data: TodayResponse; testId: string; children: ReactNode }) {
+function Section({ title, k, data, testId, empty = '无', children }: {
+  title: string; k: ListKey; data: TodayResponse; testId: string; empty?: string; children: ReactNode;
+}) {
   const list = data[k];
+  const to = MORE_ROUTE[k];
   return (
     <section className="today-card" data-testid={testId} aria-label={title}>
       <div className="today-card-head">
         <span className="today-card-title">{title}</span>
-        <span className="muted small">{list.items.length} 条</span>
-        {list.more ? <Link className="small" to={MORE_ROUTE[k]} data-testid={`${testId}-more`}>仅显示前 50 条，查看全部 ›</Link> : null}
+        {/* 评审 m2：more=true 时显示“前 50 条”，不显示成总数 */}
+        <span className="muted small" data-testid={`${testId}-count`}>{list.more ? `前 ${list.items.length} 条（共 50+ 条）` : `${list.items.length} 条`}</span>
+        {list.more && to ? <Link className="small" to={to} data-testid={`${testId}-more`}>查看全部 ›</Link> : null}
       </div>
-      {list.items.length ? children : <div className="muted small today-empty">无</div>}
+      {list.items.length ? children : <div className="muted small today-empty">{empty}</div>}
     </section>
   );
 }
@@ -67,7 +63,8 @@ const focusColumns: ColumnsType<TerminalRow> = [
 export function TodayPage() {
   const q = useToday();
   if (q.isLoading) return <Loading />;
-  if (q.isError || !q.data) return <div className="page-scroll"><ErrorBox error={q.error ?? new Error('加载失败')} /></div>;
+  // 评审 M1：只有一次都没拿到数据时才整页报错；轮询失败时保留已有数据，只在顶部显示错误条
+  if (!q.data) return <div className="page-scroll"><ErrorBox error={q.error ?? new Error('加载失败')} /></div>;
   const t = q.data;
   const range = t.market.regime_position_range;
   const rec = RECONCILIATION[t.reconciliation.status];
@@ -86,6 +83,11 @@ export function TodayPage() {
         <span className="muted small">更新于 {fmtTime(t.server_time)}</span>
         <Link to="/notifications" className="small" data-testid="today-unread">未读通知 <span className="num">{t.unread_notifications}</span></Link>
       </div>
+      {q.isError ? (
+        <div data-testid="today-refresh-error">
+          <ErrorBox error={q.error} prefix={`刷新失败，显示的是 ${fmtTime(t.server_time)} 的数据`} />
+        </div>
+      ) : null}
       <CardDisclaimer />
 
       <div className="today-status">
@@ -96,11 +98,15 @@ export function TodayPage() {
           ) : dr.status === 'generating' ? (
             <span><Tag color="processing">生成中</Tag>{dr.date} 日报正在生成</span>
           ) : (
-            <span className="muted">{dr.date} 日报尚未生成（收盘后生成）</span>
+            // 评审 m3：非交易日没有日报；交易日收盘后生成
+            <span className="muted" data-testid="today-report-not-yet">
+              {t.session === 'non_trading_day' ? `${dr.date} 非交易日，无日报` : `${dr.date} 日报尚未生成（收盘后生成）`}
+            </span>
           )}
         </section>
         <section className="today-card" data-testid="today-reconciliation" aria-label="对账">
-          <div className="today-card-head"><span className="today-card-title">对账</span></div>
+          {/* 评审 m4：/today 的对账状态只针对默认账户 */}
+          <div className="today-card-head"><span className="today-card-title">对账</span><span className="muted small">默认账户</span></div>
           <span>
             <Tag color={rec.color}>{rec.text}</Tag>
             {t.reconciliation.status === 'not_imported' ? (
@@ -109,7 +115,7 @@ export function TodayPage() {
               <>
                 差异 <span className="num">{t.reconciliation.diff_count}</span> 项，其中重要 <span className="num">{t.reconciliation.important_count}</span> 项
                 {t.reconciliation.as_of ? <span className="muted small">（截至 {fmtTime(t.reconciliation.as_of)}）</span> : null}
-                {' '}<Link to="/portfolio?tab=reconciliation">查看 ›</Link>
+                {' '}<Link to="/portfolio?tab=reconciliation">查看默认账户对账 ›</Link>
               </>
             )}
           </span>
@@ -139,14 +145,18 @@ export function TodayPage() {
 
         <Section title="风险提示" k="risk_flags" data={t} testId="today-risks">
           <ul className="today-list">
-            {t.risk_flags.items.map((f, i) => (
-              <li key={`${f.security_code ?? 'acct'}-${f.control}-${i}`}>
+            {/* 评审 m5：有 risk_event_id 时用它作 key，否则 control + security_code */}
+            {t.risk_flags.items.map((f) => (
+              <li key={f.risk_event_id ?? `${f.control}-${f.security_code ?? 'acct'}`}>
                 <Tag color={RISK_LEVEL[f.level].color}>{RISK_LEVEL[f.level].text}</Tag>
                 <span className="small">{RISK_CONTROL[f.control]}</span>
                 {stockLink(f.security_code, f.name)}
                 <span>{f.message}</span>
                 {f.gated_actions.length ? <span className="muted small">受限动作：{f.gated_actions.map((a) => ACTION_SHORT[a]).join('、')}</span> : null}
                 {f.quantity_cap !== null ? <span className="muted small">数量上限 <span className="num">{fmtNum(f.quantity_cap, 0)}</span></span> : null}
+                {f.risk_event_id ? (
+                  <Link className="small" to={`/risk-controls?tab=events&event=${encodeURIComponent(f.risk_event_id)}`} data-testid={`risk-event-${f.risk_event_id}`}>风控事件 ›</Link>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -166,14 +176,74 @@ export function TodayPage() {
 
         <Section title="今日失效" k="invalidations_today" data={t} testId="today-invalidations">
           <ul className="today-list">
-            {t.invalidations_today.items.map((x, i) => (
-              <li key={`${x.suggestion_id}-${x.strategy_key}-${i}`}>
+            {t.invalidations_today.items.map((x) => (
+              <li key={`${x.suggestion_id}-${x.strategy_key}-${x.at}`}>
                 <Link to={`/suggestions/${x.suggestion_id}`}>{x.name} <span className="mono muted">{x.security_code}</span></Link>
                 <span className="mono small muted">{x.strategy_key}</span>
                 <span>{x.text}</span>
                 <span className="muted small">{fmtTime(x.at)}</span>
               </li>
             ))}
+          </ul>
+        </Section>
+      </div>
+
+      <div className="today-grid">
+        <Section title="提醒" k="alerts" data={t} testId="today-alerts">
+          <ul className="today-list">
+            {t.alerts.items.map((a) => (
+              <li key={a.id} data-testid={`alert-${a.id}`}>
+                <Tag color={SEVERITY[a.severity]}>{SEVERITY_TEXT[a.severity]}</Tag>
+                {a.status === 'new' ? <span className="today-unread-dot" data-testid="alert-unread" aria-label={ALERT_STATUS.new} title={ALERT_STATUS.new} /> : null}
+                <span>{a.title}</span>
+                {stockLink(a.security_code, a.name)}
+                <span className="muted small">触发于 {fmtTime(a.triggered_at)}</span>
+                {a.data_as_of ? <span className="muted small">数据截至 {fmtTime(a.data_as_of)}</span> : null}
+                {a.affected_plans.map((p) => (
+                  <Link key={`${p.plan_id}-${p.plan_version_no}`} className="small" to={`/plans/${encodeURIComponent(p.plan_id)}`}>计划 v{p.plan_version_no} ›</Link>
+                ))}
+                <EvidenceChips ids={a.evidence_ids} evidence={t.evidence} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+
+        <Section title="计划触发" k="plan_triggers" data={t} testId="today-plan-triggers">
+          <div className="muted small today-note">只提示计划条件已满足，不下单</div>
+          <ul className="today-list">
+            {t.plan_triggers.items.map((p) => (
+              <li key={`${p.plan_id}-${p.condition_id}`} data-testid={`plan-trigger-${p.condition_id}`}>
+                <Tag color={p.condition_kind === 'invalidation' ? 'red' : 'blue'} data-kind={p.condition_kind}>{PLAN_CONDITION_KIND[p.condition_kind]}</Tag>
+                {stockLink(p.security_code, p.name)}
+                <span>{p.condition_text}</span>
+                <Link className="small" to={`/plans/${encodeURIComponent(p.plan_id)}`}>计划 v{p.plan_version_no} ›</Link>
+                <span className="muted small">{fmtTime(p.triggered_at)}</span>
+                <EvidenceChips ids={p.evidence_ids} evidence={t.evidence} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+
+        <Section title="数据缺口" k="data_gaps" data={t} testId="today-data-gaps" empty="数据完整">
+          <ul className="today-list">
+            {t.data_gaps.items.map((g) => {
+              const route = safeInternalRoute(g.route);
+              return (
+                <li key={g.key} data-testid={`data-gap-${g.key}`}>
+                  <Tag color={g.reason === 'data_licence_unavailable' ? 'red' : 'orange'}>{GAP_REASON[g.reason]}</Tag>
+                  <span className="muted small">{DATA_GAP_SCOPE[g.scope]}{g.dataset ? ` · ${g.dataset}` : ''}</span>
+                  <span>{g.message}</span>
+                  {g.securities.length ? (
+                    <span className="small">
+                      {g.securities.map((x) => <Link key={x.security_code} to={`/stocks/${encodeURIComponent(x.security_code)}`} className="today-gap-sec">{x.name}</Link>)}
+                      <span className="muted">共 {g.security_count} 只</span>
+                    </span>
+                  ) : null}
+                  {g.since ? <span className="muted small">自 {fmtTime(g.since)}</span> : null}
+                  {route ? <Link className="small" to={route} data-testid="data-gap-route">去处理 ›</Link> : null}
+                </li>
+              );
+            })}
           </ul>
         </Section>
       </div>

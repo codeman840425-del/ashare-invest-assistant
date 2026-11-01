@@ -1,14 +1,14 @@
 /**
  * T-F03 个股档案 / 市场概览示例数据。
- * 契约已定义：/securities?q=、/market/overview、/securities/{code}/bars（这里补指数与周线）。
- * 其余端点契约 v0.2.6 仍未定义，结构见 api/marketTypes.ts，全部 // [待契约确认]。
+ * 结构按契约 v0.2.7 §5.1 / §7.3（T-A08）：/securities/search、/securities/{code}、financials、fund-flows、factors、
+ * announcements、/market/sector-flows，以及指数日线与周线（§6.2）。
  * 公告 url 一律用保留域名 example.com 占位，前端只当外链，不取内容。
  */
-import type { DataStatus } from '../api/enums';
+import type { Board, DataStatus } from '../api/enums';
 import type { Bar, BarsResponse, Gap, MarketOverview } from '../api/types';
 import type {
-  Announcement, Board, FactorGroup, FactorValue, FactorsResponse, FinancialPeriod, FinancialsResponse, FundFlowDay, FundFlowsResponse,
-  SecurityHit, SecurityProfile, SectorFlow, SectorFlowsResponse, SectorKind,
+  Announcement, AnnouncementsResponse, FactorValue, FactorsResponse, FinancialPeriod, FinancialsResponse, FundFlowDay, FundFlowsResponse,
+  ProviderRef, SecurityHit, SecurityProfile, SecuritySearchResponse, SectorFlow, SectorFlowsResponse, SectorKind,
 } from '../api/marketTypes';
 import { minuteEnds } from '../lib/market';
 import { NOW, SECURITY_CODES, TERMINAL_ACCOUNT, TRADE_DATE, specBrief, tradingDays } from './fixtures';
@@ -22,6 +22,9 @@ function rng(seed: number) {
   };
 }
 const SUSPENDED = new Set(['601001.SH', '830001.BJ']);
+const MAIRUI = (endpoint: string | null, fetched_at: string | null): ProviderRef => ({ provider: 'mairui', endpoint, fetched_at });
+const MASTER_AS_OF = '2026-11-02';
+const ATTRIBUTION = '证券列表来自上交所、深交所、北交所公开信息（示例）';
 
 // ---------------- 指数 ----------------
 interface IndexSpec { code: string; name: string; prev_close: number; price: number; amount: number; seed: number }
@@ -60,9 +63,11 @@ function indexDaily(s: IndexSpec): BarsResponse {
     return {
       t, open: f2(open), high: f2(Math.max(open, close) * (1 + r() * 0.007)), low: f2(Math.min(open, close) * (1 - r() * 0.007)), close: f2(close),
       pre_close: i === 0 ? null : f2(closes[i - 1]), volume: String(Math.round(amount / close / 100) * 100), amount: f2(amount), avg_price: null,
+      // 盘中：当日 K 线尚未收盘
+      is_final: t !== TRADE_DATE,
     };
   });
-  return { security_code: s.code, name: s.name, freq: 'd', adjust: 'none', pre_close: null, items, next_before: null, data_status: 'fresh', data_as_of: NOW, gaps: [] };
+  return { security_code: s.code, name: s.name, freq: 'd', adjust: 'none', pre_close: null, items, next_before: null, adjust_as_of: null, data_status: 'fresh', data_as_of: NOW, gaps: [] };
 }
 function indexIntraday(s: IndexSpec): BarsResponse {
   const r = rng(s.seed * 17);
@@ -77,11 +82,11 @@ function indexIntraday(s: IndexSpec): BarsResponse {
     const amount = (s.amount / 240) * (0.5 + r() * (i < 15 ? 2.2 : 0.9));
     items.push({
       t: `${TRADE_DATE}T${mins[i]}:00+08:00`, open: f2(prev), high: f2(Math.max(prev, p) * 1.0003), low: f2(Math.min(prev, p) * 0.9997), close: f2(p),
-      pre_close: null, volume: String(Math.round(amount / p / 100) * 100), amount: f2(amount), avg_price: null,
+      pre_close: null, volume: String(Math.round(amount / p / 100) * 100), amount: f2(amount), avg_price: null, is_final: i < n - 1,
     });
     prev = p;
   }
-  return { security_code: s.code, name: s.name, freq: '1m', adjust: 'none', pre_close: f2(s.prev_close), items, next_before: null, data_status: 'fresh', data_as_of: NOW, gaps: [] };
+  return { security_code: s.code, name: s.name, freq: '1m', adjust: 'none', pre_close: f2(s.prev_close), items, next_before: null, adjust_as_of: null, data_status: 'fresh', data_as_of: NOW, gaps: [] };
 }
 export const indexBars = (code: string, freq: '1m' | 'd') => {
   const s = indexOf(code);
@@ -89,7 +94,9 @@ export const indexBars = (code: string, freq: '1m' | 'd') => {
 };
 
 /**
- * 周线：由日线按自然周聚合，t 取该周最后一个交易日 // [待契约确认] 周线 t 的取值口径（周末日期 / 周五 / 最后交易日）
+ * 周线（§6.2 v0.2.7）：由日线按自然周（周一至周日）聚合；t = 该周最后一个交易日；
+ * 第一根的 pre_close 取该周第一根日 K 的 pre_close，之后为上一根周 K 的 close；整周无交易（全周停牌）不出 K 线；
+ * is_final 只在该周最后一个交易日已收盘时为 true（这里以“该周所有日 K 都 is_final 且已不是本周”为准）。
  */
 export function toWeekly(daily: BarsResponse): BarsResponse {
   const groups = new Map<string, Bar[]>();
@@ -99,57 +106,125 @@ export function toWeekly(daily: BarsResponse): BarsResponse {
     const k = d.toISOString().slice(0, 10);
     groups.set(k, [...(groups.get(k) ?? []), b]);
   }
+  const weekOf = (t: string) => {
+    const d = new Date(`${t.slice(0, 10)}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    return d.toISOString().slice(0, 10);
+  };
+  const currentWeek = weekOf(TRADE_DATE);
   let prevClose: string | null = null;
-  const items: Bar[] = [...groups.values()].map((g) => {
+  const items: Bar[] = [];
+  for (const [wk, all] of groups) {
+    // 停牌日在日线中不出现（成交量为 0 的占位也剔除）；整周无交易则不出 K 线
+    const g = all.filter((x) => Number(x.volume) > 0);
+    if (!g.length) continue;
     const bar: Bar = {
       t: g[g.length - 1].t, open: g[0].open, close: g[g.length - 1].close,
       high: f2(Math.max(...g.map((x) => Number(x.high)))), low: f2(Math.min(...g.map((x) => Number(x.low)))),
-      pre_close: prevClose, volume: String(g.reduce((a, x) => a + Number(x.volume), 0)), amount: f2(g.reduce((a, x) => a + Number(x.amount), 0)), avg_price: null,
+      pre_close: items.length === 0 ? g[0].pre_close : prevClose,
+      volume: String(g.reduce((a, x) => a + Number(x.volume), 0)), amount: f2(g.reduce((a, x) => a + Number(x.amount), 0)), avg_price: null,
+      is_final: wk !== currentWeek && g.every((x) => x.is_final),
     };
     prevClose = bar.close;
-    return bar;
-  });
+    items.push(bar);
+  }
   return { ...daily, freq: 'w', items };
 }
 
 // ---------------- 搜索 / 主数据 ----------------
-/** 契约 §7.3 /securities?q=：代码前缀或名称包含；最多 20 条 */
-export function searchSecurities(q: string): SecurityHit[] {
-  const k = q.trim().toUpperCase();
-  if (!k) return [];
-  // [待契约确认] 搜索结果是否包含指数：契约只给 {security_code, name}，无类型字段；mock 只返回个股，指数从 /market 进入
-  const all: SecurityHit[] = SECURITY_CODES.map((c) => ({ security_code: c, name: specBrief(c)!.name }));
-  return all.filter((h) => h.security_code.startsWith(k) || h.name.includes(q.trim())).slice(0, 20);
+const boardOf = (code: string): Board => (code.endsWith('.BJ') ? 'bse' : code.startsWith('688') ? 'star' : code.startsWith('300') ? 'chinext' : 'main');
+const exchangeOf = (code: string) => code.slice(-2) as SecurityHit['exchange'];
+const CONCEPTS = ['高股息（示例）', '人工智能（示例）', '半导体（示例）', '储能（示例）', '创新药（示例）', '数据要素（示例）', '机器人（示例）'];
+const MATCH_ORDER: SecurityHit['match_kind'][] = ['code_exact', 'name_exact', 'initials_exact', 'code_prefix', 'name_prefix', 'initials_prefix', 'name_contains', 'former_name', 'former_code', 'fuzzy'];
+
+/**
+ * 契约 §7.3 GET /securities/search?q&types&include_delisted&limit（v0.2.7）：按 security_match_kind 层级排序。
+ * 示例数据没有拼音与曾用名，只演示代码/名称的精确、前缀、包含三类命中。
+ */
+export function searchSecurities(q: string, opts: { types?: string[]; limit?: number } = {}): SecuritySearchResponse {
+  // 归一化：NFKC、去空白、转大写；600000.SH / SH600000 / 600000 都按代码处理
+  const raw = q.normalize('NFKC').replace(/\s+/g, '');
+  const up = raw.toUpperCase();
+  const m = /^(?:SH|SZ|BJ)?(\d{1,6})(?:\.(?:SH|SZ|BJ))?$/.exec(up);
+  const k = m ? m[1] : up;
+  const types = opts.types?.length ? opts.types : ['stock', 'cdr'];
+  const pool: SecurityHit[] = [
+    ...SECURITY_CODES.map((c): SecurityHit => ({
+      security_code: c, name: specBrief(c)!.name, type: 'stock', exchange: exchangeOf(c), board: boardOf(c), listing_status: 'listed',
+      risk_flag: null, match_kind: 'fuzzy', matched_text: null, quote_missing: false,
+    })),
+    ...INDEX_SPECS.map((s): SecurityHit => ({
+      security_code: s.code, name: s.name, type: 'index', exchange: exchangeOf(s.code), board: null, listing_status: null,
+      risk_flag: null, match_kind: 'fuzzy', matched_text: null, quote_missing: false,
+    })),
+  ].filter((h) => types.includes(h.type));
+  const kindOf = (h: SecurityHit): SecurityHit['match_kind'] | null => {
+    if (h.security_code.slice(0, 6) === k) return 'code_exact';
+    if (h.name === raw) return 'name_exact';
+    if (h.security_code.startsWith(k)) return 'code_prefix';
+    if (h.name.startsWith(raw)) return 'name_prefix';
+    if (h.name.includes(raw)) return 'name_contains';
+    return null;
+  };
+  const items = pool
+    .map((h) => ({ ...h, match_kind: kindOf(h) }))
+    .filter((h): h is SecurityHit => h.match_kind !== null)
+    .sort((a, b) => MATCH_ORDER.indexOf(a.match_kind) - MATCH_ORDER.indexOf(b.match_kind) || a.security_code.localeCompare(b.security_code))
+    .slice(0, Math.min(Math.max(opts.limit ?? 20, 1), 50));
+  return { items, master_as_of: MASTER_AS_OF };
 }
 
-const boardOf = (code: string): Board => (code.endsWith('.BJ') ? 'bse' : code.startsWith('688') ? 'star' : code.startsWith('300') ? 'chinext' : 'main');
-const CONCEPTS = ['高股息（示例）', '人工智能（示例）', '半导体（示例）', '储能（示例）', '创新药（示例）', '数据要素（示例）', '机器人（示例）'];
-
-/** [待契约确认] GET /securities/{code} */
+/** 契约 §7.3 GET /securities/{code}（v0.2.7 SecurityProfile；指数的板块、股本、行业为 null，概念为 []） */
 export function securityProfile(code: string): SecurityProfile | null {
+  const idx = INDEX_SPECS.find((x) => x.code === code);
+  if (idx) {
+    return {
+      security_code: idx.code, name: idx.name, type: 'index', exchange: exchangeOf(idx.code), board: null, list_date: null, list_date_basis: null,
+      delist_date: null, listing_status: 'listed', risk_flag: null, former_names: [], code_history: [], master_as_of: MASTER_AS_OF, attribution: ATTRIBUTION,
+      industry: null, concepts: [], total_shares: null, float_shares: null, suspended: null,
+      sources: [{ provider: 'exchange', endpoint: null, fetched_at: '2026-11-02T08:00:00+08:00' }],
+      data_status: 'fresh', data_as_of: '2026-11-02T08:30:00+08:00', gaps: [],
+    };
+  }
   const s = specBrief(code);
   if (!s) return null;
   const r = rng(s.seed * 7);
   const total = Math.round((5 + r() * 120) * 1e8);
   const listYear = 1999 + Math.floor(r() * 24);
+  const bj = s.code.endsWith('.BJ');
   return {
-    security_code: s.code, name: s.name, exchange: s.code.slice(-2) as SecurityProfile['exchange'], board: boardOf(s.code),
-    industry: `${s.sector}（示例）`, concepts: [CONCEPTS[s.seed % CONCEPTS.length], CONCEPTS[(s.seed + 3) % CONCEPTS.length]],
+    security_code: s.code, name: s.name, type: 'stock', exchange: exchangeOf(s.code), board: boardOf(s.code),
     list_date: `${listYear}-${String(1 + Math.floor(r() * 12)).padStart(2, '0')}-${String(1 + Math.floor(r() * 27)).padStart(2, '0')}`,
-    status: SUSPENDED.has(s.code) ? 'suspended' : 'listed', risk_warning: false,
+    list_date_basis: bj ? 'neeq_select' : 'listing', delist_date: null, listing_status: 'listed', risk_flag: null,
+    // 北交所示例演示代码切换历史（示例）
+    former_names: [], code_history: bj ? [{ security_code: `43${s.code.slice(2, 6)}.BJ`, until: '2024-10-08' }] : [],
+    master_as_of: MASTER_AS_OF, attribution: ATTRIBUTION,
+    industry: { taxonomy: 'sw_l1', code: `SW${String(s.seed).padStart(4, '0')}`, name: `${s.sector}（示例）` },
+    concepts: [CONCEPTS[s.seed % CONCEPTS.length], CONCEPTS[(s.seed + 3) % CONCEPTS.length]].map((name, i) => ({ code: `GN${s.seed}${i}`, name })),
     total_shares: String(total), float_shares: String(Math.round(total * (0.55 + r() * 0.45))),
+    suspended: SUSPENDED.has(s.code),
+    sources: [
+      { provider: 'exchange', endpoint: null, fetched_at: '2026-11-02T08:00:00+08:00' },
+      MAIRUI(null, '2026-11-02T08:30:00+08:00'),
+    ],
     data_status: 'fresh', data_as_of: '2026-11-02T08:30:00+08:00', gaps: [],
   };
 }
 
 // ---------------- 财务 ----------------
 const PERIODS = ['2026-09-30', '2026-06-30', '2026-03-31', '2025-12-31', '2025-09-30', '2025-06-30', '2025-03-31', '2024-12-31'];
+const reportPeriodOf = (p: string): FinancialPeriod['report_period'] => (p.endsWith('03-31') ? 'q1' : p.endsWith('06-30') ? 'h1' : p.endsWith('09-30') ? 'q3' : 'fy');
+const nextDay = (d: string) => {
+  const x = new Date(`${d}T00:00:00Z`);
+  x.setUTCDate(x.getUTCDate() + 1);
+  return x.toISOString().slice(0, 10);
+};
 const announceOf = (p: string) => {
   const y = Number(p.slice(0, 4));
   return p.endsWith('03-31') ? `${y}-04-28` : p.endsWith('06-30') ? `${y}-08-28` : p.endsWith('09-30') ? `${y}-10-29` : `${y + 1}-04-25`;
 };
-/** [待契约确认] GET /securities/{code}/financials（累计口径，金额单位元） */
-export function financials(code: string): FinancialsResponse | null {
+/** §7.3 GET /securities/{code}/financials（累计口径，金额单位元；默认 8 期，最多 40） */
+export function financials(code: string, limit = 8): FinancialsResponse | null {
   const s = specBrief(code);
   if (!s) return null;
   const r = rng(s.seed * 13);
@@ -162,18 +237,23 @@ export function financials(code: string): FinancialsResponse | null {
     const rev = annualRev * q(p) * (i < 4 ? 1 : 0.92) * grow;
     const np = rev * margin * (0.8 + r() * 0.4);
     return {
-      period_end: p, announce_date: announceOf(p), revenue: f2(rev), revenue_yoy_pct: f2((grow - 1) * 100 + 4), net_profit: f2(np),
-      net_profit_yoy_pct: f2((r() - 0.4) * 60), eps: (np / (8 + s.seed) / 1e8).toFixed(3), roe_pct: f2(margin * 60 * q(p) * (0.8 + r() * 0.4)),
+      period_end: p, report_period: reportPeriodOf(p), announce_date: announceOf(p), available_from: nextDay(announceOf(p)), is_restated: false,
+      revenue: f2(rev), revenue_yoy_pct: f2((grow - 1) * 100 + 4), net_profit: f2(np),
+      net_profit_yoy_pct: f2((r() - 0.4) * 60), deducted_net_profit: f2(np * (0.88 + r() * 0.1)),
+      eps: (np / (8 + s.seed) / 1e8).toFixed(3), bvps: (2 + r() * 12).toFixed(3), roe_pct: f2(margin * 60 * q(p) * (0.8 + r() * 0.4)),
       gross_margin_pct: partial && i === 0 ? null : f2(margin * 100 + 12 + r() * 10), debt_ratio_pct: f2(30 + r() * 45),
       operating_cash_flow: f2(np * (0.4 + r() * 1.2) * (r() < 0.15 ? -1 : 1)),
     };
   });
   const gaps: Gap[] = partial ? [{ key: 'financials.gross_margin', reason: 'not_yet_published', message: '最新报告期毛利率未更新（示例）' }] : [];
-  return { security_code: s.code, name: s.name, items, data_status: partial ? 'partial' : 'fresh', data_as_of: '2026-11-01T20:00:00+08:00', gaps };
+  return {
+    security_code: s.code, name: s.name, items: items.slice(0, Math.min(Math.max(limit, 1), 40)), sources: [MAIRUI(null, '2026-11-01T20:00:00+08:00')],
+    data_status: partial ? 'partial' : 'fresh', data_as_of: '2026-11-01T20:00:00+08:00', gaps,
+  };
 }
 
 // ---------------- 资金流 ----------------
-/** [待契约确认] GET /securities/{code}/fund-flows?days= */
+/** §7.3 GET /securities/{code}/fund-flows?days=（默认 60，最多 250） */
 export function fundFlows(code: string, days: number): FundFlowsResponse | null {
   const s = specBrief(code);
   if (!s) return null;
@@ -188,50 +268,68 @@ export function fundFlows(code: string, days: number): FundFlowsResponse | null 
     const md = (r() - 0.5) * scale * 0.04;
     const main = sl + lg;
     return {
-      trade_date: d, main_net: f2(main), super_large_net: f2(sl), large_net: f2(lg), medium_net: f2(md), small_net: f2(-main - md),
+      trade_date: d, amount: f2(scale * (0.7 + r() * 0.6)), main_net: f2(main), super_large_net: f2(sl), large_net: f2(lg), medium_net: f2(md),
+      // 示例：最早一天的小单分档缺失，演示分档可为 null
+      small_net: i === 0 ? null : f2(-main - md),
       main_net_pct: f2((main / scale) * 100),
+      // 盘中：当日数据尚未收盘
+      is_final: d !== TRADE_DATE,
     };
   });
   const gaps: Gap[] = suspended
     ? [{ key: 'capital', reason: 'upstream_error', message: '停牌，当日无资金流（示例）' }]
     : s.data_status === 'partial' ? [{ key: 'capital', reason: 'not_yet_published', message: '当日资金流尚未更新（约 30 分钟一次，示例）' }] : [];
   const status: DataStatus = gaps.length ? 'partial' : s.data_status === 'stale' ? 'stale' : 'fresh';
-  return { security_code: s.code, name: s.name, items, data_status: status, data_as_of: s.data_as_of, gaps };
+  return { security_code: s.code, name: s.name, items, sources: [MAIRUI(null, s.data_as_of)], data_status: status, data_as_of: s.data_as_of, gaps };
 }
 
 // ---------------- 因子 ----------------
-const FACTOR_DEFS: { id: string; name: string; group: FactorGroup; unit: string | null; base: number; spread: number }[] = [
-  { id: 'f.pe_ttm', name: '市盈率 PE(TTM)', group: 'value', unit: '倍', base: 8, spread: 60 },
-  { id: 'f.pb', name: '市净率 PB', group: 'value', unit: '倍', base: 0.6, spread: 8 },
-  { id: 'f.dividend_yield', name: '股息率(TTM)', group: 'value', unit: '%', base: 0, spread: 6 },
-  { id: 'f.roe_ttm', name: 'ROE(TTM)', group: 'quality', unit: '%', base: 2, spread: 22 },
-  { id: 'f.gross_margin', name: '毛利率', group: 'quality', unit: '%', base: 10, spread: 50 },
-  { id: 'f.revenue_yoy', name: '营收同比', group: 'growth', unit: '%', base: -15, spread: 50 },
-  { id: 'f.np_yoy', name: '归母净利同比', group: 'growth', unit: '%', base: -30, spread: 90 },
-  { id: 'f.mom_20d', name: '20 日涨跌幅', group: 'momentum', unit: '%', base: -12, spread: 26 },
-  { id: 'f.mom_60d', name: '60 日涨跌幅', group: 'momentum', unit: '%', base: -20, spread: 45 },
-  { id: 'f.vol_60d', name: '60 日年化波动率', group: 'volatility', unit: '%', base: 15, spread: 45 },
-  { id: 'f.turnover_20d', name: '20 日平均换手率', group: 'liquidity', unit: '%', base: 0.3, spread: 6 },
-  { id: 'f.amount_20d', name: '20 日日均成交额', group: 'liquidity', unit: '亿元', base: 0.5, spread: 40 },
+/**
+ * factor_category 键名契约【待 T003 补测】，示例数据暂用以下占位键（前端按原样分组，标签见 FACTOR_CATEGORY_LABEL）
+ */
+const FACTOR_DEFS: { id: string; feature_key: string | null; name: string; category: string; unit: string | null; base: number; spread: number }[] = [
+  { id: 'f.pe_ttm', feature_key: 'pe_ttm', name: '市盈率 PE(TTM)', category: 'valuation', unit: '倍', base: 8, spread: 60 },
+  { id: 'f.pb', feature_key: 'pb', name: '市净率 PB', category: 'valuation', unit: '倍', base: 0.6, spread: 8 },
+  { id: 'f.dividend_yield', feature_key: null, name: '股息率(TTM)', category: 'valuation', unit: '%', base: 0, spread: 6 },
+  { id: 'f.roe_ttm', feature_key: 'roe_ttm', name: 'ROE(TTM)', category: 'quality', unit: '%', base: 2, spread: 22 },
+  { id: 'f.gross_margin', feature_key: null, name: '毛利率', category: 'quality', unit: '%', base: 10, spread: 50 },
+  { id: 'f.revenue_yoy', feature_key: null, name: '营收同比', category: 'growth', unit: '%', base: -15, spread: 50 },
+  { id: 'f.np_yoy', feature_key: null, name: '归母净利同比', category: 'growth', unit: '%', base: -30, spread: 90 },
+  { id: 'f.mom_20d', feature_key: 'ret_20d', name: '20 日涨跌幅', category: 'momentum', unit: '%', base: -12, spread: 26 },
+  { id: 'f.mom_60d', feature_key: null, name: '60 日涨跌幅', category: 'momentum', unit: '%', base: -20, spread: 45 },
+  { id: 'f.vol_60d', feature_key: null, name: '60 日年化波动率', category: 'volatility', unit: '%', base: 15, spread: 45 },
+  { id: 'f.turnover_20d', feature_key: null, name: '20 日平均换手率', category: 'liquidity', unit: '%', base: 0.3, spread: 6 },
+  { id: 'f.amount_20d', feature_key: null, name: '20 日日均成交额', category: 'liquidity', unit: '亿元', base: 0.5, spread: 40 },
 ];
-/** [待契约确认] GET /securities/{code}/factors：分位为 0–100（全市场 / 申万一级行业内） */
+const FACTOR_UNIVERSE = 5300;
+/** §7.3 GET /securities/{code}/factors：只给全市场排名（没有行业内分位）；指数返回空列表 + no_source */
 export function factors(code: string): FactorsResponse | null {
+  const idx = INDEX_SPECS.find((x) => x.code === code);
+  if (idx) {
+    return {
+      security_code: idx.code, name: idx.name, trade_date: '2026-10-30', factor_set_version: 'mr-factors-85（示例）', counts: { total: 0, by_category: {} },
+      items: [], sources: [], data_status: 'unavailable', data_as_of: '2026-10-30T18:30:00+08:00', gaps: [{ key: 'factors', reason: 'no_source', message: '指数没有因子数据（示例）' }],
+    };
+  }
   const s = specBrief(code);
   if (!s) return null;
   const r = rng(s.seed * 23);
   const bj = code.endsWith('.BJ');
   const items: FactorValue[] = FACTOR_DEFS.map((d) => {
     const x = r();
-    const missing = bj && d.group === 'value' && d.id === 'f.dividend_yield';
+    const missing = bj && d.id === 'f.dividend_yield';
+    const rank = Math.max(1, Math.round((1 - x) * FACTOR_UNIVERSE));
     return {
-      factor_id: d.id, name: d.name, group: d.group, unit: d.unit, value: missing ? null : f2(d.base + x * d.spread),
-      pct_rank_market: missing ? null : f2(Math.min(99.9, x * 100)), pct_rank_industry: missing ? null : f2(Math.min(99.9, Math.max(0.1, x * 100 + (r() - 0.5) * 30))),
+      factor_id: d.id, feature_key: d.feature_key, name: d.name, category: d.category, unit: d.unit, value: missing ? null : f2(d.base + x * d.spread),
+      market_rank: missing ? null : rank, market_rank_pct: missing ? null : f2((1 - rank / FACTOR_UNIVERSE) * 100),
     };
   });
-  const gaps: Gap[] = bj ? [{ key: 'f.dividend_yield', reason: 'no_source', message: '北交所股息率暂无数据源（示例）' }] : [];
+  const by_category: Record<string, number> = {};
+  for (const it of items) by_category[it.category] = (by_category[it.category] ?? 0) + 1;
+  const gaps: Gap[] = bj ? [{ key: 'factor.f.dividend_yield', reason: 'no_source', message: '北交所股息率暂无数据源（示例）' }] : [];
   return {
-    security_code: s.code, name: s.name, trade_date: '2026-10-30', calc_version: 'factors-0.1（示例）', items,
-    data_status: gaps.length ? 'partial' : 'fresh', data_as_of: '2026-10-30T18:30:00+08:00', gaps,
+    security_code: s.code, name: s.name, trade_date: '2026-10-30', factor_set_version: 'mr-factors-85（示例）', counts: { total: items.length, by_category }, items,
+    sources: [MAIRUI(null, '2026-10-30T18:30:00+08:00')], data_status: gaps.length ? 'partial' : 'fresh', data_as_of: '2026-10-30T18:30:00+08:00', gaps,
   };
 }
 
@@ -244,25 +342,32 @@ const ANN_TITLES: [string, string][] = [
   ['关于诉讼事项的公告（示例）', '重大事项'], ['关于股票交易异常波动的公告（示例）', '交易提示'],
 ];
 const ANN_DATES = ['2026-10-29', '2026-10-21', '2026-10-15', '2026-09-26', '2026-08-28', '2026-08-12', '2026-07-30', '2026-07-12', '2026-06-18', '2026-04-28', '2026-04-25', '2026-04-25', '2026-03-11', '2026-02-06'];
-/** [待契约确认] GET /securities/{code}/announcements（按发布时间倒序；url 为保留域名占位） */
+/** §7.3 公告免责声明（契约原文） */
+export const ANNOUNCEMENT_DISCLAIMER = '公告内容以交易所及上市公司披露原文为准，本系统仅提供标题与原文链接。';
+/** §7.3 GET /securities/{code}/announcements（按发布时间倒序；url 为保留域名占位） */
 export function announcements(code: string): Announcement[] | null {
   const s = specBrief(code);
   if (!s) return null;
-  return ANN_TITLES.map(([title, category], i) => {
+  return ANN_TITLES.map(([title, raw], i) => {
     const id = `ann_${s.code.slice(0, 6)}_${String(i + 1).padStart(3, '0')}`;
+    const published_at = `${ANN_DATES[i]}T${i % 2 ? '17:30' : '20:05'}:00+08:00`;
     return {
-      id, published_at: `${ANN_DATES[i]}T${i % 2 ? '17:30' : '20:05'}:00+08:00`, title, category,
-      // 第 7 条故意不给链接，演示“无原文链接”
-      url: i === 6 ? null : `https://example.com/disclosure/${s.code}/${id}.pdf`,
+      id, published_at, title, category: raw === '定期报告' ? 'periodic_report' : 'other', category_raw: raw, level_raw: null,
+      // 第 7 条演示“原始链接不在白名单”：url 为 null，url_host 仍是原始主机名（契约 v0.2.7：无链接时 url_host 才为 null）
+      url: i === 6 ? null : `https://example.com/disclosure/${s.code}/${id}.pdf`, url_host: 'example.com',
+      file_format: 'pdf', first_seen_at: published_at,
     };
   });
 }
+export const announcementsMeta = (): Pick<AnnouncementsResponse, 'disclaimer' | 'sources' | 'data_status' | 'data_as_of' | 'gaps'> => ({
+  disclaimer: ANNOUNCEMENT_DISCLAIMER, sources: [MAIRUI(null, '2026-11-01T21:00:00+08:00')], data_status: 'fresh', data_as_of: '2026-11-01T21:00:00+08:00', gaps: [],
+});
 
 // ---------------- 板块资金 ----------------
 const INDUSTRIES = ['银行', '电子', '计算机', '医药生物', '食品饮料', '煤炭', '基础化工', '机械设备', '有色金属', '电力设备', '汽车', '非银金融', '通信', '传媒'];
 const CONCEPT_NAMES = ['人工智能', '半导体', '储能', '机器人', '低空经济', '创新药', '高股息', '数据要素', '固态电池', '消费电子', '算力', '卫星互联网'];
-/** [待契约确认] GET /market/sector-flows?kind= */
-export function sectorFlows(kind: SectorKind, limit: number): SectorFlowsResponse {
+/** §7.3 GET /market/sector-flows?kind=&sort=&limit=（盘后数据，上一交易日） */
+export function sectorFlows(kind: SectorKind, limit: number, sort = 'main_net_desc'): SectorFlowsResponse {
   const names = kind === 'industry' ? INDUSTRIES : CONCEPT_NAMES;
   const r = rng(kind === 'industry' ? 501 : 503);
   const items: SectorFlow[] = names.map((n, i) => {
@@ -270,13 +375,16 @@ export function sectorFlows(kind: SectorKind, limit: number): SectorFlowsRespons
     const leaderCode = SECURITY_CODES.find((c) => specBrief(c)!.sector === n) ?? SECURITY_CODES[i % 7];
     const ls = specBrief(leaderCode)!;
     return {
-      sector_id: `${kind}_${String(i + 1).padStart(3, '0')}`, name: `${n}（示例）`, change_pct: f2(chg), main_net: f2((chg + (r() - 0.5) * 2) * 6e8),
+      sector_code: `${kind === 'industry' ? 'SW' : 'GN'}${String(i + 1).padStart(4, '0')}`, name: `${n}（示例）`, change_pct: f2(chg),
+      main_net: f2((chg + (r() - 0.5) * 2) * 6e8), amount: f2((40 + r() * 400) * 1e8),
       up_count: Math.round(10 + r() * 80), down_count: Math.round(5 + r() * 60),
       leader: { security_code: ls.code, name: ls.name, change_pct: f2(((ls.price - ls.prev_close) / ls.prev_close) * 100) },
     };
   });
-  items.sort((a, b) => Number(b.main_net) - Number(a.main_net));
+  const [field, dir] = sort.startsWith('change_pct') ? (['change_pct', sort.endsWith('asc') ? 1 : -1] as const) : (['main_net', sort.endsWith('asc') ? 1 : -1] as const);
+  items.sort((a, b) => dir * (Number(a[field]) - Number(b[field])));
   return {
-    kind, trade_date: TRADE_DATE, items: items.slice(0, Math.min(Math.max(limit, 1), 50)), data_status: 'fresh', data_as_of: '2026-11-02T10:30:00+08:00', gaps: [],
+    kind, taxonomy: kind === 'industry' ? 'sw_l1' : null, trade_date: '2026-10-30', items: items.slice(0, Math.min(Math.max(limit, 1), 100)),
+    sources: [MAIRUI(null, '2026-10-30T18:00:00+08:00')], data_status: 'fresh', data_as_of: '2026-10-30T18:00:00+08:00', gaps: [],
   };
 }

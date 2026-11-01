@@ -1,5 +1,5 @@
 /**
- * Mock 字段校验：示例数据的字段名必须与契约 v0.2.x（前端当前对齐 v0.2.6，docs/api-contract.md，只读）逐字一致（对齐版本见 api/enums.ts CONTRACT_VERSION）。
+ * Mock 字段校验：示例数据的字段名必须与契约 v0.2.x（前端当前对齐 v0.2.7，docs/api-contract.md，只读）逐字一致（对齐版本见 api/enums.ts CONTRACT_VERSION）。
  * 字段清单直接从契约文本解析（§5.1 内联结构、§5.2 字段表、StrategyConclusion / DimensionCell / DailyReport 定义），
  * 契约改动后这里会第一时间失败。
  */
@@ -92,8 +92,13 @@ describe(`Mock 字段与契约 ${CONTRACT_VERSION} 逐字一致`, () => {
     ['Bar', () => [...(dailyBars(SECURITY_CODES[0])?.items ?? []), ...(intradayBars(SECURITY_CODES[0])?.items ?? [])]],
     ['ReleaseCondition', () => REASONS.map((r) => r.release_condition)],
   ];
+  // v0.2.7 在说明文字里给对象加的字段（不在花括号结构内），逐条核对说明原文后并入期望集合
+  const PROSE_ADDED: Record<string, string[]> = { Bar: ['is_final'] };
+  it('v0.2.7：Bar 的 is_final 来自说明原文', () => {
+    expect(CONTRACT).toContain('v0.2.7 加 `is_final: boolean`');
+  });
   it.each(cases)('%s', (name, get) => {
-    const expected = sorted(inlineShape(name));
+    const expected = sorted([...inlineShape(name), ...(PROSE_ADDED[name] ?? [])]);
     const items = get();
     expect(items.length).toBeGreaterThan(0);
     for (const it of items) expect(keysOf(it)).toEqual(expected);

@@ -99,7 +99,8 @@ describe('个股档案 /stocks/:code', () => {
       expect(a.rel).toContain('noreferrer');
       expect(a.href).toMatch(/^https?:\/\//);
     }
-    expect(within(tab).getByText('无原文链接')).toBeInTheDocument();
+    // v0.2.7：url 为 null 而 url_host 有值 = 原始链接不在白名单，只显示主机名、不给可点链接
+    expect(within(tab).getByText('链接不在白名单（example.com）')).toBeInTheDocument();
     expect(onlyLocalApi(urls)).toBe(true);
   });
 

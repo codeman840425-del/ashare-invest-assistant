@@ -541,6 +541,9 @@ export function tradingDays(end: string, n: number): string[] {
   return out;
 }
 
+/** 示例：前复权基准日（§5.1 v0.2.7 adjust_as_of） */
+export const ADJUST_AS_OF = '2026-10-30';
+
 export function dailyBars(code: string): BarsResponse | null {
   const s = specOf(code);
   if (!s) return null;
@@ -561,13 +564,13 @@ export function dailyBars(code: string): BarsResponse | null {
     const volume = Math.round((0.6 + r()) * (s.volume_lots || 120000)) * 100;
     return {
       t, open: f2(open), high: f2(high), low: f2(low), close: f2(close), pre_close: i === 0 ? null : f2(closes[i - 1]),
-      volume: String(volume), amount: f2(volume * close), avg_price: null,
+      volume: String(volume), amount: f2(volume * close), avg_price: null, is_final: t !== TRADE_DATE,
     };
   });
   // 停牌：最后一个交易日无成交
   const last = s.data_status === 'unavailable' || s.code === '601001.SH' ? items.slice(0, -1) : items;
   return {
-    security_code: s.code, name: s.name, freq: 'd', adjust: 'qfq', pre_close: null, items: last, next_before: null,
+    security_code: s.code, name: s.name, freq: 'd', adjust: 'qfq', pre_close: null, items: last, next_before: null, adjust_as_of: ADJUST_AS_OF,
     data_status: s.data_status === 'fresh' || s.data_status === 'partial' ? 'fresh' : s.data_status,
     data_as_of: s.data_as_of, gaps: quoteGaps(s).filter((g) => g.key === 'quote'),
   };
@@ -599,11 +602,11 @@ export function intradayBars(code: string): BarsResponse | null {
     prev = close;
     return {
       t: `${TRADE_DATE}T${mins[i]}:00+08:00`, open: f2(open), high: f2(high), low: f2(low), close: f2(close), pre_close: null,
-      volume: String(vol), amount: f2(close * vol), avg_price: (cumAmt / cumVol).toFixed(3),
+      volume: String(vol), amount: f2(close * vol), avg_price: (cumAmt / cumVol).toFixed(3), is_final: i < path.length - 1,
     };
   });
   return {
-    security_code: s.code, name: s.name, freq: '1m', adjust: 'none', pre_close: f2(s.prev_close), items, next_before: null,
+    security_code: s.code, name: s.name, freq: '1m', adjust: 'none', pre_close: f2(s.prev_close), items, next_before: null, adjust_as_of: null,
     data_status: n === 0 ? 'unavailable' : s.data_status === 'partial' ? 'fresh' : s.data_status,
     data_as_of: s.data_as_of, gaps: n === 0 ? [{ key: 'quote', reason: 'upstream_error', message: '停牌或无当日成交，无分时数据（示例）' }] : quoteGaps(s).filter((g) => g.key === 'quote'),
   };

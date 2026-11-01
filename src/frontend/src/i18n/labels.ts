@@ -3,6 +3,8 @@ import type {
   EpistemicType, GapReason, Horizon, Lifecycle, MarketRegime, NotificationKind, ReasonCode,
   ReleaseKind, RiskControl, RiskLevel, Severity, SuggestionOrigin, RuleRole, StrategyEvalState, MarketSession, SignalKind,
   DataProvider, ExecutabilityStatus, ConsensusStatus, ReconciliationStatus, NotificationTargetType, PlanDraftStatus,
+  SecurityType, Board, ListingStatus, SecurityRiskFlag, SecurityMatchKind, ReportPeriod, AnnouncementCategory, IndustryTaxonomy, InstanceOrigin,
+  AlertStatus, AlertOrigin, PlanConditionKind, DataGapScope,
 } from '../api/enums';
 
 /** 动作：短标签（徽标用）与完整措辞（plan §2.5.0 措辞约定：规则信号 + 候选） */
@@ -118,7 +120,7 @@ export const SIGNAL_KIND: Record<SignalKind, string> = {
   stop_hit: '触及止损/止盈', suspended: '停牌', data_stale: '数据过期',
 };
 export const PROVIDER: Record<DataProvider, string> = {
-  mairui: '麦蕊', user_import: '用户导入', user_input: '用户录入', system: '系统计算',
+  mairui: '麦蕊', user_import: '用户导入', user_input: '用户录入', system: '系统计算', exchange: '交易所公开信息',
 };
 export const EXECUTABILITY: Record<ExecutabilityStatus, { text: string; color: string }> = {
   executable: { text: '可执行', color: 'green' }, blocked: { text: '暂不可执行', color: 'orange' }, not_applicable: { text: '不适用', color: 'default' },
@@ -133,3 +135,31 @@ export const TARGET_TYPE: Record<NotificationTargetType, string> = {
   suggestion: '候选信号卡', candidate_signal: '候选信号', plan_draft: '计划草案', plan: '交易计划', daily_report: '日报',
   import_batch: '导入批次', reconciliation: '对账', strategy_version: '策略版本', none: '无',
 };
+
+// ---- v0.2.7（T-A08）个股数据、策略实例、/today 新增枚举 ----
+export const SECURITY_TYPE: Record<SecurityType, string> = { stock: '股票', cdr: 'CDR', index: '指数' };
+export const BOARD: Record<Board, string> = { main: '主板', chinext: '创业板', star: '科创板', bse: '北交所' };
+export const LISTING_STATUS: Record<ListingStatus, string> = {
+  listed: '上市', delisting_period: '退市整理期', delisted: '已退市', missing_from_list: '交易所列表未收录',
+};
+export const SECURITY_RISK_FLAG: Record<SecurityRiskFlag, string> = { st: 'ST', star_st: '*ST', delisting: '退市风险' };
+export const MATCH_KIND: Record<SecurityMatchKind, string> = {
+  code_exact: '代码', name_exact: '简称', initials_exact: '拼音首字母', code_prefix: '代码', name_prefix: '简称', initials_prefix: '拼音首字母',
+  name_contains: '简称', former_name: '曾用名', former_code: '旧代码', fuzzy: '近似',
+};
+export const REPORT_PERIOD: Record<ReportPeriod, string> = { q1: '一季报', h1: '半年报', q3: '三季报', fy: '年报' };
+export const ANNOUNCEMENT_CATEGORY: Record<AnnouncementCategory, string> = { periodic_report: '定期报告', other: '其他' };
+export const INDUSTRY_TAXONOMY: Record<IndustryTaxonomy, string> = { sw_l1: '申万一级', sw_l2: '申万二级', csrc: '证监会行业' };
+export const INSTANCE_ORIGIN: Record<InstanceOrigin, string> = { classifier: '周期分类生成', user: '自己添加', system: '系统内置' };
+export const ALERT_STATUS: Record<AlertStatus, string> = { new: '未读', read: '已读', checked: '已核对', acted: '已处理', dismissed: '已忽略' };
+export const ALERT_ORIGIN: Record<AlertOrigin, string> = { plan_condition: '计划条件', holding_event: '持仓事件', user_custom: '自定义提醒' };
+export const PLAN_CONDITION_KIND: Record<PlanConditionKind, string> = { trigger: '计划条件', invalidation: '失效条件' };
+export const DATA_GAP_SCOPE: Record<DataGapScope, string> = { user: '本人', account: '账户', security: '证券', market: '市场' };
+/**
+ * factor_category 键名【待 T003 补测】：已知的示例键给中文名，未知键原样显示
+ */
+export const FACTOR_CATEGORY_LABEL: Record<string, string> = {
+  valuation: '估值', quality: '质量', growth: '成长', momentum: '动量', volatility: '波动', liquidity: '流动性',
+};
+export const factorCategoryLabel = (k: string) => FACTOR_CATEGORY_LABEL[k] ?? k;
+export const SEVERITY_TEXT: Record<Severity, string> = { important: '重要', attention: '关注', info: '提示' };

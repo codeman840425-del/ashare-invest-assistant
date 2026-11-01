@@ -23,12 +23,12 @@ function renderAt(path: string) {
 }
 
 describe('路由与页面（MSW 示例数据）', () => {
-  it('/ 重定向到 /terminal；外壳含免责提示、示例数据横幅', async () => {
+  it('/ 重定向到 /today（评审 T-F08 m1）；外壳含免责提示、示例数据横幅', async () => {
     const router = renderAt('/');
-    await waitFor(() => expect(router.state.location.pathname).toBe('/terminal'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/today'));
     expect(screen.getByTestId('risk-disclosure')).toHaveTextContent(DISCLAIMER_TEXT);
     expect(screen.getByTestId('sample-banner')).toHaveTextContent('示例数据');
-    expect(await screen.findByTestId('terminal')).toBeInTheDocument();
+    expect(await screen.findByTestId('today-page')).toBeInTheDocument();
   });
 
   it('终端：三栏 + 底部面板、分隔条、恢复默认布局按钮、候选信号卡共识条', async () => {

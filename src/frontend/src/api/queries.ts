@@ -47,13 +47,16 @@ export const useTerminal = (scope: TerminalScope) =>
     refetchInterval: 15_000,
   });
 
-/** T-F08：首页聚合 GET /today（契约 §7.3，弱 ETag；SSE 未接入前按 §8 每 ≥ 15 秒带 If-None-Match 轮询） */
+/** 评审 T-F08 m6：收盘后与非交易日数据基本不变，轮询放慢到 60 秒；其余时段 15 秒（契约 §8 要求 ≥ 15 秒） */
+export const todayPollMs = (session: TodayResponse['session'] | undefined) => (session === 'closed' || session === 'non_trading_day' ? 60_000 : 15_000);
+
+/** T-F08：首页聚合 GET /today（契约 §7.3，弱 ETag；SSE 未接入前按 §8 带 If-None-Match 轮询） */
 export const useToday = () =>
   useQuery({
     queryKey: qk.today,
     queryFn: ({ signal }) => apiGet<TodayResponse>('/today', undefined, signal),
     placeholderData: keepPreviousData,
-    refetchInterval: 15_000,
+    refetchInterval: (query) => todayPollMs(query.state.data?.session),
   });
 
 export const useBars = (code: string | undefined, freq: BarFreq) => {

@@ -8,7 +8,8 @@ import type {
   DataStatus, Dimension, DimensionView, EpistemicType, ExecutabilityStatus, DataLicenceState, GapReason, HealthStatus, Horizon, IngestHealth,
   Lifecycle, MarketRegime, MarketSession, NotificationKind, NotificationTargetType, ReasonCode, ReasonStatus,
   ReconciliationStatus, RegistrationMode, ReleaseKind, RiskControl, RiskLevel, Role, AccountStatus, RuleRole, Severity,
-  SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus,
+  SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus, AlertOrigin, AlertStatus, PlanConditionKind,
+  DataGapScope,
 } from './enums';
 
 export type Decimal = string;
@@ -110,6 +111,8 @@ export interface Bar {
   amount: Decimal;
   /** 仅 1m */
   avg_price: Decimal | null;
+  /** v0.2.7：日 K 当日收盘入库后为 true；周 K 见 §6.2；1m 正在形成的一分钟为 false */
+  is_final: boolean;
 }
 export interface WatchlistItem {
   security_code: string;
@@ -396,6 +399,8 @@ export interface BarsResponse extends DataStatusBlock {
   pre_close: Decimal | null;
   items: Bar[];
   next_before: string | null;
+  /** v0.2.7：前复权基准日（adjust=none 时为 null）；变化时客户端丢弃同证券同复权方式的缓存并重载 */
+  adjust_as_of: DateStr | null;
 }
 export interface TerminalAccount {
   account_id: Uuid;
@@ -416,6 +421,46 @@ export interface TerminalResponse {
   rows: TerminalRow[];
   truncated: boolean;
   unread_notifications: number;
+}
+/** v0.2.7 §7.3 /today 补充：提醒（不含 origin=plan_condition） */
+export interface TodayAlert {
+  id: Uuid;
+  rule_id: Uuid;
+  origin: AlertOrigin;
+  severity: Severity;
+  status: AlertStatus;
+  security_code: string | null;
+  name: string | null;
+  title: string;
+  triggered_at: DateTime;
+  data_as_of: DateTime | null;
+  affected_plans: { plan_id: Uuid; plan_version_no: number; condition_id: Uuid | null }[];
+  evidence_ids: string[];
+}
+/** v0.2.7：计划条件已满足（只是事实提示，不下单） */
+export interface TodayPlanTrigger {
+  plan_id: Uuid;
+  plan_version_no: number;
+  security_code: string;
+  name: string;
+  condition_id: Uuid;
+  condition_kind: PlanConditionKind;
+  condition_text: string;
+  triggered_at: DateTime;
+  alert_id: Uuid | null;
+  evidence_ids: string[];
+}
+/** v0.2.7：数据完整性缺口 */
+export interface TodayDataGap {
+  key: string;
+  reason: GapReason;
+  scope: DataGapScope;
+  dataset: string | null;
+  message: string;
+  security_count: number;
+  securities: { security_code: string; name: string }[];
+  since: DateTime | null;
+  route: string | null;
 }
 export type TerminalScope = 'all' | 'watchlist' | 'holdings';
 export interface UnreadCount { count: number }
@@ -450,9 +495,14 @@ export interface TodayResponse {
   focus: MoreList<TerminalRow>;
   pending_plan_drafts: MoreList<{ id: Uuid; security_code: string; name: string; action: Action; valid_until: DateTime | null; status: PlanDraftStatus }>;
   released_reasons: MoreList<{ reason_id: Uuid; signal_id: Uuid; code: ReasonCode; security_code: string; name: string; released_at: DateTime }>;
-  risk_flags: MoreList<RiskFlag & { security_code: string | null; name: string | null }>;
+  risk_flags: MoreList<RiskFlag & { security_code: string | null; name: string | null; risk_event_id: Uuid | null }>;
   invalidations_today: MoreList<{ suggestion_id: Uuid; security_code: string; name: string; strategy_key: string; text: string; at: DateTime }>;
   daily_report: { date: DateStr; status: 'ready' | 'generating' | 'not_yet' };
   reconciliation: { status: ReconciliationStatus; as_of: DateTime | null; diff_count: number; important_count: number };
   unread_notifications: number;
+  // v0.2.7 /today 补充
+  alerts: MoreList<TodayAlert>;
+  plan_triggers: MoreList<TodayPlanTrigger>;
+  data_gaps: MoreList<TodayDataGap>;
+  evidence: Evidence[];
 }

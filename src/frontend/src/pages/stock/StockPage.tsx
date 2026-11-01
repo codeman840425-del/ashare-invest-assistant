@@ -3,17 +3,16 @@ import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from '
 import { ApiError } from '../../api/client';
 import { ENUMS } from '../../api/enums';
 import { CODE_RE, useBarsOf, useQuote, useSecurityProfile } from '../../api/marketQueries';
-import type { Board, SecurityProfile } from '../../api/marketTypes';
+import type { SecurityProfile } from '../../api/marketTypes';
 import { useHorizonAssessment } from '../../api/queries';
 import type { Bar, BarsResponse, QuoteItem } from '../../api/types';
 import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../components/common';
 import { CAP_KIND_TEXT, capExplanation } from '../../i18n/horizonCaps';
-import { HORIZON } from '../../i18n/labels';
+import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, SECURITY_RISK_FLAG } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { PriceChartPanel } from './PriceChartPanel';
 import { AnnouncementsTab, FactorsTab, FinancialsTab, FundFlowTab } from './StockTabs';
 
-const BOARD: Record<Board, string> = { main: '主板', chinext: '创业板', star: '科创板', bse: '北交所' };
 const TABS = ['financials', 'fund-flow', 'factors', 'announcements'] as const;
 type TabKey = (typeof TABS)[number];
 
@@ -59,7 +58,7 @@ function StockBody({ profile }: { profile: SecurityProfile }) {
     <div className="page-scroll stock-page" data-testid="stock-page">
       <StockHeader profile={profile} />
       <div className="stock-top">
-        <PriceChartPanel code={code} initial={profile.status === 'suspended' ? 'd' : '1m'} height={392} />
+        <PriceChartPanel code={code} initial={profile.suspended ? 'd' : '1m'} height={392} />
         <div className="stock-side">
           <ProfilePanel profile={profile} />
           <HorizonPanel code={code} />
@@ -108,7 +107,8 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
   const intraday = useBarsOf(code, '1m', 240);
   const q = quote.data;
   const tb = todayBar(daily.data?.items, q);
-  const suspended = profile.status === 'suspended';
+  // v0.2.7：停牌不是上市状态，用 suspended 表示
+  const suspended = profile.suspended === true;
   const preClose = tb?.pre_close ?? intradayPreClose(intraday.data, q) ?? (suspended && q ? q.price : null);
   const float = profile.float_shares ? Number(profile.float_shares) : null;
   const stats: [string, React.ReactNode][] = [
@@ -127,10 +127,10 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       <div className="sh-id">
         <span className="q-name">{profile.name}</span>
         <span className="mono muted">{code}</span>
-        <Tag variant="outlined">{BOARD[profile.board]}</Tag>
-        {profile.risk_warning ? <Tag color="orange">风险警示</Tag> : null}
+        {profile.board ? <Tag variant="outlined">{BOARD[profile.board]}</Tag> : null}
+        {profile.risk_flag ? <Tag color="orange" data-testid="risk-flag-tag">{SECURITY_RISK_FLAG[profile.risk_flag]}</Tag> : null}
         {suspended ? <Tag color="default" data-testid="suspended-tag">停牌</Tag> : null}
-        {profile.status === 'delisted' ? <Tag color="default">已退市</Tag> : null}
+        {profile.listing_status !== 'listed' ? <Tag color="default" data-testid="listing-status-tag">{LISTING_STATUS[profile.listing_status]}</Tag> : null}
       </div>
       {quote.isPending ? <span className="muted">行情加载中…</span> : q ? (
         <div className="sh-quote">
@@ -157,9 +157,14 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
 
 function ProfilePanel({ profile }: { profile: SecurityProfile }) {
   const rows: [string, React.ReactNode][] = [
-    ['所属行业', profile.industry ?? '—'],
-    ['概念', profile.concepts.length ? profile.concepts.join('、') : '—'],
-    ['上市日期', profile.list_date ?? '—'],
+    ['所属行业', profile.industry ? `${profile.industry.name}（${INDUSTRY_TAXONOMY[profile.industry.taxonomy]}）` : '—'],
+    ['概念', profile.concepts.length ? profile.concepts.map((c) => c.name).join('、') : '—'],
+    ['上市日期', profile.list_date ? `${profile.list_date}${profile.list_date_basis === 'neeq_select' ? '（精选层挂牌日）' : ''}` : '—'],
+    ...(profile.delist_date ? [['退市日期', profile.delist_date] as [string, React.ReactNode]] : []),
+    ...(profile.former_names.length ? [['曾用名', profile.former_names.map((f) => f.name).join('、')] as [string, React.ReactNode]] : []),
+    ...(profile.code_history.length
+      ? [['原代码', <span className="mono">{profile.code_history.map((c) => c.security_code).join('、')}</span>] as [string, React.ReactNode]]
+      : []),
     ['总股本', profile.total_shares ? `${fmtAmount(profile.total_shares)}股` : '—'],
     ['流通股本', profile.float_shares ? `${fmtAmount(profile.float_shares)}股` : '—'],
     ['交易所', profile.exchange === 'SH' ? '上交所' : profile.exchange === 'SZ' ? '深交所' : '北交所'],
@@ -176,6 +181,11 @@ function ProfilePanel({ profile }: { profile: SecurityProfile }) {
           <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
         ))}
       </dl>
+      {/* v0.2.7：attribution 原样展示；sources 说明各字段来源 */}
+      <div className="muted small profile-attr" data-testid="profile-attribution">
+        {profile.attribution}（主数据截至 {profile.master_as_of}）
+        {profile.sources.length ? ` · 来源：${[...new Set(profile.sources.map((x) => PROVIDER[x.provider]))].join('、')}` : ''}
+      </div>
     </section>
   );
 }

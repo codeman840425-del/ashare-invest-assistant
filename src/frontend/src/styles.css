@@ -369,6 +369,9 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .today-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .today-card-title { font-weight: 600; }
 .today-empty { padding: 4px 0; }
+.today-unread-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #e5484d; }
+.today-note { margin-bottom: 4px; }
+.today-gap-sec { margin-right: 6px; }
 .today-list { list-style: none; margin: 0; padding: 0; }
 .today-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
 .today-list li:last-child { border-bottom: none; }

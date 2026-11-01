@@ -1,5 +1,5 @@
 /**
- * MSW 处理器：按契约 v0.2.6 §7 的路径与响应结构返回示例数据。只拦截同源 `/api/v1/*`。
+ * MSW 处理器：按契约 v0.2.7 §7 的路径与响应结构返回示例数据。只拦截同源 `/api/v1/*`。
  * 未实现的端点统一返回 404 + 契约错误信封（code=NOT_FOUND），便于发现漏接。
  */
 import { http, HttpResponse, delay, matchRequestUrl } from 'msw';
@@ -18,8 +18,11 @@ import {
   SIGNAL_EVENTS, SUGGESTIONS, SUGGESTION_LIST, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, WATCHLIST, dailyBars, intradayBars,
 } from './fixtures';
 import {
-  MARKET_OVERVIEW, announcements, factors, financials, fundFlows, indexBars, searchSecurities, sectorFlows, securityProfile, toWeekly,
+  INDEX_SPECS, MARKET_OVERVIEW, announcements, announcementsMeta, factors, financials, fundFlows, indexBars, searchSecurities, sectorFlows,
+  securityProfile, toWeekly,
 } from './marketFixtures';
+import { ENUMS } from '../api/enums';
+import { TODAY_EVIDENCE, riskEvents, todayAlerts, todayDataGaps, todayPlanTriggers, todaySamples } from './todayFixtures';
 
 export { errorBody };
 
@@ -36,6 +39,13 @@ export function resetMockState() {
 
 /** 浏览器里加一点延迟让加载态可见；测试（node）里不延迟 */
 const lag = () => (typeof window !== 'undefined' && import.meta.env.MODE !== 'test' ? delay(80) : Promise.resolve());
+
+const isIndex = (code: string) => INDEX_SPECS.some((x) => x.code === code);
+/** 指数没有财务、资金流：200 + 空列表 + unavailable + no_source（§7.3 v0.2.7） */
+const indexEmpty = (code: string, key: string) => ({
+  security_code: code, name: INDEX_SPECS.find((x) => x.code === code)!.name, items: [], sources: [],
+  data_status: 'unavailable' as DataStatus, data_as_of: NOW, gaps: [{ key, reason: 'no_source', message: '指数没有该项数据（示例）' }] as Gap[],
+});
 
 const LEVEL: Record<string, number> = { info: 1, warning: 2, critical: 3 };
 
@@ -61,6 +71,14 @@ function todayBody(): TodayResponse {
   const more = <T,>(items: T[]) => ({ items: items.slice(0, 50), more: items.length > 50 });
   const nameOf = (code: string) => TERMINAL_ROWS.find((r) => r.security_code === code)?.name ?? code;
   const report = DAILY_REPORTS[0];
+  const samples = todaySamples();
+  const events = riskEvents().filter((e) => e.status === 'active');
+  const u = currentUser();
+  const licOut = !!u && (licenceOut() || licenceState(u.id) === 'not_set');
+  const alerts = todayAlerts();
+  const triggers = todayPlanTriggers();
+  // 只带被引用到的 evidence（契约：alerts、plan_triggers 的 evidence_ids 都能在 evidence[] 找到）
+  const used = new Set([...alerts, ...triggers].flatMap((x) => x.evidence_ids));
   return {
     server_time: NOW, trade_date: TRADE_DATE, session: 'morning',
     market: { regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, data_status: 'fresh' },
@@ -68,16 +86,22 @@ function todayBody(): TodayResponse {
     pending_plan_drafts: more(SUGGESTIONS.flatMap((sg) => sg.plan_draft_ids.map((id) => ({
       id, security_code: sg.security_code, name: nameOf(sg.security_code), action: sg.strategies[0]?.action ?? 'wait', valid_until: null, status: 'pending' as const,
     })))),
-    released_reasons: more(REASONS.filter((r) => r.status === 'released' && r.released_at).map((r) => {
+    released_reasons: more([...REASONS.filter((r) => r.status === 'released' && r.released_at).map((r) => {
       const cs = CANDIDATE_SIGNALS.find((c) => c.id === r.signal_id);
       return { reason_id: r.id, signal_id: r.signal_id, code: r.code, security_code: cs?.security_code ?? '', name: cs?.name ?? '', released_at: r.released_at! };
-    })),
-    risk_flags: more(SUGGESTIONS.flatMap((sg) => sg.risk_flags.map((f) => ({ ...f, security_code: sg.security_code, name: nameOf(sg.security_code) })))
-      .sort((a, b) => LEVEL[b.level] - LEVEL[a.level])),
-    invalidations_today: more([]),
+    }), ...samples.released]),
+    // v0.2.7：risk_event_id 指向 /risk-controls/events 中 status=active 的事件
+    risk_flags: more(events.map(({ control, level, message, gated_actions, quantity_cap, evidence_ids, security_code, name, id }) => ({
+      control, level, message, gated_actions, quantity_cap, evidence_ids, security_code, name, risk_event_id: id,
+    })).sort((a, b) => LEVEL[b.level] - LEVEL[a.level])),
+    invalidations_today: more(samples.invalidations),
     daily_report: { date: TRADE_DATE, status: 'not_yet' },
     reconciliation: report.reconciliation,
     unread_notifications: notifications().filter((n) => n.read_at === null).length,
+    alerts: more(alerts),
+    plan_triggers: more(triggers),
+    data_gaps: { items: todayDataGaps(licOut).slice(0, 50), more: false },
+    evidence: TODAY_EVIDENCE.filter((e) => used.has(e.id)),
   };
 }
 
@@ -102,6 +126,15 @@ const routeHandlers = [
   http.get(`${API}/today`, async ({ request }) => {
     await lag();
     return jsonWithEtag(request, todayBody());
+  }),
+  // v0.2.7 §7.5 风控事件：?status=active|cleared&control=&security_code=，triggered_at desc, id desc
+  http.get(`${API}/risk-controls/events`, ({ request }) => {
+    const url = new URL(request.url);
+    const st = url.searchParams.get('status');
+    if (st && !['active', 'cleared'].includes(st)) return validation('status', 'status 取值为 active|cleared');
+    const control = url.searchParams.get('control');
+    const code = url.searchParams.get('security_code');
+    return HttpResponse.json(page(riskEvents().filter((e) => (!st || e.status === st) && (!control || e.control === control) && (!code || e.security_code === code)), url));
   }),
   http.get(`${API}/market/overview`, () => HttpResponse.json(degrade(MARKET_OVERVIEW, 'market.overview'))),
   http.get(`${API}/watchlist`, () => HttpResponse.json(WATCHLIST)),
@@ -151,47 +184,69 @@ const routeHandlers = [
   }),
 
   // ---- T-F03 个股档案 / 市场概览 ----
-  // 契约 §7.3：证券搜索（不分页，最多 20 条）
+  // 契约 §7.3（v0.2.7）：证券搜索（不分页）；/securities?q= 为别名，结构保持 [{security_code, name}]
+  http.get(`${API}/securities/search`, async ({ request }) => {
+    await lag();
+    const url = new URL(request.url);
+    const q = (url.searchParams.get('q') ?? '').normalize('NFKC').replace(/\s+/g, '');
+    if (q.length < 1 || q.length > 20) return validation('q', 'q 归一化后长度 1–20');
+    const limit = Number(url.searchParams.get('limit') ?? 20);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) return validation('limit', 'limit 取值 1–50');
+    const types = (url.searchParams.get('types') ?? '').split(',').filter(Boolean);
+    if (types.some((t) => !['stock', 'cdr', 'index'].includes(t))) return validation('types', 'types 取值 stock|cdr|index');
+    return HttpResponse.json(searchSecurities(q, { types, limit }));
+  }),
   http.get(`${API}/securities`, async ({ request }) => {
     await lag();
     const q = new URL(request.url).searchParams.get('q') ?? '';
     if (!q.trim()) return validation('q', 'q 必填');
-    return HttpResponse.json(searchSecurities(q));
+    return HttpResponse.json(searchSecurities(q).items.map(({ security_code, name }) => ({ security_code, name })));
   }),
-  // [待契约确认] 以下端点契约 v0.2.6 仍未定义，结构见 api/marketTypes.ts
   http.get(`${API}/securities/:code`, async ({ params }) => {
     await lag();
     const p = securityProfile(String(params.code));
     return p ? HttpResponse.json(degrade(p, `profile.${p.security_code}`)) : notFound('证券');
   }),
-  http.get(`${API}/securities/:code/financials`, async ({ params }) => {
+  // 指数：财务、资金流返回 200 空列表 + unavailable + no_source（§7.3 v0.2.7）
+  http.get(`${API}/securities/:code/financials`, async ({ params, request }) => {
     await lag();
-    const f = financials(String(params.code));
+    const code = String(params.code);
+    const limit = Number(new URL(request.url).searchParams.get('limit') ?? 8);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 40) return validation('limit', 'limit 取值 1–40');
+    if (isIndex(code)) return HttpResponse.json(indexEmpty(code, 'financials'));
+    const f = financials(code, limit);
     return f ? HttpResponse.json(degrade(f, 'financials')) : notFound('证券');
   }),
   http.get(`${API}/securities/:code/fund-flows`, async ({ params, request }) => {
     await lag();
-    const days = Number(new URL(request.url).searchParams.get('days') ?? 60) || 60;
-    const f = fundFlows(String(params.code), days);
+    const code = String(params.code);
+    const days = Number(new URL(request.url).searchParams.get('days') ?? 60);
+    if (!Number.isInteger(days) || days < 1 || days > 250) return validation('days', 'days 取值 1–250');
+    if (isIndex(code)) return HttpResponse.json(indexEmpty(code, 'fund_flows'));
+    const f = fundFlows(code, days);
     return f ? HttpResponse.json(degrade(f, 'fund_flows')) : notFound('证券');
   }),
   http.get(`${API}/securities/:code/factors`, async ({ params }) => {
     await lag();
     const f = factors(String(params.code));
-    return f ? HttpResponse.json(degrade(f, 'factors')) : notFound('证券');
+    return f ? HttpResponse.json(f.items.length ? degrade(f, 'factors') : f) : notFound('证券');
   }),
   http.get(`${API}/securities/:code/announcements`, async ({ params, request }) => {
     await lag();
     const list = announcements(String(params.code));
     if (!list) return notFound('证券');
-    return HttpResponse.json(degrade({ ...page(list, new URL(request.url)), data_status: 'fresh' as DataStatus, data_as_of: '2026-11-01T21:00:00+08:00', gaps: [] as Gap[] }, 'announcements'));
+    return HttpResponse.json(degrade({ ...page(list, new URL(request.url)), ...announcementsMeta() }, 'announcements'));
   }),
   http.get(`${API}/market/sector-flows`, async ({ request }) => {
     await lag();
     const url = new URL(request.url);
-    const kind = (url.searchParams.get('kind') ?? 'industry') as SectorKind;
-    if (!['industry', 'concept'].includes(kind)) return validation('kind', 'kind 取值为 industry|concept');
-    return HttpResponse.json(degrade(sectorFlows(kind, Number(url.searchParams.get('limit') ?? 20) || 20), `sector_flows.${kind}`, 'unavailable'));
+    const kind = url.searchParams.get('kind') as SectorKind | null;
+    if (!kind || !['industry', 'concept'].includes(kind)) return validation('kind', 'kind 必填，取值为 industry|concept');
+    const sort = url.searchParams.get('sort') ?? 'main_net_desc';
+    if (!(ENUMS.sector_sort as readonly string[]).includes(sort)) return validation('sort', 'sort 取值见 sector_sort');
+    const limit = Number(url.searchParams.get('limit') ?? 20);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) return validation('limit', 'limit 取值 1–100');
+    return jsonWithEtag(request, degrade(sectorFlows(kind, limit, sort), `sector_flows.${kind}`, 'unavailable'));
   }),
 
   http.get(`${API}/suggestions`, ({ request }) => {

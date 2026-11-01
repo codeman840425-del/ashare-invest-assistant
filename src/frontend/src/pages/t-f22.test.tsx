@@ -60,8 +60,8 @@ function captureRequests(path: string) {
 const typeLicence = (v: string) => fireEvent.change(screen.getByTestId('licence-input'), { target: { value: v } });
 
 describe('T-F22 契约 v0.2.6 对齐', () => {
-  it('CONTRACT_VERSION 为 v0.2.6', () => {
-    expect(CONTRACT_VERSION).toBe('v0.2.6');
+  it('CONTRACT_VERSION 为 v0.2.7（v0.2.7 起）', () => {
+    expect(CONTRACT_VERSION).toBe('v0.2.7');
   });
 });
 

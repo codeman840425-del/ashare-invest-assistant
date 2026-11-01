@@ -151,7 +151,11 @@ describe('契约 v0.2.3 同步', () => {
 
   it('#12 /today mock 顶层字段与契约 §7.3 一致；列表 ≤ 50 且带 more', async () => {
     const t = await apiGet<TodayResponse>('/today');
-    expect(Object.keys(t).sort()).toEqual(endpointKeys('/today'));
+    // v0.2.7：§7.3 `/today` 补充新增 4 个顶层字段（写在补充小节的 text 块里，不在端点行的花括号内）
+    const supplement = CONTRACT.slice(CONTRACT.indexOf('#### `/today` 补充'));
+    const added = ['alerts', 'plan_triggers', 'data_gaps', 'evidence'];
+    for (const k of added) expect(supplement).toMatch(new RegExp(`^${k}: `, 'm'));
+    expect(Object.keys(t).sort()).toEqual([...endpointKeys('/today'), ...added].sort());
     for (const k of ['focus', 'pending_plan_drafts', 'released_reasons', 'risk_flags', 'invalidations_today'] as const) {
       expect(t[k].items.length).toBeLessThanOrEqual(50);
       expect(typeof t[k].more).toBe('boolean');

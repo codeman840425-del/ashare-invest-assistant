@@ -6,7 +6,7 @@ import { useMarketOverview, useSectorFlows } from '../../api/marketQueries';
 import type { SectorFlow, SectorKind } from '../../api/marketTypes';
 import type { MarketOverview } from '../../api/types';
 import { DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/common';
-import { GAP_REASON, REGIME, SESSION } from '../../i18n/labels';
+import { GAP_REASON, INDUSTRY_TAXONOMY, REGIME, SESSION } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { PriceChartPanel } from '../stock/PriceChartPanel';
 
@@ -114,7 +114,7 @@ function RegimePanel({ m }: { m: MarketOverview }) {
   );
 }
 
-/** [待契约确认] /market/sector-flows：行业/概念涨跌与主力资金 */
+/** 契约 v0.2.7 §7.3 /market/sector-flows：行业/概念涨跌与主力资金（盘后数据，上一交易日；不轮询） */
 function SectorPanel() {
   const [kind, setKind] = useState<SectorKind>('industry');
   const q = useSectorFlows(kind);
@@ -135,6 +135,7 @@ function SectorPanel() {
         );
       },
     },
+    { title: '成交额', dataIndex: 'amount', width: 100, align: 'right', render: (v: string | null) => <span className="mono">{v === null ? '—' : fmtAmount(v)}</span> },
     { title: '涨 / 跌家数', key: 'ud', width: 110, align: 'right', render: (_v, r) => <span className="mono"><span className="up">{r.up_count ?? '—'}</span> / <span className="down">{r.down_count ?? '—'}</span></span> },
     {
       title: '领涨股', dataIndex: 'leader', width: 200, render: (l: SectorFlow['leader']) => (l ? (
@@ -149,14 +150,16 @@ function SectorPanel() {
       <div className="panel-head">
         <span className="panel-title">板块资金</span>
         <Segmented size="small" value={kind} onChange={(v) => setKind(v as SectorKind)} options={[{ value: 'industry', label: '行业' }, { value: 'concept', label: '概念' }]} />
-        <span className="muted small">按主力净流入排序 · 约 30 分钟更新</span>
+        <span className="muted small" data-testid="sector-meta">
+          按主力净流入排序 · 盘后数据{q.data ? `（${q.data.trade_date}${q.data.taxonomy ? ` · ${INDUSTRY_TAXONOMY[q.data.taxonomy]}` : ''}）` : ''}
+        </span>
         <span className="spacer" />
         {q.data ? <DataStatusTag status={q.data.data_status} asOf={q.data.data_as_of} gaps={q.data.gaps} /> : null}
       </div>
       {q.isPending ? <Loading /> : q.isError ? <ErrorBox error={q.error} /> : (
         <>
           <GapNote status={q.data.data_status} gaps={q.data.gaps} asOf={q.data.data_as_of} testId="sector-gap-note" />
-          <Table className="dense-table static" size="small" rowKey="sector_id" pagination={false} columns={cols} dataSource={q.data.items}
+          <Table className="dense-table static" size="small" rowKey="sector_code" pagination={false} columns={cols} dataSource={q.data.items}
             locale={{ emptyText: q.data.gaps.length ? `暂无板块资金：${q.data.gaps.map((g) => GAP_REASON[g.reason]).join('、')}` : '暂无板块资金' }} />
         </>
       )}

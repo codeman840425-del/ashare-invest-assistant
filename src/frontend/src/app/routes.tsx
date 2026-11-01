@@ -39,7 +39,8 @@ export const routes: RouteObject[] = [
     path: '/',
     element: <AppShell />,
     children: [
-      { index: true, element: <Navigate to="/terminal" replace /> },
+      // 评审 T-F08 m1：首页落在“今日关注”
+      { index: true, element: <Navigate to="/today" replace /> },
       { path: 'today', lazy: lazyPage(() => import('../pages/today/TodayPage'), (m) => m.TodayPage) },
       { path: 'terminal', lazy: lazyPage(() => import('../features/terminal/TerminalPage'), (m) => m.TerminalPage) },
       { path: 'suggestions', lazy: lazyPage(() => import('../pages/SuggestionIndex'), (m) => m.SuggestionIndex) },

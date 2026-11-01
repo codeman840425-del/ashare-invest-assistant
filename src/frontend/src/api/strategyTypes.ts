@@ -1,6 +1,6 @@
-/** T-F22：策略库最小类型（契约 v0.2.6 §7.5 /strategies、/strategy-instances）。完整策略库页在后续任务实现。 */
-import type { CardRiskLevel, Horizon, InstanceStatus, Lifecycle } from './enums';
-import type { Decimal, Uuid } from './types';
+/** 策略库类型（契约 v0.2.7 §5.1 StrategyInstance、§6.0A、§7.4 /strategies、§7.5 /strategy-instances） */
+import type { CardRiskLevel, Horizon, InstanceEventKind, InstanceOrigin, InstanceStatus, Lifecycle, ReasonCode } from './enums';
+import type { DateTime, Decimal, Uuid } from './types';
 
 /** GET /strategies 元素 */
 export interface StrategyTemplate {
@@ -10,11 +10,8 @@ export interface StrategyTemplate {
   horizons: Horizon[];
   current_version: { id: Uuid; version_no: number; lifecycle: Lifecycle };
   health: { state: string; weight: Decimal; n: number };
-  /**
-   * // [待契约确认] 契约 v0.2.6 只在 `/strategy-cards/{id}` 上有 `risk_level: card_risk_level`，`/strategies` 列表元素没有；
-   * 前端按此字段判断是否为高风险模板（不按 key 硬编码），缺省视为 normal。已列入 T-F22 遗留问题请架构师补字段。
-   */
-  risk_level?: CardRiskLevel;
+  /** v0.2.7：取当前版本关联 L1 卡片的值，未关联为 normal */
+  risk_level: CardRiskLevel;
 }
 
 /** POST /strategy-instances 请求体（契约 §7.5；v0.2.5 起没有 fit_ack，v0.2.6 T006e：高风险模板也没有确认字段） */
@@ -29,14 +26,45 @@ export interface StrategyInstanceCreate {
 }
 export interface StrategyInstanceCreated { id: Uuid; status: 'active'; derived_strategy_version_id: Uuid | null; warnings: string[] }
 
-/** GET /strategy-instances 元素 // [待契约确认] 契约只写了 POST 请求体，列表元素结构未定义，这里取最小字段 */
+/** §5.1 StrategyInstance（v0.2.7 完整结构）：version/lifecycle/risk_level 指实际运行的版本（有派生版本时为派生版本） */
 export interface StrategyInstance {
   id: Uuid;
   strategy_id: Uuid;
+  strategy_key: string;
+  strategy_name: string;
   strategy_version_id: Uuid;
+  version_no: number;
+  lifecycle: Lifecycle;
+  derived_strategy_version_id: Uuid | null;
+  risk_level: CardRiskLevel;
   status: InstanceStatus;
+  origin: InstanceOrigin;
   scope: StrategyInstanceCreate['scope'];
   account_id: Uuid | null;
   security_code: string | null;
+  name: string | null;
   horizon: Horizon;
+  param_overrides: Record<string, unknown> | null;
+  budget_amount: Decimal | null;
+  auto_downweight: boolean;
+  paused_by: 'user' | 'system' | null;
+  pause_reason_code: ReasonCode | null;
+  paused_until: DateTime | null;
+  created_at: DateTime;
+  confirmed_at: DateTime | null;
+  updated_at: DateTime;
+  archived_at: DateTime | null;
+}
+
+/** GET /strategy-instances/{id}/events 元素 */
+export interface StrategyInstanceEvent {
+  id: Uuid;
+  kind: InstanceEventKind;
+  from_status: InstanceStatus | null;
+  to_status: InstanceStatus | null;
+  actor: 'user' | 'system';
+  reason_code: ReasonCode | null;
+  note: string | null;
+  detail: Record<string, unknown> | null;
+  at: DateTime;
 }

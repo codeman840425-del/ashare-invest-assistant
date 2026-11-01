@@ -44,6 +44,10 @@ try {
   result.checks.focusRows = await page.locator('[data-testid=today-focus] .ant-table-row').count();
   result.checks.draftLinks = await page.locator('[data-testid=today-drafts] a[href^="/plan-drafts/"]').count();
   result.checks.riskItems = await page.locator('[data-testid=today-risks] li').count();
+  result.checks.alertItems = await page.locator('[data-testid=today-alerts] li').count();
+  result.checks.planTriggerItems = await page.locator('[data-testid=today-plan-triggers] li').count();
+  result.checks.dataGapItems = await page.locator('[data-testid=today-data-gaps] li').count();
+  result.checks.riskEventLinks = await page.locator('[data-testid^=risk-event-]').count();
   await shot('01-today-top.png', '今日关注首屏：交易日/时段/大盘环境、日报与对账状态、重点关注（示例）');
 
   // 首屏已能放下全部区块；第二张用 2 倍像素裁出下半部分列表，便于核对文字
@@ -61,8 +65,9 @@ try {
   await page2.mouse.move(1430, 890);
   await page2.waitForTimeout(500);
   const file2 = resolve(OUT, '02-today-lists.png');
-  await page2.locator('.today-grid').screenshot({ path: file2 });
-  result.shots.push({ file: file2, note: '下半部分（2 倍像素裁图）：待确认计划草案、风险提示、今日解除的不可执行原因、今日失效（示例；空列表显示“无”）' });
+  // v0.2.7 起有两组 .today-grid（草案/风险/解除/失效 + 提醒/计划条件/数据缺口），整页截图
+  await page2.screenshot({ path: file2, fullPage: true });
+  result.shots.push({ file: file2, note: '整页（2 倍像素）：草案、风险、解除原因、失效，以及 v0.2.7 新增的提醒、计划条件、数据缺口（示例；空列表显示“无”）' });
 } finally {
   await browser.close();
   server.kill();

@@ -323,7 +323,7 @@ describe('m10–m19 个股档案、持仓、其他', () => {
     const qc = makeQueryClient(true);
     const { result } = renderHook(() => useSecuritySearch('  600000 '), { wrapper: ({ children }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    const u = new URL(urls.find((x) => new URL(x).pathname === '/api/v1/securities')!);
+    const u = new URL(urls.find((x) => new URL(x).pathname === '/api/v1/securities/search')!);
     expect(u.searchParams.get('q')).toBe('600000');
     expect(qc.getQueryCache().getAll().some((q) => JSON.stringify(q.queryKey).includes('"600000"'))).toBe(true);
   });
@@ -368,7 +368,7 @@ describe('m10–m19 个股档案、持仓、其他', () => {
 
   it('m18：不在分钟结束时刻上的 1m bar 会被计数（09:30 集合竞价等）', () => {
     const minutes = dayMinutes('2026-11-02');
-    const bar = (t: string) => ({ t, open: '1', high: '1', low: '1', close: '1', pre_close: null, volume: '1', amount: '1', avg_price: null });
+    const bar = (t: string) => ({ t, open: '1', high: '1', low: '1', close: '1', pre_close: null, volume: '1', amount: '1', avg_price: null, is_final: true });
     expect(droppedBars([bar('2026-11-02T09:31:00+08:00'), bar('2026-11-02T15:00:00+08:00')], minutes)).toBe(0);
     expect(droppedBars([bar('2026-11-02T09:30:00+08:00'), bar('2026-11-02T12:00:00+08:00'), bar('2026-11-02T09:31:00+08:00')], minutes)).toBe(2);
   });

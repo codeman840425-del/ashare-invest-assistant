@@ -18,7 +18,8 @@ export function FundFlowChart({ items }: { items: FundFlowDay[] }) {
     });
     const bars = chart.addSeries(HistogramSeries, { priceFormat: { type: 'price', precision: 2, minMove: 0.01 }, priceLineVisible: false, title: '主力净流入(亿)' });
     let cum = 0;
-    const rows = items.map((d) => {
+    // v0.2.7：main_net 可为 null，缺数的日子不画柱、累计不变
+    const rows = items.filter((d) => d.main_net !== null).map((d) => {
       const v = Number(d.main_net) / 1e8;
       cum += v;
       return { time: d.trade_date as Time, v, cum };

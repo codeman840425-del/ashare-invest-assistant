@@ -3,8 +3,12 @@ import { AutoComplete, Input } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router';
 import { CODE_RE, useSecuritySearch } from '../api/marketQueries';
+import { LISTING_STATUS, MATCH_KIND, SECURITY_RISK_FLAG } from '../i18n/labels';
 
-/** 顶栏证券搜索（契约 §7.3 /securities?q=，最多 20 条）：选中或回车完整代码 → /stocks/:code */
+/**
+ * 顶栏证券搜索（契约 v0.2.7 §7.3 /securities/search，最多 20 条，按服务端 match_kind 层级排序，前端不重排）：
+ * 选中或回车完整代码 → /stocks/:code。命中曾用名/旧代码/拼音首字母时显示命中原文。
+ */
 export function SecuritySearch() {
   const navigate = useNavigate();
   const [text, setText] = useState('');
@@ -18,12 +22,15 @@ export function SecuritySearch() {
     setText('');
     navigate(`/stocks/${code}`);
   };
-  const options = (res.data ?? []).map((h) => ({
+  const options = (res.data?.items ?? []).map((h) => ({
     value: h.security_code,
     label: (
-      <span className="search-opt">
+      <span className="search-opt" data-testid={`search-hit-${h.security_code}`} data-match={h.match_kind}>
         <span className="mono">{h.security_code}</span>
         <span>{h.name}</span>
+        {h.risk_flag ? <span className="search-flag">{SECURITY_RISK_FLAG[h.risk_flag]}</span> : null}
+        {h.listing_status && h.listing_status !== 'listed' ? <span className="search-flag">{LISTING_STATUS[h.listing_status]}</span> : null}
+        {h.matched_text ? <span className="muted">{MATCH_KIND[h.match_kind]}：{h.matched_text}</span> : null}
       </span>
     ),
   }));

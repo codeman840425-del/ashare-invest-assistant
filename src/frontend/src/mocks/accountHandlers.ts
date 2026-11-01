@@ -1,6 +1,6 @@
 /**
  * MSW 处理器（T-F02 / T-F02a / T-F04）：认证、画像、管理端用户审核、券商账户、成交、导入、对账。
- * 后端目前只实现了 /health* 与 /meta/enums（src/backend/app/api/v1），其余都在这里按契约 v0.2.6 模拟（v0.2.6 加本人数据证书；v0.2.5 起无同意流程与风险测评，§1.3 只剩登录与审核状态两道门槛）。
+ * 后端目前只实现了 /health* 与 /meta/enums（src/backend/app/api/v1），其余都在这里按契约 v0.2.7 模拟（v0.2.6 加本人数据证书；v0.2.5 起无同意流程与风险测评，§1.3 只剩登录与审核状态两道门槛）。
  */
 import { http, HttpResponse } from 'msw';
 import type {

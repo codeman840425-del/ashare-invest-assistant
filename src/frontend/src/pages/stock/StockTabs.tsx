@@ -1,14 +1,21 @@
 import { Alert, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useAnnouncements, useFactors, useFinancials, useFundFlows } from '../../api/marketQueries';
-import type { Announcement, FactorGroup, FactorValue, FinancialPeriod, FundFlowDay } from '../../api/marketTypes';
+import type { Announcement, FactorValue, FinancialPeriod, FundFlowDay } from '../../api/marketTypes';
+import { ANNOUNCEMENT_CATEGORY, factorCategoryLabel, PROVIDER, REPORT_PERIOD } from '../../i18n/labels';
 import { DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/common';
 import { ExternalLink } from '../../components/ExternalLink';
 import { FundFlowChart } from '../../components/charts/FundFlowChart';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 
-/** plan §2.4 / 4：公告免责声明（原文） */
-export const ANNOUNCEMENT_DISCLAIMER = '本产品不提供新闻资讯；公告信息为盘后更新，可能存在延迟与遗漏，请以交易所/巨潮原文为准。';
+/** 契约 v0.2.7 §7.3 公告 disclaimer 原文；以响应里的 disclaimer 为准，这里只在响应到达前占位 */
+export const ANNOUNCEMENT_DISCLAIMER = '公告内容以交易所及上市公司披露原文为准，本系统仅提供标题与原文链接。';
+
+/** v0.2.7 sources：数据来源说明（提供方去重） */
+export function SourcesNote({ sources }: { sources: { provider: keyof typeof PROVIDER }[] }) {
+  if (!sources.length) return null;
+  return <span className="muted small" data-testid="sources-note">来源：{[...new Set(sources.map((x) => PROVIDER[x.provider]))].join('、')}</span>;
+}
 
 function TabHead({ children, status }: { children: React.ReactNode; status?: React.ReactNode }) {
   return (
@@ -20,18 +27,17 @@ function TabHead({ children, status }: { children: React.ReactNode; status?: Rea
   );
 }
 
-// ---------------- 财务 ---------------- // [待契约确认] 端点、指标集与口径
-const periodLabel = (p: string) => {
-  const m = p.slice(5, 7);
-  return `${p.slice(0, 4)}${m === '03' ? 'Q1' : m === '06' ? 'H1' : m === '09' ? 'Q3' : m === '12' ? '年报' : p.slice(5)}`;
-};
+// ---------------- 财务 ---------------- // 契约 v0.2.7 §5.1 FinancialPeriod
+const periodLabel = (p: FinancialPeriod) => `${p.period_end.slice(0, 4)} ${REPORT_PERIOD[p.report_period]}`;
 type FinRow = { key: string; label: string; kind: 'amount' | 'pct' | 'num'; get: (p: FinancialPeriod) => string | null; signedPct?: boolean };
 const FIN_ROWS: FinRow[] = [
   { key: 'revenue', label: '营业收入', kind: 'amount', get: (p) => p.revenue },
   { key: 'revenue_yoy', label: '营收同比', kind: 'pct', get: (p) => p.revenue_yoy_pct, signedPct: true },
   { key: 'np', label: '归母净利润', kind: 'amount', get: (p) => p.net_profit },
   { key: 'np_yoy', label: '净利同比', kind: 'pct', get: (p) => p.net_profit_yoy_pct, signedPct: true },
+  { key: 'dnp', label: '扣非净利润', kind: 'amount', get: (p) => p.deducted_net_profit },
   { key: 'eps', label: '基本每股收益（元）', kind: 'num', get: (p) => p.eps },
+  { key: 'bvps', label: '每股净资产（元）', kind: 'num', get: (p) => p.bvps },
   { key: 'roe', label: 'ROE', kind: 'pct', get: (p) => p.roe_pct },
   { key: 'gm', label: '毛利率', kind: 'pct', get: (p) => p.gross_margin_pct },
   { key: 'debt', label: '资产负债率', kind: 'pct', get: (p) => p.debt_ratio_pct },
@@ -48,9 +54,9 @@ export function FinancialsTab({ code }: { code: string }) {
     ...d.items.map((p) => ({
       key: p.period_end,
       title: (
-        <span className="fin-col">
-          {periodLabel(p.period_end)}
-          <span className="muted small mono">{p.announce_date ? `公告 ${p.announce_date.slice(5)}` : '公告日未知'}</span>
+        <span className="fin-col" data-testid={`fin-col-${p.period_end}`}>
+          {periodLabel(p)}{p.is_restated ? <Tag className="fin-restated" color="default">已追溯调整</Tag> : null}
+          <span className="muted small mono">{p.announce_date ? `公告 ${p.announce_date}` : '公告日未知'}</span>
         </span>
       ),
       align: 'right' as const,
@@ -66,7 +72,7 @@ export function FinancialsTab({ code }: { code: string }) {
   return (
     <div data-testid="tab-financials">
       <TabHead status={<DataStatusTag status={d.data_status} asOf={d.data_as_of} gaps={d.gaps} />}>
-        累计口径（年初至报告期末），金额单位元并简写为万/亿；数据在公告日之后才进入计算
+        累计口径（年初至报告期末），金额单位元并简写为万/亿；数据在公告日之后才进入计算 <SourcesNote sources={d.sources} />
       </TabHead>
       <GapNote status={d.data_status} gaps={d.gaps} asOf={d.data_as_of} />
       {d.items.length === 0 ? <div className="loading-box">暂无财务数据</div> : (
@@ -76,8 +82,8 @@ export function FinancialsTab({ code }: { code: string }) {
   );
 }
 
-// ---------------- 资金流 ---------------- // [待契约确认] 端点与分档口径
-const sum = (xs: FundFlowDay[]) => xs.reduce((a, x) => a + Number(x.main_net), 0);
+// ---------------- 资金流 ---------------- // 契约 v0.2.7 §5.1 FundFlowDay（分档可为 null；is_final=false 为盘中未定稿）
+const sum = (xs: FundFlowDay[]) => xs.reduce((a, x) => a + (x.main_net === null ? 0 : Number(x.main_net)), 0);
 const amtCell = (v: string | null) => <span className={`mono ${pctClass(v)}`}>{v === null ? '—' : (Number(v) > 0 ? '+' : '') + fmtAmount(v)}</span>;
 
 export function FundFlowTab({ code }: { code: string }) {
@@ -87,7 +93,11 @@ export function FundFlowTab({ code }: { code: string }) {
   const d = q.data;
   const recent = [...d.items].reverse();
   const cols: ColumnsType<FundFlowDay> = [
-    { title: '日期', dataIndex: 'trade_date', width: 96, render: (v: string) => <span className="mono">{v}</span> },
+    {
+      title: '日期', dataIndex: 'trade_date', width: 120,
+      render: (v: string, r) => <span className="mono">{v}{r.is_final ? null : <span className="muted small" data-testid="flow-not-final">（盘中）</span>}</span>,
+    },
+    { title: '成交额', dataIndex: 'amount', align: 'right', render: (v: string | null) => <span className="mono">{v === null ? '—' : fmtAmount(v)}</span> },
     { title: '主力净流入', dataIndex: 'main_net', align: 'right', render: amtCell },
     { title: '超大单', dataIndex: 'super_large_net', align: 'right', render: amtCell },
     { title: '大单', dataIndex: 'large_net', align: 'right', render: amtCell },
@@ -98,7 +108,7 @@ export function FundFlowTab({ code }: { code: string }) {
   return (
     <div data-testid="tab-fund-flow">
       <TabHead status={<DataStatusTag status={d.data_status} asOf={d.data_as_of} gaps={d.gaps} />}>
-        主力 = 超大单 + 大单；分档阈值以数据源口径为准
+        主力 = 超大单 + 大单；分档阈值以数据源口径为准；“—”为该档无数据 <SourcesNote sources={d.sources} />
       </TabHead>
       <GapNote status={d.data_status} gaps={d.gaps} asOf={d.data_as_of} />
       <div className="flow-stats">
@@ -122,13 +132,12 @@ export function FundFlowTab({ code }: { code: string }) {
   );
 }
 
-// ---------------- 因子 ---------------- // [待契约确认] 端点、分组与分位口径
-const GROUP: Record<FactorGroup, string> = { value: '估值', quality: '质量', growth: '成长', momentum: '动量', volatility: '波动', liquidity: '流动性' };
-function PctBar({ v }: { v: string | null }) {
+// ---------------- 因子 ---------------- // 契约 v0.2.7 §5.1 FactorValue：只有全市场排名，没有行业内分位
+function PctBar({ v, rank }: { v: string | null; rank: number | null }) {
   if (v === null) return <span className="muted">—</span>;
   const n = Math.max(0, Math.min(100, Number(v)));
   return (
-    <span className="pct-bar" title={`分位 ${fmtNum(v, 1)}`}>
+    <span className="pct-bar" title={`全市场分位 ${fmtNum(v, 1)}${rank !== null ? `，第 ${rank} 名` : ''}`}>
       <span className="track"><span className="fill" style={{ width: `${n}%` }} /></span>
       <span className="mono">{fmtNum(v, 0)}</span>
     </span>
@@ -141,36 +150,49 @@ export function FactorsTab({ code }: { code: string }) {
   if (q.isError) return <ErrorBox error={q.error} />;
   const d = q.data;
   const cols: ColumnsType<FactorValue> = [
-    { title: '分组', dataIndex: 'group', width: 70, render: (g: FactorGroup) => <Tag variant="outlined">{GROUP[g]}</Tag> },
+    { title: '分类', dataIndex: 'category', width: 80, render: (g: string) => <Tag variant="outlined">{factorCategoryLabel(g)}</Tag> },
     { title: '因子', dataIndex: 'name', width: 170 },
     { title: '代码', dataIndex: 'factor_id', width: 140, render: (v: string) => <span className="mono muted small">{v}</span> },
     { title: '数值', dataIndex: 'value', align: 'right', width: 110, render: (v: string | null, r) => (v === null ? <span className="muted">缺失</span> : <span className="mono">{fmtNum(v)}{r.unit ? <span className="muted small"> {r.unit}</span> : null}</span>) },
-    { title: '全市场分位', dataIndex: 'pct_rank_market', render: (v: string | null) => <PctBar v={v} /> },
-    { title: '行业内分位', dataIndex: 'pct_rank_industry', render: (v: string | null) => <PctBar v={v} /> },
+    { title: '全市场排名', dataIndex: 'market_rank', align: 'right', width: 100, render: (v: number | null) => <span className="mono">{v === null ? '—' : v}</span> },
+    { title: '全市场分位', dataIndex: 'market_rank_pct', render: (v: string | null, r) => <PctBar v={v} rank={r.market_rank} /> },
   ];
   return (
     <div data-testid="tab-factors">
       <TabHead status={<DataStatusTag status={d.data_status} asOf={d.data_as_of} gaps={d.gaps} />}>
-        截面日 {d.trade_date} · 计算版本 {d.calc_version} · 分位 0–100 只表示在截面中的相对位置，不代表方向判断（如 PE 分位高 = 估值相对高）
+        截面日 {d.trade_date} · 因子集 {d.factor_set_version} · 共 {d.counts.total} 个 · 分位 0–100 只表示在全市场截面中的相对位置，不代表方向判断（如 PE 分位高 = 估值相对高）
+        <SourcesNote sources={d.sources} />
       </TabHead>
       <GapNote status={d.data_status} gaps={d.gaps} asOf={d.data_as_of} />
-      <Table className="dense-table static" size="small" rowKey="factor_id" pagination={false} columns={cols} dataSource={d.items} />
+      {Object.keys(d.counts.by_category).length ? (
+        <div className="factor-counts muted small" data-testid="factor-counts">
+          {Object.entries(d.counts.by_category).map(([k, n]) => <span key={k}>{factorCategoryLabel(k)} {n}</span>)}
+        </div>
+      ) : null}
+      {d.items.length === 0 ? <div className="loading-box">暂无因子数据</div> : <Table className="dense-table static" size="small" rowKey="factor_id" pagination={false} columns={cols} dataSource={d.items} />}
     </div>
   );
 }
 
-// ---------------- 公告（只给外链） ---------------- // [待契约确认] 端点与结构
+// ---------------- 公告（只给外链） ---------------- // 契约 v0.2.7 §5.1 Announcement
 export function AnnouncementsTab({ code }: { code: string }) {
   const q = useAnnouncements(code);
   const cols: ColumnsType<Announcement> = [
     { title: '发布时间', dataIndex: 'published_at', width: 140, render: (v: string) => <span className="mono">{fmtTime(v)}</span> },
-    { title: '类别', dataIndex: 'category', width: 90, render: (v: string | null) => (v ? <Tag variant="outlined">{v}</Tag> : <span className="muted">—</span>) },
+    {
+      title: '类别', dataIndex: 'category', width: 110,
+      render: (v: Announcement['category'], r) => <Tag variant="outlined" title={r.category_raw ?? undefined}>{v === 'other' && r.category_raw ? r.category_raw : ANNOUNCEMENT_CATEGORY[v]}</Tag>,
+    },
     { title: '标题', dataIndex: 'title', render: (v: string, r) => <ExternalLink href={r.url}>{v}</ExternalLink> },
-    { title: '原文', dataIndex: 'url', width: 110, render: (v: string | null) => (v ? <ExternalLink href={v}>原文</ExternalLink> : <span className="muted small">无原文链接</span>) },
+    {
+      title: '原文', dataIndex: 'url', width: 150,
+      render: (v: string | null, r) => (v ? <ExternalLink href={v}>原文{r.file_format === 'pdf' ? '（PDF）' : ''}</ExternalLink>
+        : <span className="muted small">{r.url_host ? `链接不在白名单（${r.url_host}）` : '无原文链接'}</span>),
+    },
   ];
   return (
     <div data-testid="tab-announcements">
-      <Alert type="info" showIcon className="ann-alert" title={ANNOUNCEMENT_DISCLAIMER} description="点击标题或“原文”在新窗口打开交易所/巨潮原文；本页不抓取、不转存公告内容。" />
+      <Alert type="info" showIcon className="ann-alert" data-testid="ann-disclaimer" title={q.data?.disclaimer ?? ANNOUNCEMENT_DISCLAIMER} description="点击标题或“原文”在新窗口打开交易所/巨潮原文；本页不抓取、不转存公告内容。" />
       {q.isPending ? <Loading /> : q.isError ? <ErrorBox error={q.error} /> : (
         <>
           <TabHead status={<DataStatusTag status={q.data.data_status} asOf={q.data.data_as_of} gaps={q.data.gaps} />}>

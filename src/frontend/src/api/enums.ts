@@ -1,9 +1,9 @@
 /**
- * 契约 v0.2.6 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。
+ * 契约 v0.2.7 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。
  * 运行时以 `GET /meta/enums` 为准；这里的常量用于类型推导与 mock 校验。
  */
 /** 与 `/meta/enums.version` 对齐的契约版本 */
-export const CONTRACT_VERSION = 'v0.2.6';
+export const CONTRACT_VERSION = 'v0.2.7';
 
 export const ENUMS = {
   account_status: ['pending', 'approved', 'rejected', 'disabled'],
@@ -44,7 +44,7 @@ export const ENUMS = {
   channel: ['in_app', 'email', 'wecom_app'],
   data_status: ['fresh', 'stale', 'pending', 'partial', 'unavailable'],
   gap_reason: ['no_source', 'not_yet_published', 'upstream_error', 'quota_deferred', 'user_input_missing', 'data_licence_unavailable'],
-  data_provider: ['mairui', 'user_import', 'user_input', 'system'],
+  data_provider: ['mairui', 'user_import', 'user_input', 'system', 'exchange'],
   source_kind: ['market_data', 'disclosure', 'user_input', 'system_calc'],
   trade_side: ['buy', 'sell'],
   import_status: ['uploaded', 'parsing', 'previewed', 'committed', 'failed', 'discarded', 'reverted'],
@@ -67,6 +67,24 @@ export const ENUMS = {
   // v0.2.6（plan 2.1B）：每用户自用数据证书
   data_licence_status: ['not_set', 'pending_verification', 'active', 'invalid', 'expired', 'quota_exceeded', 'ip_limited', 'paused_by_admin'],
   data_licence_tier: ['free', 'trial', 'monthly', 'annual', 'diamond', 'other'],
+  // v0.2.7（T-A08）：个股数据、策略实例、/today 新增枚举（factor_category 键名待 T003，未列入）
+  security_type: ['stock', 'cdr', 'index'],
+  board: ['main', 'chinext', 'star', 'bse'],
+  listing_status: ['listed', 'delisting_period', 'delisted', 'missing_from_list'],
+  security_risk_flag: ['st', 'star_st', 'delisting'],
+  security_match_kind: ['code_exact', 'name_exact', 'initials_exact', 'code_prefix', 'name_prefix', 'initials_prefix', 'name_contains', 'former_name', 'former_code', 'fuzzy'],
+  report_period: ['q1', 'h1', 'q3', 'fy'],
+  announcement_category: ['periodic_report', 'other'],
+  sector_kind: ['industry', 'concept'],
+  industry_taxonomy: ['sw_l1', 'sw_l2', 'csrc'],
+  instance_origin: ['classifier', 'user', 'system'],
+  instance_event_kind: ['created', 'confirmed', 'paused', 'resumed', 'params_changed', 'archived'],
+  instance_sort: ['created_at_desc', 'updated_at_desc', 'strategy_name_asc'],
+  sector_sort: ['main_net_desc', 'main_net_asc', 'change_pct_desc', 'change_pct_asc'],
+  alert_origin: ['plan_condition', 'holding_event', 'user_custom'],
+  alert_status: ['new', 'read', 'checked', 'acted', 'dismissed'],
+  plan_condition_kind: ['trigger', 'invalidation'],
+  data_gap_scope: ['user', 'account', 'security', 'market'],
 } as const;
 
 /** §6.1 不可执行原因码（v0.2.5：22 个） */
@@ -128,4 +146,21 @@ export type ReleaseKind = E<'release_kind'>;
 export type HealthStatus = E<'health_status'>;
 export type ComponentHealth = E<'component_health'>;
 export type IngestHealth = E<'ingest_health'>;
+export type SecurityType = E<'security_type'>;
+export type Board = E<'board'>;
+export type ListingStatus = E<'listing_status'>;
+export type SecurityRiskFlag = E<'security_risk_flag'>;
+export type SecurityMatchKind = E<'security_match_kind'>;
+export type ReportPeriod = E<'report_period'>;
+export type AnnouncementCategory = E<'announcement_category'>;
+export type SectorKind = E<'sector_kind'>;
+export type IndustryTaxonomy = E<'industry_taxonomy'>;
+export type InstanceOrigin = E<'instance_origin'>;
+export type InstanceEventKind = E<'instance_event_kind'>;
+export type InstanceSort = E<'instance_sort'>;
+export type SectorSort = E<'sector_sort'>;
+export type AlertOrigin = E<'alert_origin'>;
+export type AlertStatus = E<'alert_status'>;
+export type PlanConditionKind = E<'plan_condition_kind'>;
+export type DataGapScope = E<'data_gap_scope'>;
 export type ReasonCode = (typeof REASON_CODES)[number];

@@ -68,7 +68,7 @@ export const IMPORT_CODES: readonly ImportCodeSpec[] = [
   { no: 43, code: 'IMPORT_CASH_CHAIN_BREAK', severity: 'warning', scope: 'row', needs_action: false, tone: 'info', title: '资金余额链断开', template: `${TERM.balance}链在本行断开，差额 {diff} 元`, handling: '仅提示（日间可能有非成交资金流水）' },
   { no: 44, code: 'IMPORT_NON_TRADING_DAY', severity: 'warning', scope: 'row', needs_action: false, tone: 'info', title: '非交易日', template: `${TERM.tradeDate} {date} 不是交易日`, handling: '仅提示' },
   { no: 45, code: 'IMPORT_TIME_OUTSIDE_SESSION', severity: 'warning', scope: 'row', needs_action: false, tone: 'info', title: '非交易时段', template: '成交时间不在交易时段内', handling: '仅提示' },
-  { no: 46, code: 'IMPORT_LOT_SIZE_IRREGULAR', severity: 'warning', scope: 'row', needs_action: false, tone: 'info', title: '不符合整手规则', template: '买入数量不符合整手规则', handling: '仅提示（科创板 200 股起、按 1 股递增等规则按板块处理）' },
+  { no: 46, code: 'IMPORT_LOT_SIZE_IRREGULAR', severity: 'warning', scope: 'row', needs_action: false, tone: 'info', title: '不符合整手规则', template: '买入数量不符合整手规则', handling: '仅提示（科创板 200 股起、按 1 股递增等规则按板块处理；ETF 按 100 份整数倍，v0.2.8）' },
 ];
 
 export const IMPORT_CODE_MAP: ReadonlyMap<string, ImportCodeSpec> = new Map(IMPORT_CODES.map((c) => [c.code, c]));

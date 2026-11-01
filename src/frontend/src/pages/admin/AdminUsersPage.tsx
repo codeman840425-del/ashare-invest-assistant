@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Alert, Button, Input, Modal, Segmented, Space, Table, Tag, Tooltip } from 'antd';
 import { usePatchAdminUser, useAdminUsers } from '../../api/accountQueries';
+import { CursorPager } from '../../components/CursorPager';
 import type { AdminUser, AdminUserPatch } from '../../api/accountTypes';
 import type { AccountStatus } from '../../api/enums';
 import { ErrorBox } from '../../components/common';
@@ -22,7 +23,7 @@ export function AdminUsersPage() {
   const [status, setStatus] = useState<AccountStatus | ''>('pending');
   const [q, setQ] = useState('');
   const list = useAdminUsers(status, q.trim(), PAGE_SIZE);
-  const rows = list.data?.pages.flatMap((p) => p.items) ?? [];
+  const rows = list.items;
   const patch = usePatchAdminUser();
   const [pending, setPending] = useState<{ user: AdminUser; to: Target } | null>(null);
   const [reason, setReason] = useState('');
@@ -82,11 +83,7 @@ export function AdminUsersPage() {
           },
         ]}
       />
-      {list.hasNextPage ? (
-        <div style={{ textAlign: 'center', marginTop: 8 }}>
-          <Button onClick={() => void list.fetchNextPage()} loading={list.isFetchingNextPage} data-testid="admin-users-more">加载更多</Button>
-        </div>
-      ) : rows.length ? <div className="muted small" style={{ textAlign: 'center', marginTop: 8 }}>已显示全部 {rows.length} 条</div> : null}
+      <CursorPager query={list} loaded={rows.length} testId="admin-users-pager" />
       <Modal
         open={!!pending}
         title={pending ? `${ACTION_TEXT[pending.to]}：${pending.user.display_name}（${pending.user.username}）` : ''}

@@ -1,5 +1,6 @@
 import { Alert, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { CursorPager } from '../../components/CursorPager';
 import { useAnnouncements, useFactors, useFinancials, useFundFlows } from '../../api/marketQueries';
 import type { Announcement, FactorValue, FinancialPeriod, FundFlowDay } from '../../api/marketTypes';
 import { ANNOUNCEMENT_CATEGORY, factorCategoryLabel, PROVIDER, REPORT_PERIOD } from '../../i18n/labels';
@@ -192,14 +193,16 @@ export function AnnouncementsTab({ code }: { code: string }) {
   ];
   return (
     <div data-testid="tab-announcements">
-      <Alert type="info" showIcon className="ann-alert" data-testid="ann-disclaimer" title={q.data?.disclaimer ?? ANNOUNCEMENT_DISCLAIMER} description="点击标题或“原文”在新窗口打开交易所/巨潮原文；本页不抓取、不转存公告内容。" />
-      {q.isPending ? <Loading /> : q.isError ? <ErrorBox error={q.error} /> : (
+      <Alert type="info" showIcon className="ann-alert" data-testid="ann-disclaimer" title={q.first?.disclaimer ?? ANNOUNCEMENT_DISCLAIMER} description="点击标题或“原文”在新窗口打开交易所/巨潮原文；本页不抓取、不转存公告内容。" />
+      {q.isPending ? <Loading /> : !q.first ? <ErrorBox error={q.error} /> : (
         <>
-          <TabHead status={<DataStatusTag status={q.data.data_status} asOf={q.data.data_as_of} gaps={q.data.gaps} />}>
-            最近 {q.data.items.length} 条{q.data.next_cursor ? '（更早的请到交易所/巨潮查询）' : ''}
+          <TabHead status={<DataStatusTag status={q.first.data_status} asOf={q.first.data_as_of} gaps={q.first.gaps} />}>
+            最近 {q.items.length} 条
           </TabHead>
-          <GapNote status={q.data.data_status} gaps={q.data.gaps} asOf={q.data.data_as_of} />
-          <Table className="dense-table static" size="small" rowKey="id" pagination={false} columns={cols} dataSource={q.data.items} />
+          <GapNote status={q.first.data_status} gaps={q.first.gaps} asOf={q.first.data_as_of} />
+          <Table className="dense-table static" size="small" rowKey="id" pagination={false} columns={cols} dataSource={q.items} />
+          {/* T-F21：§1.2 游标“加载更多”取更早的公告 */}
+          <CursorPager query={q} loaded={q.items.length} testId="ann-pager" />
         </>
       )}
     </div>

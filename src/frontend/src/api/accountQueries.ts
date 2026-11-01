@@ -1,9 +1,10 @@
 /**
  * T-F02 / T-F02a / T-F04 的查询与变更（TanStack Query）。路径与请求体对齐契约 v0.2.5 §7.1 / §7.2 / §7.9。
  */
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, apiGet, clearEtagCache, apiPatch, apiPost, apiPut, apiUpload, buildUrl, fetchUrl, request, setCsrfToken } from './client';
 import { noteServerDate } from '../lib/serverClock';
+import { useCursorPages } from '../lib/cursorPaging';
 import type {
   AdminUser, AdminUserPatch, BrokerAccount, BrokerAccountCreate, ImportBatch, ImportBatchSummary, ImportConfirmRequest, ImportConfirmResponse,
   ImportFinding, ImportKind, ImportOptions, ImportRow, ImportUploadResponse, LoginRequest, LoginResponse, Profile, ProfileInput, Reconciliation,
@@ -89,15 +90,10 @@ export function useSaveProfile() {
 }
 
 // ---------------- §7.9 管理端 ----------------
-/** 按 §1.2 游标分页，“加载更多”取下一页（评审 m10） */
+/** 按 §1.2 游标分页，“加载更多”取下一页（评审 m10；T-F21 改用通用 useCursorPages） */
+const adminUserId = (u: AdminUser) => u.id;
 export const useAdminUsers = (status: AccountStatus | '', q: string, limit = 50) =>
-  useInfiniteQuery({
-    queryKey: [...ak.adminUsers(status, q), limit],
-    initialPageParam: null as string | null,
-    queryFn: ({ signal, pageParam }) => apiGet<Paged<AdminUser>>('/admin/users', { status, q, limit, cursor: pageParam }, signal),
-    getNextPageParam: (last) => last.next_cursor ?? undefined,
-    retry: false,
-  });
+  useCursorPages<AdminUser>({ queryKey: ak.adminUsers(status, q), path: '/admin/users', params: { status, q }, limit, retry: false, idOf: adminUserId });
 export function usePatchAdminUser() {
   const qc = useQueryClient();
   return useMutation({

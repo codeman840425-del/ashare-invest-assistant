@@ -386,3 +386,6 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .focusable:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .chart-empty .gap-note { padding: 0; max-width: 80%; text-align: center; }
+
+/* T-F21 通用游标分页条 */
+.cursor-pager { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 8px 0; }

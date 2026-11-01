@@ -2,7 +2,7 @@ import { Button, Result, Tabs, Tag, Tooltip } from 'antd';
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ApiError } from '../../api/client';
 import { ENUMS } from '../../api/enums';
-import { CODE_RE, useBarsOf, useQuote, useSecurityProfile } from '../../api/marketQueries';
+import { CODE_RE, useBarsOf, useBarsWindow, useQuote, useSecurityProfile } from '../../api/marketQueries';
 import type { SecurityProfile } from '../../api/marketTypes';
 import { useHorizonAssessment } from '../../api/queries';
 import type { Bar, BarsResponse, QuoteItem } from '../../api/types';
@@ -102,11 +102,12 @@ const capOf = (price: string, shares: number) => Number(price) * shares;
 function StockHeader({ profile }: { profile: SecurityProfile }) {
   const code = profile.security_code;
   const quote = useQuote(code);
-  const daily = useBarsOf(code, 'd', 250);
+  // T-F21：与图表的日 K 窗口共用缓存（同一窗口大小）
+  const daily = useBarsWindow(code, 'd', 250);
   // 评审 T-F22a m12：日 K 还没有当日 bar 时，用 1m 响应的 pre_close 作昨收（与分时图共用缓存）
   const intraday = useBarsOf(code, '1m', 240);
   const q = quote.data;
-  const tb = todayBar(daily.data?.items, q);
+  const tb = todayBar(daily.first ? daily.bars : undefined, q);
   // v0.2.7：停牌不是上市状态，用 suspended 表示
   const suspended = profile.suspended === true;
   const preClose = tb?.pre_close ?? intradayPreClose(intraday.data, q) ?? (suspended && q ? q.price : null);

@@ -544,6 +544,32 @@ export function tradingDays(end: string, n: number): string[] {
 /** 示例：前复权基准日（§5.1 v0.2.7 adjust_as_of） */
 export const ADJUST_AS_OF = '2026-10-30';
 
+/** 示例：最近 120 根之前的历史日 K 根数（窗口加载演示用，共约 2.4 年） */
+export const HISTORY_DAYS = 480;
+
+function historyBars(firstDay: string, firstClose: number, seed: number, lots: number): Bar[] {
+  const days = tradingDays(firstDay, HISTORY_DAYS + 1).slice(0, -1);
+  const r = rng(seed * 97 + 13);
+  const closes: number[] = new Array(days.length);
+  let next = firstClose;
+  for (let i = days.length - 1; i >= 0; i--) {
+    closes[i] = next / (1 + Math.sin(i / 17 + seed) * 0.005 + (r() - 0.5) * 0.03);
+    next = closes[i];
+  }
+  return days.map((t, i) => {
+    const close = closes[i];
+    const prev = i === 0 ? null : closes[i - 1];
+    const open = (prev ?? close) * (1 + (r() - 0.5) * 0.012);
+    const high = Math.max(open, close) * (1 + r() * 0.015);
+    const low = Math.min(open, close) * (1 - r() * 0.015);
+    const volume = Math.round((0.6 + r()) * lots) * 100;
+    return {
+      t, open: f2(open), high: f2(high), low: f2(low), close: f2(close), pre_close: prev === null ? null : f2(prev),
+      volume: String(volume), amount: f2(volume * close), avg_price: null, is_final: true,
+    };
+  });
+}
+
 export function dailyBars(code: string): BarsResponse | null {
   const s = specOf(code);
   if (!s) return null;
@@ -567,6 +593,10 @@ export function dailyBars(code: string): BarsResponse | null {
       volume: String(volume), amount: f2(volume * close), avg_price: null, is_final: t !== TRADE_DATE,
     };
   });
+  // T-F21 窗口加载：在最近 120 根之前补 HISTORY_DAYS 根更早的示例日 K（独立随机序列，最近 120 根的数值不变）
+  const hist = historyBars(days[0], closes[0], s.seed, s.volume_lots || 120000);
+  if (hist.length) items[0] = { ...items[0], pre_close: hist[hist.length - 1].close };
+  items.unshift(...hist);
   // 停牌：最后一个交易日无成交
   const last = s.data_status === 'unavailable' || s.code === '601001.SH' ? items.slice(0, -1) : items;
   return {

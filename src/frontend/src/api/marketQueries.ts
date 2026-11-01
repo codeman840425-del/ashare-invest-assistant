@@ -1,9 +1,11 @@
-import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo } from 'react';
+import { hashKey, keepPreviousData, useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient, type QueryKey } from '@tanstack/react-query';
 import { apiGet } from './client';
+import { useCursorPages } from '../lib/cursorPaging';
 import type { BarAdjust, BarFreq, SectorSort } from './enums';
-import type { BarsResponse, MarketOverview, QuoteItem } from './types';
+import type { Bar, BarsResponse, MarketOverview, QuoteItem } from './types';
 import type {
-  AnnouncementsResponse, FactorsResponse, FinancialsResponse, FundFlowsResponse, SecurityProfile, SecuritySearchResponse, SectorFlowsResponse, SectorKind,
+  Announcement, AnnouncementsResponse, FactorsResponse, FinancialsResponse, FundFlowsResponse, SecurityProfile, SecuritySearchResponse, SectorFlowsResponse, SectorKind,
 } from './marketTypes';
 
 const enc = encodeURIComponent;
@@ -14,6 +16,7 @@ export const mk = {
   profile: (code: string) => ['security', code] as const,
   quote: (code: string) => ['quotes', code] as const,
   bars: (code: string, freq: BarFreq, adjust: BarAdjust, limit: number) => ['bars', code, freq, adjust, limit] as const,
+  barsWindow: (code: string, freq: BarFreq, adjust: BarAdjust, pageSize: number) => ['bars', code, freq, adjust, `window:${pageSize}`] as const,
   financials: (code: string) => ['financials', code] as const,
   fundFlows: (code: string, days: number) => ['fund-flows', code, days] as const,
   factors: (code: string) => ['factors', code] as const,
@@ -46,21 +49,97 @@ export const useQuote = (code: string | undefined) =>
  * v0.2.7 §5.1 adjust_as_of：同一证券、同一复权方式的基准日变了（除权除息后重算），之前缓存的日/周 K 价格口径已不一致，
  * 丢弃这些缓存（当前这次请求除外），让它们下次使用时重新拉取。返回是否发生了变化。
  */
-export function syncAdjustAsOf(qc: QueryClient, code: string, adjust: BarAdjust, freq: BarFreq, limit: number, asOf: string | null): boolean {
+export function syncAdjustAsOf(
+  qc: QueryClient, code: string, adjust: BarAdjust, freq: BarFreq, limit: number, asOf: string | null, self?: QueryKey,
+): boolean {
   if (adjust === 'none' || asOf === null) return false;
   let changed = false;
+  const selfHash = self ? hashKey(self) : null;
   for (const q of qc.getQueryCache().findAll({ queryKey: ['bars', code] })) {
     const [, , f, a, l] = q.queryKey as ReturnType<typeof mk.bars>;
-    const prev = (q.state.data as BarsResponse | undefined)?.adjust_as_of;
-    if (a !== adjust || (f === freq && l === limit) || !prev || prev === asOf) continue;
+    // 窗口加载（T-F21）的缓存是 InfiniteData：取最新一页（pages[0]）的基准日
+    const data = q.state.data as BarsResponse | InfiniteData<BarsResponse> | undefined;
+    const prev = data && 'pages' in data ? data.pages[0]?.adjust_as_of : data?.adjust_as_of;
+    const isSelf = selfHash ? q.queryHash === selfHash : f === freq && l === limit;
+    if (a !== adjust || isSelf || !prev || prev === asOf) continue;
     changed = true;
     qc.removeQueries({ queryKey: q.queryKey, exact: true });
   }
   return changed;
 }
 
+/** 窗口内各页合并为升序 K 线（pages[0] 是最新一页，后面依次更早）；按 t 去重 */
+export function mergeBarPages(pages: readonly BarsResponse[]): Bar[] {
+  const out: Bar[] = [];
+  const seen = new Set<string>();
+  for (let i = pages.length - 1; i >= 0; i--) {
+    for (const b of pages[i].items) {
+      if (seen.has(b.t)) continue;
+      seen.add(b.t);
+      out.push(b);
+    }
+  }
+  return out.sort((x, y) => (x.t < y.t ? -1 : x.t > y.t ? 1 : 0));
+}
+
+/** 只保留与最新一页复权基准日一致的页（更早的页基准日不同 → 口径不一致，不能拼接） */
+export function consistentPages(pages: readonly BarsResponse[]): BarsResponse[] {
+  if (pages.length === 0) return [];
+  const base = pages[0].adjust_as_of;
+  const out: BarsResponse[] = [];
+  for (const p of pages) {
+    if (p.adjust_as_of !== base) break;
+    out.push(p);
+  }
+  return out;
+}
+
+/**
+ * T-F21 K 线窗口加载（契约 §7.3 bars `before` + `limit`，§6.2 周 K 同规则）：
+ * 先取最近 `pageSize` 根；图表向左拖到窗口边缘（或点“更早”）时用上一页的 `next_before` 取更早一页，拼在左侧。
+ * `next_before=null` 表示已到最早。v0.2.7：翻页时发现 `adjust_as_of` 与已缓存的不同 → 丢弃整个窗口，从最新一页重新加载。
+ */
+export function useBarsWindow(code: string | undefined, freq: Exclude<BarFreq, '1m'>, pageSize: number, opts: { keepPrevious?: boolean; enabled?: boolean } = {}) {
+  const adjust: BarAdjust = 'qfq';
+  const qc = useQueryClient();
+  const key = mk.barsWindow(code ?? '', freq, adjust, pageSize);
+  const query = useInfiniteQuery({
+    queryKey: key,
+    initialPageParam: null as string | null,
+    queryFn: async ({ signal, pageParam }) => {
+      const res = await apiGet<BarsResponse>(`/securities/${enc(code!)}/bars`, { freq, adjust, limit: pageSize, before: pageParam }, signal);
+      if (pageParam === null) syncAdjustAsOf(qc, code!, adjust, freq, pageSize, res.adjust_as_of, key);
+      return res;
+    },
+    getNextPageParam: (last) => last.next_before ?? undefined,
+    enabled: (opts.enabled ?? true) && opt(code),
+    placeholderData: opts.keepPrevious ? (prev, prevQuery) => (prevQuery?.queryKey[1] === code ? prev : undefined) : undefined,
+  });
+  const pages = query.data?.pages;
+  const good = useMemo(() => consistentPages(pages ?? []), [pages]);
+  const stale = !!pages && good.length < pages.length;
+  // 更早一页的基准日与最新一页不同：整窗重载（resetQueries 只会重取第一页）
+  useEffect(() => {
+    if (stale) void qc.resetQueries({ queryKey: key, exact: true });
+    // key 由 code/freq/pageSize 决定，已在依赖里
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stale, qc, code, freq, pageSize]);
+  const bars = useMemo(() => mergeBarPages(good), [good]);
+  const { hasNextPage, isFetching, fetchNextPage } = query;
+  const { isFetchNextPageError } = query;
+  /**
+   * 取更早一页；正在请求时不重复发（fetchNextPage 默认会取消进行中的请求）。
+   * 拖动触发的自动加载在上次失败后不再自动重试（避免每次拖动都打请求），由“重试”按钮传 force。
+   */
+  const loadOlder = useCallback((force = false) => {
+    if (hasNextPage && !isFetching && (force || !isFetchNextPageError)) void fetchNextPage({ cancelRefetch: false });
+  }, [hasNextPage, isFetching, isFetchNextPageError, fetchNextPage]);
+  const loadOlderAuto = useCallback(() => loadOlder(false), [loadOlder]);
+  return { ...query, first: good[0], bars, loadOlder, loadOlderAuto, reachedStart: !!pages && !hasNextPage };
+}
+
 /** 契约 §7.3 /securities/{code}/bars；日/周默认前复权，1m 只能不复权 */
-export const useBarsOf = (code: string | undefined, freq: BarFreq, limit: number, opts: { keepPrevious?: boolean } = {}) => {
+export const useBarsOf = (code: string | undefined, freq: BarFreq, limit: number, opts: { keepPrevious?: boolean; enabled?: boolean } = {}) => {
   const adjust: BarAdjust = freq === '1m' ? 'none' : 'qfq';
   const qc = useQueryClient();
   return useQuery({
@@ -70,7 +149,8 @@ export const useBarsOf = (code: string | undefined, freq: BarFreq, limit: number
       syncAdjustAsOf(qc, code!, adjust, freq, limit, res.adjust_as_of);
       return res;
     },
-    enabled: opt(code),
+    // enabled=false 时同一 key 的缓存仍返回，只是不请求、不轮询（T-F21：切到别的周期时分时停止轮询）
+    enabled: (opts.enabled ?? true) && opt(code),
     // 评审 T-F22a m17：同一证券切换周期时保留旧图；换证券时不沿用（key 第二段是证券代码）
     // v0.2.7：复权基准日不同的旧图不能当占位（价格口径不同）——由 syncAdjustAsOf 清掉旧缓存后自然不再沿用
     placeholderData: opts.keepPrevious ? (prev, prevQuery) => (prevQuery?.queryKey[1] === code ? prev : undefined) : undefined,
@@ -102,12 +182,11 @@ export const useFactors = (code: string | undefined, enabled = true) =>
     enabled: enabled && opt(code),
   });
 
-/** 契约 §7.3 GET /securities/{code}/announcements（首屏 30 条） */
+/** 契约 §7.3 GET /securities/{code}/announcements（§1.2 游标分页；首屏 30 条，“加载更多”取更早的，T-F21） */
+const announcementId = (a: Announcement) => a.id;
 export const useAnnouncements = (code: string | undefined, enabled = true) =>
-  useQuery({
-    queryKey: mk.announcements(code ?? ''),
-    queryFn: ({ signal }) => apiGet<AnnouncementsResponse>(`/securities/${enc(code!)}/announcements`, { limit: 30 }, signal),
-    enabled: enabled && opt(code),
+  useCursorPages<Announcement, AnnouncementsResponse>({
+    queryKey: mk.announcements(code ?? ''), path: `/securities/${enc(code ?? '')}/announcements`, limit: 30, enabled: enabled && opt(code), idOf: announcementId,
   });
 
 /** 契约 §7.3 /market/overview（最小结构） */

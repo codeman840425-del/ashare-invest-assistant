@@ -2,12 +2,14 @@
  * 表格封装（plan §2.10）：业务代码只用这里的列定义，不直接依赖 AG Grid。
  * 仅使用 AG Grid Community（MIT）—— 禁止引入 ag-grid-enterprise 或任何企业功能（eslint no-restricted-imports 兜底）。
  */
-import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import {
   AllCommunityModule, ModuleRegistry, colorSchemeDark, themeBalham,
   type ColDef, type GetRowIdParams, type GridApi, type ICellRendererParams, type RowClassParams,
 } from 'ag-grid-community';
+
+import { ASYNC_TX_WAIT_MS, ROW_BUFFER, planRowUpdate } from './gridBatch';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -61,9 +63,11 @@ export interface DataGridProps<T> {
   emptyText?: string;
   testId?: string;
   rowHeight?: number;
+  /** T-F21：行情类高频刷新的表格打开，按行增量批量更新（见 planRowUpdate） */
+  batchUpdates?: boolean;
 }
 
-export function DataGrid<T>({ rows, columns, getRowId, selectedId, onRowClick, onRowDoubleClick, rowClass, loading, emptyText, testId, rowHeight }: DataGridProps<T>) {
+export function DataGrid<T>({ rows, columns, getRowId, selectedId, onRowClick, onRowDoubleClick, rowClass, loading, emptyText, testId, rowHeight, batchUpdates }: DataGridProps<T>) {
   const colDefs = useMemo<ColDef<T>[]>(
     () =>
       columns.map((c) => ({
@@ -84,6 +88,31 @@ export function DataGrid<T>({ rows, columns, getRowId, selectedId, onRowClick, o
     [columns],
   );
   const apiRef = useRef<GridApi<T> | null>(null);
+  // 批量模式：rowData 只在创建时给一次，之后由事务驱动
+  const [initialRows] = useState(rows);
+  const shownRef = useRef<readonly T[]>(rows);
+  const latestRef = useRef<readonly T[]>(rows);
+  const idRef = useRef(getRowId);
+  useEffect(() => {
+    latestRef.current = rows;
+    idRef.current = getRowId;
+  });
+  const sync = (api: GridApi<T>) => {
+    const next = latestRef.current;
+    const plan = planRowUpdate(shownRef.current, next, idRef.current);
+    if (plan.kind === 'update') api.applyTransactionAsync({ update: plan.update });
+    else if (plan.kind === 'reset') {
+      api.flushAsyncTransactions();
+      api.setGridOption('rowData', [...next]);
+    }
+    shownRef.current = next;
+  };
+  useEffect(() => {
+    if (!batchUpdates || !apiRef.current) return;
+    sync(apiRef.current);
+    // sync 只读 ref
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, batchUpdates]);
   // 选中行样式依赖 selectedId：变化时重绘行
   useEffect(() => {
     apiRef.current?.redrawRows();
@@ -95,8 +124,11 @@ export function DataGrid<T>({ rows, columns, getRowId, selectedId, onRowClick, o
         theme={gridTheme}
         onGridReady={(e) => {
           apiRef.current = e.api;
+          if (batchUpdates) sync(e.api);
         }}
-        rowData={rows}
+        rowData={batchUpdates ? initialRows : rows}
+        rowBuffer={ROW_BUFFER}
+        asyncTransactionWaitMillis={ASYNC_TX_WAIT_MS}
         columnDefs={colDefs}
         getRowId={(p: GetRowIdParams<T>) => getRowId(p.data)}
         getRowClass={(p: RowClassParams<T>) => {

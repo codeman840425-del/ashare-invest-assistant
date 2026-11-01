@@ -1,10 +1,12 @@
 import { useMemo } from 'react';
 import type { Time } from 'lightweight-charts';
 import { useBars, useCandidateSignals, useSecuritySignals } from '../../api/queries';
+import { useBarsWindow } from '../../api/marketQueries';
 import { chartStops, markerSignals } from './chartStops';
 import type { Suggestion, TerminalRow } from '../../api/types';
 import { DataStatusTag } from '../../components/common';
 import { KlineChart } from '../../components/charts/KlineChart';
+import { KlineWindowInfo } from '../../components/charts/KlineWindowInfo';
 import { IntradayChart } from '../../components/charts/IntradayChart';
 import type { ChartMarker } from '../../components/charts/chartBase';
 import { SIGNAL_KIND } from '../../i18n/labels';
@@ -13,7 +15,8 @@ import { dayMinutes } from '../../lib/market';
 
 export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null }: { row: TerminalRow | undefined; suggestion: Suggestion | undefined; tradeDate?: string | null }) {
   const code = row?.security_code;
-  const daily = useBars(code, 'd');
+  // T-F21：日 K 按窗口加载（先 120 根，向左拖到边缘再按 before 取更早一页）
+  const daily = useBarsWindow(code, 'd', 120);
   const minute = useBars(code, '1m');
   const cs = useCandidateSignals(code);
 
@@ -59,10 +62,13 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
         <span className="muted small" data-testid="stop-legend">
           　{stops ? `虚线 = ${stops.legend} 的止损/止盈` : suggestion?.consensus.status === 'divergent' ? '各策略分歧：止损/止盈见右侧各策略，图上不画' : ''}
         </span>
+        {daily.first ? <KlineWindowInfo q={daily} unit="日" /> : null}
         <span className="legend"><i style={{ background: '#e3b341' }} />MA5<i style={{ background: '#58a6ff' }} />MA20<i style={{ background: '#bc8cff' }} />MA60</span>
       </div>
       <div className="chart-wrap kline">
-        {daily.data ? <KlineChart bars={daily.data.items} markers={klineMarkers} stopLoss={stops?.stopLoss} takeProfit={stops?.takeProfit} /> : <div className="chart-empty">{daily.isError ? '日 K 加载失败' : '加载中…'}</div>}
+        {daily.first ? (
+          <KlineChart bars={daily.bars} markers={klineMarkers} stopLoss={stops?.stopLoss} takeProfit={stops?.takeProfit} viewKey={code} onReachStart={daily.loadOlderAuto} />
+        ) : <div className="chart-empty">{daily.isError ? '日 K 加载失败' : '加载中…'}</div>}
       </div>
       <div className="chart-title">分时（不复权 · 黄线 = 均价 · 点线 = 昨收）<span className="muted small">　● = 盘中规则事件</span></div>
       <div className="chart-wrap intraday">

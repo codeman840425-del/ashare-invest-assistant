@@ -32,6 +32,9 @@ export function AccountStrip({ account }: { account: TerminalAccount | null | un
   );
 }
 
+/** 行 id 用稳定引用（批量事务按 id 对齐） */
+const rowIdOf = (r: TerminalRow) => r.security_code;
+
 export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, onOpen }: {
   rows: TerminalRow[];
   loading: boolean;
@@ -111,7 +114,8 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
         rows={rows}
         columns={columns}
         loading={loading}
-        getRowId={(r) => r.security_code}
+        getRowId={rowIdOf}
+        batchUpdates
         selectedId={selected}
         onRowClick={onSelect}
         onRowDoubleClick={onOpen}

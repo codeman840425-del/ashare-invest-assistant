@@ -20,17 +20,17 @@
 |---|---|
 | 产品定位 | **MVP 主线（最高优先级，第 0A 节）**：对每位用户的持仓与自选股，每天**盘后分析** + **盘中实时操作建议**（买入/加仓/持有/减仓/卖出/等待）。每条建议都带理由、证据（时间戳、来源、认识论类型）、反证、失效条件、置信度和策略版本，**不可变存档**。建议由**确定性规则 + 因子**产生；LLM 只写解释。研究、计划、提醒、复盘等其他能力放在主线之后。 |
 | 策略库 | 覆盖四种周期：日内做T、短线、波段、中长线。六个维度：技术、资金、基本面、情绪、板块与大盘、消息。策略由引擎的三层（L1 卡片 / L2 模板 / L3 实例）承载，具体策略见 `docs/strategies/`（由策略研究员维护）；每个策略的规则、所用特征和数据来源都对用户可见。导入后**自动判定每只股票适合的周期与策略**并给出理由，用户可改。**信号矛盾时不合并结论**，按"维度 × 策略"矩阵并列展示。**六项风控**逐项可开关。模拟跟踪统计各策略的胜率与盈亏，并可开关**自动降权**（只影响排序）。 |
-| 技术栈 | 后端：**Python 3.12 + FastAPI + Pydantic v2 + SQLAlchemy 2 + Alembic**。任务：**Celery + 单实例 Beat + 唯一的行情采集服务 `ingest`（全站唯一调用麦蕊，2.1A）+ 盘中信号进程 `signal-rt`**。存储：**PostgreSQL 16 + TimescaleDB（行情时序 hypertable，3A）+ Redis 7**。前端：**React 18 + TS + Vite + TanStack Query + AntD 5（暗色 + compact）+ AG Grid Community + TradingView Lightweight Charts**，深色交易终端风格，仅桌面。部署：**Docker Compose 单机**，配置全部走环境变量，不绑定任何云厂商。 |
+| 技术栈 | 后端：**Python 3.12 + FastAPI + Pydantic v2 + SQLAlchemy 2 + Alembic**。任务：**Celery + 单实例 Beat + 唯一的行情采集服务 `ingest`（全站唯一调用麦蕊，2.1A）+ 盘中信号进程 `signal-rt`**。存储：**PostgreSQL 16 + TimescaleDB（行情时序 hypertable，3A）+ Redis 7**。前端：**React 19 + TS + Vite + TanStack Query + antd 6（暗色 + compact）+ AG Grid Community + TradingView Lightweight Charts**，深色交易终端风格，仅桌面。部署：**Docker Compose 单机**，配置全部走环境变量，不绑定任何云厂商。 |
 | 规模与部署 | V1 面向 10–100 名用户：单机，**不用 k8s，不拆微服务**。先在本地测试，之后买服务器迁移（1.3 节附迁移手册）。域名**未备案**：对公网开放前必须解决（第 9 节问题 4）。 |
 | 数据接入 | 只有**行情采集服务 `ingest`**（单副本、单活锁、licence 只在此容器）能调用麦蕊：固定出口 IP、全局令牌桶（默认每分钟 3,000，可配置）、优先队列（盘中实时 > 日批 > 历史回补）、singleflight、原始响应留存；故障切换只做冷备；其他服务和用户只读缓存和数据库（2.1A）。数据全站共享。盘中按"去重后的系统证券池"分层刷新。 |
 | 刷新与上限 | 由配额推导，参数全部可配置（0A.6、0A.7）：<br>• 多股快照默认 **15 秒**一轮（N ≤ 2,000）；<br>• Tier-1 **1,500 只每分钟**取 Pro 1 分钟 K，Tier-2 每 5 分钟；<br>• 系统 universe **硬上限 4,000**；<br>• 每用户自选 **100**、重点关注 **20**。<br>以上依据官网文档推导，**【待 T003 验证】**，实测后调到上限。 |
-| LLM | 供应商无关的网关：管理员配置 provider、base_url、模型和**加密 API key**，按任务路由，带超时、重试、备用链和预算，记录 token 与成本，提示词模板版本化。输入是证据，输出是带 `[E#]` 引用的解释；**不决定动作**，失败时回落到模板。 |
-| 账号 | 用户名 + 密码（argon2id），**无验证码**。注册后为 `pending`，管理员批准后才能使用。防滥用靠限速和锁定。 |
-| 持仓来源 | 主要导入券商交割单 .txt（插件化解析器、GBK/UTF-8 识别、预览确认、去重、对账），手动录入为辅。持仓一律由成交重建。**股东代码等敏感标识做 HMAC + 掩码，原始文件加密后存放在仓库外并做访问控制。** |
+| LLM | 供应商无关的网关，**先接 DeepSeek**（OpenAI 兼容适配器，第 9 节问题 16）：管理员配置 provider、base_url、模型和**加密 API key**，按任务路由，带超时、重试、备用链和预算，记录 token 与成本，提示词模板版本化。输入是证据，输出是带 `[E#]` 引用的解释；**不决定动作**，失败时回落到模板。 |
+| 账号 | 用户名 + 密码（argon2id），**无验证码**。V1 **注册默认关闭**（`REGISTRATION_MODE=closed`，本人账号由 CLI 创建）；以后开放为邀请制，注册后为 `pending`，管理员批准后才能使用。防滥用靠限速和锁定（第 9 节问题 1）。 |
+| 持仓来源 | 主要导入通达信（TDX）导出的交割单与持仓 .txt（插件化解析器、GBK/UTF-8 识别、46 个 `IMPORT_*` 提示码、预览确认、去重、以摊薄成本对账，3.5A），手动录入为辅。持仓一律由成交重建。**股东代码等敏感标识做 HMAC + 掩码，原始文件加密后存放在仓库外并做访问控制。** |
 | 数据模型关键 | `epistemic_type ∈ {fact, estimate, hypothesis, execution}`。研究、计划、复盘、建议、策略版本、日报都是"头表 + 不可变版本"，并绑定 `data_snapshot`（`data_as_of` / `fetched_at`）。行情表带 `first_seen_at`，支持按原貌回看。 |
 | 跟踪与会员 | **不做回测**：每条建议在 T+1、T+5、T+20 对比基准做模拟跟踪，结果用于复盘和策略降权。**会员模型只预留**（套餐、权益、订阅），不接支付。 |
-| 质量 | 质量优先（8.0 节）：golden、回放、契约、E2E 测试；领域包覆盖率 ≥ 90%；CI 门禁和发布门禁。 |
-| 最大风险（阻断级） | ① **证券投资咨询资质**：对具体股票给出买卖动作，属于法定许可业务。V1 建议邀请制、封闭、免费（7.2 节，**第 9 节问题 1**）。② **麦蕊条款禁止再分发**，需要书面授权（7.1 节）。③ **ICP 备案**（7.3 节）。④ 新闻、舆情缺口（4.5 节、2.5.2 节）。 |
+| 质量 | 质量优先（8.0 节）：golden、回放、契约、E2E 测试；领域包覆盖率 ≥ 90%；CI 门禁和发布门禁；仓库密钥与敏感信息扫描（7.4A）。**接口字段以 `api-contract.md` 为唯一事实来源**。 |
+| 最大风险（阻断级） | ① **证券投资咨询资质**：对具体股票给出买卖动作，属于法定许可业务。V1 已定为**仅本人使用**、注册关闭、免费，开放他人前再评估（7.2 节，**第 9 节问题 1**）。② **麦蕊条款禁止再分发**，需要书面授权（7.1 节）。③ **ICP 备案**（7.3 节）。④ 新闻、舆情缺口（4.5 节、2.5.2 节）。 |
 
 ---
 
@@ -40,8 +40,8 @@
 
 | # | 原则 | 落地方式（数据模型 / 契约 / 质量门禁） |
 |---|---|---|
-| **P1** | **策略输出必须可解释。** 每条候选信号都能追溯到：触发它的规则（规则 ID + 策略版本）、所用数据（来源、证券、字段、时间戳）及当时的取值、反证、失效条件。 | `candidate_signals.rule_refs[]`（`{strategy_version_id, rule_id, role, expr, passed, value, threshold}`）、`evidence[]`（`{evidence_id, provider, endpoint, security_code, field, value, unit, data_as_of, fetched_at, epistemic_type}`）、`counter_evidence[]`、`invalidation[]` 全部**非空才能写入**（数据库 CHECK + 服务层校验，缺任一项写入失败并记 `SIGNAL_NOT_EXPLAINABLE`）。证据值随不可变快照保存，可按原貌回看。 |
-| **P1a** | **LLM 只把结构化证据改写成文字，不得给出结论或动作。** | LLM 输出必须是 `{paragraphs:[{text, cites:[evidence_id]}]}`。守卫逐句校验：每个数字、每条事实性陈述都要引用存在的 `evidence_id`，数字须与证据值一致（允许按约定四舍五入）；出现动作词（买入/卖出/加仓等）、目标价、收益承诺或未引用的数字 → **拒绝**，回落模板，并在 `llm_calls.guard_result` 中记录原因（2.7）。LLM 文本只出现在 `explanation` 字段，任何业务逻辑都不读取它。 |
+| **P1** | **策略输出必须可解释。** 每条候选信号都能追溯到：触发它的规则（规则 ID + 策略版本）、所用数据（来源、证券、字段、时间戳）及当时的取值、反证、失效条件。 | `candidate_signals.rule_refs[]`（`{strategy_version_id, rule_id, role, expr, passed, value, threshold}`）、`evidence[]`（`{id, provider, endpoint, security_code, field, value, unit, data_as_of, fetched_at, epistemic_type}`，其他字段一律用 `evidence_ids[]` 引用）、`counter_evidence[]`、`invalidation[]` 全部**非空才能写入**（数据库 CHECK + 服务层校验，缺任一项写入失败并记 `SIGNAL_NOT_EXPLAINABLE`）。证据值随不可变快照保存，可按原貌回看。 |
+| **P1a** | **LLM 只把结构化证据改写成文字，不得给出结论或动作。** | LLM 输出必须是 `{paragraphs:[{text, cites: string[]}]}`（`cites` 中是证据的 `id`）。守卫逐句校验：每个数字、每条事实性陈述都要引用存在的证据 `id`，数字须与证据值一致（允许按约定四舍五入）；出现动作词（买入/卖出/加仓等）、目标价、收益承诺或未引用的数字 → **拒绝**，回落模板，并在 `llm_calls.guard_result` 中记录原因（2.7）。LLM 文本只出现在 `explanation` 字段，任何业务逻辑都不读取它。 |
 | **P1b** | **黑箱模型（机器学习、合成因子模型等）只能作为辅助参考维度，不能单独触发操作计划。** | 信号里的 `model_refs[]` 统一标 `role: "auxiliary"`、`epistemic_type: "estimate"`，不计入规则满足率，也不改变动作。**生成计划草案的前提**：至少有一条 `rule_refs[].passed = true` 的可解释规则信号；只有 `model_refs` 时返回 `PLAN_REQUIRES_EXPLAINABLE_SIGNAL`。 |
 | P2 | **候选信号 ≠ 操作计划。** 系统从不直接输出"立即买入"。 | 分三步，详见 2.5.8：<br>① 扫描产生 `candidate_signals`；<br>② 结合真实持仓、现金、限制和风控，生成 `plan_drafts`，或写出 `non_executable_reasons`；<br>③ 用户确认后才成为 `action_plans`。 |
 | P3 | **不可执行必须说明原因，并给出解除条件。** | 每条 `non_executable_reasons` 都带 `release_condition`（尽量是可机器判断的表达式），系统持续监控；条件解除后重新评估，并通知用户（2.5.9）。 |
@@ -52,7 +52,7 @@
 | P8 | **共享数据、单一出口。** | 麦蕊只经唯一的行情采集服务 `ingest` 调用（单副本、固定出口 IP、licence 只在此容器，2.1A）；行情全站共享；用户增长不会线性放大外部调用。 |
 
 **P1 质量门禁**（T-T16，CI 必过）：
-- **属性测试**：随机快照生成的每条候选信号都必须有非空的 `rule_refs`、`evidence`、`counter_evidence`、`invalidation`；每个 `evidence_id` 都能在快照中解析，且值一致。
+- **属性测试**：随机快照生成的每条候选信号都必须有非空的 `rule_refs`、`evidence`、`counter_evidence`、`invalidation`；每个 `evidence_ids` 中的引用都能在快照中解析，且值一致。
 - **golden 测试**：逐字段比对追溯链。
 - **LLM 守卫测试**（T-T12）：注入未引用的数字、动作词、错误数值，必须全部被拒绝。
 - **计划门槛测试**：只有 `model_refs` 的信号无法生成计划草案。
@@ -73,19 +73,21 @@
 | 字段 | 说明 | epistemic_type |
 |---|---|---|
 | `strategies[].action` | **每个启用策略各自一个动作** `buy / add / hold / reduce / sell / wait`（中文展示见 7.2："规则信号：买入条件满足"等）；**不合成单一结论**，顶部 `consensus` 只报告"一致 / 分歧（各动作计数）"（2.5.4） | — |
-| `strategies[].dimension_views[]` | 六维度（技术/资金/基本面/情绪/板块与大盘/消息）各自观点 bullish/bearish/neutral/unknown + 分数 + 逐条规则结果；另有 `dimension_matrix` 与 `divergence[]` | fact / hypothesis |
-| `strategies[].stop_loss / take_profit` | 风控 RC1：每个策略结论带止损/止盈价（可关） | estimate |
+| `strategies[].dimension_views[]` | 六维度（技术/资金/基本面/情绪/板块与大盘/消息）各自观点 bullish/bearish/neutral/unknown + 分数（`score`，0–100 整数，unknown 时为 null）+ 逐条规则结果（`passed`、`evidence_ids`）；另有 `dimension_matrix`（单元格含分数与 ≤ 3 个关键证据）与 `divergence[]` | fact / hypothesis |
+| `strategies[].stops` | 风控 RC1：每个策略结论带 `stops{stop_loss, take_profit, time_stop_days}`（可关；契约共享对象 `Stops`） | estimate |
+| `strategies[].state / strategy_name / candidate_signal_id / t_leg` | 该策略的评估状态（`strategy_eval_state`）、展示名、对应的候选信号（hold/wait 时为 null）、做T腿 | — |
+| `executability.status` | `executable / blocked / not_applicable`（2.5.5） | — |
 | `risk_flags[]` | 六项风控结果（2.5.6），可标记 `gated_actions`，但不改写策略动作 | fact / estimate |
 | `strategies[].score` | 0–100，**该策略规则满足度**（规则透明权重加权，见 2.5）；不是"股票好坏评分"，不跨策略合成 | estimate |
 | `confidence` | `high / medium / low` + 0–1 数值；每策略单独：数据完整度、策略内维度一致度、条件余量（离阈值多远）按固定公式算出 | estimate |
 | `reasons[]` | 理由：满足的条件，每条引用证据 ID | fact（条件结果）/ hypothesis（策略逻辑） |
-| `evidence[]` | 依据数据：`{evidence_id, key, value, unit, data_as_of, fetched_at, provider, endpoint, epistemic_type}`，全部来自 `data_snapshot` | fact / estimate |
+| `evidence[]` | 依据数据：`{id, key, value, unit, data_as_of, fetched_at, provider, endpoint, epistemic_type}`，全部来自 `data_snapshot`；`id` 在本条建议内唯一，其他字段用 `evidence_ids[]` 引用 | fact / estimate |
 | `counter_evidence[]` | 反证：不满足的条件、风险因子偏高项、负面事件、其他策略的相反结论 | fact / hypothesis |
 | `invalidation[]` | 失效条件：结构化（如 `price_below 9.50`、`ma_trend != up`、`roe_ttm < 8 at next report`），盘中自动监控 | hypothesis |
 | `strategies[].strategy_version_id + version_no + horizon` | 产生各结论的策略版本与周期；`priority_weight`（2.5.7 自动降权结果，只影响排序） | — |
 | `user_context` | 用于适配判断的画像版本、持仓数量/成本、该股占总资产比例 | fact |
 | `snapshot_id` | 数据快照；`data_status`（fresh/stale）；`generated_by`（`rules_engine@版本`）；`explanation_text`（可选，LLM 或模板生成，见 0A.4） | — |
-| `supersedes_id` | 同一股票前一条建议（形成建议链），状态 `active / superseded / invalidated / expired` 只在头表变化，正文不可变 | — |
+| `supersedes_id`、`status` | 同一股票前一条建议（形成建议链）；状态 `status ∈ active / superseded / invalidated / expired`（契约 `suggestion_status`）只在头表变化，正文不可变；API 返回时把头表状态并入建议对象 | — |
 
 ### 0A.3 盘中链路：行情刷新与信号计算（间隔由配额推导、配置驱动）
 ```
@@ -108,7 +110,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
      ├─ ⑤ 翻转检测：与上一状态比较；只有"状态翻转"或"失效条件触发"才产生事件（去抖：连续 2 轮成立才确认；失效价类可配置为立即）
      └─ ⑥ 事件 → 生成新建议版本（规则引擎） → alerts → 通知分发（站内 SSE + 可选渠道）
 ```
-- **配置驱动**（`config/realtime.yaml`，管理员可在后台修改并热加载，变更写审计日志）：`quote_interval_s`（默认 15，下限 5）、`all_market_interval_s`（默认 60）、`pro_tier1_interval_s`（默认 60）、`pro_tier2_interval_s`（默认 300）、`tier1_cap`（默认 1,500）、`universe_hard_cap`（默认 4,000）、`per_minute_budget`（全局自设上限，默认 3,000，实测后可调到 5,400 = 6,000 的 90%）、各层预算份额、`max_concurrency`（默认 1，实测后调整）、`stale_threshold_s`（默认 3×quote_interval_s）。
+- **配置驱动**（`config/realtime.yaml`，管理员可在后台修改并热加载，变更写审计日志）：`quote_interval_s`（默认 15，下限 5）、`all_market_interval_s`（默认 60）、`pro_tier1_interval_s`（默认 60）、`pro_tier2_interval_s`（默认 300）、`tier1_cap`（默认 1,500）、`universe_hard_cap`（默认 4,000）、`per_minute_budget`（全局自设上限，默认 3,000，实测后可调到 5,400 = 6,000 的 90%）、各层预算份额、`max_concurrency`（默认 1，实测后调整）、`stale_threshold_s`（默认 2×quote_interval_s，与契约 1.1 和原因码 `DATA_STALE` 一致；T-A01 由 3× 统一为 2×）。
 - **自适应**：`ingest` 记录每轮实际耗时、429/503 次数、行情 `t` 字段（更新时间）的变化比例；若连续 N 轮发现多数股票 `t` 未变化（源头更新慢于拉取），自动把间隔放大到观测到的源头更新周期；出现 429/503 时指数退避并临时降低并发与预算（熔断 5 分钟后恢复）。
 - **用户侧节奏**：用户在设置里选**通知节奏** `realtime / 1min / 3min / 5min`（默认 1min），只影响合并推送频率，不影响采集；页面通过 SSE 接收更新，SSE 不可用时 15 秒轮询 `/api/v1/quotes?codes=`（只读 Redis）。
 - **陈旧数据处理**：quote 的更新时间落后当前 > `stale_threshold_s` → `stale`；`stale` 时**不生成新建议、不触发翻转**，页面显示"行情延迟 N 秒"；连续 5 分钟失败 → 全站横幅 + 运维告警；停牌股标注"停牌"并跳过；午间休市与收盘后不刷新；15:00 后取一次收盘快照定版。
@@ -117,22 +119,22 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 
 ### 0A.4 建议生成：确定性规则 + 因子；LLM 只写解释（可选）
 1. **输入**：策略库中用户为该股票（或账户默认）启用的策略版本（见 2.5）+ 当时数据快照 + 用户画像版本 + 持仓状态 + 用户已有计划。
-2. **每个策略**输出：`state ∈ {entry_ok, hold_ok, weakening, exit_signal, insufficient_data}`、`fit_score`（条件满足度 0–100）、逐条条件结果。
+2. **每个策略**输出：`state ∈ {entry_ok, not_triggered, hold_ok, weakening, exit_signal, vetoed, insufficient_data}`（契约枚举 `strategy_eval_state`，`not_triggered` 的含义见 2.5.14 H④）、`score`（条件满足度，对外 0–100 整数）、逐条条件结果。
 3. **动作映射（确定性、版本化的规则表 `action_policy`，可在策略版本中查看）**：
 
 | 持仓状态 | 单个策略的状态 | 该策略的动作 |
 |---|---|---|
 | 未持有 | entry_ok 且无失效条件触发、适配性通过 | `buy` |
-| 未持有 | 部分满足 / insufficient_data | `wait` |
+| 未持有 | not_triggered / vetoed / insufficient_data | `wait` |
 | 已持有 | entry_ok（若超 RC2/RC3 上限，动作仍为 `add` 但标 `gated`，见 2.5.6） | `add` |
-| 已持有 | hold_ok | `hold` |
+| 已持有 | hold_ok；或 not_triggered / vetoed（否决只阻断买入方向） | `hold` |
 | 已持有 | weakening（如趋势条件失效但基本面仍成立） | `reduce` |
 | 已持有 | exit_signal 或用户计划的失效条件触发 | `sell` |
 | 任意 | 数据 stale / 关键数据缺失 | 维持上一建议并标注"数据不足，未更新"，不新出动作 |
    - **不合并（用户 11:41 确认）**：每个启用策略独立映射动作；多个策略/维度冲突时按 2.5.4 "维度 × 策略"矩阵并列展示观点、依据与分歧点，**不取保守动作、不设主策略、不输出合成结论**，由用户判断。日内做T策略的动作带 `t_leg`。
    - `score`、`confidence` 均按策略单独计算（2.5.4），公式写入 `engine_policies` 版本。
 4. **LLM（用户有充足额度，默认开启"解释"能力，但只写解释）**：经 **LLM 网关**（第 2.7 节）调用，只把**结构化证据**改写成中文解释（建议理由、日报个股分析段落、策略分歧说明）；
-   - 不决定动作、分数、置信度，不新增事实；输入只含证据 JSON（含 evidence_id），要求每句以 `[E12]` 形式引用证据；
+   - 不决定动作、分数、置信度，不新增事实；输入只含证据 JSON（含证据 `id`），要求每句以 `[E12]` 形式引用证据；
    - **防幻觉校验**：输出中所有数字必须能在输入证据中找到（数值与单位精确匹配或按约定四舍五入），所有引用 ID 必须存在；出现未引用句子、新数字、新股票代码、禁用词（"保证/必涨/稳赚"等）→ 丢弃，按网关策略重试/切换备用模型，仍失败则回退到**模板解释**（模板始终可用，LLM 不可用不影响建议生成）；
    - 原始 prompt/输出/模型/token/成本存 `llm_calls`；用户可一键查看"原始结构化证据"；
    - **用量估算**：每条解释约 1.5k 输入 + 0.3k 输出 tokens；100 用户 × 平均 30 只股票 × 每日 1 次（盘后）≈ 3,000 次/日 ≈ 5.4M tokens/日；盘中只对翻转事件生成（估计 ≤ 盘后量的 30%）；同一 (code, method_version, snapshot) 的共享部分（个股事实解读）全站缓存复用，只有涉及个人持仓的段落按用户生成。金额按所选供应商公开价目计算【待核实，取决于管理员配置的供应商】，网关按调用记录成本并设日预算上限。
@@ -164,7 +166,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 | 五档盘口 | `/hsstock/real/five/{code}` | 否 | 钻石版 6,000 次/分钟 | 实时 |
 | 最新 1 分钟 K（Pro） | `/hsstock/pro/latest/{code}.{mkt}/1/n?lt=1..5` | 否（单股） | "限流同证书档位"→ 按 6,000 次/分钟理解 | 盘中增量（Redis 集群） |
 | 历史 1 分钟 K（Pro） | `/hsstock/pro/history/{code}.{mkt}/1/n?st&et&lt`，深度约 5 年；全量 `pro.mairuiapi.com …/history/full/` | 否 | 全量接口 60 次/分钟（第 4.1 节） | 盘后补齐 |
-| 最新 5/15/30/60 分钟、日 K | `/hsstock/latest/{code}.{mkt}/{5|15|30|60|d…}/{fq}?lt` | 否 | 钻石版 6,000 次/分钟；**普通路径已不提供 1 分钟** | 实时 |
+| 最新 5/15/30/60 分钟、日 K | `/hsstock/latest/{code}.{mkt}/{5\|15\|30\|60\|d…}/{fq}?lt` | 否 | 钻石版 6,000 次/分钟；**普通路径已不提供 1 分钟** | 实时 |
 | 企业专属分时 | `https://{专属子域}.mairuiapi.com/hsstock/vip/...` | — | **仅企业版**，我方不可用 | — |
 
 **通用限流规则**：钻石版每分钟 6,000 次、**每日不限**、总量不限【文档已列·待 T003 验证】；证书到期后每日 20,000 次【文档已列·待 T003 验证】；同一证书 60 秒内最多 2 个来源 IP，超出 429 / 码 103【FAQ已列·待 T003 验证】；FAQ 一处说"当前无并发连接数限制"，另一处说"单 IP 发出多个线程的请求"会返回 503 → **并发上限【待 T003 验证】**；6,000 次/分钟是"每接口"还是"整张证书合计"文档未写明 → 按**证书合计**保守设计【待 T003 验证】；`ssjy_more` 一次是否只计 1 次、bulk 接口是否占用 6,000 预算【待 T003 验证】；Quant Pro 到期日与基础证是否同为 2027-09-11【待 T003 验证：以证书后台为准】。
@@ -208,11 +210,11 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 | 缓存 / 队列 / 限流 | **Redis 7** | ① 全站共享热数据缓存（实时快照、榜单）；② Celery broker；③ 麦蕊全局令牌桶（Lua 原子脚本）；④ 会话存储。 | — |
 | 任务调度 / 实时 | **Celery worker + 单实例 Celery Beat**（盘后批、提醒、跟踪、日报、健康度）+ **唯一的行情采集服务 `ingest`**（单副本、单活锁、令牌桶 + 优先队列，2.1A）+ **`signal-rt` 进程**（订阅 `market.updated`，盘中特征 → 规则 → 候选信号 → 可执行性 → 原因解除监控，0A.3） | Beat 只能单实例，避免重复触发。麦蕊"60 秒内最多 2 个 IP"是硬约束，外呼必须集中到一个进程、一个出口 IP。盘中计算与外呼分开，计算故障不影响采集。 | APScheduler（没有分布式队列）、Kafka 或流处理（规模用不上）、多节点直连麦蕊（违反 IP 限制） |
 | 通知 / 推送 | **站内通知 + SSE 实时推送**（`GET /api/v1/stream`，轮询兜底）；渠道适配器可插拔：MVP 站内 + 可选邮件；企业微信自建应用列为第二步（2.6） | SSE 单向、走 HTTP、Nginx 易透传，100 用户规模单进程足够。 | WebSocket（双向不需要）、短信（需签名模板与费用）、个人微信（无官方接口，不做） |
-| 前端 | **React 18 + TypeScript + Vite + React Router + TanStack Query + Ant Design 5（暗色 + compact 算法）+ AG Grid Community（高密度表格）+ TradingView Lightweight Charts（K 线/分时）+ ECharts（统计图）+ react-resizable-panels** | 深色交易终端风格、仅桌面（2.10）；AG Grid 适合实时更新的密集表格；Lightweight Charts 体积小、金融图表专用（Apache-2.0，需保留署名）。 | Next.js（无 SSR 需求）、Vue（团队偏好待定，二者皆可） |
+| 前端 | **React 19 + TypeScript + Vite + React Router + TanStack Query + antd 6（Ant Design 6，暗色 + compact 算法）+ AG Grid Community（实时密集表格，禁止 Enterprise）+ TradingView Lightweight Charts（K 线/分时）+ ECharts（统计图）+ react-resizable-panels（分隔条调宽/折叠）**（**【已定 2026-11-01】React 19 + antd 6**，原型 T-F00 已验证，第 9 节问题 34） | 深色交易终端风格、仅桌面（2.10）；AG Grid Community（MIT）适合实时更新的密集表格，低频小表用 AntD Table（2.10 选型结论）；Lightweight Charts 体积小、金融图表专用（Apache-2.0，需保留署名）。 | Next.js（无 SSR 需求）、Vue（团队偏好待定，二者皆可） |
 | 认证 | **用户名 + 密码**（argon2id），自助注册后待管理员审核；服务端会话（Redis）+ httpOnly Cookie + CSRF 头；不用短信/邮箱验证码 | 符合用户要求；会话可随时吊销（禁用账号即时生效）。 | JWT 无法即时吊销，不选。 |
 | 部署 | **Docker Compose 单机**：nginx、api、worker、beat、**ingest（唯一调用麦蕊，replicas 1）**、signal-rt、postgres（+TimescaleDB）、redis；**先本地测试，后迁移服务器**（1.3）；每日 pg_dump + WAL 归档 | V1 10–100 用户单机足够；麦蕊同一证书 60 秒内仅 2 个 IP → 只能有一个真实调用出口。 | k8s / 微服务（规模不需要，徒增运维）；`ingest` 在 compose 中固定 `replicas: 1`，冷备只写手册、不常驻（2.1A） |
-| CI/CD | GitHub Actions：lint + 类型检查 + 单测 + 契约测试 + 构建镜像；手动审批后 SSH 部署 | 仓库已在 GitHub 私有库。境内服务器拉 GHCR 可能慢 → 可推送到境内镜像仓库（待拍板）。 | — |
-| 可观测性 | 结构化 JSON 日志 + `request_id`；Sentry（自托管或 SaaS，待拍板）；Prometheus 指标（麦蕊调用次数/429/延迟、任务时延）可选 | 配额/限流是关键运维指标。 | — |
+| CI/CD | GitHub Actions：lint + 类型检查 + 单测 + 契约测试 + 构建镜像；手动审批后 SSH 部署 | 仓库已在 GitHub 私有库。境内服务器拉 GHCR 可能慢 → 再加境内镜像仓库（已定：先用 GHCR，第 9 节问题 24）。 | — |
+| 可观测性 | 结构化 JSON 日志 + `request_id`；**暂不接入 Sentry**（【已定 2026-11-01】，境内部署时再决定是否自托管，问题 35）；错误靠日志告警；Prometheus 指标（麦蕊调用次数/429/延迟、任务时延）可选 | 配额/限流是关键运维指标。 | — |
 | LLM 网关 | 自研薄层 `llm` 模块：OpenAI 兼容协议适配器 + 可扩展 provider 适配器；管理员配置供应商/模型/加密密钥/任务路由/预算（2.7） | 供应商无关、可替换；只做解释，失败回落模板。 | LangChain 等重型框架（不需要 agent 编排） |
 | 测试 | pytest + hypothesis、vitest、Playwright、schemathesis、locust（8.0） | 质量优先；golden/回放测试保证规则引擎确定性。 | — |
 
@@ -227,7 +229,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 - **无云厂商锁定**：只依赖 PostgreSQL、Redis、本地卷（或任意 S3 兼容存储，通过 `IMPORT_STORAGE_BACKEND=local|s3` 切换）；不用托管专有服务；镜像可在任意主机运行。
 - **迁移流程（本地 → 服务器）**：`pg_dump` 加原始文件卷打包（加密）→ 新主机 `docker compose up`（**先不启动 `ingest`**）→ `pg_restore` → 修改 `PUBLIC_BASE_URL` 与 DNS → **停止本地 `ingest` → 等待 ≥ 60 秒 → 启动服务器 `ingest` → 核对出口 IP → 从本地 `.env` 删除 licence**。迁移期间及之后，开发机不得用同一证书做真实调用（2.1A；第 9 节问题 27）。操作手册写在 `deploy/scripts/migrate.md` 和 `deploy/runbooks/ingest-failover.md`（T-O06、T-O07）。
 - **测试期访问**：本地 `http://localhost`，不对公网开放；如需让少数测试用户访问，用内网/VPN（如自建 WireGuard）而非把未备案域名解析到境内主机。
-- **域名未备案的影响**（第 9 节问题 5）：
+- **域名未备案的影响**（第 9 节问题 4）：
   - 域名解析到**中国内地**服务器并提供网站访问，必须先完成 ICP 备案，否则接入商会阻断（《非经营性互联网信息服务备案管理办法》第五条；阿里云/华为云/腾讯云备案说明，2026-11-01 核实）。备案需境内服务器、按接入商流程办理，耗时【待核实，常见为数周】；收费经营可能还需 ICP 经营许可证【待核实】。
   - 解析到**中国香港/境外**服务器无需 ICP 备案（同上来源），但：① 用户个人信息（持仓、成交）存储在境外属于个人信息出境，需按《个人信息保护法》第三十八条及《促进和规范数据跨境流动规定》评估/标准合同备案；② 麦蕊服务条款 5.7 要求境内运营中收集的个人信息与重要数据境内存储，境外部署与之冲突；③ 境外主机访问麦蕊与境内用户访问的网络延迟与稳定性【待核实，需实测】。
   - **建议**：测试期本地运行（无需备案）；正式开放前购买**境内**服务器并完成 ICP 备案（个人主体也可备案，但"金融/证券类信息服务"类网站的前置审批要求【待核实】）；香港方案仅作为备案完成前的过渡，且只在不存储真实个人持仓数据的前提下考虑。
@@ -258,7 +260,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
     → api.mairuiapi.com / pro.mairuiapi.com（同一证书 60 秒内最多 2 个 IP【待 T003 验证】）  │
     → 写 market.*（hypertable）+ Redis 热缓存 → PUBLISH market.updated ──────────────────┘
  [ingest 冷备：平时不运行；切换 = 停主 → 锁过期 → 等待 ≥ 60 秒 → 启备 → 核对出口 IP]
-（*evaluation 仅在问题 26 获批后启用）
+（*evaluation 在第三阶段启用，问题 26 已定）
 ```
 
 - **`ingest`（行情采集服务）**：全系统**唯一**调用麦蕊、唯一持有 licence 的组件（详见 2.1A）。职责包括：URL 构造、令牌桶与优先队列、singleflight、重试（429/503 指数退避）、错误码映射（101/102/103）、原始响应落库（`raw_payloads`，供审计与快照使用）、IP 超限告警。原先设计中"datagw 作为库在 realtime/worker 内运行"的方案**作废**，因为多进程多主机外呼会违反 2-IP 限制。
@@ -297,7 +299,9 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
   - **任何时候都不允许两个活跃调用方。**
 - **本地开发与测试，以及从本地迁移到服务器**：
   - 本地和 CI 默认 `MAIRUI_MODE=replay`，使用录制回放的 fixtures，**不持有真实 licence**。
-  - 需要真实联调（如 T003）时，只能在"当前唯一调用方"那台机器上进行；生产（或预发）`ingest` 在运行时，开发机**禁止**使用真实 licence。
+  - **【已定 2026-11-01，问题 33】本地测试期：所有麦蕊调用都在用户本人的电脑上进行**（本机 `ingest` 或 T-B05 实测脚本，二者也不同时运行），这台电脑就是唯一调用方；其他机器（含共享开发机、CI、其他代理的环境）一律回放模式、不持有 licence。用户电脑的出口 IP 若变化，先停止调用并等待 ≥ 60 秒再继续；本地模式下出口 IP 自检只告警、不拒绝（`MAIRUI_EGRESS_IP_EXPECTED` 可不设）。
+  - **上线后：只有服务器上的 `ingest` 调用**（单副本、单活锁、单一固定出口 IP）；用户电脑不再持有真实 licence。
+  - **开发与生产任何时候都不能同时调用（硬规则）**：生产（或预发）`ingest` 在运行时，开发机**禁止**使用真实 licence；需要真实联调时，先按下面的迁移步骤停掉另一方。
   - 迁移步骤：
     - ① 停止本地 `ingest`；
     - ② 等待 60 秒；
@@ -397,7 +401,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 **不做什么**：Brinson 等专业业绩归因、自动挖掘行为模式、社区分享复盘。
 
 ### 2.4 前端信息架构（页面）
-深色交易终端风格、仅桌面（2.10）。新增主线页面：`/terminal`（**默认首页**：自选/持仓实时表 + K 线/分时 + 建议卡 + 信号流，可拖拽面板）· `/suggestions/:id`（建议详情：维度×策略矩阵、证据、反证、失效条件、风控标记、建议链）· `/reports`、`/reports/:date`（盘后日报）· `/strategies`、`/strategies/:id`（策略库：规则清单、数据来源、版本、改参、胜率/盈亏、降权开关）· `/risk-controls`（六项风控开关与阈值）· `/notifications`（通知中心与偏好）· `/strategy-cards`（L1 卡片库，第二阶段）· `/strategy-instances`（我的策略实例：确认、暂停、改参）· `/candidate-signals/:id`（候选信号与不可执行原因）· `/plan-drafts/:id`（计划草案确认页）· `/restrictions`（禁投、冷静期、屏蔽）· `/admin/llm`、`/admin/realtime`、`/admin/ingest`（采集状态）、`/admin/promotions`（模板审核与生命周期）、`/admin/evaluation`（内部评估，问题 26 获批后）、`/admin/plans`（管理端）。
+深色交易终端风格、仅桌面（2.10）。新增主线页面：`/terminal`（**默认首页**：自选/持仓实时表 + K 线/分时 + 建议卡 + 信号流；固定三栏 + 底部面板，分隔条可调宽、可折叠，见 2.10）· `/suggestions/:id`（建议详情：维度×策略矩阵、证据、反证、失效条件、风控标记、建议链）· `/reports`、`/reports/:date`（盘后日报）· `/strategies`、`/strategies/:id`（策略库：规则清单、数据来源、版本、改参、胜率/盈亏、降权开关）· `/risk-controls`（六项风控开关与阈值）· `/notifications`（通知中心与偏好）· `/strategy-cards`（L1 卡片库，第二阶段）· `/strategy-instances`（我的策略实例：确认、暂停、改参）· `/candidate-signals/:id`（候选信号与不可执行原因）· `/plan-drafts/:id`（计划草案确认页）· `/restrictions`（禁投、冷静期、屏蔽）· `/admin/llm`、`/admin/realtime`、`/admin/ingest`（采集状态）、`/admin/promotions`（模板审核与生命周期）、`/admin/evaluation`（内部评估，问题 26 获批后）、`/admin/plans`（管理端）。
 原有页面保留：`/register`（注册，提交后显示"等待管理员审核"）· `/login` · `/today`（今日关注）· `/portfolio`（账户/持仓/成交）· `/market`（市场概览）· `/stocks/:code`（个股档案：行情、财务、资金流、因子、公告、问董秘、各策略适配与周期分类）· `/discover`（策略筛选，入口并入 `/strategies`）· `/candidates`（研究候选）· `/plans`（行动计划，含版本对比）· `/alerts`（提醒中心与规则）· `/reviews`（复盘）· `/settings`（画像、通知、隐私、数据导出/注销）· `/portfolio/import`（上传→预览→确认→结果）· `/admin/*`（管理员后台：注册审核、用户管理、审计日志，仅 admin 角色可见）。
 
 所有页面固定位置展示风险揭示："本工具基于公开数据与您录入的信息、按透明规则生成**规则信号**，不构成投资建议，不保证收益；规则可能失效，交易决定与风险由您自行承担。"（最终文案以第 9 节问题 1 的合规结论和法务审定为准。）
@@ -512,7 +516,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 
 | 维度 | 麦蕊可提供（已核实-文档） | 本地计算 | 缺口与补充方案 |
 |---|---|---|---|
-| 技术 | 实时：`/hsrl/ssjy_more`、`/hsrl/ssjy/all`、`/hsstock/real/five`（五档）；K 线：`/hsstock/latest`、`/hsstock/history`（5/15/30/60/d/w/m）、Pro 1 分钟 `/hsstock/pro/latest`、`/hsstock/pro/history`；指标接口 `/hsstock/history/{macd|ma|boll|kdj}`；因子：`ma_trend`、`ma5_ma20_cross`、`ma20_ma60_cross`、`macd_signal`（golden_cross/death_cross/bull_divergence/bear_divergence/none）、`kdj_signal`、`rsi_14`、`boll_position`（upper/middle/lower/breakout_upper/breakout_lower）、`boll_squeeze`、`momentum_5d/20d/60d/120d`、`rs_20d`、`high52_distance`、`volume_ratio`、`volume_price_divergence`、`volatility_20d/60d`、`intraday_amplitude_20d`、`intraday_momentum_20d`、`vwap_deviation_20d`、`overnight_gap_20d` | 当日分时 VWAP（由 1 分钟 K 计算）、ATR14、前高/前低、日内偏离度 | 实时快照字段名与是否含量比/换手【待 T003 验证：T-B05】 |
+| 技术 | 实时：`/hsrl/ssjy_more`、`/hsrl/ssjy/all`、`/hsstock/real/five`（五档）；K 线：`/hsstock/latest`、`/hsstock/history`（5/15/30/60/d/w/m）、Pro 1 分钟 `/hsstock/pro/latest`、`/hsstock/pro/history`；指标接口 `/hsstock/history/{macd\|ma\|boll\|kdj}`；因子：`ma_trend`、`ma5_ma20_cross`、`ma20_ma60_cross`、`macd_signal`（golden_cross/death_cross/bull_divergence/bear_divergence/none）、`kdj_signal`、`rsi_14`、`boll_position`（upper/middle/lower/breakout_upper/breakout_lower）、`boll_squeeze`、`momentum_5d/20d/60d/120d`、`rs_20d`、`high52_distance`、`volume_ratio`、`volume_price_divergence`、`volatility_20d/60d`、`intraday_amplitude_20d`、`intraday_momentum_20d`、`vwap_deviation_20d`、`overnight_gap_20d` | 当日分时 VWAP（由 1 分钟 K 计算）、ATR14、前高/前低、日内偏离度 | 实时快照字段名与是否含量比/换手【待 T003 验证：T-B05】 |
 | 资金 | 因子 `main_5d_net`、`main_20d_net`、`big_order_net_5d`、`flow_5d_ratio`、`flow_20d_ratio`；个股资金流 `/hsstock/history/transaction/{code}`（日频，文档写盘中约 30 分钟更新）；龙虎榜 `/hilh/mrxq`、`/hilh/ggsb/{n}`、因子 `dragontiger_count`；行业/概念资金 `/hibk/zjhhy`、`/hibk/gnbk`、`/hizj/zjh`、`/hizj/bk` | 资金流连续性（连续 N 日净流入） | 北向 `north_*` 因子按设计返回空（缺口，不用）；**盘中逐笔主力资金无实时接口**（缺口，盘中只用日频 + 30 分钟更新的资金流【待 T003 验证】） |
 | 基本面 | 估值 `pe_ttm`(+`_rank`)、`pb`(+`_rank`)、`ps_ttm`、`pcf_ttm`、`peg`、`ev_ebitda`（可能为空）、`graham_value`、`price_vs_graham`；质量 `roe_ttm`、`roa_ttm`、`gross_margin`、`net_margin`、`debt_ratio`、`current_ratio`、`accrual_ratio`、`asset_turnover`；成长 `rev_yoy`、`profit_yoy`、`eps_yoy`、`rev_cagr_3y`、`profit_cagr_3y`、`eps_cagr_3y`、`rev_profit_scissors`；分红 `dividend_yield`（上线阶段标注不一【待 T003 验证】）、`dividend_continuous_years`、`dividend_growth_3y`、`dividend_avg_3y`、`payout_ratio`；财务三表 `/hsstock/financial/*`；业绩预告/快报 `/hicw/yjyg`、`/hicw/yjkb`、`/hscp/yjyg/{code}`；分红 `/hscp/jnfh/{code}` | 行业内分位（截面本地计算）、自身历史分位 `/factor/percentile` | 一致预期/盈利预测（缺口，MVP 不用） |
 | 情绪 | 涨停/跌停/炸板池 `/hslt/ztgc/{date}`、`/hslt/dtgc/{date}`、`/hslt/zbgc/{date}`（盘中每 10 分钟）；因子（`/factor/sentiment`）`limit_up_streak`（连板）、`limit_up_break`（炸板）、`seal_ratio`（封成比）、`seal_to_float`（封流比）、`limit_up_count_20d`、`limit_down_count_20d`、`pre_auction_volume_ratio`（集合竞价量比）、`attention_score`/`attention_rank`（**文档说明基于问董秘近 60 日活跃度**，不是市场热度） | 市场宽度（全市场快照涨跌家数、涨停/跌停家数比）、炸板率、连板高度 | **市场热度/人气（股吧、搜索、社交讨论）麦蕊无**（缺口）；补充：MVP 用"涨停/炸板/连板/宽度"替代并在界面注明；后续评估持牌资讯商的舆情数据（授权【待 T003 验证】），不抓取社区网站 |
@@ -539,14 +543,14 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
  ② 通用闸门 gate_tradability：ST/*ST、停牌、上市不满 30 个交易日、退市整理期、一字涨跌停、低价股（默认 < 2 元，可配置）
     → 命中时，买入方向的候选信号不成立，并记录 gate 结果（卖出方向仍评估，例如持仓股被 ST 仍可产生 reduce/sell）
  ③ 维度评估（RuleEvaluator，唯一的求值器；盘后批和盘中增量调用同一实现）：
-    逐条规则求值 → 每维度 {view, score, rules[{rule_id, passed, value, threshold, evidence_id}], veto_reason?}
+    逐条规则求值 → 每维度 {view, score, rules[{rule_id, role, passed, value, threshold, evidence_ids}], veto_reason?}
     veto 规则命中 → 该模板 state = vetoed（只影响本模板，不跨模板）
  ④ 模板结论 = 候选信号（L3 candidate_signals，不可变）：
     {state, proposed_action(+t_leg), score, confidence, stops, support/resistance,
      rule_refs[], evidence[], counter_evidence[], invalidation[], model_refs[](auxiliary), valid_until}
     P1 校验：rule_refs、evidence、counter_evidence、invalidation 缺任一 → 不写入，并记 SIGNAL_NOT_EXPLAINABLE
  ⑤ 风控 RiskHook（RC1–RC6，统一接口，只打标记、只限制数量，不改写候选动作）→ risk_flags[]、quantity_cap
- ⑥ 汇总为候选信号卡 suggestions：维度 × 策略矩阵、consensus（只计数）、divergence[]、优先级（fit × 降权权重，只排序）
+ ⑥ 汇总为候选信号卡 suggestions：维度 × 策略矩阵、consensus（只计数）、divergence[]、优先级（score × 降权权重，只排序）
  ⑦ 可执行性检查（2.5.9 原因码）：对每个方向为 buy/add/reduce/sell 的候选信号逐项检查
     → 有任一原因：写 non_executable_reasons（附 release_condition），信号状态 = blocked
     → 无原因：生成 plan_drafts（数量区间、价格区间、止损止盈、有效期、费用估算、人工判断清单），信号状态 = drafted
@@ -559,39 +563,51 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 - **信号矛盾不合并**：建议卡呈现 **"维度 × 策略" 矩阵**（行：六个维度；列：启用的策略；格：观点 + 分数 + 关键依据），下方并列各策略的动作与止损止盈；顶部只有在所有启用策略动作一致时才显示"各策略一致：持有"，否则显示"**存在分歧（3 个策略：买入 / 等待 / 减仓）**"并列出分歧点。系统**不输出合成后的单一结论**。
 - **置信度**：每个策略单独计算 = 0.5×数据完整度 + 0.3×维度一致度（该策略内部各维度观点是否同向）+ 0.2×条件余量（离阈值的标准化距离），映射 high ≥ 0.7 / medium ≥ 0.4 / low；公式随 `engine_policy` 版本记录。
 
-#### 2.5.5 输出结构（`suggestions` 的 JSON 视图，契约见 api-contract §7.8；以下取值均为**示例**）
+#### 2.5.5 输出结构（`suggestions` 的 JSON 视图；**字段定义以 api-contract §5.2 `Suggestion` 为准**，本节只是示例，取值均为**虚构**）
 ```json
 {
-  "id": "sg_01J…", "security_code": "600000.SH", "created_at": "2026-11-02T10:31:00+08:00",
-  "origin": "intraday_event", "data_status": "fresh", "snapshot_id": "sn_…", "feature_set_version": "fs_3",
-  "candidate_signal_ids": ["cs_…"], "executability": {"status": "blocked", "reason_ids": ["nr_…"]}, "plan_draft_ids": [],
+  "id": "sg_01J…", "security_code": "600000.SH", "name": "示例银行", "created_at": "2026-11-02T10:31:00+08:00",
+  "status": "active", "origin": "intraday_event", "data_status": "fresh", "snapshot_id": "sn_…", "feature_set_version": "fs_3",
+  "candidate_signal_ids": ["cs_…"],
+  "executability": {"status": "blocked", "reason_ids": ["nr_…"], "executable_signal_ids": [], "blocked_signal_ids": ["cs_…"]},
+  "plan_draft_ids": [],
   "horizon_assessment": {"suitable": ["swing","long"], "user_overridden": false},
   "consensus": {"status": "divergent", "actions": {"buy": 1, "wait": 1, "reduce": 1}},
   "strategies": [{
-    "strategy_version_id": "sv_…", "strategy_key": "demo_trend", "version_no": 2, "horizon": "swing",
-    "action": "buy", "score": 78, "confidence": {"level": "medium", "value": 0.62}, "lifecycle": "published",
-    "rule_refs": [{"rule_id": "T1", "snippet_version": 1, "role": "entry", "passed": true}], "model_refs": [],
-    "priority_weight": 0.85, "priority_downweighted": true,
-    "dimension_views": [{"dimension": "technical", "view": "bullish", "score": 0.83,
-        "rules": [{"rule_id": "T1", "pass": true, "value": "up", "threshold": "up", "evidence_id": "E3"}]}],
-    "stop_loss": "9.50", "take_profit": "11.20", "invalidation": [{"expr": "close < ma20 for 2 days", "evidence_id": "E7"}],
-    "reasons": [{"text": "MA20 上穿 MA60", "evidence_ids": ["E4"]}],
-    "counter_evidence": [{"text": "所属行业 20 日资金净流出", "evidence_ids": ["E9"]}]
+    "strategy_version_id": "sv_…", "strategy_key": "demo_trend", "strategy_name": "示例趋势策略", "version_no": 2,
+    "instance_id": "si_…", "horizon": "swing", "lifecycle": "published",
+    "state": "entry_ok", "action": "buy", "t_leg": null, "candidate_signal_id": "cs_…",
+    "score": 78, "confidence": {"level": "medium", "value": 0.62},
+    "rule_refs": [{"rule_id": "T1", "snippet_version": 1, "role": "entry", "passed": true, "evidence_ids": ["E3"]}], "model_refs": [],
+    "priority_weight": "0.85", "priority_downweighted": true,
+    "dimension_views": [{"dimension": "technical", "view": "bullish", "score": 83,
+        "rules": [{"rule_id": "T1", "role": "entry", "passed": true, "value": "up", "threshold": "up", "evidence_ids": ["E3"]}]}],
+    "stops": {"stop_loss": "9.50", "take_profit": "11.20", "time_stop_days": 20},
+    "invalidation": [{"text": "收盘价连续 2 日低于 20 日均线", "expr": "close < ma20 for 2 days", "evidence_ids": ["E7"]}],
+    "reasons": [{"text": "MA20 上穿 MA60", "expr": null, "evidence_ids": ["E4"]}],
+    "counter_evidence": [{"text": "所属行业 20 日资金净流出", "expr": null, "evidence_ids": ["E9"]}],
+    "valid_until": "2026-11-09T15:00:00+08:00"
   }],
-  "dimension_matrix": [{"dimension": "capital", "cells": [{"strategy_key": "demo_trend", "view": "bearish"}]}],
+  "dimension_matrix": [{"dimension": "technical", "divergent": false, "cells": [
+      {"strategy_key": "demo_trend", "strategy_version_id": "sv_…", "view": "bullish", "score": 83,
+       "key_evidence_ids": ["E3"], "rules_passed": 1, "rules_total": 1}]}],
   "divergence": [{"dimensions": ["fundamental","technical"], "summary": "估值分位偏高 vs 趋势向上",
                   "resolving_info": [{"description": "下一期季报 profit_yoy 是否转正", "subscribable": true}]}],
-  "risk_flags": [{"control": "position_cap", "level": "warning", "message": "该股已占总资产 23%（上限 20%）", "gated_actions": ["add"]}],
-  "evidence": [{"id": "E3", "key": "factor.ma_trend", "value": "up", "data_as_of": "2026-10-30", "fetched_at": "…", "provider": "mairui", "endpoint": "/factor/momentum/{code}", "epistemic_type": "fact"}],
+  "risk_flags": [{"control": "position_cap", "level": "warning", "message": "该股占总资产比例超过上限", "gated_actions": ["add"], "quantity_cap": null, "evidence_ids": ["E11"]}],
+  "evidence": [{"id": "E3", "key": "factor.ma_trend", "value": "up", "unit": null, "data_as_of": "2026-10-30", "fetched_at": "…", "provider": "mairui", "endpoint": "/factor/momentum/{code}", "epistemic_type": "fact"}],
   "explanation": {"source": "template", "text": "…", "llm_call_id": null},
   "supersedes_id": "sg_…"
 }
 ```
+- **命名规则（与契约一致）**：规则结果一律 `passed`；引用证据一律 `evidence_ids: string[]`（禁止单数 `evidence_id`）；证据对象主键是 `id`，在所属文档内唯一，全局用 `(snapshot_id, id)` 定位；`reasons` / `counter_evidence` / `invalidation` 都是 `TextWithEvidence{text, expr|null, evidence_ids}`。
+- **分数刻度**：引擎内部和策略规格中的阈值、权重用 0–1 小数；对外（API、存储、页面）所有名为 `score` 的字段都是 **0–100 整数**（四舍五入），观点为 `unknown` 时为 `null`；`confidence.value` 保持 0–1、两位小数。
+- **矩阵单元格**由服务端按 `strategies[].dimension_views` 派生（`key_evidence_ids` ≤ 3 个，取该维度中 passed 规则引用的前 3 个证据），契约测试检查两者一致；行级 `divergent=true` 表示该维度下各策略观点不同向。
+- **可执行性** `executability.status`：至少一个候选信号没有未解除原因 → `executable`；全部候选信号都被阻断 → `blocked`；没有候选信号（全部 hold/wait）→ `not_applicable`。
 
 #### 2.5.6 六项风控（逐项开关，`risk_control_settings`：系统默认 → 用户覆盖）
 | ID | 风控 | 规则（默认参数） | 数据 | 输出 |
 |---|---|---|---|---|
-| RC1 | 每笔建议带止损/止盈价 | 由策略 `stops` 公式计算（ATR14、前低、突破位、基本面失效价）；限制在当日/次日涨跌停价范围内；中长线默认价格止损 −20% 可关 | 日 K、`/hsstock/stopprice/history` | 每个策略结论的 `stop_loss`/`take_profit`；盘中触发 → 失效事件 |
+| RC1 | 每笔建议带止损/止盈价 | 由策略 `stops` 公式计算（ATR14、前低、突破位、基本面失效价）；限制在当日/次日涨跌停价范围内；中长线默认价格止损 −20% 可关 | 日 K、`/hsstock/stopprice/history` | 每个策略结论的 `stops`（`stop_loss`/`take_profit`/`time_stop_days`）；盘中触发 → 失效事件 |
 | RC2 | 单只仓位上限提醒 | 单只市值 ≤ 总资产 20%（画像可调）；`add/buy` 会使其超限 → gated | 持仓、实时价 | risk_flag + 可加仓上限数量 |
 | RC3 | 总仓位按大盘环境建议 | regime 上行 60–90%、震荡 40–60%、下行 0–30%（可调）；当前总仓位超出区间 → 提示 | 指数 K、宽度、持仓 | 账户级 risk_flag（日报与终端顶部） |
 | RC4 | 板块集中度预警 | 单一申万一级行业 ≤ 40%、单一概念 ≤ 50% | 行业归属 `/hszg/*`、持仓 | risk_flag |
@@ -640,8 +656,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 - 状态：`active` → `released` / `obsolete`（所属信号已终止）。
 
 **监控**：解除监控按 `check_on` 建立索引：
-- `tick`（盘中每轮）
-- `quote_flip`
+- `tick`（盘中每轮，含行情触发规则翻转的情况；契约 `check_on` 枚举不单列 `quote_flip`）
 - `import` / `cash_update` / `holding_change`
 - `daily_close`
 - `schedule`（到点触发）
@@ -706,6 +721,38 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
   ```
   RiskHook 只打标记、只限制数量（`quantity_cap` 进入草案的数量计算），不改写候选动作。RC5 中按 VaR / EWMA 分级的部分后置。
 - **候选策略**：哪些策略先只作为 L1 卡片展示、哪些进入 L2，具体策略见 `docs/strategies/`（由策略研究员维护）。引擎只负责把 `completeness` 不同的卡片区分展示。
+
+#### 2.5.11A 首批 P0 策略与引擎接口覆盖核对（【编排者默认，用户可否决】，第 9 节 C(1)–C(5)、C(8)）
+P0 = **G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01**（9 项，见 `docs/strategies/catalog.md` 第 2 节；本文只核对引擎能否承载，不改策略内容）。四个周期都有覆盖：做T（T-01，先只做盘后统计）、短线（S-01）、波段（W-01、W-02）、中长线（L-01）；G-01、G-02、H-01、N-01 是跨周期的系统组件。资金面和情绪面在 P0 中只作辅助（W-01 的资金辅助条件、G-02 的情绪周期）。
+
+**系统组件的自动挂载（新增配置 `system_components`）**：原来只有 `gate_tradability` 自动挂载（2.5.11）。改为 `engine_policy.system_components` 列表，默认值：
+
+| 组件 | 挂到哪里 | 角色 | 作用范围 |
+|---|---|---|---|
+| `gate_tradability`（G-01） | 所有模板 | veto | 只阻断买入方向 |
+| `veto_risk_announcement`（N-01） | 所有带买入动作的模板；对已持有证券作为 counter | veto / counter | 阻断买入；持仓只加反证，不直接触发卖出 |
+| `ctx_market_regime`（G-02） | 不挂规则，产出 `f.market_regime` 供 RC3 与模板引用 | 上下文 | — |
+| `hold_risk_monitor`（H-01） | **每只持仓**一个系统实例：`strategy_instances.origin=system`、`status=active`，用户可暂停单只或全部 | exit / weakening | 只产生 reduce/sell 候选，从不产生 buy/add |
+
+H-01 是"周期分类只推荐、不自动启用"（问题 15）的**唯一例外**，因为它只做风险提示方向。系统组件的版本随 `engine_policy` 版本记录在每条信号上。
+
+**逐项覆盖与缺口**
+
+| ID | 运行方式 | 引擎是否已覆盖 | 缺口 → 处理（任务） |
+|---|---|---|---|
+| G-01 `gate_tradability` | 系统闸门，日线盘后 + 盘中快照 | 基本覆盖（2.5.11） | ① 新增特征 `f.list_days`（上市天数）；② 伪停牌交叉校验：日线 `sf=1` 且同日快照有成交 → `suspect`（T-B05a）；③ ST/退市整理状态的数据来源【待 T003】 → T-B43 |
+| G-02 `ctx_market_regime` | 盘后计算，产出 `f.market_regime ∈ {uptrend, range, downtrend}` | 部分（regime 插件，2.5.11） | ① 指数日线接口未实测【待 T003】；② **市场宽度每日落库**（`f.market_breadth`：上涨家数占比等，由全市场快照收盘后计算），历史值需按限流分批回算；③ 情绪周期 6 阶段依赖涨停股池（约 30 天历史），积累前只输出 3 态 → T-B43 |
+| H-01 `hold_risk_monitor` | 系统实例，日线盘后 + 盘中快照 | 部分 | ① 新增 ctx 字段 `ctx.cost_price`（我方重建的摊薄成本）、`ctx.position_weight`、`ctx.sector_weight`；② `origin=system` 实例与默认挂载（上表）；③ `atr(n)` 已有 → T-B42 |
+| N-01 `veto_risk_announcement` | 盘后，次一交易日开盘生效（2.12.2） | 部分 | ① 特征 `f.ann_risk_count_10d`（近 10 个交易日风险公告数）；② 公告标题关键词表，版本化存入 `event_definitions`；③ 公告接口未实测【待 T003】；④ **数据缺失时**：买入方向草案被 `KEY_DATA_MISSING` 阻断，`missing=["f.ann_risk_count_10d"]`，解除条件 `kind=expr`：该字段在新快照中非空 **且** 公告数据源的 `feature_catalog.status = verified_live`；卖出方向不受影响 → T-B42、T-B43 |
+| T-01 `t_vwap_revert` | **只做盘后统计**（C(5)） | 部分 | ① 盘中特征 `f.vwap_intraday`、`f.vwap_dev`、`f.intraday_sigma`（由快照成交额/成交量或 1 分钟 K 计算，单位与口径【待 T003】）；② 时间修饰 `for N bars`、时间 ctx `ctx.now_hhmm`；③ `t_leg` 已有；④ 1 分钟 Pro 未实测。**盘后统计模式**：模板 `scan.mode=post_close_stats`，盘后用当天 1 分钟数据重放规则，只写统计（触发次数、回补率、扣费后单腿结果，均为 `Stat`，标"模拟"），**不产生候选信号、草案或通知**。开放盘中的条件：T-B05 实测快照/1 分钟延迟满足 `stale_threshold_s`，且用户确认 → T-B42、T-B43 |
+| S-01 `st_pullback_ma` | 日线盘后 | 基本覆盖（`ma`、`pct_change`、`rank_pct`） | 行业内排名分支需要分组截面函数 `rank_pct_in(x, group_key)` 和行业归属特征 `f.sw_l1`（申万一级，来源【待 T003】）→ T-B42、T-B43 |
+| W-01 `sw_ma_trend_pullback` | 日线盘后 | 部分 | ① `ctx.highest_close_since_entry`（跟踪止盈）；② `max2(a,b)`；③ `for p.x days`（N 取参数）；④ 特征请求 `f.ind_rs20`、`f.main_net_20d`、`f.np_yoy_latest`、`f.ann_risk_count_10d`【待 T003】→ T-B42、T-B43 |
+| W-02 `sw_breakout` | 日线盘后 | 部分 | 布林带宽及其自身 120 日分位：新增 `std(x,n)`、`ts_pct_rank(x,n)`，或登记派生特征 `f.boll_bw20`、`f.boll_bw20_pct120`（两种都支持，常用的登记为派生特征以便缓存）→ T-B42 |
+| L-01 `lt_value` | 筛选型，**每月**首个交易日盘后 | 部分 | ① 调度 `scan.schedule=monthly_first_trading_day`；② 行业内分位 `rank_pct_in` 或派生特征（如 `f.pe_ttm_ind_pct`）；③ 筛选的单行业上限 `screen.per_group_cap`；④ 因子历史值是否按时点计算【待 T003】 → T-B42、T-B43 |
+
+- **S-03**（`st_strong_momo`，高风险）：随附为模板，`risk_level: high`，默认不启用、不被分类器推荐（C(2)）。
+- **北交所**：V1 不扫描（`boards.bse=false`），持仓仍可导入和展示（C(8)）。
+- **N-03**（新闻舆情）：无数据源，保持 L1 卡片、不可运行（C(8)）。
 
 #### 2.5.12 参考资料与策略文档的归属
 - 调研文档 [`docs/strategy-references.md`](./strategy-references.md)（T002）是本章**引擎结构**的依据之一，与本文输出协议冲突的地方如何处理见 2.11。
@@ -793,7 +840,7 @@ screen: null               # 选股模板写 {universe, filters[], rank_by, top_
 - **DSL 语法**（G3，引擎唯一求值器 `RuleEvaluator`，详见 T-B20）：
   - 操作数：`feature_catalog` 中的 `feature_key`、`params` 中的参数名、数字或字符串字面量。
   - 运算：比较 `< <= > >= == !=`；布尔 `and or not`；算术 `+ - * /`。
-  - 函数白名单：`ma(x,n)`、`ema(x,n)`、`atr(n)`、`highest(x,n)`、`lowest(x,n)`、`ref(x,n)`、`cross_up(a,b)`、`cross_down(a,b)`、`between(x,lo,hi)`、`rank_pct(x)`（截面分位）、`pct_change(x,n)`。
+  - 函数白名单：`ma(x,n)`、`ema(x,n)`、`atr(n)`、`highest(x,n)`、`lowest(x,n)`、`ref(x,n)`、`cross_up(a,b)`、`cross_down(a,b)`、`between(x,lo,hi)`、`rank_pct(x)`（截面分位）、`pct_change(x,n)`；新增 `max2`、`min2`、`std`、`ts_pct_rank`、`rank_pct_in` 及 `for N bars` 见 H 节⑤。
   - 时间修饰：`<expr> for N days`、`within N days`。
   - 限制：表达式 ≤ 300 字符，嵌套深度 ≤ 6；不支持变量赋值、循环、属性访问或任何 IO。
   - 白名单只能由架构师和后端修改，研究员可以提出新增函数的需求。
@@ -808,12 +855,12 @@ screen: null               # 选股模板写 {universe, filters[], rank_by, top_
 **E. 验证方法块 `validation`**（G6 的输入，对应内部评估 2.12.4）
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `methods[]` | enum[] | `fixture`（必选）、`trigger_stats`（必选：触发率与覆盖率）、`tracking_sim`（T+1/5/20 模拟跟踪）；问题 26 获批后可加 `factor_ic`、`event_study`、`param_robustness` |
-| `fixtures[]` | `{id, desc, as_of, features: {feature_key: value}, holding?: {qty, sellable}, expect: {state, action?, rule_ids_passed[], reason_codes[]?}}` | ≥ 6 个，要覆盖：满足、不满足、缺数据、维度分歧、涨跌停或停牌、做T 无底仓。数值全部虚构 |
+| `methods[]` | enum[] | `fixture`（必选）、`trigger_stats`（必选：触发率与覆盖率）、`tracking_sim`（T+1/5/20 模拟跟踪）；第三阶段（内部评估模块，问题 26 已定）可加 `factor_ic`、`event_study`、`param_robustness` |
+| `fixtures[]` | `{id, desc, as_of, features: {feature_key: value}, holding?: {qty, sellable}, expect: {state, action?, rule_ids_passed[], reason_codes[]?}}` | ≥ 6 个，要覆盖：满足、不满足、缺数据、维度分歧、涨跌停或停牌、做T 无底仓（非做T卡可替代，见 H 节⑩）。键只能是 `feature_catalog` 的键（H 节③）。数值全部虚构 |
 | `window` | `{lookback_trading_days: int, universe: string}` | 默认 120 日、全 A |
 | `horizon_days[]` | int[] | 默认 `[1,5,20]` |
 | `metrics[]` | enum[] | `trigger_rate`、`coverage`、`win_rate`、`avg_excess`、`ic`、`car` 等；**每个指标都按 `{value, n, window, small_sample}` 输出**（2.12.3） |
-| `min_n` | int | 低于该样本数不下结论，默认 20 |
+| `min_n` | int | 低于该样本数不下结论，默认 30（2.12.3；H 节⑧） |
 | `pass_criteria` | `{metric: string, op: string, value: number}[]` | 作为 G7 审核的参考；是否设为硬门槛由管理员配置 |
 | `feature_requests[]` | `{name, desc, source_hint, frequency}` | 引擎目前没有的特征，由后端评估能否接入（数据可得性 **待 T003 验证**） |
 
@@ -834,7 +881,26 @@ screen: null               # 选股模板写 {universe, filters[], rank_by, top_
 | 验证 | 卡内 `validation.type/window/benchmark/cost_model/oos_result/trade_log_ref` 摘要 + 独立的 validation.md | 卡内摘要作为 L1 展示字段保存；`oos_result` 必须是 `{metric, value, n, window}`，未执行就写"未验证"；E 节的验证块仍是 G6 的机器输入。validation.md 是方法说明，不被导入 |
 | 卡片级不可运行原因（模板附录 B 第 6 项提问） | `blocked_gates` | **采纳为系统字段**，名称统一为 `gates_missing[]`（API 7.4 节已返回），由系统根据 G1–G7 结果计算，研究员不用填写。它**不进入** 23 个不可执行原因码表——原因码只描述单个候选信号 |
 | 冲突与互斥"优先级" | 只用作展示顺序 | 与 P4 一致，引擎不合并结论 |
-| 冲击成本模型 | 研究侧估算 | 是否进入产品待编排者或用户确认（模板附录 B 第 5 项）；进入前只在内部评估中使用，`epistemic_type=estimate` |
+| 冲击成本模型 | 研究侧估算 | **进入产品**（H 节⑨，2.13 冲击成本行），`epistemic_type=estimate` |
+
+**H. 与研究员模板 v0.2 / catalog / validation 的对齐结论（2026-11-01，T-A01；回应 `_template.md` 附录 B 第 5、8–14 项）**
+
+| 议题 | 结论（引擎侧，已定） |
+|---|---|
+| ① 卡片列表项的 `ref` | **采纳**。`entry[]`/`counter_evidence[]`/`invalidation[]`/`exit[]` 的列表项可写 `ref: <rule_id>`，必须指向同一文档 `rules[]` 中**角色相容**的规则（entry→entry，counter_evidence→counter，invalidation→invalidation，exit→exit/hold/weakening）。卡片项省略 `expr` 时导入器从规则复制；两边都写时，去除空白差异后必须完全一致，否则 `CARD_IMPORT_INVALID`（`issue=ref_expr_mismatch`）。`ref` 指向不存在或角色不相容的规则同样报错。 |
+| ② `validation_summary` 与 `validation` | **分开**。`validation_summary`（`type, window, benchmark, cost_model, oos_result, trade_log_ref`）是 L1 卡片的**选填展示字段**，概括研究侧离线检验；没做写 `oos_result: "未验证"`。`validation` **只**指 E 节的机器块（G6 的输入）。如果在 `validation` 里出现摘要键，导入器报 `CARD_IMPORT_INVALID`（`issue=summary_key_in_validation`，提示改名为 `validation_summary`）。用户可见范围按方案 A（2.12.4）。 |
+| ③ 夹具的特征键 | `fixtures[].features` 的键**只能是 `feature_catalog` 的键**（`f.*`），不能是表达式字符串（如 `"ma(f.close_qfq,20)"`），否则 `CARD_IMPORT_INVALID`（`issue=fixture_key_not_in_catalog`）。需要函数值时，夹具提供 `series: {f.key: [最早…最新]}`（长度 ≥ 该规则的 warmup），由求值器计算；常用的派生值通过 `feature_requests` 登记为命名派生特征。持仓与计划上下文用 `holding`/`ctx`/`plan` 子对象提供（`ctx.*`、`plan.*` 的值）。 |
+| ④ 模板状态 `not_triggered`（新增） | 含义：**数据完整、没有否决，但核心入场条件未全部满足**。映射为 `wait`；不生成 `candidate_signals` 行，只记录在评估结果和触发统计中。与 `insufficient_data`（数据缺失）、`vetoed`（否决规则命中）、信号级 `blocked`（不可执行原因）都不同。完整枚举：`entry_ok / not_triggered / hold_ok / weakening / exit_signal / vetoed / insufficient_data`（0A.4、API `strategy_eval_state`）。研究员夹具中暂用 `insufficient_data` 表示"未满足"的，导入时提示改为 `not_triggered`。 |
+| ⑤ DSL 新增 | `max2(a,b)`、`min2(a,b)`（两数取大/小；`greatest`/`least` 作为别名；区别于滚动的 `max(x,n)`/`min(x,n)`），因此"ATR 止损与结构止损取高者"可以写成一条规则；`std(x,n)`；`ts_pct_rank(x,n)`（当前值在自身最近 n 根中的分位 0–1）；`rank_pct_in(x, group_key)`（组内截面分位）。`for N days`/`within N days` 的 N 可写整数字面量或 `int` 参数 `p.xxx`（实例化时固定，须在 schema 范围内，上限 250）；日内规则用 `for N bars`/`within N bars`。新增 ctx 字段见 G 节"持仓与计划上下文"行。 |
+| ⑥ 涨跌停与市场状态键名 | 统一为：`f.limit_up_price`、`f.limit_down_price`（当日涨跌停价，由 2.13 计算）；`f.is_limit_up_close`、`f.is_limit_down_close`（收盘封板）；`f.limit_locked_up`、`f.limit_locked_down`（全天一字板）。`f.market_regime ∈ {uptrend, range, downtrend}`（与 API 枚举 `market_regime` 一致）。 |
+| ⑦ 公告的最早可交易时刻 | 按 2.12.2：取 `max(公告时间戳, first_seen_at)`；盘中 → 下一根 1 分钟 bar，盘后/开盘前 → 下一交易日开盘，只有日期 → 按盘后。麦蕊公告盘后更新，因此实际上一律次日开盘，与研究员"公告一律按盘后"的写法结果相同；与 2.8.1 模拟跟踪入场口径一致。 |
+| ⑧ 样本量阈值 | 全站统一（2.12.3）：n < 5 不显示数值；5 ≤ n < 30 标"样本少"（`small_sample=true`）；n ≥ 30 正常。E 节 `min_n` 默认改为 30。降权门槛 n ≥ 20（2.5.7）和 `published` 的模拟样本门槛 n ≥ 20（2.5.13）不是展示阈值，保持不变。 |
+| ⑨ 冲击成本 | **进入产品**，只放在"成本与滑点"（卡片 `costs.impact_*`）：按参与率分 5 档的确定性估算（2.13），计划草案（2.5.8）、模拟跟踪（2.8.1）和内部评估共用；`epistemic_type=estimate`，档位为初值待校准。 |
+| ⑩ 非做T卡的"无底仓"夹具 | G6 的夹具覆盖要求中"做T 无底仓"一项，对非做T卡可用"持仓可卖数量为 0 时出现卖出信号"替代（研究员附录 B 第 14 项）。G6 其余覆盖要求不放宽。 |
+| ⑪ 因子数量 | 文档写 85 个、因子页另有"82 个已上线"的说法（validation.md 第 7 项），以 T003 补测和 T-B05 实测后的 `feature_catalog` 为准；导入器只认 catalog 中的键，所有因子按日频处理，盘中只用 T−1 值。 |
+| ⑫ `risk_level` | 卡片选填字段 `risk_level: normal \| high`（默认 normal）；`high` 默认不启用、不被分类器推荐（问题 11）。 |
+
+研究员侧仍待回答（不阻塞引擎开发）：分红是否计入摊薄成本（问题 19）、T+1 hold 阈值（第 9 节 C(7)）。
 
 
 ### 2.6 通知渠道（站内为主，可插拔）
@@ -876,11 +942,11 @@ class LLMGateway:
 - **管理员配置**（后台，非代码）：`llm_providers`（名称、类型、`base_url`、API key **AES-256-GCM 加密存储**，密钥加密主密钥来自环境变量/密钥文件，接口只返回掩码 `sk-…abcd`）、`llm_models`（模型名、上下文长度、每千 tokens 输入/输出单价——由管理员按供应商价目填写）、`llm_task_routes`（任务 → 主模型 + 备用链、超时（默认 30 秒）、重试（默认 2 次，指数退避，仅对超时/429/5xx）、温度、最大输出、日预算）。保存配置时可"测试连接"。
 - **任务类型**：`suggestion_rationale`（建议理由）、`daily_report_stock`（日报个股段落）、`daily_report_summary`（日报总览）、`strategy_divergence`（分歧说明）、`announcement_title_digest`（只基于公告标题的要点，不读原文）。
 - **提示词模板版本化**：`prompt_templates(task, version, system_text, user_template, output_schema, status draft/active/retired)`；激活新版本不影响历史记录；每条生成记录 `prompt_template_id + version`。
-- **输入/输出契约**：输入 = `EvidencePack{evidence[{id, key, value, unit, as_of, source}], action, score, confidence, reasons, counter_evidence, invalidation}`（不含用户名、股东代码、账户号；持仓只给比例与成本价）；输出 JSON `{paragraphs:[{text, cites:[evidence_id]}]}`；校验见 0A.4（数字/引用/禁用词），校验失败计入 `llm_calls.validation_status` 并回退模板。
+- **输入/输出契约**：输入 = `EvidencePack{evidence[{id, key, value, unit, as_of, source}], action, score, confidence, reasons, counter_evidence, invalidation}`（不含用户名、股东代码、账户号；持仓只给比例与成本价）；输出 JSON `{paragraphs:[{text, cites: string[]}]}`；校验见 0A.4（数字/引用/禁用词），校验失败计入 `llm_calls.validation_status` 并回退模板。
 - **记录与成本**：`llm_calls` 记录 task、provider、model、prompt 版本、输入/输出 tokens、耗时、状态、估算成本（tokens × 管理员填写单价）、关联对象（suggestion_id / report_id）；后台按日/任务/模型汇总，超日预算自动降级到模板。
 - **合规与数据**：只发送去标识化的结构化证据；供应商须境内可用并签数据处理条款，境外供应商涉及个人信息出境（见 7.3，问题列表）；输出同样过禁用词校验。
 
-- **守卫（0B P1a）**：LLM 输出中的每个数字、每个断言都必须引用 `evidence_id`，且数值与证据一致；不允许出现动作词、目标价或收益承诺；不允许引入证据之外的事实。任一项不通过就丢弃 LLM 输出、回退模板，并记录到 `llm_calls.validation_status`。`model_refs` 的输出只能写成"辅助参考"。
+- **守卫（0B P1a）**：LLM 输出中的每个数字、每个断言都必须引用证据 `id`，且数值与证据一致；不允许出现动作词、目标价或收益承诺；不允许引入证据之外的事实。任一项不通过就丢弃 LLM 输出、回退模板，并记录到 `llm_calls.validation_status`。`model_refs` 的输出只能写成"辅助参考"。
 - **LLM 策略草稿（第三阶段，T-B39）**：LLM 根据用户描述只输出 JSON（卡片字段、DSL、参数 schema），自动跑 G1–G6，最多修正 3 轮；结果永远只是 `draft`，必须经过 G7 人工审核（2.5.0）。
 
 ### 2.8 建议的模拟跟踪（替代回测）
@@ -923,9 +989,14 @@ class LLMGateway:
 
 ### 2.10 前端：专业交易终端风格（仅桌面）
 - 深色主题、数据密集、仅桌面（最低 1440×900，< 1280 宽显示"请使用电脑端"，不做移动适配）。
-- 组件：**Ant Design 5 暗色算法 + compact 算法**（表单、弹窗、后台页面）；**AG Grid Community**（MIT，虚拟滚动、列固定、条件着色，用于持仓、自选、建议、成交等密集表格）；**TradingView Lightweight Charts**（Apache-2.0，需按许可展示署名，K 线/分时/成交量）+ **ECharts**（资金流、因子分位、跟踪统计等其他图表）；**react-resizable-panels** 做可拖拽多面板布局；键盘快捷键（代码搜索、切换面板）。
+- 组件：**antd 6 暗色算法 + compact 算法**（表单、弹窗、后台页面）；**AG Grid Community**（MIT，虚拟滚动、列固定、条件着色、按单元格增量刷新，用于实时更新的密集表格）+ **AntD Table**（低频、少量行的管理与表单类表格）；**TradingView Lightweight Charts**（Apache-2.0，需按许可展示署名，K 线/分时/成交量）+ **ECharts**（资金流、因子分位、跟踪统计等其他图表）；**react-resizable-panels**（MIT）只用于分隔条调宽与折叠；键盘快捷键（代码搜索、切换面板）。
 - 颜色约定：红涨绿跌（A 股习惯），可在设置切换；数字等宽字体、千分位、涨跌色与 `stale` 灰显。
 - 终端主界面 `/terminal`：左 自选/持仓列表（实时价、涨跌、信号状态、当前各策略动作徽标（分歧时显示"分歧"徽标））→ 中 K 线 + 分时 + 信号标记 → 右 当前建议卡（动作、分数、置信度、理由、依据数据、反证、失效条件、策略版本、数据时间）→ 底部 通知流 / 日报。
+- **T-F01 选型结论（2026-11-01，T-A01，回应 T-F00 §6 第 8 项；许可证当日核实）**：
+  - **表格：两者并用，按场景分工。** AG Grid **只用 Community 版**（MIT；npm `ag-grid-community`）用于实时、高密度、行数多的表格：终端自选/持仓、成交流水、导入预览（最多 50,000 行）、候选信号列表。理由：行情每 15 秒一轮、按单元格增量刷新和涨跌闪烁不触发整行重渲染；内置行虚拟化、列固定、列宽拖动、键盘导航，质量优先下自己在 AntD Table 上补这些的成本和风险更高。AntD Table 用于管理端、设置页、日报中的小表（< 200 行、不实时刷新），与表单组件风格一致。前端统一封装 `DataGrid` 组件，业务代码不直接依赖 AG Grid 的 API，以后可替换。
+  - **禁止 AG Grid Enterprise**（商业许可）。行分组、聚合、透视、剪贴板、Excel 导出、区域选择、右键/列菜单、集合筛选、工具面板、状态栏、主从表、树形数据、服务端行模型、迷你图都是 Enterprise 功能，设计中不得依赖；需要时用自研的简单替代（如导出走后端 CSV）。CI 依赖检查发现 `ag-grid-enterprise` 或 `@ag-grid-enterprise/*` 即失败（T-O02）。
+  - **布局：固定三栏 + 底部面板**（左列表、中图表、右建议卡、底部通知/日报）。用 react-resizable-panels 只做**分隔条调宽和折叠**，尺寸存在浏览器 localStorage，提供"恢复默认布局"；**V1 不做面板自由拖拽、停靠或重排**。理由：10–100 名桌面用户、单一工作流，固定布局可预测、易上手，E2E 截图测试稳定，键盘焦点顺序固定；自由停靠增加状态管理和测试面，收益小。
+  - 原型（T-F00）用 AntD Table 和固定三栏，布局与本结论一致；表格在 T-F01/T-F11 中替换为 `DataGrid`（AG Grid Community）。版本**已定为 React 19 + antd 6**（与原型一致，第 9 节问题 34），T-F01 直接沿用。
 
 ---
 
@@ -937,7 +1008,7 @@ class LLMGateway:
 | 三层：知识卡 → 可运行模板 → 实例与计划（11:51） | **采纳** | 把"讲清楚"和"能运行"分开，对新手最有价值；晋级门槛本身也是教育内容 |
 | 五层草案（数据、信号、策略、匹配建议、跟踪，11:49） | **合并** | 数据与指标是共享底座，不算一层；信号层并入 L2 规则和 `rule_snippets`；匹配与跟踪是 L3 的流程。层数越多，口径越容易漂移（调研 §2） |
 | 策略卡完整字段表（12 组用户字段 + 编排者补充） | **简化**为 8 个必填 + 选填 + 系统字段（2.5.0A） | 卡片太长新手读不完。运行、复盘、表现字段由系统维护，不让人填；选股与互斥放在 L2 配置 |
-| 验证字段（区间、基准、成本、样本外、交易明细） | **延后** | 产品不做回测。上线后用 T+1/5/20 模拟跟踪；另设内部评估模块，仅管理员可见，待拍板（2.12.4） |
+| 验证字段（区间、基准、成本、样本外、交易明细） | **延后** | 产品不做回测。上线后用 T+1/5/20 模拟跟踪；另设内部评估模块，第三阶段实施（问题 26 已定）；用户只看到是否做过检验、方法类型和日期（方案 A，第 9 节 C(6)）（2.12.4） |
 | 参数敏感性 | **延后** | 需要历史验证支撑；MVP 只做参数范围和 G6 的触发率体检 |
 | 不可执行原因：用户列出 4 条，编排者补充 10 条 | **采纳并结构化**为 23 个原因码，每条带解除条件和检查时机（2.5.9） | 让"为什么现在不能做、什么时候能做"可以被监控和通知 |
 | 六维度全部纳入、越细越好 | **采纳，但如实标注缺口** | 新闻和舆情热度麦蕊没有，不伪造维度观点（`unknown`） |
@@ -952,7 +1023,7 @@ class LLMGateway:
 | 生命周期 draft → simulated → published，放文件不等于激活 | **采纳并扩展**为 `draft / simulating / published / observing / retired`，由数据库状态加管理员批准控制；注册表显式登记 | 防止误上线；与健康度合并为一个状态机 |
 | 按 A 股规则做内部评估（参考 OSkhQuant 思路） | **采纳**为共享模块 `app/market_rules`（2.13），模拟跟踪与内部评估共用；**不拷贝任何代码**（该项目为 CC BY-NC） | 口径统一；许可证合规 |
 | 抗过拟合：K 折样本外稳健度 + 发布后每日复验 + 健康/观察/退役（参考 TSP） | **采纳为仅内部可见的评估模块**，与"内部历史验证"合并为一个模块（2.12.4），并与自动降权合并为一个健康度机制（2.8.2）；**是否启用待用户拍板**（第 9 节问题 26） | 与"产品内不做回测"相容：结果不展示给终端用户，只用于管理员审核和默认参数选择 |
-| ST 股涨跌幅 5%（用户 12:02 的表述） | **更正**：沪深主板风险警示股票自 **2026-07-06** 起为 10%（交易所 2026-04-24 发布的新版交易规则）；规则按生效日期分段存储，历史回看仍用 5% | 已于 2026-11-01 网上核实 |
+| ST 股涨跌幅 5%（用户 12:02 的表述） | **更正**：沪深主板风险警示股票自 **2026-07-06** 起为 10%（交易所 2026-04-24 发布的新版交易规则）；规则按生效日期分段存储，历史回看仍用 5% | 网上资料如此，**【待 T003 补测核实】**（以交易所正式规则为准；规则模块按生效日期分段，核实后只改 `market_rules.yaml`） |
 
 ### 2.12 多因子与事件驱动的质量保障
 
@@ -988,11 +1059,12 @@ class LLMGateway:
 
 #### 2.12.3 样本量必须随统计一起展示
 - 任何胜率、IC、异常收益、盈亏比，在 API 和 UI 中都是统一结构 `{value, n, window, small_sample: bool}`：
-  - n < 20：显示"样本少"标记；
-  - n < 5：不显示数值，只显示"样本不足（n=3）"。
+  - 5 ≤ n < 30：显示"样本少"标记（`small_sample=true`）；
+  - n < 5：不显示数值（`value=null`），只显示"样本不足（n=3）"。
+  - 这是**展示阈值**；降权门槛 n ≥ 20（2.5.7）与 `published` 的模拟样本门槛 n ≥ 20（2.5.13）是另外的规则，不受影响（2.5.14 H⑧）。
 - 契约测试和前端组件测试都会检查：缺少 `n` 判为失败（T-T17）。
 
-#### 2.12.4 内部评估模块（仅管理员可见；含历史验证与抗过拟合；**是否启用待拍板，第 9 节问题 26**）
+#### 2.12.4 内部评估模块（仅管理员可见；含历史验证与抗过拟合；**已定：第三阶段实施，第 9 节问题 26；用户可见范围按方案 A，见 C(6)**）
 - **定位**：在不违背"产品内不做回测"的前提下，为管理员提供因子、事件和模板参数的历史验证。**结果永不展示给终端用户**，也不出现在任何用户接口、通知或 LLM 输入中；只用于：
   - ① 晋级审核（G6 的附加报告）；
   - ② 默认参数的选择；
@@ -1032,12 +1104,13 @@ class LLMGateway:
 | 规则 | 内容（2026-11-01 网上核实；以交易所最新规则为准） |
 |---|---|
 | T+1 | 当日买入的股票下一交易日才可卖出；可卖数量 = 昨日持仓 − 今日已卖 |
-| 涨跌幅 | 主板 10%；创业板、科创板 20%；北交所 30%；**沪深主板 ST/*ST 自 2026-07-06 起为 10%（此前为 5%）**；创业板、科创板风险警示股票 20%；北交所风险警示股票 30% |
+| 涨跌幅 | 主板 10%；创业板、科创板 20%；北交所 30%；**沪深主板 ST/*ST 自 2026-07-06 起为 10%（此前为 5%）【待 T003 补测核实】**；创业板、科创板风险警示股票 20%；北交所风险警示股票 30% |
 | 无涨跌幅限制 | 沪深注册制新股上市前 5 个交易日；北交所新股上市首日；退市整理期首日（以交易所规则为准）。这些情形下有盘中临时停牌机制（较开盘价 ±30%、±60% 各停牌 10 分钟） |
 | 涨跌停价计算 | 前收盘价 × (1 ± 比例)，四舍五入到 0.01 元【精确舍入规则以交易所为准，待核实】 |
 | 交易单位 | 买入为 100 股的整数倍（科创板 ≥ 200 股后按 1 股递增；北交所单笔不低于 100 股，可按 1 股递增）【以交易所规则为准，待核实】；余额不足 100 股须一次性卖出 |
 | 交易时段 | 集合竞价 9:15–9:25；连续竞价 9:30–11:30、13:00–14:57；收盘集合竞价 14:57–15:00 |
 | 费用 | 印花税：**仅卖出**，0.05%；过户费：双向 0.001%；佣金：双向，按用户费率，单笔最低 5 元（券商常见做法，以用户实际为准，可由导入的成交反推）；滑点：模板参数，默认 0.1% |
+| 冲击成本 | 按参与率（订单数量 ÷ 近 20 个交易日日均成交量）分 5 档的确定性估算：I1 ≤ 0.1% → 0 bp；I2 ≤ 0.5% → 5 bp；I3 ≤ 1% → 15 bp；I4 ≤ 2% → 30 bp；I5 > 2% → 60 bp。【编排者默认，初值待校准】（第 9 节 C(7)）；`epistemic_type=estimate`；计划草案（2.5.8）、模拟跟踪（2.8.1）、内部评估共用，结果写入卡片的 `costs.impact_*` 展示 |
 | 不可成交 | 买入方向遇一字涨停（或开盘即涨停未打开）不可成交；卖出方向遇一字跌停不可成交；停牌日跳过 |
 | 时点 | 数据可用时刻精确到分钟（2.12.1），不允许使用未来数据 |
 
@@ -1177,7 +1250,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `strategy_health_baselines` / `strategy_health_daily` | baseline：strategy_version_id, set_at, tracking_baseline(jsonb), oos_robustness_baseline(nullable)；daily：strategy_version_id, as_of_date, n, weight, raw, oos_robustness(nullable), state(published/observing), proposed_action(none/review/retire), detail(jsonb) |
 | `strategy_instances`（L3 头表） | id, user_id, strategy_version_id, scope(account/security/watch_group), account_id, security_id(nullable), status(proposed/active/paused/archived), origin(classifier/user), param_overrides(jsonb), derived_strategy_version_id(nullable：越界参数会生成派生版本，I4), risk_settings_snapshot(jsonb), fit_ack(jsonb：{horizon, acknowledged_at}), budget_amount, auto_downweight(bool), created_at, confirmed_at |
 | `strategy_instance_events` | id, instance_id, kind(created/confirmed/paused/resumed/params_changed/archived), detail(jsonb), actor_id, at |
-| `candidate_signals` | **正文不可变**：id, user_id, instance_id, strategy_version_id, security_id, horizon, proposed_action, t_leg, score, confidence, stops(jsonb), **rule_refs**(jsonb：[{rule_id, snippet_id, version, role, passed, value, threshold}], 非空), **evidence**(jsonb：[{evidence_id, provider, endpoint, symbol, field, value, unit, data_as_of, fetched_at, epistemic_type}], 非空), **counter_evidence**(非空), **invalidation**(非空), **model_refs**(jsonb：[{model_id, version, output, role:'auxiliary'}]), gate_results(jsonb), risk_flags(jsonb), crowding_flag, feature_set_version, snapshot_id, valid_until, cooldown_key, created_at；**头表字段**：state(open/blocked/released/drafted/confirmed/dismissed/expired/invalidated/superseded), state_changed_at；按月分区；CHECK 约束：`jsonb_array_length(rule_refs) > 0 AND jsonb_array_length(evidence) > 0` |
+| `candidate_signals` | **正文不可变**：id, user_id, instance_id, strategy_version_id, security_id, horizon, proposed_action, t_leg, score, confidence, stops(jsonb), **rule_refs**(jsonb：[{rule_id, snippet_id, version, role, passed, value, threshold}], 非空), **evidence**(jsonb：[{id, provider, endpoint, symbol, field, value, unit, data_as_of, fetched_at, epistemic_type}], 非空), **counter_evidence**(非空), **invalidation**(非空), **model_refs**(jsonb：[{model_id, version, output, role:'auxiliary'}]), gate_results(jsonb), risk_flags(jsonb), crowding_flag, feature_set_version, snapshot_id, valid_until, cooldown_key, created_at；**头表字段**：state(open/blocked/released/drafted/confirmed/dismissed/expired/invalidated/superseded), state_changed_at；按月分区；CHECK 约束：`jsonb_array_length(rule_refs) > 0 AND jsonb_array_length(evidence) > 0` |
 | `candidate_signal_events` | id, signal_id, from_state, to_state, cause(executability_check/reason_released/user/expiry/invalidation/supersede), detail(jsonb), at — 只追加 |
 | `non_executable_reasons` | id, signal_id, user_id, code(23 种之一，2.5.9), description, evidence(jsonb), epistemic_type, detected_at, snapshot_id, release_condition(jsonb), check_on(text[]), machine_checkable(bool), next_check_at, status(active/released/obsolete), released_at, release_evidence(jsonb), released_by(system/user_id) |
 | `reason_status_events` | id, reason_id, from_status, to_status, evaluated_value(jsonb), at — 只追加；解除时发 `reason_released` 通知 |
@@ -1187,7 +1260,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `llm_strategy_drafts`（第三阶段） | id, requested_by, input_text_hash, output_json(jsonb：卡片或模板草稿，仅 JSON), correction_rounds(≤3), validation_errors(jsonb), status(draft/rejected/approved_to_card), reviewer_id, llm_call_ids(uuid[]), created_at |
 | `market_rule_versions` | id, effective_from, rules(jsonb：2.13 的涨跌幅、无涨跌幅情形、整手单位、费用、时段), source_note, created_at — 按日期取当时有效的版本 |
 | `event_definitions` | id, key, version_no, source_rule(jsonb), direction, severity, dedup_window, created_at — 不可变（2.12.2） |
-| `evaluation.*`（仅管理员，问题 26 获批后启用） | `eval_runs`(id, kind(factor_ic/event_study/param_robustness/daily_revalidation), target, params, data_range, status, cost_calls, started_at, finished_at)、`eval_results`(run_id, metrics(jsonb，全部附 n), folds(jsonb), robustness) |
+| `evaluation.*`（仅管理员，第三阶段启用） | `eval_runs`(id, kind(factor_ic/event_study/param_robustness/daily_revalidation), target, params, data_range, status, cost_calls, started_at, finished_at)、`eval_results`(run_id, metrics(jsonb，全部附 n), folds(jsonb), robustness) |
 
 **对已有表的修改**：
 - `action_plans`：增加 origin(manual/plan_draft), plan_draft_id, candidate_signal_ids(uuid[])，status 增加 `pending_review`。
@@ -1211,7 +1284,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `user_signal_states` | id, user_id, security_code, source(suggestion_invalidation/plan_condition/user_rule), source_id, condition(jsonb), state(true/false/unknown), last_tick_id, changed_at |
 | `signal_events` | id, tick_id, scope(shared/user), user_id(nullable), security_code, from_state, to_state, trigger_kind(flip/invalidation/stale/resume), detail(jsonb), quote_ts, created_at — 只追加 |
 | `suggestion_threads` | id, user_id, security_code, account_id(nullable), current_suggestion_id, status(active/superseded/invalidated/expired), user_decision(none/accepted/dismissed/acted), decided_at, updated_at — 头表 |
-| `suggestions` | id, thread_id, user_id, security_code, seq_no, origin(daily_batch/intraday_event/manual_refresh), evidence(jsonb), strategies(jsonb：每策略 {strategy_version_id, horizon, action, t_leg, score, confidence, dimension_views, stop_loss, take_profit, invalidation, reasons, counter_evidence, priority_weight}), consensus(jsonb), dimension_matrix(jsonb), divergence(jsonb), risk_flags(jsonb), strategy_version_ids(uuid[]), engine_policy_id, horizon_assessment_id, profile_version_id, holding_context(jsonb), snapshot_id, data_status(fresh/stale/partial), reference_price, reference_ts, explanation_text, explanation_source(template/llm), llm_call_id, prompt_template_id, generated_by(rules_engine@ver), supersedes_id, created_at — **不可变** |
+| `suggestions` | id, thread_id, user_id, security_code, name（生成时简称）, seq_no, status(suggestion_status，唯一可变列), origin(daily_batch/intraday_event/manual_refresh), evidence(jsonb), strategies(jsonb：每策略即契约 `StrategyConclusion` {strategy_version_id, strategy_key, strategy_name, version_no, instance_id, horizon, lifecycle, state, action, t_leg, candidate_signal_id, score(0–100), confidence, rule_refs, model_refs, dimension_views, stops, invalidation, reasons, counter_evidence, priority_weight, priority_downweighted, valid_until}), executability(jsonb), candidate_signal_ids(uuid[]), consensus(jsonb), dimension_matrix(jsonb), divergence(jsonb), risk_flags(jsonb), strategy_version_ids(uuid[]), engine_policy_id, horizon_assessment_id, profile_version_id, holding_context(jsonb), snapshot_id, data_status(fresh/stale/partial), reference_price, reference_ts, explanation_text, explanation_source(template/llm), llm_call_id, prompt_template_id, generated_by(rules_engine@ver), supersedes_id, superseded_by_id, created_at — 除 `status`、`superseded_by_id` 外**不可变** |
 | `suggestion_user_actions` | id, suggestion_id, user_id, kind(viewed/dismissed/draft_requested/draft_confirmed/acted_trade_linked/reason_manually_released；**没有 converted_to_plan**), note, trade_id(nullable), at — 只追加 |
 | `suggestion_tracking` | suggestion_id, horizon_days(1/5/20), due_date, status(pending/done/not_applicable), ref_price, close_price, return_pct, benchmark_code, benchmark_return_pct, excess_pct, max_drawdown_pct, max_runup_pct, invalidation_hit_at, direction_correct(bool/null), computed_at, snapshot_id |
 | `daily_reports` | id, user_id, trade_date, status(building/ready/partial/failed), summary(jsonb：账户、市场、数据缺口), explanation_text, gaps(jsonb), generated_at；unique(user_id, trade_date) — 生成后不可变（重跑生成新 revision） |
@@ -1254,7 +1327,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 **快照与共享行情**
 | 表 | 关键字段 |
 |---|---|
-| `data_snapshots` | id, created_at, purpose(candidate/plan/alert/review/screen), items(jsonb: [{key:"quote.600519.SH.close", value, unit, data_as_of, fetched_at, provider, endpoint, raw_payload_id}]), known_events(jsonb: 当时已知的公告/事件 id 列表), hash |
+| `data_snapshots` | id, created_at, purpose(candidate/plan/alert/review/screen), items(jsonb: [{key（如 quote.{symbol}.close）, value, unit, data_as_of, fetched_at, provider, endpoint, raw_payload_id}]), known_events(jsonb: 当时已知的公告/事件 id 列表), hash |
 | `market.securities` | code("600519.SH"), name, exchange(SH/SZ/BJ), board, list_date, status, industry_codes, updated_at |
 | `market.trading_calendar` | date, is_open |
 | `market.daily_bars` | code, trade_date, open, high, low, close, volume, amount, adj_type, fetched_at（按年分区） |
@@ -1290,8 +1363,8 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 
 **① 文件接收与留存**
 - 允许 `.txt`/`.csv`（MVP），单文件 ≤ 5 MB，单次 ≤ 5 个文件；保存到本机加密卷或境内对象存储（私有桶），路径 `imports/{user_id}/{batch_id}/{sha256}`；记录原文件名、大小、sha256。
-- 同一账户上传**同 sha256 文件**→ 提示"该文件已于 X 导入"（仍可强制预览，去重会挡住重复行）。
-- 原始文件默认保留 **365 天**或至用户删除账户（待拍板），用于追溯与解析器升级后重新解析；用户可在导入记录中手动删除原始文件。
+- 同一账户上传**同 sha256 文件**→ 文件级警告 `IMPORT_DUPLICATE_FILE`（不是 HTTP 错误；仍可预览，去重会挡住重复行）。
+- 原始文件默认保留 **365 天**或至用户删除账户（已定，第 9 节问题 21），用于追溯与解析器升级后重新解析；用户可在导入记录中手动删除原始文件。
 
 **② 编码识别**
 - 依次尝试：BOM 检测 → 严格 `utf-8` 解码 → `gb18030`（GBK 超集）→ `charset-normalizer` 检测兜底；记录 `detected_encoding` 与置信度；用户可在预览页手动改选编码重新解析。
@@ -1332,11 +1405,11 @@ class BrokerStatementParser(Protocol):
 - 证券代码补市场后缀（6/9 开头→SH，0/3 开头→SZ，4/8/920 开头→BJ，规则在 `marketdata` 中统一并以证券主数据校验）。
 
 **⑤ 校验、去重与幂等**
-- 行级校验：日期合法、代码存在于证券主数据、数量 > 0、价格 > 0、`amount ≈ quantity×price`（容差 0.01 元或 0.1%）、卖出数量不超过重建后的可用持仓（超出→警告"缺少期初持仓"，不阻止，提示补录期初）。
+- 行级校验：日期合法、代码存在于证券主数据、数量 > 0、价格 > 0、`amount ≈ |quantity|×price`（容差 0.05 元，`IMPORT_AMOUNT_MISMATCH`）、卖出数量不超过重建后的可用持仓（超出→警告 `IMPORT_MISSING_OPENING_POSITION`，不阻止，提示补录期初）。完整码表与判定顺序见 3.5A-1。
 - `dedup_key`（通用规则如下；格式 A 的具体规则与"弱指纹"见 3.5A）：
   - 有成交编号：`sha256(account_id | trade_date | broker_trade_no)`；
   - 无编号：`sha256(account_id | trade_date | trade_time | code | side | quantity | price | amount)`，同文件内相同键出现多次时追加序号 `#n`（真实存在同价同量多笔成交）。
-- 去重判定写入每行 `dedup_status ∈ {new, duplicate_in_db, duplicate_in_file}`；确认时只写 `new` 行；数据库唯一索引 `(account_id, dedup_key)` 兜底，保证**重复确认/重复上传幂等**。
+- 去重判定写入每行 `dedup_status ∈ {new, duplicate_in_db, duplicate_in_file, possible_duplicate_of_manual}`（error 行为 null）；确认时只写 `new` 行；数据库唯一索引 `(account_id, dedup_key)` 兜底，保证**重复确认/重复上传幂等**。
 - 确认接口带 `Idempotency-Key` 头；同一批次重复确认返回同一结果。
 
 **⑥⑦ 写入与重建**：单事务写入成交与流水 → 对受影响账户重放全部记录重建 `holdings` → 生成 `import_batches.summary`（新增 N 笔、重复 M 笔、错误 K 行、受影响证券列表）→ 触发能力 4 的"持仓变化"事件与能力 5 的"计划-成交关联建议"（按证券与时间匹配候选计划，**由用户确认关联**）。
@@ -1346,12 +1419,12 @@ class BrokerStatementParser(Protocol):
 **表**
 | 表 | 关键字段 |
 |---|---|
-| `import_batches` | id, user_id, account_id, status(uploaded/parsing/previewed/committed/discarded/failed/reverted), parser_id, parser_version, detected_encoding, encoding_override, mapping(jsonb), summary(jsonb), created_at, committed_at, reverted_at |
+| `import_batches` | id, user_id, account_id, status(uploaded/parsing/previewed/committed/discarded/failed/reverted；契约 `import_status`), parser_id, parser_version, detected_encoding, encoding_override, mapping(jsonb), snapshot_as_of, file_findings(jsonb), summary(jsonb), created_at, committed_at, reverted_at |
 | `import_files` | id, batch_id, original_filename, size_bytes, sha256, storage_path, retained_until, deleted_at |
-| `import_rows` | id, batch_id, file_id, row_no, raw_line(text), kind(trade/event/ignored), normalized(jsonb), errors(jsonb), warnings(jsonb), dedup_key, dedup_status, committed_trade_id / committed_event_id |
+| `import_rows` | id, batch_id, file_id, row_no, raw_line(text，加密；对外只给掩码后的行), kind(trade/event/ignored), status(ok/warning/error/skipped), normalized(jsonb), findings(jsonb：`ImportFinding[]`，3.5A-1), dedup_key, dedup_status, committed_trade_id / committed_event_id |
 | `import_mappings` | id, user_id, name, parser_id, mapping(jsonb), created_at |
 
-**错误行报告**：预览与结果页逐行展示错误/警告（行号、原始行、原因、建议修改）；可下载 `errors.csv`；错误行不阻止其他行确认（用户可选择"仅导入有效行"）。
+**错误行报告**：预览与结果页逐行展示错误/警告（行号、掩码后的原始行、提示码、原因、建议修改）；可下载 `errors.csv`；错误行不阻止其他行确认（确认时 `mode=valid_rows_only`，见 3.5A-1）。
 
 **手动录入**与导入共用同一成交模型、校验规则与重建逻辑；`source=manual`。
 
@@ -1376,7 +1449,7 @@ class BrokerStatementParser(Protocol):
 | 买卖标志 | `side` | enum | `买入`→buy，`卖出`→sell | 是 | 其他取值（如红利、配股、新股入账等）→ `account_events`，映射表待更多范本 |
 | 成交数量 | `quantity` | decimal | 股；**卖出为负数** | 是 | 入库取绝对值，方向以 `side` 为准；符号与 side 不一致→错误行 |
 | 成交价格 | `price` | decimal | 元，最多 8 位小数（**同一委托多笔成交合并后的均价**） | 是 | 不四舍五入，原样保存为 numeric(20,8) |
-| 成交金额 | `amount` | decimal | 元，正数 | 是 | 校验 `|qty|×price ≈ amount`（容差 0.05 元，实测全部满足） |
+| 成交金额 | `amount` | decimal | 元，正数 | 是 | 校验 `数量绝对值 × price ≈ amount`（容差 0.05 元，实测全部满足） |
 | 委托编号 | `order_no` | string | 数字串，**按交易日重新编号** | 否（强烈建议） | 只在"同账户+同日"内唯一 |
 | 成交编号 | `broker_trade_no` | string | 数字串，**可能为负数**（疑似有符号整数溢出）——按**不透明字符串**处理，绝不转数值 | 否（强烈建议） | 见去重规则 |
 | 发生金额 | `net_amount` | decimal | 元；**买入为负、卖出为正**（资金流向） | 是 | 校验 `net = ±amount − (净佣金+印花税+过户费+交易规费)`（买入取负，容差 0.02 元；实测全部满足） |
@@ -1416,7 +1489,7 @@ class BrokerStatementParser(Protocol):
 | 证券名称 | `security_name_raw` | string | — | 否 | |
 | 证券数量 | `quantity` | decimal | 股 | 是 | |
 | 可卖数量 | `sellable_quantity` | decimal | 股 | 否 | 与 T+1 有关，仅展示 |
-| 成本价 | `broker_cost_price` | decimal | 元，4 位小数 | 否 | **券商口径成本**（可能是摊薄成本，含已实现盈亏与费用，口径【待用户确认券商说明】） |
+| 成本价 | `broker_cost_price` | decimal | 元，4 位小数 | 否 | **券商口径成本**：已确认为通达信的**摊薄成本**（含已实现盈亏与费用，第 9 节问题 20）；分红是否冲减【待范本，问题 19】 |
 | 当前价 | `last_price_ref` | decimal | 元 | 否 | 导出时刻价格，仅作对账参考，不覆盖行情 |
 | 最新市值 | `market_value_ref` | decimal | 元 | 否 | |
 | 浮动盈亏 | `unrealized_pnl_ref` | decimal | 元 | 否 | |
@@ -1432,10 +1505,10 @@ class BrokerStatementParser(Protocol):
 3. 计算列边界（两种策略，结果一致才自动采用，否则进入"需人工确认"）：
    - **策略 a（显示宽度/字节偏移）**：在表头行的 GBK 字节序列上取每个列头 token 的起始偏移作为列起点；数据行同样在 GBK 字节上按"列起点 ±(该列宽度)"切片，每片 decode 后 strip。对 UTF-8 文件改用 `unicodedata.east_asian_width`（W/F 记 2，其他记 1）计算显示列位置，等价于 GBK 字节偏移。
    - **策略 b（空白分词）**：按 `\s{2,}`（以及制表符）切分，要求每个数据行 token 数 == 表头列数；这是格式 A 的主路径（字段内无空格）。
-   - 任何行两种策略结果不一致或列数不符 → 记为错误行 `IMPORT_ROW_COLUMN_MISMATCH`，展示原始行供用户确认，不猜测。
+   - 任何行两种策略结果不一致或列数不符 → 记为错误行 `IMPORT_ROW_COLUMN_MISMATCH`，展示掩码后的原始行供用户确认，不猜测（判定顺序见 3.5A-1）。
 4. 规范化：全角数字/符号转半角、去千分位逗号、去 `\x00` 与不可见字符、负号统一；数值一律 `Decimal`，不经过 float。
 5. 跳过：分隔线（全 `-`/`=`）、空行、纯空格行、合计/小计行（首列含"合计"）。
-6. 解析器以 `sniff()` 识别格式 A：表头集合包含 {成交日期, 成交时间, 证券代码, 买卖标志, 成交数量, 成交价格, 发生金额, 剩余金额} → 成交明细 0.95；首行以 `人民币:` 开头且表头含 {证券数量, 可卖数量, 成本价} → 持仓快照 0.95。解析器 ID：`fmt_a_trades_v1`、`fmt_a_positions_v1`（券商名确认后改为别名，ID 保持不变）。
+6. 解析器以 `sniff()` 识别格式 A：表头集合包含 {成交日期, 成交时间, 证券代码, 买卖标志, 成交数量, 成交价格, 发生金额, 剩余金额} → 成交明细 0.95；首行以 `人民币:` 开头且表头含 {证券数量, 可卖数量, 成本价} → 持仓快照 0.95。解析器 ID：`tdx_trades_v1`、`tdx_positions_v1`（已确认来源为通达信导出，第 9 节问题 20；旧名 `fmt_a_trades_v1`、`fmt_a_positions_v1` 保留为别名，夹具目录名 `fmt_a/` 不改）。
 
 **去重规则（格式 A）**
 按优先级生成 `dedup_key`（全部带 `account_id` 前缀；字符串一律原样、不做数值转换）：
@@ -1443,7 +1516,7 @@ class BrokerStatementParser(Protocol):
 2. 无成交编号但有委托编号：`H(account_id | trade_date | market | order_no | side | security_code)`——委托编号按日重置，故必须带日期；格式 A 中一个委托的多笔成交已合并为一行，因此"同日同委托"唯一（实测无重复）；若后续某券商按逐笔成交导出导致同一委托多行，则该解析器声明 `order_no_unique=false`，回落到规则 3；
 3. 都没有：`H(account_id | traded_at | security_code | side | quantity | price | amount | net_amount)`，同一文件内完全相同的行追加序号 `#n` 以保留真实的重复成交；跨文件出现相同键时视为重复（并在预览中标出，用户可对单行"强制作为新成交"，需填写理由并记入审计）。
 - 另存"弱指纹" `H(account_id | trade_date | security_code | side | quantity | price)`：当规则 1/2 的键不同但弱指纹相同（例如同一成交先手动录入、后导入）→ 标记 `possible_duplicate_of_manual`，预览中让用户选择"保留导入、作废手动"或"跳过导入行"。
-- 文件级：同账户同 `sha256` 再次上传 → 提示已导入（不阻止预览）。
+- 文件级：同账户同 `sha256` 再次上传 → `IMPORT_DUPLICATE_FILE` 警告（不阻止预览）。
 - 快照级：同账户同 `as_of` 的快照再次导入 → 新版本覆盖旧版本（旧版本保留，只追加）。
 
 **对账：导入快照 vs 成交重建结果**
@@ -1453,7 +1526,7 @@ class BrokerStatementParser(Protocol):
 |---|---|---|---|
 | 数量 | `opening_positions + trades + account_events` 截至快照 `as_of` 的持股数 | 快照 `证券数量` | 必须完全相等；不等→`quantity_mismatch`（重要） |
 | 持仓存在性 | 我方有、券商无 / 券商有、我方无 | — | `missing_in_broker` / `missing_in_ours`（重要）——典型原因：缺期初持仓、缺分红送转/新股入账记录、导入的成交区间不完整 |
-| 成本 | 我方移动加权成本（**口径：买入成本含费用；卖出不改变剩余股成本**），以及按"摊薄成本"口径另算一份 | 快照 `成本价` | 两种口径中与券商最接近者在 ±0.5% 或 ±0.01 元内→`ok`（并记录券商口径名称）；否则→`cost_differs`（提示性，不视为错误，说明"券商成本口径可能不同"） |
+| 成本 | 我方按**摊薄成本**重建（主口径，与通达信一致：买入金额与费用计入，卖出回款冲减，问题 20）；另算移动加权成本只用于展示 | 快照 `成本价` | 差额 ≤ max(0.01 元, 0.1%) → `ok`；否则 → `cost_differs`（提示性，不视为错误；分红是否冲减成本未确认时在说明中提示，问题 19） |
 | 现金 | 成交明细最后一笔的 `剩余金额`；以及"上一笔剩余金额 + 本笔发生金额 = 本笔剩余金额"的**连续性检查** | 快照 `余额` | 末笔剩余金额 vs 快照余额，差额 ≠ 0 → `cash_gap`；连续性断点 → `cash_chain_break`（附：断点所在日期、差额），提示"存在未包含在成交明细中的资金流水（如利息、银证转账、分红到账、费用扣收）"，建议导入资金流水或手动补录 `cash_movements` |
 | 市值/总资产 | 我方数量 × 我方行情价 | `参考市值/资产` | 仅展示差异，不判定（价格时点不同） |
 
@@ -1465,10 +1538,118 @@ class BrokerStatementParser(Protocol):
 - **股东代码**：解析时立即计算 `HMAC-SHA256(server_secret, 股东代码)` 存入 `shareholder_code_hmac`（用于识别同一子账户、区分沪深），另存掩码形式 `shareholder_code_masked`（只保留首字符类型 + `****`，如 `A****`）；**明文不入库、不进日志、不出现在 API 响应、导出与错误报告中**（错误报告中的 raw_line 也做同样掩码）。
 - 席位代码、券商资金账号（若后续格式出现）：丢弃，不入库。
 - `import_rows.raw_line`：入库前对已识别的敏感列做掩码；完整原始内容只存在于加密的原始文件中。
-- **原始上传文件**：存放在**仓库之外**的专用存储（生产：服务器数据卷 `/srv/aia/imports/` 或境内对象存储私有桶；开发：`/var/lib/aia-dev/imports/`），**应用层 AES-256-GCM 加密（每文件独立数据密钥，主密钥来自环境变量/KMS）**，目录权限仅限应用服务账号；不经 Nginx 暴露、无公开 URL；只有文件所有者可通过 API 下载自己的原始文件；管理员无访问接口；访问与删除写审计日志；到期（默认 365 天，待拍板）或用户删除/注销时物理删除。
-- 仓库防护：`.gitignore` 忽略 `*.txt` 交割单常见存放目录与 `imports/`；CI 增加检查——`tests/fixtures/broker_statements/` 下只允许**由生成脚本产生的合成文件**（文件头含 `# SYNTHETIC` 标记的伴随 `meta.json`），并扫描疑似股东代码模式（`[A-Z]\d{9}` 等）阻止提交。
-- 测试夹具：用脚本 `tests/fixtures/broker_statements/fmt_a/generate.py` 生成**合成** GBK 定宽文件（虚构代码、虚构金额、虚构编号，刻意覆盖：5 位时间、负数成交编号、卖出负数量、3/4 字证券名称、末尾空格行、跨日现金链断点），**真实范本永不入库**。
+- **原始上传文件**：存放在**仓库之外**的专用存储（生产：服务器数据卷 `/srv/aia/imports/` 或境内对象存储私有桶；开发：`/var/lib/aia-dev/imports/`），**应用层 AES-256-GCM 加密（每文件独立数据密钥，主密钥来自环境变量/KMS）**，目录权限仅限应用服务账号；不经 Nginx 暴露、无公开 URL；只有文件所有者可通过 API 下载自己的原始文件；管理员无访问接口；访问与删除写审计日志；到期（默认 365 天，已定，问题 21）或用户删除/注销时物理删除。
+- 仓库防护：`.gitignore` 忽略交割单常见存放目录与 `imports/`；CI 密钥与敏感信息扫描见 **7.4A**（规则 S1–S9、允许清单、夹具豁免）。`tests/fixtures/broker_statements/` 下只允许虚构文件：伴随的 `meta.json` 带 `"marker": "# SYNTHETIC"`，每个文件按 sha256 登记；`origin=generate.py` 的文件须可由脚本逐字节复现，`origin=desensitized_main` 的人工脱敏主样本须在允许清单中按 sha256 登记并经人工审核。
+- 测试夹具：两份人工脱敏的主样本（`origin=desensitized_main`），其余由脚本 `tests/fixtures/broker_statements/fmt_a/generate.py` 生成**合成** GBK 定宽文件（虚构代码、虚构金额、虚构编号，刻意覆盖：5 位时间、负数成交编号、卖出负数量、3/4 字证券名称、末尾空格行、跨日现金链断点），**真实范本永不入库**。
 
+
+#### 3.5A-1 导入提示码（`IMPORT_*`）完整表与判定规则（T-A01；契约 api-contract §4.1 为唯一事实来源，两处由同一份数据生成，CI 比对一致）
+
+**口径**
+- 共 **46 个码**：**21 个 error**（文件级 8、行/字段级 13）+ **25 个 warning**（文件级 10、行/字段级 15）。只有两级：`error` 阻止写入该文件或该行；`warning` 不阻止，其中 `needs_action=true` 的要用户逐项处理或在确认时统一接受默认处理。原先设想的"信息级"（如撤单行）并入 warning，用 `needs_action=false` 表示无需处理。
+- `scope`：`file`（整个文件）/ `row`（一行）/ `field`（一行中的某个字段，带 `field`）。
+- **对账差异不是导入提示码**：`quantity_mismatch`、`missing_in_broker`、`missing_in_ours`、`cost_differs`、`cash_gap`、`cash_chain_break` 共 **6 种**，写在 `reconciliation_items.kind`（3.5A 对账表），对账在导入确认之后运行。其中 `IMPORT_CASH_CHAIN_BREAK` 是导入时对单个文件内余额链的逐行提示，`cash_chain_break` 是对账时的汇总结论，两者并存。
+- **提示对象 `ImportFinding`**（API 与 `import_rows.findings`、`import_batches.file_findings` 同构）：`{id, code, severity: "error"|"warning", scope: "file"|"row"|"field", row_no: int|null, field: string|null, message, params: object, needs_action: boolean, resolution_choices: string[], default_resolution: string|null, resolution: {choice, reason|null, by, at}|null}`。`message` 由模板和 `params` 渲染；`params` 和 `message` 中的原始值**先掩码**（股东代码、资金账号），金额等普通值照常显示给文件所有者。
+- **行状态** `import_row_status`：`ok`（无提示）/ `warning`（只有 warning，照常写入）/ `error`（至少 1 个 error，不写入）/ `skipped`（撤单、废单、未识别业务、重复行：不写入，也不算错误）。`dedup_status ∈ {new, duplicate_in_db, duplicate_in_file, possible_duplicate_of_manual}`，error 行为 `null`。
+
+| # | code | 级别 | 范围 | 消息模板 | 处理与是否可覆盖 | 测试夹具 / 提示 |
+|---|---|---|---|---|---|---|
+| 1 | `IMPORT_EMPTY_FILE` | error | file | 文件为空（0 字节或只有空白字符） | 不可覆盖；上传时即拒绝（`422 IMPORT_FILE_ERRORS`，不创建批次） | `empty.txt`；编码检测不得抛异常 |
+| 2 | `IMPORT_FILE_TOO_LARGE` | error | file | 文件超过 {limit_mb} MB | 不可覆盖；上传时拒绝，不创建批次 | 生成器造 5 MB + 1 字节 |
+| 3 | `IMPORT_UNSUPPORTED_FILE_TYPE` | error | file | 只支持 .txt / .csv 文本文件 | 不可覆盖；上传时拒绝（扩展名不符，或 NUL 字节占比 > 1% 视为二进制） | 生成器造含 NUL 的文件 |
+| 4 | `IMPORT_TOO_MANY_ROWS` | error | file | 数据行超过 {limit} 行（默认 50,000） | 不可覆盖；请拆分文件 | 生成器 |
+| 5 | `IMPORT_ENCODING_UNDETECTED` | error | file | 无法识别文件编码 | 可处理：用户在预览页手选编码后重新解析（`encoding_override`） | 生成器造随机字节文本 |
+| 6 | `IMPORT_UNRECOGNIZED_FORMAT` | error | file | 无法识别文件格式，候选解析器：{candidates} | 可处理：用户手选解析器或手工列映射后重新解析 | 生成器造无表头文本 |
+| 7 | `IMPORT_REQUIRED_COLUMN_MISSING` | error | file | 缺少必填列：{columns} | 可处理：只能把文件中**已存在**的列映射到缺失字段；**不得推算**（例如用金额 / 数量推价格） | `trades_missing_column.txt` |
+| 8 | `IMPORT_ACCOUNT_MISMATCH` | error | file | 文件中的股东代码与所选账户已登记的不一致（按 HMAC 比较） | 可处理：改选账户，或确认“属于本账户的新股东代码”（写审计） | 生成器用两个不同的虚构股东代码 |
+| 9 | `IMPORT_ROW_DECODE_ERROR` | error | row | 第 {row_no} 行无法按 {encoding} 解码 | 不可覆盖；**最先判定**。文件末尾不完整的多字节字符也归此码，不得因此整文件拒绝 | `trades_truncated_mid_char.txt` 行 5 |
+| 10 | `IMPORT_ROW_TRUNCATED` | error | row | 第 {row_no} 行不完整（文件末行没有换行且列数不足） | 不可覆盖；**优先于** `ROW_COLUMN_MISMATCH`；残缺字段一律不入库 | `trades_truncated_last_line.txt` 行 7 |
+| 11 | `IMPORT_ROW_COLUMN_MISMATCH` | error | row | 第 {row_no} 行的列数或列位置与表头不一致 | 不可覆盖（改文件或手动录入）；两种切分策略结果不一致也归此码 | `trades_column_mismatch.txt` 行 6、7 |
+| 12 | `IMPORT_REQUIRED_FIELD_EMPTY` | error | field | 必填字段 {field} 为空 | 不可覆盖 | 生成器 |
+| 13 | `IMPORT_INVALID_DATE` | error | field | 日期 {value} 无效 | 不可覆盖 | `trades_bad_formats.txt` 行 4 |
+| 14 | `IMPORT_FUTURE_DATE` | error | field | 日期 {value} 晚于导入当天 | 不可覆盖 | 生成器 |
+| 15 | `IMPORT_INVALID_TIME` | error | field | 时间 {value} 无效 | 不可覆盖；5 位左补零（`93005`→09:30:05）；**4 位及更短的非零值报错，不猜测**；`0` 或空视为缺失、不报错 | `trades_bad_formats.txt` 行 5、6 |
+| 16 | `IMPORT_INVALID_NUMBER` | error | field | {field} 的值 {value} 不是有效数字 | 不可覆盖；先做全角转半角、去千分位 | 生成器 |
+| 17 | `IMPORT_INVALID_SECURITY_CODE` | error | field | 证券代码 {value} 格式无效（应为 6 位数字） | 不可覆盖；格式有效但主数据中没有的见 `UNKNOWN_SECURITY` | 生成器 |
+| 18 | `IMPORT_INVALID_QUANTITY` | error | field | 买卖类数量为 0（且不是撤单或废单） | 不可覆盖 | `trades_sign_and_value_errors.txt` 行 9 |
+| 19 | `IMPORT_INVALID_PRICE` | error | field | 价格或成交金额 ≤ 0 | 不可覆盖 | `trades_sign_and_value_errors.txt` 行 7 |
+| 20 | `IMPORT_SIDE_QTY_SIGN_MISMATCH` | error | row | 数量符号与买卖方向不一致 | 不可覆盖 | `trades_sign_and_value_errors.txt` 行 5、6 |
+| 21 | `IMPORT_AMOUNT_MISMATCH` | error | row | 数量绝对值 × 价格 与成交金额相差 {diff} 元（容差 0.05 元） | 不可覆盖 | `trades_sign_and_value_errors.txt` 行 8 |
+| 22 | `IMPORT_DUPLICATE_FILE` | warning | file | 同一文件已于 {imported_at} 导入（批次 {batch_id}） | 仅提示；仍可预览，重复行由去重挡住 | 同一账户重传 `trades_sample.txt` |
+| 23 | `IMPORT_NO_DATA_ROWS` | warning | file | 只有表头，没有数据行 | 仅提示；批次照常创建，确认时返回 `422 IMPORT_NOTHING_TO_COMMIT` | `trades_header_only.txt` |
+| 24 | `IMPORT_UNKNOWN_COLUMN` | warning | file | 已忽略未识别的列：{columns} | 仅提示；按表头名取列，不按固定列序 | `trades_extra_column.txt` |
+| 25 | `IMPORT_FILE_POSSIBLY_TRUNCATED` | warning | file | 文件末尾不完整，可能没有导出完整 | 仅提示；与 `ROW_TRUNCATED` / 末行 `ROW_DECODE_ERROR` 同时出现 | `trades_truncated_last_line.txt`、`trades_truncated_mid_char.txt` |
+| 26 | `IMPORT_ENCODING_LOW_CONFIDENCE` | warning | file | 编码判定为 {encoding}，置信度 {confidence} 较低 | 需确认：请核对预览中的中文；可改选编码 | 生成器 |
+| 27 | `IMPORT_FORMAT_LOW_CONFIDENCE` | warning | file | 解析器 {parser} 的识别得分 {score} 低于 0.95 | 需确认：请核对列映射 | 生成器（缺少可选列） |
+| 28 | `IMPORT_SNAPSHOT_AS_OF_ASSUMED` | warning | file | 快照没有日期，导出时间按 {as_of} 处理 | 需确认：确认或修改导出时间（问题 20） | `positions_sample.txt` |
+| 29 | `IMPORT_SNAPSHOT_TOTALS_MISMATCH` | warning | file | 资金摘要与明细合计不一致（券商口径未知） | 仅展示，不判定、不阻止 | `positions_sample.txt` |
+| 30 | `IMPORT_SNAPSHOT_SUPERSEDES` | warning | file | 该账户在 {as_of} 已有快照，确认后新版本覆盖旧版本（旧版本保留） | 仅提示 | 同一 as_of 重传 `positions_sample.txt` |
+| 31 | `IMPORT_UNSUPPORTED_CURRENCY` | warning | file | 已忽略 {currency} 资金摘要行（只支持人民币） | 仅提示 | `positions_multi_currency.txt` |
+| 32 | `IMPORT_NET_AMOUNT_MISMATCH` | warning | row | 发生金额与 ±成交金额 − 费用 相差 {diff} 元（容差 0.02 元） | 仅提示；照常导入，对账时参考 | `trades_sign_and_value_errors.txt` 行 10 |
+| 33 | `IMPORT_UNKNOWN_SECURITY` | warning | row | 证券代码 {code} 不在证券主数据中（可能已退市或刚上市） | 需确认：确认后按原代码导入 | 生成器 |
+| 34 | `IMPORT_MARKET_INFERRED_CONFLICT` | warning | row | 由代码段推断的市场与股东代码类型不一致 | 需确认；以证券主数据为准 | 生成器 |
+| 35 | `IMPORT_NAME_MISMATCH` | warning | field | 证券名称 {name_raw} 与主数据 {name} 不同 | 仅提示；比较前去掉全部空白，名称内部有空格本身不报错 | `trades_column_mismatch.txt` 行 5 + 主数据夹具 |
+| 36 | `IMPORT_UNKNOWN_BIZ_TYPE` | warning | row | 业务类型 {biz} 未识别，本行未导入 | 行状态 `skipped`；需确认（可改为手动录入），不猜测 | `trades_non_trade_events.txt` 行 7 |
+| 37 | `IMPORT_ROW_CANCELLED` | warning | row | 撤单行，已忽略 | 行状态 `skipped`，无需处理；成交编号 `0` 不参与去重 | `trades_cancelled.txt` 行 5、6 |
+| 38 | `IMPORT_ROW_REJECTED` | warning | row | 废单行，已忽略 | 行状态 `skipped`，无需处理 | `trades_cancelled.txt` 行 7 |
+| 39 | `IMPORT_DUPLICATE_IN_DB` | warning | row | 与已导入的成交重复（批次 {batch_id}） | 默认 `skipped`；可覆盖：强制作为新成交，须填理由并写审计 | `trades_reimport_overlap.txt` 行 4–6 |
+| 40 | `IMPORT_DUPLICATE_IN_FILE` | warning | row | 与本文件第 {other_row_no} 行重复 | 默认 `skipped`；可覆盖（同上）。去重规则 3（无编号）下完全相同的行**不报此码**，按 `#n` 保留为真实的多笔成交 | `trades_duplicates_in_file.txt` 行 7 |
+| 41 | `IMPORT_POSSIBLE_DUPLICATE_OF_MANUAL` | warning | row | 可能与手动录入的成交 {trade_id} 是同一笔 | 需选择：跳过导入行（默认）/ 保留导入并作废手动记录 | 生成器 + 先手动录入同一笔 |
+| 42 | `IMPORT_MISSING_OPENING_POSITION` | warning | row | 卖出数量超过重建后的持仓，可能缺期初持仓 | 仅提示；建议补录期初持仓 | 生成器 |
+| 43 | `IMPORT_CASH_CHAIN_BREAK` | warning | row | 剩余金额链在本行断开，差额 {diff} 元 | 仅提示（日间可能有非成交资金流水） | `trades_duplicates_in_file.txt` 行 8；`trades_reimport_overlap.txt` |
+| 44 | `IMPORT_NON_TRADING_DAY` | warning | row | 成交日期 {date} 不是交易日 | 仅提示 | 生成器 |
+| 45 | `IMPORT_TIME_OUTSIDE_SESSION` | warning | row | 成交时间不在交易时段内 | 仅提示 | 生成器 |
+| 46 | `IMPORT_LOT_SIZE_IRREGULAR` | warning | row | 买入数量不符合整手规则 | 仅提示（科创板 200 股起、按 1 股递增等规则按板块处理） | 生成器 |
+
+**判定顺序与规则（回应 T004 报告和夹具 README §8 的疑点）**
+1. 文件级先判：大小、类型、空文件 → 编码 → 格式识别 → 必填列 → 账户匹配。任何文件级 error 都让整个文件进入 `failed`（上传阶段的前 4 个码直接 422、不建批次）。
+2. 行级顺序：`ROW_DECODE_ERROR` → `ROW_TRUNCATED` → `ROW_COLUMN_MISMATCH`；命中其中一个就**不再做字段校验**（字段边界已不可靠）。否则**报告全部字段错误**（不只报第一个），再做跨字段校验（`SIDE_QTY_SIGN_MISMATCH`、`AMOUNT_MISMATCH`），最后是 warning 与去重。
+3. **截断**：末行没有换行且列数不足 → `ROW_TRUNCATED` + 文件级 `FILE_POSSIBLY_TRUNCATED`；末行在多字节字符中间被截断 → 该行 `ROW_DECODE_ERROR` + `FILE_POSSIBLY_TRUNCATED`，其余行照常解析，**不得**因为一个坏字节把整个文件判为编码失败。
+4. **"0" 视为缺失**：成交编号、委托编号、申报序号为 `0`，或成交时间为 `0`，一律视为"没有该值"（撤单行常见），不参与去重键、不报格式错误。
+5. **负数成交编号**按不透明字符串处理，不报错（3.5A）。
+6. **撤单、废单**：`ROW_CANCELLED` / `ROW_REJECTED`，`skipped`；这些行的数量、价格为 0 不另报 `INVALID_QUANTITY` / `INVALID_PRICE`。
+7. **非成交业务**（红利入账、股息红利税补缴、新股入账、银证转账等）写入 `account_events`，不报提示码；**映射表【待范本，问题 19】**，在拿到真实写法前只识别夹具中出现的写法，股息红利税暂记 `account_events.kind=other` 并在对账说明中提示"税费类流水未细分"；没见过的写法一律 `UNKNOWN_BIZ_TYPE`，不猜。
+8. **GB18030 扩展字符**：严格按 GB18030 解码；定宽切分走 3.5A 的策略 b（空白分词）为主路径，不受字符字节宽度影响；策略 a 的显示宽度按 `east_asian_width` 计（W/F 记 2），两策略结果不一致时报 `ROW_COLUMN_MISMATCH`，不猜测。
+9. **换行**：CRLF、LF、单独 CR 都接受（②已统一换行）。夹具目前没有纯 CR 文件，已请测试补一个（T-T09）。
+10. 容差：`AMOUNT_MISMATCH` 0.05 元、`NET_AMOUNT_MISMATCH` 0.02 元（与 3.5A 字段表一致）；对账的成本容差见 3.5A 对账表。
+
+**确认（两步提交）**：`POST /imports/{batch_id}/confirm {mode: "all"|"valid_rows_only", acknowledge_warnings: boolean}`
+- 有文件级 error → `422 IMPORT_FILE_ERRORS{findings}`；
+- `mode=all` 且有 error 行 → `422 IMPORT_ROW_ERRORS{error_rows}`；`mode=valid_rows_only` 跳过 error 行，只写 `ok`/`warning` 且 `dedup_status=new` 的行；
+- 有未处理的 `needs_action` warning 且 `acknowledge_warnings≠true` → `422 IMPORT_WARNINGS_UNACKNOWLEDGED{codes}`；为 true 时对未处理项采用 `default_resolution` 并写审计；
+- 最终没有可写的行 → `422 IMPORT_NOTHING_TO_COMMIT`（只有表头、全部重复、全部错误等情况）；
+- 逐项处理：`POST /imports/{batch_id}/findings/{finding_id}/resolve {choice, reason}`；改编码、解析器、列映射或快照时间：`PUT /imports/{batch_id}/options`（触发重新解析，状态回到 `parsing`）。
+- `errors.csv`（`GET /imports/{batch_id}/errors.csv`）只含行号、code、message、字段名和**掩码后的**原始行。
+
+#### 3.5A-2 夹具期望结果 `expected.json`（唯一事实来源，由测试维护）
+- **位置与归属**：每个夹具目录一份 `tests/fixtures/broker_statements/<dir>/expected.json`，由**测试**角色编写和维护；README §6 改为说明性文字，并注明"与 expected.json 冲突时以 expected.json 为准"。解析器测试只读 `expected.json`，不解析 README。
+- **结构**（值均为占位示意）：
+```json
+{
+  "schema_version": 1,
+  "marker": "# SYNTHETIC",
+  "contract": "api-contract v0.2",
+  "files": {
+    "<fixture>.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "batch_status_after_preview": "previewed",
+      "file_findings": ["IMPORT_FILE_POSSIBLY_TRUNCATED"],
+      "row_counts": {"ok": 0, "warning": 0, "error": 0, "skipped": 0},
+      "rows": [
+        {"row_no": 5, "status": "error", "codes": ["IMPORT_ROW_DECODE_ERROR"], "dedup_status": null},
+        {"row_no": 7, "status": "skipped", "codes": ["IMPORT_DUPLICATE_IN_FILE"], "dedup_status": "duplicate_in_file", "of_row_no": 5}
+      ],
+      "normalized": [{"row_no": 3, "field": "trade_time", "equals": "09:30:05"}],
+      "confirm": {"mode": "valid_rows_only", "result": "committed"},
+      "reconciliation_kinds": []
+    }
+  }
+}
+```
+- **规则**：`row_no` 为文件物理行号（从 1 起）；`file_findings` 与每行 `codes` 按**集合完全相等**比较（多报、少报都失败）；`rows` 只列有提示或被跳过的行，没列出的数据行必须是 `ok`；`normalized` 只做抽样字段断言，值一律为字符串；`confirm.result` 取 `committed` 或错误码（如 `IMPORT_NOTHING_TO_COMMIT`）。
+- **CI 一致性检查**（T-O02a）：① `meta.json.files` 中每个 `.txt` 在 `expected.json.files` 中都有条目，反之亦然；② `expected.json` 中出现的每个 `IMPORT_*` 码都在契约 §4.1 表中；③ 契约表中每个码至少被一个夹具或生成器用例覆盖（标"生成器"的由 `tests/` 中的参数化用例覆盖，不要求有文件）。
+- `expected.json` 不包含原始行，也不需要豁免；它照常接受密钥与敏感信息扫描（7.4A）。
 
 ### 3.6 账号与管理员审核
 
@@ -1630,7 +1811,7 @@ class BrokerStatementParser(Protocol):
 | 错误码 | 404 路径错误；503 请求过于频繁/单 IP 多线程/多 IP 同证书；101 当日超限；102 licence 无效；103 IP 超限(429)；因子接口未开通返回 403 | 【FAQ已列·待 T003 验证】 |
 | Quant Pro | 1 分钟 K（`/pro/` 路径，lt 最大 5）、完整历史分钟 K（`pro.mairuiapi.com/.../history/full/...`，60 次/分钟）、全市场实时、因子包；Pro 期限独立于基础证 | 【文档已列·待 T003 验证】 |
 | 因子数量 | 首页/增强包页写 77 因子、19 接口；因子文档页与 2026-09-02 更新日志写 85 因子（含 8 个日内因子）；`north_*` 3 个字段按设计返回空 | 【待 T003 验证：以 `/factor/list` 实测为准】 |
-| 用户证书有效期 | 用户告知钻石版 + Quant Pro 至 2027-09-11 | 【待 T003 验证：用 `/query` 证书查询确认两者各自到期日】 |
+| 用户证书有效期 | 钻石版 + Quant Pro 至 2027-09-11 | **【已定 2026-11-01】用户确认有效期至 2027-09-11**（问题 5）；T-B05 仍用 `/query` 记录实测值备查 |
 | 实测 | 未持有 licence，**没有做任何真实调用**；字段、延迟、空值情况均需 T0xx 联调任务验证 | 【待 T003 验证】 |
 
 ### 4.2 各能力使用的接口（路径均省略前缀 `https://api.mairuiapi.com` 与末尾 `/{licence}`）
@@ -1657,14 +1838,14 @@ class BrokerStatementParser(Protocol):
 | 1/4 | 解禁（个股 / 全市场前后 15 天） | `/hscp/jjxs/{code}`、`/hitc/jjxs` | 03:30 / 15:40 |
 | 1/4 | 业绩预告 / 快报（全市场按季度） | `/hicw/yjyg/{year}/{q}`、`/hicw/yjkb/{year}/{q}`；个股 `/hscp/yjyg/{code}` | 每日 20:10 / 03:30 |
 | 1/4 | 龙虎榜 | `/hilh/mrxq`、`/hilh/ggsb/{n}` | 20:00 / 15:40 |
-| 2 | 财务三表 / 主要指标 | `/hsstock/financial/{balance|income|cashflow|pershareindex}/{code.市场}?st=&et=` | 每日 0 点 |
+| 2 | 财务三表 / 主要指标 | `/hsstock/financial/{balance\|income\|cashflow\|pershareindex}/{code.市场}?st=&et=` | 每日 0 点 |
 | 2 | 公司简介、分红、十大股东、股东户数 | `/hscp/gsjj/{code}`、`/hscp/jnfh/{code}`、`/hsstock/financial/topholder/{code}`、`/hsstock/financial/hm/{code}` | — |
 | 2 | 个股资金流（日频，区间≤365 天） | `/hsstock/history/transaction/{code}?st=&et=` | 盘中约 30 分钟 |
 | 2 | 行情指标（量比、换手等） | `/hsstock/indicators/{code.市场}?st=&et=` | 16:30–20:00 |
 | 2 | 因子元数据 / 分类 | `/factor/list`、`/factor/categories` | 元数据变更时 |
 | 2 | 多因子筛选（POST，计 10 次） | `/factor/screen` body: conditions/order_by/page/page_size/fields/trade_date | 最新截面 |
 | 2 | 批量因子（POST，≤50 码×≤20 因子，计 10 次） | `/factor/batch` | 最新截面 |
-| 2 | 单股全因子 / 主题因子 | `/factor/all/{code}`、`/factor/{valuation|quality|growth|momentum|capital|signal|risk|dividend|scale|sentiment|intraday}/{code}` | 交易日 16:30 后 |
+| 2 | 单股全因子 / 主题因子 | `/factor/all/{code}`、`/factor/{valuation\|quality\|growth\|momentum\|capital\|signal\|risk\|dividend\|scale\|sentiment\|intraday}/{code}` | 交易日 16:30 后 |
 | 2 | 因子分位 / 历史 / 排名 | `/factor/percentile/{factor_id}/{code}`、`/factor/history/{factor_id}/{code}`、`/factor/rank/{factor_id}`、`/factor/top/{factor_id}/{n}` | 日终 |
 | 3/4 | 1 分钟 K（Pro） | `/hsstock/pro/latest/{code.市场}/1/n?lt=`（lt≤5）、`/hsstock/pro/history/{code.市场}/1/n?st=&et=&lt=` | 盘中增量 |
 | 3 | 涨跌停价 | `/hsstock/stopprice/history/{code.市场}?st=&et=` | 每日 0 点 |
@@ -1793,7 +1974,7 @@ MVP 明确写入产品：**"本产品不提供新闻资讯；公告信息为盘�
   - 枚举：`/meta/enums` 下发原因码表、各状态机与错误码。
 - **可解释性在契约层强制执行**：任何候选信号或建议响应都必须带非空的 `rule_refs[]`、`evidence[]`、`counter_evidence[]`、`invalidation[]`，`model_refs[]` 中的每一项 `role` 都是 `auxiliary`。服务端写入时校验，不满足则返回 `SIGNAL_NOT_EXPLAINABLE`；生成计划草案时如果没有规则类信号，返回 `PLAN_REQUIRES_EXPLAINABLE_SIGNAL`。
 - **统计必带样本量**：所有统计值都使用 `{value, n, window, small_sample}` 结构（2.12.3）。
-- **内部评估**：`/admin/evaluation/*`，仅管理员可用；问题 26 获批后才启用；普通用户请求返回 404。
+- **内部评估**：`/admin/evaluation/*`，仅管理员可用；第三阶段启用；普通用户请求返回 404（方案 A 只向用户展示"是否做过内部检验、方法类型、检验日期"，见第 9 节 C(6)）。
 
 - **契约优先级**：FastAPI 生成的 `openapi.json` 是机器可读的产物；两者不一致时**以本契约为准，改代码**。
 
@@ -1894,6 +2075,210 @@ ashare-invest-assistant/
 - 分支：`main` 受保护；功能分支 `feat/T0xx-*`；PR 必须 CI 通过。
 - 后端 Python 包名 `app`，运行目录 `src/backend`；前端运行目录 `src/frontend`；测试从仓库根目录执行（`pytest tests/backend`、`pnpm -C src/frontend test` 指向 `tests/frontend`）。
 
+### 6.1 业务配置文件（`config/*.yaml`）的键、类型与默认值（T-A01，回应 T-B01 报告 §2.1）
+**通用规则**
+- 文件由**后端**按本节创建（T-B01 后续任务）；本节是默认值的唯一出处，数值与前文已定结论一致（0A.6/0A.7、2.1A、2.5.6、2.5.9、2.13、第 9 节）。改默认值先改本节，再改文件。
+- 每个文件顶层必须有 `schema_version: 1`；未知键 → 启动失败（pydantic `extra="forbid"`），防止拼写错误被静默忽略。只放**非敏感**参数，licence、密码、密钥一律走环境变量。
+- 优先级：环境变量（只限本节注明的少数键）> 管理端运行时覆盖（存数据库，写审计，只限标注“可热调”的键）> YAML 默认值。`config/strategies/` 由导入器生成（2.5.14），不在本节范围。
+- 标【待 T003】的数值来自文档推导，T-B05 实测后只改 YAML，不改代码；标【编排者默认，用户可否决】的见第 9 节 C 部分。注释里带 **◇** 的数值是本节为补全配置新给的工程默认值（前文未定），同样属于【编排者默认，用户可否决】，可直接改 YAML。
+- 每个文件在 CI 中用 pydantic 模型校验，并有一条测试检查“YAML 默认值 == 本节表格”（T-T 新增，归测试）。
+
+**`config/realtime.yaml`**（盘中实时链路，0A.6/0A.7；管理端 `/admin/realtime-settings` 可热调）
+```yaml
+schema_version: 1
+intervals:
+  quote_interval_s: 15          # int，多股快照一轮间隔；下限 5【待 T003】
+  all_market_interval_s: 60     # int，全市场快照 /hsrl/ssjy/all 间隔【待 T003】
+  pro_tier1_interval_s: 60      # int，Tier-1 的 Pro 1 分钟 K 间隔
+  pro_tier2_interval_s: 300     # int，Tier-2 间隔
+  stale_threshold_s: null       # int|null；null = 2 × quote_interval_s（data_status=stale 与原因码 DATA_STALE 共用此阈值）
+boards:                         # V1 扫描范围（第 9 节问题 10、C(8)）；关闭的板块持仓仍可导入和展示
+  main: true
+  chinext: true
+  star: true
+  bse: false                    # V1 不含北交所【编排者默认，用户可否决】
+  etf_cb_holdings_only: true    # ETF、可转债只做持仓展示
+universe:
+  tier1_cap: 1500               # int，Tier-1 只数【待 T003】
+  universe_hard_cap: 4000       # int，系统去重池硬上限
+  tier1_alert_ratio: 0.8        # float，universe 达 Tier-1 上限的 80% 时告警
+  tier1_priority: [holding, focus, multi_user_watch, single_user_watch]   # Tier-1 名额分配顺序
+watchlist:
+  per_user_cap: 100             # int，每人自选上限（默认值；实际上限取权益 watchlist.per_user_cap）
+  focus_cap: 20                 # int，每人盘中重点关注上限（权益 intraday.focus_cap）
+  holdings_import_warn: 200     # int，导入持仓超过此数给提示（持仓不设上限）
+flip_detection:
+  debounce_rounds: 2            # int，翻转需连续成立的轮数
+  invalidation_immediate: true  # bool，失效价类条件立即确认
+adaptive:
+  enabled: true
+  unchanged_ratio: 0.8          # ◇ float，“多数股票 t 未变”的比例阈值
+  unchanged_rounds: 5           # ◇ int，连续 N 轮
+  breaker_cooldown_s: 300       # int，429/503 熔断后 5 分钟恢复
+notify:
+  cadence_default: 1min         # realtime|1min|3min|5min，用户通知节奏默认值
+  sse_heartbeat_s: 15           # int，SSE 心跳（契约 §8）
+  sse_replay_window_s: 600      # int，Last-Event-ID 续传窗口 10 分钟（契约 §8）
+  poll_fallback_s: 15           # int，SSE 断开时 /terminal、/today 轮询下限
+degraded_profile:               # 证书到期降级档（7.x 风险表），管理员一键切换
+  holdings_only: true
+  quote_interval_s: 60
+  tier2_enabled: false
+```
+
+**`config/ingest.yaml`**（采集服务 `ingest`，2.1A；只有 `ingest` 进程读取）
+```yaml
+schema_version: 1
+budget:
+  per_minute_budget: 3000       # int，全局令牌桶（钻石版文档 6000/分钟，自设一半）【待 T003】；可热调，上调上限 5400
+  max_concurrency: 1            # int，并发上限【待 T003】
+  shares:                       # 各层每分钟份额，合计 ≤ per_minute_budget；高优先级可借用低优先级空闲额度
+    snapshot: 800               # 快照层
+    minute_bars: 2000           # 分钟线
+    other: 200                  # 其他接口
+  priority_min_share:
+    p0_intraday: 0.7            # 盘中 P0 至少 70%
+    p2_backfill_intraday: 0.0   # 盘中 P2 份额为 0，夜间可用满剩余额度
+backoff:
+  base_s: 1                     # ◇ 指数退避起点
+  max_s: 60                     # ◇ 退避上限
+  breaker_open_s: 300           # 连续 429/503 熔断 5 分钟
+leader:
+  lock_key: "ingest:leader"     # Redis 单活锁
+  lease_s: 30                   # ◇ 锁租期
+  renew_every_s: 10             # ◇ 续租间隔
+heartbeat:
+  key: "ingest:heartbeat"       # 环境变量 INGEST_HEARTBEAT_KEY 可覆盖
+  paused_key: "ingest:paused"   # 环境变量 INGEST_PAUSED_KEY 可覆盖
+  interval_s: 15                # ◇ leader 每 15 秒写一次
+  ttl_s: 600                    # ◇ 键过期时间（缺键也判 stale）
+  stale_after_s: 120            # 超过 120 秒视为 stale；环境变量 INGEST_STALE_AFTER_S 可覆盖
+egress:
+  check_on_start: true          # 启动时自检出口 IP，与环境变量 MAIRUI_EGRESS_IP_EXPECTED 比对，不一致拒绝外呼
+on_demand:
+  coalesce_window_s: 5          # ◇ 按需拉取“同证券同接口”合并窗口
+  priority: p1_daily
+```
+心跳载荷与健康判定见 api-contract §7.10（键 `ingest:heartbeat`，JSON `{ts, instance_id, leader, version, budget_used_last_minute, queue_depth}`）。
+
+**`config/market_rules.yaml`**（交易规则，2.13；按 `effective_from` 分段，导入为 `market_rule_versions`，回看用当时有效段）
+```yaml
+schema_version: 1
+segments:
+  - effective_from: "2026-07-06"      # 沪深主板 ST/*ST 涨跌幅改为 10% 的生效日（此前段为 5%，另列一段）【待 T003 补测核实】
+    price_limit_pct:                  # 前收 × (1 ± pct)，四舍五入到 0.01 元【精确舍入以交易所为准，待核实】
+      main_board: 10
+      main_board_st: 10
+      chinext: 20                     # 创业板（含风险警示）
+      star: 20                        # 科创板（含风险警示）
+      bse: 30                         # 北交所（含风险警示）
+    no_limit:                         # 无涨跌幅限制的情形（以交易所规则为准）
+      registered_ipo_first_days: 5    # 沪深注册制新股上市前 5 个交易日
+      bse_ipo_first_days: 1
+      delisting_period_first_day: true
+    lot:
+      buy_lot: 100
+      star_min_buy: 200               # 科创板 ≥ 200 股后按 1 股递增【待核实】
+      star_step: 1
+      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【待核实】
+      bse_step: 1
+    sessions:                         # 北京时间
+      call_auction: ["09:15", "09:25"]
+      morning: ["09:30", "11:30"]
+      afternoon: ["13:00", "14:57"]
+      closing_auction: ["14:57", "15:00"]
+    t_plus: 1
+    fees:
+      stamp_duty_sell_pct: 0.05       # 印花税仅卖出
+      transfer_fee_pct: 0.001         # 过户费双向
+      commission_rate_default_pct: null   # 佣金按用户费率；null = 未设置时由导入成交反推，仍无则提示用户填写
+      commission_min_yuan: 5          # 单笔最低（券商常见做法，以用户实际为准）
+      slippage_default_pct: 0.1       # 模板参数默认值
+    impact_cost:                      # 【编排者默认，用户可否决；初值待校准】第 9 节 C(7)
+      adv_window_days: 20             # 参与率 = 订单数量 ÷ 近 20 日日均成交量
+      tiers:                          # 参与率上界（%，含） → 成本（bp）
+        - {max_participation_pct: 0.1, bp: 0}    # I1
+        - {max_participation_pct: 0.5, bp: 5}    # I2
+        - {max_participation_pct: 1.0, bp: 15}   # I3
+        - {max_participation_pct: 2.0, bp: 30}   # I4
+        - {max_participation_pct: null, bp: 60}  # I5（> 2%）
+    unfillable:
+      one_price_limit_up_blocks_buy: true
+      one_price_limit_down_blocks_sell: true
+      skip_suspended: true
+  - effective_from: "2000-01-01"      # 2026-07-06 之前：除 main_board_st: 5 外，其余键与上一段相同（文件中写全，不做继承）
+```
+
+**`config/risk_controls.yaml`**（RC1–RC6 系统默认，2.5.6；用户可在 `/risk-controls` 覆盖，在 `min`/`max` 范围外返回 `422 RISK_CONTROL_INVALID_PARAMS`）
+```yaml
+schema_version: 1
+rc1_stop_take:                  # 每笔建议带止损/止盈
+  enabled: true
+  long_horizon_default_stop_pct: -20   # 中长线默认价格止损，可关
+  clamp_to_price_limit: true           # 止损/止盈价限制在当日/次日涨跌停价内
+rc2_position_cap:
+  enabled: true
+  single_position_max_pct: 20   # 单只市值 ≤ 总资产 20%（画像可调；用户可调范围 ◇ 5–50）
+rc3_total_exposure:             # 总仓位参考区间（%），按 market_regime；日报 regime_position_range 读这里
+  enabled: true
+  regime_ranges:
+    uptrend: [60, 90]
+    range: [40, 60]
+    downtrend: [0, 30]
+  regime_confirm_days: 2        # regime 防抖天数
+rc4_sector_concentration:
+  enabled: true
+  sw_l1_max_pct: 40             # 单一申万一级行业
+  concept_max_pct: 50           # 单一概念
+rc5_loss_streak_drawdown:
+  enabled: true
+  closed_loss_streak: 3         # 已平仓连续亏损笔数
+  drawdown_from_peak_pct: 10    # 账户净值自高点回撤
+  strategy_sim_fail_streak: 5   # 某策略模拟跟踪连续失败次数
+  pause_on_trigger: true        # 触发即挂 LOSS_STREAK_PAUSE（2.5.9），用户确认恢复或期满解除
+  pause_days: 5                 # ◇ 暂停期（交易日）
+rc6_plan_violation:
+  enabled: true
+  checks: [opposite_side, qty_over_plan, held_after_invalidation, buy_without_stop, buy_during_wait]
+executability:                  # 2.5.9 原因码的默认阈值
+  low_confidence_threshold: 0.4 # LOW_CONFIDENCE
+  new_listing_min_days: 30      # NEW_LISTING：上市不满 N 个交易日只阻断买入（与 2.5.11 gate_tradability 的 30 日一致）
+  cooling_off_after_stop:       # COOLING_OFF：止损后冷静期（第 9 节问题 31：功能提供、默认关闭、N=3）
+    enabled: false
+    days: 3
+  same_template_cooldown_days: 3  # 同模板同证券冷却 3 个交易日（问题 30）
+  # DATA_STALE 的阈值不在此处，统一用 realtime.yaml 的 stale_threshold_s
+```
+
+**`config/horizon_classifier.yaml`**（周期分类器的**框架参数**与种子版本，2.5.3；导入为不可变的 `horizon_classifier_versions`，规则正文由策略研究员给出）
+```yaml
+schema_version: 1
+version_no: 1
+suitable_threshold: 60          # int，0–100 分 ≥ 60 列为“适合”
+reasons_per_horizon: [2, 4]     # 每个周期给 2–4 条理由
+recompute:
+  on: [import_confirm, watchlist_add, weekly]
+  weekly_day: saturday
+features:                       # 分类器可用特征（必须都在 feature_catalog 中，否则启动失败）
+  - turnover_20d_avg
+  - amihud_20d
+  - volatility_20d
+  - intraday_amplitude_20d
+  - ma_trend
+  - momentum_60d
+  - roe_ttm
+  - profit_cagr_3y
+  - dividend_continuous_years
+  - limit_up_count_20d
+  - user.avg_holding_days
+  - user.has_t_trades
+  - profile.horizon_pref
+  - profile.effort
+rules: {}                       # 各周期打分规则：由策略研究员在 docs/strategies/ 给出后由导入器写入；
+                                # 2.5.3 中的阈值（振幅 ≥ 3%、成交额 ≥ 2 亿、≥ 12 期财报）只是示例，不作为默认值
+```
+`rules` 为空时分类器不输出“适合”，前端显示“周期分类规则未配置”，用户可手动选择周期。
+
 ---
 
 ## 7. 风险与合规（验收项 7）
@@ -1940,10 +2325,10 @@ ashare-invest-assistant/
 
 ### 7.3 个人信息保护（《个人信息保护法》《网络安全法》《数据安全法》）
 - 持仓、成交、资金规模属于**金融账户相关信息**，按《个保法》第 28 条作为**敏感个人信息**处理：单独同意（`consents.kind=sensitive_financial_info`）、告知必要性与影响、最小化收集（不收集身份证、券商账号/密码、银行卡）。
-- **交割单原始文件**含股东代码、资金明细等，同属敏感信息：上传前单独提示用途（解析与追溯）、默认保留 365 天（待拍板）后自动删除、用户可随时删除单个原始文件、注销时一并删除；解析时丢弃股东代码/资金账号，不入库；管理员无权查看。
+- **交割单原始文件**含股东代码、资金明细等，同属敏感信息：上传前单独提示用途（解析与追溯）、默认保留 365 天（已定，问题 21）后自动删除、用户可随时删除单个原始文件、注销时一并删除；解析时股东代码明文不入库（只存 HMAC 与掩码，3.5A），资金账号、席位代码直接丢弃；管理员无权查看。
 - 注册只收集用户名、密码与可选申请说明；邮箱为可选（仅用于通知），不收集手机号。
 - 用户权利：查阅/导出（`GET /me/export`，JSON+CSV）、更正、删除/注销（`DELETE /me`，30 天内物理删除用户数据，审计日志保留脱敏记录）、撤回同意。
-- **境内存储**：服务器与备份均在中国境内（同时满足麦蕊条款 5.7）；不向境外第三方服务传输个人信息（Sentry 等若用 SaaS 需评估或自托管，邮件服务选境内）。
+- **境内存储**：服务器与备份均在中国境内（同时满足麦蕊条款 5.7）；不向境外第三方服务传输个人信息（V1 不用 Sentry；以后如需错误追踪只考虑境内自托管；邮件服务选境内）。
 - 隐私政策、用户协议、风险揭示须由用户/法务定稿；版本号记入 `consents.doc_version`。
 - 未成年人：注册时声明已满 18 周岁。
 - 网站运营：境内对外网站需 **ICP 备案**（用户域名**尚未备案**，第 9 节问题 4）；备案完成前只在本地/VPN 内测；如收费可能需 ICP 经营许可证；等保备案（建议二级）【待核实具体义务】。
@@ -1951,14 +2336,52 @@ ashare-invest-assistant/
 
 ### 7.4 数据安全
 - 传输 TLS 1.2+；HSTS；Cookie Secure/HttpOnly/SameSite；CSRF；CSP。
-- 存储：PostgreSQL 磁盘加密（云盘加密）；敏感列（成交、持仓、备注）应用层加密为可选项（MVP 依赖磁盘加密 + 严格访问控制，待拍板）。
+- 存储：PostgreSQL 磁盘加密（云盘加密）；敏感列（成交、持仓、备注）应用层加密不在 MVP 做（已定，第 9 节问题 22：依赖磁盘加密 + 严格访问控制；股东代码 HMAC + 掩码，原始文件 AES-256-GCM）。
 - 访问控制：所有 `app.*` 查询强制 `user_id` 过滤（仓储层统一封装 + 集成测试"越权访问"用例）；可选启用 PostgreSQL RLS 兜底。
-- 密码：argon2id；注册/登录限速、渐进式锁定、蜜罐字段（无验证码，详见 3.6）；管理员账号仅由 CLI 创建，后续建议为管理员启用 TOTP 二次验证【待拍板】。
+- 密码：argon2id；注册/登录限速、渐进式锁定、蜜罐字段（无验证码，详见 3.6）；管理员账号仅由 CLI 创建，对其他人开放前管理员必须启用 TOTP 二次验证（已定，第 9 节问题 18）。
 - 上传安全：仅文本类扩展名 + 内容嗅探（拒绝二进制）、大小上限、解析在 worker 中带超时与行数上限（≤ 50,000 行）、原始文件存私有存储且不可经 URL 直接访问、文件名不参与路径拼接。
-- 秘密管理：licence 仅 data-gateway 可见；日志脱敏；仓库开启 secret scanning。
+- 秘密管理：licence 仅 `ingest` 容器可见；日志脱敏；仓库密钥与敏感信息扫描见 7.4A。
 - 备份：每日全量 + WAL，保留 30 天，季度演练恢复。
 - 审计：登录、导出、删除、计划/成交变更、导入确认/撤销、全部管理员操作写 `audit_logs`。
 - 依赖安全：Dependabot + `pip-audit`/`pnpm audit` 进 CI。
+
+### 7.4A 仓库密钥与敏感信息扫描（CI 规格，T-A01；实现任务 T-O02a）
+**目标**：仓库中不出现任何真实密钥、真实账户标识或真实交割单；虚构夹具可以通过，但每个夹具文件都要逐个登记、按内容哈希固定。
+
+**工具与时机**
+- 扫描器：gitleaks（MIT）加本仓库自定义规则 `.gitleaks.toml`，另加一个夹具一致性脚本 `scripts/ci/check_fixtures.py`（由 T-O02a 实现）。同一份配置也用作本地 pre-commit 钩子。
+- 每个 PR：扫描**本 PR 的全部提交**（`git log -p base..head`，不只看最终 diff，防止"先提交、再删除"）。`main` 分支每天全量扫描一次（含历史）。**【已定 2026-11-01】不依赖 GitHub 自带 secret scanning / push protection，只用 gitleaks**（CI + 本地 pre-commit，问题 35）。
+- 任何命中都**阻断合并**。日志只输出 `路径:行号:规则号` 和掩码后的值（保留前 2 个字符，其余用 `*`），不在 CI 日志中打出完整命中值。
+
+**规则（S1–S9）**
+
+| # | 检测对象 | 规则（正则为 RE2 / Python 语法） | 级别 | 夹具豁免 |
+|---|---|---|---|---|
+| S1 | 麦蕊 licence | ① URL 末段：`(?i)mairuiapi\.com/\S+/[A-Za-z0-9-]{16,}`；② 赋值：`(?i)(mairui[_-]?)?licen[cs]e\s*[:=]\s*["']?[A-Za-z0-9-]{16,}`。licence 的实际长度与字符集【待核实】，T-B05 拿到真实 licence 后收紧长度并在本地钩子中增加"真实值精确匹配"（值只从本机环境变量读取，不入库） | 阻断 | 不豁免 |
+| S2 | LLM / 第三方 API key | ① `\bsk-[A-Za-z0-9_-]{20,}\b`（DeepSeek、OpenAI 风格；DeepSeek 的确切 key 格式【待核实】）；② 通用赋值：`(?i)\b(api[_-]?key\|secret\|token\|passwd\|password)\b\s*[:=]\s*["'][^"'\s]{12,}["']` | 阻断 | 不豁免 |
+| S3 | 私钥 | `-----BEGIN [A-Z ]*PRIVATE KEY-----` | 阻断 | 不豁免 |
+| S4 | 环境变量文件 | 除 `.env.example` 外，任何 `.env*` 文件都不得入库；`.env.example` 中 `APP_MASTER_KEY`、`MAIRUI_LICENCE`、`*_PASSWORD`、`*_API_KEY`、`DATABASE_URL` 的值只能为空或占位符（`changeme`、`<...>`、`example`） | 阻断 | 不豁免 |
+| S5 | 沪市股东代码 | `\b[A-Z]\d{9}\b` | 阻断 | 见下方豁免 |
+| S6 | 深市股东代码 | `\b0\d{9}\b`，且同一行或同一文件表头含"股东"（避免与时间戳、金额误报） | 阻断 | 见下方豁免 |
+| S7 | 疑似真实交割单 | 文件中同时出现以下表头中的 ≥ 3 个：`成交日期`、`证券代码`、`股东代码`、`成交编号`、`委托编号`、`发生金额`、`剩余金额`；或文件是 GBK/GB18030 编码的文本 | 阻断 | 见下方豁免 |
+| S8 | 身份证号、手机号 | 身份证：`\b\d{17}[\dXx]\b` 且校验位正确；手机号：`\b1[3-9]\d{9}\b` | 身份证阻断；手机号警告 | 不豁免 |
+| S9 | 银行卡号、资金账号 | 银行卡：`\b\d{16,19}\b` 且通过 Luhn 校验 → 警告；资金账号：`(资金账号\|资金帐号\|客户号)\s*[:：]?\s*\d{6,}` → 阻断 | 见左 | 不豁免 |
+
+**允许清单 `.secretscan-allow.yaml`**（每条必须写 `rule`、`path` 或 `value_regex`、`reason`、`added_by`、`added_at`；`value_regex` 只能写虚构值）
+- 全局固定允许：证券代码示例 `600000`、`000001`（6 位，不触发 S5/S6）；虚构沪市股东代码 `A00000000[0-9]`（`A` 加 8 个 0 再加 1 位数字，只在文档与测试中使用）；掩码写法 `A1****789` 一类（含 `*` 不触发）；占位符 `<licence>`、`{licence}`、`sk-xxxxxxxx…`（全是 `x`）；文档网段 `203.0.113.0/24`。
+- 新增允许项需要架构师或测试负责人审核（CODEOWNERS 覆盖该文件）。
+
+**夹具豁免（只针对 S5、S6、S7，严格模式）**
+- 适用路径：`tests/fixtures/broker_statements/**`。其他路径（含 `docs/`）中出现 S5–S7 一律阻断。
+- 条件全部满足才豁免，任何一条不满足都按普通文件扫描：
+  1. 同目录有 `meta.json`，其 `"marker"` 为 `"# SYNTHETIC"`，`"synthetic": true`；
+  2. 目录中每个 `.txt` 都在 `meta.json.files[]` 中按 `file` 登记，且**登记的 sha256 与文件实际内容一致**（改动任何字节都要同步更新 sha256，否则失败）；没登记的文件不豁免；
+  3. `origin=generate.py` 的文件：CI 在临时目录重新运行 `generate.py`，生成结果必须与仓库中文件**逐字节相同**（证明完全由脚本生成）；
+  4. `origin=desensitized_main` 的文件（人工脱敏的主样本）：`.secretscan-allow.yaml` 中要有对应条目，写明 `path`、`sha256`、审核人和日期；哈希不一致即失败，需重新人工审核后更新；
+  5. 豁免文件中的 S5/S6 命中值必须**全部**属于 `meta.json.fake_identifiers` 列出的虚构值；出现列表外的值仍然阻断。`fake_identifiers` 是 `meta.json` 新增的顶层键（目前没有），由测试在 T-T09 中补上，同时由 `generate.py` 输出，CI 规则上线前必须补齐。
+- `expected.json` 和 `README.md` 不在豁免范围内（它们不应包含股东代码等标识）。
+
+**测试**：`tests/ci/secret_scan/` 下放正反例（全部虚构，且正例文件本身用 `.secretscan-allow.yaml` 按 sha256 登记），保证每条规则至少有一个命中用例和一个不误报用例；规则变更必须同时更新用例。
 
 ### 7.5 其他技术风险
 | 风险 | 影响 | 缓解 |
@@ -1972,7 +2395,7 @@ ashare-invest-assistant/
 | 数据质量（空字段、北向因子为空） | 错误结论 | 入库校验、`gaps` 显式展示、不对空值做推断 |
 | 证书到期 2027-09-11 | 降为每日 2 万次 / Pro 停用 | 到期前 60 天提醒运维；降级模式 |
 | 公告盘后更新 | 提醒滞后 | 文案明示；评估巨潮授权 |
-| Quant Pro / 钻石版到期（2027-09-11，Pro 到期日【待 T003 验证】） | 无 1 分钟 K、每日 2 万次 → 实时链路无法维持 | 到期前 60 天提醒；`realtime.yaml` 预置降级档（只刷持仓、60 秒快照、关闭 Tier-2） |
+| Quant Pro / 钻石版到期（2027-09-11，用户已确认） | 无 1 分钟 K、每日 2 万次 → 实时链路无法维持 | 到期前 60 天提醒；`realtime.yaml` 预置降级档（只刷持仓、60 秒快照、关闭 Tier-2） |
 | 配额规则与文档不一致（6000/分钟按接口还是按证书、`/hsrl/ssjy/all` 每分钟次数、并发是否限制） | 429 或刷新变慢 | T003 已实测触发 2 IP 限制，其余仍待补测（4.0；T-B05）；令牌桶预算可热调；429 自适应退避并告警 |
 | LLM 供应商故障/超预算 | 无解释文本 | 备用链 + 模板兜底；**建议本身不受影响**（LLM 不决定动作） |
 | 规则引擎错误导致错误建议 | 用户误判 | golden/回放测试、策略版本不可变、灰度发布新版本、一键停用策略 |
@@ -2003,7 +2426,7 @@ ashare-invest-assistant/
 | 集成 | pytest + docker（Postgres/Redis 测试容器） | 迁移、不可变触发器、as-of 查询、越权隔离、导入事务、SSE | 全过 |
 | 契约 | schemathesis（对 OpenAPI）+ 契约文档对照脚本 | 字段、类型、错误码与 `api-contract.md` 一致 | 全过 |
 | E2E | Playwright（桌面 1440×900，深色主题） | 注册→审核→登录→导入→启用策略→收到盘后日报→盘中信号翻转→建议卡→转计划→模拟跟踪结果 | 主流程全过 |
-| 安全 | 越权用例、CSRF、限速、ZAP 基线扫描、`pip-audit`/`pnpm audit`、secret scanning、敏感样式扫描 | 无高危 | 0 高危 |
+| 安全 | 越权用例、CSRF、限速、ZAP 基线扫描、`pip-audit`/`pnpm audit`、gitleaks 密钥扫描（S1–S9）、敏感样式扫描 | 无高危 | 0 高危 |
 | 性能 | locust | 100 并发用户读接口 p95 < 300 ms；一轮实时刷新（4,000 只）端到端 < 刷新间隔 | 达标 |
 
 **质量门禁（CI 必过，PR 才能合并）**：ruff + mypy --strict（后端）、eslint + tsc --noEmit（前端）、上述单元/黄金/集成/契约测试、覆盖率阈值、禁用词扫描（前端文案、后端模板、prompt 模板）、敏感数据样式扫描（股东代码样式、licence 样式、真实范本文件名）、Alembic 迁移可升可降、Docker 镜像构建；**main 分支保护 + 至少 1 名评审**。CI 永不访问真实麦蕊与真实 LLM（全部 fixtures/mock）；真实接口的冒烟测试单独手动触发。
@@ -2014,10 +2437,10 @@ ashare-invest-assistant/
 | ID | 任务 | 角色 | 依赖 |
 |---|---|---|---|
 | T-O01 | 仓库骨架：按第 6 节建目录、`.editorconfig`、`.gitignore`、`deploy/env/.env.example`；`docker-compose.yml`（nginx/api/worker/ingest(replicas 1)/signal-rt/beat/postgres+timescaledb/redis）+ `docker-compose.dev.yml`（热重载、MSW、麦蕊回放模式）；**本地一条命令启动** | 运维 | — |
-| T-O02 | CI：后端 ruff/mypy(strict)/pytest + 覆盖率、前端 eslint/tsc/vitest、契约测试、镜像构建、secret scanning 与敏感样式扫描（股东代码样式、真实范本）、`pip-audit`/`pnpm audit`；8.0 门禁接入 | 运维 | T-O01 |
+| T-O02 | CI：后端 ruff/mypy(strict)/pytest + 覆盖率、前端 eslint/tsc/vitest、契约测试、镜像构建、`pip-audit`/`pnpm audit`、依赖许可检查（禁止 `ag-grid-enterprise`）；8.0 门禁接入；密钥与敏感信息扫描见 T-O02a | 运维 | T-O01 |
 | T-B01 | 后端骨架：FastAPI、pydantic-settings（全部配置走环境变量 + `config/*.yaml`）、统一错误格式与错误码、request_id、游标分页、`/health`、`/meta/enums` | 后端 | T-O01 |
 | T-B02 | 数据库基线迁移：第 3 节全部表（含不可变触发器、`market` schema、分区） | 后端 | T-B01 |
-| T-F01 | 前端骨架：Vite+React+TS、AntD 暗色+compact、AG Grid、Lightweight Charts、react-resizable-panels；终端布局壳、路由、风险揭示组件、桌面最低分辨率检测；按 `api-contract.md` 的 MSW mock | 前端 | T-O01 |
+| T-F01 | 前端骨架：Vite + React 19 + TS + antd 6（已定，问题 34）、antd 暗色+compact、`DataGrid` 封装（AG Grid **Community**，禁止 Enterprise）、Lightweight Charts、react-resizable-panels（固定三栏 + 底部面板，只调宽/折叠，localStorage 持久化 + 恢复默认）；路由、风险揭示组件、桌面最低分辨率检测；按 `api-contract.md` v0.2 的 MSW mock（字段以契约为准，原型按契约变更记录改名）；选型结论见 2.10 | 前端 | T-O01 |
 | T-T01 | 测试框架：pytest（测试库容器）、vitest、Playwright（1440×900 深色）、schemathesis 契约测试、golden/replay 目录结构 | 测试 | T-O01 |
 
 ### Phase 1：身份、数据层、导入（约 2 周）
@@ -2062,7 +2485,7 @@ ashare-invest-assistant/
 | T-B27 | **模拟跟踪与自动降权**：`suggestion_tracking` T+1/5/20 vs 基准、`strategy_tracking_stats`（本人/全站匿名）、`user_strategy_weights`（2.5.7 公式，开关；与健康度合并见 T-B27a）、`/tracking*` | 后端 | T-B21, T-B06 |
 | T-B28 | 会员权益预留：`plans`/`plan_entitlements`/`user_subscriptions`/`entitlement_overrides`、`EntitlementService`、所有上限改走权益、`/admin/plans*` | 后端 | T-B03 |
 | T-B15 | 合规模块：措辞方案（"规则信号"）、禁用词校验、风险测评与 `signal_risk_disclosure` 同意门槛、全站揭示文案版本、审计 | 后端 | T-B03 |
-| T-F11 | **交易终端主界面** `/terminal`：可拖拽面板、AG Grid 自选/持仓（实时价、各策略动作徽标、分歧徽标、stale 灰显）、K 线+分时+信号标记、SSE 接入 | 前端 | T-F01→T-B22/T-B26 |
+| T-F11 | **交易终端主界面** `/terminal`：固定三栏 + 底部面板（分隔条可调宽）、一次请求 `GET /terminal`（ETag，SSE 断开时才轮询）、AG Grid Community 自选/持仓（实时价、各策略动作徽标、分歧徽标、stale 灰显）、K 线+分时+信号标记、SSE 接入 | 前端 | T-F01→T-B22/T-B26 |
 | T-F12 | **建议卡**：维度×策略矩阵、并列动作、止损止盈、理由/反证/证据（时间、来源、类型）、失效条件、风控标记、置信度、策略版本、LLM 解释引用跳转、历史建议链 | 前端 | T-B21/T-B31 |
 | T-F13 | 盘后日报页（账户概览、逐股卡片、缺口） | 前端 | T-B24 |
 | T-F14 | 通知中心（未读、SSE、偏好、免打扰、渠道绑定） | 前端 | T-B26 |
@@ -2107,7 +2530,7 @@ ashare-invest-assistant/
 > 下表中的任务**替代或拆分**原表中的同名任务：T-B04 由 T-B04a 替代；T-B20 拆为 T-B20a/b/c；T-B30 中的 `user_symbol_strategy_settings` 改为 `strategy_instances`；T-B11 删除"从建议一键生成计划"，改为 T-B34。MVP 范围按 T002 建议划分：
 > - **MVP（M2）**：底座、研究员首批内置策略（`docs/strategies/`）、门禁、计划草案、模拟跟踪、降权与健康度；
 > - **第二阶段**：卡片库、晋级流程、用户派生版本；
-> - **第三阶段**：LLM 策略草稿、内部评估模块（问题 26 获批后）。
+> - **第三阶段**：LLM 策略草稿、内部评估模块（问题 26 已定）。
 
 | ID | 任务 | 角色 | 阶段 | 依赖 |
 |---|---|---|---|---|
@@ -2128,8 +2551,12 @@ ashare-invest-assistant/
 | T-B37 | 事件定义与事件信号：`event_definitions`、最早可交易时刻对齐、提前反应（拥挤）检查、AI 抽取事件的置信度、原文链接与人工复核队列（2.12.2） | 后端 | 2 | T-B35, T-B25 |
 | T-B38 | 卡片库与晋级：`strategy_cards` / `strategy_card_versions`、`rule_snippets`、晋级申请、G1–G7 报告、管理员审核、用户派生版本 | 后端 | 第二阶段 | T-B20c |
 | T-B39 | LLM 策略草稿：只输出 JSON、最多修正 3 轮、自动跑 G1–G6、只能保存为 `draft` | 后端 | 第三阶段 | T-B38, T-B25 |
-| T-B40 | **内部评估模块** `app/evaluation`（问题 26 获批后）：单因子 IC / RankIC / 分组 / 衰减、事件研究 CAR、K 折稳健度（中位数 × 0.6 + 最差折 × 0.4）、发布基线与每日复验 → 2.8.2；`evaluation` 队列独立限流；`/admin/evaluation/*` | 后端 | 第三阶段 | T-B36, T-B27a |
+| T-B40 | **内部评估模块** `app/evaluation`（第三阶段，问题 26 已定）：单因子 IC / RankIC / 分组 / 衰减、事件研究 CAR、K 折稳健度（中位数 × 0.6 + 最差折 × 0.4）、发布基线与每日复验 → 2.8.2；`evaluation` 队列独立限流；`/admin/evaluation/*` | 后端 | 第三阶段 | T-B36, T-B27a |
 | T-B41 | 存储与缓存：Redis 键与失效事件（3A.3）、预计算表、游标分页统一实现、K 线窗口接口（`before` / `limit`） | 后端 | 2 | T-B02a |
+| T-B42 | **DSL 与上下文扩展**（2.5.11A、2.5.14 H）：`max2/min2`（及 `greatest/least` 别名）、`std`、`ts_pct_rank`、`rank_pct_in`、`for/within N bars`、`for p.x days`；`ctx.cost_price`、`ctx.position_weight`、`ctx.sector_weight`、`ctx.highest_close_since_entry`、`ctx.now_hhmm`；`ref` 校验、`validation_summary` 分离、夹具键校验；`system_components` 挂载与 H-01 系统实例；`scan.mode=post_close_stats`、`scan.schedule=monthly_first_trading_day`、`screen.per_group_cap` | 后端 | 2 | T-B20b, T-B20d |
+| T-B43 | **P0 策略所需特征**（2.5.11A，数据可得性【待 T003】）：`f.list_days`、`f.market_breadth`（每日落库 + 分批回算）、`f.ann_risk_count_10d`（关键词表进 `event_definitions`）、`f.sw_l1`、`f.vwap_intraday`/`f.vwap_dev`/`f.intraday_sigma`、`f.boll_bw20`/`f.boll_bw20_pct120`、`f.ind_rs20`、`f.main_net_20d`、`f.np_yoy_latest`、`f.pe_ttm_ind_pct`；ST/退市整理状态来源 | 后端 | 2 | T-B35, T-B05 |
+| T-B44 | **终端聚合接口与日报结构**（契约 v0.2）：`GET /terminal`、`GET /today`（一次查询、无 N+1，弱 ETag + 304）、`DailyReport` 结构（regime 建议仓位区间、对账状态）、`Bar`/`WatchlistItem`/`Notification` 结构、所有带 `security_code` 的对象带 `name`、SSE `signal_kind` | 后端 | 2 | T-B41, T-B24 |
+| T-O02a | **密钥与敏感信息扫描**（7.4A）：`.gitleaks.toml`（S1–S9）、`.secretscan-allow.yaml` 与 CODEOWNERS、夹具豁免检查脚本（meta.json 标记、sha256 固定、`generate.py` 可复现、`fake_identifiers`）、`expected.json` 与契约码表一致性检查（3.5A-2）、PR 全提交扫描 + 每日全量扫描、pre-commit 钩子、正反例测试 | 运维 | 1 | T-O02 |
 | T-F17 | 候选信号卡与不可执行原因（显示解除条件和自动重评状态）、冲突并列展示、"模拟中 / 观察中"徽标、统计数字旁显示 n 和"样本少"标记 | 前端 | 2 | T-B33 |
 | T-F18 | 计划草案确认页：数量与价格区间、人工判断清单（必答）、偏离二次确认、风险确认；`stale` 提示后重新生成 | 前端 | 2 | T-B34 |
 | T-F19 | 策略实例管理（确认 `proposed`、改参越界生成派生版本、暂停）；限制管理（禁投、冷静期、屏蔽） | 前端 | 2 | T-B32 |
@@ -2148,94 +2575,95 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 
 ---
 
-## 9. 待用户拍板的问题
+## 9. 待用户拍板的问题（2026-11-01 已回填拍板结论）
 
-> 按优先级排列。**问题 1 是阻断级**：不拍板，主线可以在本地开发和自用测试，但不能对任何第三方开放。
+> **状态说明**：用户已于 2026-11-01 12:24（MST）批准本方案并对第 9 节拍板（vision.md《方案拍板》）。下面每题标三种状态之一：
+> - **【已定 2026-11-01】**：用户明确拍板，或用户明确授权"其余参数按架构师建议执行"。后者标注"（架构师默认）"，用户以后可以在设置里修改。
+> - **【编排者默认，用户可否决】**：编排者在 12:32 给出的默认值，用户尚未逐项确认；按默认值开发，用户否决时只改配置或文档。
+> - **【待定】**：仍需用户回答，不影响当前开发的写明"不阻塞"。
+>
+> 当前运行模式：**单用户自用**（用户本人一人）。注册与审核流程照常开发，但对外邀请由配置关闭（`REGISTRATION_MODE=closed`，3.6）。
 
-**A. 合规与对外开放（阻断级）**
-1. **【第一优先】操作建议功能的合规路径**（详见 7.2）：主线会对具体股票输出"买入/加仓/持有/减仓/卖出/等待"的规则信号，这在法规上属于"品种选择 + 买卖时机建议"。选哪条路？
-   - A：**邀请制、封闭、免费**的小范围内测（V1 推荐：10–100 位明确知情的用户，不收费、无广告、不公开招募）；
-   - B：与持牌证券投资咨询机构合作（**收费前必须**）；
-   - C：降级为纯工具（只展示用户自己配置的规则是否满足，不出动作词）。
-   另外，是否同意上线前请律师出具书面意见？
-2. **麦蕊数据再分发授权**（7.1）：由你联系麦蕊，取得"多用户网站展示数据"的书面授权吗（可能需要企业版或定制协议）？授权到手前，是否只供你本人和少量知情测试者使用？
-3. **收费时机**：会员模型只预留、不接支付。确认在第 1 题和第 2 题都解决之前不收费吗？
-4. **运营主体、域名与备案**（1.3、7.3）：域名**未备案**。三种做法：
-   - (a) 只在本地 / VPN 内测，不对公网开放；
-   - (b) 买境内服务器，以个人或公司主体做 ICP 备案（约 1–3 周【待核实】），备案期间域名不能解析到该服务器；
-   - (c) 用香港/境外服务器免备案。但个人信息会出境（《个保法》第 38 条），而且违反麦蕊条款 5.7"境内存储"，**不推荐**。
-   你选哪种？以个人还是公司主体运营？
+**A. 合规与对外开放**
+1. **操作建议功能的合规路径**（7.2）——**【已定 2026-11-01】方案 A：邀请制、封闭、免费**。由于暂不申请麦蕊授权（问题 2），**授权前只供用户本人使用**，即单用户运行：
+   - `REGISTRATION_MODE` 取 `closed`（默认，注册接口返回 `503 REGISTRATION_CLOSED`）/ `invite`（需邀请码，进入 `pending` 待审核）/ `open`（保留，V1 不用）。用户本人账号由 `python -m app.cli create-admin` 创建，单用户期间本人同时是管理员。
+   - 方案 B（持牌机构合作）仍是**收费前必须**；方案 C 作为退路保留。
+   - 子问题——**【已定 2026-11-01】内测前只供用户本人使用，暂不请律师。** 但**对任何第三方开放（切到 `invite`）之前，必须先取得律师书面意见**（与 7.2 一致），这一前置条件不取消。
+2. **麦蕊数据再分发授权**（7.1）——**【已定 2026-11-01】暂不申请**。后果：授权到手前系统只供用户本人使用；任何第三方访问（包括"少量知情测试者"）都要等授权。
+3. **收费时机**——**【已定 2026-11-01】免费**。会员模型只预留数据结构，不接支付。
+4. **运营主体、域名与备案**（1.3、7.3）——**【已定 2026-11-01】先本地测试，以后购买境内服务器并以个人名义 ICP 备案**；不采用香港/境外服务器。备案耗时与"金融/证券类信息服务"的前置审批要求仍【待核实】，在买服务器前查清。
 
 **B. 数据与配额**
-5. **证书有效期**：钻石版和 Quant Pro 是否**都**到 2027-09-11？用 `/query` 实测确认。到期后续费吗？如果不续，系统会降级为每日 2 万次、无 1 分钟 K。
-6. **开发/测试证书**：同一证书 60 秒内最多 2 个来源 IP【待 T003 验证】。全站只有 `ingest` 一个调用方（2.1A）；本地开发和 CI 用回放数据。是否需要另买一张便宜证书专供开发？（与问题 27 合并决策）
-7. **刷新与上限默认值**（0A.3、0A.7）：
-   - 默认快照间隔 15 秒（待 T-B05 实测后调到上限）；
-   - Tier-1 1,500 只每分钟拉 1 分钟 K；
-   - 系统 universe 硬上限 4,000；
-   - 每用户自选 100、重点关注 20。
-   这些默认值可以吗？
-8. **消息面缺口**（4.5）：麦蕊只有盘后公告和问董秘，**没有新闻**。消息面先用"公告类型 + 事件因子"，接受吗？是否询价巨潮或持牌资讯商？
-9. **情绪面缺口**（2.5.2）：股吧、搜索、社交热度麦蕊没有。`attention_score` 按文档基于问董秘活跃度，不是市场热度。先用涨跌停、炸板、连板、竞价量比和市场宽度替代，接受吗？要不要采购舆情数据？
-10. **覆盖范围**：要不要包含北交所和科创板（京市公告接口文档未见）？ETF、可转债只做持仓展示可以吗？
+5. **证书有效期**——**【已定 2026-11-01】有效期至 2027-09-11**（用户确认）。到期前 60 天提醒；届时再决定是否续费，不续则启用降级档（每日 2 万次、无 1 分钟 K，6.1 `realtime.yaml` 的 `degraded_profile`）。
+6. **开发/测试证书**——**【已定 2026-11-01】不另购**（与问题 27 合并；架构师默认）。全站只有 `ingest` 一个调用方，本地开发和 CI 用回放数据。
+7. **刷新与上限默认值**——**【已定 2026-11-01】（架构师默认）**：快照间隔 15 秒（T-B05 实测后调到上限）；Tier-1 1,500 只每分钟 1 分钟 K；universe 硬上限 4,000；每用户自选 100、重点关注 20。数值仍【待 T003 验证】，可在后台修改。
+8. **消息面缺口**——**【已定 2026-11-01】（架构师默认）**：先用"公告类型 + 事件因子"；暂不询价巨潮或持牌资讯商。**V1 没有新闻源**【编排者默认，见 C(8)】。
+9. **情绪面缺口**——**【已定 2026-11-01】（架构师默认）**：用涨跌停、炸板、连板、竞价量比和市场宽度替代；暂不采购舆情数据。
+10. **覆盖范围**——**【已定 2026-11-01】（架构师默认）**：沪深主板、创业板、科创板；ETF、可转债只做持仓展示。**V1 不含北交所**【编排者默认，见 C(8)】：北交所股票可以导入和展示持仓，但不进入策略扫描（模板 `universe.boards.bse=false`）。
 
 **C. 策略库与建议引擎**
-11. **内置策略**：具体策略清单和阈值由策略研究员在 `docs/strategies/` 中维护（2.5.14）。需要你拍板的只有两点：首批上线几个策略；高风险的短线情绪类策略是否默认不启用。
-12. **风控默认值**（2.5.6）：
-    - 单只 ≤ 20%；
-    - 总仓位按大盘：上行 60–90%、震荡 40–60%、下行 0–30%；
-    - 单一行业 ≤ 40%；
-    - 连续亏损 3 笔或回撤 10% 预警；
-    - 中长线默认价格止损 −20%。
-    这些默认值可以吗？六项默认全开吗？
-13. **自动降权**（2.5.7）：
-    - 默认开启吗？
-    - 参数用 α=10、β=0.6、γ=0.4，权重范围 0.3–1.2，样本 < 20 不调整，可以吗？
-    - 统计窗口按 5 日跟踪期计算，可以吗？
-14. **模拟跟踪口径**：基准默认沪深300（可选行业指数），跟踪 1/5/20 个交易日，可以吗？"全站匿名汇总胜率"是否对所有用户展示？
-15. **周期分类**：导入后自动分类并启用推荐策略，还是只给推荐、由用户确认后启用？我们建议后者，与合规控制一致。
+11. **内置策略**——**【已定 2026-11-01】高风险的短线情绪类策略默认不启用**。卡片新增选填字段 `risk_level: normal | high`（2.5.0A）；`high` 的模板不会被周期分类器推荐，用户必须在策略页逐项确认风险后手动启用。首批上线哪些策略：【编排者默认，见 C(1)】。
+12. **风控默认值**——**【已定 2026-11-01】（架构师默认）**：单只 ≤ 20%；总仓位按大盘 上行 60–90% / 震荡 40–60% / 下行 0–30%；单一行业 ≤ 40%；连续亏损 3 笔或回撤 10% 预警；中长线默认止损 −20%；六项默认全开，可在设置里逐项关闭或调整。
+13. **自动降权**——**【已定 2026-11-01】（架构师默认）**：默认开启；α=10、β=0.6、γ=0.4，权重 0.3–1.2；样本 n < 20 时不调整权重（这是降权门槛，与展示阈值无关，见 2.12.3）；统计窗口按 5 日跟踪期。
+14. **模拟跟踪口径**——**【已定 2026-11-01】（架构师默认）**：基准沪深300（可选行业指数），跟踪 T+1/5/20；全站匿名汇总只对登录用户在策略页展示（单用户期间等同本人统计）。hold 的阈值见 C(7)。
+15. **周期分类**——**【已定 2026-11-01】只推荐，由用户确认后启用**。唯一例外是系统组件 H-01（持仓风险监控）默认挂到全部持仓，见 C(3)；它只产生减仓/卖出方向的候选信号，不产生买入。
 
 **D. LLM、通知、账号**
-16. **LLM 供应商**：用哪家（境内可用、签数据处理协议）？每日预算上限多少？默认开启"解释"吗？
-17. **通知渠道**：MVP 只做站内 + 可选邮件。第二步上企业微信自建应用（需要企业主体），可以吗？
-18. **账号审核细节**：
-    - 注册时要不要申请说明或邀请码？
-    - 待审核时管理员只看站内角标吗？
-    - 被驳回的用户能否重新申请（建议最多 3 次）？
-    - 管理员是否启用 TOTP？
+16. **LLM 供应商**——**【已定 2026-11-01】先接 DeepSeek**，经 LLM 网关的 `openai_compatible` 适配器接入（2.7）。base_url、模型名和单价由管理员在后台按 DeepSeek 官方文档填写（本文不写价格）。默认开启"解释"，失败回落模板；日预算由管理员设定；`llm_calls` 保留 90 天（架构师默认）。DeepSeek 的数据处理条款【待核实】，发送内容已按 7.3 去标识化。
+17. **通知渠道**——**【已定 2026-11-01】（架构师默认）**：MVP 只做站内 + 可选邮件；企业微信自建应用放第二步。
+18. **账号审核细节**——**【已定 2026-11-01】（架构师默认）**：`invite` 模式下注册须填邀请码和申请说明；待审核只在管理端显示角标；被驳回的用户最多重新申请 3 次；**对其他人开放前**管理员必须启用 TOTP（单用户期间可不启用）。当前为 `closed` 模式，这些规则先实现、不生效。
 
 **E. 导入与隐私**
-19. **交割单范本**：除格式 A 外，你还用哪些券商或交易软件？请各提供一份脱敏导出文件（股东代码、资金账号替换为 X），覆盖分红、送转、新股中签、银证转账等业务。
-20. **格式 A 的三个待确认项**（3.5A）：(a) 两份范本来自哪家券商/哪个交易软件（决定解析器命名与业务标志映射）；(b) 持仓快照"成本价"是摊薄成本还是买入均价（影响对账口径）；(c) 持仓快照没有日期列——导出时间由你在上传时确认，是否可接受？（另：成交编号出现负数，我们按不透明字符串处理，不需要你确认，仅告知）
-21. **原始文件留存期**：默认保留 365 天，还是"导入后立即删除"或"直到用户删除"？
-22. **敏感数据加密**：股东代码已做 HMAC + 掩码，原始文件加密存在仓库外。持仓、成交金额是否也要应用层字段加密？
-23. **期初持仓**：导入只覆盖部分历史时，是否接受"先手动录入导入起点之前的期初持仓"？
+19. **其他交割单范本**——**【已定 2026-11-01】目前只支持通达信格式**（`tdx_trades_v1` / `tdx_positions_v1`）；其他券商格式以后再加。仍需要（不阻塞）：另外需要一份含**撤单、红利入账、股息税、新股中签/入账、银证转账**真实写法的脱敏范本（股东代码、资金账号替换为 X，金额可改为虚构值）。用途：确定这些行的业务类型映射（目前按夹具推测，3.5A-1 标【待范本】），以及**现金分红是否冲减摊薄成本**（影响对账）。
+20. **格式 A 的待确认项**——**【已定 2026-11-01】**：(a) 来源为**通达信（TDX）导出**，解析器 ID 改为 `tdx_trades_v1`、`tdx_positions_v1`（旧名 `fmt_a_*` 保留为别名）；(b) 持仓快照"成本价"为**摊薄成本**，对账以摊薄成本为主口径（3.5A）；(c) 快照没有日期列，导出时间由用户在上传时确认（默认上传时间，产生 `IMPORT_SNAPSHOT_AS_OF_ASSUMED` 提示）。
+21. **原始文件留存期**——**【已定 2026-11-01】（架构师默认）**：保留 365 天，用户可随时删除单个文件，注销时一并删除；可在设置里改。
+22. **敏感数据加密**——**【已定 2026-11-01】（架构师默认）**：MVP 不做持仓/成交的应用层字段加密，依赖磁盘加密 + 访问控制；股东代码 HMAC + 掩码（明文不入库）、原始文件应用层 AES-256-GCM 加密并存放在仓库外，这两项照常执行。
+23. **期初持仓**——**【已定 2026-11-01】（架构师默认）**：接受"手动录入或由持仓快照转换导入起点之前的期初持仓"。
 
 **F. 运维**
-24. **镜像仓库与服务器**：
-    - CI 产物推到 GHCR 还是境内镜像仓库？
-    - 服务器预算：原建议 4C8G/100GB 起步；**按 3A 的存储估算，建议改为 4C16G、SSD ≥ 300 GB**（见问题 28），可以吗？
-    - 本地测试期是否需要通过 VPN 给其他测试者访问？
-**G. 第二轮新增（策略分层、可解释性、存储、内部评估、数据源）**
-25. **策略卡字段**（2.5.0A）：必填 8 项、选填与系统字段按 vision.md《策略卡字段定稿》精简。可以吗？
-26. **内部评估模块（仅管理员可见）**（2.12.4）：
-    - 内容：单因子 IC、事件研究、K 折参数稳健度、发布后每日复验；与健康度、降权合并为一个机制（2.8.2）。结果**永不展示给普通用户**。
-    - **建议**：同意，放在第三阶段；先只做 1–3 年日线级的单因子和事件研究，再做参数稳健度。
-    - **利**：减少"上线才发现无效"的策略；默认参数有依据；能及早发现衰减。
-    - **弊**：约 1.5–2 周工作量；有过拟合风险（用 K 折和最差折权重缓解）；历史因子是否"按时点"待 T003 验证。
-    - **配额**：日 K 一次性约 5,400 次；全市场因子截面每年约 131 万计数，夜间分批完成，钻石版每日不限【待 T003 验证】。
-    - 是否同意？同意后，G6 增加仅管理员可见的收益评估报告；不同意时，G6 只统计触发率、覆盖率和重合度。
-27. **开发证书**：生产 `ingest` 运行期间，开发机不能用同一证书做真实联调（2.1A）。是否另购一张开发或测试用证书？（建议：等需要并行开发时再买）
-28. **行情保留期**（3A.2）：
-    - 推荐：1 分钟 K 全市场保留 1 年、跟踪池保留 3 年；日 K 和因子全部保留；业务数据（信号、建议、计划）永久保留。
-    - 服务器磁盘 ≥ 300 GB、内存 16 GB。
-    - 可以吗？（第 24 题中原建议的 4C8G/100GB 相应上调）
-29. **计划确认的严格程度**（2.5.8）：人工判断清单的必答项默认 3 条；数量和价格超出草案区间时需要二次确认。可以吗？
-30. **冷却与有效期默认值**：同一模板加同一证券冷却 3 个交易日；候选信号有效期为做T 当日 14:50、短线 1 个交易日、波段 5 个交易日、中长线 20 个交易日。可以吗？
-31. **禁投、冷静期与屏蔽**：是否需要"止损后自动冷静 N 个交易日"（默认关闭，N=3）？
-32. **策略健康度阈值**（2.8.2）：
-    - 降为"观察中"：weight < 0.8 持续 5 日；
-    - 提示复审：weight < 0.6 持续 20 日；
-    - 恢复：weight ≥ 0.9 持续 10 日；
-    - 退役必须由管理员确认。
-    - 可以吗？
+24. **镜像仓库与服务器**——**【已定 2026-11-01】（架构师默认）**：先用 GHCR，境内拉取慢时再加境内镜像仓库；服务器 4C16G、SSD ≥ 300 GB；单用户期间**不设 VPN** 给他人访问。
+
+**G. 策略分层、可解释性、存储、内部评估**
+25. **策略卡字段**——**【已定 2026-11-01】vision.md 定稿的全部字段都保留**；8 项必填是晋级 L2 的门槛，其余为选填，原样保存并在详情页展示（2.5.0A、2.5.14 B/H）。
+26. **内部评估模块**——**【已定 2026-11-01】要做，放在第三阶段**（T-B40）。先做单因子检验与事件研究，再做参数稳健度。用户可见部分按**方案 A**【编排者默认，见 C(6)】。
+27. **开发证书**——**【已定 2026-11-01】（架构师默认）**：暂不购买，等需要并行开发时再定。
+28. **行情保留期**——**【已定 2026-11-01】（架构师默认）**：1 分钟 K 全市场保留 1 年、跟踪池保留 3 年；日 K 和因子全部保留；业务数据永久保留；磁盘 ≥ 300 GB、内存 16 GB。
+29. **计划确认的严格程度**——**【已定 2026-11-01】（架构师默认）**：人工判断清单必答 3 条；超出草案区间需二次确认。
+30. **冷却与有效期**——**【已定 2026-11-01】（架构师默认）**：同模板同证券冷却 3 个交易日；候选信号有效期 做T 当日 14:50、短线 1 日、波段 5 日、中长线 20 日。
+31. **止损后冷静期**——**【已定 2026-11-01】（架构师默认）**：功能提供，默认关闭，N=3。
+32. **策略健康度阈值**——**【已定 2026-11-01】（架构师默认）**：weight < 0.8 持续 5 日 → 观察中；< 0.6 持续 20 日 → 提示复审；≥ 0.9 持续 10 日 → 恢复；退役须管理员确认。
+
+**H. 新增问题**
+33. **本地测试期的麦蕊固定出口**——**【已定 2026-11-01】本地测试期间，所有麦蕊调用都在用户本人电脑上进行（唯一调用方）；上线后统一由服务器上的 `ingest` 经单一固定出口调用。开发与生产任何时候都不能同时调用（规则见 2.1A）。** 下面是当初的分析，留作背景：共享电脑出口 IP 会变（T003 已触发错误 103），不能作为 `ingest` 出口（2.1A）。在买境内服务器之前，三个选项：
+   - (a) 先买一台小规格**境内固定 IP 主机**只跑 `ingest`（之后并入正式服务器）。如果只做采集、不对外提供网站，是否也要备案【待核实】；
+   - (b) 用户家庭或办公网络申请**固定公网 IP**，`ingest` 跑在该网络内的电脑上；
+   - (c) **只用回放数据**开发（T-B04 录制/回放），真实联调推迟到买服务器后。
+   - 架构师建议：先 (c) 推进开发；需要实测（T-B05）时选 (a)。
+
+**H2. 2026-11-01 补充拍板**
+34. **前端版本**——**【已定 2026-11-01】React 19 + antd 6**（原型 T-F00 已验证），全文替换原 React 18 + AntD 5（概览表、1.1、2.10、T-F01）。
+35. **错误追踪与密钥扫描**——**【已定 2026-11-01】暂不接入 Sentry**（境内部署时再决定是否自托管）；**不依赖 GitHub secret scanning，只用 gitleaks**（7.4A）。
+36. **仍待 T003 补测核实**（不改为已定）：沪深主板 ST/*ST 涨跌幅 2026-07-06 起由 5% 改为 10%（2.13）；因子数量 77/82/85 的口径（2.5.14 H⑪）。
+
+**I. 编排者默认（2026-11-01 12:32）——【编排者默认，用户可否决】**
+- **C(1) 首批 P0 策略**：G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01（研究员 `docs/strategies/catalog.md` 第 2 节总表；取代早期方案中 2.5.10 的 ①–⑨ MVP 模板清单）。引擎接口覆盖核对与缺口见 2.5.11A。
+- **C(2) S-03**（高风险短线情绪类）：以模板形式随附，但**默认不启用**、不被分类器推荐，`risk_level: high`；用户手动启用前须确认风险。
+- **C(3) H-01 持仓风险监控**：默认挂到**全部持仓**（`strategy_instances.origin=system`、`status=active`），用户可对单只或全部暂停；只产生 weakening/exit_signal（reduce/sell 候选），从不产生买入。
+- **C(4) N-01 风险公告否决**：公告数据缺失或过期时，**阻断买入方向的计划草案**，原因码 `KEY_DATA_MISSING`（附缺失字段 `f.ann_risk_count_10d`），解除条件：该字段在新快照中非空**且**公告数据源状态为 `verified_live`（2.5.11A）。卖出方向不受影响。
+- **C(5) T-01 做T**：在实测盘中延迟之前**只做盘后统计**：不产生盘中候选信号、草案或通知；盘后按规则统计"当日若执行会触发几次、回补率、扣费后单腿结果"，标为模拟（2.5.11A）。延迟实测达标并经用户确认后才开放盘中。
+- **C(6) 内部评估结果的用户可见范围**：放在第三阶段；架构师选择**方案 A**（研究员 validation.md §9.3）：用户只看到"是否做过内部检验（是/否）、方法类型、检验日期"，**不显示任何数值、通过与否或曲线**；数值只在管理端可见。理由：① 告诉用户"这条规则有没有被检验过"符合可解释性原则 P1，方案 B 连这一点也隐藏了；② 不出现数值就不构成"历史业绩展示"，与 7.2 第 5 条一致；③ 与 2.12.4"结果数值永不展示"不矛盾。注意：单用户期间用户本人就是管理员，可以在管理端看到数值；对他人开放后此隔离才真正起作用。
+- **C(7) 成本与阈值初值**：冲击成本分档 0/5/15/30/60 bp（2.13）；hold 的"方向正确"阈值 T+5 |超额| ≤ 2%、T+20 |超额| ≤ 5%（2.8）。全部标"初值，待校准"。T+1 的 hold 阈值未给出，**暂不统计 T+1 的 hold 方向正确率**（只记录数值），待定。
+- **C(8) 数据范围**：V1 不含北交所（`boards.bse=false`）、没有新闻源；N-03（新闻类）在 catalog 中保持**不可运行**（L1 卡片），解除条件按 catalog 第 5 节：用户拍板接入有授权的新闻源（问题 8/9），接入后仍须走 G1–G7。
+
+**后端骨架反馈 T-B01 §4 的处理（2026-11-01，T-A01；契约 v0.2 变更记录“v0.2 补充”为准）**
+- 大小写：JSON 键与普通枚举值 `snake_case`；码类取值（错误码、原因码、`IMPORT_*`、`G1`–`G7`）大写。三类码命名空间不重名，CI 检查。
+- `DATA_STALE`：原因码保留；HTTP 错误码改名 `503 FRESH_DATA_REQUIRED`。
+- 405：新增 `405 METHOD_NOT_ALLOWED`（`Allow` 头）；非管理员访问 `/admin/*` 仍为 404。
+- 健康检查：`/health/live`（恒 200，用于容器健康检查）+ `/health/ready`（db/redis 失败 503 `down`；只有 ingest 异常 200 `degraded`）；`/health` 为 ready 的别名。
+- ingest 心跳：确认 Redis 心跳 + 120 秒判 stale，键 `ingest:heartbeat`（JSON，含 `ts`）与 `ingest:paused`（契约 §7.10，plan 6.1）。
+- `/meta/enums` 外层结构：`{version, enums, reason_codes, error_codes, import_codes, risk_control_labels}`。
+- `PENDING_T_A01` 的 21 个枚举取值 v0.2 不变；§3 新增 `health_status`、`component_health`、`ingest_health`、`gap_reason`、`data_provider`、`source_kind`。
+- `config/*.yaml` 五个文件的键与默认值见 6.1；文件由后端创建。
+- 仍需运维决定（不属于契约）：nginx `proxy_pass` 尾斜杠导致 `/api` 前缀被去掉（T-B01 §4.1），建议去掉尾斜杠，保持 `/api/v1`。
+
+**仍待定的问题汇总**：C(7) 中 T+1 hold 阈值；ST 涨跌幅变更与 77/82/85 个因子的口径【待 T003 补测核实】（问题 36）；LLM API key 的确切格式与 DeepSeek 数据处理条款【待核实】（问题 16、7.4A S2）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法与分红是否冲减摊薄成本（问题 19，待脱敏范本）；另见 2.5.14 H 末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning 已于 2026-11-01 拍板。）

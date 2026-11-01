@@ -39,8 +39,6 @@ export const routes: RouteObject[] = [
   { path: '/login', element: <LoginPage /> },
   { path: '/register', lazy: lazyPage(() => import('../pages/auth/RegisterPage'), (m) => m.RegisterPage) },
   { path: '/account-status', lazy: lazyPage(() => import('../pages/auth/AccountStatusPage'), (m) => m.AccountStatusPage) },
-  // 403 CONSENT_REQUIRED 的落点：风险揭示等条款同意 + 风险测评
-  { path: '/onboarding', lazy: lazyPage(() => import('../pages/auth/OnboardingPage'), (m) => m.OnboardingPage) },
   {
     path: '/',
     element: <AppShell />,

@@ -1,12 +1,14 @@
 import type { HorizonCap } from '../api/types';
 
 /**
- * 周期封顶说明（契约 v0.2.3 #23）：按 HorizonCap.rule_id 显示，不查原因码文案（SH0C / IT0C 不是 reason_code）。
- * 文案描述规则本身，规则 ID 以等宽字体附在后面，便于和 horizon_classifier.yaml 对照。
+ * 周期封顶说明（契约 v0.2.3 #23、v0.2.5 #2）：按 HorizonCap.rule_id 显示，不查原因码文案（rule_id 不是 reason_code）。
+ * v0.2.5 起画像类规则（SH0 / SH0B / SH0C / IT0B / IT0C）是 mode: hint，只出现在 hints[]（文案由服务端给出），不再封顶；
+ * 这里只剩非画像的 requires 规则。文案取自 plan 6.1 horizon_classifier.yaml 的 reason。
  */
 export const HORIZON_CAP_RULE_TEXT: Record<string, string> = {
-  SH0C: '投资经验为新手或画像未填写，短线分数封顶；可在卡片上确认后覆盖',
-  IT0C: '投资经验为新手或画像未填写，日内做T 分数封顶；可在卡片上确认后覆盖',
+  IT0: '做T 需要已有底仓（T+1：当日买入不能当日卖出）',
+  LG0: '已披露财报不足 12 期（或缺失）：基本面历史不完整',
+  LG0B: 'ROE(TTM) 缺失：无法判断质量',
 };
 
 export function capExplanation(c: HorizonCap): string {

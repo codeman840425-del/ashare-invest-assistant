@@ -6,8 +6,8 @@
  *   pnpm build:mock && node scripts/check-dist.mjs dist-mock --expect-present
  *                                                    # 反向自检：示例构建里必须能找到这些标记，证明检查本身有效
  *
- * 标记来源：src/mocks/compliance.ts 中示例问卷的题目 / 分组标题 / 选项文字（运行时解析，题库改了这里自动跟上），
- * 以及题号、示例哈希前缀、示例邀请码、MSW 运行时与 Service Worker 文件名。
+ * 标记来源：src/mocks/session.ts 中带“（示例）”的示例账号文字（显示名、申请说明、驳回理由等，运行时解析，夹具改了这里自动跟上），
+ * 以及示例邀请码、MSW 运行时与 Service Worker 文件名。（T-F05：示例题库随风险测评一起删除，标记来源改为 session.ts）
  * 另外检查业务代码块（非 vendor-*）不超过 500 kB。
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -23,14 +23,11 @@ if (!existsSync(dir)) {
   process.exit(2);
 }
 
-const compliance = readFileSync(join(root, 'src/mocks/compliance.ts'), 'utf8');
-const texts = [...compliance.matchAll(/\b(?:title|text):\s*'([^']{6,})'/g)].map((m) => m[1]);
-const ids = [...compliance.matchAll(/\bq_id:\s*'([^']+)'/g)].map((m) => m[1]);
-const markers = [
-  ...new Set([...texts, ...ids, 'demo-sha256', 'DEMO-INVITE-OK', 'mockServiceWorker', 'virtual:msw', 'setupWorker']),
-];
-if (texts.length < 5 || ids.length < 3) {
-  console.error('check-dist: 没能从 src/mocks/compliance.ts 解析出示例题库标记，脚本需要更新');
+const session = readFileSync(join(root, 'src/mocks/session.ts'), 'utf8');
+const texts = [...new Set([...session.matchAll(/'([^'\n]{4,}（示例）)'/g)].map((m) => m[1]))];
+const markers = [...new Set([...texts, 'DEMO-INVITE-OK', 'mockServiceWorker', 'virtual:msw', 'setupWorker'])];
+if (texts.length < 5) {
+  console.error('check-dist: 没能从 src/mocks/session.ts 解析出示例账号标记，脚本需要更新');
   process.exit(2);
 }
 
@@ -56,7 +53,7 @@ const BUDGET = 500 * 1024;
 const big = files.filter((f) => /\.js$/.test(f) && !/[\\/]vendor-[^\\/]+\.js$/.test(f) && statSync(f).size > BUDGET);
 
 if (expectPresent) {
-  const missing = ['demo-sha256', ids[0], texts[0]].filter((m) => !hits.has(m));
+  const missing = ['DEMO-INVITE-OK', 'mockServiceWorker', texts[0]].filter((m) => !hits.has(m));
   if (missing.length) {
     console.error(`check-dist（反向自检）: ${relative(root, dir)} 里缺少标记：${missing.join('、')}`);
     process.exit(1);

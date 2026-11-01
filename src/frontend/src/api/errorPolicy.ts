@@ -14,7 +14,6 @@ export const ERROR_TEXT: Partial<Record<AnyErrorCode, string>> = {
   ACCOUNT_LOCKED: '登录失败次数过多，账号暂时锁定',
   CSRF_FAILED: '页面已过期，请刷新后重试',
   FORBIDDEN: '没有权限执行该操作',
-  CONSENT_REQUIRED: '需要先完成风险测评并同意风险揭示，才能查看候选信号与日报',
   ENTITLEMENT_LIMIT_REACHED: '已达到当前权益上限',
   NOT_FOUND: '内容不存在或已删除',
   METHOD_NOT_ALLOWED: '前端调用方式与接口不一致（已记录到控制台）',
@@ -45,18 +44,6 @@ export function fmtBytes(n: number): string {
   return `${n} B`;
 }
 
-/** CONSENT_REQUIRED.details.required（契约 #26）；缺省视为需要完成开通引导 */
-export function consentRequired(e: ApiError): string[] | null {
-  const r = e.details?.required;
-  return Array.isArray(r) ? r.map(String) : null;
-}
-/** 只缺“个人敏感信息处理单独同意”：在当前页弹出单独同意，不跳开通引导（评审 s2） */
-export function onlySensitiveConsentMissing(e: unknown): boolean {
-  if (!(e instanceof ApiError) || e.code !== 'CONSENT_REQUIRED') return false;
-  const r = consentRequired(e);
-  return !!r && r.length > 0 && r.every((k) => k === 'sensitive_financial_info');
-}
-
 export function errorText(e: unknown): string {
   if (e instanceof ApiError) {
     // 带参数的文案（评审 m6 / m7）
@@ -68,7 +55,6 @@ export function errorText(e: unknown): string {
       const max = Number(e.details?.max_bytes);
       if (Number.isFinite(max) && max > 0) return `文件过大，超过单次上传上限 ${fmtBytes(max)}`;
     }
-    if (onlySensitiveConsentMissing(e)) return '需要先单独同意个人敏感信息处理，才能建账户、导入或录入成交';
     const t = ERROR_TEXT[e.code];
     if (t) return t;
     if (e.message && e.code !== 'HTTP_ERROR') return e.message;
@@ -78,16 +64,12 @@ export function errorText(e: unknown): string {
   return (e as Error)?.message ?? String(e);
 }
 
-export type GlobalErrorAction = 'login' | 'consent' | 'log' | 'none';
+export type GlobalErrorAction = 'login' | 'log' | 'none';
 
-/**
- * 全局处理（QueryCache/MutationCache.onError）：401 → 登录页；CONSENT_REQUIRED → 开通引导；405 → 控制台。
- * CONSENT_REQUIRED 只缺 sensitive_financial_info 时不跳转（由当前页的单独同意弹窗处理，避免在引导页循环；评审 s2）。
- */
+/** 全局处理（QueryCache/MutationCache.onError）：401 → 登录页；405 → 控制台（v0.2.5 起没有同意门槛） */
 export function globalErrorAction(e: unknown): GlobalErrorAction {
   if (!(e instanceof ApiError)) return 'none';
   if (e.status === 401 && e.code === 'AUTH_REQUIRED') return 'login';
-  if (e.code === 'CONSENT_REQUIRED') return onlySensitiveConsentMissing(e) ? 'none' : 'consent';
   if (e.status === 405 || e.code === 'METHOD_NOT_ALLOWED') return 'log';
   return 'none';
 }

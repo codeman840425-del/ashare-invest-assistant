@@ -1,24 +1,39 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { render, screen } from '@testing-library/react';
-import { RISK_DISCLOSURE_TEXT, RiskDisclosure } from './RiskDisclosure';
+import { CardDisclaimer, DISCLAIMER_TEXT, RiskDisclosure } from './RiskDisclosure';
 
-describe('RiskDisclosure 风险揭示', () => {
-  it('文本与 plan / 同意书 signal_risk_disclosure 逐字一致', () => {
-    expect(RISK_DISCLOSURE_TEXT).toBe(
-      '本工具基于公开数据与您录入的信息、按透明规则生成规则信号，不构成投资建议，不保证收益；规则可能失效，交易决定与风险由您自行承担。',
-    );
+/** 读取 docs/strategies/compliance/disclaimer.md 原文：「## 文案」下第一行引用块（去掉行首 "> "，其余逐字保留） */
+function disclaimerFromDoc(): string {
+  const md = readFileSync(resolve(__dirname, '../../../../docs/strategies/compliance/disclaimer.md'), 'utf8');
+  const sec = md.slice(md.indexOf('## 文案'));
+  const line = sec.split('\n').find((l) => l.startsWith('> '));
+  if (!line) throw new Error('disclaimer.md 中没有找到文案引用块');
+  return line.slice(2).replace(/\r$/, '');
+}
+
+describe('RiskDisclosure 固定免责提示（契约 v0.2.5 #1）', () => {
+  it('文案与 docs/strategies/compliance/disclaimer.md 原文完全一致（含标点、空格）', () => {
+    const doc = disclaimerFromDoc();
+    expect(doc.length).toBeGreaterThan(20);
+    expect(DISCLAIMER_TEXT).toBe(doc);
   });
 
-  it('以 role=note 渲染完整揭示文字，并附 Lightweight Charts 署名', () => {
+  it('页面底部渲染的文字与原文完全一致，并附 Lightweight Charts 署名', () => {
     render(<RiskDisclosure />);
-    const el = screen.getByRole('note', { name: '风险揭示' });
-    expect(el).toHaveTextContent(RISK_DISCLOSURE_TEXT);
+    const el = screen.getByTestId('risk-disclosure');
+    expect(el.querySelector('span')!.textContent).toBe(disclaimerFromDoc());
     expect(el).toHaveTextContent('TradingView Lightweight Charts');
   });
 
-  it('可关闭署名，但揭示文字仍在', () => {
+  it('可关闭署名，但免责提示仍在', () => {
     render(<RiskDisclosure showAttribution={false} />);
     const el = screen.getByTestId('risk-disclosure');
-    expect(el).toHaveTextContent(RISK_DISCLOSURE_TEXT);
-    expect(el).not.toHaveTextContent('TradingView');
+    expect(el.textContent).toBe(disclaimerFromDoc());
+  });
+
+  it('卡片内的免责提示文字与原文完全一致', () => {
+    render(<CardDisclaimer />);
+    expect(screen.getByTestId('card-disclaimer').textContent).toBe(disclaimerFromDoc());
   });
 });

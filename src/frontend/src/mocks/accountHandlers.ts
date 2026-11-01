@@ -1,21 +1,20 @@
 /**
- * MSW 处理器（T-F02 / T-F02a / T-F04）：认证、同意与风险测评、画像、管理端用户审核、券商账户、成交、导入、对账。
- * 后端目前只实现了 /health* 与 /meta/enums（src/backend/app/api/v1），其余都在这里按契约 v0.2.4 模拟。
+ * MSW 处理器（T-F02 / T-F02a / T-F04）：认证、画像、管理端用户审核、券商账户、成交、导入、对账。
+ * 后端目前只实现了 /health* 与 /meta/enums（src/backend/app/api/v1），其余都在这里按契约 v0.2.5 模拟（v0.2.5 起无同意流程与风险测评，§1.3 只剩登录与审核状态两道门槛）。
  */
 import { http, HttpResponse } from 'msw';
 import type {
-  AdminUserPatch, BrokerAccountCreate, ConsentRequest, ImportConfirmRequest, ImportOptions, LoginRequest, ProfileInput, RegisterRequest,
-  ImportBatchSummary, ResolveFindingRequest, RiskAssessmentRequest, Trade, TradeCreate,
+  AdminUserPatch, BrokerAccountCreate, ImportConfirmRequest, ImportOptions, LoginRequest, ProfileInput, RegisterRequest,
+  ImportBatchSummary, ResolveFindingRequest, Trade, TradeCreate,
 } from '../api/accountTypes';
-import { ENUMS, type ConsentKey, type LegalDocKey } from '../api/enums';
+import { ENUMS } from '../api/enums';
 import { OVERRIDE_CHOICES } from '../i18n/importLabels';
 import {
-  MOCK_INVITE_CODES, emptyStats, finding, applyParse, currentUser, missingCompliance, publicBatch, reconciliationFor, state, toAdminUser, toMe,
+  MOCK_INVITE_CODES, emptyStats, finding, applyParse, currentUser, publicBatch, reconciliationFor, state, toAdminUser, toMe,
   type MockBatch, type MockUser,
 } from './session';
 import { errorBody, page } from './handlerUtils';
 import { NOW, uid } from './fixtures';
-import { CONSENT_KEYS, RISK_QUESTIONNAIRE, UNDERSTANDING_Q, consentDocs, demoSha, legalDocument, scoreAssessment, withStatus } from './compliance';
 
 const API = '/api/v1';
 const json = (body: unknown, status = 200) => HttpResponse.json(body as Record<string, unknown>, { status });
@@ -25,10 +24,7 @@ const notFound = (what: string) => err(404, 'NOT_FOUND', `${what} 不存在（�
 const badTransition = (from: string, to: string) => err(409, 'INVALID_STATE_TRANSITION', `不能从 ${from} 变为 ${to}`, { from, to });
 const noContent = (status = 204) => new HttpResponse(null, { status });
 
-const PUBLIC = [/^\/meta\//, /^\/legal\//, /^\/health/, /^\/auth\/login$/, /^\/auth\/register$/];
-const GATED = [/^\/today/, /^\/suggestions/, /^\/daily-reports/, /^\/signals/, /^\/candidate-signals/, /^\/plan-drafts/];
-/** v0.2.4 #13：上传导入、手工录入成交需要个人敏感信息单独同意（POST /accounts 不要求） */
-const SENSITIVE_WRITES = [/^\/imports$/, /^\/trades$/];
+const PUBLIC = [/^\/meta\//, /^\/health/, /^\/auth\/login$/, /^\/auth\/register$/];
 
 const me = () => currentUser()!;
 const myAccount = (id: string | null) => state.accounts.find((a) => a.id === id);
@@ -41,7 +37,7 @@ const USERNAME_RE = /^[a-z0-9_]{4,32}$/; // 契约 #24
 const RESERVED = ['admin', 'root', 'system'];
 
 export const accountHandlers = [
-  // —— 统一前置：鉴权与合规门槛（契约 §1.3）。返回 undefined 时继续交给后续处理器 ——
+  // —— 统一前置：鉴权与审核状态（契约 §1.3）。返回 undefined 时继续交给后续处理器 ——
   http.all(`${API}/*`, ({ request }) => {
     const path = new URL(request.url).pathname.slice(API.length);
     const user = currentUser();
@@ -53,31 +49,11 @@ export const accountHandlers = [
     if (PUBLIC.some((re) => re.test(path))) return undefined;
     if (!user) return err(401, 'AUTH_REQUIRED', '请先登录');
     if (user.status !== 'approved') return err(403, 'ACCOUNT_NOT_APPROVED', '账号未通过审核', { status: user.status });
-    const required = GATED.some((re) => re.test(path)) ? missingCompliance(user) : [];
-    if (required.length) return err(403, 'CONSENT_REQUIRED', '请先阅读并同意风险揭示、完成有效的风险测评', { required });
-    if (request.method === 'POST' && SENSITIVE_WRITES.some((re) => re.test(path)) && toMe(user).consents.sensitive_financial_info.needs_reconsent) {
-      return err(403, 'CONSENT_REQUIRED', '请先单独同意个人敏感信息处理', { required: ['sensitive_financial_info'] });
-    }
     return undefined;
   }),
 
   // ---------------- §7.1 认证 ----------------
   http.get(`${API}/meta/registration`, () => json({ mode: state.registrationMode })),
-  // v0.2.4 #3：文书版本与正文
-  http.get(`${API}/meta/consent-docs`, () => json({ items: consentDocs(state.docVersions) })),
-  http.get(`${API}/legal/:key/versions`, ({ params }) => {
-    const v = state.docVersions[params.key as LegalDocKey];
-    if (!v || v === 'unversioned') return notFound('文书');
-    // 版本列表不含正文
-    const rest: Partial<ReturnType<typeof legalDocument>> = { ...legalDocument(params.key as LegalDocKey, v) };
-    delete rest.content_md;
-    return json({ items: [rest] });
-  }),
-  http.get(`${API}/legal/:key/:version?`, ({ params }) => {
-    const v = state.docVersions[params.key as LegalDocKey];
-    if (!v || v === 'unversioned' || (params.version && params.version !== v)) return notFound('文书');
-    return json(legalDocument(params.key as LegalDocKey, v));
-  }),
   http.post(`${API}/auth/login`, async ({ request }) => {
     const body = (await request.json()) as Partial<LoginRequest>;
     const user = state.users.find((x) => x.username === body.username);
@@ -112,78 +88,17 @@ export const accountHandlers = [
     }
     if ((b.apply_note ?? '').length > 200) fields.push({ field: 'apply_note', issue: 'too_long' });
     if ((b.display_name ?? '').trim().length > 32) fields.push({ field: 'display_name', issue: 'too_long' });
-    // v0.2.4 #2：必须包含 terms / privacy / signal_risk_disclosure，可另含 sensitive_financial_info，其他值 → 400
-    const got = new Set(b.agreements ?? []);
-    const need: ConsentKey[] = ['terms', 'privacy', 'signal_risk_disclosure'];
-    if (!need.every((k) => got.has(k)) || [...got].some((k) => !CONSENT_KEYS.includes(k))) fields.push({ field: 'agreements', issue: 'invalid' });
+    // v0.2.5 #1：旧客户端仍发 agreements 时服务端忽略（不报错、不记录）
     if (fields.length) return validationError(fields);
     if (state.users.some((x) => x.username === name)) return err(409, 'CONFLICT', '用户名已被使用');
     const id = nextId();
     state.users.push({
       id, username: name, display_name: b.display_name!.trim(), role: 'user', status: 'pending', apply_note: b.apply_note?.trim() || null, created_at: NOW, reviewed_at: null,
-      review_reason: null, register_ip_region: '上海（示例）', same_ip_registrations: 1, assessments: [],
-      grants: Object.fromEntries([...got].map((k) => [k, { version: state.docVersions[k], accepted_at: NOW }])),
+      review_reason: null, register_ip_region: '上海（示例）', same_ip_registrations: 1,
     });
     return json({ id, username: name, status: 'pending' }, 201);
   }),
   http.get(`${API}/me`, () => json(toMe(me()))),
-  // v0.2.4 #4：version 与 content_sha256 必须等于 /meta/consent-docs 的当前值；withdraw 只接受两项
-  http.post(`${API}/me/consents`, async ({ request }) => {
-    const b = (await request.json()) as Partial<ConsentRequest>;
-    if (!b.key || !CONSENT_KEYS.includes(b.key)) return validationError([{ field: 'key', issue: 'invalid' }]);
-    const cur = state.docVersions[b.key];
-    if (b.version !== cur) return validationError([{ field: 'version', issue: 'invalid' }]);
-    if ((b.content_sha256 ?? null) !== (cur === 'unversioned' ? null : demoSha(b.key, cur))) return validationError([{ field: 'content_sha256', issue: 'invalid' }]);
-    if (!b.ui_surface || b.ui_surface.length > 64) return validationError([{ field: 'ui_surface', issue: 'invalid' }]);
-    if (!b.presentation || !ENUMS.consent_presentation.includes(b.presentation)) return validationError([{ field: 'presentation', issue: 'invalid' }]);
-    const action = b.action ?? 'grant';
-    if (action === 'withdraw') {
-      if (b.key === 'terms' || b.key === 'privacy') return validationError([{ field: 'action', issue: 'invalid' }]);
-      const rest = { ...me().grants };
-      delete rest[b.key];
-      me().grants = rest;
-    } else {
-      me().grants = { ...me().grants, [b.key]: { version: cur, accepted_at: NOW } };
-    }
-    return json({ key: b.key, version: cur, action, at: NOW }, 201);
-  }),
-  // v0.2.4 #6：问卷（不含分值）；示例问卷只在 MSW 中（评审 P1）
-  http.get(`${API}/me/risk-assessment/questionnaire`, () =>
-    state.questionnairePublished ? json(RISK_QUESTIONNAIRE) : err(404, 'NOT_FOUND', '风险测评问卷尚未发布（示例）')),
-  http.get(`${API}/me/risk-assessment`, () => {
-    const list = me().assessments;
-    return list.length ? json(withStatus(list, list[list.length - 1], NOW)) : notFound('风险测评');
-  }),
-  http.get(`${API}/me/risk-assessments`, ({ request }) => {
-    const list = me().assessments;
-    return json(page([...list].reverse().map((a) => withStatus(list, a, NOW)), new URL(request.url)));
-  }),
-  http.post(`${API}/me/risk-assessment`, async ({ request }) => {
-    const b = (await request.json()) as Partial<RiskAssessmentRequest>;
-    if (!state.questionnairePublished) return notFound('风险测评问卷');
-    if (b.questionnaire_version !== RISK_QUESTIONNAIRE.version) {
-      return err(409, 'VERSION_CONFLICT', '问卷已更新，请重新作答', { current_version: RISK_QUESTIONNAIRE.version });
-    }
-    const answers = b.answers ?? [];
-    const fields: { field: string; issue: string }[] = [];
-    for (const a of answers) {
-      const q = RISK_QUESTIONNAIRE.questions.find((x) => x.q_id === a.q_id);
-      if (!q) fields.push({ field: `answers.${a.q_id}`, issue: 'unknown_question' });
-      else if (!q.choices.some((c) => c.id === a.choice)) fields.push({ field: `answers.${a.q_id}`, issue: 'invalid_choice' });
-    }
-    for (const q of RISK_QUESTIONNAIRE.questions) {
-      if (q.required && !answers.some((a) => a.q_id === q.q_id)) fields.push({ field: `answers.${q.q_id}`, issue: 'required' });
-    }
-    if (fields.length) return validationError(fields);
-    if (answers.find((a) => a.q_id === UNDERSTANDING_Q.q_id)?.choice !== UNDERSTANDING_Q.correct) {
-      return err(400, 'VALIDATION_ERROR', '理解确认题未通过', { reason: 'understanding_required', fields: [{ field: `answers.${UNDERSTANDING_Q.q_id}`, issue: 'understanding_required' }] });
-    }
-    const recent = me().assessments.filter((a) => Date.parse(NOW) - Date.parse(a.submitted_at) < 86_400_000);
-    if (recent.length >= 3) return err(429, 'RATE_LIMITED', '24 小时内提交次数过多', { retry_after_s: 3600 });
-    const a = scoreAssessment(nextId(), answers, NOW);
-    me().assessments = [...me().assessments, a];
-    return json(a, 201);
-  }),
   http.get(`${API}/me/profile`, () => {
     const p = state.profiles.get(me().id);
     return p ? json(p) : notFound('投资画像');
@@ -192,14 +107,15 @@ export const accountHandlers = [
     const b = (await request.json()) as Partial<ProfileInput>;
     const fields: { field: string; issue: string }[] = [];
     if (!b.horizon_pref?.length || !b.horizon_pref.every((h) => (ENUMS.horizon as readonly string[]).includes(h))) fields.push({ field: 'horizon_pref', issue: '至少选择一个周期' });
-    if (!b.effort || !['low', 'medium', 'high'].includes(b.effort)) fields.push({ field: 'effort', issue: '取值不合法' });
-    if (!Number.isInteger(b.risk_tolerance) || b.risk_tolerance! < 1 || b.risk_tolerance! > 5) fields.push({ field: 'risk_tolerance', issue: '1–5' });
-    if (!b.experience || !['novice', 'intermediate', 'advanced'].includes(b.experience)) fields.push({ field: 'experience', issue: '取值不合法' });
+    // v0.2.5 #6：三个自报字段可为 null（未填写）；无 exceeds_assessment 校验
+    if (b.effort != null && !['low', 'medium', 'high'].includes(b.effort)) fields.push({ field: 'effort', issue: '取值不合法' });
+    if (b.risk_tolerance != null && (!Number.isInteger(b.risk_tolerance) || b.risk_tolerance < 1 || b.risk_tolerance > 5)) fields.push({ field: 'risk_tolerance', issue: '1–5' });
+    if (b.experience != null && !['novice', 'intermediate', 'advanced'].includes(b.experience)) fields.push({ field: 'experience', issue: '取值不合法' });
     const pct = Number(b.max_single_position_pct);
     if (!(pct >= 5 && pct <= 50)) fields.push({ field: 'max_single_position_pct', issue: '5–50' });
     if (fields.length) return validationError(fields);
     const prev = state.profiles.get(me().id);
-    const p = { ...(b as ProfileInput), version_no: (prev?.version_no ?? 0) + 1 };
+    const p = { ...(b as ProfileInput), effort: b.effort ?? null, risk_tolerance: b.risk_tolerance ?? null, experience: b.experience ?? null, version_no: (prev?.version_no ?? 0) + 1 };
     state.profiles.set(me().id, p);
     return json(p);
   }),

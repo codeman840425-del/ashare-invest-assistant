@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { useCandidateSignals, useSuggestionReasons } from '../../api/queries';
 import type { CandidateSignal, Suggestion, TerminalRow } from '../../api/types';
 import { ActionBadge, ConfidenceTag, ErrorBox, Loading } from '../../components/common';
+import { CardDisclaimer } from '../../components/RiskDisclosure';
 import { ACTION_FULL, ACTION_SHORT, HORIZON, REASON_CODE, RISK_CONTROL, RISK_LEVEL, SIGNAL_STATE } from '../../i18n/labels';
 
 const shortAction = (a: keyof typeof ACTION_FULL) => ACTION_FULL[a].replace(/^规则信号：|（候选）$/g, '');
@@ -73,6 +74,7 @@ export function SuggestionPanel({ row, suggestion, loading, error }: { row: Term
           </div>
         ) : null}
         {sg.gaps.length ? <div className="gap-mini small">数据缺口：{sg.gaps.map((g) => g.message).join('；')}</div> : null}
+        <CardDisclaimer />
       </div>
       <div className="right-actions">
         <Button size="small" onClick={() => navigate(`/suggestions/${sg.id}`)}>维度 × 策略矩阵</Button>

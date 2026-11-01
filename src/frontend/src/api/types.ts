@@ -8,7 +8,7 @@ import type {
   DataStatus, Dimension, DimensionView, EpistemicType, ExecutabilityStatus, GapReason, HealthStatus, Horizon, IngestHealth,
   Lifecycle, MarketRegime, MarketSession, NotificationKind, NotificationTargetType, ReasonCode, ReasonStatus,
   ReconciliationStatus, RegistrationMode, ReleaseKind, RiskControl, RiskLevel, Role, AccountStatus, RuleRole, Severity,
-  SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus, AssessmentStatus, ConsentKey,
+  SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus,
 } from './enums';
 
 export type Decimal = string;
@@ -51,10 +51,12 @@ export interface RuleRef {
 }
 export interface ModelRef { model_key: string; version: string; role: 'auxiliary'; output: Record<string, unknown>; evidence_ids: string[] }
 export interface TextWithEvidence { text: string; expr: string | null; evidence_ids: string[] }
-/** v0.2.2 `GET /horizon-assessments?security_code=` 周期分类结果（版本化） */
 /** v0.2.3 §5.1 HorizonCap */
 export interface HorizonCap { horizon: Horizon; cap: number; kind: 'data_missing' | 'requires'; rule_id: string | null; inputs_missing: string[] }
+/** v0.2.5 §5.1 HorizonHint：画像类规则（mode: hint）已填写且不满足时的提示；不影响分数与 suitable */
+export interface HorizonHint { horizon: Horizon; rule_id: string; text: string }
 export type HorizonReason = TextWithEvidence & { horizon: Horizon; polarity: 'for' | 'against' };
+/** v0.2.2 `GET /horizon-assessments?security_code=` 周期分类结果（版本化） */
 export interface HorizonAssessment {
   suitable: Horizon[];
   /** 四个周期都有，0–100，不为 null（数据缺失按封顶处理） */
@@ -65,7 +67,9 @@ export interface HorizonAssessment {
   inputs_missing: string[];
   /** v0.2.3：哪个周期因什么被封顶；同一周期多个封顶取最小 */
   caps: HorizonCap[];
-  /** v0.2.3：语义化版本，如 "1.1.0" */
+  /** v0.2.5：画像类规则的提示，永不为 null */
+  hints: HorizonHint[];
+  /** v0.2.3：语义化版本，如 "1.2.0" */
   classifier_version: string;
   snapshot_id: string;
   /** v0.2.3：reasons[].evidence_ids 只在本响应的 evidence[] 内解析 */
@@ -351,22 +355,8 @@ export interface Me {
   role: Role;
   status: AccountStatus;
   entitlements: Record<string, unknown>;
-  /** v0.2.4 #5：四个 consent_key 都有一项；未同意或已撤回时 version/accepted_at 为 null，needs_reconsent=true */
-  consents: Record<ConsentKey, ConsentState>;
-  risk_assessment: RiskAssessmentSummary | null;
 }
-export interface ConsentState { version: string | null; accepted_at: DateTime | null; current_version: string; needs_reconsent: boolean }
-/** v0.2.4 #6 */
-export interface RiskAssessmentSummary {
-  assessment_id: Uuid;
-  questionnaire_version: string;
-  risk_tolerance: number;
-  submitted_at: DateTime;
-  expires_at: DateTime;
-  status: AssessmentStatus;
-  needs_retest: boolean;
-}
-/** GET /meta/registration（v0.2.4：只有 mode；文书版本改由 GET /meta/consent-docs 提供） */
+/** GET /meta/registration */
 export interface RegistrationMeta { mode: RegistrationMode }
 export interface PortfolioPosition {
   security_code: string;

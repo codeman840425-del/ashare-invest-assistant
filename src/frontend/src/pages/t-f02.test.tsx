@@ -50,34 +50,13 @@ describe('登录与账号状态', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/account-status'));
     expect(new URLSearchParams(router.state.location.search).get('status')).toBe('pending');
   });
-  it('已合规用户登录 → 回到 next', async () => {
+  it('已开通用户登录 → 回到 next', async () => {
     const router = await login('demo_user');
     await waitFor(() => expect(router.state.location.pathname).toBe('/portfolio'));
   });
-  it('未签署 / 未测评用户登录 → /onboarding?next=', async () => {
+  it('没有画像的新用户登录 → 也直接回到 next（v0.2.5 无开通引导）', async () => {
     const router = await login('new_user');
-    await waitFor(() => expect(router.state.location.pathname).toBe('/onboarding'));
-    expect(new URLSearchParams(router.state.location.search).get('next')).toBe('/portfolio');
-  });
-});
-
-describe('开通引导：同意条款 → 风险测评 → 完成', () => {
-  it('全部勾选后才可继续；答完全部题目后显示测评等级', async () => {
-    mockLoginAs('new_user');
-    renderAt('/onboarding?next=%2Fportfolio');
-    const box = await screen.findByTestId('onboarding-consents');
-    const go = within(box).getByRole('button', { name: /同意并继续/ });
-    expect(go).toBeDisabled();
-    for (const cb of within(box).getAllByRole('checkbox')) fireEvent.click(cb);
-    expect(go).toBeEnabled();
-    fireEvent.click(go);
-    const risk = await screen.findByTestId('onboarding-risk');
-    const submit = await within(risk).findByRole('button', { name: /提交测评/ });
-    expect(submit).toBeDisabled();
-    for (const g of within(risk).getAllByRole('radiogroup')) fireEvent.click(within(g).getAllByRole('radio')[1]);
-    expect(submit).toBeEnabled();
-    fireEvent.click(submit);
-    expect(await screen.findByTestId('risk-level')).toHaveTextContent('风险承受能力');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/portfolio'));
   });
 });
 

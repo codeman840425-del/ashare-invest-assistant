@@ -3,7 +3,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from './AppProviders';
 import { makeQueryClient } from './queryClient';
 import { routes } from './routes';
-import { RISK_DISCLOSURE_TEXT } from '../components/RiskDisclosure';
+import { DISCLAIMER_TEXT } from '../components/RiskDisclosure';
 import { REPORT_DATE, SUGGESTIONS } from '../mocks/fixtures';
 
 // jsdom 没有 canvas：图表组件换成占位（图表本身在 Playwright 截图里验证）
@@ -23,10 +23,10 @@ function renderAt(path: string) {
 }
 
 describe('路由与页面（MSW 示例数据）', () => {
-  it('/ 重定向到 /terminal；外壳含风险揭示、示例数据横幅', async () => {
+  it('/ 重定向到 /terminal；外壳含免责提示、示例数据横幅', async () => {
     const router = renderAt('/');
     await waitFor(() => expect(router.state.location.pathname).toBe('/terminal'));
-    expect(screen.getByTestId('risk-disclosure')).toHaveTextContent(RISK_DISCLOSURE_TEXT);
+    expect(screen.getByTestId('risk-disclosure')).toHaveTextContent(DISCLAIMER_TEXT);
     expect(screen.getByTestId('sample-banner')).toHaveTextContent('示例数据');
     expect(await screen.findByTestId('terminal')).toBeInTheDocument();
   });

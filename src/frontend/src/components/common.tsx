@@ -69,7 +69,6 @@ export function ErrorBox({ error, prefix = '加载失败' }: { error: unknown; p
   return (
     <div className={`error-box${fresh ? ' refreshing' : ''}`} role="alert" data-code={e?.code}>
       {fresh ? '' : `${prefix}：`}{errorText(error)}
-      {e?.code === 'CONSENT_REQUIRED' ? <> <Link to="/onboarding">去完成 ›</Link></> : null}
       {e?.code === 'AUTH_REQUIRED' ? <> <Link to="/login">去登录 ›</Link></> : null}
       {e ? <span className="muted mono">（{e.code}{e.requestId ? ` · ${e.requestId}` : ''}）</span> : null}
     </div>

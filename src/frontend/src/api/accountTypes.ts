@@ -1,9 +1,9 @@
 /**
- * T-F02 / T-F02a / T-F04 / T-F05 用到的类型：契约 v0.2.4 §5.1 ImportFinding、§7.1 认证与账号、§7.2 账户/成交/导入、§7.9 管理端。
+ * T-F02 / T-F02a / T-F04 / T-F05 用到的类型：契约 v0.2.5 §5.1 ImportFinding、§7.1 认证与账号、§7.2 账户/成交/导入、§7.9 管理端。
  * 契约没写清结构的地方按前端判断补齐，并标注 `// [待契约确认]`（清单见 reports/T-F02.md「遗留问题」）。
  */
 import type {
-  AccountStatus, AssessmentStatus, ConsentKey, ConsentPresentation, LegalDocKey, DedupStatus, Horizon, ImportRowStatus, ImportScope, ImportSeverity, ImportStatus,
+  AccountStatus, DedupStatus, Horizon, ImportRowStatus, ImportScope, ImportSeverity, ImportStatus,
   ReconciliationItemKind, ReconciliationStatus, Role, TradeSide,
 } from './enums';
 import type { DateStr, DateTime, Decimal, Me, Uuid } from './types';
@@ -11,8 +11,6 @@ import type { DateStr, DateTime, Decimal, Me, Uuid } from './types';
 // ---------- §7.1 认证 ----------
 export interface LoginRequest { username: string; password: string }
 export interface LoginResponse { user: Me; csrf_token: string }
-/** 契约 v0.2.4 §3 `consent_key`（需用户同意的文书） */
-export type { ConsentKey };
 export interface RegisterRequest {
   /** 4–32 位，^[a-z0-9_]{4,32}$，前端输入即转小写（v0.2.3 #24） */
   username: string;
@@ -23,39 +21,9 @@ export interface RegisterRequest {
   invite_code: string | null;
   /** ≤200 字（v0.2.4 #2）；invite 模式必填 */
   apply_note: string | null;
-  /** 必须包含 terms、privacy、signal_risk_disclosure，可另含 sensitive_financial_info（v0.2.4 #2） */
-  agreements: ConsentKey[];
+  // v0.2.5：agreements 已删除（提交注册即视为已知悉固定免责提示）
 }
 
-/** GET /meta/consent-docs 的元素（v0.2.4 #3） */
-export interface ConsentDoc {
-  key: LegalDocKey;
-  /** 语义化版本或 "unversioned" */
-  version: string;
-  version_no: number | null;
-  title: string;
-  summary: string;
-  effective_at: DateTime | null;
-  content_sha256: string | null;
-  /** = /api/v1/legal/{key}；未定稿时 null */
-  url: string | null;
-  required_for: ('register' | 'advice' | 'import' | 'display')[];
-}
-/** GET /legal/{doc_key}（v0.2.4 #3） */
-export interface LegalDocument {
-  key: LegalDocKey;
-  version: string;
-  version_no: number;
-  title: string;
-  summary: string;
-  content_md: string;
-  content_sha256: string;
-  locale: string;
-  change_level: 'major' | 'minor' | 'patch';
-  changelog: string;
-  effective_at: DateTime;
-  published_at: DateTime;
-}
 export interface RegisterResponse { id: Uuid; username: string; status: 'pending' }
 /** 403 ACCOUNT_NOT_APPROVED 的 details（plan 3.6：rejected 附驳回理由） */
 export interface NotApprovedDetails { status: Exclude<AccountStatus, 'approved'>; reason?: string | null }
@@ -63,8 +31,8 @@ export interface NotApprovedDetails { status: Exclude<AccountStatus, 'approved'>
 export type Effort = 'low' | 'medium' | 'high';
 export type Experience = 'novice' | 'intermediate' | 'advanced';
 /**
- * PUT /me/profile 请求体（契约 §7.1，v0.2.4 #7）：三个测评字段可为 null（未测评）；
- * 写入测评建议值时带 assessment_id；最多 2 位小数的 max_single_position_pct 为 5–50。
+ * PUT /me/profile 请求体（契约 §7.1，v0.2.5 #6）：全部由用户自报；effort / risk_tolerance / experience 为 null 表示未填写
+ * （分类器不封顶、不提示）；max_single_position_pct 为 5–50、最多 2 位小数。
  */
 export interface ProfileInput {
   horizon_pref: Horizon[];
@@ -72,53 +40,9 @@ export interface ProfileInput {
   risk_tolerance: number | null;
   experience: Experience | null;
   max_single_position_pct: Decimal;
-  assessment_id?: Uuid | null;
 }
-/** GET/PUT /me/profile 响应；还没有画像时 GET 返回 404 NOT_FOUND（v0.2.4 #7） */
-export interface Profile extends ProfileInput { version_no: number; questionnaire_version?: string | null }
-
-/** POST /me/consents（v0.2.4 #4）：version 与 content_sha256 必须等于 /meta/consent-docs 的当前值 */
-export interface ConsentRequest {
-  key: ConsentKey;
-  version: string;
-  content_sha256: string | null;
-  action?: 'grant' | 'withdraw';
-  /** ≤64，记录在哪个界面同意（如 onboarding、import_upload） */
-  ui_surface: string;
-  presentation: ConsentPresentation;
-}
-export interface ConsentResponse { key: ConsentKey; version: string; action: 'grant' | 'withdraw'; at: DateTime }
-export interface RiskAnswer { q_id: string; choice: string }
-/** POST /me/risk-assessment（v0.2.4 #6） */
-export interface RiskAssessmentRequest {
-  questionnaire_version: string;
-  answers: RiskAnswer[];
-  started_at: DateTime | null;
-  client_duration_s: number | null;
-}
-/**
- * GET /me/risk-assessment/questionnaire（v0.2.4 #6）：不含分值与计分规则；没有已发布问卷 → 404。
- * 题目只从这里取，前端不内置题库（评审 P1）。
- */
-export interface RiskQuestionnaire {
-  questionnaire_key: 'risk_profile';
-  version: string;
-  intro: string;
-  groups: { id: string; title: string }[];
-  questions: { q_id: string; group: string; type: 'single'; required: boolean; title: string; choices: { id: string; text: string }[] }[];
-}
-export interface DerivedValue<T> { value: T; rule_ids: string[] }
-/** POST /me/risk-assessment 的 201 响应、GET /me/risk-assessment（v0.2.4 #6） */
-export interface RiskAssessment {
-  assessment_id: Uuid;
-  questionnaire_version: string;
-  submitted_at: DateTime;
-  expires_at: DateTime;
-  status: AssessmentStatus;
-  derived: { risk_tolerance: DerivedValue<number>; experience: DerivedValue<Experience>; effort: DerivedValue<Effort> };
-  flags: string[];
-  needs_retest: boolean;
-}
+/** GET/PUT /me/profile 响应；还没有画像时 GET 返回 404 NOT_FOUND */
+export interface Profile extends ProfileInput { version_no: number }
 
 // ---------- §7.9 管理端：用户审核 ----------
 /** GET /admin/users 列表元素（v0.2.4 #12）。`same_ip_flag` 由服务端按 `admin.same_ip_highlight_threshold` 计算，只作提示 */

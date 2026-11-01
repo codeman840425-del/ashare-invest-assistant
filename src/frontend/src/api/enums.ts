@@ -1,5 +1,5 @@
 /**
- * 契约 v0.2.5 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。v0.2.5 作废的 consent_key 等四个枚举由 T-F05 删除。
+ * 契约 v0.2.5 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。
  * 运行时以 `GET /meta/enums` 为准；这里的常量用于类型推导与 mock 校验。
  */
 /** 与 `/meta/enums.version` 对齐的契约版本 */
@@ -33,11 +33,6 @@ export const ENUMS = {
   bar_freq: ['1m', 'd', 'w'],
   bar_adjust: ['none', 'qfq', 'hfq'],
   registration_mode: ['closed', 'invite', 'open'],
-  // v0.2.4 #1、#6
-  consent_key: ['terms', 'privacy', 'signal_risk_disclosure', 'sensitive_financial_info'],
-  legal_doc_key: ['terms', 'privacy', 'signal_risk_disclosure', 'sensitive_financial_info', 'site_risk_notice'],
-  consent_presentation: ['checkbox_unticked', 'scroll_and_confirm', 'modal'],
-  assessment_status: ['valid', 'expiring', 'grace', 'expired', 'superseded'],
   notification_target_type: [
     'suggestion', 'candidate_signal', 'plan_draft', 'plan', 'daily_report', 'import_batch', 'reconciliation', 'strategy_version', 'none',
   ],
@@ -71,12 +66,12 @@ export const ENUMS = {
   ingest_health: ['ok', 'stale', 'paused', 'unknown'],
 } as const;
 
-/** §6.1 不可执行原因码（23 个） */
+/** §6.1 不可执行原因码（v0.2.5：22 个） */
 export const REASON_CODES = [
   'DATA_STALE', 'KEY_DATA_MISSING', 'LOW_CONFIDENCE', 'NON_TRADING_TIME', 'SUSPENDED', 'LIMIT_LOCKED', 'ST_OR_DELISTING',
   'NEW_LISTING', 'INSUFFICIENT_CASH', 'T1_NOT_SELLABLE', 'NO_POSITION', 'POSITION_CAP_REACHED', 'STRATEGY_BUDGET_EXHAUSTED',
   'SECTOR_EXPOSURE_EXCEEDED', 'REGIME_MISMATCH', 'SAME_DIRECTION_PLAN_EXISTS', 'CONFLICTS_CONFIRMED_PLAN', 'BLOCKLISTED',
-  'COOLING_OFF', 'LOSS_STREAK_PAUSE', 'STRATEGY_CONFLICT', 'USER_MUTED', 'PROFILE_OR_CONSENT_MISSING',
+  'COOLING_OFF', 'LOSS_STREAK_PAUSE', 'STRATEGY_CONFLICT', 'USER_MUTED',
 ] as const;
 
 type E<K extends keyof typeof ENUMS> = (typeof ENUMS)[K][number];
@@ -127,7 +122,3 @@ export type HealthStatus = E<'health_status'>;
 export type ComponentHealth = E<'component_health'>;
 export type IngestHealth = E<'ingest_health'>;
 export type ReasonCode = (typeof REASON_CODES)[number];
-export type ConsentKey = E<'consent_key'>;
-export type LegalDocKey = E<'legal_doc_key'>;
-export type ConsentPresentation = E<'consent_presentation'>;
-export type AssessmentStatus = E<'assessment_status'>;

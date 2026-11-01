@@ -54,7 +54,6 @@ export function AppShell() {
   useApiErrorRedirect();
   const userMenu = [
     { key: '/settings/profile', label: '投资画像' },
-    { key: '/onboarding?next=/settings/profile', label: '风险测评' },
     ...(me.data?.role === 'admin' ? [{ key: '/admin/users', label: '用户审核（管理）' }] : []),
     { type: 'divider' as const },
     { key: 'logout', label: '退出登录', danger: true },

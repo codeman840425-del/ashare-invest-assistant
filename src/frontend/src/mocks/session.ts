@@ -5,12 +5,11 @@
  */
 import type { AccountStatus, Role } from '../api/enums';
 import type {
-  AdminUser, BrokerAccount, ImportBatch, ImportFinding, ImportKind, ImportRow, Profile, Reconciliation, RiskAssessment, Trade,
+  AdminUser, BrokerAccount, ImportBatch, ImportFinding, ImportKind, ImportRow, Profile, Reconciliation, Trade,
 } from '../api/accountTypes';
 import type { Me } from '../api/types';
 import { IMPORT_CODE_MAP, renderTemplate } from '../api/importCodes';
 import { ACCOUNT_ID, NOW, uid } from './fixtures';
-import { ASSESSMENT_OK, INITIAL_DOC_VERSIONS, assessmentSummary, consentStates, scoreAssessment, type DocVersions, type Grants } from './compliance';
 
 export interface MockUser {
   id: string;
@@ -24,58 +23,34 @@ export interface MockUser {
   review_reason: string | null;
   register_ip_region: string | null;
   same_ip_registrations: number;
-  /** 已同意的文书版本（Me.consents 由 compliance.consentStates 推导） */
-  grants: Grants;
-  /** 测评记录（只追加，最后一条为最近一次） */
-  assessments: RiskAssessment[];
   /** 登录时返回 ACCOUNT_LOCKED */
   locked?: boolean;
   last_login_at?: string | null;
 }
 
-const AT = '2026-10-01T09:00:00+08:00';
-const g = (version = '1.0.0') => ({ version, accepted_at: AT });
-/** 已完成开通、并已单独同意个人敏感信息处理（v0.2.4 #13）的示例用户 */
-const CONSENTED: Grants = { terms: g(), privacy: g(), signal_risk_disclosure: g(), sensitive_financial_info: g() };
-const NO_SENSITIVE: Grants = { terms: g(), privacy: g(), signal_risk_disclosure: g() };
-/** 风险揭示书 MAJOR 版本已更新、需要重新同意 */
-const OLD_SIGNAL: Grants = { ...CONSENTED, signal_risk_disclosure: g('0.9.0') };
-const DEMO_ANSWERS = [
-  { q_id: 'demo_r1_loss', choice: 'C' }, { q_id: 'demo_r2_drop', choice: 'C' }, { q_id: 'demo_e1_years', choice: 'C' },
-  { q_id: 'demo_t1_time', choice: 'B' }, { q_id: 'demo_k4_understand', choice: 'B' },
-];
-const assessed = (n: number, at: string): RiskAssessment[] => [scoreAssessment(uid(n), DEMO_ANSWERS, at)];
-const RISK = () => assessed(940, '2026-10-01T09:05:00+08:00');
 const u = (n: number, username: string, display_name: string, status: AccountStatus, extra: Partial<MockUser> = {}): MockUser => ({
   id: uid(n), username, display_name, role: 'user', status, apply_note: null, created_at: '2026-10-20T20:15:00+08:00',
   reviewed_at: status === 'pending' ? null : '2026-10-21T09:00:00+08:00', review_reason: null, register_ip_region: '浙江（示例）',
-  same_ip_registrations: 1, grants: {}, assessments: [], last_login_at: null, ...extra,
+  same_ip_registrations: 1, last_login_at: null, ...extra,
 });
 
 function initialUsers(): MockUser[] {
   return [
-    u(2, 'demo_user', '示例用户', 'approved', { grants: CONSENTED, assessments: RISK(), created_at: '2026-09-28T10:00:00+08:00' }),
-    u(3, 'admin', '管理员（示例）', 'approved', { role: 'admin', grants: CONSENTED, assessments: RISK(), created_at: '2026-09-01T10:00:00+08:00' }),
+    u(2, 'demo_user', '示例用户', 'approved', { created_at: '2026-09-28T10:00:00+08:00' }),
+    u(3, 'admin', '管理员（示例）', 'approved', { role: 'admin', created_at: '2026-09-01T10:00:00+08:00' }),
     u(4, 'new_user', '新用户（示例）', 'approved', { created_at: '2026-10-30T10:00:00+08:00' }),
     u(5, 'pending_user', '待审核用户（示例）', 'pending', { apply_note: '同事推荐，想用来整理交割单（示例）', created_at: '2026-11-01T21:40:00+08:00' }),
     u(6, 'pending_two', '申请人乙（示例）', 'pending', { apply_note: null, register_ip_region: '广东（示例）', same_ip_registrations: 3, created_at: '2026-11-01T22:05:00+08:00' }),
     u(7, 'rejected_user', '已驳回用户（示例）', 'rejected', { review_reason: '申请说明不完整，请补充用途后重新提交（示例）' }),
     u(8, 'disabled_user', '已停用用户（示例）', 'disabled', { review_reason: '账号长期未使用，已停用（示例）' }),
     u(9, 'locked_user', '锁定用户（示例）', 'approved', { locked: true }),
-    // 已开通但未单独同意个人敏感信息处理：建账户 / 导入 / 手工录入会收到 403 CONSENT_REQUIRED（契约 #26）
-    u(12, 'no_sensitive', '未单独同意用户（示例）', 'approved', { grants: NO_SENSITIVE, assessments: RISK() }),
-    // 新手：短线、日内做T 封顶（契约 #23）
-    u(13, 'novice_user', '新手用户（示例）', 'approved', { grants: CONSENTED, assessments: RISK() }),
-    // 测评将到期（≤30 天）/ 已过宽限期 / 风险揭示书需重新同意（v0.2.4 #5、#6）
-    u(14, 'expiring_user', '测评将到期用户（示例）', 'approved', { grants: CONSENTED, assessments: assessed(941, '2025-11-20T09:00:00+08:00') }),
-    u(15, 'expired_user', '测评已过期用户（示例）', 'approved', { grants: CONSENTED, assessments: assessed(942, '2025-09-01T09:00:00+08:00') }),
-    u(16, 'reconsent_user', '需重新同意用户（示例）', 'approved', { grants: OLD_SIGNAL, assessments: RISK() }),
+    // 自报经验为新手：短线、日内做T 只出提示（v0.2.5 #2，SH0C / IT0C 进 hints，不封顶）
+    u(13, 'novice_user', '新手用户（示例）', 'approved'),
   ];
 }
 
 const DEMO_PROFILE: Profile = {
   version_no: 2, horizon_pref: ['swing', 'long'], effort: 'medium', risk_tolerance: 3, experience: 'intermediate', max_single_position_pct: '20',
-  assessment_id: uid(940), questionnaire_version: '1.0.0',
 };
 
 export const SECOND_ACCOUNT_ID = uid(11);
@@ -322,9 +297,6 @@ export const MOCK_SAME_IP_THRESHOLD = 3;
 export interface SessionState {
   currentUserId: string | null;
   registrationMode: 'closed' | 'invite' | 'open';
-  docVersions: DocVersions;
-  /** 风险测评题库是否已发布（未发布时 GET 题库返回 404） */
-  questionnairePublished: boolean;
   users: MockUser[];
   profiles: Map<string, Profile>;
   accounts: BrokerAccount[];
@@ -369,17 +341,18 @@ function initialBatches(): MockBatch[] {
 }
 
 export const state: SessionState = {
-  currentUserId: uid(2), registrationMode: 'invite', docVersions: { ...INITIAL_DOC_VERSIONS }, questionnairePublished: true, users: [], profiles: new Map(), accounts: [], trades: [], batches: [], reconciled: new Set(), tradeIdem: new Map(),
+  currentUserId: uid(2), registrationMode: 'invite', users: [], profiles: new Map(), accounts: [], trades: [], batches: [], reconciled: new Set(), tradeIdem: new Map(),
 };
 
 export function resetSession() {
   findingSeq = 0;
   state.currentUserId = uid(2);
   state.registrationMode = 'invite';
-  state.docVersions = { ...INITIAL_DOC_VERSIONS };
-  state.questionnairePublished = true;
   state.users = initialUsers();
-  state.profiles = new Map([[uid(2), { ...DEMO_PROFILE }], [uid(3), { ...DEMO_PROFILE, version_no: 1 }]]);
+  state.profiles = new Map([
+    [uid(2), { ...DEMO_PROFILE }], [uid(3), { ...DEMO_PROFILE, version_no: 1 }],
+    [uid(13), { ...DEMO_PROFILE, version_no: 1, horizon_pref: ['short'], experience: 'novice', effort: 'medium', risk_tolerance: 3 }],
+  ]);
   state.accounts = initialAccounts();
   state.trades = initialTrades();
   state.batches = initialBatches();
@@ -391,7 +364,7 @@ resetSession();
 export const currentUser = (): MockUser | null => state.users.find((x) => x.id === state.currentUserId) ?? null;
 export const toMe = (x: MockUser): Me => ({
   id: x.id, username: x.username, display_name: x.display_name, role: x.role, status: x.status,
-  entitlements: { 'watchlist.per_user_cap': 50 }, consents: consentStates(x.grants, state.docVersions), risk_assessment: assessmentSummary(x.assessments, NOW),
+  entitlements: { 'watchlist.per_user_cap': 50 },
 });
 export const toAdminUser = (x: MockUser): AdminUser => ({
   id: x.id, username: x.username, display_name: x.display_name, role: x.role, status: x.status, apply_note: x.apply_note, created_at: x.created_at,
@@ -405,21 +378,6 @@ export function mockLoginAs(username: string | null) {
 export function setRegistrationMode(m: SessionState['registrationMode']) {
   state.registrationMode = m;
 }
-export function setQuestionnairePublished(v: boolean) {
-  state.questionnairePublished = v;
-}
-export function setDocVersion(key: keyof DocVersions, version: string) {
-  state.docVersions = { ...state.docVersions, [key]: version };
-}
-/** §1.3 合规门槛的缺项：`consent_key` 或 "risk_assessment"（v0.2.4 #8） */
-export function missingCompliance(x: MockUser): string[] {
-  const me = toMe(x);
-  return [
-    ...(me.consents.signal_risk_disclosure.needs_reconsent ? ['signal_risk_disclosure'] : []),
-    ...(!me.risk_assessment || !ASSESSMENT_OK.has(me.risk_assessment.status) ? ['risk_assessment'] : []),
-  ];
-}
-
 // ---------------- 对账（示例） ----------------
 export function reconciliationFor(accountId: string): Reconciliation {
   if (!state.reconciled.has(accountId)) return { status: 'not_imported', as_of: null, items: [] };

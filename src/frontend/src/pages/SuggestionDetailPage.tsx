@@ -8,6 +8,7 @@ import type { DimensionMatrixRow, Evidence, StrategyConclusion, Suggestion } fro
 import { DataGrid, type DataColumn } from '../components/DataGrid';
 import { ActionBadge, ConfidenceTag, ConsensusBadge, DataStatusTag, ErrorBox, Loading } from '../components/common';
 import { EvidenceChips } from '../components/EvidenceChips';
+import { CardDisclaimer } from '../components/RiskDisclosure';
 import {
   ACTION_SHORT, CHECK_ON, DIMENSION, EPISTEMIC, EVAL_STATE, EXECUTABILITY, GAP_REASON, HORIZON, LIFECYCLE, ORIGIN, REASON_CODE,
   RELEASE_KIND, RISK_CONTROL, RISK_LEVEL, SIGNAL_STATE, VIEW,
@@ -84,6 +85,12 @@ function HorizonPanel({ sg }: { sg: Suggestion }) {
             <div key={`cap-${i}`} className="hz-missing" data-testid={`cap-${c.horizon}-${c.rule_id ?? "missing"}`}>
               {HORIZON[c.horizon]} 封顶 {c.cap}：{capExplanation(c)}
               {c.kind === 'requires' && c.rule_id ? <span className="mono muted">（{c.rule_id}）</span> : null}
+            </div>
+          ))}
+          {/* v0.2.5 #2/#3：画像类规则只提示，不影响分数与 suitable */}
+          {(a.hints ?? []).map((h, i) => (
+            <div key={`hint-${i}`} className="hz-hint" data-testid={`hint-${h.horizon}-${h.rule_id}`}>
+              {HORIZON[h.horizon]} 提示：{h.text}<span className="mono muted">（{h.rule_id}）</span>
             </div>
           ))}
           {a.inputs_missing.length ? (
@@ -233,6 +240,7 @@ export function SuggestionDetailPage() {
       <section className="panel" style={{ height: Math.min(12, sg.evidence.length) * 28 + 34 }}>
         <DataGrid<Evidence> testId="evidence" rows={sg.evidence} columns={evidenceColumns} getRowId={(e) => e.id} />
       </section>
+      <CardDisclaimer />
     </div>
   );
 }

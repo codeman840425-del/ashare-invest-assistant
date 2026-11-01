@@ -202,9 +202,8 @@ describe('Mock 业务一致性', () => {
   it('v0.2.3：/horizon-assessments 字段、四周期分数非空、每周期 2–4 条理由、证据可解析、缺数据封顶', () => {
     const line = CONTRACT.split('\n').find((l) => l.includes('`/horizon-assessments?security_code=`'))!;
     const shape = line.slice(line.indexOf('周期分类结果'));
-    const HZ_KEYS = ['suitable', 'scores', 'reasons', 'inputs_missing', 'caps', 'classifier_version', 'snapshot_id', 'evidence'];
-    // v0.2.5 新增的 hints（HorizonHint）随 T-F05（画像规则改为提示）一起接入；T-F05 提交时并入 HZ_KEYS
-    expect(sorted(topKeys(shape).filter((k) => k !== 'hints'))).toEqual(sorted(HZ_KEYS));
+    const HZ_KEYS = ['suitable', 'scores', 'reasons', 'inputs_missing', 'caps', 'hints', 'classifier_version', 'snapshot_id', 'evidence'];
+    expect(sorted(topKeys(shape))).toEqual(sorted(HZ_KEYS));
     expect(sorted(topKeys(shape.slice(shape.indexOf('scores:') + 7)))).toEqual(sorted(ENUMS.horizon));
     expect(Object.keys(HORIZON_ASSESSMENTS)).toHaveLength(SUGGESTIONS.length);
     let capped = 0;

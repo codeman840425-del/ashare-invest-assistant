@@ -54,9 +54,9 @@ describe('M2：错误码类型与全局处理', () => {
     const sec = CONTRACT.slice(CONTRACT.indexOf('## 4. 错误码表'), CONTRACT.indexOf('### 4.1'));
     const rows = [...sec.matchAll(/^\| (\d{3}) \| `([A-Z][A-Z0-9_]*)` \|/gm)].map((m) => [m[2], Number(m[1])]);
     expect(rows.length).toBeGreaterThan(50);
-    // v0.2.5 作废的两个码由 T-F05（删除同意 / 测评 / fit_ack）随界面一起删除；T-F05 提交时去掉这个例外
-    const T_F05_PENDING = ['CONSENT_REQUIRED', 'STRATEGY_FIT_ACK_REQUIRED'];
-    expect(Object.entries(ERROR_CODES).filter(([c]) => !T_F05_PENDING.includes(c))).toEqual(rows);
+    expect(Object.entries(ERROR_CODES)).toEqual(rows);
+    expect(isErrorCode('CONSENT_REQUIRED')).toBe(false); // v0.2.5 删除
+    expect(isErrorCode('STRATEGY_FIT_ACK_REQUIRED')).toBe(false);
     expect(isErrorCode('IMPORT_ROW_COLUMN_MISMATCH')).toBe(false); // §4.1 提示码不在 error_codes
   });
 
@@ -71,20 +71,14 @@ describe('M2：错误码类型与全局处理', () => {
     expect(errorText(err(413, 'PAYLOAD_TOO_LARGE', { max_bytes: 27262976 }))).toBe('文件过大，超过单次上传上限 26 MB');
     expect(errorText(err(503, 'FRESH_DATA_REQUIRED', { retry_after_s: 8 }))).toBe('行情数据暂未更新，请 8 秒后再试');
     expect(errorText(err(503, 'FRESH_DATA_REQUIRED'))).toBe('行情数据暂未更新，请稍后再试');
-    expect(errorText(err(403, 'CONSENT_REQUIRED', { required: ['sensitive_financial_info'] }))).toContain('个人敏感信息');
-    expect(errorText(err(403, 'CONSENT_REQUIRED'))).toContain('风险揭示');
     expect(errorText(new ApiError(502, 'HTTP_ERROR', 'HTTP 502', null, null))).toContain('服务暂时不可用');
     for (const k of Object.keys(ERROR_TEXT)) expect(isErrorCode(k) || ['HTTP_ERROR', 'NETWORK_ERROR', 'NOT_MODIFIED'].includes(k)).toBe(true);
   });
 
-  it('全局动作：401 → login；CONSENT_REQUIRED → consent；405 → log', () => {
+  it('全局动作：401 → login；405 → log；其他 403 → none（v0.2.5 无 consent 动作）', () => {
     expect(globalErrorAction(err(401, 'AUTH_REQUIRED'))).toBe('login');
     expect(globalErrorAction(err(401, 'INVALID_CREDENTIALS'))).toBe('none');
-    expect(globalErrorAction(err(403, 'CONSENT_REQUIRED', { required: ['signal_risk_disclosure'] }))).toBe('consent');
-    expect(globalErrorAction(err(403, 'CONSENT_REQUIRED'))).toBe('consent');
-    // 只缺个人敏感信息单独同意：不跳开通引导（评审 s2）
-    expect(globalErrorAction(err(403, 'CONSENT_REQUIRED', { required: ['sensitive_financial_info'] }))).toBe('none');
-    expect(globalErrorAction(err(403, 'CONSENT_REQUIRED', { required: ['sensitive_financial_info', 'risk_assessment'] }))).toBe('consent');
+    expect(globalErrorAction(err(403, 'FORBIDDEN'))).toBe('none');
     expect(globalErrorAction(err(405, 'METHOD_NOT_ALLOWED', { allowed: ['GET'] }))).toBe('log');
     expect(globalErrorAction(new Error('x'))).toBe('none');
   });

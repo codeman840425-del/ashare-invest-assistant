@@ -71,7 +71,6 @@ export const REASON_CODE: Record<ReasonCode, string> = {
   STRATEGY_BUDGET_EXHAUSTED: '策略预算用尽', SECTOR_EXPOSURE_EXCEEDED: '行业暴露超限', REGIME_MISMATCH: '大盘环境不符',
   SAME_DIRECTION_PLAN_EXISTS: '已有同向计划', CONFLICTS_CONFIRMED_PLAN: '与已确认计划相反', BLOCKLISTED: '在禁投名单',
   COOLING_OFF: '冷静期', LOSS_STREAK_PAUSE: '连亏暂停', STRATEGY_CONFLICT: '策略方向冲突', USER_MUTED: '已屏蔽',
-  PROFILE_OR_CONSENT_MISSING: '画像或同意未完成',
 };
 export const CHECK_ON: Record<CheckOn, string> = {
   tick: '盘中每轮', daily_close: '每日收盘', schedule: '到点', holding_change: '持仓变化', cash_update: '资金更新',

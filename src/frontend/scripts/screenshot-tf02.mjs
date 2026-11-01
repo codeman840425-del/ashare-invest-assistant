@@ -54,19 +54,10 @@ try {
   await page.waitForTimeout(400);
   await shot('01-login.png', '登录页（深色）');
 
-  // 2) 开通引导：未签署用户登录 → /onboarding
+  // 2) v0.2.5（T-F05）：开通引导页已删除；没有画像的新用户登录后直接回到 next（原 02/03 截图不再生成）
   await login('new_user', '/portfolio');
-  await page.waitForSelector('[data-testid=onboarding-consents]');
-  for (const cb of await page.locator('[data-testid=onboarding-consents] input[type=checkbox]').all()) await cb.check();
-  await page.waitForTimeout(300);
-  await shot('02-onboarding-consents.png', '开通引导：阅读并同意');
-  await page.getByRole('button', { name: /同意并继续/ }).click();
-  await page.waitForSelector('[data-testid=onboarding-risk]');
-  for (const g of await page.locator('[data-testid=onboarding-risk] .ant-radio-group').all()) await g.locator('input[type=radio]').nth(1).check();
-  await page.getByRole('button', { name: /提交测评/ }).click();
-  await page.waitForSelector('[data-testid=risk-level]');
-  result.checks.riskLevel = await page.locator('[data-testid=risk-level]').innerText();
-  await shot('03-onboarding-done.png', '开通引导：测评完成');
+  await page.waitForURL(/\/portfolio/);
+  result.checks.newUserLandsOnNext = new URL(page.url()).pathname;
 
   // 3) 用户审核（管理员）
   await login('admin', '/admin/users');

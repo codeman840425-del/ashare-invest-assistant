@@ -44,8 +44,11 @@ describe('生产包不含示例数据与 MSW（源码层）', () => {
     for (const m of main.matchAll(/import\s*\(\s*['"]([^'"]+)['"]/g)) expect(m.index).toBeGreaterThan(guard);
   });
 
-  it('示例题库只在 mocks/compliance.ts，业务代码里没有示例题号', () => {
-    const hits = app.filter((f) => /demo_[a-z]\d?_\w+|demo-sha256/.test(readFileSync(f, 'utf8'))).map((f) => relative(SRC, f));
+  it('v0.2.5：同意流程与风险测评的残留（路由、题库、门槛）在业务代码和 mocks 里都不存在', () => {
+    const hits = files
+      .filter((f) => !/\.test\.tsx?$/.test(f))
+      .filter((f) => /onboarding|CONSENT_REQUIRED|risk-assessment|consent-docs|demo_[a-z]\d?_\w+|demo-sha256/.test(readFileSync(f, 'utf8')))
+      .map((f) => relative(SRC, f));
     expect(hits).toEqual([]);
   });
 });

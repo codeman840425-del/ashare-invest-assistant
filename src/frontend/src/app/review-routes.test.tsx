@@ -1,4 +1,4 @@
-/** T-F01 评审 M2（全局 401/CONSENT 跳转）与 M4（管理后台只对 admin 可见） */
+/** T-F01 评审 M2（全局 401 跳转；v0.2.5 起无 CONSENT 跳转）与 M4（管理后台只对 admin 可见） */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { http, HttpResponse } from 'msw';
@@ -30,11 +30,11 @@ describe('M2 全局错误处理', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/login'));
     expect(new URLSearchParams(router.state.location.search).get('next')).toBe('/terminal?scope=all');
   });
-  it('403 CONSENT_REQUIRED → 跳转 /onboarding?next=', async () => {
-    server.use(http.get('/api/v1/suggestions', err(403, 'CONSENT_REQUIRED')));
+  it('v0.2.5：403 不触发跳转（不再有开通引导）', async () => {
+    server.use(http.get('/api/v1/suggestions', err(403, 'FORBIDDEN')));
     const router = renderAt('/suggestions');
-    await waitFor(() => expect(router.state.location.pathname).toBe('/onboarding'));
-    expect(new URLSearchParams(router.state.location.search).get('next')).toBe('/suggestions');
+    await waitFor(() => expect(document.querySelector('[data-code="FORBIDDEN"]')).not.toBeNull());
+    expect(router.state.location.pathname).toBe('/suggestions');
   });
   it('ErrorBox 按码显示中文文案并带 data-code', async () => {
     server.use(http.get('/api/v1/suggestions', err(503, 'FRESH_DATA_REQUIRED')));

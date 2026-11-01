@@ -1,20 +1,19 @@
 /**
- * T-F02 / T-F02a / T-F04 的查询与变更（TanStack Query）。路径与请求体对齐契约 v0.2.4 §7.1 / §7.2 / §7.9。
+ * T-F02 / T-F02a / T-F04 的查询与变更（TanStack Query）。路径与请求体对齐契约 v0.2.5 §7.1 / §7.2 / §7.9。
  */
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, apiGet, clearEtagCache, apiPatch, apiPost, apiPut, apiUpload, buildUrl, fetchUrl, setCsrfToken } from './client';
 import type {
-  AdminUser, AdminUserPatch, BrokerAccount, BrokerAccountCreate, ConsentRequest, ConsentResponse, ImportBatch, ImportBatchSummary, ImportConfirmRequest, ImportConfirmResponse,
+  AdminUser, AdminUserPatch, BrokerAccount, BrokerAccountCreate, ImportBatch, ImportBatchSummary, ImportConfirmRequest, ImportConfirmResponse,
   ImportFinding, ImportKind, ImportOptions, ImportRow, ImportUploadResponse, LoginRequest, LoginResponse, Profile, ProfileInput, Reconciliation,
-  RegisterRequest, RegisterResponse, ResolveFindingRequest, RiskAssessmentRequest, RiskAssessment, RiskQuestionnaire, ConsentDoc, Trade, TradeCreate,
+  RegisterRequest, RegisterResponse, ResolveFindingRequest, Trade, TradeCreate,
 } from './accountTypes';
-import type { AccountStatus, ConsentKey, ConsentPresentation } from './enums';
+import type { AccountStatus } from './enums';
 import type { Paged, RegistrationMeta } from './types';
 import { qk } from './queries';
 
 export const ak = {
   registration: ['meta', 'registration'] as const,
-  questionnaire: ['me', 'risk-questionnaire'] as const,
   profile: ['me', 'profile'] as const,
   adminUsers: (status: string, q: string) => ['admin', 'users', status, q] as const,
   accounts: ['accounts'] as const,
@@ -23,28 +22,11 @@ export const ak = {
   batch: (id: string) => ['import', id] as const,
   rows: (id: string, filter: string) => ['import', id, 'rows', filter] as const,
   reconciliation: (accountId: string) => ['reconciliation', accountId] as const,
-  consentDocs: ['meta', 'consent-docs'] as const,
 };
 
 // ---------------- §7.1 ----------------
 export const useRegistrationMode = () =>
   useQuery({ queryKey: ak.registration, queryFn: ({ signal }) => apiGet<RegistrationMeta>('/meta/registration', undefined, signal), staleTime: 60_000 });
-
-/** GET /meta/consent-docs（v0.2.4 #3）：各文书当前版本、哈希与正文链接；不需登录，服务端缓存 300 秒 */
-export const useConsentDocs = () =>
-  useQuery({
-    queryKey: ak.consentDocs,
-    queryFn: ({ signal }) => apiGet<{ items: ConsentDoc[] }>('/meta/consent-docs', undefined, signal),
-    staleTime: 300_000,
-  });
-/**
- * POST /me/consents 请求体（v0.2.4 #4）：version、content_sha256 取自 /meta/consent-docs 的当前值；
- * 文书清单里没有该项时按“未定稿”提交（version="unversioned"、哈希 null）。
- */
-export function consentBody(docs: ConsentDoc[] | undefined, key: ConsentKey, ui_surface: string, presentation: ConsentPresentation): ConsentRequest {
-  const d = docs?.find((x) => x.key === key);
-  return { key, version: d?.version ?? 'unversioned', content_sha256: d?.content_sha256 ?? null, action: 'grant', ui_surface, presentation };
-}
 
 export function useLogin() {
   const qc = useQueryClient();
@@ -81,35 +63,6 @@ export const useChangePassword = () =>
     onSuccess: () => setCsrfToken(null),
   });
 export const useRegister = () => useMutation({ mutationFn: (b: RegisterRequest) => apiPost<RegisterResponse>('/auth/register', b) });
-
-export function useConsent() {
-  const qc = useQueryClient();
-  return useMutation({ mutationFn: (b: ConsentRequest) => apiPost<ConsentResponse>('/me/consents', b), onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }) });
-}
-/**
- * 风险测评问卷（评审 P1、v0.2.4 #6）：只从接口取，不在前端写死题目。
- * 404（没有已发布问卷）时返回 null，页面显示“尚未发布”。
- */
-export const useRiskQuestionnaire = (enabled = true) =>
-  useQuery({
-    queryKey: ak.questionnaire,
-    enabled,
-    queryFn: async ({ signal }) => {
-      try {
-        return await apiGet<RiskQuestionnaire>('/me/risk-assessment/questionnaire', undefined, signal);
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 404) return null;
-        throw e;
-      }
-    },
-  });
-export function useRiskAssessment() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (b: RiskAssessmentRequest) => apiPost<RiskAssessment>('/me/risk-assessment', b),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }),
-  });
-}
 
 /** 还没有画像时后端返回 404，这里转为 null（评审裁定 T-F02 #4 已确认） */
 export const useProfile = () =>

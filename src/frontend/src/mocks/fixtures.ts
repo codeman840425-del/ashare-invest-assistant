@@ -707,16 +707,6 @@ export const DAILY_REPORT_LIST: DailyReportListItem[] = DAILY_REPORTS.map((d) =>
 export const ME: Me = {
   id: uid(2), username: 'demo_user', display_name: '示例用户', role: 'user', status: 'approved',
   entitlements: { 'watchlist.per_user_cap': 50 },
-  consents: {
-    terms: { version: '1.0.0', accepted_at: '2026-10-01T09:00:00+08:00', current_version: '1.0.0', needs_reconsent: false },
-    privacy: { version: '1.0.0', accepted_at: '2026-10-01T09:00:00+08:00', current_version: '1.0.0', needs_reconsent: false },
-    signal_risk_disclosure: { version: '1.0.0', accepted_at: '2026-10-01T09:00:00+08:00', current_version: '1.0.0', needs_reconsent: false },
-    sensitive_financial_info: { version: '1.0.0', accepted_at: '2026-10-01T09:00:00+08:00', current_version: '1.0.0', needs_reconsent: false },
-  },
-  risk_assessment: {
-    assessment_id: uid(940), questionnaire_version: '1.0.0', risk_tolerance: 3, submitted_at: '2026-10-01T09:05:00+08:00',
-    expires_at: '2027-10-01T09:05:00+08:00', status: 'valid', needs_retest: false,
-  },
 };
 export const HEALTH_READY: HealthReady = { status: 'ok', db: 'ok', redis: 'ok', ingest: 'ok', checked_at: NOW, version: 'mock-0.2' };
 
@@ -746,22 +736,22 @@ SUGGESTIONS.forEach((sg, i) => {
   const used = new Set(reasons.flatMap((x) => x.evidence_ids));
   const caps: HorizonCap[] = missing.length ? [{ horizon: 'long', cap: 59, kind: 'data_missing', rule_id: null, inputs_missing: [...missing] }] : [];
   HORIZON_ASSESSMENTS[sg.security_code] = {
-    suitable: sg.horizon_assessment.suitable, scores, reasons, inputs_missing: [...new Set(missing)].sort(), caps, classifier_version: '1.1.0',
+    suitable: sg.horizon_assessment.suitable, scores, reasons, inputs_missing: [...new Set(missing)].sort(), caps, hints: [], classifier_version: '1.2.0',
     snapshot_id: sg.snapshot_id, evidence: sg.evidence.filter((e) => used.has(e.id)),
   };
 });
 
 /**
- * 新手（或画像未填写）用户看到的周期分类（契约 v0.2.3 #23 / 问题 37）：short 与 intraday_t 分数封顶 59，
- * caps 含 `{kind:"requires", rule_id:"SH0C"|"IT0C"}`。SH0C / IT0C 是分类器规则 ID，不是 reason_code。
+ * 自报经验为新手的用户看到的周期分类（契约 v0.2.5 #2，classifier 1.2.0）：SH0C / IT0C 为 mode: hint，
+ * 只写入 hints[]，不改分数、不进 caps[]、不影响 suitable。画像未填写时不提示（见 handlers：只对 novice_user 生效）。
  */
 export function noviceAssessment(a: HorizonAssessment): HorizonAssessment {
-  const scores = { ...a.scores, short: Math.min(a.scores.short, 59), intraday_t: Math.min(a.scores.intraday_t, 59) };
-  const caps: HorizonCap[] = [
-    ...a.caps,
-    { horizon: 'short', cap: 59, kind: 'requires', rule_id: 'SH0C', inputs_missing: [] },
-    { horizon: 'intraday_t', cap: 59, kind: 'requires', rule_id: 'IT0C', inputs_missing: [] },
-  ];
-  const suitable = a.suitable.filter((h) => scores[h] >= 60);
-  return { ...a, scores, caps, suitable: suitable.length ? suitable : a.suitable.filter((h) => h !== 'short' && h !== 'intraday_t') };
+  return {
+    ...a,
+    hints: [
+      ...a.hints,
+      { horizon: 'short', rule_id: 'SH0C', text: '短线需要盯盘与止损纪律，您自报的经验为新手' },
+      { horizon: 'intraday_t', rule_id: 'IT0C', text: '做T 需要盘中决断与纪律，您自报的经验为新手' },
+    ],
+  };
 }

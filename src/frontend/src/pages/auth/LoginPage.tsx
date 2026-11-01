@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../../api/client';
 import { errorText } from '../../api/errorPolicy';
 import { useLogin, useRegistrationMode } from '../../api/accountQueries';
-import { fmtDuration, needsOnboarding, safeNext } from '../../lib/auth';
+import { fmtDuration, safeNext } from '../../lib/auth';
 import { AuthLayout } from './AuthLayout';
 
 interface FormValues { username: string; password: string }
@@ -20,9 +20,8 @@ export function LoginPage() {
   const onFinish = (v: FormValues) => {
     setErr(null);
     login.mutate({ ...v, username: v.username.trim().toLowerCase() }, {
-      onSuccess: (r) => {
-        const target = safeNext(next);
-        navigate(needsOnboarding(r.user) ? `/onboarding?next=${encodeURIComponent(target)}` : target, { replace: true });
+      onSuccess: () => {
+        navigate(safeNext(next), { replace: true });
       },
       onError: (e) => {
         if (e instanceof ApiError && e.code === 'ACCOUNT_NOT_APPROVED') {

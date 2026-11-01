@@ -98,33 +98,7 @@ audit_logs = Table(
     comment="全站审计；按月分区；行不可改删（保留期通过 DROP 分区实现）",
 )
 
-consents = Table(
-    "consents",
-    metadata,
-    pk_uuid(),
-    user_fk(),
-    txt("kind", nullable=False),
-    txt("doc_version", nullable=False),
-    boolean("granted", nullable=False),
-    created_at("at"),
-    txt("ip_hash"),
-    # 契约 §3 没有 consent 枚举：plan §3.3 的 4 种 + 契约 §7.1 注册/同意里的
-    # signal_risk_disclosure、terms
-    one_of(
-        "kind",
-        [
-            "privacy_policy",
-            "sensitive_financial_info",
-            "risk_disclosure",
-            "email_notification",
-            "signal_risk_disclosure",
-            # 契约 §7.1 POST /me/consents 的 key=terms（用户协议），plan §3.3 未列；
-            # 迁移 0004（T-B03）
-            "terms",
-        ],
-    ),
-    schema=APP,
-)
+# consents：契约 v0.2.5（T-A06）作废，迁移 0005 删除。
 
 user_profiles = Table(
     "user_profiles",

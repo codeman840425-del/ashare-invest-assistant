@@ -1,17 +1,20 @@
-"""``/me``、``/me/profile``、``/me/consents``、``/me/risk-assessment``（契约 §7.1；T-B03）。"""
+"""``/me``、``/me/profile``（契约 §7.1；T-B03）。
+
+契约 v0.2.5（T-A06）：删除 ``/me/consents``、``/me/risk-assessment``，``Me`` 不再有 ``consents``、
+``risk_assessment``；画像的 ``effort``、``risk_tolerance``、``experience`` 为用户自报、可为 null。
+"""
 
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import Connection, Row
 from sqlalchemy.exc import IntegrityError
 
-from app.auth import risk_assessment, service
-from app.auth.consents import API_TO_KIND
+from app.auth import service
 from app.auth.deps import AuthDep, EngineDep, SettingsDep, client_ip, ip_hash
 from app.common.errors import AppError, ErrorCode
 from app.schemas.enums import Horizon, ProfileEffort, ProfileExperience
@@ -29,9 +32,10 @@ class _Body(BaseModel):
 
 class ProfileIn(_Body):
     horizon_pref: Annotated[list[Horizon], Field(min_length=1, max_length=len(Horizon))]
-    effort: ProfileEffort
-    risk_tolerance: Annotated[int, Field(ge=1, le=5, strict=True)]
-    experience: ProfileExperience
+    #: 用户自报、选填：null（或不传）= 未填写（分类器不封顶、不提示）
+    effort: ProfileEffort | None = None
+    risk_tolerance: Annotated[int, Field(ge=1, le=5, strict=True)] | None = None
+    experience: ProfileExperience | None = None
     max_single_position_pct: Annotated[
         Decimal, Field(ge=POSITION_PCT_MIN, le=POSITION_PCT_MAX, max_digits=5, decimal_places=2)
     ]
@@ -52,20 +56,6 @@ class ProfileIn(_Body):
         return v
 
 
-class ConsentIn(_Body):
-    key: Literal["signal_risk_disclosure", "privacy", "terms"]
-    version: Annotated[str, Field(min_length=1, max_length=64)]
-
-
-class Answer(_Body):
-    q_id: Annotated[str, Field(min_length=1, max_length=64)]
-    choice: Annotated[str, Field(min_length=1, max_length=64)]
-
-
-class RiskAssessmentIn(_Body):
-    answers: Annotated[list[Answer], Field(max_length=200)]
-
-
 def build_me(conn: Connection, user: Row[Any]) -> dict[str, Any]:
     return {
         "id": str(user.id),
@@ -75,8 +65,6 @@ def build_me(conn: Connection, user: Row[Any]) -> dict[str, Any]:
         "status": user.status,
         # 权益（entitlements）归 T-B28；此前恒为空对象
         "entitlements": {},
-        "consents": service.consents_view(conn, user.id),
-        "risk_assessment": service.risk_assessment_view(conn, user.id),
     }
 
 
@@ -105,17 +93,14 @@ def put_profile(
 ) -> dict[str, Any]:
     changes: dict[str, Any] = {
         "horizon_pref": [h.value for h in body.horizon_pref],
-        "effort": body.effort.value,
+        "effort": None if body.effort is None else body.effort.value,
         "risk_tolerance": body.risk_tolerance,
-        "experience": body.experience.value,
+        "experience": None if body.experience is None else body.experience.value,
         "max_single_position_pct": body.max_single_position_pct,
     }
     try:
         with engine.begin() as conn:
-            prev = service.latest_profile(conn, auth.user_id)
-            # confirmed_at = 测评时间：改了风险等级就不再算“已测评”，需重新测评
-            if prev is None or prev.risk_tolerance != body.risk_tolerance:
-                changes["confirmed_at"] = None
+            # v0.2.5：不再有测评，confirmed_at 不由本接口维护（沿用上一版）
             row = service.insert_profile_version(conn, auth.user_id, changes)
             service.audit(
                 conn,
@@ -130,63 +115,3 @@ def put_profile(
     except IntegrityError as exc:
         raise AppError(ErrorCode.VERSION_CONFLICT) from exc
     return service.profile_view(row)
-
-
-@router.post("/me/consents", status_code=201)
-def post_consent(
-    body: ConsentIn, auth: AuthDep, request: Request, settings: SettingsDep, engine: EngineDep
-) -> dict[str, Any]:
-    ih = ip_hash(settings, client_ip(request, settings))
-    with engine.begin() as conn:
-        at = service.insert_consents(
-            conn, auth.user_id, [API_TO_KIND[body.key]], doc_version=body.version, ip_hash=ih
-        )
-        service.audit(
-            conn,
-            action="consent.granted",
-            actor_id=auth.user_id,
-            actor_role=auth.user.role,
-            target_type="consent",
-            target_id=body.key,
-            detail={"version": body.version},
-            ip_hash=ih,
-        )
-    return {"key": body.key, "version": body.version, "accepted_at": service.bj(at)}
-
-
-@router.post("/me/risk-assessment")
-def post_risk_assessment(
-    body: RiskAssessmentIn,
-    auth: AuthDep,
-    request: Request,
-    settings: SettingsDep,
-    engine: EngineDep,
-) -> dict[str, Any]:
-    questionnaire = risk_assessment.ACTIVE_QUESTIONNAIRE
-    level, issues = risk_assessment.score(questionnaire, [(a.q_id, a.choice) for a in body.answers])
-    if level is None or questionnaire is None:
-        raise _validation(issues)
-    try:
-        with engine.begin() as conn:
-            row = service.insert_profile_version(
-                conn,
-                auth.user_id,
-                {"risk_tolerance": level, "confirmed_at": service.now_utc()},
-            )
-            service.audit(
-                conn,
-                action="risk_assessment.submitted",
-                actor_id=auth.user_id,
-                actor_role=auth.user.role,
-                target_type="user_profile",
-                target_id=str(row.id),
-                detail={
-                    "questionnaire_version": questionnaire.version,
-                    "level": level,
-                    "version_no": int(row.version_no),
-                },
-                ip_hash=ip_hash(settings, client_ip(request, settings)),
-            )
-    except IntegrityError as exc:
-        raise AppError(ErrorCode.VERSION_CONFLICT) from exc
-    return {"level": level, "assessed_at": service.bj(row.confirmed_at)}

@@ -17,7 +17,6 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.me import build_me
 from app.auth import service
-from app.auth.consents import REGISTER_AGREEMENT_TO_KIND, REGISTER_DOC_VERSION
 from app.auth.deps import (
     AuthDep,
     EngineDep,
@@ -38,7 +37,7 @@ router = APIRouter(tags=["auth"])
 #: plan §3.6 / users.username CHECK：4–32 位小写字母、数字、下划线（契约写 3–32，取更严的库约束）
 USERNAME_RE = re.compile(r"^[a-z0-9_]{4,32}$")
 RESERVED_USERNAMES = frozenset({"admin", "root", "system"})
-#: 契约 v0.2.4 #2：display_name 1–32、apply_note ≤ 200（注册字段，与同意/测评无关）
+#: 契约 v0.2.4 #2：display_name 1–32、apply_note ≤ 200
 DISPLAY_NAME_MAX = 32
 APPLY_NOTE_MAX = 200
 
@@ -57,7 +56,9 @@ class RegisterIn(_Body):
     display_name: Annotated[str, Field(min_length=1, max_length=DISPLAY_NAME_MAX)]
     invite_code: Annotated[str | None, Field(max_length=128)] = None
     apply_note: Annotated[str | None, Field(max_length=APPLY_NOTE_MAX)] = None
-    agreements: Annotated[list[str], Field(max_length=16)]
+    #: 契约 v0.2.5（T-A06）：不做同意流程；旧客户端仍发 ``agreements`` 时忽略
+    #: （不校验、不报错、不记录）
+    agreements: Annotated[Any, Field(exclude=True)] = None
 
 
 class RegisterOut(BaseModel):
@@ -132,13 +133,6 @@ def register(
     display_name = body.display_name.strip()
     if not display_name:
         fields.append({"field": "display_name", "issue": "must not be blank"})
-    agreed = set(body.agreements)
-    unknown = sorted(agreed - set(REGISTER_AGREEMENT_TO_KIND))
-    missing = sorted(set(REGISTER_AGREEMENT_TO_KIND) - agreed)
-    if unknown:
-        fields.append({"field": "agreements", "issue": "unknown: " + ",".join(unknown)})
-    if missing:
-        fields.append({"field": "agreements", "issue": "required: " + ",".join(missing)})
     if fields:
         raise _validation(fields)
 
@@ -161,13 +155,6 @@ def register(
                 )
                 .returning(users.c.id, users.c.username, users.c.status)
             ).one()
-            service.insert_consents(
-                conn,
-                row.id,
-                [REGISTER_AGREEMENT_TO_KIND[a] for a in sorted(agreed)],
-                doc_version=REGISTER_DOC_VERSION,
-                ip_hash=ih,
-            )
             service.audit(
                 conn,
                 action="auth.register",

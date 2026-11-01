@@ -152,6 +152,15 @@ HORIZON_CAP_BAD_ITEM = (
     ' || !(@.inputs_missing.type() == "array")'
 )
 
+#: HorizonHint（契约 v0.2.5 §5.1）：{horizon, rule_id 非空字符串, text 非空字符串}
+HORIZON_HINT_BAD_ITEM = (
+    '@.type() != "object"'
+    ' || !(@.horizon.type() == "string")'
+    f" || !{jsonpath_one_of('@.horizon', Horizon)}"
+    ' || !(@.rule_id.type() == "string") || @.rule_id == ""'
+    ' || !(@.text.type() == "string") || @.text == ""'
+)
+
 symbol_horizon_assessments = Table(
     "symbol_horizon_assessments",
     metadata,
@@ -171,6 +180,8 @@ symbol_horizon_assessments = Table(
     jsonb("caps", nullable=False, server_default=text("'[]'::jsonb")),
     #: 理由引用的证据 Evidence[]（契约 v0.2.3；plan 未写 NOT NULL，可空；迁移 0003）
     jsonb("evidence"),
+    #: 画像类 mode: hint 规则的提示 HorizonHint[]（契约 v0.2.5 / T-A06；迁移 0005）
+    jsonb("hints", nullable=False, server_default=text("'[]'::jsonb")),
     created_at(),
     array_subset("suitable_horizons", Horizon),
     one_of("trigger", HorizonAssessmentTrigger),
@@ -181,6 +192,7 @@ symbol_horizon_assessments = Table(
         name="inputs_missing_keys",
     ),
     CheckConstraint(jsonb_array_items("caps", HORIZON_CAP_BAD_ITEM), name="caps_shape"),
+    CheckConstraint(jsonb_array_items("hints", HORIZON_HINT_BAD_ITEM), name="hints_shape"),
     CheckConstraint(
         jsonb_array_items("evidence", EVIDENCE_BAD_ITEM, nullable=True), name="evidence_shape"
     ),
@@ -452,7 +464,6 @@ strategy_instances = Table(
     jsonb("param_overrides"),
     uuid_col("derived_strategy_version_id", fk="app.strategy_versions.id"),
     jsonb("risk_settings_snapshot"),
-    jsonb("fit_ack"),
     money("budget_amount"),
     boolean("auto_downweight", nullable=False, server_default=text("true")),
     created_at(),

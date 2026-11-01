@@ -568,15 +568,25 @@ class ClassifierGate(_Cond):
 
 
 class ClassifierRequire(_Cond):
-    """周期前提：条件为假（或输入为 null，not_null 除外）时 ``else_score: 0`` 或 ``else_cap``。"""
+    """周期前提。
 
+    - ``mode: cap``（默认）：条件为假（或输入为 null，not_null 除外）时 ``else_score: 0`` 或
+      ``else_cap``，二者必须且只能给一个。
+    - ``mode: hint``（分类器 1.2.0，T-A06）：不得带 ``else_score``/``else_cap``；输入未填写时跳过，
+      不满足时只输出 ``hints[]``，不改分数、不进 ``caps[]``。
+    """
+
+    mode: Literal["cap", "hint"] = "cap"
     else_score: Literal[0] | None = None
     else_cap: Score | None = None
     reason: Annotated[str, Field(min_length=1)]
 
     @model_validator(mode="after")
     def _check(self) -> ClassifierRequire:
-        if (self.else_score is None) == (self.else_cap is None):
+        if self.mode == "hint":
+            if self.else_score is not None or self.else_cap is not None:
+                raise ValueError(f"前提 {self.id}：mode=hint 不得带 else_score/else_cap")
+        elif (self.else_score is None) == (self.else_cap is None):
             raise ValueError(f"前提 {self.id}：else_score 与 else_cap 必须且只能给一个")
         return self
 

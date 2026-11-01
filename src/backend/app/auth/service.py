@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Connection, Row, func, insert, select, update
 
-from app.auth.consents import KIND_TO_API
-from app.db.tables.users import account_reviews, audit_logs, consents, user_profiles, users
+from app.db.tables.users import account_reviews, audit_logs, user_profiles, users
 
 BEIJING = dt.timezone(dt.timedelta(hours=8), "Asia/Shanghai")
 
@@ -72,57 +71,6 @@ def audit(
     )
 
 
-def insert_consents(
-    conn: Connection,
-    user_id: uuid.UUID,
-    kinds: Sequence[str],
-    *,
-    doc_version: str,
-    ip_hash: str | None,
-) -> dt.datetime:
-    at = now_utc()
-    conn.execute(
-        insert(consents),
-        [
-            {
-                "user_id": user_id,
-                "kind": kind,
-                "doc_version": doc_version,
-                "granted": True,
-                "at": at,
-                "ip_hash": ip_hash,
-            }
-            for kind in kinds
-        ],
-    )
-    return at
-
-
-def consents_view(conn: Connection, user_id: uuid.UUID) -> dict[str, dict[str, str | None]]:
-    """每种 kind 取最新一行（``at`` 相同按 id 兜底），``granted`` 为真才输出。"""
-    ranked = (
-        select(
-            consents.c.kind,
-            consents.c.doc_version,
-            consents.c.granted,
-            consents.c.at,
-            func.row_number()
-            .over(
-                partition_by=consents.c.kind,
-                order_by=(consents.c.at.desc(), consents.c.id.desc()),
-            )
-            .label("rn"),
-        )
-        .where(consents.c.user_id == user_id)
-        .subquery()
-    )
-    rows = conn.execute(select(ranked).where(ranked.c.rn == 1, ranked.c.granted.is_(True))).all()
-    return {
-        KIND_TO_API.get(r.kind, r.kind): {"version": r.doc_version, "accepted_at": bj(r.at)}
-        for r in sorted(rows, key=lambda r: str(r.kind))
-    }
-
-
 def latest_profile(conn: Connection, user_id: uuid.UUID) -> Row[Any] | None:
     return conn.execute(
         select(user_profiles)
@@ -130,14 +78,6 @@ def latest_profile(conn: Connection, user_id: uuid.UUID) -> Row[Any] | None:
         .order_by(user_profiles.c.version_no.desc())
         .limit(1)
     ).first()
-
-
-def risk_assessment_view(conn: Connection, user_id: uuid.UUID) -> dict[str, Any] | None:
-    """最新一版画像的 ``risk_tolerance`` + ``confirmed_at``（测评时间）；未测评为 ``None``。"""
-    row = latest_profile(conn, user_id)
-    if row is None or row.confirmed_at is None or row.risk_tolerance is None:
-        return None
-    return {"level": int(row.risk_tolerance), "assessed_at": bj(row.confirmed_at)}
 
 
 _PROFILE_FIELDS = (

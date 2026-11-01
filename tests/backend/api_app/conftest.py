@@ -181,6 +181,8 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, backend: SimpleNa
     """
     for key in SETTINGS_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+    for key in [k for k in os.environ if k.upper().startswith("BUSINESS__")]:  # plan §6.1 嵌套写法
+        monkeypatch.delenv(key, raising=False)
     cfg = tmp_path / "config"
     cfg.mkdir()
     populate_business(cfg, backend_business_files())

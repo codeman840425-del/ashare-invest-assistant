@@ -71,51 +71,112 @@ def _write_realtime(cfgtools, cfg: Path) -> dict:
     return yaml.safe_load(text)
 
 
-def test_env_overrides_yaml_business(backend, cfgtools, clean_env, monkeypatch):
-    """plan v0.2.2 §6.1：三层深合并（逐键递归），只覆盖给出的键，兄弟键保留。"""
+#: 虚构取值标记：检查 ConfigError 消息不回显取值（不是任何真实配置值）
+FAKE_VALUE_MARKER = "fake-value-marker-zz9"
+
+#: plan §6.1 注明的 3 个心跳键：嵌套写法 / 扁平别名 → (heartbeat 字段, Settings 顶层字段, 测试值, 期望值)
+HEARTBEAT_ENV_CASES = [
+    ("BUSINESS__INGEST__HEARTBEAT__KEY", "key", "ingest_heartbeat_key", "hb:nested", "hb:nested"),
+    ("BUSINESS__INGEST__HEARTBEAT__PAUSED_KEY", "paused_key", "ingest_paused_key", "pz:nested", "pz:nested"),
+    ("BUSINESS__INGEST__HEARTBEAT__STALE_AFTER_S", "stale_after_s", "ingest_stale_after_s", "45", 45),
+    ("INGEST_HEARTBEAT_KEY", "key", "ingest_heartbeat_key", "hb:flat", "hb:flat"),
+    ("INGEST_PAUSED_KEY", "paused_key", "ingest_paused_key", "pz:flat", "pz:flat"),
+    ("INGEST_STALE_AFTER_S", "stale_after_s", "ingest_stale_after_s", "90", 90),
+]
+
+
+def _require_runtime_layer(backend):
+    if not hasattr(backend.config.Settings, "with_business_overrides"):
+        pytest.skip("依赖后端 T-B02（34641ae）：Settings.with_business_overrides 运行时覆盖层未实现（plan §6.1）")
+
+
+def _require_env_whitelist(backend):
+    if not hasattr(backend.config, "business_env_layer"):
+        pytest.skip("依赖后端 T-B02（34641ae）：业务配置环境变量白名单 business_env_layer 未实现（plan §6.1）")
+
+
+# ---- 合并规则：经运行时覆盖层测试（评审 review-T-B02 F3；plan §6.1 不允许整块 BUSINESS 环境变量）----
+def test_runtime_override_deep_merge_keeps_siblings(backend, cfgtools, clean_env):
+    """plan §6.1：深合并逐键递归，只覆盖给出的叶子键，同级键保留；原 Settings 不变。"""
+    _require_runtime_layer(backend)
     base = _write_realtime(cfgtools, clean_env)
+    s = backend.config.Settings()
     bd = cfgtools.business_dict
-    assert bd(backend.config.Settings())["realtime"]["intervals"]["quote_interval_s"] == 15
-    monkeypatch.setenv("BUSINESS", '{"realtime": {"intervals": {"quote_interval_s": 30}}}')
-    got = bd(backend.config.Settings())["realtime"]
+    assert bd(s)["realtime"]["intervals"]["quote_interval_s"] == 15
+    s2 = s.with_business_overrides({"realtime": {"intervals": {"quote_interval_s": 30}}})
     want = {**base, "intervals": {**base["intervals"], "quote_interval_s": 30}}
-    assert got == want
+    assert bd(s2)["realtime"] == want
+    assert bd(s)["realtime"]["intervals"]["quote_interval_s"] == 15  # 返回新对象
+    others = {k: v for k, v in bd(s).items() if k != "realtime"}
+    assert {k: v for k, v in bd(s2).items() if k != "realtime"} == others
 
 
-def test_business_list_replaced_wholesale(backend, cfgtools, clean_env, monkeypatch):
+def test_business_list_replaced_wholesale(backend, cfgtools, clean_env):
     """架构师已定（T-T01b）：列表整体替换，不按元素合并。"""
+    _require_runtime_layer(backend)
     base = _write_realtime(cfgtools, clean_env)
     assert base["universe"]["tier1_priority"] != ["focus"] and len(base["universe"]["tier1_priority"]) > 1
-    monkeypatch.setenv("BUSINESS", '{"realtime": {"universe": {"tier1_priority": ["focus"]}}}')
-    got = cfgtools.business_dict(backend.config.Settings())["realtime"]["universe"]
+    s = backend.config.Settings().with_business_overrides({"realtime": {"universe": {"tier1_priority": ["focus"]}}})
+    got = cfgtools.business_dict(s)["realtime"]["universe"]
     assert got["tier1_priority"] == ["focus"]
     assert {k: v for k, v in got.items() if k != "tier1_priority"} == {
         k: v for k, v in base["universe"].items() if k != "tier1_priority"}
 
 
-def test_business_null_means_not_overridden(backend, cfgtools, clean_env, monkeypatch):
+def test_business_null_means_not_overridden(backend, cfgtools, clean_env):
     """plan v0.2.2 §6.1：上层值显式为 null 视为“未覆盖”，保留下层值。"""
-    from pydantic import ValidationError
-
+    _require_runtime_layer(backend)
     _write_realtime(cfgtools, clean_env)
-    monkeypatch.setenv("BUSINESS", '{"realtime": {"intervals": {"quote_interval_s": null}}}')
-    try:
-        got = cfgtools.business_dict(backend.config.Settings())["realtime"]["intervals"]["quote_interval_s"]
-    except (ValidationError, ValueError):
-        pytest.xfail("后端 T-B02（plan §6.1 合并规则）未实现：上层 null 覆盖了 yaml 值并导致校验失败")
-    if got is None:
-        pytest.xfail("后端 T-B02（plan §6.1 合并规则）未实现：上层 null 覆盖了 yaml 值")
-    assert got == 15
+    s = backend.config.Settings().with_business_overrides({"realtime": {"intervals": {"quote_interval_s": None}}})
+    assert cfgtools.business_dict(s)["realtime"]["intervals"]["quote_interval_s"] == 15
 
 
-def test_business_merged_result_validated(backend, cfgtools, clean_env, monkeypatch):
-    """合并后的结果整体走 pydantic 校验：环境变量带入未知键 → 启动失败。"""
+@pytest.mark.parametrize(
+    "override",
+    [
+        pytest.param({"realtime": {"intervalz": {}}}, id="unknown-key"),
+        pytest.param({"realtime": {"intervals": {"quote_interval_s": FAKE_VALUE_MARKER}}}, id="wrong-type"),
+    ],
+)
+def test_business_merged_result_validated(backend, cfgtools, clean_env, override):
+    """合并后的结果整体走严格模型校验：未知键 / 类型错误 → ConfigError，消息不含取值。"""
+    _require_runtime_layer(backend)
     _write_realtime(cfgtools, clean_env)
-    if not cfgtools.business_files():
-        pytest.xfail("T-B02（config/*.yaml 的 pydantic 模型）未实现：合并结果未校验（plan §6.1）")
-    monkeypatch.setenv("BUSINESS", '{"realtime": {"intervalz": {}}}')
-    with pytest.raises(ValueError):
+    s = backend.config.Settings()
+    with pytest.raises(backend.config.ConfigError) as ei:
+        s.with_business_overrides(override)
+    assert FAKE_VALUE_MARKER not in str(ei.value)
+
+
+# ---- 环境变量层：只允许 plan §6.1 注明的 3 个心跳键 ----
+@pytest.mark.parametrize(("env", "field", "attr", "raw", "want"), HEARTBEAT_ENV_CASES, ids=[c[0] for c in HEARTBEAT_ENV_CASES])
+def test_env_whitelisted_heartbeat_keys(backend, cfgtools, clean_env, monkeypatch, env, field, attr, raw, want):
+    """白名单内的心跳键（嵌套与扁平两种写法）覆盖 ingest.yaml，其余心跳键保留。"""
+    _require_env_whitelist(backend)
+    base = cfgtools.business_dict(backend.config.Settings())["ingest"]["heartbeat"]
+    monkeypatch.setenv(env, raw)
+    s = backend.config.Settings()
+    hb = cfgtools.business_dict(s)["ingest"]["heartbeat"]
+    assert hb == {**base, field: want}
+    assert getattr(s, attr) == want
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        pytest.param("BUSINESS", id="whole-BUSINESS"),
+        pytest.param("BUSINESS__REALTIME__INTERVALS__QUOTE_INTERVAL_S", id="not-whitelisted"),
+        pytest.param("BUSINESS__INGEST__HEARTBEAT__INTERVAL_S", id="heartbeat-not-whitelisted"),
+    ],
+)
+def test_env_business_outside_whitelist_rejected(backend, clean_env, monkeypatch, env):
+    """plan §6.1：整块 BUSINESS 或白名单外的 BUSINESS__* → ConfigError，消息不含取值。"""
+    _require_env_whitelist(backend)
+    value = '{"realtime": {"intervals": {"quote_interval_s": 30}}, "x": "%s"}' % FAKE_VALUE_MARKER if env == "BUSINESS" else FAKE_VALUE_MARKER
+    monkeypatch.setenv(env, value)
+    with pytest.raises(backend.config.ConfigError) as ei:
         backend.config.Settings()
+    assert FAKE_VALUE_MARKER not in str(ei.value)
 
 
 def test_mairui_env_ignored(backend, clean_env, monkeypatch, caplog):

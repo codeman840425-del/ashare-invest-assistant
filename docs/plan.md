@@ -225,7 +225,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 - **规模定位**：10–100 个用户、单台主机、Docker Compose；**不用 k8s、不拆微服务、不引入消息中间件以外的分布式组件**。代码按模块化单体组织（第 2.2 节），API 与 worker 共用同一镜像、不同启动命令。
 - **容器清单**（`deploy/compose/docker-compose.yml`）：`nginx`（静态前端、反向代理、SSE 透传）、`api`（uvicorn 2–4 workers）、`worker`（Celery，队列 `default/batch/llm/notify/evaluation`）、**`ingest`（行情采集服务，`replicas: 1`，全站唯一调用麦蕊，唯一注入 `MAIRUI_LICENCE`，2.1A）**、`signal-rt`（盘中信号计算，单实例，**无 licence**）、`beat`（唯一）、`postgres`（PG16 + TimescaleDB 镜像，版本固定）、`redis`。出口 IP 即主机的固定公网 IP；`ingest` 启动时自检。
 - **资源估算**：4 vCPU / 8 GB 内存 / 100 GB SSD 足够（分钟线保留 90 天约 3–4 GB，见 3.3）；测试期用开发者本机（Docker Desktop 或 Linux）即可。
-- **配置全部走环境变量**（pydantic-settings；`deploy/env/.env.example` 只有变量名与假值）：`DATABASE_URL`、`REDIS_URL`、`MAIRUI_LICENCE`、`MAIRUI_BASE_URL`、`MAIRUI_PRO_BASE_URL`、`APP_MASTER_KEY`（加密 LLM key / 股东代码 HMAC / 原始文件）、`IMPORT_STORAGE_PATH`、`PUBLIC_BASE_URL`、`SESSION_COOKIE_SECURE`、`SMTP_*`；运行参数（实时间隔、预算、上限）在数据库配置表 + `config/*.yaml` 默认值中，可在后台修改。 **`MAIRUI_LICENCE` 只注入 `ingest` 容器**；其他容器的 env 文件不含此变量，CI 会检查。
+- **配置全部走环境变量**（pydantic-settings；`deploy/env/.env.example` 只有变量名与假值）：`DATABASE_URL`、`REDIS_URL`、`MAIRUI_LICENCE`、`MAIRUI_BASE_URL`、`MAIRUI_PRO_BASE_URL`、`APP_MASTER_KEY`（加密 LLM key / 股东代码 HMAC / 原始文件）、`IMPORT_STORAGE_PATH`、`PUBLIC_BASE_URL`、`SESSION_COOKIE_SECURE`、`REGISTRATION_MODE`（默认 `closed`）、`SMTP_*`；运行参数（实时间隔、预算、上限）在数据库配置表 + `config/*.yaml` 默认值中，可在后台修改。 **`MAIRUI_LICENCE` 只注入 `ingest` 容器**；其他容器的 env 文件不含此变量，CI 会检查。
 - **无云厂商锁定**：只依赖 PostgreSQL、Redis、本地卷（或任意 S3 兼容存储，通过 `IMPORT_STORAGE_BACKEND=local|s3` 切换）；不用托管专有服务；镜像可在任意主机运行。
 - **迁移流程（本地 → 服务器）**：`pg_dump` 加原始文件卷打包（加密）→ 新主机 `docker compose up`（**先不启动 `ingest`**）→ `pg_restore` → 修改 `PUBLIC_BASE_URL` 与 DNS → **停止本地 `ingest` → 等待 ≥ 60 秒 → 启动服务器 `ingest` → 核对出口 IP → 从本地 `.env` 删除 licence**。迁移期间及之后，开发机不得用同一证书做真实调用（2.1A；第 9 节问题 27）。操作手册写在 `deploy/scripts/migrate.md` 和 `deploy/runbooks/ingest-failover.md`（T-O06、T-O07）。
 - **测试期访问**：本地 `http://localhost`，不对公网开放；如需让少数测试用户访问，用内网/VPN（如自建 WireGuard）而非把未备案域名解析到境内主机。
@@ -534,7 +534,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 - **特征**：流动性（日均成交额、`turnover_20d_avg`、`amihud_20d`）、波动（`volatility_20d`、`intraday_amplitude_20d`、ATR%）、趋势（`ma_trend`、`momentum_60d`）、基本面完整度与质量（`roe_ttm`、`profit_cagr_3y`、`dividend_continuous_years`、财报期数）、情绪活跃度（`limit_up_count_20d`）、**用户自身行为**（该股历史平均持有天数、是否有同日买卖的做T记录、交易频率——来自导入成交）、画像（投资期限、精力、风险承受）。
 - **规则化打分**（分类器配置 `horizon_classifier_versions`，不可变）：每个周期 0–100 分，例如：`intraday_t` = 有底仓 × 日内振幅 ≥ 3% × 日成交额 ≥ 2 亿 × 用户精力 ≥ 中 × 历史有做T行为加分；`long` = 基本面完整（≥ 12 期财报）× ROE/分红稳定 × 用户期限 ≥ 长；`swing`、`short` 同理（**以上阈值均为示例**，正式规则与阈值由策略研究员在 `docs/strategies/` 中给出，写入不可变的 `horizon_classifier_versions`）（见 horizon_classifier.md v1）。≥ 60 分的周期列为"适合"，并给出每个周期 2–4 条理由（引用特征值与证据 ID）及不适合的理由。
 - 每个"适合"周期下，按策略 `applicability` 与 `fit_dimensions` 匹配列出适用策略（`fit_score` 排序）。
-- **新手限制短线【已定 2026-11-01，问题 37 方案 A】**：`profile.experience` 为 novice 或未填写时，`short` 最高 59 分（不列为“适合”），由分类器 1.1.0 的 `requires` 规则 `SH0C` 实现（6.1）；用户仍可经 `fit_ack` 确认后覆盖。`intraday_t` 同样封顶 59，口径一致，由 `requires` 规则 `IT0C` 实现【编排者默认，用户可否决，2026-11-01】。**新手封顶的落点**：只写在 `config/horizon_classifier.yaml` 对应周期的 `requires` 中（`else_cap: 59`），不在 hard gates、不在代码里硬编码，也不另设“画像封顶”块；分类器输出的 `caps[]` 以 `kind: requires`、`rule_id: SH0C/IT0C` 体现。horizon_classifier.md §4 的 rules 块由研究员按本节补同两条（文档同步，不改规则结构）。
+- **新手限制短线【已定 2026-11-01，问题 37 方案 A】**：`profile.experience` 为 novice 或未填写时，`short` 最高 59 分（不列为“适合”），由分类器 1.1.0 的 `requires` 规则 `SH0C` 实现（6.1）；用户仍可经 `fit_ack` 确认后覆盖。`intraday_t` 同样封顶 59，口径一致，由 `requires` 规则 `IT0C` 实现【编排者默认，用户可否决，2026-11-01】。**新手封顶的落点**：只写在 `config/horizon_classifier.yaml` 对应周期的 `requires` 中（`else_cap: 59`），不在 hard gates、不在代码里硬编码，也不另设“画像封顶”块；分类器输出的 `caps[]` 以 `kind: requires`、`rule_id: SH0C/IT0C` 体现。**`SH0C`/`IT0C` 是分类器规则 ID（`HorizonCap.rule_id`），不是不可执行原因码 `reason_code`**：它们只降低周期适配分、影响 `suitable`，不阻断信号或计划，不进契约 §6.1 的 23 个原因码，也不进 `/meta/enums.reason_codes`（T-A05 定）；画像缺失导致的阻断仍用既有原因码 `PROFILE_OR_CONSENT_MISSING`。horizon_classifier.md §4 的 rules 块由研究员按本节补同两条（文档同步，不改规则结构）。
 - **用户覆盖**：分类结果生成 `strategy_instances`（`status=proposed`，**用户确认后才变为 active**，2.5.0），替代原先的 `user_symbol_strategy_settings`；用户修改后系统不再自动改动，只在分类结果变化时提示"系统建议已变化"。
 
 #### 2.5.4 引擎流水线（L2 求值 → L3 候选信号 → 可执行性 → 计划草案）
@@ -1237,7 +1237,8 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `account_reviews` | id, user_id, action(approve/reject/disable/enable/reset_password), reason, admin_id, created_at — 只追加，审核历史 |
 | `login_attempts` | id, username_tried, user_id(nullable), ip_hash, success, failure_reason, at — 用于限速、锁定与审计（保留 180 天） |
 | `audit_logs` | id, actor_id, actor_role, action, target_type, target_id, detail(jsonb), ip_hash, at |
-| `consents` | id, user_id, kind(privacy_policy / sensitive_financial_info / risk_disclosure / email_notification), doc_version, granted(bool), at, ip_hash |
+| `consents` | id, user_id, kind(privacy_policy / sensitive_financial_info / risk_disclosure / email_notification / signal_risk_disclosure / terms), doc_version, granted(bool), at, ip_hash — 只追加；`terms` 为用户协议（T-B03 迁移 0004 补入，T-A05 确认） |
+| `invite_codes` | id, code_hash(unique；`HMAC-SHA256(APP_MASTER_KEY, 归一化邀请码)`，明文不入库), created_by(admin), created_at, expires_at, max_uses(V1 恒 1), used_count, used_by(nullable), used_at, revoked_at, revoked_by, bound_username(nullable，绑定后只有该用户名可用), note — 状态由字段推导（active/used/expired/revoked），不物理删除；规则见 6.1 `config/auth.yaml`（T-A05） |
 | `user_profiles` | id, user_id, version_no, horizon_pref(text[]，取值为 `horizon` 枚举), effort(low/medium/high), risk_tolerance(1–5), experience(novice/intermediate/advanced), max_single_position_pct(decimal), capital_range(enum: <10万/10–50万/50–200万/>200万，选填), max_drawdown_pct(选填), focus_areas(text[]，选填), confirmed_at, created_at — **只追加**，最新版本为当前画像。**前五个字段与契约 `/me/profile` 一一对应（契约为准，T-A02）**；原 `horizon(short/medium/long)` 改为 `horizon_pref`，原 `weekly_hours` 由 `effort` 取代；选填字段契约暂未暴露，只供内部使用 |
 
 **账户/持仓/成交**
@@ -1739,8 +1740,11 @@ class BrokerStatementParser(Protocol):
   - 注册：同一 IP 每小时 ≤ 5 次、每日 ≤ 20 次；全站 `pending` 账户数 ≥ 200 时暂停注册（返回 `503 REGISTRATION_CLOSED`）；蜜罐隐藏字段；注册请求最短填写时间（< 3 秒视为机器）。
   - 登录：同一 IP 每分钟 ≤ 10 次；同一用户名连续失败 5 次锁定 15 分钟，再失败递增（30/60 分钟，上限 24 小时）；锁定返回 `403 ACCOUNT_LOCKED` 及 `details.retry_after_s`。
   - 全局：Nginx `limit_req` + 应用层 Redis 滑动窗口；返回 `429 RATE_LIMITED` + `Retry-After`。
-  - 密码哈希：argon2id（memory 64 MiB、time 3、parallelism 1，参数可配置并支持登录时透明升级）。
+  - 密码哈希：argon2id（memory 64 MiB、time 3、parallelism 1，参数可配置并支持登录时透明升级）；键为 6.1 `config/auth.yaml` 的 `password_hash.*`，下限按 OWASP（m ≥ 19456 KiB、t ≥ 2、p ≥ 1），低于下限启动失败（T-A05）。
   - 修改密码/重置后吊销其他会话。
+  - **会话（T-A05）**：空闲 7 天滑动过期 + 自登录起 30 天绝对过期（不续期），V1 不提供“记住我”；登录、修改密码时**轮换**会话（新 `sid` 与新 CSRF 令牌，旧会话作废）；改角色、禁用、驳回、管理员重置密码时吊销该用户全部会话。键见 6.1 `config/auth.yaml` `session.*`。
+  - **邀请码（T-A05；`invite` 模式启用前由 T-B03c 实现，此前 `invite` 模式按 `closed` 处理，返回 `503 REGISTRATION_CLOSED`）**：只由管理员发放（`/admin/invites`）；128 位随机数，Crockford Base32 显示（26 字符，按 4 位分组加连字符，输入忽略大小写与连字符）；只存 HMAC 摘要，明文只在创建响应中出现一次；默认单次使用、7 天过期，可选绑定用户名，可吊销；核验与建用户在同一事务内（条件更新 `used_count`），核验失败一律返回同一种错误，不区分“不存在/过期/已用/已吊销”；发放、吊销、使用都写 `audit_logs`。不绑定邮箱（V1 无邮箱验证，绑定无法核实）。
+  - **同意书版本（T-A05）**：版本号取自 6.1 `config/auth.yaml` `consents.doc_versions`；未定稿时为 `null`，记为 `"unversioned"`，**只允许在 `closed` 模式下存在**——切到 `invite` 前五类文书必须有正式版本号，否则启动失败。
 
 ---
 
@@ -2200,7 +2204,7 @@ degraded_profile:               # 证书到期降级档（7.x 风险表），管
   tier2_enabled: false
 ```
 
-**`config/ingest.yaml`**（采集服务 `ingest`，2.1A；只有 `ingest` 进程读取）
+**`config/ingest.yaml`**（采集服务 `ingest`，2.1A；只有 `ingest` 进程读取。交割单上传上限**不在本文件**，见 `config/imports.yaml`）
 ```yaml
 schema_version: 1
 budget:
@@ -2612,6 +2616,55 @@ budget:
 ```
 `max_output_tokens`、`temperature`（◇）是本节给的工程默认值；`timeout_s` 30 秒与 `max_retries` 2 次沿用 2.7。`fallback_models` 为空表示失败直接回落模板（同一供应商内切换模型不能应对供应商故障）。环境变量只有 `DEEPSEEK_API_KEY` 一项，不允许用环境变量改 `base_url`。
 
+
+**`config/imports.yaml`**（交割单导入，3.5；`api` 与 `worker` 读取；T-A05 定，回应 T-B02a。**不可热调**，改后重启；`max_request_bytes` 须与 nginx `client_max_body_size` 同步修改）
+```yaml
+schema_version: 1
+max_file_bytes: 5242880         # int，单文件上限 5 MiB（3.5 “≤ 5 MB”按 MiB 计）；超限 422 IMPORT_FILE_ERRORS + IMPORT_FILE_TOO_LARGE，不创建批次
+max_files_per_upload: 5         # int，单次上传文件数上限（3.5）
+max_request_bytes: 27262976     # int，框架层请求体上限 = nginx client_max_body_size 26m；必须 > max_file_bytes × max_files_per_upload（否则启动失败）；超限 413 PAYLOAD_TOO_LARGE {max_bytes}
+max_rows_per_file: 50000        # int，数据行上限；超限 IMPORT_TOO_MANY_ROWS（导入码 #4）
+allowed_extensions: [".txt", ".csv"]   # list[str]，小写比较（3.5 MVP）；其他 → IMPORT_UNSUPPORTED_FILE_TYPE
+raw_file_retention_days: 365    # int，原始文件留存天数（第 9 节问题 21 已定）；账户注销时提前删除；用户可手动删除
+```
+- **键路径**：`imports.max_file_bytes` 等（`Settings.business.imports.*`）。T-B02a 暂放的 `ingest.imports.*` 作废：`ingest.yaml` 只由 `ingest` 进程读取、与持有 licence 的采集服务隔离，上传上限属于 `api`，不应混入。
+- **存储路径不进 YAML**：原始文件目录只来自环境变量 `IMPORT_STORAGE_PATH`（部署相关，见 2 节环境变量表、3.5A 存储要求）；YAML 里不设路径键，也不设 `*_env` 引用键。
+- 环境变量不能覆盖本文件的键。
+
+**`config/auth.yaml`**（认证、会话、邀请码、同意书版本，3.6；`api` 读取；T-A05 定，回应 T-B03。**不可热调**，改后重启；注册模式仍由环境变量 `REGISTRATION_MODE` 决定，不在本文件）
+```yaml
+schema_version: 1
+password:
+  min_len: 10                   # int，≥ 10（3.6 已定），模型校验下限 10
+  max_len: 128                  # int ◇，上限防止超长输入
+password_hash:                  # argon2id；改参数后新哈希用新参数，旧哈希在下次登录成功时透明升级
+  memory_kib: 65536             # int，64 MiB（3.6）；下限 19456（OWASP 最低配置）
+  time_cost: 3                  # int；下限 2
+  parallelism: 1                # int；下限 1
+  hash_len: 32                  # int ◇；下限 16
+  salt_len: 16                  # int ◇；下限 16
+session:
+  idle_ttl_s: 604800            # int，空闲过期 7 天，每次有效请求续期（契约 §1.3）
+  absolute_ttl_s: 2592000       # int ◇，自登录起 30 天绝对过期，不续期；必须 ≥ idle_ttl_s
+  remember_me: false            # bool，V1 固定 false（模型只接受 false）；不提供“记住我”
+invite:
+  code_bytes: 16                # int，128 位随机（secrets）；下限 16
+  default_ttl_h: 168            # int，默认 7 天过期
+  max_ttl_h: 720                # int，管理员可设的最长有效期 30 天
+  max_uses: 1                   # int，V1 只支持单次使用（模型只接受 1）
+consents:
+  doc_versions:                 # 各文书当前版本；null = 未定稿，存为 "unversioned"
+    terms: null
+    privacy: null
+    risk_disclosure: null
+    signal_risk_disclosure: null
+    sensitive_financial_info: null
+```
+- 固定规则（不是配置项）：哈希算法只用 argon2id；Cookie `sid` 为 `HttpOnly; SameSite=Lax; Path=/`，`Secure` 由环境变量 `SESSION_COOKIE_SECURE` 控制（默认 true；`APP_ENV` 不是 `local`/`test` 时设为 false → 启动失败）；Cookie `Max-Age` = `absolute_ttl_s`，服务端同时按 `idle_ttl_s` 与 `absolute_ttl_s` 判定；登录与改密轮换会话，改角色/禁用/驳回/重置吊销全部会话（3.6）。
+- 邀请码：明文 = `code_bytes` 随机字节的 Crockford Base32（无填充），入库前去连字符、转大写后做 `HMAC-SHA256(APP_MASTER_KEY, code)`；只由管理员发放；可选 `bound_username`；可吊销；`invite.created` / `invite.revoked` / `invite.redeemed` 写审计（不记明文）。
+- 同意书版本：`POST /me/consents` 与注册 `agreements` 记录的版本 = 本节当前值（`null` 记为 `"unversioned"`）；客户端提交的 `version` 与当前值不符 → `400 VALIDATION_ERROR`。`REGISTRATION_MODE=invite` 而任一版本为 `null` → 启动失败（切到 `invite` 前文书须定稿并取得律师意见，第 9 节问题 1）。
+- 环境变量不能覆盖本文件的键。
+
 ---
 
 ## 7. 风险与合规（验收项 7）
@@ -2783,6 +2836,7 @@ budget:
 | T-B03 | 认证与同意：注册（pending）/登录（未批准拒绝且不建会话）/登出/会话/CSRF/改密/consents；`/me`、画像（版本化，含风险测评） | 后端 | T-B02 |
 | T-B03a | 防滥用：限速、渐进锁定、蜜罐、pending 上限、`login_attempts`；Nginx `limit_req` | 后端 | T-B03 |
 | T-B03b | 管理员：`create-admin` CLI、用户审核/禁用/重置、`account_reviews`、`audit_logs`、禁用即吊销会话 | 后端 | T-B03 |
+| T-B03c | 邀请码：`invite_codes` 表、`/admin/invites`、注册核验（同事务、统一错误）、审计；`invite` 模式启用前必须完成（T-A05） | 后端 | T-B03b |
 | T-B04 | ~~麦蕊网关 `datagw`~~ **由 T-B04a（`ingest` 服务）取代**，以下功能全部移入 `ingest`：URL 构造、Redis Lua 令牌桶（`per_minute_budget` 可配置）、并发上限（`max_concurrency`）、singleflight、错误码映射（101/102/103/403/429/503）与自适应退避、licence 脱敏、`raw_payloads`、日计数器与降级开关、**录制/回放模式**（本地与 CI 不访问真实麦蕊） | 后端 | T-B02 |
 | T-B05 | **麦蕊实测联调（真实证书，仅一台机器）**：逐一调用 0A.6 与 4.2 的接口，确认字段、空值、延迟、`/hsrl/ssjy/all` 每分钟次数、并发规则、6000/分钟是按接口还是按证书、因子数量（77/85）、`dividend_yield` 可用性、资金流盘中更新频率、板块实时；产出 `docs/mairui-verified.md` 与脱敏 fixtures；回填本文全部【待核实】与【待 T003 验证】；**与 T003 报告 `/workspace/team/reports/T003-mairui-capability.md` 对账**，只在当前唯一调用方上执行 | 后端 | T-B04a |
 | T-B05a | **日线数据质量检查**（T003 发现的伪停牌占位行）：`sf=1` 且同日快照有成交 → 标 `suspect`，排除出指标、信号与跟踪计算，生成管理端告警；补测结果写入 T-B05 产出 | 后端 | T-B05 |

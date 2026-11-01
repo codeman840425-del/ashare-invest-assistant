@@ -13,6 +13,10 @@ T-T01b 起对齐 plan/契约 v0.2.2（T-A02）：§6.1 由 5 个文件变为 6 �
 4. 仓库 ``config/*.yaml``（``AIA_CONFIG_DIR``）== 快照；T-A02 改动的文件不一致时 xfail 并写明负责任务，
    其余文件不一致直接失败。
 
+T-T01d（T-A05，7c62f59，契约 #22）：§6.1 由 6 个文件变为 8 个（新增 ``imports.yaml``、``auth.yaml``）；
+交割单上传上限的键路径改为 ``imports.max_file_bytes`` 等（``Settings.business.imports.*``），
+T-B02a 暂放的 ``ingest.imports.*`` 作废，``ingest.yaml`` 不得再有 ``imports`` 段。
+
 YAML 一律按 1.2 布尔规则读取（只认 true/false），与后端 ``config_files`` 一致；plan 已把 ``"on"`` 加引号。
 """
 
@@ -31,7 +35,11 @@ pytestmark = [pytest.mark.unit]
 
 HERE = Path(__file__).resolve().parent
 SNAP_DIR = HERE / "config_defaults"
-NAMES = ("realtime", "ingest", "market_rules", "risk_controls", "horizon_classifier", "llm")
+NAMES = ("realtime", "ingest", "market_rules", "risk_controls", "horizon_classifier", "llm", "imports", "auth")
+#: T-A05 新增的文件（plan 7c62f59；origin/main 的 plan 尚无时 xfail，待运维推送）
+T_A05_FILES = ("imports", "auth")
+#: nginx client_max_body_size 26m（deploy/nginx/nginx.conf；契约 #22 413 details.max_bytes）
+NGINX_MAX_BODY = 26 * 1024 * 1024
 REPO_ROOT = HERE.parents[2]
 CONFIG_DIR = Path(os.environ.get("AIA_CONFIG_DIR", REPO_ROOT / "config")).resolve()
 
@@ -40,6 +48,8 @@ OWNER = {
     "market_rules": "后端 T-B36（交易规则模块：modeled_from / adv_basis / risk_warning，第二段 2023-04-10；v0.2.3 applies_to_boards 加 chinext、新增 limit_order_only_exchanges）",
     "horizon_classifier": "后端 T-B30（周期分类：f.* 特征、recompute 加 position_open_close、rules 全文；v0.2.3 version_no 2 / classifier_version 1.1.0 / SH0C）",
     "llm": "后端 T-B25（LLM 网关：config/llm.yaml 与其模型）",
+    "imports": "后端 T-B02a 跟进（T-A05：新建 config/imports.yaml 与模型，键路径 imports.*，删除 ingest.imports.*）",
+    "auth": "后端 T-B03 跟进（T-A05：新建 config/auth.yaml 与模型：password/password_hash/session/invite/consents）",
 }
 HORIZONS = ("intraday_t", "short", "swing", "long")
 
@@ -249,6 +259,55 @@ def test_key_defaults_llm():
     assert d["budget"]["daily_budget_cny"] is None
 
 
+def test_key_defaults_imports():
+    """T-A05 / 契约 #22：上传上限键在 imports.yaml 顶层（imports.max_file_bytes），不在 ingest.yaml。"""
+    d = snap("imports")
+    assert (d["max_file_bytes"], d["max_files_per_upload"], d["max_request_bytes"]) == (5 * 1024 * 1024, 5, NGINX_MAX_BODY)
+    assert d["max_request_bytes"] > d["max_file_bytes"] * d["max_files_per_upload"]
+    assert (d["max_rows_per_file"], d["allowed_extensions"], d["raw_file_retention_days"]) == (50000, [".txt", ".csv"], 365)
+    assert all(e == e.lower() and e.startswith(".") for e in d["allowed_extensions"])
+    assert not [k for k in d if k.endswith(("_path", "_dir", "_env"))], "存储路径只来自环境变量，YAML 不设路径键"
+
+
+def test_ingest_snapshot_has_no_imports_section():
+    """T-B02a 暂放的 ingest.imports.* 作废（ingest.yaml 只由 ingest 进程读取）。"""
+    d = snap("ingest")
+    assert "imports" not in d and "max_file_bytes" not in str(d)
+
+
+def test_key_defaults_auth():
+    d = snap("auth")
+    assert d["password"] == {"min_len": 10, "max_len": 128}
+    ph = d["password_hash"]
+    assert (ph["memory_kib"], ph["time_cost"], ph["parallelism"]) == (65536, 3, 1)
+    assert ph["memory_kib"] >= 19456 and ph["time_cost"] >= 2 and ph["hash_len"] >= 16 and ph["salt_len"] >= 16
+    se = d["session"]
+    assert se == {"idle_ttl_s": 7 * 86400, "absolute_ttl_s": 30 * 86400, "remember_me": False}
+    assert se["absolute_ttl_s"] >= se["idle_ttl_s"]
+    inv = d["invite"]
+    assert (inv["code_bytes"], inv["default_ttl_h"], inv["max_ttl_h"], inv["max_uses"]) == (16, 168, 720, 1)
+    assert inv["default_ttl_h"] <= inv["max_ttl_h"]
+    assert d["consents"]["doc_versions"] == dict.fromkeys(
+        ("terms", "privacy", "risk_disclosure", "signal_risk_disclosure", "sensitive_financial_info"))
+    keys = [p for p in diff_paths(d, {}) if re.search(r"(?i)(secret|master_key|api_key|pepper)", p)]
+    assert keys == [], "auth.yaml 不放密钥（APP_MASTER_KEY 只来自环境变量）"
+
+
+def test_backend_upload_limit_key_path(backend, clean_env):
+    """契约 #22：后端读 ``Settings.business.imports.max_file_bytes``；仍在 ``ingest.imports`` 下 → xfail（T-B02a 跟进）。"""
+    business = backend.config.Settings().business
+    imports = getattr(business, "imports", None)
+    ingest_imports = getattr(getattr(business, "ingest", None), "imports", None)
+    if imports is None and ingest_imports is not None:
+        pytest.xfail(OWNER["imports"] + "；当前后端仍为 business.ingest.imports.*")
+    if imports is None:
+        pytest.skip("后端没有上传上限配置（T-B02a 未落地）")
+    want = snap("imports")
+    assert (imports.max_file_bytes, imports.max_files_per_upload, imports.max_request_bytes) == (
+        want["max_file_bytes"], want["max_files_per_upload"], want["max_request_bytes"])
+    assert ingest_imports is None, "ingest.imports.* 应删除"
+
+
 def test_snapshot_matches_backend_settings_defaults(backend, clean_env):
     """ingest.yaml 的心跳键名/阈值与后端 Settings 默认值一致（契约 §7.10、plan §6.1）。"""
     s = backend.config.Settings()
@@ -257,14 +316,23 @@ def test_snapshot_matches_backend_settings_defaults(backend, clean_env):
 
 
 # ---------------- 2. 快照 == plan §6.1 ----------------
-def test_plan_6_1_lists_six_files(docs_dir):
+def _t_a05_missing(blocks: dict[str, str]) -> list[str]:
+    return [n for n in T_A05_FILES if n not in blocks]
+
+
+def test_plan_6_1_lists_eight_files(docs_dir):
+    """T-A05：白名单 8 个文件。docs 尚是 7c62f59 之前的版本（6 个）→ xfail，待运维推送 7c62f59。"""
     blocks = plan_blocks((docs_dir / "plan.md").read_text(encoding="utf-8"))
-    assert set(blocks) == set(NAMES)
+    if set(blocks) == set(NAMES) - set(T_A05_FILES):
+        pytest.xfail("plan §6.1 尚无 imports.yaml/auth.yaml：架构师 7c62f59 未推到 origin（运维推送）")
+    assert set(blocks) == set(NAMES) and len(blocks) == 8
 
 
 @pytest.mark.parametrize("name", NAMES)
 def test_snapshot_equals_plan_block(docs_dir, name):
     blocks = plan_blocks((docs_dir / "plan.md").read_text(encoding="utf-8"))
+    if name in _t_a05_missing(blocks):
+        pytest.xfail(f"plan §6.1 尚无 {name}.yaml：架构师 7c62f59 未推到 origin（运维推送）")
     assert name in blocks, f"plan §6.1 已无 {name}.yaml"
     assert load12(blocks[name]) == snap(name), f"plan §6.1 的 {name}.yaml 已变，请同步快照"
 

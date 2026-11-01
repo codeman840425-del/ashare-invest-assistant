@@ -4,6 +4,9 @@
 - 每个模块新建一个独立数据库（``tt01d_auth_<随机>``），``alembic upgrade head`` 后测试，结束即删除；
   Redis 只按本组用户的键断言，不 ``FLUSHDB``，可与其他用例共用实例。
 - 用户名、口令、主密钥全部运行时随机生成，不含任何真实凭据；不连外网、不调用任何行情接口。
+- 契约 v0.2.3 #24–#27（T-A05，架构师 7c62f59，尚未推到 origin）：用户名 4–32、会话绝对 30 天 + 改密轮换、
+  同意书 ``doc_versions`` / ``sensitive_financial_info`` / ``CONSENT_REQUIRED``、注册 ``apply_note`` 与邀请码。
+  后端未实现的条目用 ``xfail(strict=True)``，原因写明负责任务（T-B03 跟进 / T-B03c）。
 - 防暴力（限速/渐进锁定，plan §3.6 数值）归 T-B03a：用 ``xfail(strict=True)`` 固化契约预期，实现后会 XPASS 失败提醒转正。
 """
 
@@ -43,6 +46,11 @@ for _pkg in ("argon2", "alembic", "sqlalchemy", "redis", "psycopg", "fastapi"):
 API = "/api/v1"
 CT_JSON = "application/json; charset=utf-8"
 IDLE_TTL_S = 604800  # 契约 §1.3：滑动 7 天
+ABSOLUTE_TTL_S = 2592000  # 契约 #25 / plan 6.1 auth.yaml session.absolute_ttl_s：自登录起 30 天，不续期；Cookie Max-Age 取此值
+DOC_KEYS = ("terms", "privacy", "risk_disclosure", "signal_risk_disclosure", "sensitive_financial_info")
+#: 后端未跟上 v0.2.3 #24–#27 的负责任务
+T_B03_FU = "T-B03 跟进（契约 v0.2.3 #25/#26，T-A05 7c62f59）：后端尚未实现"
+T_B03C = "T-B03c（契约 #27 邀请码）：未实现前 invite 模式按 closed 返回 503"
 AGREEMENTS = ["terms", "privacy", "risk_disclosure"]
 ME_KEYS = {"id", "username", "display_name", "role", "status", "entitlements", "consents", "risk_assessment"}
 BJ_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+08:00$")
@@ -231,12 +239,23 @@ def test_alembic_head_is_0004_and_terms_consent_kind(authdb: SimpleNamespace, sq
 @pytest.mark.parametrize("mode", ["closed", "invite", "open"])
 def test_meta_registration_reports_mode(app_client: Callable[..., Any], mode: str) -> None:
     r = app_client(mode).get(f"{API}/meta/registration")
-    assert r.status_code == 200 and r.json() == {"mode": mode}
+    assert r.status_code == 200 and r.json()["mode"] == mode
+    assert set(r.json()) <= {"mode", "doc_versions"}
+
+
+@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（/meta/registration 无 doc_versions）")
+def test_meta_registration_reports_doc_versions(app_client: Callable[..., Any]) -> None:
+    """#26：``doc_versions`` 五个键，值为 string；auth.yaml 默认 null → ``"unversioned"``。"""
+    body = app_client("closed").get(f"{API}/meta/registration").json()
+    assert set(body) == {"mode", "doc_versions"}
+    assert set(body["doc_versions"]) == set(DOC_KEYS)
+    assert all(isinstance(v, str) and v for v in body["doc_versions"].values())
+    assert set(body["doc_versions"].values()) == {"unversioned"}  # plan 6.1 auth.yaml 默认全部未定稿
 
 
 def test_registration_default_is_closed(authdb: SimpleNamespace, make_client: Callable[..., Any]) -> None:
     c = make_client(database_url=authdb.url, redis_url=authdb.redis_url)
-    assert c.get(f"{API}/meta/registration").json() == {"mode": "closed"}
+    assert c.get(f"{API}/meta/registration").json()["mode"] == "closed"
 
 
 @pytest.mark.parametrize("mode", ["closed", "invite"])
@@ -296,6 +315,62 @@ def test_register_duplicate_username_case_insensitive_is_409(app_client: Callabl
 def test_register_rejects_bad_username(app_client: Callable[..., Any], username: str) -> None:
     r = app_client("open").post(f"{API}/auth/register", json=reg(username, new_pw()))
     assert "username" in fields(assert_err(r, 400, "VALIDATION_ERROR"))
+
+
+@pytest.mark.parametrize("length", [4, 32])
+def test_register_username_length_bounds_accepted(app_client: Callable[..., Any], length: int) -> None:
+    """#24：``^[a-z0-9_]{4,32}$`` 两端可用（3 位、33 位见上一用例）。"""
+    name = ("t" + secrets.token_hex(16))[:length]
+    r = app_client("open").post(f"{API}/auth/register", json=reg(name, new_pw()))
+    assert r.status_code == 201, r.text[:300]
+
+
+@pytest.mark.parametrize("length", [10, 128])
+def test_register_password_length_bounds_accepted(app_client: Callable[..., Any], length: int) -> None:
+    """#27 / plan 6.1 auth.yaml password：10–128 两端可用。"""
+    pw = ("Tt9" + secrets.token_hex(64))[:length]
+    r = app_client("open").post(f"{API}/auth/register", json=reg(new_name(), pw))
+    assert r.status_code == 201, r.text[:300]
+
+
+@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（RegisterIn 无 apply_note，extra=forbid → 400）")
+def test_register_accepts_apply_note(app_client: Callable[..., Any], sql: Callable[..., Any]) -> None:
+    """#27：注册体增加 ``apply_note: string(≤500) | null``（open 模式可选）。"""
+    c = app_client("open")
+    for note in ("测试申请说明", "x" * 500, None):
+        r = c.post(f"{API}/auth/register", json=reg(new_name(), new_pw(), apply_note=note))
+        assert r.status_code == 201, r.text[:300]
+
+
+def test_register_apply_note_over_500_is_400(app_client: Callable[..., Any]) -> None:
+    r = app_client("open").post(f"{API}/auth/register", json=reg(new_name(), new_pw(), apply_note="x" * 501))
+    assert "apply_note" in fields(assert_err(r, 400, "VALIDATION_ERROR"))
+
+
+@pytest.mark.xfail(strict=True, reason=T_B03C)
+def test_register_invalid_invite_codes_share_one_response_body(app_client: Callable[..., Any]) -> None:
+    """#27：邀请码错误/过期/已用/已吊销统一 ``400 {fields:[{field:"invite_code", issue:"invalid"}]}``，响应体完全相同。
+
+    测试只能构造“不存在”的几种形态（随机、错格式、空白）；过期/已用/已吊销需 ``/admin/invites``（T-B03c）落地后补。
+    """
+    c = app_client("invite")
+    bodies = []
+    for code in ("TT01D" + secrets.token_hex(12).upper(), "not-a-code", "  "):
+        r = c.post(f"{API}/auth/register", json=reg(new_name(), new_pw(), invite_code=code, apply_note="申请说明"))
+        err = assert_err(r, 400, "VALIDATION_ERROR")
+        assert err["details"]["fields"] == [{"field": "invite_code", "issue": "invalid"}]
+        bodies.append({k: v for k, v in err.items() if k != "request_id"})
+    assert all(b == bodies[0] for b in bodies)
+
+
+def test_admin_invites_hidden_from_non_admin(session: Callable[..., SimpleNamespace], app_client: Callable[..., Any]) -> None:
+    """#27 /admin/invites（🛡）：非 admin（含未登录）一律 404，不暴露端点存在。"""
+    s = session()
+    for c in (s.client, app_client()):
+        assert_err(c.get(f"{API}/admin/invites"), 404, "NOT_FOUND")
+    r = s.client.post(f"{API}/admin/invites", json={"ttl_h": 24}, headers={"X-CSRF-Token": s.csrf})
+    assert_err(r, 404, "NOT_FOUND")
+    assert_err(s.client.delete(f"{API}/admin/invites/{uuid.uuid4()}", headers={"X-CSRF-Token": s.csrf}), 404, "NOT_FOUND")
 
 
 @pytest.mark.parametrize("kind", ["short", "letters-only", "digits-only", "same-as-username", "common", "too-long"])
@@ -448,10 +523,17 @@ def test_cookie_flags_when_insecure_dev(session: Callable[..., SimpleNamespace])
     ck = set_cookies(s.resp)
     sid, csrf = attrs(ck["sid"]), attrs(ck["csrf_token"])
     assert "httponly" in sid and sid["samesite"].lower() == "lax" and sid["path"] == "/"
-    assert int(sid["max-age"]) == IDLE_TTL_S
+    assert int(sid["max-age"]) >= IDLE_TTL_S  # #25 起 = absolute_ttl_s，见下方 xfail 用例
     assert "httponly" not in csrf and csrf["samesite"].lower() == "lax" and csrf["path"] == "/"
     assert "secure" not in sid and "secure" not in csrf
     assert "domain" not in sid  # 只发给本站
+
+
+@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（Cookie Max-Age 仍为 idle_ttl_s）")
+def test_cookie_max_age_is_absolute_ttl(session: Callable[..., SimpleNamespace]) -> None:
+    """#25 / plan 6.1：Cookie ``Max-Age`` = ``absolute_ttl_s``（30 天）；服务端另按 idle 与 absolute 判定。"""
+    ck = set_cookies(session().resp)
+    assert int(attrs(ck["sid"])["max-age"]) == ABSOLUTE_TTL_S
 
 
 def test_cookie_secure_by_default(
@@ -497,6 +579,30 @@ def test_session_ttl_is_sliding_7_days(session: Callable[..., SimpleNamespace], 
     assert authdb.redis.ttl(key) > IDLE_TTL_S - 60
 
 
+def _age_session(authdb: SimpleNamespace, sid: str, days: float) -> None:
+    """把会话的 ``created_at`` 改到 ``days`` 天前（保留剩余 TTL），模拟“登录已久但一直活跃”。"""
+    key = sid_key(sid)
+    ttl = authdb.redis.ttl(key)
+    data = json.loads(authdb.redis.get(key))
+    data["created_at"] = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    authdb.redis.set(key, json.dumps(data), ex=ttl)
+
+
+def test_session_within_absolute_ttl_still_valid(session: Callable[..., SimpleNamespace], authdb: SimpleNamespace) -> None:
+    s = session()
+    _age_session(authdb, s.sid, 29)
+    assert s.client.get(f"{API}/me").status_code == 200
+
+
+@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（无绝对过期：滑动续期可无限延长会话）")
+def test_session_past_absolute_ttl_is_401(session: Callable[..., SimpleNamespace], authdb: SimpleNamespace) -> None:
+    """#25：自登录起 30 天绝对过期，不因活跃续期；过期后 401 且会话被清除。"""
+    s = session()
+    _age_session(authdb, s.sid, 31)
+    assert_err(s.client.get(f"{API}/me"), 401, "AUTH_REQUIRED")
+    assert authdb.redis.get(sid_key(s.sid)) is None
+
+
 def test_login_rotates_session_and_csrf(session: Callable[..., SimpleNamespace], authdb: SimpleNamespace) -> None:
     """已带 sid 再登录：签发新 sid/新 CSRF，旧 sid 立即失效（防会话固定）。"""
     s = session()
@@ -537,14 +643,17 @@ def test_corrupt_session_payload_is_401_and_purged(session: Callable[..., Simple
     assert authdb.redis.get(sid_key(s.sid)) is None
 
 
+@pytest.mark.parametrize("status", ["disabled", "rejected"])
 def test_status_change_revokes_live_sessions(
-    session: Callable[..., SimpleNamespace], authdb: SimpleNamespace, sql: Callable[..., Any]
+    session: Callable[..., SimpleNamespace], authdb: SimpleNamespace, sql: Callable[..., Any], status: str
 ) -> None:
-    """禁用即失效（plan §3.6）：已登录用户被禁用后下一次请求 403，会话全部吊销，恢复后也需重新登录。"""
+    """禁用/驳回即失效（plan §3.6、契约 #25）：下一次请求 403，会话全部吊销，恢复后也需重新登录。
+
+    改角色、管理员重置密码吊销会话要经 /admin 接口触发（T-B03b），待其落地后补用例。"""
     s = session()
-    sql("UPDATE app.users SET status='disabled' WHERE id=:i", i=s.user.id)
+    sql("UPDATE app.users SET status=:s WHERE id=:i", s=status, i=s.user.id)
     err = assert_err(s.client.get(f"{API}/me"), 403, "ACCOUNT_NOT_APPROVED")
-    assert err["details"]["status"] == "disabled"
+    assert err["details"]["status"] == status
     assert user_session_keys(authdb, s.user.id) == set()
     sql("UPDATE app.users SET status='approved' WHERE id=:i", i=s.user.id)
     assert_err(s.client.get(f"{API}/me"), 401, "AUTH_REQUIRED")
@@ -671,10 +780,11 @@ def test_change_password_revokes_other_sessions_and_old_password(
         f"{API}/auth/password", json={"old_password": s.user.password, "new_password": newp}, headers={"X-CSRF-Token": s.csrf}
     )
     assert r.status_code == 204, r.text[:300]
-    assert s.client.get(f"{API}/me").status_code == 200  # 当前会话保留
+    assert s.client.get(f"{API}/me").status_code == 200  # 当前用户仍登录（#25 起为轮换后的新会话）
     for o in (other1, other2):
         assert_err(o.client.get(f"{API}/me"), 401, "AUTH_REQUIRED")
-    assert user_session_keys(authdb, s.user.id) == {hashlib.sha256(s.sid.encode()).hexdigest()}
+    current = s.client.cookies.get("sid")
+    assert user_session_keys(authdb, s.user.id) == {hashlib.sha256(current.encode()).hexdigest()}
     assert_err(
         app_client().post(f"{API}/auth/login", json={"username": s.user.username, "password": s.user.password}),
         401, "INVALID_CREDENTIALS",
@@ -682,6 +792,32 @@ def test_change_password_revokes_other_sessions_and_old_password(
     assert app_client().post(f"{API}/auth/login", json={"username": s.user.username, "password": newp}).status_code == 200
     (changed,) = sql("SELECT password_changed_at FROM app.users WHERE id=:i", i=s.user.id)[0]
     assert changed is not None
+
+
+@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（改密保留当前 sid，不轮换）")
+def test_change_password_rotates_current_session(
+    session: Callable[..., SimpleNamespace], app_client: Callable[..., Any], authdb: SimpleNamespace
+) -> None:
+    """#25：改密 204 + Set-Cookie 新 ``sid`` 与新 ``csrf_token``；旧 sid 401；新 sid + 新 CSRF 可用。"""
+    s = session()
+    old_sid, old_csrf = s.sid, s.csrf
+    r = s.client.post(
+        f"{API}/auth/password", json={"old_password": s.user.password, "new_password": new_pw()}, headers={"X-CSRF-Token": s.csrf}
+    )
+    assert r.status_code == 204 and r.content == b""
+    ck = set_cookies(r)
+    assert {"sid", "csrf_token"} <= set(ck)
+    new_sid, new_csrf = ck["sid"].split(";", 1)[0].split("=", 1)[1], ck["csrf_token"].split(";", 1)[0].split("=", 1)[1]
+    assert new_sid and new_sid != old_sid and new_csrf and new_csrf != old_csrf
+    assert authdb.redis.get(sid_key(old_sid)) is None
+    old = app_client()
+    old.cookies.set("sid", old_sid)
+    assert_err(old.get(f"{API}/me"), 401, "AUTH_REQUIRED")
+    assert s.client.get(f"{API}/me").status_code == 200
+    ok = s.client.post(f"{API}/me/consents", json={"key": "privacy", "version": "unversioned"}, headers={"X-CSRF-Token": new_csrf})
+    assert ok.status_code == 201
+    stale = s.client.post(f"{API}/me/consents", json={"key": "privacy", "version": "unversioned"}, headers={"X-CSRF-Token": old_csrf})
+    assert_err(stale, 403, "CSRF_FAILED")
 
 
 def test_change_password_requires_auth(app_client: Callable[..., Any]) -> None:
@@ -710,10 +846,18 @@ def test_me_shape(session: Callable[..., SimpleNamespace]) -> None:
     assert "password_hash" not in json.dumps(me) and "failed_login_count" not in me
 
 
-@pytest.mark.parametrize("key", ["signal_risk_disclosure", "privacy", "terms"])
+def current_doc_version(client: Any, key: str) -> str:
+    """#26：当前版本取自 ``/meta/registration`` 的 ``doc_versions``；旧后端没有该字段时按 auth.yaml 默认 ``"unversioned"``。"""
+    return client.get(f"{API}/meta/registration").json().get("doc_versions", {}).get(key, "unversioned")
+
+
+@pytest.mark.parametrize("key", [
+    "signal_risk_disclosure", "privacy", "terms",
+    pytest.param("sensitive_financial_info", marks=pytest.mark.xfail(strict=True, reason=T_B03_FU + "（consent key 无 sensitive_financial_info）")),
+])
 def test_post_consent_and_me_reflects_latest(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], key: str) -> None:
     s = session()
-    ver = "v-tt01d-" + secrets.token_hex(2)
+    ver = current_doc_version(s.client, key)
     r = s.client.post(f"{API}/me/consents", json={"key": key, "version": ver}, headers={"X-CSRF-Token": s.csrf})
     assert r.status_code == 201, r.text[:300]
     body = r.json()
@@ -734,6 +878,36 @@ def test_post_consent_invalid_is_400(session: Callable[..., SimpleNamespace], pa
     s = session()
     r = s.client.post(f"{API}/me/consents", json=payload, headers={"X-CSRF-Token": s.csrf})
     assert_err(r, 400, "VALIDATION_ERROR")
+
+
+@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（version 未与 doc_versions 比对）")
+@pytest.mark.parametrize("key", ["privacy", "signal_risk_disclosure"])
+def test_post_consent_version_mismatch_is_400(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], key: str) -> None:
+    """#26：``version`` 必须等于当前 ``doc_versions[key]``，否则 ``400 VALIDATION_ERROR``（field: version），且不落库。"""
+    s = session()
+    bad = "v-tt01d-" + secrets.token_hex(3)
+    r = s.client.post(f"{API}/me/consents", json={"key": key, "version": bad}, headers={"X-CSRF-Token": s.csrf})
+    assert fields(assert_err(r, 400, "VALIDATION_ERROR")) == ["version"]
+    assert sql("SELECT count(*) FROM app.consents WHERE user_id=:i AND doc_version=:v", i=s.user.id, v=bad)[0][0] == 0
+
+
+@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（无 /accounts、/imports 写接口与 sensitive_financial_info 门槛）")
+@pytest.mark.parametrize("path,body", [
+    ("/imports", None),
+    ("/accounts", {"name": "测试账户", "broker": "示例证券", "account_type": "cash"}),
+], ids=["imports", "accounts"])
+def test_financial_writes_require_sensitive_financial_info_consent(
+    session: Callable[..., SimpleNamespace], path: str, body: dict[str, Any] | None
+) -> None:
+    """#26（plan 7.3，个保法第 28 条单独同意）：未同意 ``sensitive_financial_info`` → ``403 CONSENT_REQUIRED``。"""
+    s = session()
+    hdr = {"X-CSRF-Token": s.csrf}
+    if body is None:
+        r = s.client.post(f"{API}{path}", files={"files": ("demo.csv", b"col\n1\n", "text/csv")}, headers=hdr)
+    else:
+        r = s.client.post(f"{API}{path}", json=body, headers=hdr)
+    err = assert_err(r, 403, "CONSENT_REQUIRED")
+    assert err["details"]["required"] == ["sensitive_financial_info"]
 
 
 def test_admin_routes_hidden_from_non_admin(session: Callable[..., SimpleNamespace], app_client: Callable[..., Any]) -> None:

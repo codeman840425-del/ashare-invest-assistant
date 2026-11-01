@@ -127,6 +127,16 @@ def test_reason_codes_match_contract(payload, contract):
         assert sorted(got[code]["check_on"]) == sorted(spec["check_on"]), code
 
 
+@pytest.mark.parametrize("rule_id", ["SH0C", "IT0C"])
+def test_horizon_rule_ids_are_not_reason_codes(payload, contract, rule_id):
+    """契约 v0.2.3 #23（T-A05）：SH0C/IT0C 只是 HorizonCap.rule_id，不进 /meta/enums，也不在 §6.1 原因码表里。"""
+    assert rule_id not in parse_reason_codes(contract)
+    assert rule_id not in {r["code"] for r in payload["reason_codes"]}
+    for key in ("error_codes", "import_codes"):
+        assert rule_id not in {r["code"] if isinstance(r, dict) else r for r in payload.get(key, [])}
+    assert all(rule_id not in values for values in payload["enums"].values())
+
+
 def test_error_codes_match_contract(payload, contract):
     want = parse_error_codes(contract)
     got = {e["code"]: e for e in payload["error_codes"]}

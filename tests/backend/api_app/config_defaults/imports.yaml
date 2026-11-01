@@ -1,0 +1,7 @@
+schema_version: 1
+max_file_bytes: 5242880         # int，单文件上限 5 MiB（3.5 “≤ 5 MB”按 MiB 计）；超限 422 IMPORT_FILE_ERRORS + IMPORT_FILE_TOO_LARGE，不创建批次
+max_files_per_upload: 5         # int，单次上传文件数上限（3.5）
+max_request_bytes: 27262976     # int，框架层请求体上限 = nginx client_max_body_size 26m；必须 > max_file_bytes × max_files_per_upload（否则启动失败）；超限 413 PAYLOAD_TOO_LARGE {max_bytes}
+max_rows_per_file: 50000        # int，数据行上限；超限 IMPORT_TOO_MANY_ROWS（导入码 #4）
+allowed_extensions: [".txt", ".csv"]   # list[str]，小写比较（3.5 MVP）；其他 → IMPORT_UNSUPPORTED_FILE_TYPE
+raw_file_retention_days: 365    # int，原始文件留存天数（第 9 节问题 21 已定）；账户注销时提前删除；用户可手动删除

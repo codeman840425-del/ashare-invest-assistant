@@ -1,3 +1,5 @@
+状态：已停用（用户 2026-11-02 决定）
+
 # 风险测评问卷：设计说明
 
 > 研究员 T-B15 草案，2026-11-01。可配置版本见同目录 `risk_questionnaire.yaml`（questionnaire_version 1.0.0，status: draft）。

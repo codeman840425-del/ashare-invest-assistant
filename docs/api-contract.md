@@ -1,12 +1,42 @@
 # A股个人投资研究与决策助手 · REST 接口契约（MVP v1）
 
-- 作者：架构师；日期：2026-11-01；版本：**v0.2.4**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b；v0.2.4 为 T-A05 合入研究员 T-B15 合规文书与问卷、前端 T-F02 评审 D1–D7）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
+- 作者：架构师；日期：2026-11-02；版本：**v0.2.5**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b；v0.2.4 为 T-A05 合入研究员 T-B15 合规文书与问卷、前端 T-F02 评审 D1–D7；v0.2.5 为 T-A06 按用户 2026-11-02 决定删除同意流程与风险测评）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
 - 配套：[`plan.md`](./plan.md)（架构方案）。本契约优先于代码：FastAPI 生成的 `openapi.json` 与本文不一致时**改代码**。
 - **示例值全部虚构**：代码用 `600000.SH / 000001.SZ`，ID 用 `00000000-0000-4000-8000-0000000000xx`，金额为随意整数；不含任何真实账户、股东代码、姓名、金额或委托/成交编号。证券简称一律用“示例银行”“演示电子”这类虚构名称。
 
 ---
 
 ## 0. 变更记录
+
+### v0.2.5（2026-11-02，T-A06；用户决定：仅朋友间私下使用、非商业；**不做风险测评、不做同意流程**；**含不兼容变更（删除端点、表与错误码）**）
+> 本节列出的项一律**作废**，以本节为准；下文 v0.2.4 及更早的变更记录保留原文只作历史，凡与本节冲突的条目视为作废（条目首列已标 ~~作废~~ 的除外不再逐条修改）。plan 第 9 节问题 43–48。
+
+**A. 作废清单**
+
+| 类别 | 作废项（来源） | 替代 |
+|---|---|---|
+| 表 | `consents`（v0.2.3 #26、v0.2.4 #4）、`legal_documents` 与停用记录表 `legal_document_events`（v0.2.4 #3）、`questionnaires`、`risk_assessments`（v0.2.4 #6）；`user_profiles.assessment_id`、`user_profiles.questionnaire_version`（v0.2.4 #7）；`strategy_instances.fit_ack`（v0.2.3） | 无。已建的由新迁移删除（plan 3.3） |
+| 端点 | `GET /meta/consent-docs`；`GET /legal/{doc_key}`、`/legal/{doc_key}/versions`、`/legal/{doc_key}/{version}`；`POST /me/consents`；`GET /me/risk-assessment/questionnaire`；`GET /me/risk-assessment`、`GET /me/risk-assessments`；`POST /me/risk-assessment`（v0.2.3 #26，v0.2.4 #3、#4、#6）；`DELETE /me`（plan 原 7.3，契约未定义，一并不做） | 无；账号删除由管理员手动处理 |
+| 请求/响应字段 | `POST /auth/register` 的 `agreements`（v0.2.4 #2）；`Me.consents`、`Me.risk_assessment` 与 `RiskAssessmentSummary`（v0.2.4 #5、#6）；`/me/profile` 的 `assessment_id`（请求）、`questionnaire_version`（响应）与 `exceeds_assessment` 校验（v0.2.4 #7）；`POST /strategy-instances` 的 `fit_ack`（v0.2.3）；`POST /me/consents` 的 `content_sha256`/`action`/`ui_surface`/`presentation`；`doc_versions`、`needs_reconsent`、`current_version`、`"unversioned"` | 注册：提交即视为已知悉固定免责提示；旧客户端仍发 `agreements` 时**服务端忽略**（不报错、不记录）。画像字段全部选填 |
+| 错误码 | `403 CONSENT_REQUIRED`（含 `details.required`，v0.2.4 #8）；`422 STRATEGY_FIT_ACK_REQUIRED`（含 `ack_allowed`、`blocking_rule_ids`，v0.2.4 #9）；`409 VERSION_CONFLICT` 中“问卷版本不是当前版本”的用法；`400 VALIDATION_ERROR` 的 `issue: "exceeds_assessment"`、`understanding_required` | 不适配只进 `warnings[]` / `hints[]` |
+| 门槛 | §1.3 ⚖ 合规门槛（有效测评 + `signal_risk_disclosure` 同意）；`POST /imports`、`POST /trades` 的 `sensitive_financial_info` 门槛（v0.2.4 #13 后半） | ⚖ 只作为“建议类输出”标记：前端在其输出旁展示固定免责提示，服务端不拦截 |
+| 枚举 | `consent_key`、`legal_doc_key`、`consent_presentation`、`assessment_status`（v0.2.4 新增）；`reason_code` 中的 `PROFILE_OR_CONSENT_MISSING`（23 → 22 个） | 无 |
+| 配置键 | `config/auth.yaml` 的 `consents.doc_versions`（7c62f59，v0.2.4 已移出）；研究员 `risk_questionnaire.yaml`（全部键）；分类器中画像类规则的 `else_cap`（`SH0`、`SH0B`、`SH0C`、`IT0B`、`IT0C`） | 分类器 1.2.0 规则键 `mode: hint` |
+| 工具 | 文书/问卷发布 CLI 与哈希/指纹/版本级别校验（v0.2.4 #15，versioning.md §3、§6） | 无 |
+| 待确认问题 | plan 第 9 节问题 38–42；问题 37 方案 A（新手封顶） | 问题 43–48 |
+
+**B. 新增或修改**
+
+| # | 项 | 决定 | 后端改动 | 前端改动 |
+|---|---|---|---|---|
+| 1 | 固定免责提示 | 文案以 `docs/strategies/compliance/disclaimer.md`（1.0）为准：“本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。”；页面底部、候选信号卡、行动计划卡固定展示；不需要勾选、不记录 | 无 | `RiskDisclosure` 组件用该文案（逐字一致）；注册页展示同一文案 |
+| 2 | 周期分类器 1.2.0（`version_no: 3`） | 画像类 `requires` 规则改为 `mode: hint`：画像未填写 → 不封顶、不提示；已填写且不满足 → 只进 `hints[]`，不改分数、不进 `caps[]`、不影响 `suitable`。`SH0C`/`IT0C` 只在自报 `experience=novice` 时提示 | 规则加载支持 `mode`；新版本行不可变；1.1.0 保留 | 显示 `hints[]` |
+| 3 | `/horizon-assessments` | 响应加 `hints: HorizonHint[]`（永不为 null）；去掉“用户覆盖周期须带 `fit_ack`” | 同上 | 类型 |
+| 4 | `POST /strategy-instances` | 删 `fit_ack`；I3 只校验模板 `horizons`（`STRATEGY_HORIZON_MISMATCH`）；周期不适合或画像低于卡片 `fit` 下限 → 正常 201，`warnings[]` 给出中文说明 | 删 fit_ack 校验 | 删确认对话框，改为显示 warnings |
+| 5 | `Me` | `{id, username, display_name, role, status, entitlements}` | 删字段 | 类型；删 `/onboarding` 跳转（保留 `/account-status`） |
+| 6 | `/me/profile` | 请求/响应不再有 `assessment_id`、`questionnaire_version`；`effort`、`risk_tolerance`、`experience` 用户自报、可为 null | 删校验与列 | 画像页改为普通选填表单 |
+| 7 | 更换 LLM 供应商 | 只发站内通知（`notification_kind=system`），不要求重新同意 | 运维流程 | 无 |
+| — | `/meta/enums.version` | `"v0.2.4"` → `"v0.2.5"`；删除 A 表所列枚举与原因码 | 同步 | `CONTRACT_VERSION` |
 
 ### v0.2.4（2026-11-01，T-A05；合入研究员 T-B15 的 `docs/strategies/compliance/`（问卷、文书版本规则）与前端评审 T-F02 §4 D1–D7；**含不兼容变更**：注册 `agreements` 的 `risk_disclosure` 改为 `signal_risk_disclosure`，`POST /me/consents` 必须带 `content_sha256`，`/meta/registration` 不再返回 `doc_versions`，`Me.risk_assessment` 结构改变，`POST /me/risk-assessment` 响应改为 `RiskAssessment` 且返回 201）
 > 为什么单独升版本而不并入 v0.2.3：后端尚未同步 v0.2.3，但本次新增 3 张表、8 个端点并改了已发布字段的取值与必填项，不是“只加可选字段”，并入会让 v0.2.3 失去意义。
@@ -162,7 +192,7 @@
 - **会话 Cookie** `sid`：`HttpOnly; Secure; SameSite=Lax; Path=/`；服务端会话存 Redis，空闲 7 天滑动过期、自登录起 30 天绝对过期（均可配置，plan 6.1 `config/auth.yaml` `session.*`）；V1 不提供“记住我”。登录与修改密码时轮换会话（新 `sid` 与新 `csrf_token`，旧会话作废）；改角色、禁用、驳回、管理员重置密码时吊销该用户全部会话。
 - **CSRF**：登录成功后响应体与 Cookie `csrf_token`（非 HttpOnly）给出令牌；所有 `POST/PUT/PATCH/DELETE` 必须带头 `X-CSRF-Token`，缺失或不符 → `403 CSRF_FAILED`。响应体 `csrf_token` 与 Cookie 值相同，以 Cookie 为准（双提交：服务端用常数时间比较请求头、Cookie 与会话内令牌，三者须一致）；响应体值只供读不到 Cookie 的客户端兜底（v0.2.4 #13）。
 - **权限**：未登录 → `401 AUTH_REQUIRED`；账号非 `approved` → `403 ACCOUNT_NOT_APPROVED`（以上两条均不适用于 `/admin/*`）；`/admin/*`：不是已登录的 `role=admin` 时（含未登录）一律 `404 NOT_FOUND`，与不存在的路径无法区分（不泄露管理端存在性；先于本节其他校验，v0.2.1）。用户只能访问自己的资源，访问他人资源一律 `404 NOT_FOUND`（不泄露存在性）。
-- **合规门槛**：建议类接口（标 ⚖：`/today`、`/suggestions*`、`/daily-reports*`、`/signals*`、`/candidate-signals*`、`/plan-drafts*` 的生成与确认、`/stream` 中标 ⚖ 的事件）要求用户有**有效**风险测评（`assessment_status` ∈ {`valid`, `expiring`, `grace`}）且已同意 `signal_risk_disclosure` 的当前版本（`needs_reconsent=false`），否则 `403 CONSENT_REQUIRED`（`details.required` 列出所有缺项，取值为 `consent_key` 或 `"risk_assessment"`，如 `["signal_risk_disclosure", "risk_assessment"]`）。导入和手工录入成交（`POST /imports`、`POST /trades`）要求已单独同意 `sensitive_financial_info`（《个保法》第 28 条，plan 7.3），否则 `403 CONSENT_REQUIRED{required:["sensitive_financial_info"]}`（v0.2.4 #8、#13；`POST /accounts` 不要求）。
+- **合规门槛**：**无**（v0.2.5 作废原有的测评与同意门槛，`CONSENT_REQUIRED` 不再存在）。标 ⚖ 的建议类接口（`/today`、`/suggestions*`、`/daily-reports*`、`/signals*`、`/candidate-signals*`、`/plan-drafts*`、`/stream` 中标 ⚖ 的事件）只表示“输出是规则信号”：前端须在其旁固定展示免责提示（`docs/strategies/compliance/disclaimer.md`：“本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。”），服务端不拦截。`POST /imports`、`POST /trades` 也不需要单独同意。
 - **限速**：超限 `429 RATE_LIMITED`，头 `Retry-After`（秒）。
 - 敏感字段一律掩码输出（如 `shareholder_code_masked: "A00****000"` 为格式示意），任何接口都不返回原始股东代码、资金账号或原始上传文件内容。
 
@@ -186,10 +216,6 @@
 |---|---|
 | `account_status` | `pending` `approved` `rejected` `disabled` |
 | `role` | `user` `admin` |
-| `consent_key` | `terms` `privacy` `signal_risk_disclosure` `sensitive_financial_info`（需用户同意的文书；v0.2.4） |
-| `legal_doc_key` | `terms` `privacy` `signal_risk_disclosure` `sensitive_financial_info` `site_risk_notice`（`site_risk_notice` = 全站固定风险揭示，只展示不需同意；v0.2.4） |
-| `consent_presentation` | `checkbox_unticked` `scroll_and_confirm` `modal`（同意时的呈现方式，记入 consents；v0.2.4） |
-| `assessment_status` | `valid` `expiring`（距到期 ≤ `remind_before_days`）`grace`（已过 `expires_at`、仍在宽限期内）`expired` `superseded`（有更新的一次测评）；服务端按时间计算，不存库（v0.2.4） |
 | `epistemic_type` | `fact` `estimate` `hypothesis` `execution` |
 | `horizon` | `intraday_t` `short` `swing` `long` |
 | `dimension` | `technical` `capital` `fundamental` `sentiment` `sector_market` `news` |
@@ -232,7 +258,7 @@
 | `lifecycle` | `draft` `simulating` `published` `observing` `retired` |
 | `instance_status` | `proposed` `active` `paused` `archived` |
 | `candidate_signal_state` | `open` `drafted` `blocked` `released` `confirmed` `dismissed` `expired` `invalidated` `superseded` |
-| `reason_code` | 见 6.1（23 个） |
+| `reason_code` | 见 6.1（22 个；v0.2.5 删 `PROFILE_OR_CONSENT_MISSING`） |
 | `reason_status` | `active` `released` `obsolete` |
 | `check_on` | `tick` `daily_close` `schedule` `holding_change` `cash_update` `import` `plan_change` `user_action` |
 | `release_kind` | `expr` `time` `event` `user_action` |
@@ -260,14 +286,13 @@
 | 403 | `ACCOUNT_LOCKED` | 连续失败临时锁定 | `{retry_after_s}` |
 | 403 | `CSRF_FAILED` | CSRF 令牌缺失/不符 | — |
 | 403 | `FORBIDDEN` | 角色不足（保留；`/admin/*` 不使用，一律 404，见 §1.3） | — |
-| 403 | `CONSENT_REQUIRED` | 缺少必要同意（含需重新同意）或有效风险测评 | `{required:[string]}`（`consent_key` 或 `"risk_assessment"`，v0.2.4） |
 | 403 | `ENTITLEMENT_LIMIT_REACHED` | 超出套餐权益上限（自选数、重点关注数、导入次数、LLM 解释次数等） | `{key, limit, current}` |
 | 404 | `NOT_FOUND` | 资源不存在或不属于当前用户 | — |
 | 405 | `METHOD_NOT_ALLOWED` | 路径存在但方法不支持；响应头 `Allow`。非管理员（含未登录）访问 `/admin/*` 一律按 `404 NOT_FOUND` 返回，不带 `Allow` 头 | `{allowed: string[]}` |
 | 413 | `PAYLOAD_TOO_LARGE` | 请求体超过网关/框架上限（v0.2.3 补充）；应用层文件超限仍用 `422 IMPORT_FILE_ERRORS` | `{max_bytes}`（= plan 6.1 `imports.max_request_bytes`；nginx 返回时可省略） |
 | 409 | `CONFLICT` | 唯一约束冲突（如用户名已存在） | `{field}` |
 | 409 | `IDEMPOTENCY_CONFLICT` | 同一幂等键、不同请求体 | — |
-| 409 | `VERSION_CONFLICT` | 乐观锁版本号不符（`If-Match`/`base_version_no`）；或提交测评时 `questionnaire_version` 不是当前问卷（v0.2.4） | `{current_version_no}`；测评时为 `{current_version: string}` |
+| 409 | `VERSION_CONFLICT` | 乐观锁版本号不符（`If-Match`/`base_version_no`） | `{current_version_no}`；测评时为 `{current_version: string}` |
 | 409 | `IMMUTABLE_RESOURCE` | 试图修改不可变对象（建议、已发布策略版本、日报、成交原记录） | — |
 | 422 | `IMPORT_FILE_ERRORS` | 文件级 error：上传阶段（空文件、过大、类型不符、行数超限，此时**不创建批次**），或确认时批次仍有文件级 error | `{findings: ImportFinding[]}`（code 见 §4.1） |
 | 422 | `IMPORT_ROW_ERRORS` | `mode=all` 确认时仍有 error 行 | `{error_rows: int}` |
@@ -284,7 +309,6 @@
 | 422 | `SUGGESTION_INSUFFICIENT_DATA` | 必备字段缺失，未生成建议（0A.2 缺一不可） | `{missing:[string]}` |
 | 409 | `INVALID_STATE_TRANSITION` | 状态机不允许的跃迁（第 6.0 节） | `{from, to, allowed}` |
 | 409 | `STRATEGY_VERSION_NOT_RUNNABLE` | 模板版本不是 `published`/`observing`（例如 simulating、retired） | `{lifecycle}` |
-| 422 | `STRATEGY_FIT_ACK_REQUIRED` | 周期分类器判定不适合，需要用户确认 `fit_ack`；`ack_allowed=false` 时带 `fit_ack` 也不能启用（v0.2.4，plan 第 9 节问题 39【待用户确认】） | `{horizon, suitable, ack_allowed: boolean, blocking_rule_ids: string[]}` |
 | 422 | `STRATEGY_PARAM_OUT_OF_RANGE` | 参数覆盖超出 param_schema 的 min/max/choices | `{param, min, max, choices}` |
 | 422 | `INSTANCE_SCOPE_INVALID` | 实例作用范围不合法（例如 security 范围缺少代码，或代码不在账户/自选中） | `{scope}` |
 | 422 | `PROMOTION_GATES_NOT_MET` | 晋级或上线时门禁未通过 | `{gates:[{gate, result}]}` |
@@ -400,7 +424,8 @@
 | `Notification` | `{id, kind: notification_kind, severity, title: string, body: string \| null, created_at: string(datetime), read_at: string(datetime) \| null, security_code: string \| null, name: string \| null, target: {type: notification_target_type, id: string \| null, route: string \| null}}`。`target.route` 是前端路由（如 `/suggestions/{id}`、`/daily-reports/2026-11-02`），`type=none` 时 `id` 与 `route` 为 `null`。`route` 由服务端生成，前端直接跳转（v0.2.3）：`suggestion` → `/suggestions/{id}`；`candidate_signal` → `/candidate-signals/{id}`；`plan_draft` → `/plan-drafts/{id}`；`plan` → `/plans/{id}`；`daily_report` → `/daily-reports/{date}`（`id` 为日期）；`import_batch` → `/portfolio/import?batch={id}`；`reconciliation` → `/portfolio?tab=reconciliation&account_id={id}`；`strategy_version` → `/strategies/{strategy_id}?version={id}`（`id` 为版本 id） |
 | `TerminalRow` | `{security_code, name, in_watchlist: boolean, focus: boolean, quote: {price, change_pct, amount: string(decimal), t: string(datetime)} \| null, holding: {qty: string(decimal), sellable_qty: string(decimal), cost_price: string(decimal), weight_pct: string(decimal), pnl: string(decimal), pnl_pct: string(decimal)} \| null, suggestion: SuggestionSummary \| null, active_reason_count: int, max_risk_level: risk_level \| null, data_status: data_status, data_as_of: string(datetime) \| null}`。`cost_price` 为摊薄成本（plan 3.5A）；`data_as_of` 为该行行情与建议中较旧者的数据时点，完全无数据时为 `null`（v0.2.3） |
 | `SuggestionSummary` | `{id, created_at, status: suggestion_status, consensus: consensus_status, actions: [{strategy_key, strategy_name, action, t_leg: t_leg \| null}], executability_status: executability_status, divergent_dimensions: dimension[], top_score: int \| null}`。终端表格的动作徽标与分歧标记只读这里，不再逐只请求 `/suggestions/{id}` |
-| `HorizonCap` | `{horizon: horizon, cap: int(0–100), kind: "data_missing" \| "requires", rule_id: string \| null, inputs_missing: string[]}`（v0.2.3）。`data_missing`：必需特征缺失导致封顶（`rule_id=null`，`inputs_missing` 为该周期缺失的 `f.*` 键）；`requires`：某条 `requires` 规则不满足导致封顶（`rule_id` 如 `SH0C`、`IT0C`，`inputs_missing` 可为 `[]`）。`rule_id` 是 `horizon_classifier.yaml` 的规则 ID，**不是** `reason_code`，不进 `/meta/enums`（v0.2.3 #23）。同一周期多个封顶都列出，生效值取最小 |
+| `HorizonHint` | `{horizon: horizon, rule_id: string, text: string}`（v0.2.5）。画像类 `requires` 规则（`mode: hint`）在画像**已填写且不满足**时给出的提示，如 `{horizon:"short", rule_id:"SH0C", text:"短线需要盯盘与止损纪律，您自报的经验为新手"}`；画像未填写不产生提示；不影响分数与 `suitable`。`rule_id` 不是 `reason_code` |
+| `HorizonCap` | `{horizon: horizon, cap: int(0–100), kind: "data_missing" \| "requires", rule_id: string \| null, inputs_missing: string[]}`（v0.2.3）。`data_missing`：必需特征缺失导致封顶（`rule_id=null`，`inputs_missing` 为该周期缺失的 `f.*` 键）；`requires`：某条 `mode: cap` 的 `requires` 规则不满足导致封顶（`rule_id` 如 `IT0`、`LG0`，`inputs_missing` 可为 `[]`；v0.2.5 起画像类规则 `SH0`/`SH0B`/`SH0C`/`IT0B`/`IT0C` 为 `mode: hint`，不再出现在 `caps` 中）。`rule_id` 是 `horizon_classifier.yaml` 的规则 ID，**不是** `reason_code`，不进 `/meta/enums`（v0.2.3 #23）。同一周期多个封顶都列出，生效值取最小 |
 
 **可解释性强制规则（P1）**：在任何返回 `CandidateSignal`、`Suggestion` 中策略结论的响应里，`rule_refs`、`evidence`、`counter_evidence`、`invalidation` 都是**非空数组**；`model_refs[*].role == "auxiliary"`。服务端写入时校验，不满足的不写入（内部记 `SIGNAL_NOT_EXPLAINABLE`）；契约测试检查所有示例和响应（T-T17）。
 
@@ -481,29 +506,22 @@
 | `LOSS_STREAK_PAUSE` | user_action / time | user_action, schedule | 是 |
 | `STRATEGY_CONFLICT` | user_action / expr | user_action, tick | 是 |
 | `USER_MUTED` | user_action / time | user_action, schedule | 是（通过 `/restrictions`） |
-| `PROFILE_OR_CONSENT_MISSING` | user_action | user_action | 否（完成相应步骤后系统解除） |
 
 ---
 
 ## 7. 端点
-约定：标 🔒 的需要登录且账号已批准；标 🛡 的需要 `role=admin`；标 ⚖ 的还要满足 1.3 的合规门槛；列表接口均按 1.2 分页，除非注明。请求体字段未注明可空的都必填。
+约定：标 🔒 的需要登录且账号已批准；标 🛡 的需要 `role=admin`；标 ⚖ 的为建议类输出，前端须展示固定免责提示（1.3，v0.2.5 起无服务端门槛）；列表接口均按 1.2 分页，除非注明。请求体字段未注明可空的都必填。
 
 ### 7.1 认证与账号
 | 方法 | 路径 | 说明 | 请求 → 响应 |
 |---|---|---|---|
-| GET | `/meta/registration` | 注册模式（不需登录），前端据此隐藏注册入口 | → `200 {mode: registration_mode}`（v0.2.4：`doc_versions` 移到 `GET /meta/consent-docs`） |
-| GET | `/meta/consent-docs` | 各文书当前版本（不需登录；`Cache-Control: public, max-age=300`；v0.2.4 #3） | → `200 {items: [ConsentDoc]}`，每个 `legal_doc_key` 一项：`ConsentDoc {key: legal_doc_key, version: string（语义化版本或 "unversioned"）, version_no: int \| null, title: string, summary: string, effective_at: string(datetime) \| null, content_sha256: string \| null, url: string \| null（= `/api/v1/legal/{key}`；未定稿时 null）, required_for: ("register" \| "advice" \| "import" \| "display")[]}`。`terms`、`privacy` → `["register"]`；`signal_risk_disclosure` → `["register", "advice"]`；`sensitive_financial_info` → `["import"]`；`site_risk_notice` → `["display"]`。`"unversioned"` 只会在 `registration_mode=closed` 时出现 |
-| GET | `/legal/{doc_key}` · `/legal/{doc_key}/versions` · `/legal/{doc_key}/{version}` | 文书正文（不需登录，v0.2.4 #3） | 当前版本 / 历史列表 / 指定版本：`LegalDocument {key: legal_doc_key, version, version_no, title, summary, content_md, content_sha256, locale, change_level: "major"\|"minor"\|"patch", changelog: string, effective_at, published_at}`；列表元素不含 `content_md`。未发布（`"unversioned"`）或版本不存在 → `404 NOT_FOUND`。已发布的版本永远可取（只插入，不删除） |
-| POST | `/auth/register` | 注册，状态为 `pending`。**V1 默认 `registration_mode=closed`**，一律返回 `503 REGISTRATION_CLOSED`；本人账号由 CLI 创建 | `{username: string(4–32，^[a-z0-9_]+$，服务端转小写；保留词 admin/root/system 等 → 400 VALIDATION_ERROR), password: string(10–128，须含字母与数字，不得等于用户名，不得在弱口令表中), display_name: string(1–32), invite_code: string \| null（V1 不用）, apply_note: string(≤200) \| null, agreements: consent_key[]}`；`agreements` 必须包含 `terms`、`privacy`、`signal_risk_disclosure`，可另含 `sensitive_financial_info`（v0.2.4 #2：原 `risk_disclosure` 作废），按 `/meta/consent-docs` 的当前版本记录（`presentation=checkbox_unticked`） → `201 {id, username, status:"pending"}`；`invite` 模式下 `invite_code`、`apply_note` 必填，邀请码无效（不存在/过期/已用/已吊销/绑定的用户名不符）一律 `400 VALIDATION_ERROR {fields:[{field:"invite_code", issue:"invalid"}]}`；可能返回 `409 CONFLICT`、`503 REGISTRATION_CLOSED`（含邀请功能未上线时的 `invite` 模式）、`429 RATE_LIMITED` |
+| GET | `/meta/registration` | 注册模式（不需登录），前端据此隐藏注册入口 | → `200 {mode: registration_mode}`（v0.2.5：不再有文书版本） |
+| POST | `/auth/register` | 注册，状态为 `pending`。**V1 默认 `registration_mode=closed`**，一律返回 `503 REGISTRATION_CLOSED`；本人账号由 CLI 创建 | `{username: string(4–32，^[a-z0-9_]+$，服务端转小写；保留词 admin/root/system 等 → 400 VALIDATION_ERROR), password: string(10–128，须含字母与数字，不得等于用户名，不得在弱口令表中), display_name: string(1–32), invite_code: string \| null（V1 不用）, apply_note: string(≤200) \| null}`；提交注册即视为已知悉固定免责提示（注册页展示），不记录同意；旧客户端发来的 `agreements` 字段被忽略（v0.2.5） → `201 {id, username, status:"pending"}`；`invite` 模式下 `invite_code`、`apply_note` 必填，邀请码无效（不存在/过期/已用/已吊销/绑定的用户名不符）一律 `400 VALIDATION_ERROR {fields:[{field:"invite_code", issue:"invalid"}]}`；可能返回 `409 CONFLICT`、`503 REGISTRATION_CLOSED`（含邀请功能未上线时的 `invite` 模式）、`429 RATE_LIMITED` |
 | POST | `/auth/login` | 登录 | `{username, password}` → `200 {user: Me, csrf_token}` + Set-Cookie；可能返回 `401 INVALID_CREDENTIALS`、`403 ACCOUNT_NOT_APPROVED{status, reason?}`、`403 ACCOUNT_LOCKED{retry_after_s}` |
 | POST | `/auth/logout` 🔒 | 注销 | → `204` |
 | POST | `/auth/password` 🔒 | 修改密码，同时注销其他会话并轮换当前会话 | `{old_password, new_password}` → `204` + Set-Cookie（新 `sid`、新 `csrf_token`；前端从 Cookie 重读 CSRF 令牌）；旧密码错误 → `400 VALIDATION_ERROR`（`field: old_password`），计入 T-B03a 限速 |
-| GET | `/me` 🔒 | 当前用户 | → `Me {id, username, display_name, role, status, entitlements: {key: value}, consents: {[consent_key]: {version: string \| null, accepted_at: string(datetime) \| null, current_version: string, needs_reconsent: boolean}}（四个键都有；未同意或已撤回时 `version`/`accepted_at` 为 null，`needs_reconsent=true`）, risk_assessment: RiskAssessmentSummary \| null}`；`RiskAssessmentSummary {assessment_id, questionnaire_version, risk_tolerance: int(1–5), submitted_at, expires_at, status: assessment_status, needs_retest: boolean}`（v0.2.4 #5、#6） |
-| GET/PUT | `/me/profile` 🔒 | 投资画像（版本化，PUT 生成新版本） | `{horizon_pref: horizon[], effort: "low"\|"medium"\|"high" \| null, risk_tolerance: int(1–5) \| null, experience: "novice"\|"intermediate"\|"advanced" \| null, max_single_position_pct: string(decimal，5–50，最多 2 位小数), assessment_id: uuid \| null}` → `{version_no, questionnaire_version: string \| null, ...}`；无画像时 GET → `404 NOT_FOUND`。三个测评字段为 null 表示未测评（分类器按未填写处理，plan 2.5.14）。**【待用户确认】（plan 第 9 节问题 38，研究员默认）**：这三个字段只能等于或比 `assessment_id`（省略时取最近一次有效测评）的 `derived` 更保守，更激进 → `400 VALIDATION_ERROR {fields:[{field, issue:"exceeds_assessment", max_allowed}]}`；没有有效测评时只能为 null。`assessment_id` 不是自己的或不是有效测评 → 400（v0.2.4 #7） |
-| POST | `/me/consents` 🔒 | 同意或撤回条款（只追加记录） | `{key: consent_key, version: string, content_sha256: string \| null, action: "grant"\|"withdraw"（默认 grant）, ui_surface: string(≤64), presentation: consent_presentation}` → `201 {key, version, action, at}`；`version` 与 `content_sha256` 必须等于 `/meta/consent-docs` 的当前值（`"unversioned"` 时 `content_sha256` 为 null），否则 `400 VALIDATION_ERROR`（`field: version` 或 `content_sha256`）。`withdraw` 只接受 `signal_risk_disclosure`、`sensitive_financial_info`（撤回后相应门槛立即生效，已有数据的处理见 plan 7.3）；`terms`、`privacy` 不能单独撤回（走注销账户）→ 400（v0.2.4 #4） |
-| GET | `/me/risk-assessment/questionnaire` 🔒 | 当前问卷（不含分值、正确答案和计分规则；v0.2.4 #6） | → `200 {questionnaire_key: "risk_profile", version, intro: string, groups: [{id, title}], questions: [{q_id, group, type: "single", required: boolean, title, choices: [{id, text}]}]}`；结构对应 `docs/strategies/compliance/risk_questionnaire.yaml`；没有已发布问卷 → `404 NOT_FOUND` |
-| GET | `/me/risk-assessment` 🔒 · `/me/risk-assessments` 🔒 | 最近一次测评 / 历史（分页） | → `RiskAssessment`；从未测评 → `404 NOT_FOUND`；历史元素同结构，记录不可修改 |
-| POST | `/me/risk-assessment` 🔒 | 提交风险测评（每次新增一条记录，不改画像） | `{questionnaire_version: string, answers: [{q_id: string, choice: string}], started_at: string(datetime) \| null, client_duration_s: int \| null}` → `201 RiskAssessment {assessment_id, questionnaire_version, submitted_at, expires_at, status: assessment_status, derived: {risk_tolerance: {value: int(1–5), rule_ids: string[]}, experience: {value, rule_ids}, effort: {value, rule_ids}}, flags: string[]（如 `no_loss_tolerance`、`self_report_higher`、`fast_completion`）, needs_retest: boolean}`。`questionnaire_version` 不是当前版本 → `409 VERSION_CONFLICT {current_version}`；缺题、未知 `q_id` 或选项 → `400 VALIDATION_ERROR {fields:[{field:"answers.<q_id>", issue}]}`；K4（理解确认）答错 → `400 VALIDATION_ERROR`，`details.reason = "understanding_required"`（不入库）；24 小时内超过 3 次 → `429 RATE_LIMITED`。`trade_count_12m` 等由服务端从成交记录计算，客户端不提交。用户确认后用 `PUT /me/profile` 带 `assessment_id` 写入画像。有效期 **【待用户确认】（问题 40）** 365 天、提前 30 天提醒、宽限 30 天 |
+| GET | `/me` 🔒 | 当前用户 | → `Me {id, username, display_name, role, status, entitlements: {key: value}}`（v0.2.5 删 `consents`、`risk_assessment`） |
+| GET/PUT | `/me/profile` 🔒 | 投资画像（版本化，PUT 生成新版本；全部由用户自报） | `{horizon_pref: horizon[], effort: "low"\|"medium"\|"high" \| null, risk_tolerance: int(1–5) \| null, experience: "novice"\|"intermediate"\|"advanced" \| null, max_single_position_pct: string(decimal，5–50，最多 2 位小数)}` → `{version_no, ...}`；无画像时 GET → `404 NOT_FOUND`（分类器按未填写处理）。三个自报字段为 null 表示未填写：分类器不封顶、不提示（plan 2.5.3、2.5.14）。v0.2.5 删 `assessment_id`、`questionnaire_version` 与 `exceeds_assessment` 校验 |
 | GET/PATCH | `/admin/users` 🛡 · `/admin/users/{id}` 🛡 | 审核和停用账号 | GET 列表分页（§1.2）`?status=&q=`，元素 `AdminUser {id, username, display_name, status: account_status, role, apply_note: string \| null, created_at, register_ip_region: string \| null（粗粒度）, same_ip_registrations: int, same_ip_flag: boolean（超过 plan 6.1 `admin.same_ip_highlight_threshold`，只作提示）, review_reason: string \| null, reviewed_at: string(datetime) \| null, last_login_at: string(datetime) \| null}`；PATCH `{status: "approved"\|"rejected"\|"disabled", reason: string(≤200) \| null}`：`rejected`、`disabled`，以及从 `disabled` 恢复为 `approved` 时 `reason` 必填，否则 `400 VALIDATION_ERROR`（v0.2.4 #12） |
 
 ### 7.2 账户、成交与导入（只返回掩码字段）
@@ -520,7 +538,7 @@
 | POST | `/imports/{batch_id}/discard` 🔒 | 放弃未提交的批次 → `{status: "discarded"}`（只允许 `previewed`/`failed`） |
 | POST | `/imports/{batch_id}/revert` 🔒 | 回滚已提交批次 → `{status: "reverted"}` |
 | GET | `/imports/{batch_id}/errors.csv` 🔒 | `text/csv; charset=utf-8`（带 BOM）：列 `row_no, code, severity, field, message, raw_masked`；只含**掩码后**的原始行 |
-| GET/POST | `/trades` 🔒 · `/trades/{id}` 🔒 | 成交列表和手工录入；原记录不可修改，更正时写更正记录。GET `?account_id=&security_code=&from=&to=&include_voided=`（分页），元素 `Trade {id, account_id, trade_date, trade_time: string \| null, security_code, name, side: trade_side, qty: string(decimal), price: string(decimal), amount: string(decimal), fee_total: string(decimal) \| null, net_amount: string(decimal) \| null, source: "import"\|"manual", batch_id: uuid \| null, voided: boolean, void_reason: string \| null, voided_at: string(datetime) \| null, corrects_trade_id: uuid \| null, created_at}`。POST `TradeCreate {account_id, trade_date, trade_time: string \| null, security_code, side, qty: string(decimal), price: string(decimal), fee_total: string(decimal) \| null, corrects_trade_id: uuid \| null, reason: string \| null（corrects_trade_id 非空时必填）}` → `201 Trade`，支持 `Idempotency-Key`；带 `corrects_trade_id` 时在同一事务中作废原记录并写入新记录；需已同意 `sensitive_financial_info`（§1.3）（v0.2.4 #12） |
+| GET/POST | `/trades` 🔒 · `/trades/{id}` 🔒 | 成交列表和手工录入；原记录不可修改，更正时写更正记录。GET `?account_id=&security_code=&from=&to=&include_voided=`（分页），元素 `Trade {id, account_id, trade_date, trade_time: string \| null, security_code, name, side: trade_side, qty: string(decimal), price: string(decimal), amount: string(decimal), fee_total: string(decimal) \| null, net_amount: string(decimal) \| null, source: "import"\|"manual", batch_id: uuid \| null, voided: boolean, void_reason: string \| null, voided_at: string(datetime) \| null, corrects_trade_id: uuid \| null, created_at}`。POST `TradeCreate {account_id, trade_date, trade_time: string \| null, security_code, side, qty: string(decimal), price: string(decimal), fee_total: string(decimal) \| null, corrects_trade_id: uuid \| null, reason: string \| null（corrects_trade_id 非空时必填）}` → `201 Trade`，支持 `Idempotency-Key`；带 `corrects_trade_id` 时在同一事务中作废原记录并写入新记录（v0.2.4 #12；v0.2.5 删除同意要求） |
 | POST | `/trades/{id}/void` 🔒 | 作废一条成交（v0.2.4 #12） | `{reason: string(1–200)}` → `200 Trade`；已作废 → `409 INVALID_STATE_TRANSITION`；导入批次回滚造成的作废，`void_reason` 为 `"batch_reverted:{batch_id}"`；写审计 |
 | GET | `/snapshots` 🔒 | 持仓快照 |
 | GET | `/reconciliation?account_id=` 🔒 | 对账结果：`{status: reconciliation_status, as_of: string(datetime) \| null, items: [{kind: reconciliation_item_kind, security_code: string \| null, name: string \| null, ours: string(decimal) \| null, broker: string(decimal) \| null, diff: string(decimal) \| null, important: boolean, note: string}]}`。成本按**摊薄成本**比较（我方重建值计入分红：现金红利冲减、股息红利税补缴计入，与通达信一致，v0.2.2），容差 `max(0.01 元, 0.1%)`（plan 3.5A）；每次导入确认后重算 |
@@ -556,12 +574,12 @@
 | GET | `/strategies/{id}/versions/{vid}/tracking` 🔒 | 跟踪统计：`{scope: "mine"\|"site", by_horizon: [{horizon_days: 1\|5\|20, win_rate: Stat, avg_return_pct: Stat, avg_excess_pct: Stat, profit_loss_ratio: Stat, max_loss_streak: int}]}` |
 | GET | `/strategies/{id}/versions/{vid}/lifecycle-events` 🔒 | 生命周期历史 |
 | POST | `/admin/strategies/{id}/versions/{vid}/lifecycle` 🛡 | `{to: lifecycle, reason: string}` → `200 {from, to}`；可能返回 `409 INVALID_STATE_TRANSITION` 或 `422 PROMOTION_GATES_NOT_MET{gates}` |
-| GET | `/horizon-assessments?security_code=` 🔒 | 周期分类结果（版本化）：`{suitable: horizon[], scores: {intraday_t: int, short: int, swing: int, long: int}（四个都有，0–100，不为 null）, reasons: [TextWithEvidence & {horizon: horizon, polarity: "for" \| "against"}]（每个周期 2–4 条，`reasons_per_horizon`）, inputs_missing: string[], caps: HorizonCap[], classifier_version: string, snapshot_id: string, evidence: Evidence[]}`（v0.2.2；v0.2.3 加 `caps`、`snapshot_id`、`evidence`；规则见 plan 6.1 `horizon_classifier.yaml`）。`reasons[].evidence_ids` 只在本响应的 `evidence[]` 中解析。`classifier_version` 匹配 `^(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$`（如 `"1.1.0"`）。`inputs_missing`：所有周期合计缺失的 feature_catalog 键（`f.*`），去重、升序，永不为 `null`，无缺失为 `[]`；画像未填（`profile.*`）不进此数组，而以 `caps[].kind="requires"` 与 `against` 理由体现。用户覆盖周期须带 `fit_ack`（plan 2.5.3） |
+| GET | `/horizon-assessments?security_code=` 🔒 | 周期分类结果（版本化）：`{suitable: horizon[], scores: {intraday_t: int, short: int, swing: int, long: int}（四个都有，0–100，不为 null）, reasons: [TextWithEvidence & {horizon: horizon, polarity: "for" \| "against"}]（每个周期 2–4 条，`reasons_per_horizon`）, inputs_missing: string[], caps: HorizonCap[], hints: HorizonHint[], classifier_version: string, snapshot_id: string, evidence: Evidence[]}`（v0.2.2；v0.2.3 加 `caps`、`snapshot_id`、`evidence`；规则见 plan 6.1 `horizon_classifier.yaml`）。`reasons[].evidence_ids` 只在本响应的 `evidence[]` 中解析。`classifier_version` 匹配 `^(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$`（如 `"1.2.0"`）。`inputs_missing`：所有周期合计缺失的 feature_catalog 键（`f.*`），去重、升序，永不为 `null`，无缺失为 `[]`；画像未填（`profile.*`）不进此数组，也不封顶、不提示；画像已填写且不满足画像类规则时只进 `hints[]`（v0.2.5，永不为 null）。用户可自由为任何周期创建实例，不需要确认（plan 2.5.3） |
 
 ### 7.5 L3 实例、限制与风控
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET/POST | `/strategy-instances` 🔒 | POST `{strategy_version_id, scope: "account"\|"security"\|"watch_group", account_id, security_code: string \| null, horizon, param_overrides: object \| null, fit_ack: {horizon, acknowledged: true} \| null, budget_amount: string(decimal) \| null}` → `201 {id, status:"active", derived_strategy_version_id: uuid \| null, warnings: string[]}`。按 I1–I7 校验，可能返回 `STRATEGY_VERSION_NOT_RUNNABLE`、`CONSENT_REQUIRED`、`STRATEGY_HORIZON_MISMATCH`、`STRATEGY_FIT_ACK_REQUIRED`、`STRATEGY_PARAM_OUT_OF_RANGE`、`ENTITLEMENT_LIMIT_REACHED`、`INSTANCE_SCOPE_INVALID` |
+| GET/POST | `/strategy-instances` 🔒 | POST `{strategy_version_id, scope: "account"\|"security"\|"watch_group", account_id, security_code: string \| null, horizon, param_overrides: object \| null, budget_amount: string(decimal) \| null}` → `201 {id, status:"active", derived_strategy_version_id: uuid \| null, warnings: string[]}`。按 I1–I7 校验，可能返回 `STRATEGY_VERSION_NOT_RUNNABLE`、`STRATEGY_HORIZON_MISMATCH`、`STRATEGY_PARAM_OUT_OF_RANGE`、`ENTITLEMENT_LIMIT_REACHED`、`INSTANCE_SCOPE_INVALID`。周期分类判定不适合或画像低于卡片 `fit` 下限时正常 201，`warnings[]` 给出中文说明（v0.2.5：`fit_ack` 作废） |
 | GET/PATCH | `/strategy-instances/{id}` 🔒 | PATCH `{param_overrides?, budget_amount?}`；改参会生成新的派生版本 |
 | POST | `/strategy-instances/{id}/confirm` 🔒 | `proposed → active` |
 | POST | `/strategy-instances/{id}/pause` · `/resume` · `/archive` 🔒 | 状态跃迁 |
@@ -651,7 +669,7 @@
 - **ingest 心跳**（ingest 写、api 读）：leader 每 15 秒 `SET ingest:heartbeat <json> EX 600`，JSON 为 `{"ts": int(Unix 秒), "instance_id": string, "leader": true, "version": string, "budget_used_last_minute": int, "queue_depth": {"p0": int, "p1": int, "p2": int}}`；api 只依赖 `ts`，其余字段供 `/admin/ingest/status` 展示。判定顺序：Redis 不可用 → `unknown`；`ingest:paused` 存在（值为 JSON `{"by", "at", "reason"}`，管理员暂停时写入）→ `paused`；心跳缺失、无法解析或 `now - ts > 120` → `stale`；否则 `ok`。键名与阈值可配置（plan 6.1 `config/ingest.yaml`，环境变量 `INGEST_HEARTBEAT_KEY`、`INGEST_PAUSED_KEY`、`INGEST_STALE_AFTER_S`）。
 - **`/meta/enums` 结构**（取值全部来自后端的集中定义，路由里不写死）：
 ```json
-{"version": "v0.2.4",
+{"version": "v0.2.5",
  "enums": {"horizon": ["intraday_t", "short", "swing", "long"], "...": []},
  "reason_codes": [{"code": "T1_NOT_SELLABLE", "release_kinds": ["time"], "check_on": ["daily_close"], "manually_releasable": false, "note": "…"}],
  "error_codes": [{"code": "NOT_FOUND", "http_status": 404, "scope": "http"}],
@@ -703,18 +721,19 @@
 - 405：`DELETE /api/v1/health` → `405 METHOD_NOT_ALLOWED` + `Allow` 头；非管理员（含未登录）对 `/admin/*` 用错方法 → 404，无 `Allow` 头。
 - **v0.2.3**：
   - `/horizon-assessments`：每条 `reasons[].evidence_ids` 都能在同一响应的 `evidence[]` 中找到；`classifier_version` 匹配语义化版本正则；`inputs_missing` 非 null、去重、升序、每项以 `f.` 开头；每个分数 ≤ 对应周期 `caps[].cap` 的最小值；novice 夹具的 `short` ≤ 59 且 `caps` 含 `{horizon: "short", kind: "requires", rule_id: "SH0C"}`；同一夹具的 `intraday_t` ≤ 59 且 `caps` 含 `{horizon: "intraday_t", kind: "requires", rule_id: "IT0C"}`；`SH0C`/`IT0C` 不出现在 `/meta/enums.reason_codes`（#23）。
-  - 认证（#24–#27）：用户名 3 位 → 400；`POST /me/consents` 版本不符 → 400；未同意 `sensitive_financial_info` 时 `POST /imports` → 403 `CONSENT_REQUIRED`；改密后旧 `sid` 401、响应带新 `sid`；超过绝对过期的会话 401；邀请码各类无效情形返回完全相同的响应体。
+  - 认证（#24–#27）：用户名 3 位 → 400；~~consents 两项~~（v0.2.5 作废）；改密后旧 `sid` 401、响应带新 `sid`；超过绝对过期的会话 401；邀请码各类无效情形返回完全相同的响应体。
   - 纯离场策略：未持有的证券不出现 H-01 类结论；持有时其 `state`/`action` 只在 §5.2 允许的集合内；其单元格 `rules_total == 0`、`score == null`、`exit_hits ≤ exit_total`。
   - `consensus.status` 与行级 `divergent` 按 §5.2 的定义可由 `strategies[]` 重算得出。
   - OpenAPI schema 与所有响应示例中不得出现 provider 值 `local`；`Evidence.provider` ∈ `data_provider`；`cash_available` 只出现在 `/terminal.account`。
   - 所有 `RuleRef.dimension` 非空。
   - `POST /notifications/{id}/read`、`/notifications/read-all` 返回 204 且无响应体。
+- **v0.2.5**：
+  - `/meta/consent-docs`、`/legal/terms`、`POST /me/consents`、`/me/risk-assessment*` → 404；`/meta/enums` 不含 `consent_key`、`legal_doc_key`、`consent_presentation`、`assessment_status`，`reason_codes` 为 22 个且不含 `PROFILE_OR_CONSENT_MISSING`，`error_codes` 不含 `CONSENT_REQUIRED`、`STRATEGY_FIT_ACK_REQUIRED`。
+  - 注册带或不带 `agreements` 都 201，库中不产生同意记录；`Me` 无 `consents`、`risk_assessment` 键。
+  - 无画像、或画像不满足任何条件时，⚖ 接口、`POST /imports`、`POST /trades` 均不返回 403。
+  - 分类器 1.2.0：画像全空时 `short`/`intraday_t` 分数与“画像全满足”时相比只差加分项（不出现 59 封顶）、`hints=[]`；`experience=novice` 时 `hints` 含 `SH0C`、`IT0C`，`caps` 不含二者，`suitable` 与 novice 前相同（其他条件不变）；`risk_tolerance=2` → `hints` 含 `SH0`；`effort=low` → 含 `SH0B`、`IT0B`。`IT0`（无底仓）仍为 `caps` 中 `kind=requires`。
+  - `POST /strategy-instances` 对不适合的周期 → 201 且 `warnings` 非空；请求带 `fit_ack` 被忽略。
 - **v0.2.4**：
-  - 注册 `agreements` 含 `risk_disclosure` 或缺 `signal_risk_disclosure` → 400；`apply_note` 201 字 → 400。
-  - `POST /me/consents`：`content_sha256` 与 `/meta/consent-docs` 不符 → 400；同一 key 先 grant 再 withdraw 后，`Me.consents[key].needs_reconsent=true`，库中两行都在；对 `consents`、`legal_documents`、`questionnaires`、`risk_assessments` 执行 UPDATE/DELETE/TRUNCATE 被触发器拒绝。
-  - `REGISTRATION_MODE=invite` 且任一文书为 `"unversioned"` → 启动失败；`closed` 时 `/meta/consent-docs` 可返回 `"unversioned"`，`/legal/{key}` → 404。
-  - 测评：`questionnaire_version` 旧 → 409；缺题 → 400 且 `fields` 列出缺的 `q_id`；K4 答错 → 400 `understanding_required` 且不入库；24 小时第 4 次 → 429；问卷响应中不出现 `points`、`score`、`correct`；同一答卷两次计分结果一致，`derived` 与 `risk_questionnaire.yaml` 的样例一致。
-  - 没有有效测评时 ⚖ 接口 → 403，`required` 含 `"risk_assessment"`；测评过期超过宽限期后同样 403。
-  - 未同意 `sensitive_financial_info`：`POST /imports`、`POST /trades` → 403；`POST /accounts` 不受影响。
+  - `apply_note` 201 字 → 400。（`agreements` 相关用例 v0.2.5 作废）
   - CSRF：头与 Cookie 一致但与会话内令牌不符 → 403 `CSRF_FAILED`。
   - §4.1“处理选项”表中每个码的 `resolution_choices` 与实际返回一致；`force_import` 不带理由 → 400；`POST /trades/{id}/void` 两次 → 第二次 409。

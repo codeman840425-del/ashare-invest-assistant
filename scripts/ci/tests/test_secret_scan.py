@@ -312,7 +312,8 @@ def test_check_coverage(tmp_path: Path) -> None:
 def _real(repo: Path, mode: str, **env: str) -> subprocess.CompletedProcess[str]:
     import os
 
-    e = {k: v for k, v in os.environ.items() if k not in ("MAIRUI_LICENCE", "DEEPSEEK_API_KEY")}
+    drop = ("MAIRUI_LICENCE", "DEEPSEEK_API_KEY", "AIA_SECRET_ENV_FILE", "PRE_COMMIT_FROM_REF", "PRE_COMMIT_TO_REF")
+    e = {k: v for k, v in os.environ.items() if k not in drop}
     e.update(env)
     return subprocess.run(["bash", str(CI_DIR / "check_real_secrets.sh"), mode], cwd=repo, env=e, capture_output=True, text=True)
 
@@ -346,6 +347,63 @@ def test_check_real_secrets(tmp_repo: Path) -> None:
     git(tmp_repo, "add", "c.txt")
     r = _real(tmp_repo, "cached", DEEPSEEK_API_KEY=other)
     assert r.returncode == 1 and other not in r.stdout + r.stderr
+
+
+def test_check_real_secrets_env_file(tmp_repo: Path) -> None:
+    """环境变量未设置时从 deploy/env/.env 读取（不 source）；占位值视为未配置；值不出现在输出里。"""
+    import secrets
+
+    value = "fake" + secrets.token_hex(12)  # 运行时生成的假值
+    write(tmp_repo, ".gitignore", "deploy/env/.env\n")  # 与真实仓库一致：.env 不入库
+    write(tmp_repo, "a.txt", "nothing here\n")
+    base = commit_all(tmp_repo)
+    env_dir = tmp_repo / "deploy" / "env"
+    env_dir.mkdir(parents=True)
+    env_file = env_dir / ".env"  # 被 .gitignore 忽略，不会提交
+    # 占位值：跳过
+    env_file.write_text("MAIRUI_LICENCE=<licence>\nDEEPSEEK_API_KEY=changeme-local\n")
+    r = _real(tmp_repo, "worktree")
+    assert r.returncode == 0 and "跳过" in r.stdout and "not-found" not in r.stdout
+    # 带引号、export 前缀、$( ) 不会被执行
+    marker = tmp_repo / "executed"
+    env_file.write_text(f'# c\nexport MAIRUI_LICENCE="{value}"\nDEEPSEEK_API_KEY=$(touch {marker})xxxxxxxx\n')
+    r = _real(tmp_repo, "worktree")
+    assert r.returncode == 0 and "not-found MAIRUI_LICENCE" in r.stdout and "env 文件" in r.stdout, r.stdout
+    assert not marker.exists()
+    write(tmp_repo, "b.txt", f"k = {value}\n")
+    head = commit_all(tmp_repo)
+    for mode in ("worktree", "history", f"{base}..{head}"):
+        r = _real(tmp_repo, mode)
+        assert r.returncode == 1 and "FOUND MAIRUI_LICENCE" in r.stdout, mode
+        assert value not in r.stdout + r.stderr
+    # 环境变量优先于 env 文件
+    r = _real(tmp_repo, "worktree", MAIRUI_LICENCE="fake" + secrets.token_hex(12))
+    assert r.returncode == 0 and "环境变量" in r.stdout
+    # AIA_SECRET_ENV_FILE 指定别的文件
+    alt = tmp_repo.parent / "alt.env"
+    alt.write_text("MAIRUI_LICENCE=\n")
+    assert "跳过" in _real(tmp_repo, "worktree", AIA_SECRET_ENV_FILE=str(alt)).stdout
+    # pre-push：用 pre-commit 给的区间
+    r = _real(tmp_repo, "push", PRE_COMMIT_FROM_REF=base, PRE_COMMIT_TO_REF=head)
+    assert r.returncode == 1 and f"{base}..{head}" in r.stdout
+    r = _real(tmp_repo, "push", PRE_COMMIT_FROM_REF=head, PRE_COMMIT_TO_REF=head)
+    assert r.returncode == 0
+
+
+def test_workflows_use_no_real_credentials() -> None:
+    """CI 不配置、不引用麦蕊证书与 DeepSeek key（任何 secret 都不引用），也不写真实麦蕊/DeepSeek 地址。"""
+    wf = sorted((REPO / ".github" / "workflows").glob("*.y*ml"))
+    assert wf
+    for f in wf:
+        text = f.read_text(encoding="utf-8")
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())  # 去掉注释
+        assert "secrets." not in code, f.name
+        assert not re.search(r"MAIRUI_LICENCE|DEEPSEEK_API_KEY", code), f.name
+        assert not re.search(r"(?i)mairuiapi\.com|deepseek\.com", code), f.name
+        assert "check_real_secrets" not in code, f.name
+    ci = yaml.safe_load((REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    for k in ("MAIRUI_BASE_URL", "MAIRUI_PRO_BASE_URL"):
+        assert ci["env"][k].startswith("http://127.0.0.1:"), k
 
 
 def test_gitleaks_report_masks(tmp_path: Path) -> None:

@@ -1,11 +1,13 @@
 """``/me``、``/me/profile``（契约 §7.1；T-B03）。
 
 契约 v0.2.5（T-A06）：删除 ``/me/consents``、``/me/risk-assessment``，``Me`` 不再有 ``consents``、
-``risk_assessment``；画像的 ``effort``、``risk_tolerance``、``experience`` 为用户自报、可为 null。
+``risk_assessment``；v0.2.6（T-A07）``Me`` 加 ``data_licence_status``；
+画像的 ``effort``、``risk_tolerance``、``experience`` 为用户自报、可为 null。
 """
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 from typing import Annotated, Any
 
@@ -17,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from app.auth import service
 from app.auth.deps import AuthDep, EngineDep, SettingsDep, client_ip, ip_hash
 from app.common.errors import AppError, ErrorCode
+from app.licences.service import live_status
 from app.schemas.enums import Horizon, ProfileEffort, ProfileExperience
 
 router = APIRouter(tags=["me"])
@@ -65,6 +68,8 @@ def build_me(conn: Connection, user: Row[Any]) -> dict[str, Any]:
         "status": user.status,
         # 权益（entitlements）归 T-B28；此前恒为空对象
         "entitlements": {},
+        # 契约 v0.2.6（T-A07）：本人数据证书状态（只有状态，不含证书值）
+        "data_licence_status": live_status(conn, uuid.UUID(str(user.id))),
     }
 
 

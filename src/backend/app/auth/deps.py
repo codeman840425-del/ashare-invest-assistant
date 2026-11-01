@@ -26,7 +26,7 @@ from app.common.errors import AppError, ErrorCode
 from app.config import Settings, get_settings
 from app.db.engine import engine_for
 from app.db.tables.users import users
-from app.schemas.enums import AccountStatus
+from app.schemas.enums import AccountStatus, Role
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -155,3 +155,23 @@ def current_auth(request: Request, engine: EngineDep, store: StoreDep) -> AuthCo
 
 
 AuthDep = Annotated[AuthContext, Depends(current_auth)]
+
+
+def current_admin(request: Request, engine: EngineDep, store: StoreDep) -> AuthContext:
+    """契约 §1.3 / §7.9：``/admin/*`` 不是已登录、已批准的 ``role=admin`` 时（含未登录、
+    会话失效、非 approved）一律 ``404 NOT_FOUND``，与不存在的路径无法区分。
+    已确认是管理员之后，不安全方法的 CSRF 不符照常返回 ``403 CSRF_FAILED``。"""
+    session = store.get(request.cookies.get(SESSION_COOKIE))
+    if session is None:
+        raise AppError(ErrorCode.NOT_FOUND)
+    user = load_user(engine, session.user_id)
+    if user is None or user.status != AccountStatus.APPROVED or user.role != Role.ADMIN:
+        raise AppError(ErrorCode.NOT_FOUND)
+    if request.method.upper() in UNSAFE_METHODS and not session.csrf_ok(
+        request.headers.get(CSRF_HEADER)
+    ):
+        raise AppError(ErrorCode.CSRF_FAILED)
+    return AuthContext(user=user, session=session)
+
+
+AdminDep = Annotated[AuthContext, Depends(current_admin)]

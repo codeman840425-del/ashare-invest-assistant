@@ -1,11 +1,13 @@
 """契约 §3 枚举、§4.1 导入提示码与 §6.1 不可执行原因码表 —— **全仓唯一来源**。
 
 ``GET /meta/enums`` 直接下发本模块内容；其他模块需要枚举时从这里导入，不要另行定义。
-已同步到契约 :data:`CONTRACT_VERSION`（v0.2.5；v0.2 为 T-A01 定稿，原 ``PENDING_T_A01`` 标记已解除；
+已同步到契约 :data:`CONTRACT_VERSION`（v0.2.6；v0.2 为 T-A01 定稿，原 ``PENDING_T_A01`` 标记已解除；
 v0.2.1–v0.2.3 未改 §3 枚举、§4 错误码与 §6.1 原因码的取值；v0.2.4 新增的 ``consent_key``、
 ``legal_doc_key``、``consent_presentation``、``assessment_status`` 在 v0.2.5（T-A06）作废并删除，
 同时删除原因码 ``PROFILE_OR_CONSENT_MISSING``（23 → 22）与错误码 ``CONSENT_REQUIRED``、
-``STRATEGY_FIT_ACK_REQUIRED``）。
+``STRATEGY_FIT_ACK_REQUIRED``）。v0.2.6（T-A07）新增 ``data_licence_status``、
+``data_licence_tier``，``notification_kind`` 加 ``data_licence``、``gap_reason`` 加
+``data_licence_unavailable``，错误码加三个 ``DATA_LICENCE_*``。
 
 ``CONTRACT_ENUMS`` 只登记契约 §3 的命名枚举；契约里以内联字面量出现的取值（如 ``/me/profile`` 的
 ``effort``、``experience``）在本模块文末“非 §3 取值”一节集中定义，供 DB CHECK 与请求模型复用，
@@ -246,6 +248,7 @@ class NotificationKind(StrEnum):
     PLAN_DRAFT_READY = "plan_draft_ready"
     PLAN_TRIGGERED = "plan_triggered"
     STRATEGY_HEALTH = "strategy_health"
+    DATA_LICENCE = "data_licence"  # v0.2.6（T-A07）
 
 
 class Severity(StrEnum):
@@ -279,6 +282,7 @@ class GapReason(StrEnum):
     UPSTREAM_ERROR = "upstream_error"
     QUOTA_DEFERRED = "quota_deferred"
     USER_INPUT_MISSING = "user_input_missing"
+    DATA_LICENCE_UNAVAILABLE = "data_licence_unavailable"  # v0.2.6（T-A07）
 
 
 class DataProvider(StrEnum):  # Evidence.provider
@@ -522,11 +526,50 @@ class IngestHealth(StrEnum):
 
 
 # ---------------------------------------------------------------------------
+# 每用户数据证书（契约 v0.2.6，plan §2.1B，T-A07）
+# ---------------------------------------------------------------------------
+
+
+class DataLicenceStatus(StrEnum):
+    NOT_SET = "not_set"
+    PENDING_VERIFICATION = "pending_verification"
+    ACTIVE = "active"
+    INVALID = "invalid"
+    EXPIRED = "expired"
+    QUOTA_EXCEEDED = "quota_exceeded"
+    IP_LIMITED = "ip_limited"
+    PAUSED_BY_ADMIN = "paused_by_admin"
+
+
+class DataLicenceTier(StrEnum):
+    """用户自报的麦蕊证书档位，决定默认每分钟上限（ingest.yaml ``licences.tier_per_minute``）。"""
+
+    FREE = "free"
+    TRIAL = "trial"
+    MONTHLY = "monthly"
+    ANNUAL = "annual"
+    DIAMOND = "diamond"
+    OTHER = "other"
+
+
+#: ``DataLicenceStatus.last_error_code`` 的取值（契约 §5 共享对象，内联字面量）
+DATA_LICENCE_ERROR_CODES: Final[tuple[str, ...]] = (
+    "101",
+    "102",
+    "103",
+    "429",
+    "503",
+    "network",
+    "http_5xx",
+)
+
+
+# ---------------------------------------------------------------------------
 # /meta/enums 注册表：契约 §3 的枚举名 → 枚举类（顺序与契约表格一致）
 # ---------------------------------------------------------------------------
 
 #: 本模块对应的契约版本（``/meta/enums`` 的 ``version``）
-CONTRACT_VERSION: Final = "v0.2.5"
+CONTRACT_VERSION: Final = "v0.2.6"
 
 #: ``/meta/enums`` 的 ``enums``：契约 §3 各表名 → 取值（顺序同 §3）。``reason_code`` 不在其中，
 #: 只在 ``reason_codes`` 里带解除条件展开（契约 §7.10；评审 M7）。
@@ -588,6 +631,8 @@ CONTRACT_ENUMS: Final[dict[str, type[StrEnum]]] = {
     "health_status": HealthStatus,
     "component_health": ComponentHealth,
     "ingest_health": IngestHealth,
+    "data_licence_status": DataLicenceStatus,
+    "data_licence_tier": DataLicenceTier,
 }
 
 

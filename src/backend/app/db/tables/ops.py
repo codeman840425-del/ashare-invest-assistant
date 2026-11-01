@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import PrimaryKeyConstraint, Table, text
+from sqlalchemy import Index, PrimaryKeyConstraint, Table, text
 
 from app.db.base import OPS, integer, metadata, one_of, pk_uuid, ts, txt, uuid_col
 
@@ -25,11 +25,19 @@ ingest_request_log = Table(
     txt("mairui_code"),
     integer("latency_ms"),
     ts("finished_at"),
+    #: T-A07（迁移 0007）：本次调用使用的用户证书行（``app.user_data_licences.id``）；
+    #: 不设外键（hypertable），不含证书值。管理端 ``calls_last_minute``/``calls_today`` 按它统计。
+    uuid_col("licence_id"),
     PrimaryKeyConstraint("id", "requested_at"),
     one_of("priority", ["P0", "P1", "P2"]),
     one_of("status", ["queued", "done", "failed", "dropped"]),
     schema=OPS,
     comment="hypertable（requested_at，chunk 1 天，保留 30 天：运维策略）",
+)
+Index(
+    "ix_ingest_request_log_licence_requested",
+    ingest_request_log.c.licence_id,
+    ingest_request_log.c.requested_at.desc(),
 )
 
 ingest_leases = Table(

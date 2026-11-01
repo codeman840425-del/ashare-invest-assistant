@@ -1,0 +1,11 @@
+# CI contract job（.github/workflows/ci.yml 在 src/backend 下运行 schemathesis，会自动读取本文件）。
+# 只放“契约明文规定、与 schemathesis 默认判定冲突”的例外；其余检查保持 --checks all。
+
+# 契约 §4 / §7.1：V1 默认 registration_mode=closed，POST /auth/register 一律 503 REGISTRATION_CLOSED。
+# 只对这一个接口放行 503；其他 5xx 仍判失败。
+[[operations]]
+include-path = "/api/v1/auth/register"
+checks.not_a_server_error.expected-statuses = ["2XX", "3XX", "4XX", "503"]
+
+# /admin/* 不出现在 openapi.json（契约 §1.3：非管理员看不出管理接口是否存在，见 app/api/v1/data_licence.py），
+# 所以 schemathesis 不会测到它们，也就不会把“未声明方法返回 404”判成 ST204。

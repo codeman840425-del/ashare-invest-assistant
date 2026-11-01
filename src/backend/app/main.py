@@ -10,8 +10,9 @@ from app.api.v1 import router as v1_router
 from app.common.errors import ErrorResponse, Utf8JSONResponse, install_exception_handlers
 from app.common.logging import configure_logging
 from app.common.middleware import BodySizeLimitMiddleware, RequestIdMiddleware
-from app.config import Settings, get_settings
+from app.config import ConfigError, Settings, get_settings
 from app.config_files import BUSINESS_FILES
+from app.licences.keys import PRIVATE_KEYS_NAME, private_keys_present
 from app.version import APP_VERSION
 
 logger = logging.getLogger("app")
@@ -26,6 +27,9 @@ _ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
 def create_app(settings: Settings | None = None) -> FastAPI:
     cfg = settings or get_settings()
     configure_logging(cfg.log_level)
+    if private_keys_present():
+        # plan §2.1B（T-A07）：证书解密私钥只能注入 ingest；api 进程看到私钥即拒绝启动
+        raise ConfigError(f"api 不得持有 {PRIVATE_KEYS_NAME}（只给 ingest）")
 
     app = FastAPI(
         title="ashare-invest-assistant API",

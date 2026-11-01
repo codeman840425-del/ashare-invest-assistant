@@ -215,6 +215,76 @@ class IngestOnDemand(_Strict):
     priority: Annotated[str, Field(pattern=r"^p[0-2]_[a-z_]+$")]
 
 
+class IngestTierPerMinute(_Strict):
+    """各档位默认每证书每分钟上限；键与契约 ``data_licence_tier`` 一一对应（T-A07）。"""
+
+    diamond: Annotated[int, Field(gt=0, le=PER_MINUTE_BUDGET_MAX)]
+    annual: Annotated[int, Field(gt=0, le=PER_MINUTE_BUDGET_MAX)]
+    monthly: Annotated[int, Field(gt=0, le=PER_MINUTE_BUDGET_MAX)]
+    trial: Annotated[int, Field(gt=0, le=PER_MINUTE_BUDGET_MAX)]
+    free: Annotated[int, Field(gt=0, le=PER_MINUTE_BUDGET_MAX)]
+    other: Annotated[int, Field(gt=0, le=PER_MINUTE_BUDGET_MAX)]
+
+
+class IngestLicenceBreaker(_Strict):
+    consecutive_503: PosInt
+    open_s: PosInt
+    backoff_s: Annotated[list[PosInt], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def _check(self) -> IngestLicenceBreaker:
+        if any(a > b for a, b in itertools.pairwise(self.backoff_s)):
+            raise ValueError("backoff_s 必须非递减")
+        return self
+
+
+class IngestIpLimitedEscalate(_Strict):
+    count: PosInt
+    window_s: PosInt
+    pause_s: PosInt
+
+
+class IngestLiveProfile(_Strict):
+    full_snapshot_interval_s: PosInt
+    focus_max: PosInt
+    focus_interval_s: PosInt
+
+
+class IngestLicences(_Strict):
+    """``licences``（plan §2.1B / §6.1，T-A07）：每用户证书的限额、调度与状态机参数。"""
+
+    tier_per_minute: IngestTierPerMinute
+    diamond_after_expiry_per_day: PosInt
+    per_licence_max_concurrency: PosInt
+    global_max_concurrency: PosInt
+    cross_licence_scheduling: Literal["drr"]
+    drr_quantum: PosInt
+    breaker: IngestLicenceBreaker
+    ip_limited_pause_s: PosInt
+    ip_limited_escalate: IngestIpLimitedEscalate
+    quota_resume_at: Annotated[str, Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")]
+    expiry_reminder_days: Annotated[list[PosInt], Field(min_length=1)]
+    verify_rate_limit_per_hour: PosInt
+    live_profile: IngestLiveProfile
+    eod_scope: Literal["user_universe"]
+
+    @model_validator(mode="after")
+    def _check(self) -> IngestLicences:
+        if self.per_licence_max_concurrency > self.global_max_concurrency:
+            raise ValueError("per_licence_max_concurrency 不能大于 global_max_concurrency")
+        days = self.expiry_reminder_days
+        if any(a <= b for a, b in itertools.pairwise(days)):
+            raise ValueError("expiry_reminder_days 必须严格递减")
+        return self
+
+
+class IngestDataSharing(_Strict):
+    """``data_sharing``：``shared_cache`` 待麦蕊书面确认前禁用；跨证书兜底是硬规则 false。"""
+
+    mode: Literal["per_licence"]
+    allow_cross_licence_fallback: Literal[False]
+
+
 class IngestConfig(_File):
     budget: IngestBudget
     backoff: IngestBackoff
@@ -222,6 +292,8 @@ class IngestConfig(_File):
     heartbeat: IngestHeartbeat
     egress: IngestEgress
     on_demand: IngestOnDemand
+    licences: IngestLicences
+    data_sharing: IngestDataSharing
 
 
 # ---------------------------------------------------------------------------

@@ -49,6 +49,7 @@ from pydantic_settings import (
 )
 
 from app.config_files import BUSINESS_FILES, BusinessConfig
+from app.licences.keys import PUBLIC_KEYS_NAME, SealKeyError, parse_public_keys, read_secret
 from app.schemas.enums import RegistrationMode
 
 AppEnv = Literal["local", "test", "staging", "production"]
@@ -96,9 +97,25 @@ _Yaml12BoolLoader.add_implicit_resolver(
 )
 
 
-#: plan §6.1 / §7.4A：licence、密码、密钥只走环境变量；YAML 中出现这类键名直接启动失败（评审 m2）
+#: plan §6.1 / §7.4A：licence、密码、密钥只走环境变量；YAML 中出现这类键名直接启动失败（评审 m2）。
+#: 复数形式也算（T-B45：``licences.value: <证书>`` 不能漏网）；``tokens`` 例外——
+#: llm.yaml 的 ``context_window_tokens`` 等是用量参数。
 _SENSITIVE_KEY_PARTS: Final = frozenset(
-    {"licence", "license", "password", "passwd", "secret", "token", "apikey", "credential"}
+    {
+        "licence",
+        "licences",
+        "license",
+        "licenses",
+        "password",
+        "passwords",
+        "passwd",
+        "secret",
+        "secrets",
+        "token",
+        "apikey",
+        "credential",
+        "credentials",
+    }
 )
 
 
@@ -136,16 +153,28 @@ def _sensitive_key_paths(data: object, path: str = "") -> list[str]:
     return hits
 
 
-#: 键名含敏感词、但只放策略参数的段（plan §6.1 ``auth.yaml``：口令长度、argon2 参数）。
-#: 豁免条件：路径在本表中且所有叶子值都是整数/布尔（不可能放进口令或密钥字符串）。
+#: 键名含敏感词、但只放策略参数的段（plan §6.1 ``auth.yaml``：口令长度、argon2 参数；
+#: ``ingest.yaml`` 的 ``licences`` / ``data_sharing``：每证书限额与调度参数，T-A07）。
+#: 豁免条件：路径在本表中且所有叶子值都是整数/布尔；仅 :data:`_POLICY_TOKEN_STEMS`
+#: 里的文件（``ingest``）另允许**短于 16 个字符**的小写标识（``drr``、``00:01``、
+#: ``per_licence``）——麦蕊证书至少 16 个字符（契约 ``PUT /me/data-licence``），装不下。
+#: ``auth.yaml`` 的 ``password`` 段仍只认数值：短口令也可能是字符串。
 _POLICY_ONLY_PATHS: dict[str, frozenset[str]] = {
     "auth": frozenset({"password", "password_hash"}),
+    "ingest": frozenset({"licences", "data_sharing"}),
 }
 
+_POLICY_TOKEN_STEMS: Final = frozenset({"ingest"})
+_POLICY_TOKEN_RE: Final = re.compile(r"^[a-z0-9_:]{1,15}$")
 
-def _numeric_leaves_only(data: object) -> bool:
+
+def _policy_leaves_only(data: object, *, tokens: bool) -> bool:
     if isinstance(data, Mapping):
-        return all(_numeric_leaves_only(v) for v in data.values())
+        return all(_policy_leaves_only(v, tokens=tokens) for v in data.values())
+    if isinstance(data, list):
+        return all(_policy_leaves_only(v, tokens=tokens) for v in data)
+    if isinstance(data, str):
+        return tokens and bool(_POLICY_TOKEN_RE.match(data))
     return isinstance(data, bool | int)
 
 
@@ -153,7 +182,7 @@ def _policy_only(stem: str, data: Mapping[str, Any], hit: str) -> bool:
     top = hit.split(".", 1)[0]
     if top not in _POLICY_ONLY_PATHS.get(stem, frozenset()):
         return False
-    return _numeric_leaves_only(data.get(top))
+    return _policy_leaves_only(data.get(top), tokens=stem in _POLICY_TOKEN_STEMS)
 
 
 def load_yaml_dir(config_dir: Path) -> dict[str, Any]:
@@ -305,6 +334,22 @@ class YamlDirSettingsSource(PydanticBaseSettingsSource):
         return {"business": deep_merge(found, business_env_layer())}
 
 
+class SealPublicKeysSource(PydanticBaseSettingsSource):
+    """``data_licence_seal_public_keys`` 的文件来源：``$SECRETS_DIR``（默认 ``/run/secrets``）
+    下的同名文件（运维 T-O09 以 compose secret 挂载）。环境变量优先（在本来源之前）。
+    只认这一个字段：    私钥不经 Settings（见 :mod:`app.licences.keys`）。"""
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        try:
+            text = read_secret(PUBLIC_KEYS_NAME)
+        except SealKeyError as exc:
+            raise ConfigError(str(exc)) from None
+        return {PUBLIC_KEYS_NAME: text} if text else {}
+
+
 def check_config_dir_files(found: dict[str, Any], config_dir: Path) -> None:
     """``config/`` 顶层只允许八个约定文件（缺失或多余都失败）。"""
     missing = sorted(set(BUSINESS_FILES) - set(found))
@@ -412,6 +457,12 @@ class Settings(BaseSettings):
 
     # --- 密钥 ---
     app_master_key: SecretStr | None = None
+    #: 证书封装公钥（T-A07 / T-O09）：单行 JSON ``{"<版本>": "<base64 SPKI DER>"}``；环境变量
+    #: ``DATA_LICENCE_SEAL_PUBLIC_KEYS`` 或 ``/run/secrets/data_licence_seal_public_keys``。
+    #: 未配置时 ``PUT /me/data-licence`` 返回 503（不落明文）。api **没有**私钥。
+    data_licence_seal_public_keys: str | None = None
+    #: 新封装使用的公钥版本（``DATA_LICENCE_SEAL_KEY_VERSION``）
+    data_licence_seal_key_version: int | None = Field(default=None, ge=1)
 
     # 认证（plan §3.6 / 契约 §1.3，T-B03）：注册模式与会话 Cookie 的 Secure 标记
     #: ``REGISTRATION_MODE``：closed（默认，``/auth/register`` → 503）/ invite / open
@@ -478,6 +529,17 @@ class Settings(BaseSettings):
             raise ValueError("APP_MASTER_KEY 在非 local/test 环境必须设置")
         if self.app_master_key is not None and len(self.app_master_key.get_secret_value()) < 32:
             raise ValueError("APP_MASTER_KEY 至少 32 个字符")
+        if self.data_licence_seal_public_keys:
+            try:
+                keys = parse_public_keys(self.data_licence_seal_public_keys)
+            except SealKeyError as exc:
+                raise ValueError(str(exc)) from None
+            if self.data_licence_seal_key_version is None:
+                raise ValueError(
+                    "配置了 DATA_LICENCE_SEAL_PUBLIC_KEYS 时必须设置 DATA_LICENCE_SEAL_KEY_VERSION"
+                )
+            if self.data_licence_seal_key_version not in keys:
+                raise ValueError("DATA_LICENCE_SEAL_KEY_VERSION 在封装公钥里不存在")
         # review-T-B03 S6 / T-A05：只有 local/test 允许关闭 Cookie 的 Secure 标记
         if not self.session_cookie_secure and self.app_env not in _DEV_ENVS:
             raise ValueError("SESSION_COOKIE_SECURE=false 只允许在 APP_ENV=local/test 使用")
@@ -523,6 +585,7 @@ class Settings(BaseSettings):
         return (
             _InitNoneIsUnset(settings_cls, init_settings),
             env_settings,
+            SealPublicKeysSource(settings_cls),
             YamlDirSettingsSource(settings_cls, config_dir),
         )
 

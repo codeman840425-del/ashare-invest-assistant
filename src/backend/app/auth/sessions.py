@@ -3,9 +3,11 @@
 - Cookie ``sid``：32 字节随机令牌（URL 安全 base64）。Redis 里只存它的 SHA-256，泄露 Redis 内容
   也拿不到可用的 Cookie。
 - 键：``auth:session:{sha256(sid)}`` → JSON ``{user_id, csrf_token, created_at}``，TTL = 空闲期限，
-  每次使用续期；``auth:user_sessions:{user_id}`` → 该用户全部会话摘要（集合），用于改密/禁用时吊销。
-- 空闲期限：契约 §1.3 “空闲 7 天过期（可配置）”。配置键名 plan 未给 → 常量，
-  待架构师定（报告 TODO）。
+  每次使用续期（但不超过绝对期限的剩余时间）；``auth:user_sessions:{user_id}`` → 该用户全部会话摘要
+  （集合），用于改密/禁用时吊销。
+- 期限取 ``config/auth.yaml session``（review-T-B03 M4）：``idle_ttl_s`` 空闲过期（默认 7 天），
+  ``absolute_ttl_s`` 自登录起绝对过期（默认 30 天，不续期）。每次取会话时检查
+  ``now - created_at ≥ absolute_ttl_s`` 即作废。
 - CSRF：每个会话一个随机令牌，登录时通过响应体与非 HttpOnly Cookie ``csrf_token`` 下发；
   写请求的 ``X-CSRF-Token`` 头与会话中保存的值做常量时间比较（不信任 Cookie 本身）。
 """
@@ -22,7 +24,6 @@ from typing import Final
 
 import redis
 
-SESSION_IDLE_TTL_S: Final = 7 * 24 * 3600
 SESSION_COOKIE: Final = "sid"
 CSRF_COOKIE: Final = "csrf_token"
 CSRF_HEADER: Final = "X-CSRF-Token"
@@ -49,9 +50,17 @@ class Session:
 
 
 class SessionStore:
-    def __init__(self, client: redis.Redis, *, idle_ttl_s: int = SESSION_IDLE_TTL_S) -> None:
+    def __init__(self, client: redis.Redis, *, idle_ttl_s: int, absolute_ttl_s: int) -> None:
+        if idle_ttl_s <= 0 or absolute_ttl_s < idle_ttl_s:
+            raise ValueError("要求 0 < idle_ttl_s ≤ absolute_ttl_s")
         self._r = client
         self._ttl = idle_ttl_s
+        self._abs = absolute_ttl_s
+
+    def _remaining_ttl(self, created_at: dt.datetime, now: dt.datetime) -> int:
+        """本次续期的 TTL：空闲期限与绝对期限剩余时间取小；≤ 0 表示已绝对过期。"""
+        left = self._abs - (now - created_at).total_seconds()
+        return min(self._ttl, int(left))
 
     def create(self, user_id: str) -> tuple[str, Session]:
         """新建会话，返回 ``(sid 明文, Session)``；明文只写进 Cookie，不落 Redis。"""
@@ -72,7 +81,7 @@ class SessionStore:
         pipe = self._r.pipeline()
         pipe.set(_SESSION_PREFIX + session.sid_digest, payload, ex=self._ttl)
         pipe.sadd(_USER_PREFIX + user_id, session.sid_digest)
-        pipe.expire(_USER_PREFIX + user_id, self._ttl)
+        pipe.expire(_USER_PREFIX + user_id, self._abs)
         pipe.execute()
         return sid, session
 
@@ -92,12 +101,20 @@ class SessionStore:
                 csrf_token=str(data["csrf_token"]),
                 created_at=str(data["created_at"]),
             )
+            created = dt.datetime.fromisoformat(session.created_at)
+            if created.tzinfo is None:
+                raise ValueError("created_at 缺时区")
         except (ValueError, KeyError, TypeError):
             self._r.delete(_SESSION_PREFIX + digest)
             return None
+        ttl = self._remaining_ttl(created, dt.datetime.now(dt.UTC))
+        if ttl <= 0:
+            # 绝对过期：作废，不续期（review-T-B03 M4）
+            self.delete(session)
+            return None
         pipe = self._r.pipeline()
-        pipe.expire(_SESSION_PREFIX + digest, self._ttl)
-        pipe.expire(_USER_PREFIX + session.user_id, self._ttl)
+        pipe.expire(_SESSION_PREFIX + digest, ttl)
+        pipe.expire(_USER_PREFIX + session.user_id, self._abs)
         pipe.execute()
         return session
 

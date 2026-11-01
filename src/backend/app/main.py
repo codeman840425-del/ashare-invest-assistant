@@ -42,9 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.api_prefix = cfg.api_prefix
     install_exception_handlers(app)
     # add_middleware 后加的在外层：RequestId 在最外，413 也带 X-Request-Id
-    app.add_middleware(
-        BodySizeLimitMiddleware, max_bytes=cfg.business.ingest.imports.max_request_bytes
-    )
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=cfg.business.imports.max_request_bytes)
     app.add_middleware(RequestIdMiddleware)
     app.include_router(v1_router, prefix=cfg.api_prefix)
 

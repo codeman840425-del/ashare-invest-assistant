@@ -2,7 +2,7 @@
 
 - 运行参数（数据库、Redis、密钥、端口等）只来自环境变量，与
   ``deploy/compose/docker-compose.yml`` 中 ``api`` 服务的 ``environment`` 同名。
-- 业务配置（``config/realtime.yaml``、``ingest.yaml``、``llm.yaml`` 等六个文件，plan §6.1）
+- 业务配置（``config/realtime.yaml``、``ingest.yaml``、``llm.yaml`` 等八个文件，plan §6.1）
   只读加载到 :attr:`Settings.business`，并按 :mod:`app.config_files` 严格校验：未知键、缺文件、
   多余文件、取值越界 → 启动失败。``config/strategies/`` 子目录不在这里加载：L2 模板要经
   导入器成为不可变 DB 版本，放文件不会激活（plan §2.5.13）。
@@ -117,6 +117,26 @@ def _sensitive_key_paths(data: object, path: str = "") -> list[str]:
     return hits
 
 
+#: 键名含敏感词、但只放策略参数的段（plan §6.1 ``auth.yaml``：口令长度、argon2 参数）。
+#: 豁免条件：路径在本表中且所有叶子值都是整数/布尔（不可能放进口令或密钥字符串）。
+_POLICY_ONLY_PATHS: dict[str, frozenset[str]] = {
+    "auth": frozenset({"password", "password_hash"}),
+}
+
+
+def _numeric_leaves_only(data: object) -> bool:
+    if isinstance(data, Mapping):
+        return all(_numeric_leaves_only(v) for v in data.values())
+    return isinstance(data, bool | int)
+
+
+def _policy_only(stem: str, data: Mapping[str, Any], hit: str) -> bool:
+    top = hit.split(".", 1)[0]
+    if top not in _POLICY_ONLY_PATHS.get(stem, frozenset()):
+        return False
+    return _numeric_leaves_only(data.get(top))
+
+
 def load_yaml_dir(config_dir: Path) -> dict[str, Any]:
     """读取 ``config_dir`` 下一层的 ``*.yaml`` / ``*.yml``（不递归），按文件名排序。
 
@@ -139,7 +159,8 @@ def load_yaml_dir(config_dir: Path) -> dict[str, Any]:
             data = {}
         if not isinstance(data, dict):
             raise ConfigError(f"配置文件顶层必须是映射：{path.name}")
-        if hits := _sensitive_key_paths(data):
+        hits = [h for h in _sensitive_key_paths(data) if not _policy_only(path.stem, data, h)]
+        if hits:
             raise ConfigError(
                 f"配置文件 {path.name} 含疑似敏感键 {hits}：licence/密码/密钥只能走环境变量"
             )
@@ -266,7 +287,7 @@ class YamlDirSettingsSource(PydanticBaseSettingsSource):
 
 
 def check_config_dir_files(found: dict[str, Any], config_dir: Path) -> None:
-    """``config/`` 顶层只允许六个约定文件（缺失或多余都失败）。"""
+    """``config/`` 顶层只允许八个约定文件（缺失或多余都失败）。"""
     missing = sorted(set(BUSINESS_FILES) - set(found))
     extra = sorted(set(found) - set(BUSINESS_FILES))
     if missing or extra:
@@ -346,7 +367,7 @@ class Settings(BaseSettings):
     # 认证（plan §3.6 / 契约 §1.3，T-B03）：注册模式与会话 Cookie 的 Secure 标记
     #: ``REGISTRATION_MODE``：closed（默认，``/auth/register`` → 503）/ invite / open
     registration_mode: RegistrationMode = RegistrationMode.CLOSED
-    #: ``SESSION_COOKIE_SECURE``：生产必须 true；本地 http 调试可设 false
+    #: ``SESSION_COOKIE_SECURE``：生产必须 true；只有 APP_ENV=local/test 可设 false（S6）
     session_cookie_secure: bool = True
 
     # --- 分页（契约 §1.2） ---
@@ -396,6 +417,9 @@ class Settings(BaseSettings):
             raise ValueError("APP_MASTER_KEY 在非 local/test 环境必须设置")
         if self.app_master_key is not None and len(self.app_master_key.get_secret_value()) < 32:
             raise ValueError("APP_MASTER_KEY 至少 32 个字符")
+        # review-T-B03 S6 / T-A05：只有 local/test 允许关闭 Cookie 的 Secure 标记
+        if not self.session_cookie_secure and self.app_env not in _DEV_ENVS:
+            raise ValueError("SESSION_COOKIE_SECURE=false 只允许在 APP_ENV=local/test 使用")
         return self
 
     def with_business_overrides(self, runtime: Mapping[str, Any] | None) -> Settings:

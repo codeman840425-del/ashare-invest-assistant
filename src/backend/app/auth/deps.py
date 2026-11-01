@@ -3,7 +3,7 @@
 判定顺序（🔒 接口）：无会话或会话失效 → ``401 AUTH_REQUIRED``；用户不存在或已注销 → 吊销会话后
 ``401 AUTH_REQUIRED``；账号非 ``approved`` → ``403 ACCOUNT_NOT_APPROVED {status}``；写方法
 （POST/PUT/PATCH/DELETE）的 ``X-CSRF-Token`` 缺失或不符 → ``403 CSRF_FAILED``。
-``/admin/*`` 的 404 规则不在这里（T-B03b）。
+``/admin/*`` 的 404 规则不在这里。
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import redis
 from fastapi import Depends, Request
 from sqlalchemy import Engine, Row, select
 
+from app.auth.passwords import PasswordPolicy, policy_for
 from app.auth.sessions import CSRF_HEADER, SESSION_COOKIE, Session, SessionStore
 from app.common.errors import AppError, ErrorCode
 from app.config import Settings, get_settings
@@ -43,12 +44,22 @@ def _redis_for(url: str) -> redis.Redis:
 def get_session_store(settings: Annotated[Settings, Depends(get_settings)]) -> SessionStore:
     if not settings.redis_url:
         raise AppError(ErrorCode.INTERNAL_ERROR)
-    return SessionStore(_redis_for(settings.redis_url))
+    ttl = settings.business.auth.session
+    return SessionStore(
+        _redis_for(settings.redis_url),
+        idle_ttl_s=ttl.idle_ttl_s,
+        absolute_ttl_s=ttl.absolute_ttl_s,
+    )
+
+
+def get_password_policy(settings: Annotated[Settings, Depends(get_settings)]) -> PasswordPolicy:
+    return policy_for(settings.business.auth)
 
 
 EngineDep = Annotated[Engine, Depends(get_engine)]
 StoreDep = Annotated[SessionStore, Depends(get_session_store)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+PasswordsDep = Annotated[PasswordPolicy, Depends(get_password_policy)]
 
 
 def client_ip(request: Request) -> str | None:

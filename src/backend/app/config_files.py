@@ -3,7 +3,7 @@
 - 每个文件对应一个 pydantic 模型，全部 ``extra="forbid"``、``frozen=True``：未知键、缺键、
   类型或取值不符 → :class:`pydantic.ValidationError`，进程启动即失败（plan §6.1 通用规则）。
 - 默认值**只在 YAML 里**（plan §6.1 是唯一出处），这里不写默认值，只写类型与取值范围；
-  因此六个文件缺一不可，``config/`` 顶层也不允许出现其他 yaml 文件（防止文件名拼错被忽略）。
+  因此八个文件缺一不可，``config/`` 顶层也不允许出现其他 yaml 文件（防止文件名拼错被忽略）。
 - 范围约束只取 plan 明文给出的（如 ``quote_interval_s`` 下限 5、``per_minute_budget`` 热调上限
   5400、RC2 用户可调范围 5–50）以及“数值本身必须有意义”的约束（正数、上下界有序）。
 - ``config/strategies/`` 不在本模块范围（由导入器处理，plan §2.5.14）。
@@ -215,37 +215,6 @@ class IngestOnDemand(_Strict):
     priority: Annotated[str, Field(pattern=r"^p[0-2]_[a-z_]+$")]
 
 
-#: plan §3.5“单文件 ≤ 5 MB，单次 ≤ 5 个文件”（MB 按 MiB 计，与 nginx 的 ``26m`` 同口径）
-IMPORT_MAX_FILE_BYTES_DEFAULT = 5 * 1024 * 1024
-IMPORT_MAX_FILES_DEFAULT = 5
-#: 网关/框架层请求体上限 = nginx ``client_max_body_size 26m``
-#: （deploy/nginx/nginx.conf，契约 §4 413）
-IMPORT_MAX_REQUEST_BYTES_DEFAULT = 26 * 1024 * 1024
-
-
-class IngestImports(_Strict):
-    """交割单上传与请求体上限（T-B02a 补充；plan §6.1 尚无此块，见 reports/T-B02a.md）。
-
-    - ``max_file_bytes`` / ``max_files_per_upload``：应用层上限，超限按契约走
-      ``422 IMPORT_FILE_ERRORS`` + ``IMPORT_FILE_TOO_LARGE``（导入接口实现时使用）。
-    - ``max_request_bytes``：框架层请求体上限，超限 ``413 PAYLOAD_TOO_LARGE {max_bytes}``；
-      必须 ≥ 单次上传的文件总量（契约：网关上限须略大于应用上限），默认与 nginx 26m 一致。
-    """
-
-    max_file_bytes: PosInt = IMPORT_MAX_FILE_BYTES_DEFAULT
-    max_files_per_upload: PosInt = IMPORT_MAX_FILES_DEFAULT
-    max_request_bytes: PosInt = IMPORT_MAX_REQUEST_BYTES_DEFAULT
-
-    @model_validator(mode="after")
-    def _request_covers_upload(self) -> IngestImports:
-        if self.max_request_bytes <= self.max_file_bytes * self.max_files_per_upload:
-            raise ValueError(
-                "max_request_bytes 必须大于 max_file_bytes × max_files_per_upload"
-                "（网关/框架上限须略大于应用上限，契约 §4 413）"
-            )
-        return self
-
-
 class IngestConfig(_File):
     budget: IngestBudget
     backoff: IngestBackoff
@@ -253,8 +222,6 @@ class IngestConfig(_File):
     heartbeat: IngestHeartbeat
     egress: IngestEgress
     on_demand: IngestOnDemand
-    #: 有默认值：plan §6.1 的 ingest.yaml 代码块还没有这一块，旧快照缺它也能加载
-    imports: IngestImports = Field(default_factory=IngestImports)
 
 
 # ---------------------------------------------------------------------------
@@ -903,12 +870,117 @@ class LlmConfig(_File):
 
 
 # ---------------------------------------------------------------------------
+# config/imports.yaml（T-A05：键路径 ``imports.*``；取代 T-B02a 暂放的 ``ingest.imports.*``）
+# ---------------------------------------------------------------------------
+
+
+#: 小写扩展名，带点（如 ``.csv``）
+FileExtension = Annotated[str, Field(pattern=r"^\.[a-z0-9]+$")]
+
+
+class ImportsConfig(_File):
+    """交割单导入上限（plan §6.1 ``config/imports.yaml``；api 与 worker 读取）。
+
+    - ``max_file_bytes`` / ``max_files_per_upload`` / ``max_rows_per_file``：应用层上限，超限按契约
+      走 ``422 IMPORT_FILE_ERRORS`` + ``IMPORT_*``（导入接口实现时使用）。
+    - ``max_request_bytes``：框架层请求体上限（= nginx ``client_max_body_size``），超限
+      ``413 PAYLOAD_TOO_LARGE {max_bytes}``；必须 > ``max_file_bytes × max_files_per_upload``。
+    - 存储路径只来自环境变量 ``IMPORT_STORAGE_PATH``，本文件不设路径键。
+    """
+
+    max_file_bytes: PosInt
+    max_files_per_upload: PosInt
+    max_request_bytes: PosInt
+    max_rows_per_file: PosInt
+    allowed_extensions: Annotated[list[FileExtension], Field(min_length=1)]
+    raw_file_retention_days: PosInt
+
+    @model_validator(mode="after")
+    def _check(self) -> ImportsConfig:
+        if self.max_request_bytes <= self.max_file_bytes * self.max_files_per_upload:
+            raise ValueError(
+                "max_request_bytes 必须大于 max_file_bytes × max_files_per_upload"
+                "（网关/框架上限须略大于应用上限，契约 §4 413）"
+            )
+        if len(set(self.allowed_extensions)) != len(self.allowed_extensions):
+            raise ValueError("allowed_extensions 不能重复")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# config/auth.yaml（T-A05；api 读取）
+# ---------------------------------------------------------------------------
+
+
+class AuthPassword(_Strict):
+    #: plan §3.6 已定 ≥ 10
+    min_len: Annotated[int, Field(ge=10)]
+    max_len: PosInt
+
+    @model_validator(mode="after")
+    def _check(self) -> AuthPassword:
+        if self.min_len > self.max_len:
+            raise ValueError("password.min_len 不能大于 max_len")
+        return self
+
+
+class AuthPasswordHash(_Strict):
+    """argon2id 参数；下限按 OWASP（plan §3.6 / §6.1），低于下限启动失败。"""
+
+    memory_kib: Annotated[int, Field(ge=19456)]
+    time_cost: Annotated[int, Field(ge=2)]
+    parallelism: Annotated[int, Field(ge=1)]
+    hash_len: Annotated[int, Field(ge=16)]
+    salt_len: Annotated[int, Field(ge=16)]
+
+
+class AuthSession(_Strict):
+    idle_ttl_s: PosInt
+    absolute_ttl_s: PosInt
+    #: V1 固定 false
+    remember_me: Literal[False]
+
+    @model_validator(mode="after")
+    def _check(self) -> AuthSession:
+        if self.absolute_ttl_s < self.idle_ttl_s:
+            raise ValueError("session.absolute_ttl_s 必须 ≥ idle_ttl_s")
+        return self
+
+
+class AuthInvite(_Strict):
+    code_bytes: Annotated[int, Field(ge=16)]
+    default_ttl_h: PosInt
+    max_ttl_h: PosInt
+    #: V1 只支持单次使用
+    max_uses: Literal[1]
+
+    @model_validator(mode="after")
+    def _check(self) -> AuthInvite:
+        if self.default_ttl_h > self.max_ttl_h:
+            raise ValueError("invite.default_ttl_h 不能大于 max_ttl_h")
+        return self
+
+
+class AuthAdmin(_Strict):
+    #: 审核列表同 IP 注册数超过此值时高亮（只作提示；plan §3.6，T-A05 D8）
+    same_ip_highlight_threshold: Annotated[int, Field(ge=1)]
+
+
+class AuthConfig(_File):
+    password: AuthPassword
+    password_hash: AuthPasswordHash
+    session: AuthSession
+    invite: AuthInvite
+    admin: AuthAdmin
+
+
+# ---------------------------------------------------------------------------
 # 汇总
 # ---------------------------------------------------------------------------
 
 
 class BusinessConfig(_Strict):
-    """``config/`` 顶层六个文件；键为文件名（不含扩展名）。"""
+    """``config/`` 顶层八个文件；键为文件名（不含扩展名）。"""
 
     realtime: RealtimeConfig
     ingest: IngestConfig
@@ -916,6 +988,8 @@ class BusinessConfig(_Strict):
     risk_controls: RiskControlsConfig
     horizon_classifier: HorizonClassifierConfig
     llm: LlmConfig
+    imports: ImportsConfig
+    auth: AuthConfig
 
 
 BUSINESS_FILES: tuple[str, ...] = tuple(BusinessConfig.model_fields)

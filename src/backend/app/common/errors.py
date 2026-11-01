@@ -244,7 +244,7 @@ class Utf8JSONResponse(JSONResponse):
 
 
 class PayloadTooLarge(StarletteHTTPException):
-    """请求体超过框架层上限（``ingest.imports.max_request_bytes``）→ ``413 PAYLOAD_TOO_LARGE``。"""
+    """请求体超过框架层上限（``imports.max_request_bytes``）→ ``413 PAYLOAD_TOO_LARGE``。"""
 
     def __init__(self, max_bytes: int) -> None:
         super().__init__(status_code=413)

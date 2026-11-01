@@ -6,12 +6,15 @@
 - 契约 v0.2.5（T-A06 bd33f83，用户 2026-11-02 决定）：requires 规则新增 ``mode: cap``（默认）| ``hint``。
   画像类规则 SH0/SH0B/SH0C/IT0B/IT0C 为 ``mode: hint``：输入未填写 → 跳过（不提示、不封顶）；已填写且不满足 →
   只写入 ``hints[]``（``HorizonHint {horizon, rule_id, text}``），不改分数、不进 ``caps[]``、不影响 ``suitable``。
-  ``mode: cap`` 的规则不满足时进 ``caps``（``kind: "requires"``；``else_score`` 的 cap 记 0，如 IT0 无底仓）。
-- 契约 §5 ``HorizonCap``：``{horizon, cap, kind: "requires"|"data_missing", rule_id, inputs_missing}``；
-  闸门（HG*）封顶不属于 HorizonCap 的两种 kind，单独放在 ``gate_caps``。规则 ID 不是 reason_code（v0.2.3 #23）。
+- 契约 v0.2.6（T-A07 308afd3，T006e 裁定 1、2；T-T22）：``HorizonCap.kind`` 只取 ``"gate" | "data_missing"``（删 ``requires``）：
+  HG1–HG6 → ``gate``（``rule_id`` 为 ``HGn``，判 0 分的 HG1–HG3 记 ``cap: 0``）；``LG0``/``LG0B`` 的 ``else_cap`` →
+  ``data_missing``（``rule_id`` 为规则 ID）；必需特征缺失 → ``data_missing``、``rule_id=null``；
+  ``IT0`` 的 ``else_score: 0`` 是分数，**不进** ``caps``。hints 与分数无关：IT0 判 0 分时 novice 仍给 ``IT0C``。
+  v0.2.5 的“IT0 为 ``kind=requires``”用例已删除（契约 §9 v0.2.5 该条作废）。规则 ID 不是 reason_code（v0.2.3 #23）。
 - 用例 E（novice，次新股）：1.1.0 时 short 被 SH0C 封顶 59；1.2.0 起只提示，short 85、suitable [short]。
   docs/strategies/horizon_classifier.md §7 用例 E 行仍是 1.1.0 口径（研究员按 T-A06 §6 更新），本文件以 plan §6.1 为准。
-- 后端分类器（T-B30）落地后，应以同一组输入调用后端实现并比对；目前后端没有分类器，只做规则层期望。
+- 后端分类器（T-B30；caps.kind 改 gate/data_missing 见 T-A07 §5 后端）落地后，应以同一组输入调用后端实现并比对；
+  目前后端没有分类器，只做规则层期望；后端 ``HORIZON_CAP_KINDS``（库内 CHECK）另有 xfail 用例。
 
 全部为示例数值，不联网、不依赖后端。
 """
@@ -63,26 +66,26 @@ def _cond(op: str, actual: Any, value: Any) -> bool:
 
 
 def evaluate(inputs: dict[str, Any]) -> dict[str, Any]:
-    """返回 {raw, scores, caps(HorizonCap 列表/周期), gate_caps(闸门 id/周期), hints(HorizonHint 列表), suitable}。
+    """返回 {raw, scores, caps(HorizonCap 列表/周期，kind ∈ gate/data_missing), hints(HorizonHint 列表), suitable}。
     ``rank_pct`` 输入直接给分位值；``f.*`` 为 None 记为缺失；``profile.*`` 为 None 记为未填写。"""
     raw: dict[str, int] = {}
     scores: dict[str, int] = {}
     caps: dict[str, list[dict[str, Any]]] = {}
-    gate_caps: dict[str, list[str]] = {}
     hints: list[dict[str, Any]] = []
     for h in HORIZONS:
         spec = RULES["horizons"][h]
         zero = False
         limits: list[tuple[int, str]] = []
         hcaps: list[dict[str, Any]] = []
-        gates: list[str] = []
         for g in RULES["gates"]:
             if (g["horizons"] == "all" or h in g["horizons"]) and _cond(g["op"], inputs.get(g["input"]), g.get("value")):
                 if "score" in g:
                     zero = True
+                    cap = g["score"]
                 else:
-                    limits.append((g["cap"], g["id"]))
-                    gates.append(g["id"])
+                    cap = g["cap"]
+                    limits.append((cap, g["id"]))
+                hcaps.append({"horizon": h, "cap": cap, "kind": "gate", "rule_id": g["id"], "inputs_missing": []})
         for q in spec["requires"]:
             mode = q.get("mode", "cap")
             actual = inputs.get(q["input"])
@@ -91,13 +94,11 @@ def evaluate(inputs: dict[str, Any]) -> dict[str, Any]:
                     hints.append({"horizon": h, "rule_id": q["id"], "text": q["reason"]})
                 continue
             if not _cond(q["op"], actual, q.get("value")):
-                if "else_score" in q:
+                if "else_score" in q:  # v0.2.6：是分数不是封顶，不进 caps（只写反向理由）
                     zero = True
-                    cap = q["else_score"]
-                else:
-                    cap = q["else_cap"]
-                    limits.append((cap, q["id"]))
-                hcaps.append({"horizon": h, "cap": cap, "kind": "requires", "rule_id": q["id"], "inputs_missing": []})
+                    continue
+                limits.append((q["else_cap"], q["id"]))  # LG0/LG0B：财报历史/数据不足 → data_missing（架构师归类）
+                hcaps.append({"horizon": h, "cap": q["else_cap"], "kind": "data_missing", "rule_id": q["id"], "inputs_missing": []})
         total = missing = 0
         missing_keys: list[str] = []
         for c in spec["components"]:
@@ -115,27 +116,35 @@ def evaluate(inputs: dict[str, Any]) -> dict[str, Any]:
         raw[h] = total
         scores[h] = 0 if zero else min([total] + [c for c, _ in limits])
         caps[h] = hcaps
-        gate_caps[h] = gates
     order = {h: i for i, h in enumerate(RULES["tie_order"])}
     suitable = sorted((h for h in HORIZONS if scores[h] >= THRESHOLD), key=lambda h: (-scores[h], order[h]))
-    return {"raw": raw, "scores": scores, "caps": caps, "gate_caps": gate_caps, "hints": hints, "suitable": suitable}
+    return {"raw": raw, "scores": scores, "caps": caps, "hints": hints, "suitable": suitable}
 
 
 def hint_ids(r: dict[str, Any], horizon: str | None = None) -> set[str]:
     return {x["rule_id"] for x in r["hints"] if horizon is None or x["horizon"] == horizon}
 
 
-def rule_ids(caps: list[dict[str, Any]], kind: str = "requires") -> list[str]:
-    return [c["rule_id"] for c in caps if c["kind"] == kind]
+CAP_KINDS = {"gate", "data_missing"}  # 契约 v0.2.6 HorizonCap.kind（T006e 裁定 2）
+DATA_MISSING_RULES = {"LG0", "LG0B"}
+
+
+def rule_ids(caps: list[dict[str, Any]], kind: str | None = None) -> list[str]:
+    return [c["rule_id"] for c in caps if kind is None or c["kind"] == kind]
 
 
 def assert_horizon_cap_shape(r: dict[str, Any]) -> None:
-    """契约 §5 HorizonCap：字段齐全；requires 带 rule_id；data_missing 的 rule_id 为 null；分数 ≤ 最小 cap。"""
+    """契约 v0.2.6 HorizonCap：字段齐全；kind 只取 gate/data_missing；gate 的 rule_id 为 HGn、inputs_missing 为 []；
+    data_missing 的 rule_id 为 null（特征缺失，inputs_missing 非空）或 LG0/LG0B；分数 ≤ 最小 cap。"""
     for h, items in r["caps"].items():
         for c in items:
             assert set(c) == {"horizon", "cap", "kind", "rule_id", "inputs_missing"} and c["horizon"] == h
-            assert c["kind"] in {"requires", "data_missing"} and 0 <= c["cap"] <= 100
-            assert (c["rule_id"] is None) == (c["kind"] == "data_missing")
+            assert c["kind"] in CAP_KINDS and 0 <= c["cap"] <= 100
+            if c["kind"] == "gate":
+                assert re.fullmatch(r"HG[1-6]", c["rule_id"]) and c["inputs_missing"] == []
+            else:
+                assert c["rule_id"] is None or c["rule_id"] in DATA_MISSING_RULES
+                assert bool(c["inputs_missing"]) == (c["rule_id"] is None)
             assert c["inputs_missing"] == sorted(set(c["inputs_missing"]))
         if items:
             assert r["scores"][h] <= min(c["cap"] for c in items)
@@ -235,7 +244,7 @@ def test_novice_hints_sh0c_it0c_without_caps_and_suitable_unchanged(base):
     for h in HORIZONS:
         assert not {"SH0C", "IT0C"} & set(rule_ids(novice["caps"][h]))
     assert novice["suitable"] == control["suitable"]  # 分数可因经验加分项不同（如 intraday_t），但无 59 封顶
-    assert all(novice["scores"][h] == novice["raw"][h] or novice["gate_caps"][h] or novice["caps"][h] for h in HORIZONS)
+    assert all(novice["scores"][h] == novice["raw"][h] or novice["caps"][h] or h == "intraday_t" for h in HORIZONS)
     assert_horizon_cap_shape(novice)
 
 
@@ -260,22 +269,72 @@ def test_hint_shape_is_horizon_hint():
         assert isinstance(x["text"], str) and x["text"] and "未填写" not in x["text"]
 
 
-def test_it0_no_base_position_still_in_caps_as_requires():
-    """v0.2.5 组 4：IT0（无底仓）仍是 ``mode: cap``，在 caps 中 ``kind=requires``，分数 0。"""
+# ---- 契约 v0.2.6（T-A07 308afd3，T006e）：caps.kind = gate | data_missing；T-T22 ----
+# 已删除 v0.2.5 用例 test_it0_no_base_position_still_in_caps_as_requires（“IT0 为 kind=requires”，契约 §9 v0.2.5 该条作废）。
+def test_v026_it0_no_base_position_scores_zero_without_cap():
+    """无底仓：intraday_t 分数 0，``caps`` 中没有 IT0（else_score 是分数，不是封顶）。"""
     r = evaluate({**CASE_B, "user.has_position": False})
-    assert {"horizon": "intraday_t", "cap": 0, "kind": "requires", "rule_id": "IT0", "inputs_missing": []} in r["caps"]["intraday_t"]
     assert r["scores"]["intraday_t"] == 0 and "intraday_t" not in r["suitable"]
+    assert "IT0" not in rule_ids(r["caps"]["intraday_t"])
+    assert_horizon_cap_shape(r)
+
+
+def test_v026_hints_independent_of_score_it0c_still_given():
+    """T006e 裁定 1：IT0 判 0 分时，``experience=novice`` 仍给 IT0C 提示。"""
+    r = evaluate({**CASE_B, "user.has_position": False, "profile.experience": "novice"})
+    assert r["scores"]["intraday_t"] == 0 and "IT0C" in hint_ids(r, "intraday_t")
+    assert "IT0" not in rule_ids(r["caps"]["intraday_t"])
+
+
+@pytest.mark.parametrize("case", ["B", "E", "ST", "BSE", "fund", "delisting", "new20", "few_reports", "no_roe", "missing_f"])
+def test_v026_cap_kinds_only_gate_or_data_missing(case):
+    """``caps[].kind`` 只出现 gate、data_missing（覆盖全部闸门、LG0/LG0B 与特征缺失）。"""
+    variants = {
+        "B": {}, "E": None, "ST": {"f.is_st": True}, "BSE": {"sec.board": "bse"}, "fund": {"sec.type": "etf"},
+        "delisting": {"f.is_delisting_period": True}, "new20": {"f.list_days": 10}, "few_reports": {"f.fin_report_count": 6},
+        "no_roe": {"f.roe_ttm": None}, "missing_f": {"f.intraday_amplitude_20d": None, "f.amount_20d_avg": None,
+                                                    "f.turnover_20d_avg": None, "f.volatility_20d": None},
+    }
+    r = evaluate(CASE_E if variants[case] is None else {**CASE_B, **variants[case]})
+    kinds = {c["kind"] for items in r["caps"].values() for c in items}
+    assert kinds <= CAP_KINDS and "requires" not in kinds
+    assert_horizon_cap_shape(r)
+
+
+def test_v026_st_stock_has_gate_hg4_cap_59():
+    r = evaluate({**CASE_B, "f.is_st": True})
+    for h in HORIZONS:
+        assert {"horizon": h, "cap": 59, "kind": "gate", "rule_id": "HG4", "inputs_missing": []} in r["caps"][h]
+
+
+@pytest.mark.parametrize(("variant", "rule"), [({"sec.type": "etf"}, "HG1"), ({"sec.board": "bse"}, "HG2"),
+                                               ({"f.is_delisting_period": True}, "HG3")])
+def test_v026_zero_score_gates_recorded_with_cap_0(variant, rule):
+    """判 0 分的 HG1–HG3 记 ``{kind: gate, cap: 0, rule_id: HGn}``。"""
+    r = evaluate({**CASE_B, **variant})
+    for h in HORIZONS:
+        assert r["scores"][h] == 0
+        assert {"horizon": h, "cap": 0, "kind": "gate", "rule_id": rule, "inputs_missing": []} in r["caps"][h]
+
+
+@pytest.mark.parametrize(("variant", "rule"), [({"f.fin_report_count": 6}, "LG0"), ({"f.roe_ttm": None}, "LG0B")])
+def test_v026_lg0_lg0b_are_data_missing_with_rule_id(variant, rule):
+    """财报不足 12 期 → ``{kind: data_missing, rule_id: LG0, cap: 59}``；ROE 缺失 → LG0B（架构师归类）。"""
+    r = evaluate({**CASE_B, **variant})
+    assert {"horizon": "long", "cap": 59, "kind": "data_missing", "rule_id": rule, "inputs_missing": []} in r["caps"]["long"]
     assert_horizon_cap_shape(r)
 
 
 def test_case_e_under_1_2_0():
-    """用例 E（novice 次新股）：1.2.0 起 short 不再封顶（85，适合），只提示 SH0C；intraday_t 无底仓 IT0 → 0；swing 被 HG6 封顶 59。"""
+    """用例 E（novice 次新股）：1.2.0 起 short 不再封顶（85，适合），只提示 SH0C；intraday_t 无底仓 IT0 → 0（v0.2.6 不进 caps）；
+    swing 被 HG6 封顶 59（v0.2.6 记为 kind=gate）；long 财报 6 期 → LG0 data_missing。"""
     r = evaluate(CASE_E)
     assert r["raw"]["short"] == 85 and r["raw"]["swing"] == 65
     assert r["scores"] == {"intraday_t": 0, "short": 85, "swing": 59, "long": 10}
     assert r["caps"]["short"] == []
-    assert rule_ids(r["caps"]["intraday_t"]) == ["IT0"]
-    assert r["gate_caps"]["swing"] == ["HG6"] and r["caps"]["swing"] == []  # 闸门封顶不是 HorizonCap
+    assert r["caps"]["intraday_t"] == []  # v0.2.6：IT0 的 else_score 不进 caps
+    assert r["caps"]["swing"] == [{"horizon": "swing", "cap": 59, "kind": "gate", "rule_id": "HG6", "inputs_missing": []}]
+    assert "LG0" in rule_ids(r["caps"]["long"], "data_missing")
     assert hint_ids(r) == {"SH0C", "IT0C"} and r["suitable"] == ["short"]
     assert_horizon_cap_shape(r)
 

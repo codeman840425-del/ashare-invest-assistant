@@ -1,0 +1,16 @@
+# plan v0.2.7 §6.1 `config/securities.yaml` 代码块原文快照（测试维护，T-A08 fa6d55d 新增）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。
+schema_version: 1
+search:
+  similarity_threshold: 0.3     # ◇ pg_trgm 相似度下限；查询中至少 2 个汉字才启用模糊匹配
+  initials_max_variants: 16     # ◇ 多音字拼音首字母组合上限
+  limit_default: 20             # ◇
+  limit_max: 50                 # ◇
+announcements:
+  url_host_allowlist:           # ◇ 只有 https 且主机在此列表内的原文链接才返回给前端
+    - www.sse.com.cn
+    - static.sse.com.cn
+    - www.szse.cn
+    - disc.szse.cn
+    - www.bse.cn
+    - www.cninfo.com.cn
+    - static.cninfo.com.cn

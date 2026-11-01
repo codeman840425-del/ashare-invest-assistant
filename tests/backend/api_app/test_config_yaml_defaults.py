@@ -21,6 +21,9 @@ T-B02a 暂放的 ``ingest.imports.*`` 作废，``ingest.yaml`` 不得再有 ``im
 契约 v0.2.5（T-A06 bd33f83）：不做同意流程（``auth.yaml`` 仍无 consents 段）；``horizon_classifier.yaml`` 升到
 ``version_no: 3`` / ``classifier_version: "1.2.0"``，画像类 requires 改 ``mode: hint``，快照按 bd33f83 的 plan §6.1 原文；
 docs 仍为 v0.2.4 时快照比对 xfail（运维推送 bd33f83）。
+契约 v0.2.6（T-A07 308afd3）：``ingest.yaml`` 的 ``budget.*`` 改为每证书默认值，新增 ``licences``（档位每分钟上限、
+DRR、熔断、ip_limited 升级、额度恢复时刻）与 ``data_sharing``（``per_licence``、``allow_cross_licence_fallback: false``）；
+快照按 308afd3 的 plan §6.1 原文；仓库文件与后端模型未跟上 → xfail（后端 T-B04a 扩展）。
 
 YAML 一律按 1.2 布尔规则读取（只认 true/false），与后端 ``config_files`` 一致；plan 已把 ``"on"`` 加引号。
 """
@@ -40,9 +43,12 @@ pytestmark = [pytest.mark.unit]
 
 HERE = Path(__file__).resolve().parent
 SNAP_DIR = HERE / "config_defaults"
-NAMES = ("realtime", "ingest", "market_rules", "risk_controls", "horizon_classifier", "llm", "imports", "auth")
+NAMES = ("realtime", "ingest", "market_rules", "risk_controls", "horizon_classifier", "llm", "imports", "auth", "securities")
 #: T-A05 新增的文件（plan 7c62f59；origin/main 的 plan 尚无时 xfail，待运维推送）
 T_A05_FILES = ("imports", "auth")
+#: plan v0.2.7（T-A08 fa6d55d）新增的文件；所用 docs 尚无时 xfail（origin/main 仍为 v0.2.6，待运维推送）
+V027_FILES = ("securities",)
+V027_DOCS_PENDING = "plan §6.1 仍为 v0.2.6：架构师 T-A08 fa6d55d（v0.2.7，config/securities.yaml）未推到 origin（运维推送）"
 #: nginx client_max_body_size 26m（deploy/nginx/nginx.conf；契约 #22 413 details.max_bytes）
 NGINX_MAX_BODY = 26 * 1024 * 1024
 REPO_ROOT = HERE.parents[2]
@@ -54,12 +60,17 @@ OWNER = {
     "horizon_classifier": "后端 T-B30（周期分类：f.* 特征、recompute 加 position_open_close、rules 全文；v0.2.5 version_no 3 / classifier_version 1.2.0 / 画像类 requires 为 mode: hint，T-A06 §3）",
     "llm": "后端 T-B25（LLM 网关：config/llm.yaml 与其模型）",
     "imports": "后端 T-B02a 跟进（T-A05：新建 config/imports.yaml 与模型，键路径 imports.*，删除 ingest.imports.*）",
+    "ingest": "后端 T-B04a 扩展（T-A07 §5 / plan §6.1 v0.2.6：config/ingest.yaml 与模型加 licences、data_sharing 段）",
+    "securities": "后端 T-B06（plan §6.1 v0.2.7：新建 config/securities.yaml 与模型 search.*、announcements.url_host_allowlist，由 api 读取）",
     "auth": "后端 T-B03 跟进（T-A05：新建 config/auth.yaml 与模型：password/password_hash/session/invite/admin；v0.2.4 无 consents 段）",
 }
 HORIZONS = ("intraday_t", "short", "swing", "long")
 #: plan v0.2.5（T-A06 bd33f83）改动的 §6.1 代码块；docs 仍是 v0.2.4 时快照比对 xfail，待运维推送
 V025_CHANGED = {"horizon_classifier": 3}
 V025_DOCS_PENDING = "plan §6.1 仍为 v0.2.4：架构师 T-A06 bd33f83（v0.2.5，分类器 1.2.0）未推到 origin（运维推送）"
+#: plan v0.2.6（T-A07 308afd3）新增的顶层段；所用 docs 尚无时快照比对 xfail
+V026_ADDED = {"ingest": ("licences", "data_sharing")}
+V026_DOCS_PENDING = "plan §6.1 仍为 v0.2.5：架构师 T-A07 308afd3（v0.2.6，每用户证书）不在所用 docs 中"
 
 
 class _Yaml12Loader(yaml.SafeLoader):
@@ -129,6 +140,24 @@ def test_key_defaults_realtime():
     assert d["notify"]["cadence_default"] in {"realtime", "1min", "3min", "5min"}
     assert (d["notify"]["sse_heartbeat_s"], d["notify"]["sse_replay_window_s"]) == (15, 600)
     assert d["intervals"]["quote_interval_s"] >= 5
+
+
+def test_key_defaults_ingest_licences():
+    """plan v0.2.6 §6.1 / 2.1B：档位默认每证书每分钟 = 官方一半；DRR；熔断与 ip_limited 参数；禁止跨证书回退。"""
+    d = snap("ingest")
+    lic = d["licences"]
+    assert lic["tier_per_minute"] == {"diamond": 3000, "annual": 1500, "monthly": 500, "trial": 500, "free": 150, "other": 150}
+    assert lic["tier_per_minute"]["diamond"] == d["budget"]["per_minute_budget"]
+    assert (lic["per_licence_max_concurrency"], lic["global_max_concurrency"]) == (1, 2)
+    assert (lic["cross_licence_scheduling"], lic["drr_quantum"]) == ("drr", 1)
+    assert lic["breaker"] == {"consecutive_503": 5, "open_s": 300, "backoff_s": [1, 2, 4, 8, 16, 32, 60]}
+    assert lic["ip_limited_pause_s"] == 120
+    assert lic["ip_limited_escalate"] == {"count": 3, "window_s": 3600, "pause_s": 3600}
+    assert lic["quota_resume_at"] == "00:01" and isinstance(lic["quota_resume_at"], str)
+    assert lic["diamond_after_expiry_per_day"] == 20000
+    assert lic["expiry_reminder_days"] == [30, 7, 1] and lic["verify_rate_limit_per_hour"] == 5
+    assert lic["eod_scope"] == "user_universe"
+    assert d["data_sharing"] == {"mode": "per_licence", "allow_cross_licence_fallback": False}
 
 
 def test_key_defaults_ingest():
@@ -334,12 +363,14 @@ def _t_a05_missing(blocks: dict[str, str]) -> list[str]:
     return [n for n in T_A05_FILES if n not in blocks]
 
 
-def test_plan_6_1_lists_eight_files(docs_dir):
-    """T-A05：白名单 8 个文件。docs 尚是 7c62f59 之前的版本（6 个）→ xfail，待运维推送 7c62f59。"""
+def test_plan_6_1_lists_nine_files(docs_dir):
+    """白名单：T-A05 8 个文件，v0.2.7（T-A08）加 securities.yaml 共 9 个。docs 尚是更早版本 → xfail，待运维推送。"""
     blocks = plan_blocks((docs_dir / "plan.md").read_text(encoding="utf-8"))
-    if set(blocks) == set(NAMES) - set(T_A05_FILES):
+    if set(blocks) == set(NAMES) - set(T_A05_FILES) - set(V027_FILES):
         pytest.xfail("plan §6.1 尚无 imports.yaml/auth.yaml：架构师 7c62f59 未推到 origin（运维推送）")
-    assert set(blocks) == set(NAMES) and len(blocks) == 8
+    if set(blocks) == set(NAMES) - set(V027_FILES):
+        pytest.xfail(V027_DOCS_PENDING)
+    assert set(blocks) == set(NAMES) and len(blocks) == 9
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -347,10 +378,14 @@ def test_snapshot_equals_plan_block(docs_dir, name):
     blocks = plan_blocks((docs_dir / "plan.md").read_text(encoding="utf-8"))
     if name in _t_a05_missing(blocks):
         pytest.xfail(f"plan §6.1 尚无 {name}.yaml：架构师 7c62f59 未推到 origin（运维推送）")
+    if name in V027_FILES and name not in blocks:
+        pytest.xfail(V027_DOCS_PENDING)
     assert name in blocks, f"plan §6.1 已无 {name}.yaml"
     plan = load12(blocks[name])
     if name in V025_CHANGED and plan.get("version_no", 0) < V025_CHANGED[name] and snap(name)["version_no"] == V025_CHANGED[name]:
         pytest.xfail(V025_DOCS_PENDING)
+    if name in V026_ADDED and not set(V026_ADDED[name]) & set(plan) and set(V026_ADDED[name]) <= set(snap(name)):
+        pytest.xfail(V026_DOCS_PENDING)
     assert plan == snap(name), f"plan §6.1 的 {name}.yaml 已变，请同步快照"
 
 

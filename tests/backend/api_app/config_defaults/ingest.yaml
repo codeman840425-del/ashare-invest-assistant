@@ -1,7 +1,8 @@
-# plan v0.2.2 §6.1 `config/ingest.yaml` 代码块原文快照（测试维护，T-T01b）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。
+# plan v0.2.6 §6.1 `config/ingest.yaml` 代码块原文快照（测试维护，T-T01b 建、T-T22 按 308afd3 更新）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。
 schema_version: 1
+# T-A07：budget.* 改为“每张证书”的默认值（证书档位未知且无管理员覆盖时使用）；全进程并发见 licences.global_max_concurrency
 budget:
-  per_minute_budget: 3000       # int，全局令牌桶（钻石版文档 6000/分钟，自设一半）【待 T003】；可热调，上调上限 5400
+  per_minute_budget: 3000       # int，每证书令牌桶（原为全局）（钻石版文档 6000/分钟，自设一半）【待 T003】；可热调，上调上限 5400
   max_concurrency: 1            # int，并发上限【待 T003】
   shares:                       # 各层每分钟份额，合计 ≤ per_minute_budget；高优先级可借用低优先级空闲额度
     snapshot: 800               # 快照层
@@ -29,3 +30,33 @@ egress:
 on_demand:
   coalesce_window_s: 5          # ◇ 按需拉取“同证券同接口”合并窗口
   priority: p1_daily
+licences:                       # T-A07 每用户证书（2.1B）
+  tier_per_minute:              # ◇ 各档位默认每证书每分钟上限（官方档位的一半，T003）
+    diamond: 3000
+    annual: 1500
+    monthly: 500
+    trial: 500
+    free: 150
+    other: 150
+  diamond_after_expiry_per_day: 20000   # 钻石版过期后官方每日额度
+  per_licence_max_concurrency: 1
+  global_max_concurrency: 2     # 【待 T-B05 实测】同 IP 多证书并发
+  cross_licence_scheduling: drr # 先比优先级，同级按证书赤字轮转
+  drr_quantum: 1
+  breaker:
+    consecutive_503: 5
+    open_s: 300
+    backoff_s: [1, 2, 4, 8, 16, 32, 60]
+  ip_limited_pause_s: 120
+  ip_limited_escalate: {count: 3, window_s: 3600, pause_s: 3600}
+  quota_resume_at: "00:01"      # 北京时间次日
+  expiry_reminder_days: [30, 7, 1]
+  verify_rate_limit_per_hour: 5
+  live_profile:                 # ◇ 默认盘中配置（每证书）
+    full_snapshot_interval_s: 60
+    focus_max: 20
+    focus_interval_s: 15
+  eod_scope: user_universe      # 盘后批量只取该用户自选与持仓 + 批量日 K
+data_sharing:
+  mode: per_licence             # per_licence（默认）| shared_cache【待麦蕊书面确认，禁用】
+  allow_cross_licence_fallback: false   # 硬规则：不可改为 true

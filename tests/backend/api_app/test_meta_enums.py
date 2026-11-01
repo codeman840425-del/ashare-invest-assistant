@@ -1,4 +1,4 @@
-"""``GET /meta/enums``：T-B01 报告 §6 建议 7 + 契约 §3/§4/§6.1/§7.10/§9（T-T01c 升到 v0.2.3，T-T01d 升到 v0.2.4、v0.2.5）。
+"""``GET /meta/enums``：T-B01 报告 §6 建议 7 + 契约 §3/§4/§6.1/§7.10/§9（T-T01c 升到 v0.2.3，T-T01d 升到 v0.2.4、v0.2.5，T-T22 升到 v0.2.6）。
 
 - 与契约逐项比对的用例需要 v0.2.3 文档（``AIA_DOCS_DIR``，缺省为仓库 docs/），否则 skip；
 - 后端尚未同步 v0.2 的差异（新增枚举、改名的取值/错误码、version、import_codes）在运行时
@@ -25,10 +25,48 @@ ENUM_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 UPPER_CODE_ENUMS = {"gate", "reason_code"}
 IMPORT_CODES_JSON = Path(__file__).resolve().parents[1] / "unit" / "import_codes.json"
 TODO = "后端 /meta/enums 未同步契约（T-B01 v0.2 修订；v0.2.3 由后端按 T-A03 同步：version、PAYLOAD_TOO_LARGE 等）"
-#: 本组测试对齐的契约版本（T-T01d 升到 v0.2.5，架构师 T-A06 bd33f83）；/meta/enums.version 必须等于它
-CONTRACT_VERSION = "v0.2.5"
-#: origin/main 的 docs 仍是 v0.2.4（bd33f83 未推到 origin）：文档版本落后一个小版本时 xfail 而不是失败
-DOCS_PENDING = "docs 仍为 v0.2.4：契约 v0.2.5（T-A06 bd33f83）未推到 origin（运维推送）"
+#: 本组测试对齐的契约版本（升到 v0.2.7：架构师 T-A08 fa6d55d + 35517f8，在本地 main、尚未推 origin）；
+#: /meta/enums.version 最终必须等于它
+CONTRACT_VERSION = "v0.2.7"
+#: 用旧一版文档（origin/main 仍为 v0.2.6）运行时 xfail 而不是失败
+DOCS_PENDING = "docs 仍为 v0.2.6：契约 v0.2.7（T-A08 fa6d55d/35517f8）未推到 origin（运维推送）"
+#: 各版本契约的错误码 / 原因码个数（v0.2.7 无新增错误码、原因码：59 / 22）
+CODE_COUNTS = {"v0.2.4": (58, 23), "v0.2.5": (56, 22), "v0.2.6": (59, 22), "v0.2.7": (59, 22)}
+#: 契约 v0.2.7 新增枚举（T-A08 变更表 #14，共 18 个）；factor_category 取值待 T003 定稿，契约暂不列值
+V027_ENUMS = {
+    "alert_origin": ["plan_condition", "holding_event", "user_custom"],
+    "alert_status": ["new", "read", "checked", "acted", "dismissed"],
+    "announcement_category": ["periodic_report", "other"],
+    "board": ["main", "chinext", "star", "bse"],
+    "data_gap_scope": ["user", "account", "security", "market"],
+    "factor_category": [],
+    "industry_taxonomy": ["sw_l1", "sw_l2", "csrc"],
+    "instance_event_kind": ["created", "confirmed", "paused", "resumed", "params_changed", "archived"],
+    "instance_origin": ["classifier", "user", "system"],
+    "instance_sort": ["created_at_desc", "updated_at_desc", "strategy_name_asc"],
+    "listing_status": ["listed", "delisting_period", "delisted", "missing_from_list"],
+    "plan_condition_kind": ["trigger", "invalidation"],
+    "report_period": ["q1", "h1", "q3", "fy"],
+    "sector_kind": ["industry", "concept"],
+    "sector_sort": ["main_net_desc", "main_net_asc", "change_pct_desc", "change_pct_asc"],
+    "security_match_kind": ["code_exact", "name_exact", "initials_exact", "code_prefix", "name_prefix", "initials_prefix",
+                            "name_contains", "former_name", "former_code", "fuzzy"],
+    "security_risk_flag": ["st", "star_st", "delisting"],
+    "security_type": ["stock", "cdr", "index"],
+}
+#: 契约 v0.2.7 给已有枚举加的值
+V027_ENUM_ADDED = {"data_provider": "exchange"}
+B_V027_ENUMS = ("后端 T-B01 / T-B06 / T-B07 / T-B10（契约 v0.2.7 / T-A08：schemas/enums.py 加 18 个枚举、data_provider 加 exchange，"
+                "version 改 v0.2.7）")
+#: 契约 v0.2.6 新增项（T-A07 §3/§4）
+V026_ERRORS = {"DATA_LICENCE_IN_USE": 409, "DATA_LICENCE_NOT_SET": 409, "DATA_LICENCE_UNAVAILABLE": 409}
+V026_ENUMS = {
+    "data_licence_status": ["not_set", "pending_verification", "active", "invalid", "expired", "quota_exceeded", "ip_limited",
+                            "paused_by_admin"],
+    "data_licence_tier": ["free", "trial", "monthly", "annual", "diamond", "other"],
+}
+V026_ENUM_ADDED = {"notification_kind": "data_licence", "gap_reason": "data_licence_unavailable"}
+B_V026_ENUMS = "后端 T-B01 / T-B45（契约 v0.2.6 / T-A07 §5：errors.py 加 3 个 DATA_LICENCE_* 码、schemas/enums.py 加证书枚举，version 改 v0.2.6）"
 #: 契约 v0.2.5 作废项（T-A06 §1）
 V025_RETIRED_ENUMS = ("consent_key", "legal_doc_key", "consent_presentation", "assessment_status")
 V025_RETIRED_ERRORS = ("CONSENT_REQUIRED", "STRATEGY_FIT_ACK_REQUIRED")
@@ -52,7 +90,10 @@ def parse_enums(contract: str) -> dict[str, list[str]]:
             continue
         name, cell = m.groups()
         cell = re.sub(r"（[^）]*）", "", cell)  # 去掉全角括号内的说明
-        out[name] = re.findall(r"`([^`]+)`", cell)
+        # 只取单元格开头连续的取值（可带半角注记，如 `stop_take`(RC1)）；其后的说明文字里的反引号不是取值
+        # （v0.2.7 的 data_provider / listing_status 说明里提到 `ProviderRef.provider`、`SecurityProfile.suspended`）
+        lead = re.match(r"(?:`[^`]+`(?:\([A-Z0-9]+\))?[\s、，,]*)*", cell)
+        out[name] = re.findall(r"`([^`]+)`", lead.group(0) if lead else "")
     return out
 
 
@@ -94,16 +135,33 @@ def payload(client) -> dict[str, Any]:
 # ---------------- 解析器自检（文档 v0.2.3） ----------------
 def test_contract_header_version(contract):
     m = re.search(r"版本：\*\*(v[0-9.]+)\*\*", contract)
-    assert m and m.group(1) in {"v0.2.4", CONTRACT_VERSION}, m and m.group(1)
-    assert contract.index("### v0.2.4") < contract.index("### v0.2.3") < contract.index("### v0.2.2") < contract.index("### v0.2.1")
+    assert m and m.group(1) in {"v0.2.5", "v0.2.6", CONTRACT_VERSION}, m and m.group(1)
+    assert contract.index("### v0.2.5") < contract.index("### v0.2.4") < contract.index("### v0.2.3") < contract.index("### v0.2.2")
+    if m.group(1) == "v0.2.5":
+        pytest.xfail(DOCS_PENDING)
+    assert contract.index("### v0.2.6") < contract.index("### v0.2.5")
     if m.group(1) != CONTRACT_VERSION:
         pytest.xfail(DOCS_PENDING)
-    assert contract.index("### v0.2.5") < contract.index("### v0.2.4")
+    assert contract.index("### v0.2.7") < contract.index("### v0.2.6")
+
+
+def _docs_version(contract: str) -> str:
+    m = re.search(r"版本：\*\*(v[0-9.]+)\*\*", contract)
+    return m.group(1) if m else ""
 
 
 def _is_v025(contract: str) -> bool:
-    m = re.search(r"版本：\*\*(v[0-9.]+)\*\*", contract)
-    return bool(m) and m.group(1) == CONTRACT_VERSION
+    """文档已是 v0.2.5 或更新（v0.2.5 的删除项在 v0.2.6 仍然成立）。"""
+    return _docs_version(contract) in {"v0.2.5", "v0.2.6", "v0.2.7"}
+
+
+def _is_v026(contract: str) -> bool:
+    """文档已是 v0.2.6 或更新（v0.2.7 无不兼容变更，v0.2.6 新增项仍然成立）。"""
+    return _docs_version(contract) in {"v0.2.6", "v0.2.7"}
+
+
+def _is_v027(contract: str) -> bool:
+    return _docs_version(contract) == "v0.2.7"
 
 
 def test_contract_parsers_sanity(contract):
@@ -113,30 +171,78 @@ def test_contract_parsers_sanity(contract):
     assert enums["ingest_health"] == ["ok", "stale", "paused", "unknown"]
     errors = parse_error_codes(contract)
     # v0.2.3：新增 413 PAYLOAD_TOO_LARGE（57 → 58）；v0.2.5：删 CONSENT_REQUIRED、STRATEGY_FIT_ACK_REQUIRED（58 → 56），
-    # 删原因码 PROFILE_OR_CONSENT_MISSING（23 → 22）
+    # 删原因码 PROFILE_OR_CONSENT_MISSING（23 → 22）；v0.2.6：加 3 个 DATA_LICENCE_*（56 → 59）；v0.2.7：不变（59 / 22）
     assert errors["METHOD_NOT_ALLOWED"] == 405 and errors["PAYLOAD_TOO_LARGE"] == 413
-    assert (len(errors), len(parse_reason_codes(contract))) == ((56, 22) if _is_v025(contract) else (58, 23))
+    assert (len(errors), len(parse_reason_codes(contract))) == CODE_COUNTS[_docs_version(contract)]
 
 
 def test_v025_contract_drops_consent_and_assessment_items(contract):
     """v0.2.5 组 1（文档层）：契约 §3/§4/§6.1 不再有同意/测评枚举、``CONSENT_REQUIRED``、``STRATEGY_FIT_ACK_REQUIRED``、
-    ``PROFILE_OR_CONSENT_MISSING``；码表 56 个错误码、22 个原因码。"""
+    ``PROFILE_OR_CONSENT_MISSING``；原因码 22 个（错误码个数见 CODE_COUNTS）。"""
     if not _is_v025(contract):
         pytest.xfail(DOCS_PENDING)
     enums, errors, reasons = parse_enums(contract), parse_error_codes(contract), parse_reason_codes(contract)
     assert not set(V025_RETIRED_ENUMS) & set(enums)
-    assert not set(V025_RETIRED_ERRORS) & set(errors) and len(errors) == 56
+    assert not set(V025_RETIRED_ERRORS) & set(errors) and len(errors) == CODE_COUNTS[_docs_version(contract)][0]
     assert not set(V025_RETIRED_REASONS) & set(reasons) and len(reasons) == 22
 
 
-@pytest.mark.xfail(strict=False, reason=B_V025_ENUMS)
 def test_v025_meta_enums_drops_consent_and_assessment_items(payload):
-    """v0.2.5 组 1（接口层）：``/meta/enums`` 不含作废枚举；``reason_codes`` 22 个且不含 PROFILE_OR_CONSENT_MISSING；
-    ``error_codes`` 不含 CONSENT_REQUIRED、STRATEGY_FIT_ACK_REQUIRED；``version`` = v0.2.5。"""
+    """v0.2.5 组 1（接口层，后端 4162abb 已同步）：``/meta/enums`` 不含作废枚举；``reason_codes`` 22 个且不含
+    PROFILE_OR_CONSENT_MISSING；``error_codes`` 不含 CONSENT_REQUIRED、STRATEGY_FIT_ACK_REQUIRED（version 见 test_version_and_import_codes）。"""
     assert not set(V025_RETIRED_ENUMS) & set(payload["enums"])
     reasons = {r["code"] for r in payload["reason_codes"]}
     assert len(reasons) == 22 and not set(V025_RETIRED_REASONS) & reasons
     assert not set(V025_RETIRED_ERRORS) & {e["code"] for e in payload["error_codes"]}
+
+
+def test_v026_contract_adds_data_licence_items(contract):
+    """v0.2.6（文档层）：3 个 409 DATA_LICENCE_* 码、data_licence_status/tier 枚举、notification_kind 加 data_licence、
+    gap_reason 加 data_licence_unavailable。"""
+    if not _is_v026(contract):
+        pytest.xfail("docs 仍为 v0.2.5：契约 v0.2.6（T-A07 308afd3）不在所用 docs 中")
+    enums, errors = parse_enums(contract), parse_error_codes(contract)
+    assert {k: errors.get(k) for k in V026_ERRORS} == V026_ERRORS
+    assert {k: enums.get(k) for k in V026_ENUMS} == V026_ENUMS
+    for name, value in V026_ENUM_ADDED.items():
+        assert value in enums[name], name
+
+
+def test_v026_meta_enums_has_data_licence_items(payload):
+    """v0.2.6（接口层）：``/meta/enums`` 含证书枚举与 3 个 DATA_LICENCE_* 错误码，version = v0.2.6。
+
+    T-B04a.md（efcd244，已在 origin/main）：后端已同步 v0.2.6，去掉装饰器 xfail、直接断言；只在后端仍报 v0.2.5 时
+    imperative xfail，写明负责任务。version 为 v0.2.6 或更新（v0.2.7 无不兼容变更）。"""
+    if payload["version"] == "v0.2.5":
+        pytest.xfail(B_V026_ENUMS)
+    errors = {e["code"]: e for e in payload["error_codes"]}
+    assert {k: errors[k]["http_status"] for k in V026_ERRORS if k in errors} == V026_ERRORS
+    for name, values in V026_ENUMS.items():
+        assert list(payload["enums"][name]) == values, name
+    for name, value in V026_ENUM_ADDED.items():
+        assert value in payload["enums"][name], name
+    assert payload["version"] in {"v0.2.6", CONTRACT_VERSION}
+
+
+def test_v027_contract_adds_enums(contract):
+    """v0.2.7（文档层，T-A08 #14）：新增 18 个枚举（取值逐项相等）、``data_provider`` 加 ``exchange``；错误码 / 原因码不变。"""
+    if not _is_v027(contract):
+        pytest.xfail(DOCS_PENDING)
+    enums = parse_enums(contract)
+    assert {k: enums.get(k) for k in V027_ENUMS} == V027_ENUMS
+    for name, value in V027_ENUM_ADDED.items():
+        assert value in enums[name], name
+    assert (len(parse_error_codes(contract)), len(parse_reason_codes(contract))) == CODE_COUNTS["v0.2.7"]
+
+
+def test_v027_meta_enums_has_new_enums(payload):
+    """v0.2.7（接口层）：``/meta/enums`` 含 18 个新枚举与 ``data_provider.exchange``，version = v0.2.7。后端仍报更早版本 → xfail。"""
+    if payload["version"] != CONTRACT_VERSION and re.fullmatch(r"v0\.2\.[5-6]", payload["version"]):
+        pytest.xfail(B_V027_ENUMS + f"；当前 version = {payload['version']}")
+    for name, values in V027_ENUMS.items():
+        assert list(payload["enums"][name]) == values, name
+    for name, value in V027_ENUM_ADDED.items():
+        assert value in payload["enums"][name], name
     assert payload["version"] == CONTRACT_VERSION
 
 
@@ -191,8 +297,8 @@ def test_error_codes_match_contract(payload, contract):
 def test_version_and_import_codes(payload):
     if "version" not in payload or "import_codes" not in payload:
         pytest.xfail(f"{TODO}：/meta/enums 缺 version / import_codes（契约 v0.2 §7.10）")
-    if payload["version"] != CONTRACT_VERSION and re.fullmatch(r"v0\.2(\.[0-4])?", payload["version"]):
-        pytest.xfail(f"后端（T-B01 / v0.2.3–v0.2.5 同步）：app/schemas/enums.py 的 CONTRACT_VERSION 仍为 {payload['version']}，应改为 {CONTRACT_VERSION}")
+    if payload["version"] != CONTRACT_VERSION and re.fullmatch(r"v0\.2(\.[0-6])?", payload["version"]):
+        pytest.xfail(f"后端（T-B01，v0.2.7 同步）：app/schemas/enums.py 的 CONTRACT_VERSION 仍为 {payload['version']}，应改为 {CONTRACT_VERSION}")
     assert payload["version"] == CONTRACT_VERSION
     want = {c["code"]: c for c in json.loads(IMPORT_CODES_JSON.read_text(encoding="utf-8"))["codes"]}
     got = {c["code"]: c for c in payload["import_codes"]}

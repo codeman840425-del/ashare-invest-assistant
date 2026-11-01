@@ -60,11 +60,13 @@ B_V025_ENUMS = "后端 T-B01 / T-B03b（契约 v0.2.5 / T-A06 §3：errors.py、
 B_V025_INSTANCES = "后端（策略实例 POST，契约 v0.2.5 / T-A06 §1.4、§3：删 fit_ack 校验、加 warnings；接口尚未实现）"
 #: 后端未跟上契约 v0.2.4（T-A05 35f4880）的负责任务
 T_B03_V024 = "T-B03 跟进（契约 v0.2.4，T-A05 35f4880）：后端尚未实现"
-T_B03C = "T-B03c（契约 #27 邀请码）：未实现前 invite 模式按 closed 返回 503"
 #: 旧客户端的注册 ``agreements``：现后端（f44b6ee）仍必填；v0.2.5 起服务端忽略。默认注册体照发，以兼容两者
 AGREEMENTS = ["terms", "privacy", "risk_disclosure"]
-#: 契约 v0.2.5 §7.1 ``Me``（删 consents、risk_assessment）
-ME_KEYS = {"id", "username", "display_name", "role", "status", "entitlements"}
+#: 契约 §7.1 ``Me``：v0.2.5 删 consents、risk_assessment；v0.2.6 加必填 ``data_licence_status``（T-B45，efcd244 已在 origin/main）
+ME_KEYS = {"id", "username", "display_name", "role", "status", "entitlements", "data_licence_status"}
+#: 契约 §3 ``data_licence_status`` 取值（v0.2.6）
+DATA_LICENCE_STATUSES = {"not_set", "pending_verification", "active", "invalid", "expired", "quota_exceeded", "ip_limited",
+                         "paused_by_admin"}
 #: v0.2.5 前的 Me 多出的键（后端未同步时允许出现，由 test_v025_me_has_no_consent_or_assessment_keys 跟踪）
 ME_RETIRED_KEYS = {"consents", "risk_assessment"}
 BJ_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+08:00$")
@@ -183,20 +185,37 @@ def sql(authdb: SimpleNamespace) -> Callable[..., Any]:
     return _sql
 
 
-@pytest.fixture
-def app_client(authdb: SimpleNamespace, make_client: Callable[..., Any]) -> Callable[..., Any]:
-    """``app_client(mode="open", secure=False, **settings)`` → TestClient（真实 PG/Redis，进程内）。"""
+def random_client_ip() -> str:
+    """测试用来源 IP（198.18.0.0/15 基准测试网段，不在可信代理内）：每个客户端各用一个，
+    使 T-B03a 的按 IP 限速（Redis 键跨用例、跨运行存活）只在用例有意为之时触发。"""
+    n = secrets.randbelow(1 << 17)
+    return f"198.{18 + (n >> 16)}.{(n >> 8) & 0xFF}.{n & 0xFF}"
 
-    def _make(mode: str = "open", secure: bool | None = False, base_url: str = "http://testserver", **kw: Any) -> Any:
+
+@pytest.fixture
+def app_client(authdb: SimpleNamespace, backend: SimpleNamespace, make_settings: Callable[..., Any]) -> Iterator[Callable[..., Any]]:
+    """``app_client(mode="open", secure=False, ip=None, **settings)`` → TestClient（真实 PG/Redis，进程内）。
+
+    ``ip`` 为直连来源地址；不给则每个客户端随机一个（见 :func:`random_client_ip`）。
+    """
+    from fastapi.testclient import TestClient
+
+    clients: list[Any] = []
+
+    def _make(mode: str = "open", secure: bool | None = False, base_url: str = "http://testserver",
+              ip: str | None = None, **kw: Any) -> Any:
         overrides: dict[str, Any] = {"database_url": authdb.url, "redis_url": authdb.redis_url, "registration_mode": mode}
         if secure is not None:
             overrides["session_cookie_secure"] = secure
         overrides.update(kw)
-        c = make_client(**overrides)
-        c.base_url = base_url  # type: ignore[assignment]
+        app = backend.main.create_app(make_settings(**overrides))
+        c = TestClient(app, base_url=base_url, raise_server_exceptions=False, client=(ip or random_client_ip(), 50000))
+        clients.append(c)
         return c
 
-    return _make
+    yield _make
+    for c in clients:
+        c.close()
 
 
 @pytest.fixture
@@ -234,12 +253,17 @@ def user_session_keys(authdb: SimpleNamespace, uid: str) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# 迁移版本（DB 自检同步改为 0004）
+# 迁移版本：origin/main 0cb78ad 的 head = 0008（0005 T-B16 契约 v0.2.5、0006 T-B16b caps kind、
+# 0007 T-B45 数据证书表、0008 T-B03c 邀请码；aia-t01 运维重建后同为 0008）
 # ---------------------------------------------------------------------------
-def test_alembic_head_is_0004(authdb: SimpleNamespace, sql: Callable[..., Any]) -> None:
-    """现后端 head = 0004（T-B03）。v0.2.5 的删表迁移落地后 head 会前移，届时同步本用例与 DB 自检。"""
+#: DB 自检期望的迁移 head：0008（新迁移推到 origin 时同步此处）
+KNOWN_HEADS = ("0008",)
+
+
+def test_alembic_head_is_known(authdb: SimpleNamespace, sql: Callable[..., Any]) -> None:
+    """head 必须是已登记的版本（新迁移落地时同步本用例与 DB 自检）。"""
     assert (BACKEND_DIR / "migrations" / "versions").is_dir()
-    assert sql("SELECT version_num FROM alembic_version")[0][0] == "0004"
+    assert sql("SELECT version_num FROM alembic_version")[0][0] in KNOWN_HEADS
 
 
 # ---------------------------------------------------------------------------
@@ -257,13 +281,24 @@ def test_registration_default_is_closed(authdb: SimpleNamespace, make_client: Ca
     assert c.get(f"{API}/meta/registration").json()["mode"] == "closed"
 
 
-@pytest.mark.parametrize("mode", ["closed", "invite"])
-def test_register_when_not_open_is_503_and_writes_nothing(
-    app_client: Callable[..., Any], sql: Callable[..., Any], mode: str
-) -> None:
+def test_register_when_closed_is_503_and_writes_nothing(app_client: Callable[..., Any], sql: Callable[..., Any]) -> None:
     name = new_name()
-    r = app_client(mode).post(f"{API}/auth/register", json=reg(name, new_pw()))
+    r = app_client("closed").post(f"{API}/auth/register", json=reg(name, new_pw()))
     assert_err(r, 503, "REGISTRATION_CLOSED")
+    assert sql("SELECT count(*) FROM app.users WHERE username=:u", u=name)[0][0] == 0
+
+
+def test_register_invite_mode_without_code_is_400_and_writes_nothing(
+    app_client: Callable[..., Any], sql: Callable[..., Any]
+) -> None:
+    """#27（T-B03c 已在 origin 0cb78ad）：invite 模式缺邀请码 → ``400 VALIDATION_ERROR``，
+    ``invite_code`` 记为 invalid（与错误/过期/已用同一形态）；缺 ``apply_note`` 记为 required；不落库。"""
+    name = new_name()
+    r = app_client("invite").post(f"{API}/auth/register", json=reg(name, new_pw()))
+    err = assert_err(r, 400, "VALIDATION_ERROR")
+    got = err["details"]["fields"]
+    assert {"field": "invite_code", "issue": "invalid"} in got
+    assert {"field": "apply_note", "issue": "required"} in got
     assert sql("SELECT count(*) FROM app.users WHERE username=:u", u=name)[0][0] == 0
 
 
@@ -330,7 +365,6 @@ def test_register_password_length_bounds_accepted(app_client: Callable[..., Any]
     assert r.status_code == 201, r.text[:300]
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（RegisterIn 无 apply_note，extra=forbid → 400）")
 def test_register_accepts_apply_note(app_client: Callable[..., Any], sql: Callable[..., Any]) -> None:
     """#27：注册体增加 ``apply_note``（open 模式可选）；v0.2.4 #2 上限由 500 改为 200。"""
     c = app_client("open")
@@ -345,7 +379,6 @@ def test_register_apply_note_over_200_is_400(app_client: Callable[..., Any]) -> 
     assert "apply_note" in fields(assert_err(r, 400, "VALIDATION_ERROR"))
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03C)
 def test_register_invalid_invite_codes_share_one_response_body(app_client: Callable[..., Any]) -> None:
     """#27：邀请码错误/过期/已用/已吊销统一 ``400 {fields:[{field:"invite_code", issue:"invalid"}]}``，响应体完全相同。
 
@@ -407,6 +440,7 @@ def test_login_success_returns_me_and_csrf_and_cookies(session: Callable[..., Si
     assert set(body) == {"user", "csrf_token"}
     assert ME_KEYS <= set(body["user"]) <= ME_KEYS | ME_RETIRED_KEYS
     assert body["user"]["username"] == s.user.username and body["user"]["status"] == "approved"
+    assert body["user"]["data_licence_status"] == "not_set"  # 新用户尚未设置证书（契约 v0.2.6）
     assert len(s.csrf) >= 32 and s.sid and len(s.sid) >= 32
     assert s.client.cookies.get("csrf_token") == s.csrf
     assert s.sid not in s.resp.text  # sid 只在 HttpOnly cookie 里
@@ -514,7 +548,6 @@ def test_cookie_flags_when_insecure_dev(session: Callable[..., SimpleNamespace])
     assert "domain" not in sid  # 只发给本站
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（Cookie Max-Age 仍为 idle_ttl_s）")
 def test_cookie_max_age_is_absolute_ttl(session: Callable[..., SimpleNamespace]) -> None:
     """#25 / plan 6.1：Cookie ``Max-Age`` = ``absolute_ttl_s``（30 天）；服务端另按 idle 与 absolute 判定。"""
     ck = set_cookies(session().resp)
@@ -579,7 +612,6 @@ def test_session_within_absolute_ttl_still_valid(session: Callable[..., SimpleNa
     assert s.client.get(f"{API}/me").status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（无绝对过期：滑动续期可无限延长会话）")
 def test_session_past_absolute_ttl_is_401(session: Callable[..., SimpleNamespace], authdb: SimpleNamespace) -> None:
     """#25：自登录起 30 天绝对过期，不因活跃续期；过期后 401 且会话被清除。"""
     s = session()
@@ -812,7 +844,6 @@ def test_change_password_revokes_other_sessions_and_old_password(
     assert changed is not None
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03_FU + "（改密保留当前 sid，不轮换）")
 def test_change_password_rotates_current_session(
     session: Callable[..., SimpleNamespace], app_client: Callable[..., Any], authdb: SimpleNamespace
 ) -> None:
@@ -851,13 +882,15 @@ def test_me_requires_auth(app_client: Callable[..., Any]) -> None:
 
 
 def test_me_shape(session: Callable[..., SimpleNamespace]) -> None:
-    """契约 v0.2.5 ``Me`` 的核心键齐全；作废键（consents/risk_assessment）由 v0.2.5 组单独跟踪，这里不因其存在而失败。"""
+    """契约 ``Me`` 的键齐全（含 v0.2.6 必填 ``data_licence_status``）；作废键（consents/risk_assessment）由 v0.2.5 组单独跟踪，
+    这里不因其存在而失败。"""
     s = session()
     me = s.client.get(f"{API}/me").json()
     assert ME_KEYS <= set(me) <= ME_KEYS | ME_RETIRED_KEYS
     assert me["id"] == s.user.id and me["username"] == s.user.username
     assert me["role"] == "user" and me["status"] == "approved"
     assert isinstance(me["entitlements"], dict)
+    assert me["data_licence_status"] in DATA_LICENCE_STATUSES and me["data_licence_status"] == "not_set"
     assert "password_hash" not in json.dumps(me) and "failed_login_count" not in me
 
 
@@ -891,7 +924,6 @@ def test_audit_logs_contain_no_password_or_raw_ip(
 T_B03A = "T-B03a：限速/渐进锁定/可信代理尚未实现（T-B03 报告声明延后）"
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03A)
 def test_bruteforce_5_failures_lock_15_minutes(app_client: Callable[..., Any], mkuser: Callable[..., SimpleNamespace]) -> None:
     u = mkuser()
     c = app_client()
@@ -902,7 +934,6 @@ def test_bruteforce_5_failures_lock_15_minutes(app_client: Callable[..., Any], m
     assert 800 <= err["details"]["retry_after_s"] <= 900
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03A)
 def test_login_rate_limited_per_ip(app_client: Callable[..., Any]) -> None:
     c = app_client()
     codes = [c.post(f"{API}/auth/login", json={"username": new_name(), "password": new_pw()}) for _ in range(11)]
@@ -911,7 +942,6 @@ def test_login_rate_limited_per_ip(app_client: Callable[..., Any]) -> None:
     assert int(last.headers["retry-after"]) > 0
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03A)
 def test_register_rate_limited_per_ip(app_client: Callable[..., Any]) -> None:
     c = app_client("open")
     rs = [c.post(f"{API}/auth/register", json=reg(new_name(), new_pw())) for _ in range(6)]
@@ -919,14 +949,14 @@ def test_register_rate_limited_per_ip(app_client: Callable[..., Any]) -> None:
     assert int(rs[-1].headers["retry-after"]) > 0
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03A + "；nginx 也未设置/覆盖 X-Real-IP")
 def test_client_supplied_x_real_ip_not_trusted(
     session: Callable[..., SimpleNamespace], app_client: Callable[..., Any], sql: Callable[..., Any]
 ) -> None:
     """直连客户端自带的 X-Real-IP 不应改变审计/限速用的来源 IP（否则可伪造来源绕过按 IP 限速）。"""
     s = session()
+    ip = random_client_ip()  # 两次请求同一直连来源；只有 X-Real-IP 不同
     for hdr in ({}, {"X-Real-IP": "203.0.113." + str(secrets.randbelow(250) + 1)}):
-        app_client().post(f"{API}/auth/login", json={"username": s.user.username, "password": new_pw()}, headers=hdr)
+        app_client(ip=ip).post(f"{API}/auth/login", json={"username": s.user.username, "password": new_pw()}, headers=hdr)
     hashes = [h for (h,) in sql(
         "SELECT ip_hash FROM app.audit_logs WHERE (actor_id=:i OR target_id=:t) AND action LIKE 'auth.login%' ORDER BY at DESC LIMIT 2",
         i=s.user.id, t=s.user.id,
@@ -936,18 +966,17 @@ def test_client_supplied_x_real_ip_not_trusted(
 
 # ---------------------------------------------------------------------------
 # 契约 v0.2.5（T-A06 bd33f83）§8 测试点：不做同意流程与风险测评
-# 后端（f44b6ee 起的 T-B03/T-B03b 实现）尚未同步 → 受影响用例 xfail(strict=False)，原因写明负责任务。
+# 后端已在 origin/main 同步（T-B03 跟进 4162abb 等）：原 xfail(strict=False) 已移除，直接断言防回归。
 # 分类器 1.2.0 的规则层期望在 tests/backend/unit/test_horizon_cases.py；/meta/enums 与文档码表在 test_meta_enums.py。
 # ---------------------------------------------------------------------------
 #: 组 1：作废的端点（v0.2.5 → 404）
-# 后端从未实现的 3 个端点已是 404（直接断言，防回归）；仍存在的 3 个端点待后端同步 → xfail(strict=False)。
-_V025_PENDING = pytest.mark.xfail(strict=False, reason=B_V025_AUTH)
+# 6 个端点在 origin/main 均为 404（直接断言，防回归）。
 V025_RETIRED_ENDPOINTS = [
     pytest.param("GET", "/meta/consent-docs", None, id="GET /meta/consent-docs"),
     pytest.param("GET", "/legal/terms", None, id="GET /legal/terms"),
-    pytest.param("POST", "/me/consents", {"key": "privacy", "version": "unversioned"}, id="POST /me/consents", marks=_V025_PENDING),
-    pytest.param("GET", "/me/risk-assessment", None, id="GET /me/risk-assessment", marks=_V025_PENDING),
-    pytest.param("POST", "/me/risk-assessment", {"answers": {}}, id="POST /me/risk-assessment", marks=_V025_PENDING),
+    pytest.param("POST", "/me/consents", {"key": "privacy", "version": "unversioned"}, id="POST /me/consents"),
+    pytest.param("GET", "/me/risk-assessment", None, id="GET /me/risk-assessment"),
+    pytest.param("POST", "/me/risk-assessment", {"answers": {}}, id="POST /me/risk-assessment"),
     pytest.param("GET", "/me/risk-assessment/questionnaire", None, id="GET /me/risk-assessment/questionnaire"),
 ]
 
@@ -969,7 +998,6 @@ def _consent_rows(sql: Callable[..., Any], uid: Any) -> int:
     return sql("SELECT count(*) FROM app.consents WHERE user_id=:i", i=uid)[0][0]
 
 
-@pytest.mark.xfail(strict=False, reason=B_V025_AUTH)
 @pytest.mark.parametrize("agreements", ["absent", "legacy"])
 def test_v025_register_ignores_agreements_and_writes_no_consent(
     app_client: Callable[..., Any], sql: Callable[..., Any], agreements: str
@@ -984,12 +1012,13 @@ def test_v025_register_ignores_agreements_and_writes_no_consent(
     assert sql("SELECT count(*) FROM app.audit_logs WHERE target_id=:i AND action LIKE 'consent.%'", i=r.json()["id"])[0][0] == 0
 
 
-@pytest.mark.xfail(strict=False, reason=B_V025_AUTH)
 def test_v025_me_has_no_consent_or_assessment_keys(session: Callable[..., SimpleNamespace]) -> None:
-    """v0.2.5 组 2：``Me`` = ``{id, username, display_name, role, status, entitlements}``，无 consents、risk_assessment。"""
+    """v0.2.5 组 2：无 consents、risk_assessment；键集合恰为契约 v0.2.6 ``Me``
+    ``{id, username, display_name, role, status, entitlements, data_licence_status}``。"""
     s = session()
-    assert set(s.client.get(f"{API}/me").json()) == ME_KEYS
-    assert set(s.resp.json()["user"]) == ME_KEYS
+    for keys in (set(s.client.get(f"{API}/me").json()), set(s.resp.json()["user"])):
+        assert keys == ME_KEYS
+        assert not keys & {"consents", "risk_assessment"}
 
 
 #: 组 3：⚖ 建议类接口与财务写入（v0.2.5 无合规门槛）

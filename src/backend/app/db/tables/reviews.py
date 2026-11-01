@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Table, UniqueConstraint
+from sqlalchemy import Index, Table, UniqueConstraint, text
 
 from app.db.base import (
     APP,
@@ -29,12 +29,26 @@ data_snapshots = Table(
     jsonb("items", nullable=False),
     jsonb("known_events"),
     txt("hash", nullable=False),
+    # T-B16-core-r2（迁移 0013，plan §3.3/§7.3）：含持仓/成交/账户派生内容的快照必须填 user_id
+    # （相关时填 licence_id）；删除用户数据时按它们物理删除。user_id 为空 → 只能存市场级内容。
+    user_fk(nullable=True),
+    uuid_col("licence_id", fk="app.user_data_licences.id"),
     one_of(
         "purpose",
         ["candidate", "plan", "alert", "review", "screen", "suggestion", "signal", "report"],
     ),
     schema=APP,
     comment="不可变（触发器）",
+)
+Index(
+    "ix_data_snapshots_user_id",
+    data_snapshots.c.user_id,
+    postgresql_where=text("user_id IS NOT NULL"),
+)
+Index(
+    "ix_data_snapshots_licence_id",
+    data_snapshots.c.licence_id,
+    postgresql_where=text("licence_id IS NOT NULL"),
 )
 
 reviews = Table(

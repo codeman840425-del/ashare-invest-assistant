@@ -2,7 +2,7 @@
 
 Revision ID: 0011
 Revises: 0010
-Create Date: 2026-11-02 08:30:00+08:00
+Create Date: 2026-11-02 07:24:29+08:00
 
 不设维护会话旁路（无会话变量、无 session_replication_role、无专用角色）。改为“数据状态门”：
 

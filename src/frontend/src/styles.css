@@ -274,6 +274,8 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .auth-foot { width: 100%; margin-top: auto; padding-top: 24px; }
 .reg-disclaimer { margin: 4px 0 16px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 4px; }
 .reg-disclaimer p { margin: 4px 0 0; line-height: 1.6; }
+/* T-F24 注册蜜罐：移出可视区域（不用 display:none，部分机器人会跳过 display:none 的输入框） */
+.reg-hp { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
 .card-disclaimer { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); line-height: 1.5; }
 
 /* ---------- 导入预览着色（api/importCodes.ts IMPORT_TONE.rowClass） ---------- */

@@ -19,6 +19,9 @@ import { deleteLicence, licenceOf, mockIngestPaused, patchLicence, putLicence, r
 import { NOW, uid } from './fixtures';
 
 const API = '/api/v1';
+const REGISTER_KEYS = new Set(['username', 'password', 'display_name', 'invite_code', 'apply_note', 'website', 'form_started_at']);
+/** 契约 v0.2.8 #11：固定 3000 毫秒，不进配置 */
+const HONEYPOT_MIN_FILL_MS = 3000;
 const json = (body: unknown, status = 200) => HttpResponse.json(body as Record<string, unknown>, { status });
 const err = (status: number, code: string, message: string, details: Record<string, unknown> | null = null) => json(errorBody(code, message, details), status);
 export const validationError = (fields: { field: string; issue: string }[]) => err(400, 'VALIDATION_ERROR', '参数校验失败', { fields });
@@ -58,7 +61,8 @@ export const accountHandlers = [
   }),
 
   // ---------------- §7.1 认证 ----------------
-  http.get(`${API}/meta/registration`, () => json({ mode: state.registrationMode })),
+  // v0.2.8 #11：前端用响应头 Date 校正 form_started_at 的时钟
+  http.get(`${API}/meta/registration`, () => HttpResponse.json({ mode: state.registrationMode }, { headers: { Date: new Date().toUTCString() } })),
   http.post(`${API}/auth/login`, async ({ request }) => {
     const body = (await request.json()) as Partial<LoginRequest>;
     const user = state.users.find((x) => x.username === body.username);
@@ -76,8 +80,13 @@ export const accountHandlers = [
   }),
   http.post(`${API}/auth/register`, async ({ request }) => {
     if (state.registrationMode === 'closed') return err(503, 'REGISTRATION_CLOSED', '暂未开放注册');
-    const b = (await request.json()) as Partial<RegisterRequest>;
+    const raw = (await request.json()) as Record<string, unknown>;
+    const b = raw as Partial<RegisterRequest>;
     const fields: { field: string; issue: string }[] = [];
+    // §7.1 extra=forbid：未知字段 400；agreements（v0.2.5 旧客户端）忽略；website、form_started_at 是正式字段（v0.2.8 #11）
+    for (const k of Object.keys(raw)) if (!REGISTER_KEYS.has(k) && k !== 'agreements') fields.push({ field: k, issue: 'extra_forbidden' });
+    const fsa = raw.form_started_at;
+    if (fsa !== undefined && fsa !== null && !Number.isInteger(fsa)) fields.push({ field: 'form_started_at', issue: 'invalid' });
     const name = b.username ?? '';
     if (!USERNAME_RE.test(name)) fields.push({ field: 'username', issue: '4–32 位小写字母、数字或下划线' });
     else if (RESERVED.some((r) => name.includes(r))) fields.push({ field: 'username', issue: '包含保留字' });
@@ -96,6 +105,13 @@ export const accountHandlers = [
     // v0.2.5 #1：旧客户端仍发 agreements 时服务端忽略（不报错、不记录）
     if (fields.length) return validationError(fields);
     if (state.users.some((x) => x.username === name)) return err(409, 'CONFLICT', '用户名已被使用');
+    // v0.2.8 #11 蜜罐：website 去空白后非空，或填写不足 3000 毫秒（含未来时间）→ 返回与正常注册相同的 201，但不建用户、不消耗邀请码
+    const hpWebsite = typeof raw.website === 'string' && raw.website.trim() !== '';
+    const hpFast = typeof fsa === 'number' && Date.now() - fsa < HONEYPOT_MIN_FILL_MS;
+    if (hpWebsite || hpFast) {
+      state.honeypotHits.push(hpWebsite && hpFast ? 'both' : hpWebsite ? 'website' : 'too_fast');
+      return json({ id: crypto.randomUUID(), username: name, status: 'pending' }, 201);
+    }
     const id = nextId();
     state.users.push({
       id, username: name, display_name: b.display_name!.trim(), role: 'user', status: 'pending', apply_note: b.apply_note?.trim() || null, created_at: NOW, reviewed_at: null,

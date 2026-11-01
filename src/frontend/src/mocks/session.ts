@@ -298,6 +298,8 @@ export const MOCK_SAME_IP_THRESHOLD = 3;
 export interface SessionState {
   currentUserId: string | null;
   registrationMode: 'closed' | 'invite' | 'open';
+  /** v0.2.8 #11：蜜罐命中记录（模拟审计 auth.register_honeypot，只记 trigger，不记表单内容） */
+  honeypotHits: ('website' | 'too_fast' | 'both')[];
   users: MockUser[];
   profiles: Map<string, Profile>;
   accounts: BrokerAccount[];
@@ -342,13 +344,14 @@ function initialBatches(): MockBatch[] {
 }
 
 export const state: SessionState = {
-  currentUserId: uid(2), registrationMode: 'invite', users: [], profiles: new Map(), accounts: [], trades: [], batches: [], reconciled: new Set(), tradeIdem: new Map(),
+  currentUserId: uid(2), registrationMode: 'invite', honeypotHits: [], users: [], profiles: new Map(), accounts: [], trades: [], batches: [], reconciled: new Set(), tradeIdem: new Map(),
 };
 
 export function resetSession() {
   findingSeq = 0;
   state.currentUserId = uid(2);
   state.registrationMode = 'invite';
+  state.honeypotHits = [];
   state.users = initialUsers();
   state.profiles = new Map([
     [uid(2), { ...DEMO_PROFILE }], [uid(3), { ...DEMO_PROFILE, version_no: 1 }],

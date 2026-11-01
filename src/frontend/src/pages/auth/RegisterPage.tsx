@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { Alert, Button, Form, Input, Result } from 'antd';
 import { Link, useNavigate } from 'react-router';
 import { ApiError } from '../../api/client';
@@ -6,6 +6,7 @@ import { useRegister, useRegistrationMode } from '../../api/accountQueries';
 import { errorText } from '../../api/errorPolicy';
 import { Loading, ErrorBox } from '../../components/common';
 import { DISCLAIMER_TEXT } from '../../components/RiskDisclosure';
+import { serverNowMs } from '../../lib/serverClock';
 import { AuthLayout } from './AuthLayout';
 
 interface FormValues {
@@ -28,19 +29,29 @@ function issueText(field: string, issue: string): string {
   return issue;
 }
 
+/**
+ * 蜜罐输入框（契约 v0.2.8 #11，T-F24）：移出可视区域并对读屏器隐藏（aria-hidden），
+ * tabindex=-1、autocomplete=off；不用 Form.Item，不进表单校验和无障碍树。正常用户提交时为空串。
+ */
+function HoneypotField({ inputRef }: { inputRef: RefObject<HTMLInputElement | null> }) {
+  return (
+    <div className="reg-hp" aria-hidden="true" data-testid="reg-hp">
+      <input ref={inputRef} type="text" name="website" tabIndex={-1} autoComplete="off" defaultValue="" data-testid="reg-website" />
+    </div>
+  );
+}
+
 export function RegisterPage() {
   const reg = useRegistrationMode();
-  const register = useRegister();
   const navigate = useNavigate();
-  const [form] = Form.useForm<FormValues>();
-  const [err, setErr] = useState<string | null>(null);
+  const [closed, setClosed] = useState(false);
   const [done, setDone] = useState<string | null>(null);
 
   if (reg.isLoading) return <AuthLayout title="注册"><Loading /></AuthLayout>;
   if (reg.isError) return <AuthLayout title="注册"><ErrorBox error={reg.error} /></AuthLayout>;
   const mode = reg.data?.mode ?? 'closed';
 
-  if (mode === 'closed' || err === 'closed') {
+  if (mode === 'closed' || closed) {
     return (
       <AuthLayout title="注册" testId="register-closed">
         <Result status="info" title="当前不开放注册" subTitle="本系统为自用部署，账号由管理员通过命令行创建。如需使用请联系管理员。" extra={<Link to="/login">返回登录</Link>} />
@@ -56,6 +67,17 @@ export function RegisterPage() {
     );
   }
 
+  return <RegisterForm mode={mode} onDone={setDone} onClosed={() => setClosed(true)} />;
+}
+
+function RegisterForm({ mode, onDone, onClosed }: { mode: 'invite' | 'open'; onDone: (username: string) => void; onClosed: () => void }) {
+  const register = useRegister();
+  const [form] = Form.useForm<FormValues>();
+  const [err, setErr] = useState<string | null>(null);
+  const websiteRef = useRef<HTMLInputElement | null>(null);
+  /** v0.2.8 #11：表单首次渲染时的毫秒时间（按服务端时钟校正）；出错后重试沿用同一个值 */
+  const [startedAt] = useState(() => serverNowMs());
+
   const onFinish = (v: FormValues) => {
     setErr(null);
     register.mutate(
@@ -63,12 +85,15 @@ export function RegisterPage() {
         username: v.username.toLowerCase(), password: v.password, display_name: v.display_name.trim(),
         invite_code: mode === 'invite' ? v.invite_code?.trim() || null : null,
         apply_note: v.apply_note?.trim() || null,
+        // v0.2.8 #11：两个蜜罐字段总是一起提交；有值也照常提交，由服务端判定
+        website: websiteRef.current?.value ?? '',
+        form_started_at: startedAt,
       },
       {
-        onSuccess: (r) => setDone(r.username),
+        onSuccess: (r) => onDone(r.username),
         onError: (e) => {
           if (!(e instanceof ApiError)) return setErr(errorText(e));
-          if (e.code === 'REGISTRATION_CLOSED') return setErr('closed');
+          if (e.code === 'REGISTRATION_CLOSED') return onClosed();
           if (e.code === 'CONFLICT') return form.setFields([{ name: 'username', errors: ['用户名已被使用'] }]);
           if (e.code === 'VALIDATION_ERROR') {
             const fields = ((e.details as { fields?: { field: string; issue: string }[] } | null)?.fields ?? []);
@@ -88,7 +113,7 @@ export function RegisterPage() {
   return (
     <AuthLayout title={mode === 'invite' ? '注册（邀请制）' : '注册'} testId="register-page">
       <Alert type="info" showIcon style={{ marginBottom: 12 }} title="注册后需管理员审核，审核通过前无法登录。" />
-      {err && err !== 'closed' ? <Alert type="error" showIcon style={{ marginBottom: 12 }} title={err} /> : null}
+      {err ? <Alert type="error" showIcon style={{ marginBottom: 12 }} title={err} /> : null}
       <Form<FormValues> form={form} layout="vertical" onFinish={onFinish} requiredMark={false} disabled={register.isPending}>
         <Form.Item name="username" label="用户名" extra="4–32 位小写字母、数字或下划线，用于登录"
           normalize={(v: string | undefined) => v?.toLowerCase()}
@@ -116,6 +141,7 @@ export function RegisterPage() {
           rules={[{ required: mode === 'invite', whitespace: true, message: '邀请制下请填写申请说明' }, { max: APPLY_NOTE_MAX, message: `不超过 ${APPLY_NOTE_MAX} 字` }]}>
           <Input.TextArea rows={2} maxLength={APPLY_NOTE_MAX} showCount data-testid="reg-apply-note" />
         </Form.Item>
+        <HoneypotField inputRef={websiteRef} />
         <div className="reg-disclaimer" data-testid="reg-disclaimer">
           <div className="muted small">提交注册即视为已知悉：</div>
           <p data-testid="reg-disclaimer-text">{DISCLAIMER_TEXT}</p>

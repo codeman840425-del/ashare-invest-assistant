@@ -21,6 +21,10 @@ export interface RegisterRequest {
   invite_code: string | null;
   /** ≤200 字（v0.2.4 #2）；invite 模式必填 */
   apply_note: string | null;
+  /** v0.2.8 #11 蜜罐：页面上隐藏的输入框，正常提交为空串 */
+  website: string | null;
+  /** v0.2.8 #11：注册表单首次渲染时的毫秒时间戳（Unix epoch ms，按服务端时钟校正） */
+  form_started_at: number | null;
   // v0.2.5：agreements 已删除（提交注册即视为已知悉固定免责提示）
 }
 

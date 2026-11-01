@@ -73,6 +73,8 @@ export interface RequestOptions {
   signal?: AbortSignal;
   /** 契约 §1：写操作可带 Idempotency-Key，重试时复用同一个值 */
   idempotencyKey?: string;
+  /** 拿到响应后（解析响应体之前）回调，用于读取响应头，例如注册页按 Date 校正时钟 */
+  onResponse?: (res: Response) => void;
 }
 
 /** 相对地址转成可 fetch 的地址（jsdom/Node 需要绝对 URL，取当前页面同源） */
@@ -104,6 +106,7 @@ export async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DEL
     if ((e as Error)?.name === 'AbortError') throw e;
     throw new ApiError(0, 'NETWORK_ERROR', '网络连接失败，请检查网络或稍后重试', null, null);
   }
+  opts.onResponse?.(res);
   if (res.status === 304) {
     if (cached) return cached.data as T;
     throw new ApiError(304, 'NOT_MODIFIED', '服务端返回 304，但本地没有可复用的数据', null, res.headers.get('X-Request-Id'));

@@ -2,7 +2,8 @@
  * T-F02 / T-F02a / T-F04 的查询与变更（TanStack Query）。路径与请求体对齐契约 v0.2.5 §7.1 / §7.2 / §7.9。
  */
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, apiGet, clearEtagCache, apiPatch, apiPost, apiPut, apiUpload, buildUrl, fetchUrl, setCsrfToken } from './client';
+import { ApiError, apiGet, clearEtagCache, apiPatch, apiPost, apiPut, apiUpload, buildUrl, fetchUrl, request, setCsrfToken } from './client';
+import { noteServerDate } from '../lib/serverClock';
 import type {
   AdminUser, AdminUserPatch, BrokerAccount, BrokerAccountCreate, ImportBatch, ImportBatchSummary, ImportConfirmRequest, ImportConfirmResponse,
   ImportFinding, ImportKind, ImportOptions, ImportRow, ImportUploadResponse, LoginRequest, LoginResponse, Profile, ProfileInput, Reconciliation,
@@ -26,7 +27,12 @@ export const ak = {
 
 // ---------------- §7.1 ----------------
 export const useRegistrationMode = () =>
-  useQuery({ queryKey: ak.registration, queryFn: ({ signal }) => apiGet<RegistrationMeta>('/meta/registration', undefined, signal), staleTime: 60_000 });
+  useQuery({
+    queryKey: ak.registration,
+    // v0.2.8 #11：顺带按响应头 Date 校正时钟，供注册页的 form_started_at 使用
+    queryFn: ({ signal }) => request<RegistrationMeta>('GET', '/meta/registration', { signal, onResponse: (res) => noteServerDate(res) }),
+    staleTime: 60_000,
+  });
 
 export function useLogin() {
   const qc = useQueryClient();

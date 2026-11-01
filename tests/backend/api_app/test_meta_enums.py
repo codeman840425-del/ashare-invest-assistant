@@ -25,13 +25,18 @@ ENUM_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 UPPER_CODE_ENUMS = {"gate", "reason_code"}
 IMPORT_CODES_JSON = Path(__file__).resolve().parents[1] / "unit" / "import_codes.json"
 TODO = "后端 /meta/enums 未同步契约（T-B01 v0.2 修订；v0.2.3 由后端按 T-A03 同步：version、PAYLOAD_TOO_LARGE 等）"
-#: 本组测试对齐的契约版本（升到 v0.2.7：架构师 T-A08 fa6d55d + 35517f8，在本地 main、尚未推 origin）；
-#: /meta/enums.version 最终必须等于它
-CONTRACT_VERSION = "v0.2.7"
-#: 用旧一版文档（origin/main 仍为 v0.2.6）运行时 xfail 而不是失败
-DOCS_PENDING = "docs 仍为 v0.2.6：契约 v0.2.7（T-A08 fa6d55d/35517f8）未推到 origin（运维推送）"
-#: 各版本契约的错误码 / 原因码个数（v0.2.7 无新增错误码、原因码：59 / 22）
-CODE_COUNTS = {"v0.2.4": (58, 23), "v0.2.5": (56, 22), "v0.2.6": (59, 22), "v0.2.7": (59, 22)}
+#: 本组测试对齐的契约版本（T-T23 升到 v0.2.8：架构师 T-A09 6ef79c4，在本地 main、尚未推 origin；
+#: origin/main 0cb78ad 的 docs 与后端仍为 v0.2.7）；/meta/enums.version 最终必须等于它
+CONTRACT_VERSION = "v0.2.8"
+#: 用旧一版文档（origin/main 仍为 v0.2.7）运行时 xfail 而不是失败
+DOCS_PENDING = "docs 仍为 v0.2.7：契约 v0.2.8（T-A09 6ef79c4）未推到 origin（运维推送）"
+#: 各版本契约的错误码 / 原因码个数（v0.2.7、v0.2.8 无新增错误码、原因码：59 / 22）
+CODE_COUNTS = {"v0.2.4": (58, 23), "v0.2.5": (56, 22), "v0.2.6": (59, 22), "v0.2.7": (59, 22), "v0.2.8": (59, 22)}
+#: 契约 v0.2.8（T-A09 #4–#9）改动的已有枚举：security_type 加 etf（位于 cdr 与 index 之间）、gap_reason 加 not_applicable
+V028_ENUM_CHANGED = {"security_type": ["stock", "cdr", "etf", "index"]}
+V028_ENUM_ADDED = {"gap_reason": "not_applicable"}
+B_V028_ENUMS = ("后端 T-B02y（契约 v0.2.8 / T-A09：schemas/enums.py security_type 加 etf、gap_reason 加 not_applicable，"
+                "version 改 v0.2.8；已在本地 main 457a211，未推 origin）")
 #: 契约 v0.2.7 新增枚举（T-A08 变更表 #14，共 18 个）；factor_category 取值待 T003 定稿，契约暂不列值
 V027_ENUMS = {
     "alert_origin": ["plan_condition", "holding_event", "user_custom"],
@@ -135,14 +140,17 @@ def payload(client) -> dict[str, Any]:
 # ---------------- 解析器自检（文档 v0.2.3） ----------------
 def test_contract_header_version(contract):
     m = re.search(r"版本：\*\*(v[0-9.]+)\*\*", contract)
-    assert m and m.group(1) in {"v0.2.5", "v0.2.6", CONTRACT_VERSION}, m and m.group(1)
+    assert m and m.group(1) in {"v0.2.5", "v0.2.6", "v0.2.7", CONTRACT_VERSION}, m and m.group(1)
     assert contract.index("### v0.2.5") < contract.index("### v0.2.4") < contract.index("### v0.2.3") < contract.index("### v0.2.2")
     if m.group(1) == "v0.2.5":
         pytest.xfail(DOCS_PENDING)
     assert contract.index("### v0.2.6") < contract.index("### v0.2.5")
-    if m.group(1) != CONTRACT_VERSION:
+    if m.group(1) == "v0.2.6":
         pytest.xfail(DOCS_PENDING)
     assert contract.index("### v0.2.7") < contract.index("### v0.2.6")
+    if m.group(1) != CONTRACT_VERSION:
+        pytest.xfail(DOCS_PENDING)
+    assert contract.index("### v0.2.8") < contract.index("### v0.2.7")
 
 
 def _docs_version(contract: str) -> str:
@@ -152,16 +160,26 @@ def _docs_version(contract: str) -> str:
 
 def _is_v025(contract: str) -> bool:
     """文档已是 v0.2.5 或更新（v0.2.5 的删除项在 v0.2.6 仍然成立）。"""
-    return _docs_version(contract) in {"v0.2.5", "v0.2.6", "v0.2.7"}
+    return _docs_version(contract) in {"v0.2.5", "v0.2.6", "v0.2.7", "v0.2.8"}
 
 
 def _is_v026(contract: str) -> bool:
-    """文档已是 v0.2.6 或更新（v0.2.7 无不兼容变更，v0.2.6 新增项仍然成立）。"""
-    return _docs_version(contract) in {"v0.2.6", "v0.2.7"}
+    """文档已是 v0.2.6 或更新（v0.2.7、v0.2.8 未删 v0.2.6 新增项）。"""
+    return _docs_version(contract) in {"v0.2.6", "v0.2.7", "v0.2.8"}
 
 
 def _is_v027(contract: str) -> bool:
-    return _docs_version(contract) == "v0.2.7"
+    """文档已是 v0.2.7 或更新（v0.2.8 只给 security_type / gap_reason 加值，见 V028_ENUM_CHANGED）。"""
+    return _docs_version(contract) in {"v0.2.7", "v0.2.8"}
+
+
+def _is_v028(contract: str) -> bool:
+    return _docs_version(contract) == "v0.2.8"
+
+
+def _v027_enums_as_of(version: str) -> dict[str, list[str]]:
+    """V027_ENUMS 在给定版本下的期望取值：v0.2.8 起 security_type 按 V028_ENUM_CHANGED（逐项相等，不放宽）。"""
+    return {**V027_ENUMS, **(V028_ENUM_CHANGED if version == "v0.2.8" else {})}
 
 
 def test_contract_parsers_sanity(contract):
@@ -221,7 +239,7 @@ def test_v026_meta_enums_has_data_licence_items(payload):
         assert list(payload["enums"][name]) == values, name
     for name, value in V026_ENUM_ADDED.items():
         assert value in payload["enums"][name], name
-    assert payload["version"] in {"v0.2.6", CONTRACT_VERSION}
+    assert payload["version"] in {"v0.2.6", "v0.2.7", CONTRACT_VERSION}
 
 
 def test_v027_contract_adds_enums(contract):
@@ -229,21 +247,47 @@ def test_v027_contract_adds_enums(contract):
     if not _is_v027(contract):
         pytest.xfail(DOCS_PENDING)
     enums = parse_enums(contract)
-    assert {k: enums.get(k) for k in V027_ENUMS} == V027_ENUMS
+    want = _v027_enums_as_of(_docs_version(contract))
+    assert {k: enums.get(k) for k in want} == want
     for name, value in V027_ENUM_ADDED.items():
         assert value in enums[name], name
-    assert (len(parse_error_codes(contract)), len(parse_reason_codes(contract))) == CODE_COUNTS["v0.2.7"]
+    assert (len(parse_error_codes(contract)), len(parse_reason_codes(contract))) == CODE_COUNTS[_docs_version(contract)]
 
 
 def test_v027_meta_enums_has_new_enums(payload):
-    """v0.2.7（接口层）：``/meta/enums`` 含 18 个新枚举与 ``data_provider.exchange``，version = v0.2.7。后端仍报更早版本 → xfail。"""
-    if payload["version"] != CONTRACT_VERSION and re.fullmatch(r"v0\.2\.[5-6]", payload["version"]):
+    """v0.2.7（接口层）：``/meta/enums`` 含 18 个新枚举与 ``data_provider.exchange``；version 为 v0.2.7 时取值逐项等于 v0.2.7，
+    为 v0.2.8 时 security_type 按 v0.2.8（加 etf）。后端仍报更早版本 → xfail。"""
+    if re.fullmatch(r"v0\.2\.[5-6]", payload["version"]):
         pytest.xfail(B_V027_ENUMS + f"；当前 version = {payload['version']}")
-    for name, values in V027_ENUMS.items():
+    assert payload["version"] in {"v0.2.7", CONTRACT_VERSION}
+    for name, values in _v027_enums_as_of(payload["version"]).items():
         assert list(payload["enums"][name]) == values, name
     for name, value in V027_ENUM_ADDED.items():
         assert value in payload["enums"][name], name
+
+
+def test_v028_contract_changes_enums(contract):
+    """v0.2.8（文档层，T-A09 验收第 1 条）：security_type = stock, cdr, etf, index；gap_reason 含 not_applicable；
+    错误码 / 原因码个数不变（59 / 22）。所用 docs 仍为 v0.2.7 → xfail（运维推送 6ef79c4）。"""
+    if not _is_v028(contract):
+        pytest.xfail(DOCS_PENDING)
+    enums = parse_enums(contract)
+    assert {k: enums.get(k) for k in V028_ENUM_CHANGED} == V028_ENUM_CHANGED
+    for name, value in V028_ENUM_ADDED.items():
+        assert enums[name][-1] == value, name  # 追加在末尾
+    assert (len(parse_error_codes(contract)), len(parse_reason_codes(contract))) == CODE_COUNTS["v0.2.8"]
+
+
+def test_v028_meta_enums(payload):
+    """v0.2.8（接口层，T-A09 验收第 1 条）：``/meta/enums`` version = v0.2.8，security_type 含 etf（cdr 与 index 之间），
+    gap_reason 含 not_applicable。后端仍报 v0.2.7 或更早 → xfail（T-B02y，本地 main 457a211 未推 origin）。"""
+    if re.fullmatch(r"v0\.2\.[5-7]", payload["version"]):
+        pytest.xfail(B_V028_ENUMS + f"；当前 version = {payload['version']}")
     assert payload["version"] == CONTRACT_VERSION
+    for name, values in V028_ENUM_CHANGED.items():
+        assert list(payload["enums"][name]) == values, name
+    for name, value in V028_ENUM_ADDED.items():
+        assert value in payload["enums"][name], name
 
 
 # ---------------- 逐项比对（文档 v0.2.3） ----------------
@@ -297,8 +341,9 @@ def test_error_codes_match_contract(payload, contract):
 def test_version_and_import_codes(payload):
     if "version" not in payload or "import_codes" not in payload:
         pytest.xfail(f"{TODO}：/meta/enums 缺 version / import_codes（契约 v0.2 §7.10）")
-    if payload["version"] != CONTRACT_VERSION and re.fullmatch(r"v0\.2(\.[0-6])?", payload["version"]):
-        pytest.xfail(f"后端（T-B01，v0.2.7 同步）：app/schemas/enums.py 的 CONTRACT_VERSION 仍为 {payload['version']}，应改为 {CONTRACT_VERSION}")
+    if payload["version"] != CONTRACT_VERSION and re.fullmatch(r"v0\.2(\.[0-7])?", payload["version"]):
+        pytest.xfail(f"后端（T-B02y，v0.2.8 同步，本地 main 457a211 未推 origin）：app/schemas/enums.py 的 CONTRACT_VERSION 仍为 "
+                     f"{payload['version']}，应改为 {CONTRACT_VERSION}")
     assert payload["version"] == CONTRACT_VERSION
     want = {c["code"]: c for c in json.loads(IMPORT_CODES_JSON.read_text(encoding="utf-8"))["codes"]}
     got = {c["code"]: c for c in payload["import_codes"]}

@@ -91,6 +91,8 @@ LEAK_KEY_SAMPLES = ("licence", "license", "data_licence", "LICENCE", "masked_lic
 STATUS_KEYS = {"status", "tier", "has_quant_pro", "expires_on", "days_to_expiry", "set_at", "last_verified_at",
                "last_error_code", "last_error_at", "paused_until"}
 ADMIN_EXTRA = {"user_id", "username", "display_name", "per_minute_limit", "calls_last_minute", "calls_today", "queue_depth"}
+#: 契约 v0.2.8 #2：AdminDataLicence 新增（与 /admin/ingest/status licences[].licence_id 对应，未设置为 null）
+ADMIN_EXTRA_V028 = {"licence_id"}
 LICENCE_STATUSES = {"not_set", "pending_verification", "active", "invalid", "expired", "quota_exceeded", "ip_limited",
                     "paused_by_admin"}
 
@@ -247,7 +249,9 @@ def test_full_lifecycle_never_echoes_licence(session: Callable[..., SimpleNamesp
     assert lst.status_code == 200, lst.text[:300]
     items = lst.json()["items"] if isinstance(lst.json(), dict) else lst.json()
     mine = [x for x in items if str(x["user_id"]) == str(s.user.id)]
-    assert len(mine) == 1 and set(mine[0]) == STATUS_KEYS | ADMIN_EXTRA
+    # 契约 v0.2.8 #2（T-T23）：AdminDataLicence 加 licence_id；按后端声明的契约版本取期望键集合（各版本都是全等）
+    v028 = acall("GET", "/meta/enums").json().get("version") == "v0.2.8"
+    assert len(mine) == 1 and set(mine[0]) == STATUS_KEYS | ADMIN_EXTRA | (ADMIN_EXTRA_V028 if v028 else set())
     assert not [k for k in walk_keys(lst.json()) if FORBIDDEN_KEY.search(k)]
     assert acall("POST", f"/admin/data-licences/{s.user.id}/pause", json={"reason": "测试暂停"}).status_code == 204
     assert call("GET", "/me/data-licence").json()["status"] == "paused_by_admin"

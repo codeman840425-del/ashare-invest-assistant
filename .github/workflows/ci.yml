@@ -1,0 +1,364 @@
+# CI 质量门禁（plan.md §8.0、T-O02）。密钥与敏感信息扫描在 secret-scan.yml（T-O02a）。
+# 所有第三方 action 按提交 SHA 固定（注释为对应版本）。CI 不访问真实麦蕊与真实 LLM。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  UV_VERSION: "0.13.6"
+  UV_PYTHON: "3.13"
+  UV_PYTHON_DOWNLOADS: automatic
+  PYTEST_COV_VERSION: "7.1.0"
+  PIP_AUDIT_VERSION: "2.10.1"
+  SCHEMATHESIS_VERSION: "4.33.0"
+  PYYAML_VERSION: "6.0.3"
+  TIMESCALE_IMAGE: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+  REDIS_IMAGE: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+
+jobs:
+  # ------------------------------------------------------------------ 后端：ruff / mypy strict / pytest + 覆盖率
+  backend:
+    name: backend (ruff, mypy, pytest+coverage)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: src/backend/uv.lock
+      - name: uv sync --frozen
+        working-directory: src/backend
+        run: uv sync --frozen
+      - name: ruff check
+        working-directory: src/backend
+        run: uv run --frozen ruff check --output-format=github .
+      - name: mypy --strict
+        working-directory: src/backend
+        run: uv run --frozen mypy
+      - name: pytest + 覆盖率
+        shell: bash
+        run: |
+          set -euo pipefail
+          py=src/backend/.venv/bin/python
+          if [ -f tests/requirements.txt ]; then
+            uv pip install --python "$py" -r tests/requirements.txt "pytest-cov==${PYTEST_COV_VERSION}"
+          else
+            uv pip install --python "$py" "pytest-cov==${PYTEST_COV_VERSION}"
+          fi
+          dirs=()
+          for d in src/backend/tests tests/backend tests/replay; do
+            [ -d "$d" ] && dirs+=("$d")
+          done
+          if [ "${#dirs[@]}" -eq 0 ]; then
+            echo "::error title=backend tests::没有找到后端测试（src/backend/tests、tests/backend、tests/replay 都不存在）——需要测试角色合入 T-T01 测试骨架"
+            exit 1
+          fi
+          ini=()
+          [ -f tests/pytest.ini ] && ini=(-c tests/pytest.ini)
+          PYTHONPATH=src/backend "$py" -m pytest "${ini[@]}" "${dirs[@]}" \
+            --cov=src/backend/app --cov-report=term-missing:skip-covered \
+            --cov-report="json:${RUNNER_TEMP}/coverage.json" --cov-fail-under=80
+      - name: 领域包覆盖率 ≥ 90%（domain/ importing/ signals/ advice/ llm/）
+        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
+        run: |
+          test -f "${RUNNER_TEMP}/coverage.json" || { echo "::error title=coverage::没有 coverage.json（pytest 未运行）"; exit 1; }
+          python3 scripts/ci/check_coverage.py "${RUNNER_TEMP}/coverage.json"
+
+  # ------------------------------------------------------------------ 前端：eslint / tsc / vitest / pnpm audit
+  frontend:
+    name: frontend (eslint, tsc, vitest, pnpm audit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 检测前端工程
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f src/frontend/package.json ]; then
+            echo "::notice title=frontend::src/frontend/package.json 不存在（前端工程尚未提交），前端 job 跳过"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "present=true" >> "$GITHUB_OUTPUT"
+          if [ ! -f src/frontend/pnpm-lock.yaml ]; then
+            echo "::error title=frontend::src/frontend 有 package.json 但没有 pnpm-lock.yaml——前端必须用 pnpm 并提交锁文件（不接受 package-lock.json）"
+            exit 1
+          fi
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: steps.detect.outputs.present == 'true'
+        with:
+          package_json_file: src/frontend/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.detect.outputs.present == 'true'
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: src/frontend/pnpm-lock.yaml
+      - name: pnpm install --frozen-lockfile
+        if: steps.detect.outputs.present == 'true'
+        working-directory: src/frontend
+        run: pnpm install --frozen-lockfile
+      - name: eslint
+        if: steps.detect.outputs.present == 'true'
+        working-directory: src/frontend
+        run: pnpm exec eslint . --max-warnings=0
+      - name: tsc --noEmit
+        if: ${{ !cancelled() && steps.detect.outputs.present == 'true' }}
+        working-directory: src/frontend
+        shell: bash
+        run: |
+          if node -e 'process.exit(require("./package.json").scripts?.typecheck ? 0 : 1)'; then
+            pnpm run typecheck
+          else
+            pnpm exec tsc --noEmit
+          fi
+      - name: vitest
+        if: ${{ !cancelled() && steps.detect.outputs.present == 'true' }}
+        working-directory: src/frontend
+        run: pnpm exec vitest run
+      - name: pnpm audit
+        if: ${{ !cancelled() && steps.detect.outputs.present == 'true' }}
+        working-directory: src/frontend
+        run: pnpm audit --audit-level high
+      - name: AG Grid Enterprise（已安装依赖）
+        if: ${{ !cancelled() && steps.detect.outputs.present == 'true' }}
+        run: python3 scripts/ci/check_licenses.py --node-modules src/frontend/node_modules
+      - name: tests/ 下的 vitest（测试角色）
+        if: ${{ !cancelled() && steps.detect.outputs.present == 'true' && hashFiles('tests/package.json') != '' }}
+        working-directory: tests
+        shell: bash
+        run: |
+          if [ ! -f pnpm-lock.yaml ]; then echo "::error title=tests vitest::tests/package.json 没有 pnpm-lock.yaml"; exit 1; fi
+          pnpm install --frozen-lockfile
+          pnpm exec vitest run
+
+  # ------------------------------------------------------------------ 契约：文档对照脚本 + 三类码不得重名 + schemathesis
+  contract:
+    name: contract (doc check, code namespaces, schemathesis)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      db:
+        image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+        env:
+          POSTGRES_USER: aia
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: aia
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aia -d aia" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql://aia:ci-only@127.0.0.1:5432/aia
+      REDIS_URL: redis://127.0.0.1:6379/0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: src/backend/uv.lock
+      - name: 契约文档静态检查（§4.1 = plan 3.5A-1、码表计数）
+        run: python3 scripts/ci/check_contract.py
+      - name: 三类码不得重名（契约文档）
+        if: ${{ !cancelled() }}
+        run: python3 scripts/ci/check_code_namespaces.py
+      - name: uv sync --frozen
+        if: ${{ !cancelled() }}
+        working-directory: src/backend
+        run: uv sync --frozen
+      - name: 导出 /meta/enums
+        id: meta
+        if: ${{ !cancelled() }}
+        working-directory: src/backend
+        run: .venv/bin/python ../../scripts/ci/dump_meta_enums.py "${RUNNER_TEMP}/meta.json"
+      - name: /meta/enums 与契约一致
+        if: ${{ !cancelled() && steps.meta.outcome == 'success' }}
+        run: python3 scripts/ci/check_contract.py --meta-json "${RUNNER_TEMP}/meta.json"
+      - name: 三类码不得重名（后端实现）
+        if: ${{ !cancelled() && steps.meta.outcome == 'success' }}
+        run: python3 scripts/ci/check_code_namespaces.py --meta-json "${RUNNER_TEMP}/meta.json"
+      - name: 迁移到 head（schemathesis 需要库表）
+        id: migrate
+        if: ${{ !cancelled() && hashFiles('src/backend/alembic.ini') != '' }}
+        working-directory: src/backend
+        run: .venv/bin/alembic upgrade head
+      - name: schemathesis（OpenAPI /api/v1/openapi.json）
+        if: ${{ !cancelled() && steps.meta.outcome == 'success' }}
+        working-directory: src/backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 > "${RUNNER_TEMP}/api.log" 2>&1 &
+          pid=$!
+          trap 'kill $pid 2>/dev/null || true' EXIT
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8000/api/v1/health/live > /dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/api/v1/health/live > /dev/null || { cat "${RUNNER_TEMP}/api.log"; exit 1; }
+          uvx --from "schemathesis==${SCHEMATHESIS_VERSION}" schemathesis run \
+            http://127.0.0.1:8000/api/v1/openapi.json \
+            --checks all --max-examples 50 --seed 20261101 --no-color \
+            || { echo "--- api log (tail)"; tail -n 100 "${RUNNER_TEMP}/api.log"; exit 1; }
+
+  # ------------------------------------------------------------------ Alembic 迁移可升可降（plan §8.0）
+  migrations:
+    name: migrations (alembic up/down/up)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      db:
+        image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+        env:
+          POSTGRES_USER: aia
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: aia
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aia -d aia" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql://aia:ci-only@127.0.0.1:5432/aia
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 检测 alembic.ini
+        id: detect
+        run: |
+          if [ -f src/backend/alembic.ini ]; then echo "present=true" >> "$GITHUB_OUTPUT"
+          else echo "::notice title=migrations::src/backend/alembic.ini 不存在，跳过迁移检查"; echo "present=false" >> "$GITHUB_OUTPUT"; fi
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: steps.detect.outputs.present == 'true'
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: src/backend/uv.lock
+      - name: upgrade head → downgrade base → upgrade head
+        if: steps.detect.outputs.present == 'true'
+        working-directory: src/backend
+        run: |
+          set -euo pipefail
+          uv sync --frozen
+          .venv/bin/alembic upgrade head
+          .venv/bin/alembic downgrade base
+          .venv/bin/alembic upgrade head
+          .venv/bin/alembic check
+
+  # ------------------------------------------------------------------ 镜像构建（只构建不推送）
+  image:
+    name: image (backend.Dockerfile, no push)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: docker build（push=false）
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: src/backend
+          file: deploy/docker/backend.Dockerfile
+          push: false
+          load: true
+          tags: aia-backend:ci
+          provenance: false
+      - name: 冒烟：/api/v1/health/live
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name aia-api-smoke -e APP_ENV=test -v "$PWD/config:/app/config:ro" -p 8000:8000 aia-backend:ci
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/api/v1/health/live && exit 0
+            sleep 1
+          done
+          docker logs aia-api-smoke
+          exit 1
+      - name: 清理
+        if: always()
+        run: docker rm -f aia-api-smoke || true
+
+  # ------------------------------------------------------------------ 依赖审计
+  pip-audit:
+    name: pip-audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: pip-audit（uv.lock 全部依赖组）
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv export --project src/backend --frozen --all-groups --no-emit-project --format requirements.txt \
+            -o "${RUNNER_TEMP}/backend-requirements.txt"
+          uvx --from "pip-audit==${PIP_AUDIT_VERSION}" pip-audit --strict --progress-spinner off \
+            -r "${RUNNER_TEMP}/backend-requirements.txt" --require-hashes --disable-pip
+          if [ -f tests/requirements.txt ]; then
+            uvx --from "pip-audit==${PIP_AUDIT_VERSION}" pip-audit --strict --progress-spinner off -r tests/requirements.txt
+          fi
+
+  # ------------------------------------------------------------------ 依赖许可
+  licenses:
+    name: licenses (no ag-grid-enterprise, no GPL/AGPL/NC)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: uv sync --frozen
+        working-directory: src/backend
+        run: uv sync --frozen
+      - name: AG Grid Enterprise 与 Python 依赖许可证
+        run: python3 scripts/ci/check_licenses.py --python src/backend/.venv/bin/python
+
+  # ------------------------------------------------------------------ 交割单夹具一致性（7.4A 条件 1–5、3.5A-2）
+  fixtures:
+    name: fixtures (check_fixtures.py)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: check_fixtures.py
+        run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_fixtures.py

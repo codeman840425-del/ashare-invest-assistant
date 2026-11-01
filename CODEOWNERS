@@ -1,0 +1,9 @@
+# plan.md §7.4A：扫描规则、白名单、CI 与夹具校验脚本的改动必须由仓库所有者评审。
+# 需要配合分支保护「Require review from Code Owners」才生效（仓库设置由所有者开启，见 T-O02 报告建议）。
+/.secretscan-allow.yaml   @codeman840425-del
+/.gitleaks.toml           @codeman840425-del
+/.pre-commit-config.yaml  @codeman840425-del
+/CODEOWNERS               @codeman840425-del
+/.github/                 @codeman840425-del
+/scripts/ci/              @codeman840425-del
+/tests/fixtures/broker_statements/ @codeman840425-del

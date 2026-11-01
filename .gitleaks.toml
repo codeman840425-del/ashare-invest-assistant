@@ -1,0 +1,128 @@
+# gitleaks 配置（plan.md §7.4A：S1–S9 + gitleaks 默认规则）。
+# 与 scripts/ci/secret_scan.py 同一套规则：gitleaks 管正则类规则；
+# 文件级 S7（表头词 ≥3 / GBK 编码）、S8 身份证校验位、S9 Luhn、S4 文件存在性、夹具豁免条件、
+# 手机号与银行卡（警告级）由 secret_scan.py 判定。两者在 CI 中都必须通过。
+# CI 运行时加 --ignore-gitleaks-allow：行内 gitleaks:allow 注释不生效，允许项只能走 .secretscan-allow.yaml。
+# 中文关键字用 \x{....} 书写，避免本文件自己命中 S6/S7。
+
+title = "ashare-invest-assistant S1-S9"
+
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------- S1 麦蕊 licence
+[[rules]]
+id = "S1-mairui-licence-url"
+description = "S1 麦蕊 licence（URL 路径形式）"
+regex = '''(?i)mairuiapi\.com/\S+/[A-Za-z0-9-]{16,}'''
+keywords = ["mairuiapi"]
+tags = ["S1", "block"]
+
+[[rules]]
+id = "S1-mairui-licence-assign"
+description = "S1 麦蕊 licence（赋值形式）"
+regex = '''(?i)(mairui[_-]?)?licen[cs]e\s*[:=]\s*["']?[A-Za-z0-9-]{16,}'''
+keywords = ["licence", "license"]
+tags = ["S1", "block"]
+
+# ---------------------------------------------------------------- S2 API Key
+[[rules]]
+id = "S2-sk-heuristic"
+description = "S2 sk- 形式的 API key（启发式；真实值精确比对见 secret-scan.yml 的 secret-exact job）"
+regex = '''\bsk-[A-Za-z0-9_-]{20,}\b'''
+keywords = ["sk-"]
+tags = ["S2", "block"]
+
+[[rules]]
+id = "S2-secret-assign"
+description = "S2 api_key/secret/token/password 赋值为 12 位以上的带引号字面量"
+regex = '''(?i)\b(api[_-]?key|secret|token|passwd|password)\b\s*[:=]\s*["'][^"'\s]{12,}["']'''
+keywords = ["key", "secret", "token", "passwd", "password"]
+tags = ["S2", "block"]
+
+# ---------------------------------------------------------------- S3 私钥
+[[rules]]
+id = "S3-private-key"
+description = "S3 私钥头"
+regex = '''-----BEGIN [A-Z ]*PRIVATE KEY-----'''
+keywords = ["private key"]
+tags = ["S3", "block"]
+
+# ---------------------------------------------------------------- S4 环境文件
+[[rules]]
+id = "S4-env-file"
+description = "S4 不允许提交 .env*（.env.example 除外）"
+path = '''(^|/)\.env[^/]*$'''
+tags = ["S4", "block"]
+[[rules.allowlists]]
+paths = ['''(^|/)\.env\.example$''']
+
+[[rules]]
+id = "S4-env-example-value"
+description = "S4 .env.example 中敏感键只能为空或占位符（changeme…、example…、<...>）"
+path = '''(^|/)\.env\.example$'''
+regex = '''(?m)^[ \t]*(?:export[ \t]+)?(?:APP_MASTER_KEY|MAIRUI_LICENCE|DATABASE_URL|[A-Z0-9_]*_PASSWORD|[A-Z0-9_]*_API_KEY)[ \t]*=[ \t]*["']?([^\s"'#]+)'''
+secretGroup = 1
+tags = ["S4", "block"]
+[[rules.allowlists]]
+regexTarget = "secret"
+regexes = ['''^(changeme[A-Za-z0-9_.-]*|example[A-Za-z0-9_.-]*|<[^<>]+>)$''']
+
+# ---------------------------------------------------------------- S5/S6 股东代码
+# 夹具目录的豁免以 meta.json 条件为准（secret_scan.py + check_fixtures.py 判定）；
+# 这里只放开夹具目录里 .txt / .py / meta.json，README.md 与 expected.json 不豁免。
+[[rules]]
+id = "S5-sh-holder-code"
+description = "S5 沪市股东代码样式"
+regex = '''\b[A-Z]\d{9}\b'''
+tags = ["S5", "block"]
+[[rules.allowlists]]
+paths = ['''^tests/fixtures/broker_statements/[^/]+/(?:[^/]+\.txt|[^/]+\.py|meta\.json)$''']
+
+[[rules]]
+id = "S6-sz-holder-code"
+description = "S6 深市股东代码样式（同一行含“股东”；文件表头上下文由 secret_scan.py 判定）"
+regex = '''\x{80a1}\x{4e1c}[^\n]*\b(0\d{9})\b|\b(0\d{9})\b[^\n]*\x{80a1}\x{4e1c}'''
+tags = ["S6", "block"]
+[[rules.allowlists]]
+paths = ['''^tests/fixtures/broker_statements/[^/]+/(?:[^/]+\.txt|[^/]+\.py|meta\.json)$''']
+
+# ---------------------------------------------------------------- S7 疑似真实交割单
+[[rules]]
+id = "S7-statement-header"
+description = "S7 同一行出现 3 个以上交割单表头词（文件级与 GBK 判定由 secret_scan.py 做）"
+regex = '''(?:\x{6210}\x{4ea4}\x{65e5}\x{671f}|\x{8bc1}\x{5238}\x{4ee3}\x{7801}|\x{80a1}\x{4e1c}\x{4ee3}\x{7801}|\x{6210}\x{4ea4}\x{7f16}\x{53f7}|\x{59d4}\x{6258}\x{7f16}\x{53f7}|\x{53d1}\x{751f}\x{91d1}\x{989d}|\x{5269}\x{4f59}\x{91d1}\x{989d})(?:[^\n]*?(?:\x{6210}\x{4ea4}\x{65e5}\x{671f}|\x{8bc1}\x{5238}\x{4ee3}\x{7801}|\x{80a1}\x{4e1c}\x{4ee3}\x{7801}|\x{6210}\x{4ea4}\x{7f16}\x{53f7}|\x{59d4}\x{6258}\x{7f16}\x{53f7}|\x{53d1}\x{751f}\x{91d1}\x{989d}|\x{5269}\x{4f59}\x{91d1}\x{989d})){2}'''
+tags = ["S7", "block"]
+[[rules.allowlists]]
+# docs/ 顶层 *.md 只豁免 S7（子目录不豁免）；夹具目录同 S5
+paths = [
+  '''^docs/[^/]+\.md$''',
+  '''^tests/fixtures/broker_statements/[^/]+/(?:[^/]+\.txt|[^/]+\.py|meta\.json)$''',
+]
+
+# ---------------------------------------------------------------- S8 身份证
+[[rules]]
+id = "S8-id-card"
+description = "S8 18 位身份证样式（出生日期结构；校验位由 secret_scan.py 精确判定）"
+regex = '''\b[1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b'''
+tags = ["S8", "block"]
+
+# ---------------------------------------------------------------- S9 资金账号
+[[rules]]
+id = "S9-fund-account"
+description = "S9 资金账号/客户号"
+regex = '''(?:\x{8d44}\x{91d1}\x{8d26}\x{53f7}|\x{8d44}\x{91d1}\x{5e10}\x{53f7}|\x{5ba2}\x{6237}\x{53f7})\s*[:\x{ff1a}]?\s*\d{6,}'''
+tags = ["S9", "block"]
+
+# ---------------------------------------------------------------- 全局允许（只放虚构值）
+# 必须与 .secretscan-allow.yaml 的 value_regex 一一对应（scripts/ci/tests 校验）。
+[[allowlists]]
+description = "虚构值（.secretscan-allow.yaml）"
+regexTarget = "secret"
+regexes = [
+  '''^A000000001$''',
+  '''^A000000000$''',
+  '''^0000000001$''',
+  '''^0000000000$''',
+  '''^quote\.600519\.SH\.close$''',
+]

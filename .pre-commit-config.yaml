@@ -1,0 +1,24 @@
+# 本地提交前密钥扫描（plan.md §7.4A）。安装：uv tool install pre-commit==4.7.0 && pre-commit install
+# 规则与 CI 相同：.gitleaks.toml + scripts/ci/secret_scan.py + 真实值精确比对（本机环境变量）。
+minimum_pre_commit_version: "4.0.0"
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # v8.30.1
+    hooks:
+      - id: gitleaks
+        args: ["--config", ".gitleaks.toml", "--ignore-gitleaks-allow"]
+  - repo: local
+    hooks:
+      - id: secret-scan-staged
+        name: secret_scan.py（暂存区，S1–S9）
+        entry: python scripts/ci/secret_scan.py staged
+        language: python
+        additional_dependencies: ["pyyaml==6.0.3"]
+        pass_filenames: false
+        always_run: true
+      - id: secret-exact-staged
+        name: 真实密钥值精确比对（暂存区，git grep -qF，不打印值）
+        entry: bash scripts/ci/check_real_secrets.sh cached
+        language: system
+        pass_filenames: false
+        always_run: true

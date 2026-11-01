@@ -53,6 +53,15 @@ x-app-depends: &app-depends
     condition: service_completed_successfully
   timescale-apply:
     condition: service_completed_successfully
+  db-roles:
+    condition: service_completed_successfully
+
+# 分库角色（T-O10）：api / ingest 不再用库属主连接。aia_api 读不到证书密文列（列级授权），aia_ingest 全列；
+# 属主（POSTGRES_USER）只给 migrate / timescale-apply / db-roles 以及暂未拆分的 worker、signal-rt、beat。
+# 口令不进 .env、不进仓库：由 deploy/scripts/compose.sh 从 $AIA_SECRETS_DIR/db_password_aia_{api,ingest}（600，
+# 缺失时 deploy/scripts/db-role-passwords.sh 生成、从不覆盖）读出后导出给 compose 插值。
+x-db-api-url: &db-api-url postgresql+psycopg://aia_api:${AIA_DB_API_PASSWORD:?请用 deploy/scripts/compose.sh 调用（读 db_password_aia_api）}@postgres:5432/${POSTGRES_DB:-aia}
+x-db-ingest-url: &db-ingest-url postgresql+psycopg://aia_ingest:${AIA_DB_INGEST_PASSWORD:?请用 deploy/scripts/compose.sh 调用（读 db_password_aia_ingest）}@postgres:5432/${POSTGRES_DB:-aia}
 
 services:
   nginx:
@@ -62,6 +71,7 @@ services:
       - "127.0.0.1:${NGINX_HTTP_PORT:-8080}:80"
     volumes:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/limits.conf:/etc/nginx/aia-limits.conf:ro
     depends_on:
       api:
         condition: service_healthy
@@ -81,6 +91,7 @@ services:
     environment:
       <<: *app-env
       SERVICE_NAME: api
+      DATABASE_URL: *db-api-url
       API_PREFIX: ${API_PREFIX:-/api/v1}
       HEALTH_CHECK_TIMEOUT_S: ${HEALTH_CHECK_TIMEOUT_S:-1.0}
       APP_MASTER_KEY: ${APP_MASTER_KEY:?APP_MASTER_KEY 未设置}
@@ -140,6 +151,7 @@ services:
     environment:
       <<: *app-env
       SERVICE_NAME: ingest
+      DATABASE_URL: *db-ingest-url
       MAIRUI_MODE: ${MAIRUI_MODE:-replay}
       MAIRUI_REPLAY_DIR: ${MAIRUI_REPLAY_DIR:-/fixtures/mairui}
       MAIRUI_BASE_URL: ${MAIRUI_BASE_URL:-https://api.mairuiapi.com}
@@ -229,6 +241,34 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # 角色与列级授权（T-O10）：migrate、timescale-apply 之后幂等执行 deploy/db/roles/apply-roles.sh（每次 up 都跑，
+  # 新迁移建的表/列也会被覆盖到）。以属主连接；口令以 secret 文件传入，不经环境变量。
+  db-roles:
+    image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+    entrypoint: ["bash", "/aia/deploy/db/roles/apply-roles.sh"]
+    command: []
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-aia}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置}
+      PGDATABASE: ${POSTGRES_DB:-aia}
+      PGCONNECT_TIMEOUT: "10"
+      AIA_DB_ROLE_PASSWORD_DIR: /run/secrets
+    secrets:
+      - db_password_aia_api
+      - db_password_aia_ingest
+    volumes:
+      - ../db/roles:/aia/deploy/db/roles:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      timescale-apply:
+        condition: service_completed_successfully
+
   postgres:
     # TimescaleDB 2.31.0 + PostgreSQL 16.15（digest 固定 PG 小版本；plan §3A.1 避开 16.5/17.1）
     image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
@@ -285,3 +325,8 @@ secrets:
     file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/data_licence_seal_private_keys
   data_licence_seal_public_keys:
     file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/data_licence_seal_public_keys
+  # 分库角色口令（T-O10）：deploy/scripts/db-role-passwords.sh 生成（600，不覆盖）；只挂给 db-roles。
+  db_password_aia_api:
+    file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/db_password_aia_api
+  db_password_aia_ingest:
+    file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/db_password_aia_ingest

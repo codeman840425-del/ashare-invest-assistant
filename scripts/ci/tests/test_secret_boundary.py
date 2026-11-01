@@ -108,3 +108,37 @@ def test_env_example_private_key(repo: Path) -> None:
 def test_gitignore_blocks_seal_key_files(path: str) -> None:
     r = subprocess.run(["git", "-C", str(REPO), "check-ignore", "-q", "--no-index", path])
     assert r.returncode == 0, f".gitignore 应排除 {path}"
+
+
+# ---------------------------------------------------------------- 数据库角色分离（T-O10）
+
+def test_api_on_owner_role_rejected(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "DATABASE_URL: *db-api-url", "DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aia}:${POSTGRES_PASSWORD:?x}@postgres:5432/aia")
+    errs = ccs.check(repo)
+    assert any("服务 api 的 DATABASE_URL 应为 aia_api" in e for e in errs), errs
+
+
+def test_ingest_literal_password_rejected(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "DATABASE_URL: *db-ingest-url",
+         "DATABASE_URL: postgresql+psycopg://aia_ingest:" + "x" * 8 + "@postgres:5432/aia")
+    assert any("服务 ingest 的 DATABASE_URL" in e for e in ccs.check(repo))
+
+
+def test_overlay_cannot_switch_api_back_to_owner(repo: Path) -> None:
+    (repo / "deploy/compose/docker-compose.x.yml").write_text(
+        "services:\n  api:\n    environment:\n      - DATABASE_URL=postgresql://aia:${POSTGRES_PASSWORD}@postgres/aia\n",
+        encoding="utf-8")
+    assert any("docker-compose.x.yml: 服务 api 的 DATABASE_URL" in e for e in ccs.check(repo))
+
+
+def test_db_password_secret_only_for_db_roles(repo: Path) -> None:
+    (repo / "deploy/compose/docker-compose.x.yml").write_text(
+        "services:\n  worker:\n    secrets: [db_password_aia_api]\n", encoding="utf-8")
+    assert any("服务 worker 挂了 db_password_aia_api" in e for e in ccs.check(repo))
+
+
+def test_db_password_secret_must_be_file(repo: Path) -> None:
+    text = (repo / ccs.BASE_COMPOSE).read_text(encoding="utf-8")
+    assert "  db_password_aia_ingest:\n    file:" in text
+    _sub(repo, ccs.BASE_COMPOSE, "  db_password_aia_ingest:\n    file:", "  db_password_aia_ingest:\n    x-file:")
+    assert any("顶层 secrets 缺少 db_password_aia_ingest" in e for e in ccs.check(repo))

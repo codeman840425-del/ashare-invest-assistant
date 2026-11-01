@@ -11,7 +11,10 @@
   3. 证书封装私钥只给 ingest：secret data_licence_seal_private_keys、名字以 _PRIVATE_KEY / _PRIVATE_KEYS
      结尾的环境变量、挂载源含 private_keys 的卷，都只允许出现在 ingest 服务；
   4. 基础 compose 的顶层 secrets 用 file: 定义两把封装密钥，ingest 拿到私钥+公钥，api 拿到公钥；
-  5. .env.example 里没有私钥变量（私钥只走 secret 文件）。
+  5. .env.example 里没有私钥变量（私钥只走 secret 文件）；
+  6. 数据库角色分离（T-O10，契约 v0.2.6 验收“api 数据库角色 SELECT ciphertext 被拒”）：基础 compose 里
+     api / ingest 的 DATABASE_URL 用户分别是 aia_api / aia_ingest（不是属主），口令只经 ${AIA_DB_*_PASSWORD} 插值；
+     db_password_* secret 用 file: 定义、只挂给 db-roles；任何 compose 文件都不得把 api/ingest 改回属主。
 
 失败退出码 1，依赖缺失退出码 2。用法：check_secret_boundary.py [--repo DIR]
 """
@@ -38,6 +41,10 @@ PRIVATE_SECRET = "data_licence_seal_private_keys"
 PUBLIC_SECRET = "data_licence_seal_public_keys"
 PRIVATE_ENV_RE = re.compile(r"_PRIVATE_KEYS?$")
 PRIVATE_OWNER = "ingest"
+DB_ROLE_OF = {"api": ("aia_api", "AIA_DB_API_PASSWORD"), "ingest": ("aia_ingest", "AIA_DB_INGEST_PASSWORD")}
+DB_PW_SECRETS = ("db_password_aia_api", "db_password_aia_ingest")
+DB_PW_OWNER = "db-roles"
+DB_URL_RE = re.compile(r"^postgresql(?:\+\w+)?://([^:@/]+):(\$\{(\w+)[^}]*\})@")
 
 
 def _texts(repo: Path):
@@ -101,6 +108,19 @@ def check(repo: Path) -> list[str]:
             for src in _volume_sources(svc.get("volumes")):
                 if "private_keys" in src:
                     errs.append(f"{where} 挂载了私钥路径，只允许 {PRIVATE_OWNER}")
+        for name, svc in (doc.get("services") or {}).items():
+            svc = svc or {}
+            if name != DB_PW_OWNER:
+                for sn in set(_secret_names(svc.get("secrets"))) & set(DB_PW_SECRETS):
+                    errs.append(f"{rel}: 服务 {name} 挂了 {sn}，只允许 {DB_PW_OWNER}")
+            env = svc.get("environment")
+            url = env.get("DATABASE_URL") if isinstance(env, dict) else next(
+                (e.split("=", 1)[1] for e in (env or []) if isinstance(e, str) and e.startswith("DATABASE_URL=")), None)
+            if name in DB_ROLE_OF and url is not None:
+                user, var = DB_ROLE_OF[name]
+                m = DB_URL_RE.match(str(url))
+                if not m or m.group(1) != user or m.group(3) != var:
+                    errs.append(f"{rel}: 服务 {name} 的 DATABASE_URL 应为 {user}:${{{var}}}@…（不得用属主或明文口令）")
         for sname, sdef in (doc.get("secrets") or {}).items():
             if isinstance(sdef, dict) and "environment" in sdef:
                 errs.append(f"{rel}: secret {sname} 用 environment: 定义（必须用 file:，不经环境变量）")
@@ -112,7 +132,14 @@ def check(repo: Path) -> list[str]:
         for s in (PRIVATE_SECRET, PUBLIC_SECRET):
             if not (isinstance(top.get(s), dict) and "file" in top[s]):
                 errs.append(f"{BASE_COMPOSE}: 顶层 secrets 缺少 {s}（file:）")
+        for s in DB_PW_SECRETS:
+            if not (isinstance(top.get(s), dict) and "file" in top[s]):
+                errs.append(f"{BASE_COMPOSE}: 顶层 secrets 缺少 {s}（file:）")
         svcs = doc.get("services") or {}
+        for svc in DB_ROLE_OF:
+            env = (svcs.get(svc) or {}).get("environment")
+            if not (isinstance(env, dict) and "DATABASE_URL" in env):
+                errs.append(f"{BASE_COMPOSE}: 服务 {svc} 没有显式 DATABASE_URL（必须用独立角色）")
         need = {PRIVATE_OWNER: {PRIVATE_SECRET, PUBLIC_SECRET}, "api": {PUBLIC_SECRET}}
         for svc, want in need.items():
             have = set(_secret_names((svcs.get(svc) or {}).get("secrets")))

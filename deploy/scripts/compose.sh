@@ -89,6 +89,17 @@ if [ "${1-}" = "--get" ]; then
   exit 0
 fi
 
+# 分库角色口令（T-O10）：api/ingest 的 DATABASE_URL 用 aia_api/aia_ingest，口令只存在 $AIA_SECRETS_DIR（600），
+# 缺失时生成（从不覆盖），读出后导出给 compose 插值；不写 .env、不打印。
+for role in aia_api aia_ingest; do
+  [ -s "$secrets_dir/db_password_$role" ] || "$ROOT/deploy/scripts/db-role-passwords.sh" "$secrets_dir" >&2
+done
+AIA_DB_API_PASSWORD="$(tr -d '\n' < "$secrets_dir/db_password_aia_api")"
+AIA_DB_INGEST_PASSWORD="$(tr -d '\n' < "$secrets_dir/db_password_aia_ingest")"
+[[ "$AIA_DB_API_PASSWORD" =~ ^[0-9a-f]{16,}$ && "$AIA_DB_INGEST_PASSWORD" =~ ^[0-9a-f]{16,}$ ]] \
+  || { echo "$secrets_dir/db_password_aia_{api,ingest} 格式不对（应为十六进制，见 db-role-passwords.sh）" >&2; exit 2; }
+export AIA_DB_API_PASSWORD AIA_DB_INGEST_PASSWORD
+
 # daemon 没起来（机器重启后）或 docker.sock ACL 丢失（dockerd 被别处重启）时，自动修复一次（T-O08）。
 if ! docker info >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null)" != "systemd" ] \
    && command -v dockerd >/dev/null 2>&1 && sudo -n true 2>/dev/null; then

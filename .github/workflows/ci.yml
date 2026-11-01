@@ -276,6 +276,21 @@ jobs:
           .venv/bin/alembic downgrade base
           .venv/bin/alembic upgrade head
           .venv/bin/alembic check
+      - name: 分库角色与列级授权（db-roles 幂等两次 + 验收：api 读 ciphertext 被拒）
+        if: steps.detect.outputs.present == 'true'
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGUSER: aia
+          PGPASSWORD: ci-only
+          PGDATABASE: aia
+        run: |
+          set -euo pipefail
+          export AIA_DB_ROLE_PASSWORD_DIR="$RUNNER_TEMP/db-roles"
+          bash deploy/scripts/db-role-passwords.sh "$AIA_DB_ROLE_PASSWORD_DIR"
+          bash deploy/db/roles/apply-roles.sh
+          bash deploy/db/roles/apply-roles.sh
+          bash deploy/db/roles/verify-roles.sh
 
   # ------------------------------------------------------------------ 镜像构建（只构建不推送）
   image:
@@ -370,11 +385,13 @@ jobs:
 
   # 网关上限一致性（T-O03）：nginx client_max_body_size = config/imports.yaml max_request_bytes
   # > max_file_bytes × max_files_per_upload，且 = 413 信封 max_bytes。imports.yaml 不存在时明确失败。
+  # T-O10：limit_req 静态规则（zone 键、429 RATE_LIMITED 信封、Retry-After = ceil(1/速率)、dev 只 dry run）
+  # + 运行时冒烟（临时 nginx + 桩上游，正例 429 / 反例不误伤 / 413 不被 429 盖住）。
   # 正反例在 scripts/ci/tests/test_gateway_limits.py（secret-scan.yml selftest job 运行）。
   gateway-limits:
     name: gateway-limits (nginx client_max_body_size ↔ config/imports.yaml)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -384,6 +401,8 @@ jobs:
           version: ${{ env.UV_VERSION }}
       - name: check_gateway_limits.py
         run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_gateway_limits.py
+      - name: nginx 限流运行时冒烟（prod 正反例 + dev dry run）
+        run: bash scripts/ci/nginx_limits_smoke.sh both
 
   # 部署配置的密钥边界（T-A07 §5、T-O09）：部署配置不再有全站麦蕊证书变量；不用 env_file；
   # 证书封装私钥（secret / *_PRIVATE_KEYS 变量 / 私钥挂载）只给 ingest；api 只拿公钥。

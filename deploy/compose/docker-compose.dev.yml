@@ -64,6 +64,11 @@ services:
       - ../../src/backend:/app/src/backend:ro
       - ../../config:/app/config:ro
 
+  # 网关限流（T-O10）：dev 改挂宽松取值（同一容器路径覆盖基础文件的 limits.conf），避免测试方 live 契约套件/e2e 被网关 429。
+  nginx:
+    volumes:
+      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro
+
   postgres:
     ports:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"

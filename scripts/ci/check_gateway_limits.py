@@ -13,12 +13,20 @@
   3. 网关上限略大于应用上限：client_max_body_size > max_file_bytes × max_files_per_upload（plan：“必须 >”，否则 api 启动失败）；
      余量 = 二者之差，按 plan 当前取值为 1 MiB（容纳 multipart 开销），评审未另定余量，因此由规则 2 的等式锁定。
   4. nginx 413 JSON 信封（@payload_too_large）里的 max_bytes == client_max_body_size 字节数（契约 §4：{max_bytes} = max_request_bytes）。
+限流（T-O10，契约 §1.3/§2 429 RATE_LIMITED + Retry-After；plan“全局 Nginx limit_req + 应用层”）：
+  5. deploy/nginx/limits.conf（生产）与 limits.dev.conf（dev）都定义 zone aia_api / aia_auth / aia_import，
+     键为 $binary_remote_addr（aia_import 用 $aia_import_key，nginx.conf 的 map 中 default 必须是 $binary_remote_addr、GET/HEAD 为空）；
+     dev 速率不低于生产；$aia_retry_after_s 各分支 = ceil(1/速率) 秒；dev 必须 limit_req_dry_run on（只记日志），生产不得 dry run。
+  6. nginx.conf：include /etc/nginx/aia-limits.conf、limit_req_status 429；location /api/ 有 aia_api；登录/注册 location 有 aia_auth；
+     = /api/v1/imports 有 aia_import；error_page 429 @rate_limited，信封含 RATE_LIMITED、details.retry_after_s、Retry-After、X-Request-Id。
+  7. compose：基础文件把 limits.conf 挂到 /etc/nginx/aia-limits.conf，dev 叠加文件改挂 limits.dev.conf。
 用法：check_gateway_limits.py [--repo DIR]   不一致或缺文件时退出码 1，输出 ::error。
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import sys
 from pathlib import Path
@@ -95,11 +103,130 @@ def check(repo: Path) -> list[str]:
     return errors
 
 
+LIMITS_PROD = "deploy/nginx/limits.conf"
+LIMITS_DEV = "deploy/nginx/limits.dev.conf"
+COMPOSE_BASE = "deploy/compose/docker-compose.yml"
+COMPOSE_DEV = "deploy/compose/docker-compose.dev.yml"
+LIMITS_TARGET = "/etc/nginx/aia-limits.conf"
+ZONES = ("aia_api", "aia_auth", "aia_import")
+ZONE_KEY = {"aia_api": "$binary_remote_addr", "aia_auth": "$binary_remote_addr", "aia_import": "$aia_import_key"}
+ZONE_RE = re.compile(r"^\s*limit_req_zone\s+(\S+)\s+zone=(\w+):\S+\s+rate=(\d+)r/([sm])\s*;", re.M)
+# $aia_retry_after_s 的 map 分支 → 对应 zone
+RETRY_BRANCH = {"default": "aia_api", "~^/api/v1/auth/(login|register)$": "aia_auth", "~^/api/v1/imports$": "aia_import"}
+LOCATIONS = {  # location 头 → 必须出现的 limit_req zone
+    "location /api/ {": ("aia_api",),
+    "location ~ ^/api/v1/auth/(login|register)$ {": ("aia_api", "aia_auth"),
+    "location = /api/v1/imports {": ("aia_api", "aia_import"),
+}
+
+
+def _block(conf: str, head: str) -> str | None:
+    i = conf.find(head)
+    if i < 0:
+        return None
+    j = conf.find("\n    }", i)
+    return conf[i:j if j > 0 else len(conf)]
+
+
+def _parse_limits(text: str) -> tuple[dict[str, tuple[str, float]], dict[str, int]]:
+    zones = {z: (k, int(n) / (60.0 if u == "m" else 1.0)) for k, z, n, u in ZONE_RE.findall(text)}
+    m = re.search(r"map\s+\$uri\s+\$aia_retry_after_s\s*\{(.*?)\}", text, re.S)
+    retry: dict[str, int] = {}
+    for line in (m.group(1).splitlines() if m else []):
+        mm = re.match(r'\s*"?([^"\s]+)"?\s+(\d+)\s*;', line)
+        if mm:
+            retry[mm.group(1)] = int(mm.group(2))
+    return zones, retry
+
+
+def check_rate_limits(repo: Path) -> list[str]:
+    errors: list[str] = []
+    parsed: dict[str, dict[str, tuple[str, float]]] = {}
+    for rel in (LIMITS_PROD, LIMITS_DEV):
+        f = repo / rel
+        if not f.is_file():
+            errors.append(f"{rel} 不存在（limit_req 参数）")
+            continue
+        zones, retry = _parse_limits(strip_comments(f.read_text(encoding="utf-8")))
+        parsed[rel] = zones
+        dry = bool(re.search(r"^\s*limit_req_dry_run\s+on\s*;", strip_comments(f.read_text(encoding="utf-8")), re.M))
+        if rel == LIMITS_DEV and not dry:
+            errors.append(f"{rel}: 缺少 limit_req_dry_run on;（burst 在 location 里写死，只放宽速率挡不住本机连发，dev 会误伤契约套件）")
+        if rel == LIMITS_PROD and dry:
+            errors.append(f"{rel}: 生产限流不得 limit_req_dry_run on（等于没有限流）")
+        for z in ZONES:
+            if z not in zones:
+                errors.append(f"{rel}: 缺少 limit_req_zone {z}")
+            elif zones[z][0] != ZONE_KEY[z]:
+                errors.append(f"{rel}: zone {z} 的键是 {zones[z][0]}，应为 {ZONE_KEY[z]}（按来源地址）")
+        for branch, z in RETRY_BRANCH.items():
+            if z not in zones:
+                continue
+            want = math.ceil(1 / zones[z][1])
+            if retry.get(branch) != want:
+                errors.append(f"{rel}: $aia_retry_after_s 分支 {branch} = {retry.get(branch)}，应为 ceil(1/速率) = {want}（zone {z}）")
+    if len(parsed) == 2:
+        for z in ZONES:
+            p, d = parsed[LIMITS_PROD].get(z), parsed[LIMITS_DEV].get(z)
+            if p and d and d[1] < p[1]:
+                errors.append(f"{LIMITS_DEV}: zone {z} 速率低于生产（dev 只能放宽）")
+
+    conf_path = repo / NGINX_CONF
+    if not conf_path.is_file():
+        return errors + [f"{NGINX_CONF} 不存在"]
+    conf = strip_comments(conf_path.read_text(encoding="utf-8"))
+    if not re.search(r"^\s*include\s+" + re.escape(LIMITS_TARGET) + r"\s*;", conf, re.M):
+        errors.append(f"{NGINX_CONF}: 没有 include {LIMITS_TARGET}")
+    if not re.search(r"^\s*limit_req_status\s+429\s*;", conf, re.M):
+        errors.append(f"{NGINX_CONF}: 没有 limit_req_status 429（默认 503，不符合契约 429 RATE_LIMITED）")
+    m = re.search(r"map\s+\$request_method\s+\$aia_import_key\s*\{(.*?)\}", conf, re.S)
+    body = m.group(1) if m else ""
+    if not (re.search(r"^\s*default\s+\$binary_remote_addr\s*;", body, re.M)
+            and re.search(r'^\s*GET\s+""\s*;', body, re.M) and re.search(r'^\s*HEAD\s+""\s*;', body, re.M)):
+        errors.append(f"{NGINX_CONF}: map $request_method $aia_import_key 应为 GET/HEAD → \"\"、default → $binary_remote_addr")
+    for head, zones in LOCATIONS.items():
+        blk = _block(conf, head)
+        if blk is None:
+            errors.append(f"{NGINX_CONF}: 缺少 {head.rstrip(' {')}")
+            continue
+        for z in zones:
+            if not re.search(r"^\s*limit_req\s+zone=" + z + r"\b", blk, re.M):
+                errors.append(f"{NGINX_CONF}: {head.rstrip(' {')} 没有 limit_req zone={z}")
+    if not re.search(r"^\s*error_page\s+429\s+@rate_limited\s*;", conf, re.M):
+        errors.append(f"{NGINX_CONF}: 没有 error_page 429 @rate_limited")
+    rl = _block(conf, "location @rate_limited {")
+    if rl is None:
+        errors.append(f"{NGINX_CONF}: 没有 location @rate_limited（429 JSON 信封）")
+    else:
+        for needle, why in (('"code":"RATE_LIMITED"', "错误码 RATE_LIMITED"),
+                            ('"retry_after_s":$aia_retry_after_s', "details.retry_after_s"),
+                            ('"request_id":"$aia_request_id"', "request_id"),
+                            ("add_header Retry-After $aia_retry_after_s always;", "Retry-After 头"),
+                            ("add_header X-Request-Id $aia_request_id always;", "X-Request-Id 头"),
+                            ("return 429 ", "状态 429")):
+            if needle not in rl:
+                errors.append(f"{NGINX_CONF}: @rate_limited 缺少{why}（{needle}）")
+
+    for rel, src in ((COMPOSE_BASE, "../nginx/limits.conf"), (COMPOSE_DEV, "../nginx/limits.dev.conf")):
+        f = repo / rel
+        if not f.is_file():
+            errors.append(f"{rel} 不存在")
+            continue
+        doc = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        vols = (((doc.get("services") or {}).get("nginx") or {}).get("volumes")) or []
+        if f"{src}:{LIMITS_TARGET}:ro" not in vols:
+            errors.append(f"{rel}: nginx 没有挂载 {src}:{LIMITS_TARGET}:ro")
+    if not errors:
+        p = parsed.get(LIMITS_PROD, {})
+        print("OK   limit_req：" + "，".join(f"{z}={p[z][1]:g}r/s" for z in ZONES if z in p) + "；429 RATE_LIMITED 信封 + Retry-After")
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo", type=Path, default=Path.cwd())
     args = ap.parse_args(argv)
-    errors = check(args.repo.resolve())
+    errors = check(args.repo.resolve()) + check_rate_limits(args.repo.resolve())
     for e in errors:
         print(f"::error title=gateway-limits::{e}")
     print(f"check_gateway_limits: {len(errors)} 个问题")

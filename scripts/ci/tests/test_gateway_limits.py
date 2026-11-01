@@ -21,6 +21,9 @@ def gw_repo(tmp_path: Path) -> Path:
     """用仓库里真实的 nginx.conf + plan 6.1 的 imports.yaml 取值。"""
     (tmp_path / "deploy/nginx").mkdir(parents=True)
     shutil.copy(REPO / cgl.NGINX_CONF, tmp_path / cgl.NGINX_CONF)
+    (tmp_path / "deploy/compose").mkdir(parents=True)
+    for rel in (cgl.LIMITS_PROD, cgl.LIMITS_DEV, cgl.COMPOSE_BASE, cgl.COMPOSE_DEV):
+        shutil.copy(REPO / rel, tmp_path / rel)
     write(tmp_path, cgl.IMPORTS_YAML, PLAN_YAML)
     return tmp_path
 
@@ -85,3 +88,43 @@ def test_commented_directive_ignored_and_conflicting_values(gw_repo: Path) -> No
     assert cgl.check(gw_repo) == []
     _sub(gw_repo, cgl.NGINX_CONF, "listen 80;", "listen 80;\n    client_max_body_size 1m;")
     assert any("多个不同取值" in e for e in cgl.check(gw_repo))
+
+
+# ---------------------------------------------------------------- 限流（T-O10）
+
+def test_repo_rate_limits_ok(gw_repo: Path) -> None:
+    assert cgl.check_rate_limits(gw_repo) == []
+
+
+@pytest.mark.parametrize("rel,old,new,needle", [
+    (cgl.LIMITS_PROD, "limit_req_zone $binary_remote_addr zone=aia_api", "limit_req_zone $http_x_forwarded_for zone=aia_api",
+     "键是 $http_x_forwarded_for"),
+    (cgl.LIMITS_PROD, "zone=aia_auth:10m rate=20r/m;", "zone=aia_auth:10m rate=30r/m;", "ceil(1/速率) = 2"),
+    (cgl.LIMITS_PROD, "limit_req_zone $aia_import_key zone=aia_import:10m rate=6r/m;\n", "", "缺少 limit_req_zone aia_import"),
+    (cgl.LIMITS_DEV, "zone=aia_api:10m rate=1000r/s;", "zone=aia_api:10m rate=5r/s;", "速率低于生产"),
+    (cgl.NGINX_CONF, "  limit_req_status 429;\n", "", "limit_req_status 429"),
+    (cgl.NGINX_CONF, "include /etc/nginx/aia-limits.conf;", "include /etc/nginx/other.conf;", "没有 include"),
+    (cgl.NGINX_CONF, "    default $binary_remote_addr;\n", "    default $http_x_real_ip;\n", "$aia_import_key"),
+    (cgl.NGINX_CONF, "limit_req zone=aia_auth burst=10 nodelay;", "", "zone=aia_auth"),
+    (cgl.NGINX_CONF, "limit_req zone=aia_import burst=5 nodelay;", "", "zone=aia_import"),
+    (cgl.NGINX_CONF, "error_page 429 @rate_limited;", "", "error_page 429"),
+    (cgl.NGINX_CONF, '"code":"RATE_LIMITED"', '"code":"TOO_MANY"', "RATE_LIMITED"),
+    (cgl.NGINX_CONF, "add_header Retry-After $aia_retry_after_s always;", "", "Retry-After"),
+    (cgl.LIMITS_DEV, "limit_req_dry_run on;", "# limit_req_dry_run on;", "缺少 limit_req_dry_run on"),
+    (cgl.LIMITS_PROD, "limit_req_zone $binary_remote_addr zone=aia_api", "limit_req_dry_run on;\nlimit_req_zone $binary_remote_addr zone=aia_api",
+     "不得 limit_req_dry_run"),
+    (cgl.COMPOSE_DEV, "../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro", "../nginx/limits.conf:/etc/nginx/aia-limits.conf:ro",
+     "limits.dev.conf"),
+])
+def test_rate_limit_negative(gw_repo: Path, rel: str, old: str, new: str, needle: str) -> None:
+    _sub(gw_repo, rel, old, new)
+    errs = cgl.check_rate_limits(gw_repo)
+    assert any(needle in e for e in errs), errs
+
+
+def test_global_api_limit_required(gw_repo: Path) -> None:
+    conf = (gw_repo / cgl.NGINX_CONF).read_text(encoding="utf-8")
+    head = "    location /api/ {\n      limit_req zone=aia_api burst=100 nodelay;\n"
+    assert head in conf
+    (gw_repo / cgl.NGINX_CONF).write_text(conf.replace(head, "    location /api/ {\n"), encoding="utf-8")
+    assert any("location /api/ 没有 limit_req zone=aia_api" in e for e in cgl.check_rate_limits(gw_repo))

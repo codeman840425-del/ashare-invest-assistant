@@ -21,8 +21,14 @@ aia_docker_init() {
 }
 aia_docker() { aia_docker_init; "${AIA_DOCKER[@]}" "$@"; }
 
+# 直连模式（T-O01b）：AIA_PSQL_MODE=direct 时不用 docker exec，直接用本进程的 psql 经网络连接，
+# 连接参数取标准 libpq 环境变量（PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE）。
+# 供 compose 一次性服务 timescale-apply 在 postgres 镜像内运行 db-apply-timescale.sh。
+aia_psql_direct() { [ "${AIA_PSQL_MODE:-exec}" = "direct" ]; }
+
 # 目标 postgres 容器：AIA_PG_CONTAINER 优先，否则取 compose 项目里的 postgres 服务。
 aia_pg_container() {
+  if aia_psql_direct; then printf '%s\n' "direct"; return 0; fi
   if [ -n "${AIA_PG_CONTAINER:-}" ]; then printf '%s\n' "$AIA_PG_CONTAINER"; return 0; fi
   local id
   id="$("$AIA_ROOT/deploy/scripts/compose.sh" ps -q postgres 2>/dev/null | head -n1 || true)"
@@ -34,6 +40,10 @@ aia_pg_container() {
 # 用法：aia_psql <container> <db> [psql 参数...]   （SQL 从 stdin 或 -c 传入）
 aia_psql() {
   local c="$1" db="$2"; shift 2
+  if aia_psql_direct; then
+    psql -X -v ON_ERROR_STOP=1 -d "$db" "$@"
+    return
+  fi
   aia_docker exec -i -e AIA_TARGET_DB="$db" "$c" \
     sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d "$AIA_TARGET_DB" "$@"' sh "$@"
 }

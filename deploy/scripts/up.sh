@@ -5,6 +5,8 @@
 # - 默认叠加 docker-compose.dev.yml（麦蕊回放模式），等待全部服务 healthy 后返回
 # - 默认带 --build：后端镜像（deploy/docker/backend.Dockerfile）有缓存时只需数秒，避免 live 模式跑旧镜像；
 #   AIA_UP_BUILD=0 可跳过构建
+# - 启动顺序：postgres/redis → migrate（alembic upgrade head）→ timescale-apply（策略）→ 应用服务 → nginx；
+#   一次性服务失败时 --wait 返回非 0，用 `compose.sh logs migrate timescale-apply` 看原因
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,4 +21,4 @@ build_flag=()
 [ "${AIA_UP_BUILD:-1}" = "1" ] && build_flag=(--build)
 
 "$HERE/compose.sh" up -d "${build_flag[@]}" --wait --wait-timeout "${UP_WAIT_TIMEOUT:-300}" "$@"
-"$HERE/compose.sh" ps
+"$HERE/compose.sh" ps -a

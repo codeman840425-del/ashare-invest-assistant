@@ -4,7 +4,8 @@
 #      回放数据读 tests/fixtures（只读挂载），录制的麦蕊样本约定放在 tests/fixtures/mairui/。
 #   2) 热重载：把源码只读挂载进容器（覆盖镜像内 /app/src/backend；依赖在镜像 /opt/venv，不受影响）。
 #      api 已用 `uvicorn app.main:app --reload`（T-O01a，只监视 app/，轮询模式）；
-#      worker/beat/ingest/signal-rt 入口落地后用 watchfiles 重启。
+#      worker/beat/ingest/signal-rt 已用后端镜像的真实入口（T-O01b），改代码后 `compose.sh restart <服务>` 生效；
+#      migrate 也挂源码，新加的迁移不用重建镜像即可在下次 up 时执行。
 #      注意：改 pyproject/uv.lock 后需重新构建镜像（up.sh 默认带 --build）。
 #   3) 便于调试：postgres / redis 只在 127.0.0.1 上暴露端口。
 # 需要真实联调时（仅"当前唯一调用方"主机）：AIA_PROFILE=live deploy/scripts/up.sh（不叠加本文件）。
@@ -16,6 +17,13 @@ x-dev-env: &dev-env
   PYTHONDONTWRITEBYTECODE: "1"
 
 services:
+  migrate:
+    environment:
+      <<: *dev-env
+    volumes:
+      - ../../src/backend:/app/src/backend:ro
+      - ../../config:/app/config:ro
+
   api:
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*",
               "--reload", "--reload-dir", "/app/src/backend/app"]

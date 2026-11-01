@@ -3,31 +3,30 @@
 #
 # 硬约束：MAIRUI_LICENCE 只出现在 ingest 的 environment 中；其他服务不得引用它，
 #         且任何服务都不使用 env_file（避免把 .env 整体注入）。CI（T-O02）会检查。
-# api 已是真实应用（T-O01a）：deploy/docker/backend.Dockerfile 构建（上下文 src/backend），uvicorn app.main:app。
-# worker/beat/ingest/signal-rt 后端尚无入口，仍是占位（python:3.13 slim 的 http.server，只回 200）；
-# 入口落地后改为复用 *backend-build / *backend-image，仅替换 command 与 healthcheck。
+# 全部应用服务共用后端镜像（deploy/docker/backend.Dockerfile，上下文 src/backend）：
+#   api（uvicorn app.main:app）、migrate（一次性：alembic upgrade head）、
+#   worker/beat/ingest/signal-rt（python -m app.workers.<名>，T-B02 入口；目前为后端的常驻占位实现，
+#   不连外部服务、ingest 只写 Redis 心跳、不读 licence）。
+# 启动顺序（T-O01b）：postgres/redis healthy → migrate（alembic upgrade head）成功退出
+#   → timescale-apply（postgres 镜像内跑 deploy/scripts/db-apply-timescale.sh，按 policies.conf 补压缩/保留/连续聚合）成功退出
+#   → api / worker / beat / ingest / signal-rt → nginx。
 
 name: ${COMPOSE_PROJECT_NAME:-aia}
 
 # 镜像全部固定到精确 tag + digest（T-O08）。升级流程：改 tag → docker buildx imagetools inspect <tag>
 # 取新 digest → 本地 up.sh + db-restore-drill.sh 验证 → 提交。PG/TimescaleDB 升级还需按官方流程 ALTER EXTENSION。
-x-placeholder-image: &placeholder-image python:3.13.18-slim-trixie@sha256:76baad6037690d6e8c4397fbcaef17bca6f19eecef822b708fe8fa3417d30bb5
-
-# 占位入口：监听 8000，任意路径返回 200
-x-placeholder-cmd: &placeholder-cmd ["python", "-m", "http.server", "8000", "--bind", "0.0.0.0", "--directory", "/tmp"]
-
 # 后端镜像（T-O01a）。dockerfile 路径相对 context；上下文过滤见 deploy/docker/backend.Dockerfile.dockerignore
 x-backend-image: &backend-image ${AIA_BACKEND_IMAGE:-aia-backend:local}
 x-backend-build: &backend-build
   context: ../../src/backend
   dockerfile: ../../deploy/docker/backend.Dockerfile
 
-x-placeholder-healthcheck: &placeholder-healthcheck
-  test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).status == 200 else 1)"]
-  interval: 10s
+# worker 类健康检查（T-B02 §8.2）：存活文件 45 秒内更新过即健康；参数为服务名
+x-worker-healthcheck: &worker-healthcheck
+  interval: 15s
   timeout: 5s
-  retries: 5
-  start_period: 10s
+  retries: 3
+  start_period: 20s
 
 # 所有应用服务共享的非敏感变量（不含 MAIRUI_*）
 x-app-env: &app-env
@@ -44,6 +43,10 @@ x-app-depends: &app-depends
     condition: service_healthy
   redis:
     condition: service_healthy
+  migrate:
+    condition: service_completed_successfully
+  timescale-apply:
+    condition: service_completed_successfully
 
 services:
   nginx:
@@ -83,17 +86,17 @@ services:
       - imports:/var/lib/aia-dev/imports
       - ../../config:/app/config:ro
     depends_on: *app-depends
-    # /health 恒返回 200（依赖异常体现在 body 的 status=degraded），这里只判活；判就绪看 body
+    # 存活探针 ${API_PREFIX}/health/live（不依赖 db/redis，T-B02 §8.1）；就绪看 /health/ready 的 HTTP 码
     healthcheck:
-      test: ["CMD", "python", "-c", "import os,urllib.request,sys; u='http://127.0.0.1:8000'+os.environ.get('API_PREFIX','/api/v1')+'/health'; sys.exit(0 if urllib.request.urlopen(u, timeout=3).status == 200 else 1)"]
+      test: ["CMD", "python", "-c", "import os,urllib.request,sys; u='http://127.0.0.1:8000'+os.environ.get('API_PREFIX','/api/v1')+'/health/live'; sys.exit(0 if urllib.request.urlopen(u, timeout=3).status == 200 else 1)"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 15s
 
   worker:
-    image: *placeholder-image
-    command: *placeholder-cmd
+    image: *backend-image
+    command: ["python", "-m", "app.workers.worker"]
     restart: unless-stopped
     environment:
       <<: *app-env
@@ -108,13 +111,16 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
     volumes:
       - imports:/var/lib/aia-dev/imports
+      - ../../config:/app/config:ro
     depends_on: *app-depends
-    healthcheck: *placeholder-healthcheck
+    healthcheck:
+      <<: *worker-healthcheck
+      test: ["CMD", "python", "-m", "app.workers.healthcheck", "worker"]
 
   # 行情采集服务：全站唯一调用麦蕊、唯一持有 licence（plan §2.1A）
   ingest:
-    image: *placeholder-image
-    command: *placeholder-cmd
+    image: *backend-image
+    command: ["python", "-m", "app.workers.ingest"]
     restart: unless-stopped
     deploy:
       replicas: 1
@@ -127,32 +133,84 @@ services:
       MAIRUI_BASE_URL: ${MAIRUI_BASE_URL:-https://api.mairuiapi.com}
       MAIRUI_PRO_BASE_URL: ${MAIRUI_PRO_BASE_URL:-https://pro.mairuiapi.com}
       MAIRUI_EGRESS_IP_EXPECTED: ${MAIRUI_EGRESS_IP_EXPECTED:-}
+    volumes:
+      - ../../config:/app/config:ro
     depends_on: *app-depends
-    healthcheck: *placeholder-healthcheck
+    healthcheck:
+      <<: *worker-healthcheck
+      test: ["CMD", "python", "-m", "app.workers.healthcheck", "ingest"]
 
   # 盘中信号计算：单实例，无 licence
   signal-rt:
-    image: *placeholder-image
-    command: *placeholder-cmd
+    image: *backend-image
+    command: ["python", "-m", "app.workers.signal_rt"]
     restart: unless-stopped
     environment:
       <<: *app-env
       SERVICE_NAME: signal-rt
+    volumes:
+      - ../../config:/app/config:ro
     depends_on: *app-depends
-    healthcheck: *placeholder-healthcheck
+    healthcheck:
+      <<: *worker-healthcheck
+      test: ["CMD", "python", "-m", "app.workers.healthcheck", "signal-rt"]
 
   # Celery beat：全站唯一
   beat:
-    image: *placeholder-image
-    command: *placeholder-cmd
+    image: *backend-image
+    command: ["python", "-m", "app.workers.beat"]
     restart: unless-stopped
     deploy:
       replicas: 1
     environment:
       <<: *app-env
       SERVICE_NAME: beat
+    volumes:
+      - ../../config:/app/config:ro
     depends_on: *app-depends
-    healthcheck: *placeholder-healthcheck
+    healthcheck:
+      <<: *worker-healthcheck
+      test: ["CMD", "python", "-m", "app.workers.healthcheck", "beat"]
+
+  # 一次性：数据库迁移（T-O01b）。成功退出（0）后 timescale-apply 才运行；失败则 api 等服务不会启动。
+  migrate:
+    image: *backend-image
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      <<: *app-env
+      SERVICE_NAME: migrate
+    volumes:
+      - ../../config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 一次性：TimescaleDB 部署侧策略（压缩/保留/连续聚合，deploy/db/timescale/policies.conf）。
+  # 后端镜像没有 psql，放在 postgres 镜像里经网络直连执行（AIA_PSQL_MODE=direct）；脚本幂等，每次 up 都会重跑。
+  timescale-apply:
+    # 与 postgres 服务同一镜像（含 psql）；升级时两处一起改（deploy/scripts/lib/common.sh 的 aia_compose_image 读 postgres 服务那一行）
+    image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+    entrypoint: ["bash", "/aia/deploy/scripts/db-apply-timescale.sh"]
+    command: []
+    restart: "no"
+    environment:
+      AIA_ROOT: /aia
+      AIA_PSQL_MODE: direct
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-aia}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置}
+      PGDATABASE: ${POSTGRES_DB:-aia}
+      PGCONNECT_TIMEOUT: "10"
+    volumes:
+      - ../scripts:/aia/deploy/scripts:ro
+      - ../db/timescale:/aia/deploy/db/timescale:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   postgres:
     # TimescaleDB 2.31.0 + PostgreSQL 16.15（digest 固定 PG 小版本；plan §3A.1 避开 16.5/17.1）

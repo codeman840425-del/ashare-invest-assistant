@@ -4,6 +4,8 @@
 !pyproject.toml
 !uv.lock
 !app/
+!alembic.ini
+!migrations/
 **/__pycache__
 **/*.py[cod]
 **/.env

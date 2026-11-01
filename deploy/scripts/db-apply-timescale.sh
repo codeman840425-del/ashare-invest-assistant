@@ -4,7 +4,8 @@
 #   deploy/scripts/db-apply-timescale.sh --dry-run       # 只打印将要做的改动
 #   deploy/scripts/db-apply-timescale.sh --db aia_drill --container <名字>   # 指定库/容器（演练用）
 #   deploy/scripts/db-apply-timescale.sh --only market.minute_bars
-# 环境变量：AIA_PG_CONTAINER、AIA_TS_POLICY_FILE（默认 deploy/db/timescale/policies.conf）、
+# 环境变量：AIA_PSQL_MODE=direct（不用 docker exec，按 PGHOST/PGUSER/PGPASSWORD/PGDATABASE 直连；compose 的 timescale-apply 服务用）、
+#           AIA_PG_CONTAINER、AIA_TS_POLICY_FILE（默认 deploy/db/timescale/policies.conf）、
 #           AIA_TS_MIGRATE_DATA=1（允许把已有数据的普通表转换为 hypertable，会锁表并复制数据）、
 #           AIA_TS_KEY_COLS（连续聚合的证券列候选，默认 security_id/code）
 # 表不存在时打印 SKIP 并继续；任何一项 SQL 出错时该项失败、其余照常执行，最终退出码 1。
@@ -26,7 +27,10 @@ while [ $# -gt 0 ]; do
 done
 [ -f "$CONF" ] || aia_die "找不到策略文件 $CONF"
 [ -n "$CONTAINER" ] || CONTAINER="$(aia_pg_container)"
-if [ -z "$DB" ]; then DB="$(aia_docker exec "$CONTAINER" sh -c 'printf %s "$POSTGRES_DB"')"; fi
+if [ -z "$DB" ]; then
+  if aia_psql_direct; then DB="${PGDATABASE:-}"
+  else DB="$(aia_docker exec "$CONTAINER" sh -c 'printf %s "$POSTGRES_DB"')"; fi
+fi
 [ -n "$DB" ] || aia_die "无法确定目标库（--db）"
 
 aia_psql "$CONTAINER" "$DB" -qtAc "select 1 from pg_extension where extname='timescaledb'" | grep -q 1 \

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
-# 后端镜像（T-O01a）：FastAPI api 服务；worker/beat/ingest/signal-rt 的入口落地后复用同一镜像、换启动命令。
+# 后端镜像（T-O01a/T-O01b）：api、migrate（alembic）、worker/beat/ingest/signal-rt 共用同一镜像，只换启动命令。
 #
-# 构建上下文 = src/backend（只取 pyproject.toml、uv.lock、app/）。
+# 构建上下文 = src/backend（只取 pyproject.toml、uv.lock、app/、alembic.ini、migrations/）。
 # 上下文过滤：src/backend 下没有 .dockerignore（部署侧不改 src/），改用 BuildKit 的
 #   "Dockerfile 同名 ignore 文件"：deploy/docker/backend.Dockerfile.dockerignore，
 #   排除 probes/（含探针结果/样例）、.venv、__pycache__、.env 等，不会进入构建上下文。
@@ -31,7 +31,10 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 COPY app ./app
-RUN python -m compileall -q app
+# 迁移（T-O01b）：compose 的一次性 migrate 服务在镜像内执行 alembic upgrade head
+COPY alembic.ini ./
+COPY migrations ./migrations
+RUN python -m compileall -q app migrations
 
 # ---------------------------------------------------------------- runtime
 FROM ${PYTHON_IMAGE} AS runtime
@@ -50,5 +53,5 @@ ENV PATH=/opt/venv/bin:$PATH \
 WORKDIR /app/src/backend
 USER aia:aia
 EXPOSE 8000
-# 健康检查由 compose 定义（打 ${API_PREFIX}/health）；--proxy-headers 信任 nginx 传来的 X-Forwarded-*
+# 健康检查由 compose 定义（api 打 ${API_PREFIX}/health/live；worker 类用 app.workers.healthcheck）；--proxy-headers 信任 nginx 传来的 X-Forwarded-*
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]

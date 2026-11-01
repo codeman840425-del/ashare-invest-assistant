@@ -142,7 +142,7 @@ def register(
     if fields:
         raise _validation(fields)
 
-    ih = ip_hash(settings, client_ip(request))
+    ih = ip_hash(settings, client_ip(request, settings))
     pw_hash = passwords.hash(body.password)
     try:
         with engine.begin() as conn:
@@ -194,7 +194,7 @@ def login(
     passwords: PasswordsDep,
 ) -> dict[str, Any]:
     username = body.username.strip().lower()
-    ih = ip_hash(settings, client_ip(request))
+    ih = ip_hash(settings, client_ip(request, settings))
     with engine.connect() as conn:
         user = service.find_user_by_username(conn, username)
 
@@ -269,7 +269,7 @@ def logout(
             actor_role=auth.user.role,
             target_type="user",
             target_id=str(auth.user_id),
-            ip_hash=ip_hash(settings, client_ip(request)),
+            ip_hash=ip_hash(settings, client_ip(request, settings)),
         )
     response = Response(status_code=204)
     _clear_auth_cookies(response, settings)
@@ -306,7 +306,7 @@ def change_password(
             actor_role=auth.user.role,
             target_type="user",
             target_id=str(auth.user_id),
-            ip_hash=ip_hash(settings, client_ip(request)),
+            ip_hash=ip_hash(settings, client_ip(request, settings)),
         )
     # review-T-B03 S3 / 契约 v0.2.3 #25：吊销全部会话（含当前），新建会话并下发新 sid / csrf_token
     store.revoke_user(str(auth.user_id))

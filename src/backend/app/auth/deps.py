@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import uuid
 from dataclasses import dataclass
 from functools import lru_cache
@@ -62,15 +63,40 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 PasswordsDep = Annotated[PasswordPolicy, Depends(get_password_policy)]
 
 
-def client_ip(request: Request) -> str | None:
-    """客户端 IP：nginx 设置的 ``X-Real-IP`` 优先，否则取直连地址。
+def _parse_ip(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        return str(ipaddress.ip_address(value.strip()[:64]))
+    except ValueError:
+        return None
 
-    TODO(T-B03a)：可信代理名单由防滥用任务确定；这里只用于审计 ``ip_hash``，不做访问控制。
+
+def _trusted_peer(peer: str, nets: tuple[str, ...]) -> bool:
+    addr = _parse_ip(peer)
+    if addr is None:
+        return False
+    ip = ipaddress.ip_address(addr)
+    return any(ip in ipaddress.ip_network(n, strict=False) for n in nets)
+
+
+def client_ip(request: Request, settings: Settings) -> str | None:
+    """来源 IP（审计 ``ip_hash``；T-B03a 的按 IP 限速也用它）。
+
+    - 直连对端不在 ``TRUSTED_PROXIES`` 内：一律取直连地址，忽略所有转发头（防伪造）。
+    - 直连对端是我方 nginx：``X-Forwarded-For`` 只取**最右一跳**（nginx 用
+      ``$proxy_add_x_forwarded_for`` 追加的 ``$remote_addr``），左侧各跳是客户端可伪造的，绝不采信；
+      没有 XFF 时用 nginx 覆盖写入的 ``X-Real-IP``（T-O03 M1）；都不合法时退回直连地址。
     """
-    real = request.headers.get("x-real-ip")
-    if real:
-        return real.strip()[:64]
-    return request.client.host if request.client else None
+    peer = request.client.host if request.client else None
+    if peer is None or not _trusted_peer(peer, settings.trusted_proxies):
+        return peer
+    xff = request.headers.get("x-forwarded-for")
+    if xff is not None:
+        hops = [h for h in (p.strip() for p in xff.split(",")) if h]
+        rightmost = _parse_ip(hops[-1]) if hops else None
+        return rightmost or peer
+    return _parse_ip(request.headers.get("x-real-ip")) or peer
 
 
 def ip_hash(settings: Settings, ip: str | None) -> str | None:

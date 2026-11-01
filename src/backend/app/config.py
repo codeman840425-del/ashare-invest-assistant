@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 from collections.abc import Mapping
@@ -44,6 +45,14 @@ AppEnv = Literal["local", "test", "staging", "production"]
 
 #: 允许在缺少 APP_MASTER_KEY 时用进程内临时密钥的环境（游标签名重启即失效）
 _DEV_ENVS: frozenset[str] = frozenset({"local", "test"})
+#: ``TRUSTED_PROXIES`` 默认：回环 + RFC1918（compose 内的 nginx）
+_DEFAULT_TRUSTED_PROXIES: Final = (
+    "127.0.0.0/8",
+    "::1/128",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+)
 
 
 def _default_config_dir() -> Path:
@@ -369,6 +378,9 @@ class Settings(BaseSettings):
     registration_mode: RegistrationMode = RegistrationMode.CLOSED
     #: ``SESSION_COOKIE_SECURE``：生产必须 true；只有 APP_ENV=local/test 可设 false（S6）
     session_cookie_secure: bool = True
+    #: ``TRUSTED_PROXIES``：只有直连对端落在这些网段（我方 nginx）时才采信转发头，且只取
+    #: ``X-Forwarded-For`` 最右一跳（nginx 追加的 ``$remote_addr``）。JSON 数组；空 = 不采信。
+    trusted_proxies: tuple[str, ...] = _DEFAULT_TRUSTED_PROXIES
 
     # --- 分页（契约 §1.2） ---
     page_limit_default: int = Field(default=50, ge=1)
@@ -408,6 +420,13 @@ class Settings(BaseSettings):
         if not value.startswith("/"):
             value = "/" + value
         return value.rstrip("/")
+
+    @field_validator("trusted_proxies")
+    @classmethod
+    def _check_proxies(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for net in value:
+            ipaddress.ip_network(net, strict=False)  # 非法网段 → ValueError → 启动失败
+        return value
 
     @model_validator(mode="after")
     def _check(self) -> Settings:

@@ -125,7 +125,7 @@ def put_profile(
                 target_type="user_profile",
                 target_id=str(row.id),
                 detail={"version_no": int(row.version_no)},
-                ip_hash=ip_hash(settings, client_ip(request)),
+                ip_hash=ip_hash(settings, client_ip(request, settings)),
             )
     except IntegrityError as exc:
         raise AppError(ErrorCode.VERSION_CONFLICT) from exc
@@ -136,7 +136,7 @@ def put_profile(
 def post_consent(
     body: ConsentIn, auth: AuthDep, request: Request, settings: SettingsDep, engine: EngineDep
 ) -> dict[str, Any]:
-    ih = ip_hash(settings, client_ip(request))
+    ih = ip_hash(settings, client_ip(request, settings))
     with engine.begin() as conn:
         at = service.insert_consents(
             conn, auth.user_id, [API_TO_KIND[body.key]], doc_version=body.version, ip_hash=ih
@@ -185,7 +185,7 @@ def post_risk_assessment(
                     "level": level,
                     "version_no": int(row.version_no),
                 },
-                ip_hash=ip_hash(settings, client_ip(request)),
+                ip_hash=ip_hash(settings, client_ip(request, settings)),
             )
     except IntegrityError as exc:
         raise AppError(ErrorCode.VERSION_CONFLICT) from exc

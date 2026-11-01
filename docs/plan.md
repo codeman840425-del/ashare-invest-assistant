@@ -534,7 +534,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 - **特征**：流动性（日均成交额、`turnover_20d_avg`、`amihud_20d`）、波动（`volatility_20d`、`intraday_amplitude_20d`、ATR%）、趋势（`ma_trend`、`momentum_60d`）、基本面完整度与质量（`roe_ttm`、`profit_cagr_3y`、`dividend_continuous_years`、财报期数）、情绪活跃度（`limit_up_count_20d`）、**用户自身行为**（该股历史平均持有天数、是否有同日买卖的做T记录、交易频率——来自导入成交）、画像（投资期限、精力、风险承受）。
 - **规则化打分**（分类器配置 `horizon_classifier_versions`，不可变）：每个周期 0–100 分，例如：`intraday_t` = 有底仓 × 日内振幅 ≥ 3% × 日成交额 ≥ 2 亿 × 用户精力 ≥ 中 × 历史有做T行为加分；`long` = 基本面完整（≥ 12 期财报）× ROE/分红稳定 × 用户期限 ≥ 长；`swing`、`short` 同理（**以上阈值均为示例**，正式规则与阈值由策略研究员在 `docs/strategies/` 中给出，写入不可变的 `horizon_classifier_versions`）（见 horizon_classifier.md v1）。≥ 60 分的周期列为"适合"，并给出每个周期 2–4 条理由（引用特征值与证据 ID）及不适合的理由。
 - 每个"适合"周期下，按策略 `applicability` 与 `fit_dimensions` 匹配列出适用策略（`fit_score` 排序）。
-- **新手限制短线【已定 2026-11-01，问题 37 方案 A】**：`profile.experience` 为 novice 或未填写时，`short` 最高 59 分（不列为“适合”），由分类器 1.1.0 的 `requires` 规则 `SH0C` 实现（6.1）；用户仍可经 `fit_ack` 确认后覆盖。`intraday_t` 暂不加同类封顶（研究员建议，待定，不阻塞）。
+- **新手限制短线【已定 2026-11-01，问题 37 方案 A】**：`profile.experience` 为 novice 或未填写时，`short` 最高 59 分（不列为“适合”），由分类器 1.1.0 的 `requires` 规则 `SH0C` 实现（6.1）；用户仍可经 `fit_ack` 确认后覆盖。`intraday_t` 同样封顶 59，口径一致，由 `requires` 规则 `IT0C` 实现【编排者默认，用户可否决，2026-11-01】。**新手封顶的落点**：只写在 `config/horizon_classifier.yaml` 对应周期的 `requires` 中（`else_cap: 59`），不在 hard gates、不在代码里硬编码，也不另设“画像封顶”块；分类器输出的 `caps[]` 以 `kind: requires`、`rule_id: SH0C/IT0C` 体现。horizon_classifier.md §4 的 rules 块由研究员按本节补同两条（文档同步，不改规则结构）。
 - **用户覆盖**：分类结果生成 `strategy_instances`（`status=proposed`，**用户确认后才变为 active**，2.5.0），替代原先的 `user_symbol_strategy_settings`；用户修改后系统不再自动改动，只在分类结果变化时提示"系统建议已变化"。
 
 #### 2.5.4 引擎流水线（L2 求值 → L3 候选信号 → 可执行性 → 计划草案）
@@ -916,7 +916,7 @@ screen: null               # 选股模板写 {universe, filters[], rank_by, top_
 | ⑰ `ctx.now_hhmm` 用于入场规则 | **允许**（G 节 ctx 限制的唯一例外）：`ctx.now_hhmm`（北京时间 `HH:MM` 字符串，可与字面量比较）只依赖时钟、不依赖持仓，可用于任何角色的规则。求值取值：盘中 = 本轮扫描时刻；`post_close_stats` 重放 = 被重放 bar 的结束时刻；日线盘后规则中使用 → 导入时报 `CARD_IMPORT_INVALID`（`issue=intraday_ctx_in_daily_rule`）。T-01 目前为盘后统计，不阻塞。 |
 | ⑱ ST/*ST 涨跌幅 | 已核实，2026-07-06 起 10%、此前 5%（2.11、2.13、`market_rules.yaml`）。风险警示股票的 50 万股买入上限（主板与创业板，科创板不适用）与限价申报约束（仅沪市）见 2.13（T006b 已核实）。 |
 
-研究员侧原待回答的问题 19（分红是否计入摊薄成本）与 C(7) T+1 hold 阈值均已于 2026-11-01 定（第 9 节）。问题 37（novice 限制 short）【已定 2026-11-01，方案 A】，见 2.5.3、6.1 `SH0C`。仍待定（不阻塞）：`intraday_t` 是否同样封顶（研究员建议暂不加）。
+研究员侧原待回答的问题 19（分红是否计入摊薄成本）与 C(7) T+1 hold 阈值均已于 2026-11-01 定（第 9 节）。问题 37（novice 限制 short）【已定 2026-11-01，方案 A】，见 2.5.3、6.1 `SH0C`。`intraday_t` 同样封顶（`IT0C`，编排者默认，用户可否决）。
 
 
 ### 2.6 通知渠道（站内为主，可插拔）
@@ -2380,7 +2380,7 @@ executability:                  # 2.5.9 原因码的默认阈值
 **`config/horizon_classifier.yaml`**（周期分类器的**框架参数**与种子版本，2.5.3；导入为不可变的 `horizon_classifier_versions`，规则正文由策略研究员给出）
 ```yaml
 schema_version: 1
-version_no: 2                    # T-A03：问题 37 方案 A 新增 SH0C，发新版本（v1 不可变，保留）
+version_no: 2                    # T-A03：问题 37 方案 A 新增 SH0C、IT0C，发新版本（v1 不可变，保留）
 classifier_version: "1.1.0"     # T-A03 新增键：对外的语义化版本（契约 /horizon-assessments.classifier_version，正则见契约 §7.4 `/horizon-assessments`）；v1 = "1.0.0"
 suitable_threshold: 60          # int，0–100 分 ≥ 60 列为“适合”
 reasons_per_horizon: [2, 4]     # 每个周期给 2–4 条理由
@@ -2438,6 +2438,8 @@ rules:
            reason: "做T 需要已有底仓（T+1：当日买入不能当日卖出）"}
         - {id: IT0B, input: profile.effort, op: in, value: [medium, high], else_cap: 59,
            reason: "做T 需要盘中盯盘，画像精力为低或未填写"}
+        - {id: IT0C, input: profile.experience, op: in, value: [intermediate, advanced], else_cap: 59,
+           reason: "做T 需要盘中决断与纪律，画像经验为新手或未填写"}   # 【编排者默认，用户可否决，2026-11-01】口径同 SH0C；用户可经 fit_ack 覆盖
       components:
         - {id: IT1, input: f.intraday_amplitude_20d, transform: rank_pct,
            bands: [{op: ge, value: 0.7, pts: 30}, {op: ge, value: 0.5, pts: 20}, {op: ge, value: 0.3, pts: 10}],
@@ -2981,7 +2983,7 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
    - **【已定 2026-11-01，用户拍板】2023-04-10 之前的规则不建模**（`modeled_from`）；起始日依据 O9、O10 第 10.9 条（政府网转载证监会信息确认日历日期，交易所原页未找到）；更早的回看标“交易规则未建模”。需要时再按 2020-08-24 分段。
    - **【已核实 T006b，T-A03 已同步】** 涨跌停价舍入：沪 3.3.17、深 3.3.19（含两条边界规则）；风险警示 50 万股买入上限：沪 4.4.10、深 4.5.4，**只适用主板与创业板，科创板不适用**（沪 4.4.1、6.14）；只能限价申报**只适用沪市**（沪 4.4.9）；科创板单笔 ≥ 200 股（沪 6.7）。
    - 仍待核实（不阻塞）：① 因子数量 77/82/85 的口径（2.5.14 H⑪，T003）；② 科创板“超出 200 股后按 1 股递增”与北交所交易单位（2.13；北交所 V1 不扫描）。
-37. **新手是否限制短线周期**——**【已定 2026-11-01，方案 A】**（horizon_classifier.md §9）：`profile.experience` 为 novice 或未填写时 `short` 封顶 59（不列为“适合”），用户可经 `fit_ack` 覆盖；实现为分类器新版本 1.1.0（`version_no: 2`）的 `requires` 规则 `SH0C`（6.1）。`intraday_t` 是否同样处理【待定，不阻塞】，研究员建议先不加。
+37. **新手是否限制短线周期**——**【已定 2026-11-01，方案 A】**（horizon_classifier.md §9）：`profile.experience` 为 novice 或未填写时 `short` 封顶 59（不列为“适合”），用户可经 `fit_ack` 覆盖；实现为分类器新版本 1.1.0（`version_no: 2`）的 `requires` 规则 `SH0C`（6.1）。`intraday_t` 同样封顶 59，规则 `IT0C`【编排者默认，用户可否决，2026-11-01】。
 
 **I. 编排者默认（2026-11-01 12:32）——【编排者默认，用户可否决】**
 - **C(1) 首批 P0 策略**：G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01（研究员 `docs/strategies/catalog.md` 第 2 节总表；取代早期方案中 2.5.10 的 ①–⑨ MVP 模板清单）。引擎接口覆盖核对与缺口见 2.5.11A。

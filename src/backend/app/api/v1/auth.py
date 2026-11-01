@@ -17,7 +17,7 @@ from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.me import build_me
-from app.auth import abuse, service
+from app.auth import abuse, invites, service
 from app.auth.deps import (
     AuthDep,
     EngineDep,
@@ -120,9 +120,10 @@ def register(
     passwords: PasswordsDep,
     rds: RedisDep,
 ) -> RegisterOut:
-    # closed：一律 503（先于参数业务校验）。invite：邀请码的存储与核验未定义（无表、无发放接口），
-    # 不能核验就不能放行 → 按最保守理解同 closed（报告 TODO）。open：契约“保留，V1 不用”，照实现。
-    if settings.registration_mode != RegistrationMode.OPEN:
+    # closed：一律 503（先于参数业务校验）。invite（T-B03c）：invite_code、apply_note 必填，
+    # 邀请码与建用户同一事务核验。open：契约“保留，V1 不用”，照实现。
+    mode = settings.registration_mode
+    if mode == RegistrationMode.CLOSED:
         raise AppError(ErrorCode.REGISTRATION_CLOSED)
 
     # 防滥用（plan §3.6）：同一 IP 每小时/每日上限（每次尝试都计，含校验失败）→ 429；
@@ -144,6 +145,16 @@ def register(
     display_name = body.display_name.strip()
     if not display_name:
         fields.append({"field": "display_name", "issue": "must not be blank"})
+    apply_note = (body.apply_note or "").strip() or None
+    if mode == RegistrationMode.INVITE:
+        # 邀请码缺失与无效同一种错误（不区分原因）；格式错误不查库
+        if (
+            body.invite_code is None
+            or invites.normalize(body.invite_code, settings.business.auth.invite.code_bytes) is None
+        ):
+            fields.append({"field": "invite_code", "issue": "invalid"})
+        if apply_note is None:
+            fields.append({"field": "apply_note", "issue": "required"})
     if fields:
         raise _validation(fields)
 
@@ -151,6 +162,19 @@ def register(
     pw_hash = passwords.hash(body.password)
     try:
         with engine.begin() as conn:
+            # 先占用邀请码再查重名：没有有效邀请码的人探测不到用户名是否已存在；
+            # 之后任何失败（含 409）整个事务回滚，占用随之撤销
+            invite_id = (
+                invites.redeem(
+                    conn,
+                    settings,
+                    raw_code=body.invite_code,
+                    username=username,
+                    now=service.now_utc(),
+                )
+                if mode == RegistrationMode.INVITE
+                else None
+            )
             if service.username_taken(conn, username):
                 raise AppError(ErrorCode.CONFLICT, details={"field": "username"})
             row = conn.execute(
@@ -159,7 +183,7 @@ def register(
                     username=username,
                     password_hash=pw_hash,
                     display_name=display_name,
-                    apply_note=(body.apply_note or "").strip() or None,
+                    apply_note=apply_note,
                     role=Role.USER,
                     status=AccountStatus.PENDING,
                     password_changed_at=service.now_utc(),
@@ -173,8 +197,20 @@ def register(
                 actor_role=Role.USER,
                 target_type="user",
                 target_id=str(row.id),
+                detail=None if invite_id is None else {"invite_id": str(invite_id)},
                 ip_hash=ih,
             )
+            if invite_id is not None:
+                invites.mark_used_by(conn, invite_id, row.id)
+                service.audit(
+                    conn,
+                    action="invite.redeemed",
+                    actor_id=row.id,
+                    actor_role=Role.USER,
+                    target_type="invite",
+                    target_id=str(invite_id),
+                    ip_hash=ih,
+                )
     except IntegrityError as exc:
         # 并发注册同名：唯一约束兜底
         raise AppError(ErrorCode.CONFLICT, details={"field": "username"}) from exc

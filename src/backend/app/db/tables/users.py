@@ -79,6 +79,36 @@ login_attempts = Table(
     comment="限速、锁定与审计；保留 180 天（由定时任务删除，故不加不可变触发器）",
 )
 
+# 邀请码（plan §3.3 / §6.1 invite.*，契约 §7.9，T-B03c）：只存 HMAC 摘要；状态由字段推导，不物理删除
+invite_codes = Table(
+    "invite_codes",
+    metadata,
+    pk_uuid(),
+    txt("code_hash", nullable=False),
+    uuid_col("created_by", nullable=False, fk="app.users.id"),
+    created_at(),
+    ts("expires_at", nullable=False),
+    integer("max_uses", nullable=False, server_default=text("1")),
+    integer("used_count", nullable=False, server_default=text("0")),
+    uuid_col("used_by", fk="app.users.id"),
+    ts("used_at"),
+    ts("revoked_at"),
+    uuid_col("revoked_by", fk="app.users.id"),
+    txt("bound_username"),
+    txt("note"),
+    UniqueConstraint("code_hash"),
+    CheckConstraint("max_uses = 1", name="max_uses_v1"),
+    CheckConstraint("used_count >= 0 AND used_count <= max_uses", name="used_count_range"),
+    CheckConstraint("expires_at > created_at", name="expires_after_created"),
+    CheckConstraint("(revoked_at IS NULL) = (revoked_by IS NULL)", name="revoked_pair"),
+    CheckConstraint("note IS NULL OR char_length(note) <= 200", name="note_len"),
+    schema=APP,
+    comment=(
+        "邀请码：HMAC-SHA256(APP_MASTER_KEY, 归一化码)，明文不入库；"
+        "状态 active/used/expired/revoked 由字段推导"
+    ),
+)
+
 # 按月声明式分区（plan §3A.6）：分区键 at 必须在主键里
 audit_logs = Table(
     "audit_logs",

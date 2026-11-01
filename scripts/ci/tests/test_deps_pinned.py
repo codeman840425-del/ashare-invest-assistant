@@ -14,7 +14,8 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[3]
 CI = REPO / "scripts" / "ci"
-YAML_SCRIPTS = ["secret_scan.py", "gitleaks_report.py", "check_fixtures.py", "check_gateway_limits.py"]
+YAML_SCRIPTS = ["secret_scan.py", "gitleaks_report.py", "check_fixtures.py", "check_gateway_limits.py",
+                "check_secret_boundary.py"]
 WORKFLOWS = [REPO / ".github/workflows/secret-scan.yml", REPO / ".github/workflows/ci.yml"]
 PIN_RE = re.compile(r"pyyaml==([0-9][0-9A-Za-z.]*)")
 

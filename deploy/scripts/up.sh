@@ -9,6 +9,7 @@
 #   一次性服务失败时 --wait 返回非 0，用 `compose.sh logs migrate timescale-apply` 看原因
 # - 项目名/卷名优先级见 compose.sh 头部注释：只认 deploy/env/.env（缺省按工作树目录名派生），
 #   shell 里导出的 COMPOSE_PROJECT_NAME 不生效（T-O03）；启动前先打印解析结果
+# - 证书封装密钥缺失时：全新部署自动生成（seal-keygen.sh，不覆盖已有文件）；已有数据卷则停止并提示从备份恢复（T-O09）
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,6 +21,22 @@ if ! docker info >/dev/null 2>&1 && ! sudo -n docker info >/dev/null 2>&1; then
 fi
 
 "$HERE/compose.sh" --resolve
+
+# 证书封装密钥（T-O09）：compose 的 secret 文件必须存在。
+# - 全新部署（本卷前缀的 pgdata 卷还不存在）：自动调用 seal-keygen.sh 生成（已有文件绝不覆盖）。
+# - 已有数据卷但缺私钥：停止。库里可能已有用旧私钥加密的证书，换新密钥会让它们永远解不开；
+#   先从私钥备份恢复（deploy/runbooks/data-licence-seal-keys.md），确认库里没有证书时才手动运行 seal-keygen.sh。
+secrets_dir="$("$HERE/compose.sh" --get AIA_SECRETS_DIR)"
+volume_prefix="$("$HERE/compose.sh" --get AIA_VOLUME_PREFIX)"
+if [ ! -e "$secrets_dir/data_licence_seal_private_keys" ] || [ ! -e "$secrets_dir/data_licence_seal_public_keys" ]; then
+  if docker volume inspect "${volume_prefix}_pgdata" >/dev/null 2>&1 \
+     || sudo -n docker volume inspect "${volume_prefix}_pgdata" >/dev/null 2>&1; then
+    echo "缺少证书封装密钥（$secrets_dir），但数据卷 ${volume_prefix}_pgdata 已存在：不自动生成新密钥。" >&2
+    echo "请先从私钥备份恢复；确认库里没有已加密的证书后，才可手动运行 deploy/scripts/seal-keygen.sh。" >&2
+    exit 1
+  fi
+  "$HERE/seal-keygen.sh"
+fi
 
 build_flag=()
 [ "${AIA_UP_BUILD:-1}" = "1" ] && build_flag=(--build)

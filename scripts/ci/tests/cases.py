@@ -63,13 +63,24 @@ def cases() -> list[Case]:
         # S3
         Case("s3", "keys/k.txt", "-----BEGIN " + "RSA PRIVATE" + " KEY-----\n", {"S3"}, set(), {"S3"}),
         Case("s3-neg", "keys/p.txt", "-----BEGIN PUBLIC KEY-----\n", set(), set(), set()),
+        # S3：证书封装私钥（T-O09）。值在运行时拼出：前缀 + 虚构填充，不是可用的密钥
+        Case("s3-x25519-pkcs8", "deploy/k.json", '{"1": "' + "MC4CAQAwBQYDK2Vu" + "BCIEI" + fake_token(43, "TESTONLY") + '"}\n',
+             {"S3"}, set(), {"S3"}),
+        # 公钥（SPKI，MCowBQYDK2VuAyEA 开头）不拦
+        Case("s3-x25519-pub-neg", "deploy/p.json", '{"1": "' + "MCowBQYDK2VuAyEA" + fake_token(44, "TESTONLY") + '"}\n',
+             set(), set(), set()),
+        Case("s3-seal-key-file", "deploy/secrets/data_licence_seal_private_keys", "{}\n", {"S3"}, set(), {"S3"}),
+        Case("s3-seal-key-file-bak", "backup/data_licence_seal_private_keys.20261102", "x\n", {"S3"}, set(), {"S3"}),
+        Case("s3-seal-pub-file-neg", "deploy/secrets/data_licence_seal_public_keys", "{}\n", set(), set(), set()),
         # S4
         Case("s4-envfile", "deploy/.env.local", "FOO=bar\n", {"S4"}, set(), {"S4"}),
         Case("s4-example-real", "deploy/.env.example", "POSTGRES_" + "PASSWORD=" + "notaplaceholder1\n", {"S4"}, set(), {"S4"}),
+        Case("s4-example-seal-key", "deploy/y/.env.example", "DATA_LICENCE_SEAL_" + "PRIVATE_KEYS=" + "notaplaceholder1\n",
+             {"S4"}, set(), {"S4"}),
         Case(
             "s4-example-neg",
             "deploy/x/.env.example",
-            "POSTGRES_PASSWORD=changeme-local\nAPP_MASTER_KEY=\nMAIRUI_LICENCE=<licence>\nDEEPSEEK_API_KEY=example-key\nLOG_LEVEL=info\n",
+            "POSTGRES_PASSWORD=changeme-local\nAPP_MASTER_KEY=\nMAIRUI_LICENCE=<licence>\nDATA_LICENCE_SEAL_PRIVATE_KEYS=\nDEEPSEEK_API_KEY=example-key\nLOG_LEVEL=info\n",
             set(), set(), set(),
         ),
         # S5

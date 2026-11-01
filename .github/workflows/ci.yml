@@ -1,6 +1,6 @@
 # CI 质量门禁（plan.md §8.0、T-O02）。密钥与敏感信息扫描在 secret-scan.yml（T-O02a）。
 # 所有第三方 action 按提交 SHA 固定（注释为对应版本）。
-# CI 不访问真实麦蕊与真实 LLM：不配置 MAIRUI_LICENCE / DEEPSEEK_API_KEY，不引用任何 secret，一律用 mock 或录制数据。
+# CI 不访问真实麦蕊与真实 LLM：不配置麦蕊证书 / DEEPSEEK_API_KEY，不引用任何 secret，一律用 mock 或录制数据。
 # 兜底：麦蕊基址指向本机不可达端口，万一有代码误发请求也只会连接失败，不会到达公网（scripts/ci/tests 有检查）。
 name: ci
 
@@ -384,3 +384,20 @@ jobs:
           version: ${{ env.UV_VERSION }}
       - name: check_gateway_limits.py
         run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_gateway_limits.py
+
+  # 部署配置的密钥边界（T-A07 §5、T-O09）：部署配置不再有全站麦蕊证书变量；不用 env_file；
+  # 证书封装私钥（secret / *_PRIVATE_KEYS 变量 / 私钥挂载）只给 ingest；api 只拿公钥。
+  # 正反例在 scripts/ci/tests/test_secret_boundary.py（secret-scan.yml selftest job 运行）。
+  secret-boundary:
+    name: secret-boundary (私钥只给 ingest，无全站证书变量)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: check_secret_boundary.py
+        run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_secret_boundary.py

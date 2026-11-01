@@ -1,8 +1,11 @@
 # ashare-invest-assistant —— 基础编排（plan §1.3、§2.1A、§6）
 # 一键启动（本地默认叠加 docker-compose.dev.yml = 回放模式）：deploy/scripts/up.sh
 #
-# 硬约束：MAIRUI_LICENCE 只出现在 ingest 的 environment 中；其他服务不得引用它，
-#         且任何服务都不使用 env_file（避免把 .env 整体注入）。CI（T-O02）会检查。
+# 硬约束（T-A07 / T-O09）：不再有全站麦蕊证书变量；用户证书 HPKE 加密存库（plan §2.1B）。
+#   证书封装私钥（docker secret data_licence_seal_private_keys）只挂给 ingest；公钥（data_licence_seal_public_keys）
+#   挂给 api 与 ingest（ingest 轮换时要重新封装）。secret 是只读挂载，容器内路径 /run/secrets/<名>，
+#   后端按同名设置项加载（pydantic-settings secrets_dir=/run/secrets：DATA_LICENCE_SEAL_PRIVATE_KEYS / _PUBLIC_KEYS）。
+#   任何服务都不使用 env_file（避免把 .env 整体注入）。CI（scripts/ci/check_secret_boundary.py，CI job secret-boundary）检查这几条。
 # 全部应用服务共用后端镜像（deploy/docker/backend.Dockerfile，上下文 src/backend）：
 #   api（uvicorn app.main:app）、migrate（一次性：alembic upgrade head）、
 #   worker/beat/ingest/signal-rt（python -m app.workers.<名>，T-B02 入口；目前为后端的常驻占位实现，
@@ -88,6 +91,10 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       IMPORT_STORAGE_BACKEND: ${IMPORT_STORAGE_BACKEND:-local}
       IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
+      # 证书封装：api 只有公钥（只能加密）；当前版本号
+      DATA_LICENCE_SEAL_KEY_VERSION: ${DATA_LICENCE_SEAL_KEY_VERSION:-1}
+    secrets:
+      - data_licence_seal_public_keys
     volumes:
       - imports:/var/lib/aia-dev/imports
       - ../../config:/app/config:ro
@@ -123,7 +130,7 @@ services:
       <<: *worker-healthcheck
       test: ["CMD", "python", "-m", "app.workers.healthcheck", "worker"]
 
-  # 行情采集服务：全站唯一调用麦蕊、唯一持有 licence（plan §2.1A）
+  # 行情采集服务：全站唯一调用麦蕊、唯一能解密用户证书（plan §2.1A、§2.1B）
   ingest:
     image: *backend-image
     command: ["python", "-m", "app.workers.ingest"]
@@ -135,10 +142,14 @@ services:
       SERVICE_NAME: ingest
       MAIRUI_MODE: ${MAIRUI_MODE:-replay}
       MAIRUI_REPLAY_DIR: ${MAIRUI_REPLAY_DIR:-/fixtures/mairui}
-      MAIRUI_LICENCE: ${MAIRUI_LICENCE:-}
       MAIRUI_BASE_URL: ${MAIRUI_BASE_URL:-https://api.mairuiapi.com}
       MAIRUI_PRO_BASE_URL: ${MAIRUI_PRO_BASE_URL:-https://pro.mairuiapi.com}
       MAIRUI_EGRESS_IP_EXPECTED: ${MAIRUI_EGRESS_IP_EXPECTED:-}
+      DATA_LICENCE_SEAL_KEY_VERSION: ${DATA_LICENCE_SEAL_KEY_VERSION:-1}
+    # 私钥只在这里出现（CI 检查）
+    secrets:
+      - data_licence_seal_private_keys
+      - data_licence_seal_public_keys
     volumes:
       - ../../config:/app/config:ro
     depends_on: *app-depends
@@ -265,3 +276,12 @@ volumes:
     name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_redisdata
   imports:
     name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_imports
+
+# 证书封装密钥（T-O09）：由 deploy/scripts/seal-keygen.sh 生成在仓库外的 AIA_SECRETS_DIR（compose.sh 解析，
+# 默认 ~/.config/aia/secrets/<卷前缀>）。私钥 600、属主为容器用户；不入库、不进镜像、不进 .env。
+# 备份与轮换见 deploy/runbooks/data-licence-seal-keys.md（私钥丢失 = 已加密证书无法解密）。
+secrets:
+  data_licence_seal_private_keys:
+    file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/data_licence_seal_private_keys
+  data_licence_seal_public_keys:
+    file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/data_licence_seal_public_keys

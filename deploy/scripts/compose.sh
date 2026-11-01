@@ -4,7 +4,8 @@
 #   deploy/scripts/compose.sh logs -f ingest
 #   deploy/scripts/compose.sh down -v
 # AIA_PROFILE=dev（默认，叠加 docker-compose.dev.yml = 麦蕊回放模式）| live（只用基础文件；生产/live 要求 SESSION_COOKIE_SECURE=true）
-#   deploy/scripts/compose.sh --resolve   # 只打印解析出的 项目名 / 卷前缀 / 后端镜像 及来源，不调用 docker
+#   deploy/scripts/compose.sh --resolve   # 只打印解析出的 项目名 / 卷前缀 / 后端镜像 / 密钥目录 及来源，不调用 docker
+#   deploy/scripts/compose.sh --get NAME  # 只输出一个解析结果（COMPOSE_PROJECT_NAME|AIA_VOLUME_PREFIX|AIA_BACKEND_IMAGE|AIA_SECRETS_DIR）
 #
 # 项目名与卷名的优先级（T-O03；多个工作树共用一个 compose 项目“aia”就是因为 shell 里导出的
 # COMPOSE_PROJECT_NAME 盖过了 .env）：
@@ -13,6 +14,9 @@
 #   AIA_VOLUME_PREFIX   ：deploy/env/.env 的值 > 项目名；同样不认 shell。数据卷显式命名为 <前缀>_pgdata/_redisdata/_imports，
 #                         改项目名时把前缀设成旧项目名即可沿用原有数据卷（不删卷、不迁数据）。
 #   AIA_BACKEND_IMAGE   ：shell > .env > aia-backend:<项目名>（每个项目各自的镜像 tag，构建不会互相覆盖）。
+#   AIA_SECRETS_DIR     ：deploy/env/.env 的值 > ${XDG_CONFIG_HOME:-~/.config}/aia/secrets/<卷前缀>（T-O09）；不认 shell。
+#                         证书封装密钥（seal-keygen.sh 生成）放在仓库外，按数据卷前缀区分：密钥跟着它加密的数据走，
+#                         同一份数据卷换项目名/工作树仍用同一把密钥。
 #   其余变量按 docker compose 默认：shell 导出 > .env > compose 文件里的默认值。
 set -euo pipefail
 
@@ -55,6 +59,17 @@ if [ -n "$shell_prefix" ] && [ "$shell_prefix" != "$prefix" ]; then
   echo "警告：忽略 shell 中导出的 AIA_VOLUME_PREFIX=$shell_prefix，使用 $prefix（$prefix_src）。" >&2
 fi
 export COMPOSE_PROJECT_NAME="$project" AIA_VOLUME_PREFIX="$prefix"
+shell_secrets="${AIA_SECRETS_DIR-}"
+secrets_dir="$(env_get AIA_SECRETS_DIR)"; secrets_src="deploy/env/.env"
+if [ -z "$secrets_dir" ]; then
+  secrets_dir="${XDG_CONFIG_HOME:-$HOME/.config}/aia/secrets/$prefix"; secrets_src="按卷前缀派生"
+fi
+case "$secrets_dir" in /*) ;; *) echo "AIA_SECRETS_DIR=$secrets_dir 必须是绝对路径" >&2; exit 2 ;; esac
+case "$secrets_dir/" in "$ROOT"/*) echo "AIA_SECRETS_DIR 不能在仓库里（$secrets_dir）" >&2; exit 2 ;; esac
+if [ -n "$shell_secrets" ] && [ "$shell_secrets" != "$secrets_dir" ]; then
+  echo "警告：忽略 shell 中导出的 AIA_SECRETS_DIR=$shell_secrets，使用 $secrets_dir（$secrets_src）。" >&2
+fi
+export AIA_SECRETS_DIR="$secrets_dir"
 image_src="shell"
 if [ -z "${AIA_BACKEND_IMAGE-}" ]; then
   if [ -n "$(env_get AIA_BACKEND_IMAGE)" ]; then image_src="deploy/env/.env"; AIA_BACKEND_IMAGE="$(env_get AIA_BACKEND_IMAGE)"
@@ -63,7 +78,14 @@ if [ -z "${AIA_BACKEND_IMAGE-}" ]; then
 fi
 
 if [ "${1-}" = "--resolve" ]; then
-  echo "compose 项目：$project（$project_src）；数据卷前缀：$prefix（$prefix_src）；后端镜像：$AIA_BACKEND_IMAGE（$image_src）；profile：$PROFILE"
+  echo "compose 项目：$project（$project_src）；数据卷前缀：$prefix（$prefix_src）；后端镜像：$AIA_BACKEND_IMAGE（$image_src）；密钥目录：$secrets_dir（$secrets_src）；profile：$PROFILE"
+  exit 0
+fi
+if [ "${1-}" = "--get" ]; then
+  case "${2-}" in
+    COMPOSE_PROJECT_NAME|AIA_VOLUME_PREFIX|AIA_BACKEND_IMAGE|AIA_SECRETS_DIR) printf '%s\n' "${!2}" ;;
+    *) echo "--get 只支持 COMPOSE_PROJECT_NAME|AIA_VOLUME_PREFIX|AIA_BACKEND_IMAGE|AIA_SECRETS_DIR" >&2; exit 2 ;;
+  esac
   exit 0
 fi
 

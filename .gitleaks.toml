@@ -48,6 +48,19 @@ regex = '''-----BEGIN [A-Z ]*PRIVATE KEY-----'''
 keywords = ["private key"]
 tags = ["S3", "block"]
 
+[[rules]]
+id = "S3-x25519-pkcs8"
+description = "S3 证书封装私钥（X25519 PKCS#8 DER 的 base64，T-O09）"
+regex = '''MC4CAQAwBQYDK2VuBCIEI[A-Za-z0-9+/]{43}'''
+keywords = ["mc4caqawbqydk2vubciei"]
+tags = ["S3", "block"]
+
+[[rules]]
+id = "S3-seal-private-key-file"
+description = "S3 不允许提交证书封装私钥文件（seal-keygen.sh 产物，T-O09）"
+path = '''(^|/)data_licence_seal_private_keys[^/]*$'''
+tags = ["S3", "block"]
+
 # ---------------------------------------------------------------- S4 环境文件
 [[rules]]
 id = "S4-env-file"
@@ -61,7 +74,7 @@ paths = ['''(^|/)\.env\.example$''']
 id = "S4-env-example-value"
 description = "S4 .env.example 中敏感键只能为空或占位符（changeme…、example…、<...>）"
 path = '''(^|/)\.env\.example$'''
-regex = '''(?m)^[ \t]*(?:export[ \t]+)?(?:APP_MASTER_KEY|MAIRUI_LICENCE|DATABASE_URL|[A-Z0-9_]*_PASSWORD|[A-Z0-9_]*_API_KEY)[ \t]*=[ \t]*["']?([^\s"'#]+)'''
+regex = '''(?m)^[ \t]*(?:export[ \t]+)?(?:APP_MASTER_KEY|MAIRUI_LICENCE|DATA_LICENCE_SEAL_PRIVATE_KEYS|DATABASE_URL|[A-Z0-9_]*_PASSWORD|[A-Z0-9_]*_API_KEY)[ \t]*=[ \t]*["']?([^\s"'#]+)'''
 secretGroup = 1
 tags = ["S4", "block"]
 [[rules.allowlists]]

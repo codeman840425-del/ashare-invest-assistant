@@ -97,6 +97,8 @@ LINE_RULES: list[tuple[str, str, re.Pattern[str]]] = [
         ),
     ),
     ("S3", BLOCK, re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", A)),
+    # 证书封装私钥（T-O09）：X25519 PKCS#8 DER 的 base64 固定以这 21 个字符开头、共 64 个字符
+    ("S3", BLOCK, re.compile(r"MC4CAQAwBQYDK2VuBCIEI[A-Za-z0-9+/]{43}", A)),
     ("S5", BLOCK, re.compile(r"\b[A-Z]\d{9}\b", A)),
     ("S9", BLOCK, ACCOUNT_RE),
 ]
@@ -107,6 +109,7 @@ LINE_RULE_GL_IDS = [
     "S2-sk-heuristic",
     "S2-secret-assign",
     "S3-private-key",
+    "S3-x25519-pkcs8",
     "S5-sh-holder-code",
     "S9-fund-account",
 ]
@@ -118,7 +121,9 @@ S9_CARD_RE = re.compile(r"\b\d{16,19}\b", A)
 
 ENV_FILE_RE = re.compile(r"(^|/)\.env[^/]*$")
 ENV_EXAMPLE = ".env.example"
-ENV_SENSITIVE_KEY = re.compile(r"^(APP_MASTER_KEY|MAIRUI_LICENCE|DATABASE_URL|[A-Z0-9_]*_PASSWORD|[A-Z0-9_]*_API_KEY)$")
+# 证书封装私钥文件（deploy/scripts/seal-keygen.sh 的产物，T-O09）：任何路径、任何后缀都不得入库
+SEAL_KEY_FILE_RE = re.compile(r"(^|/)data_licence_seal_private_keys[^/]*$")
+ENV_SENSITIVE_KEY = re.compile(r"^(APP_MASTER_KEY|MAIRUI_LICENCE|DATA_LICENCE_SEAL_PRIVATE_KEYS|DATABASE_URL|[A-Z0-9_]*_PASSWORD|[A-Z0-9_]*_API_KEY)$")
 ENV_PLACEHOLDER = re.compile(r"^(|changeme[A-Za-z0-9_.-]*|example[A-Za-z0-9_.-]*|<[^<>]+>)$")
 
 _ID_WEIGHTS = (7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2)
@@ -374,6 +379,9 @@ def scan_blob(path: str, data: bytes, snap: Snapshot, allow: AllowList, where: s
     # S4：.env* 文件（.env.example 除外）
     if ENV_FILE_RE.search(path) and base != ENV_EXAMPLE:
         add(0, "S4", BLOCK, base, "S4-env-file")
+    # S3：证书封装私钥文件（按文件名，内容为空也拦）
+    if SEAL_KEY_FILE_RE.search(path):
+        add(0, "S3", BLOCK, base, "S3-seal-private-key-file")
 
     text, is_gbk = decode(data)
     if text is None:

@@ -1,6 +1,6 @@
 # 本地开发叠加层（deploy/scripts/up.sh 默认叠加）：
-#   1) 麦蕊回放模式：ingest 强制 MAIRUI_MODE=replay，并把 MAIRUI_LICENCE 置空——
-#      即使开发者 shell 或 .env 里有真实 licence，本地容器也拿不到（plan §2.1A：本地/CI 不持有真实 licence）。
+#   1) 麦蕊回放模式：ingest 强制 MAIRUI_MODE=replay。compose 不向任何容器传全站证书变量（T-O09），
+#      所以即使开发者 shell 里临时设置了真实证书（本机实测用），本地容器也拿不到（plan §2.1A/§2.1B）。
 #      回放数据读 tests/fixtures（只读挂载），录制的麦蕊样本约定放在 tests/fixtures/mairui/。
 #   2) 热重载：把源码只读挂载进容器（覆盖镜像内 /app/src/backend；依赖在镜像 /opt/venv，不受影响）。
 #      api 已用 `uvicorn app.main:app --reload`（T-O01a，只监视 app/，轮询模式）；
@@ -44,7 +44,6 @@ services:
     environment:
       <<: *dev-env
       MAIRUI_MODE: replay
-      MAIRUI_LICENCE: ""
       MAIRUI_REPLAY_DIR: /fixtures/mairui
     volumes:
       - ../../src/backend:/app/src/backend:ro

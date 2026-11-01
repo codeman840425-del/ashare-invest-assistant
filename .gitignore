@@ -14,8 +14,13 @@ src/backend/probes/samples/
 !**/.env.example
 
 # --- 证书 / 密钥 / 麦蕊 licence ---
-# 麦蕊 licence 是一段字符串，只经环境变量 MAIRUI_LICENCE 注入 ingest；
-# 任何把它落盘的文件形态都排除（另由 secret 扫描兜底）。
+# 麦蕊证书由用户在网页录入、HPKE 加密存库（plan §2.1B），部署配置里不再有全站证书变量（T-O09）；
+# 任何把证书落盘的文件形态都排除（另由 secret 扫描兜底）。
+# 证书封装密钥（deploy/scripts/seal-keygen.sh 生成）默认在仓库外 ~/.config/aia/secrets/；
+# 万一被放进工作树，下面几条也会排除（私钥文件另有 S3 扫描规则 S3-seal-private-key-file / S3-x25519-pkcs8）。
+data_licence_seal_*
+*_private_keys*
+deploy/secrets/
 *.pem
 *.key
 *.crt

@@ -2,9 +2,13 @@
 
 - 运行参数（数据库、Redis、密钥、端口等）只来自环境变量，与
   ``deploy/compose/docker-compose.yml`` 中 ``api`` 服务的 ``environment`` 同名。
-- 业务配置（``config/realtime.yaml``、``ingest.yaml`` 等）只读加载到
-  :attr:`Settings.business`，键为文件名（不含扩展名）。``config/strategies/`` 子目录
-  不在这里加载：L2 模板要经导入器成为不可变 DB 版本，放文件不会激活（plan §2.5.13）。
+- 业务配置（``config/realtime.yaml``、``ingest.yaml`` 等五个文件，plan §6.1）只读加载到
+  :attr:`Settings.business`，并按 :mod:`app.config_files` 严格校验：未知键、缺文件、
+  多余文件、取值越界 → 启动失败。``config/strategies/`` 子目录不在这里加载：L2 模板要经
+  导入器成为不可变 DB 版本，放文件不会激活（plan §2.5.13）。
+- ingest 心跳键名与过期阈值的优先级：环境变量 ``INGEST_HEARTBEAT_KEY`` /
+  ``INGEST_PAUSED_KEY`` / ``INGEST_STALE_AFTER_S`` > ``ingest.yaml`` 的 ``heartbeat`` 段
+  （plan §6.1、契约 §7.10）。
 - 本服务**不读取** ``MAIRUI_LICENCE``：licence 只注入 ``ingest`` 容器（plan §2.1A）；
   未声明的环境变量一律忽略（``extra="ignore"``）。
 """
@@ -12,18 +16,21 @@
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 import yaml
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+
+from app.config_files import BUSINESS_FILES, BusinessConfig
 
 AppEnv = Literal["local", "test", "staging", "production"]
 
@@ -43,6 +50,48 @@ class ConfigError(RuntimeError):
     """配置文件无法解析或结构不符合约定。"""
 
 
+class _Yaml12BoolLoader(yaml.SafeLoader):
+    """布尔只认 ``true``/``false``（YAML 1.2 语义）。
+
+    PyYAML 默认按 YAML 1.1 把 ``on``/``off``/``yes``/``no`` 也解析成布尔，
+    ``horizon_classifier.yaml`` 的 ``recompute.on`` 键会因此变成 ``True``。
+    """
+
+
+_Yaml12BoolLoader.yaml_implicit_resolvers = {
+    first: [(tag, rx) for tag, rx in resolvers if tag != "tag:yaml.org,2002:bool"]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+_Yaml12BoolLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool",
+    re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
+    list("tTfF"),
+)
+
+
+#: plan §6.1 / §7.4A：licence、密码、密钥只走环境变量；YAML 中出现这类键名直接启动失败（评审 m2）
+_SENSITIVE_KEY_PARTS: Final = frozenset(
+    {"licence", "license", "password", "passwd", "secret", "token", "apikey", "credential"}
+)
+
+
+def _sensitive_key_paths(data: object, path: str = "") -> list[str]:
+    """递归找出键名分段（按 ``_`` / ``-`` / ``.`` 切分）命中敏感词的键路径；只返回路径，不含值。"""
+    hits: list[str] = []
+    if isinstance(data, dict):
+        for key, value in data.items():
+            k = str(key)
+            here = f"{path}.{k}" if path else k
+            parts = set(re.split(r"[_\-.]", k.lower()))
+            if parts & _SENSITIVE_KEY_PARTS or "api_key" in k.lower():
+                hits.append(here)
+            hits.extend(_sensitive_key_paths(value, here))
+    elif isinstance(data, list):
+        for i, item in enumerate(data):
+            hits.extend(_sensitive_key_paths(item, f"{path}[{i}]"))
+    return hits
+
+
 def load_yaml_dir(config_dir: Path) -> dict[str, Any]:
     """读取 ``config_dir`` 下一层的 ``*.yaml`` / ``*.yml``（不递归），按文件名排序。
 
@@ -58,13 +107,17 @@ def load_yaml_dir(config_dir: Path) -> dict[str, Any]:
             raise ConfigError(f"配置文件重名：{path.stem}（.yaml 与 .yml 同时存在）")
         try:
             with path.open(encoding="utf-8") as fh:
-                data = yaml.safe_load(fh)
+                data = yaml.load(fh, Loader=_Yaml12BoolLoader)  # noqa: S506 - SafeLoader 子类
         except yaml.YAMLError as exc:
             raise ConfigError(f"配置文件解析失败：{path.name}") from exc
         if data is None:
             data = {}
         if not isinstance(data, dict):
             raise ConfigError(f"配置文件顶层必须是映射：{path.name}")
+        if hits := _sensitive_key_paths(data):
+            raise ConfigError(
+                f"配置文件 {path.name} 含疑似敏感键 {hits}：licence/密码/密钥只能走环境变量"
+            )
         result[path.stem] = data
     return result
 
@@ -78,11 +131,24 @@ class YamlDirSettingsSource(PydanticBaseSettingsSource):
 
     def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
         if field_name == "business":
-            return load_yaml_dir(self._config_dir), field_name, True
+            return self()["business"], field_name, True
         return None, field_name, False
 
     def __call__(self) -> dict[str, Any]:
-        return {"business": load_yaml_dir(self._config_dir)}
+        found = load_yaml_dir(self._config_dir)
+        check_config_dir_files(found, self._config_dir)
+        return {"business": found}
+
+
+def check_config_dir_files(found: dict[str, Any], config_dir: Path) -> None:
+    """``config/`` 顶层只允许五个约定文件（缺失或多余都失败）。"""
+    missing = sorted(set(BUSINESS_FILES) - set(found))
+    extra = sorted(set(found) - set(BUSINESS_FILES))
+    if missing or extra:
+        raise ConfigError(
+            f"config 目录 {config_dir} 文件不符合 plan §6.1："
+            f"缺少 {missing or '无'}，多余 {extra or '无'}"
+        )
 
 
 class Settings(BaseSettings):
@@ -108,9 +174,11 @@ class Settings(BaseSettings):
     redis_url: str | None = None
     health_check_timeout_s: float = Field(default=1.0, gt=0, le=10)
 
-    # --- ingest 新鲜度（/health 的 ingest 字段；键名为临时约定，待 T-B04a 对齐） ---
-    ingest_heartbeat_key: str = "ingest:heartbeat"
-    ingest_paused_key: str = "ingest:paused"
+    # --- ingest 新鲜度（/health/ready 的 ingest 字段，契约 §7.10）---
+    # 未设置环境变量时取 ingest.yaml 的 heartbeat 段（见 _ingest_keys_from_yaml）；
+    # 下面的默认值只在直接构造 Settings 且不经 yaml 来源时生效，与 plan §6.1 一致。
+    ingest_heartbeat_key: str = Field(default="ingest:heartbeat", min_length=1)
+    ingest_paused_key: str = Field(default="ingest:paused", min_length=1)
     ingest_stale_after_s: int = Field(default=120, gt=0)
 
     # --- 密钥 ---
@@ -123,7 +191,32 @@ class Settings(BaseSettings):
 
     # --- 业务配置（config/*.yaml，只读） ---
     config_dir: Path = Field(default_factory=_default_config_dir)
-    business: dict[str, Any] = Field(default_factory=dict)
+    business: BusinessConfig
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ingest_keys_from_yaml(cls, data: object) -> object:
+        """环境变量没给时，用 ingest.yaml ``heartbeat`` 段填充三个心跳参数。"""
+        if not isinstance(data, dict):
+            return data
+        business = data.get("business")
+        heartbeat: Any = None
+        if isinstance(business, BusinessConfig):
+            heartbeat = business.ingest.heartbeat.model_dump()
+        elif isinstance(business, dict):
+            ingest = business.get("ingest")
+            if isinstance(ingest, dict):
+                heartbeat = ingest.get("heartbeat")
+        if isinstance(heartbeat, dict):
+            pairs = (
+                ("ingest_heartbeat_key", "key"),
+                ("ingest_paused_key", "paused_key"),
+                ("ingest_stale_after_s", "stale_after_s"),
+            )
+            for field, key in pairs:
+                if data.get(field) is None and key in heartbeat:
+                    data = {**data, field: heartbeat[key]}
+        return data
 
     @field_validator("api_prefix")
     @classmethod
@@ -166,5 +259,16 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """进程级单例；测试中可 ``get_settings.cache_clear()`` 或用 ``create_app(settings)``。"""
-    return Settings()
+    """进程级单例；测试中可 ``get_settings.cache_clear()`` 或用 ``create_app(settings)``。
+
+    配置不合法时抛 :class:`ConfigError`（消息里只有字段路径与错误说明，不回显取值，
+    以免环境变量中的密钥进入日志），进程因此启动失败。
+    """
+    try:
+        return Settings()
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(p) for p in err['loc']) or '<root>'}: {err['msg']}"
+            for err in exc.errors(include_input=False, include_url=False)
+        )
+        raise ConfigError(f"配置校验失败：{problems}") from None

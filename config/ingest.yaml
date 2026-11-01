@@ -1,0 +1,32 @@
+# config/ingest.yaml —— 内容逐字取自 docs/plan.md §6.1（默认值唯一出处，改值先改 plan）。
+# 校验：src/backend/app/config_files.py（pydantic，extra="forbid"，未知键启动失败）。
+schema_version: 1
+budget:
+  per_minute_budget: 3000       # int，全局令牌桶（钻石版文档 6000/分钟，自设一半）【待 T003】；可热调，上调上限 5400
+  max_concurrency: 1            # int，并发上限【待 T003】
+  shares:                       # 各层每分钟份额，合计 ≤ per_minute_budget；高优先级可借用低优先级空闲额度
+    snapshot: 800               # 快照层
+    minute_bars: 2000           # 分钟线
+    other: 200                  # 其他接口
+  priority_min_share:
+    p0_intraday: 0.7            # 盘中 P0 至少 70%
+    p2_backfill_intraday: 0.0   # 盘中 P2 份额为 0，夜间可用满剩余额度
+backoff:
+  base_s: 1                     # ◇ 指数退避起点
+  max_s: 60                     # ◇ 退避上限
+  breaker_open_s: 300           # 连续 429/503 熔断 5 分钟
+leader:
+  lock_key: "ingest:leader"     # Redis 单活锁
+  lease_s: 30                   # ◇ 锁租期
+  renew_every_s: 10             # ◇ 续租间隔
+heartbeat:
+  key: "ingest:heartbeat"       # 环境变量 INGEST_HEARTBEAT_KEY 可覆盖
+  paused_key: "ingest:paused"   # 环境变量 INGEST_PAUSED_KEY 可覆盖
+  interval_s: 15                # ◇ leader 每 15 秒写一次
+  ttl_s: 600                    # ◇ 键过期时间（缺键也判 stale）
+  stale_after_s: 120            # 超过 120 秒视为 stale；环境变量 INGEST_STALE_AFTER_S 可覆盖
+egress:
+  check_on_start: true          # 启动时自检出口 IP，与环境变量 MAIRUI_EGRESS_IP_EXPECTED 比对，不一致拒绝外呼
+on_demand:
+  coalesce_window_s: 5          # ◇ 按需拉取“同证券同接口”合并窗口
+  priority: p1_daily

@@ -1,10 +1,8 @@
-"""契约 §3 枚举与 §6.1 不可执行原因码表 —— **全仓唯一来源**。
+"""契约 §3 枚举、§4.1 导入提示码与 §6.1 不可执行原因码表 —— **全仓唯一来源**。
 
 ``GET /meta/enums`` 直接下发本模块内容；其他模块需要枚举时从这里导入，不要另行定义。
-
-⚠ T-A01（架构师正在修订契约中的 Suggestion / CandidateSignal 结构）：
-:data:`PENDING_T_A01` 中列出的枚举与这两个结构强相关，取值以契约当前版本为准，
-T-A01 定稿后只改本文件。本任务刻意**不**定义 Suggestion / CandidateSignal 的模型。
+已同步到契约 :data:`CONTRACT_VERSION`（v0.2，T-A01 定稿；原 ``PENDING_T_A01`` 标记已解除，
+那 21 个枚举的取值 v0.2 未变）。
 """
 
 from __future__ import annotations
@@ -31,25 +29,25 @@ class Role(StrEnum):
 
 
 # ---------------------------------------------------------------------------
-# 证据 / 策略 / 信号（★ = 与 Suggestion/CandidateSignal 相关，见 PENDING_T_A01）
+# 证据 / 策略 / 信号
 # ---------------------------------------------------------------------------
 
 
-class EpistemicType(StrEnum):  # ★
+class EpistemicType(StrEnum):
     FACT = "fact"
     ESTIMATE = "estimate"
     HYPOTHESIS = "hypothesis"
     EXECUTION = "execution"
 
 
-class Horizon(StrEnum):  # ★
+class Horizon(StrEnum):
     INTRADAY_T = "intraday_t"
     SHORT = "short"
     SWING = "swing"
     LONG = "long"
 
 
-class Dimension(StrEnum):  # ★
+class Dimension(StrEnum):
     TECHNICAL = "technical"
     CAPITAL = "capital"
     FUNDAMENTAL = "fundamental"
@@ -58,14 +56,14 @@ class Dimension(StrEnum):  # ★
     NEWS = "news"
 
 
-class DimensionView(StrEnum):  # ★
+class DimensionView(StrEnum):
     BULLISH = "bullish"
     BEARISH = "bearish"
     NEUTRAL = "neutral"
     UNKNOWN = "unknown"
 
 
-class RuleRole(StrEnum):  # ★
+class RuleRole(StrEnum):
     ENTRY = "entry"
     HOLD = "hold"
     WEAKENING = "weakening"
@@ -76,7 +74,7 @@ class RuleRole(StrEnum):  # ★
     INVALIDATION = "invalidation"
 
 
-class Action(StrEnum):  # ★
+class Action(StrEnum):
     BUY = "buy"
     ADD = "add"
     HOLD = "hold"
@@ -85,38 +83,54 @@ class Action(StrEnum):  # ★
     WAIT = "wait"
 
 
-class TLeg(StrEnum):  # ★ 仅 intraday_t
+class TLeg(StrEnum):  # 仅 intraday_t
     SELL_FIRST = "sell_first"
     BUY_FIRST = "buy_first"
 
 
-class ConfidenceLevel(StrEnum):  # ★
+class ConfidenceLevel(StrEnum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
 
-class ConsensusStatus(StrEnum):  # ★
+class ConsensusStatus(StrEnum):
     UNANIMOUS = "unanimous"
     DIVERGENT = "divergent"
     SINGLE = "single"
     NONE = "none"
 
 
-class SuggestionOrigin(StrEnum):  # ★
+class StrategyEvalState(StrEnum):
+    ENTRY_OK = "entry_ok"
+    NOT_TRIGGERED = "not_triggered"
+    HOLD_OK = "hold_ok"
+    WEAKENING = "weakening"
+    EXIT_SIGNAL = "exit_signal"
+    VETOED = "vetoed"
+    INSUFFICIENT_DATA = "insufficient_data"
+
+
+class ExecutabilityStatus(StrEnum):
+    EXECUTABLE = "executable"
+    BLOCKED = "blocked"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class SuggestionOrigin(StrEnum):
     DAILY_BATCH = "daily_batch"
     INTRADAY_EVENT = "intraday_event"
     MANUAL_REFRESH = "manual_refresh"
 
 
-class SuggestionStatus(StrEnum):  # ★
+class SuggestionStatus(StrEnum):
     ACTIVE = "active"
     SUPERSEDED = "superseded"
     INVALIDATED = "invalidated"
     EXPIRED = "expired"
 
 
-class RiskControl(StrEnum):  # ★（RiskFlag.control）
+class RiskControl(StrEnum):  # RiskFlag.control
     STOP_TAKE = "stop_take"  # RC1
     POSITION_CAP = "position_cap"  # RC2
     TOTAL_EXPOSURE = "total_exposure"  # RC3
@@ -136,16 +150,77 @@ RISK_CONTROL_LABELS: Final[dict[RiskControl, str]] = {
 }
 
 
-class RiskLevel(StrEnum):  # ★（RiskFlag.level）
+class RiskLevel(StrEnum):  # RiskFlag.level
     INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
+
+
+class CardRiskLevel(StrEnum):  # L1 卡片风险等级，与 RiskLevel 无关
+    NORMAL = "normal"
+    HIGH = "high"
 
 
 class MarketRegime(StrEnum):
     UPTREND = "uptrend"
     RANGE = "range"
     DOWNTREND = "downtrend"
+
+
+class SignalKind(StrEnum):
+    RULE_FLIP = "rule_flip"
+    BREAKOUT = "breakout"
+    BREAKDOWN = "breakdown"
+    VWAP_DEVIATION = "vwap_deviation"
+    VOLUME_SPIKE = "volume_spike"
+    LIMIT_UP_TOUCH = "limit_up_touch"
+    LIMIT_DOWN_TOUCH = "limit_down_touch"
+    LIMIT_OPEN = "limit_open"
+    INVALIDATION_NEAR = "invalidation_near"
+    STOP_HIT = "stop_hit"
+    SUSPENDED = "suspended"
+    DATA_STALE = "data_stale"
+
+
+class MarketSession(StrEnum):
+    NON_TRADING_DAY = "non_trading_day"
+    PRE_OPEN = "pre_open"
+    CALL_AUCTION = "call_auction"
+    MORNING = "morning"
+    LUNCH_BREAK = "lunch_break"
+    AFTERNOON = "afternoon"
+    CLOSING_AUCTION = "closing_auction"
+    CLOSED = "closed"
+
+
+class BarFreq(StrEnum):  # 取值本身是固定记号（契约 §1 例外）
+    M1 = "1m"
+    D = "d"
+    W = "w"
+
+
+class BarAdjust(StrEnum):  # 1m 只支持 none
+    NONE = "none"
+    QFQ = "qfq"
+    HFQ = "hfq"
+
+
+class RegistrationMode(StrEnum):
+    CLOSED = "closed"  # V1 默认
+    INVITE = "invite"
+    OPEN = "open"  # 保留，V1 不用
+
+
+class NotificationTargetType(StrEnum):
+    SUGGESTION = "suggestion"
+    CANDIDATE_SIGNAL = "candidate_signal"
+    PLAN_DRAFT = "plan_draft"
+    PLAN = "plan"
+    DAILY_REPORT = "daily_report"
+    IMPORT_BATCH = "import_batch"
+    RECONCILIATION = "reconciliation"
+    STRATEGY_VERSION = "strategy_version"
+    NONE = "none"
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +266,28 @@ class DataStatus(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+class GapReason(StrEnum):
+    NO_SOURCE = "no_source"
+    NOT_YET_PUBLISHED = "not_yet_published"
+    UPSTREAM_ERROR = "upstream_error"
+    QUOTA_DEFERRED = "quota_deferred"
+    USER_INPUT_MISSING = "user_input_missing"
+
+
+class DataProvider(StrEnum):  # Evidence.provider
+    MAIRUI = "mairui"
+    USER_IMPORT = "user_import"
+    USER_INPUT = "user_input"
+    SYSTEM = "system"
+
+
+class SourceKind(StrEnum):  # 证据来源类别（plan 3.1）
+    MARKET_DATA = "market_data"
+    DISCLOSURE = "disclosure"
+    USER_INPUT = "user_input"
+    SYSTEM_CALC = "system_calc"
+
+
 # ---------------------------------------------------------------------------
 # 成交 / 导入
 # ---------------------------------------------------------------------------
@@ -201,13 +298,54 @@ class TradeSide(StrEnum):
     SELL = "sell"
 
 
-class ImportStatus(StrEnum):
+class ImportStatus(StrEnum):  # v0.2：preview_ready→previewed，confirmed→committed，新增 discarded
     UPLOADED = "uploaded"
     PARSING = "parsing"
-    PREVIEW_READY = "preview_ready"
-    CONFIRMED = "confirmed"
+    PREVIEWED = "previewed"
+    COMMITTED = "committed"
     FAILED = "failed"
+    DISCARDED = "discarded"
     REVERTED = "reverted"
+
+
+class ImportSeverity(StrEnum):
+    ERROR = "error"
+    WARNING = "warning"
+
+
+class ImportScope(StrEnum):
+    FILE = "file"
+    ROW = "row"
+    FIELD = "field"
+
+
+class ImportRowStatus(StrEnum):
+    OK = "ok"
+    WARNING = "warning"
+    ERROR = "error"
+    SKIPPED = "skipped"
+
+
+class DedupStatus(StrEnum):
+    NEW = "new"
+    DUPLICATE_IN_DB = "duplicate_in_db"
+    DUPLICATE_IN_FILE = "duplicate_in_file"
+    POSSIBLE_DUPLICATE_OF_MANUAL = "possible_duplicate_of_manual"
+
+
+class ReconciliationStatus(StrEnum):
+    MATCHED = "matched"
+    DIFF = "diff"
+    NOT_IMPORTED = "not_imported"
+
+
+class ReconciliationItemKind(StrEnum):
+    QUANTITY_MISMATCH = "quantity_mismatch"
+    MISSING_IN_BROKER = "missing_in_broker"
+    MISSING_IN_OURS = "missing_in_ours"
+    COST_DIFFERS = "cost_differs"
+    CASH_GAP = "cash_gap"
+    CASH_CHAIN_BREAK = "cash_chain_break"
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +361,7 @@ class CardCompleteness(StrEnum):
     RETIRED = "retired"
 
 
-class Lifecycle(StrEnum):  # ★（CandidateSignal.lifecycle）
+class Lifecycle(StrEnum):  # CandidateSignal.lifecycle
     DRAFT = "draft"
     SIMULATING = "simulating"
     PUBLISHED = "published"
@@ -238,7 +376,7 @@ class InstanceStatus(StrEnum):
     ARCHIVED = "archived"
 
 
-class CandidateSignalState(StrEnum):  # ★
+class CandidateSignalState(StrEnum):
     OPEN = "open"
     DRAFTED = "drafted"
     BLOCKED = "blocked"
@@ -250,7 +388,7 @@ class CandidateSignalState(StrEnum):  # ★
     SUPERSEDED = "superseded"
 
 
-class ReasonCode(StrEnum):  # ★ 契约 §6.1（取值为大写，契约原文如此）
+class ReasonCode(StrEnum):  # 契约 §6.1；码类取值用大写（契约 §1 大小写规则）
     DATA_STALE = "DATA_STALE"
     KEY_DATA_MISSING = "KEY_DATA_MISSING"
     LOW_CONFIDENCE = "LOW_CONFIDENCE"
@@ -276,13 +414,13 @@ class ReasonCode(StrEnum):  # ★ 契约 §6.1（取值为大写，契约原文�
     PROFILE_OR_CONSENT_MISSING = "PROFILE_OR_CONSENT_MISSING"
 
 
-class ReasonStatus(StrEnum):  # ★
+class ReasonStatus(StrEnum):
     ACTIVE = "active"
     RELEASED = "released"
     OBSOLETE = "obsolete"
 
 
-class CheckOn(StrEnum):  # ★
+class CheckOn(StrEnum):
     TICK = "tick"
     DAILY_CLOSE = "daily_close"
     SCHEDULE = "schedule"
@@ -293,14 +431,14 @@ class CheckOn(StrEnum):  # ★
     USER_ACTION = "user_action"
 
 
-class ReleaseKind(StrEnum):  # ★
+class ReleaseKind(StrEnum):
     EXPR = "expr"
     TIME = "time"
     EVENT = "event"
     USER_ACTION = "user_action"
 
 
-class PlanDraftStatus(StrEnum):  # ★
+class PlanDraftStatus(StrEnum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
     DISCARDED = "discarded"
@@ -319,7 +457,7 @@ class RestrictionKind(StrEnum):
     MUTE = "mute"
 
 
-class SuggestionUserAction(StrEnum):  # ★（没有 converted_to_plan）
+class SuggestionUserAction(StrEnum):  # 没有 converted_to_plan
     VIEWED = "viewed"
     DISMISSED = "dismissed"
     DRAFT_REQUESTED = "draft_requested"
@@ -355,9 +493,37 @@ class LlmTask(StrEnum):
 
 
 # ---------------------------------------------------------------------------
+# 健康检查（契约 §7.10）
+# ---------------------------------------------------------------------------
+
+
+class HealthStatus(StrEnum):
+    OK = "ok"
+    DEGRADED = "degraded"
+    DOWN = "down"
+
+
+class ComponentHealth(StrEnum):
+    OK = "ok"
+    ERROR = "error"
+
+
+class IngestHealth(StrEnum):
+    OK = "ok"
+    STALE = "stale"
+    PAUSED = "paused"
+    UNKNOWN = "unknown"  # Redis 不可用，无法判断
+
+
+# ---------------------------------------------------------------------------
 # /meta/enums 注册表：契约 §3 的枚举名 → 枚举类（顺序与契约表格一致）
 # ---------------------------------------------------------------------------
 
+#: 本模块对应的契约版本（``/meta/enums`` 的 ``version``）
+CONTRACT_VERSION: Final = "v0.2.1"
+
+#: ``/meta/enums`` 的 ``enums``：契约 §3 各表名 → 取值（顺序同 §3）。``reason_code`` 不在其中，
+#: 只在 ``reason_codes`` 里带解除条件展开（契约 §7.10；评审 M7）。
 CONTRACT_ENUMS: Final[dict[str, type[StrEnum]]] = {
     "account_status": AccountStatus,
     "role": Role,
@@ -370,22 +536,39 @@ CONTRACT_ENUMS: Final[dict[str, type[StrEnum]]] = {
     "t_leg": TLeg,
     "confidence_level": ConfidenceLevel,
     "consensus_status": ConsensusStatus,
+    "strategy_eval_state": StrategyEvalState,
+    "executability_status": ExecutabilityStatus,
     "suggestion_origin": SuggestionOrigin,
     "suggestion_status": SuggestionStatus,
     "risk_control": RiskControl,
     "risk_level": RiskLevel,
+    "card_risk_level": CardRiskLevel,
     "market_regime": MarketRegime,
+    "signal_kind": SignalKind,
+    "market_session": MarketSession,
+    "bar_freq": BarFreq,
+    "bar_adjust": BarAdjust,
+    "registration_mode": RegistrationMode,
+    "notification_target_type": NotificationTargetType,
     "notification_kind": NotificationKind,
     "severity": Severity,
     "channel": Channel,
     "data_status": DataStatus,
+    "gap_reason": GapReason,
+    "data_provider": DataProvider,
+    "source_kind": SourceKind,
     "trade_side": TradeSide,
     "import_status": ImportStatus,
+    "import_severity": ImportSeverity,
+    "import_scope": ImportScope,
+    "import_row_status": ImportRowStatus,
+    "dedup_status": DedupStatus,
+    "reconciliation_status": ReconciliationStatus,
+    "reconciliation_item_kind": ReconciliationItemKind,
     "card_completeness": CardCompleteness,
     "lifecycle": Lifecycle,
     "instance_status": InstanceStatus,
     "candidate_signal_state": CandidateSignalState,
-    "reason_code": ReasonCode,
     "reason_status": ReasonStatus,
     "check_on": CheckOn,
     "release_kind": ReleaseKind,
@@ -396,34 +579,10 @@ CONTRACT_ENUMS: Final[dict[str, type[StrEnum]]] = {
     "feature_status": FeatureStatus,
     "gate": Gate,
     "llm_task": LlmTask,
+    "health_status": HealthStatus,
+    "component_health": ComponentHealth,
+    "ingest_health": IngestHealth,
 }
-
-#: 与 Suggestion / CandidateSignal 结构强相关、T-A01 可能调整的枚举（报告中已标注）
-PENDING_T_A01: Final[frozenset[str]] = frozenset(
-    {
-        "epistemic_type",
-        "horizon",
-        "dimension",
-        "dimension_view",
-        "rule_role",
-        "action",
-        "t_leg",
-        "confidence_level",
-        "consensus_status",
-        "suggestion_origin",
-        "suggestion_status",
-        "risk_control",
-        "risk_level",
-        "lifecycle",
-        "candidate_signal_state",
-        "reason_code",
-        "reason_status",
-        "check_on",
-        "release_kind",
-        "plan_draft_status",
-        "suggestion_user_action",
-    }
-)
 
 
 # ---------------------------------------------------------------------------
@@ -499,4 +658,75 @@ REASON_CODE_TABLE: Final[tuple[ReasonCodeSpec, ...]] = (
         False,
         "完成相应步骤后系统解除",
     ),
+)
+
+
+# ---------------------------------------------------------------------------
+# 契约 §4.1 导入提示码（IMPORT_*，只出现在 ImportFinding.code，不是 HTTP 错误码）
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ImportCodeSpec:
+    code: str
+    severity: ImportSeverity
+    scope: ImportScope
+    #: 契约 §4.1“处理”列为“需确认/需选择”的 warning；error 一律 False（见 reports/T-B02.md）
+    needs_action: bool
+
+
+_ER, _WA = ImportSeverity.ERROR, ImportSeverity.WARNING
+_FI, _RO, _FD = ImportScope.FILE, ImportScope.ROW, ImportScope.FIELD
+
+IMPORT_CODE_TABLE: Final[tuple[ImportCodeSpec, ...]] = (
+    # error · 文件级 8
+    ImportCodeSpec("IMPORT_EMPTY_FILE", _ER, _FI, False),
+    ImportCodeSpec("IMPORT_FILE_TOO_LARGE", _ER, _FI, False),
+    ImportCodeSpec("IMPORT_UNSUPPORTED_FILE_TYPE", _ER, _FI, False),
+    ImportCodeSpec("IMPORT_TOO_MANY_ROWS", _ER, _FI, False),
+    ImportCodeSpec("IMPORT_ENCODING_UNDETECTED", _ER, _FI, False),
+    ImportCodeSpec("IMPORT_UNRECOGNIZED_FORMAT", _ER, _FI, False),
+    ImportCodeSpec("IMPORT_REQUIRED_COLUMN_MISSING", _ER, _FI, False),
+    ImportCodeSpec("IMPORT_ACCOUNT_MISMATCH", _ER, _FI, False),
+    # error · 行/字段级 13
+    ImportCodeSpec("IMPORT_ROW_DECODE_ERROR", _ER, _RO, False),
+    ImportCodeSpec("IMPORT_ROW_TRUNCATED", _ER, _RO, False),
+    ImportCodeSpec("IMPORT_ROW_COLUMN_MISMATCH", _ER, _RO, False),
+    ImportCodeSpec("IMPORT_REQUIRED_FIELD_EMPTY", _ER, _FD, False),
+    ImportCodeSpec("IMPORT_INVALID_DATE", _ER, _FD, False),
+    ImportCodeSpec("IMPORT_FUTURE_DATE", _ER, _FD, False),
+    ImportCodeSpec("IMPORT_INVALID_TIME", _ER, _FD, False),
+    ImportCodeSpec("IMPORT_INVALID_NUMBER", _ER, _FD, False),
+    ImportCodeSpec("IMPORT_INVALID_SECURITY_CODE", _ER, _FD, False),
+    ImportCodeSpec("IMPORT_INVALID_QUANTITY", _ER, _FD, False),
+    ImportCodeSpec("IMPORT_INVALID_PRICE", _ER, _FD, False),
+    ImportCodeSpec("IMPORT_SIDE_QTY_SIGN_MISMATCH", _ER, _RO, False),
+    ImportCodeSpec("IMPORT_AMOUNT_MISMATCH", _ER, _RO, False),
+    # warning · 文件级 10
+    ImportCodeSpec("IMPORT_DUPLICATE_FILE", _WA, _FI, False),
+    ImportCodeSpec("IMPORT_NO_DATA_ROWS", _WA, _FI, False),
+    ImportCodeSpec("IMPORT_UNKNOWN_COLUMN", _WA, _FI, False),
+    ImportCodeSpec("IMPORT_FILE_POSSIBLY_TRUNCATED", _WA, _FI, False),
+    ImportCodeSpec("IMPORT_ENCODING_LOW_CONFIDENCE", _WA, _FI, True),
+    ImportCodeSpec("IMPORT_FORMAT_LOW_CONFIDENCE", _WA, _FI, True),
+    ImportCodeSpec("IMPORT_SNAPSHOT_AS_OF_ASSUMED", _WA, _FI, True),
+    ImportCodeSpec("IMPORT_SNAPSHOT_TOTALS_MISMATCH", _WA, _FI, False),
+    ImportCodeSpec("IMPORT_SNAPSHOT_SUPERSEDES", _WA, _FI, False),
+    ImportCodeSpec("IMPORT_UNSUPPORTED_CURRENCY", _WA, _FI, False),
+    # warning · 行/字段级 15
+    ImportCodeSpec("IMPORT_NET_AMOUNT_MISMATCH", _WA, _RO, False),
+    ImportCodeSpec("IMPORT_UNKNOWN_SECURITY", _WA, _RO, True),
+    ImportCodeSpec("IMPORT_MARKET_INFERRED_CONFLICT", _WA, _RO, True),
+    ImportCodeSpec("IMPORT_NAME_MISMATCH", _WA, _FD, False),
+    ImportCodeSpec("IMPORT_UNKNOWN_BIZ_TYPE", _WA, _RO, True),
+    ImportCodeSpec("IMPORT_ROW_CANCELLED", _WA, _RO, False),
+    ImportCodeSpec("IMPORT_ROW_REJECTED", _WA, _RO, False),
+    ImportCodeSpec("IMPORT_DUPLICATE_IN_DB", _WA, _RO, False),
+    ImportCodeSpec("IMPORT_DUPLICATE_IN_FILE", _WA, _RO, False),
+    ImportCodeSpec("IMPORT_POSSIBLE_DUPLICATE_OF_MANUAL", _WA, _RO, True),
+    ImportCodeSpec("IMPORT_MISSING_OPENING_POSITION", _WA, _RO, False),
+    ImportCodeSpec("IMPORT_CASH_CHAIN_BREAK", _WA, _RO, False),
+    ImportCodeSpec("IMPORT_NON_TRADING_DAY", _WA, _RO, False),
+    ImportCodeSpec("IMPORT_TIME_OUTSIDE_SESSION", _WA, _RO, False),
+    ImportCodeSpec("IMPORT_LOT_SIZE_IRREGULAR", _WA, _RO, False),
 )

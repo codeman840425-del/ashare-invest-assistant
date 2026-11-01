@@ -11,6 +11,8 @@ from app.common.errors import ErrorResponse, install_exception_handlers
 from app.common.logging import configure_logging
 from app.common.middleware import RequestIdMiddleware
 from app.config import Settings, get_settings
+from app.config_files import BUSINESS_FILES
+from app.version import APP_VERSION
 
 logger = logging.getLogger("app")
 
@@ -27,7 +29,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="ashare-invest-assistant API",
-        version="0.1.0",
+        version=APP_VERSION,
         openapi_url=f"{cfg.api_prefix}/openapi.json",
         docs_url=f"{cfg.api_prefix}/docs" if cfg.app_env in {"local", "test"} else None,
         redoc_url=None,
@@ -36,6 +38,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is not None:
         app.dependency_overrides[get_settings] = lambda: settings
 
+    app.state.api_prefix = cfg.api_prefix
     install_exception_handlers(app)
     app.add_middleware(RequestIdMiddleware)
     app.include_router(v1_router, prefix=cfg.api_prefix)
@@ -44,7 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "app created env=%s prefix=%s business_config=%s",
         cfg.app_env,
         cfg.api_prefix or "/",
-        sorted(cfg.business),
+        list(BUSINESS_FILES),
     )
     return app
 

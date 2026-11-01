@@ -4,7 +4,8 @@
 
     {"error": {"code": str, "message": str, "details": object | null, "request_id": str}}
 
-- 错误码表 :data:`ERROR_CODES` 与契约 §4 逐行对应（HTTP 状态取契约原值）。
+- 错误码表 :data:`ERROR_CODES` 与契约 §4（v0.2）逐行对应（HTTP 状态取契约原值）。
+  §4.1 的 ``IMPORT_*`` 导入提示码不是 HTTP 错误码，见 :data:`app.schemas.enums.IMPORT_CODE_TABLE`。
 - 业务代码抛 :class:`AppError`；框架层异常（路由不存在、参数校验失败、未捕获异常）
   由 :func:`install_exception_handlers` 统一转换，不向客户端泄露堆栈或内部信息。
 """
@@ -39,13 +40,15 @@ class ErrorCode(StrEnum):
     CONSENT_REQUIRED = "CONSENT_REQUIRED"
     ENTITLEMENT_LIMIT_REACHED = "ENTITLEMENT_LIMIT_REACHED"
     NOT_FOUND = "NOT_FOUND"
+    METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
     CONFLICT = "CONFLICT"
     IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
     VERSION_CONFLICT = "VERSION_CONFLICT"
     IMMUTABLE_RESOURCE = "IMMUTABLE_RESOURCE"
-    IMPORT_DUPLICATE_FILE = "IMPORT_DUPLICATE_FILE"
-    IMPORT_UNRECOGNIZED_FORMAT = "IMPORT_UNRECOGNIZED_FORMAT"
+    IMPORT_FILE_ERRORS = "IMPORT_FILE_ERRORS"
     IMPORT_ROW_ERRORS = "IMPORT_ROW_ERRORS"
+    IMPORT_WARNINGS_UNACKNOWLEDGED = "IMPORT_WARNINGS_UNACKNOWLEDGED"
+    IMPORT_NOTHING_TO_COMMIT = "IMPORT_NOTHING_TO_COMMIT"
     STRATEGY_INVALID_CONFIG = "STRATEGY_INVALID_CONFIG"
     STRATEGY_EXPR_FORBIDDEN = "STRATEGY_EXPR_FORBIDDEN"
     STRATEGY_VERSION_PUBLISHED = "STRATEGY_VERSION_PUBLISHED"
@@ -55,7 +58,6 @@ class ErrorCode(StrEnum):
     SUGGESTION_SUPERSEDED = "SUGGESTION_SUPERSEDED"
     SUGGESTION_REFRESH_TOO_FREQUENT = "SUGGESTION_REFRESH_TOO_FREQUENT"
     SUGGESTION_INSUFFICIENT_DATA = "SUGGESTION_INSUFFICIENT_DATA"
-    IMPORT_ROW_COLUMN_MISMATCH = "IMPORT_ROW_COLUMN_MISMATCH"
     INVALID_STATE_TRANSITION = "INVALID_STATE_TRANSITION"
     STRATEGY_VERSION_NOT_RUNNABLE = "STRATEGY_VERSION_NOT_RUNNABLE"
     STRATEGY_FIT_ACK_REQUIRED = "STRATEGY_FIT_ACK_REQUIRED"
@@ -73,7 +75,7 @@ class ErrorCode(StrEnum):
     DEVIATION_ACK_REQUIRED = "DEVIATION_ACK_REQUIRED"
     REASON_NOT_MANUALLY_RELEASABLE = "REASON_NOT_MANUALLY_RELEASABLE"
     REGISTRATION_CLOSED = "REGISTRATION_CLOSED"
-    DATA_STALE = "DATA_STALE"
+    FRESH_DATA_REQUIRED = "FRESH_DATA_REQUIRED"
     INGEST_PAUSED = "INGEST_PAUSED"
     LLM_UNAVAILABLE = "LLM_UNAVAILABLE"
     LLM_BUDGET_EXCEEDED = "LLM_BUDGET_EXCEEDED"
@@ -86,7 +88,7 @@ class ErrorCode(StrEnum):
     MAINTENANCE = "MAINTENANCE"
 
 
-ErrorScope = Literal["http", "row", "internal"]
+ErrorScope = Literal["http", "internal"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,8 +96,8 @@ class ErrorSpec:
     http_status: int
     #: 默认中文信息（可变，客户端不得据此判断逻辑）
     message: str
-    #: http = 作为 HTTP 错误返回；row = 只作为导入行级 error_code；
-    #: internal = 只出现在日志/管理端，不返回给普通用户
+    #: http = 作为 HTTP 错误返回；internal = 只出现在日志/管理端，不返回给普通用户
+    #: （契约 §7.10 ``error_codes[].scope``）
     scope: ErrorScope = "http"
 
 
@@ -114,13 +116,15 @@ ERROR_CODES: Final[dict[ErrorCode, ErrorSpec]] = {
     E.CONSENT_REQUIRED: ErrorSpec(403, "请先完成风险测评并同意相关条款"),
     E.ENTITLEMENT_LIMIT_REACHED: ErrorSpec(403, "已达到套餐权益上限"),
     E.NOT_FOUND: ErrorSpec(404, "资源不存在"),
+    E.METHOD_NOT_ALLOWED: ErrorSpec(405, "该路径不支持此请求方法"),
     E.CONFLICT: ErrorSpec(409, "数据冲突"),
     E.IDEMPOTENCY_CONFLICT: ErrorSpec(409, "同一幂等键对应了不同的请求内容"),
     E.VERSION_CONFLICT: ErrorSpec(409, "版本号不一致，请刷新后重试"),
     E.IMMUTABLE_RESOURCE: ErrorSpec(409, "该对象不可修改"),
-    E.IMPORT_DUPLICATE_FILE: ErrorSpec(409, "该文件已导入过"),
-    E.IMPORT_UNRECOGNIZED_FORMAT: ErrorSpec(422, "无法识别文件格式或编码"),
+    E.IMPORT_FILE_ERRORS: ErrorSpec(422, "文件有错误，无法导入"),
     E.IMPORT_ROW_ERRORS: ErrorSpec(422, "仍有未处理的错误行"),
+    E.IMPORT_WARNINGS_UNACKNOWLEDGED: ErrorSpec(422, "有需要处理的提示尚未确认"),
+    E.IMPORT_NOTHING_TO_COMMIT: ErrorSpec(422, "没有可写入的行"),
     E.STRATEGY_INVALID_CONFIG: ErrorSpec(422, "策略配置校验失败"),
     E.STRATEGY_EXPR_FORBIDDEN: ErrorSpec(422, "规则表达式包含不允许的字段或运算"),
     E.STRATEGY_VERSION_PUBLISHED: ErrorSpec(409, "已发布的版本不可修改"),
@@ -130,7 +134,6 @@ ERROR_CODES: Final[dict[ErrorCode, ErrorSpec]] = {
     E.SUGGESTION_SUPERSEDED: ErrorSpec(409, "该条已被新的结果取代"),
     E.SUGGESTION_REFRESH_TOO_FREQUENT: ErrorSpec(409, "刷新过于频繁，请稍后再试"),
     E.SUGGESTION_INSUFFICIENT_DATA: ErrorSpec(422, "必备数据缺失，未生成结果"),
-    E.IMPORT_ROW_COLUMN_MISMATCH: ErrorSpec(422, "列数或列名与识别的模板不一致", "row"),
     E.INVALID_STATE_TRANSITION: ErrorSpec(409, "当前状态不允许该操作"),
     E.STRATEGY_VERSION_NOT_RUNNABLE: ErrorSpec(409, "该策略版本当前不可运行"),
     E.STRATEGY_FIT_ACK_REQUIRED: ErrorSpec(422, "该周期被判定为不适合，需要确认"),
@@ -148,7 +151,7 @@ ERROR_CODES: Final[dict[ErrorCode, ErrorSpec]] = {
     E.DEVIATION_ACK_REQUIRED: ErrorSpec(422, "数量或价格超出草案区间，请确认偏离"),
     E.REASON_NOT_MANUALLY_RELEASABLE: ErrorSpec(409, "该原因由系统判断，不能手动解除"),
     E.REGISTRATION_CLOSED: ErrorSpec(503, "注册已关闭"),
-    E.DATA_STALE: ErrorSpec(503, "数据不是最新，暂不能执行该操作"),
+    E.FRESH_DATA_REQUIRED: ErrorSpec(503, "行情不是最新，本次操作未执行"),
     E.INGEST_PAUSED: ErrorSpec(503, "行情采集已暂停"),
     E.LLM_UNAVAILABLE: ErrorSpec(503, "解释服务暂不可用"),
     E.LLM_BUDGET_EXCEEDED: ErrorSpec(429, "解释服务今日额度已用完"),
@@ -199,8 +202,6 @@ class AppError(Exception):
         headers: dict[str, str] | None = None,
     ) -> None:
         spec = ERROR_CODES[code]
-        if spec.scope == "row":
-            raise ValueError(f"{code} 是行级错误码，不能作为 HTTP 错误抛出")
         self.code = code
         self.status_code = spec.http_status
         self.message = message or spec.message
@@ -246,13 +247,13 @@ def error_response(
     )
 
 
-# 框架层 HTTPException 的状态码 → 契约错误码（契约没有 405/413/415 等专用码，见报告）
+# 框架层 HTTPException 的状态码 → 契约错误码（405 单独处理；413/415 等契约无专用码，见报告）
 _HTTP_STATUS_TO_CODE: Final[dict[int, ErrorCode]] = {
     400: E.VALIDATION_ERROR,
     401: E.AUTH_REQUIRED,
     403: E.FORBIDDEN,
     404: E.NOT_FOUND,
-    405: E.NOT_FOUND,
+    405: E.METHOD_NOT_ALLOWED,
     409: E.CONFLICT,
     422: E.VALIDATION_ERROR,
     429: E.RATE_LIMITED,
@@ -307,8 +308,35 @@ async def _validation_handler(request: Request, exc: Exception) -> JSONResponse:
     return error_response(E.VALIDATION_ERROR, details=validation_details(exc))
 
 
+def _is_admin_path(request: Request) -> bool:
+    prefix: str = getattr(request.app.state, "api_prefix", "")
+    path = request.url.path
+    if prefix and path.startswith(prefix):
+        path = path[len(prefix) :]
+    return path == "/admin" or path.startswith("/admin/")
+
+
+def _is_admin_user(request: Request) -> bool:
+    """鉴权尚未实现（T-B03）：在此之前一律视为非管理员。"""
+    return bool(getattr(request.state, "is_admin", False))
+
+
+def _method_not_allowed(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """契约 §4：405 带 ``Allow`` 头与 ``details.allowed``；非管理员访问 ``/admin/*`` 一律 404。"""
+    if _is_admin_path(request) and not _is_admin_user(request):
+        return error_response(E.NOT_FOUND)
+    headers = dict(exc.headers or {})
+    allow_raw = next((v for k, v in headers.items() if k.lower() == "allow"), "")
+    allowed = [m.strip().upper() for m in allow_raw.split(",") if m.strip()]
+    other = {k: v for k, v in headers.items() if k.lower() != "allow"}
+    other["Allow"] = ", ".join(allowed)
+    return error_response(E.METHOD_NOT_ALLOWED, details={"allowed": allowed}, headers=other)
+
+
 async def _http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, StarletteHTTPException)  # noqa: S101
+    if exc.status_code == 405:
+        return _method_not_allowed(request, exc)
     code = _HTTP_STATUS_TO_CODE.get(exc.status_code)
     if code is None:
         # 未映射的框架状态码（如 413/415）：按契约只能落到已定义的错误码，记录原状态便于排查

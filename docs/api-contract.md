@@ -373,7 +373,7 @@
 | `data_licence_tier` | `free` `trial` `monthly` `annual` `diamond` `other`（v0.2.6；用户自报的麦蕊证书档位，决定默认每分钟上限） |
 | `security_type` | `stock` `cdr` `etf` `index`（v0.2.7；v0.2.8 加 `etf`，见 v0.2.7 未决 Q3、plan 第 9 节问题 53；可转债本版不收录） |
 | `board` | `main` `chinext` `star` `bse`（v0.2.7） |
-| `listing_status` | `listed` `delisting_period` `delisted` `missing_from_list`（v0.2.7；`missing_from_list`=麦蕊或历史数据中有、但交易所当前列表中找不到，T007 §5）。**停牌不是上市状态**，用 `SecurityProfile.suspended` 表示 |
+| `listing_status` | `listed` `delisting_period` `delisted` `missing_from_list`（v0.2.7；`missing_from_list`=麦蕊或历史数据中有、但交易所当前列表中找不到，T007 §5；**停牌不是上市状态**，用 `SecurityProfile.suspended` 表示） |
 | `security_risk_flag` | `st` `star_st` `delisting`（v0.2.7；同时命中时取最高一项：`delisting` > `star_st` > `st`） |
 | `security_match_kind` | `code_exact` `name_exact` `initials_exact` `code_prefix` `name_prefix` `initials_prefix` `name_contains` `former_name` `former_code` `fuzzy`（v0.2.7；按此顺序即排序层级） |
 | `report_period` | `q1` `h1` `q3` `fy`（v0.2.7） |

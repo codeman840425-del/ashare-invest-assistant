@@ -183,8 +183,10 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .expo-row .ant-progress { margin: 0; }
 .expo .panel-head, .acct-risk .panel-head { margin-bottom: 4px; }
 .stock-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
-.stock-card { padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
-.stock-card:hover { border-color: #2f4566; }
+.stock-card { padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.stock-card.clickable { cursor: pointer; }
+.stock-card.clickable:hover, .stock-card.clickable:focus-visible { border-color: #2f4566; outline: none; box-shadow: 0 0 0 1px var(--accent); }
+.report-dates { display: inline-flex; gap: 4px; align-items: center; }
 .stock-card.dim { opacity: 0.75; }
 .stc-head { display: flex; align-items: baseline; gap: 8px; }
 .stc-head b { font-size: 13px; color: #fff; }

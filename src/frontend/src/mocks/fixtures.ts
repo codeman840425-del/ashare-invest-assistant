@@ -709,6 +709,39 @@ export const DAILY_REPORTS: DailyReport[] = [(() => {
   };
 })()];
 
+/**
+ * T-F13：上一期日报（示例）——未导入交割单（account=null、reconciliation not_imported）、市场宽度缺失、
+ * 一只已移出自选的证券（suggestion=null），用于覆盖日报页的空值分支与日期切换。
+ */
+export const PREV_REPORT_DATE = '2026-10-29';
+DAILY_REPORTS.push((() => {
+  const cur = DAILY_REPORTS[0]!;
+  // 上一期的证据时点不能晚于报告日：这里不复用本期证据 ID（只保留文字，示例）
+  const noEv = (xs: TextWithEvidence[]) => xs.map((x) => ({ ...x, evidence_ids: [] }));
+  const keep = cur.stocks.slice(0, 3).map((s) => ({
+    ...s, change_from_previous: 'unchanged' as const,
+    highlights: noEv(s.highlights), invalidation: noEv(s.invalidation), next_watch: noEv(s.next_watch),
+  }));
+  const removed = {
+    security_code: '000003.SZ', name: '示例已移出', close: null, change_pct: null, data_status: 'unavailable' as DataStatus,
+    max_risk_level: null, suggestion_id: null, suggestion: null, change_from_previous: 'removed' as const,
+    highlights: [], invalidation: [], next_watch: [],
+  };
+  return {
+    ...cur,
+    date: PREV_REPORT_DATE, generated_at: `${PREV_REPORT_DATE}T17:40:00+08:00`, account_id: null,
+    market: { regime: 'range', regime_position_range: null, breadth: null, summary: [{ text: '市场宽度数据缺失，大盘环境沿用上一交易日判定（示例）', expr: null, evidence_ids: [] }] },
+    evidence: [],
+    account: null,
+    reconciliation: { status: 'not_imported', as_of: null, diff_count: 0, important_count: 0 },
+    stocks: [...keep, removed],
+    pending: { plan_drafts: 0, active_reasons: 0 },
+    explanation: { source: 'template', text: '尚未导入交割单，账户概览为空；逐股卡片按自选生成。（示例数据）', llm_call_id: null },
+    data_status: 'partial', data_as_of: `${PREV_REPORT_DATE}T17:30:00+08:00`,
+    gaps: [{ key: 'market.breadth', reason: 'not_yet_published', message: '市场宽度在生成时尚未发布（示例）' }],
+  } satisfies DailyReport;
+})());
+
 export const DAILY_REPORT_LIST: DailyReportListItem[] = DAILY_REPORTS.map((d) => ({
   date: d.date, generated_at: d.generated_at, regime: d.market.regime, reconciliation_status: d.reconciliation.status, stock_count: d.stocks.length,
 }));

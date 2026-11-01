@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from './client';
 import type {
   BarsResponse, CandidateSignal, DailyReport, DailyReportListItem, HorizonAssessment, Me, NonExecutableReason, Notification, Paged, Portfolio,
@@ -112,6 +112,19 @@ export const useUnreadCount = () =>
 
 export const useDailyReports = () =>
   useQuery({ queryKey: qk.dailyReports, queryFn: ({ signal }) => apiGet<Paged<DailyReportListItem>>('/daily-reports', { limit: 20 }, signal) });
+
+/**
+ * T-F13：日报日期列表按 §1.2 游标逐页加载（日期选择器里“加载更早”）。
+ * 与 useDailyReports 分开缓存键，避免改变首页跳转所用的单页结构。
+ */
+export const useDailyReportPages = (limit = 20) =>
+  useInfiniteQuery({
+    queryKey: [...qk.dailyReports, 'pages', limit],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) =>
+      apiGet<Paged<DailyReportListItem>>('/daily-reports', pageParam ? { limit, cursor: pageParam } : { limit }, signal),
+    getNextPageParam: (last) => last.next_cursor,
+  });
 
 export const useDailyReport = (date: string | undefined) =>
   useQuery({

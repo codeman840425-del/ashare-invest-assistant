@@ -3,7 +3,7 @@
 
 静态（只读 docs/）：
 - §4.1 导入提示码共 46 个、21 个 error / 25 个 warning，且与 plan.md 3.5A-1 的表逐行一致；
-- §4 错误码不重复；§6.1 原因码 23 个。
+- §4 错误码不重复；§6.1 原因码 22 个（v0.2.5 起；管理接口 /admin/* 不进公开 openapi.json，本脚本不读 openapi）。
 对照后端（``--meta-json``，后端 ``GET /api/v1/meta/enums`` 的响应）：
 - ``version`` 等于契约版本（契约变更记录最新一节）；
 - ``enums`` 的键集合 == §3 表名（不含 ``reason_code``），每个取值逐项一致（含顺序）；
@@ -27,7 +27,7 @@ import contract_md as cm  # noqa: E402
 
 EXPECTED_IMPORT_TOTAL = 46
 EXPECTED_IMPORT_SEVERITY = {"error": 21, "warning": 25}
-EXPECTED_REASON_TOTAL = 23
+EXPECTED_REASON_TOTAL = 22  # 契约 §3 第 325 行“22 个；v0.2.5 删 PROFILE_OR_CONSENT_MISSING”，架构师裁定（review-T-B03a-…-B45 §6(b)）
 
 
 def static_checks(text: str) -> list[str]:

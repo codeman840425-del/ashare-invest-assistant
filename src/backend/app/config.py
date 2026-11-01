@@ -15,8 +15,10 @@
   ``INGEST_STALE_AFTER_S``，以及等价的嵌套写法 ``BUSINESS__INGEST__HEARTBEAT__KEY`` /
   ``…__PAUSED_KEY`` / ``…__STALE_AFTER_S``（分隔符 ``__``）。其他 ``BUSINESS__*`` 或整块
   ``BUSINESS`` 环境变量 → 启动失败（见 :func:`business_env_layer`）。
-- 本服务**不读取** ``MAIRUI_LICENCE``：licence 只注入 ``ingest`` 容器（plan §2.1A）；
-  未声明的环境变量一律忽略（``extra="ignore"``）。
+- 本服务**不读取** ``MAIRUI_LICENCE``。T-A07（plan §2.1B 第 7 点）起生产不再使用全站证书：
+  每位用户的证书以 HPKE 密文存库，只有 ``ingest`` 持有解密私钥；``ingest`` 发现
+  ``MAIRUI_LICENCE`` 非空即拒绝启动（:mod:`app.workers.ingest`）。未声明的环境变量一律忽略
+  （``extra="ignore"``）。
 """
 
 from __future__ import annotations

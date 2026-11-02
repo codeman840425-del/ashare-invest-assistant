@@ -27,15 +27,30 @@
   删除失败的行保留（``deleted_at`` 仍为空）下一轮重试；worker 以 aia_api 运行，无
   ``ops.pending_file_purges`` 权限（T-B03f m2），故不写该表。
   worker 须挂载与 api 相同的 ``IMPORT_STORAGE_PATH`` 卷。
+
+证券主数据（T-B52，plan 4.6）按**北京时间钟点**排程（:func:`beat_slots`，beat 每轮调用；同一钟点用
+``SET beat:slot:<task>:<日期>:<HHMM> NX EX 2d`` 去重，钟点后 15 分钟内有效）：
+
+- ``master.sync_exchange_lists``：周一至周五 ``master.fetch_times[0]``（trigger ``beat_1800``），
+  周二至周六 ``fetch_times[1]``（``beat_0730``，只补拉上一交易日没有成功的来源）；
+- ``master.sync_bse_code_map``：每月第一个工作日 18:30（北交所代码对照）；
+- ``master.purge_snapshots``：每天 03:30，删除 90 天前的原始快照文件。
+
+主数据任务带 ``args``（``{"trigger": ...}``）与 ``attempt``；执行时持 Redis 锁 ``lock:<task>``；失败
+时第 1、2 次进 ``jobs:delayed``（10 分钟后由 beat 放回队列），第 3 次仍失败则写一条
+``master_runs.status='failed'``。``master.sync_exchange_lists`` 由 beat 触发且成功时，若
+``master.reconcile_vendor`` 已注册（T-B53）则接着排它；首次导入（CLI）从不触发。
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import time
+import uuid
 from collections.abc import Callable
-from typing import Final
+from typing import Any, Final
 
 import redis
 from sqlalchemy import Engine
@@ -56,7 +71,24 @@ PURGE_COOLDOWNS: Final = "licences.purge_expired_cooldowns"
 PURGE_IMPORT_ROWS: Final = "imports.purge_preview_rows"
 PURGE_RAW_FILES: Final = "imports.purge_expired_raw_files"
 
-Task = Callable[[Settings], int]
+Task = Callable[..., int]  # (settings, **args) -> 处理条数
+
+DELAYED_KEY: Final = "jobs:delayed"
+SLOT_PREFIX: Final = "beat:slot:"
+LOCK_PREFIX: Final = "lock:"
+#: 钟点任务的触发窗口（秒）与去重键寿命
+SLOT_WINDOW_S: Final = 15 * 60
+SLOT_TTL_S: Final = 2 * 86400
+MAX_ATTEMPTS: Final = 3
+RETRY_DELAY_S: Final = 600
+LOCK_TTL_S: Final = 3600
+
+SYNC_LISTS: Final = "master.sync_exchange_lists"
+SYNC_CODE_MAP: Final = "master.sync_bse_code_map"
+PURGE_SNAPSHOTS: Final = "master.purge_snapshots"
+RECONCILE_VENDOR: Final = "master.reconcile_vendor"  # T-B53 注册
+CODE_MAP_TIME: Final = "18:30"
+PURGE_SNAPSHOTS_TIME: Final = "03:30"
 
 
 def _redis(settings: Settings) -> redis.Redis:
@@ -110,12 +142,97 @@ def purge_raw_files_task(settings: Settings) -> int:
         return purge_expired_raw_files(conn, settings)
 
 
+# ---------------------------------------------------------------------------
+# 证券主数据（T-B52）
+# ---------------------------------------------------------------------------
+
+
+class MasterSyncFailedError(RuntimeError):
+    """本次运行所有来源都失败（``master_runs`` 已记 failed）。"""
+
+
+def _master_fetcher() -> Any:  # noqa: ANN401  selfcheck 替换为假实现
+    from app.master.sources import http_fetcher
+
+    return http_fetcher()
+
+
+def _master_root(settings: Settings) -> Any:  # noqa: ANN401
+    from app.master.sync import resolve_master_root
+
+    root = resolve_master_root(settings.master_snapshot_path, settings.app_env)
+    if root is None:
+        raise RuntimeError("MASTER_SNAPSHOT_PATH 未设置")
+    return root
+
+
+def _master_run(settings: Settings, trigger: str, sources: list[str] | None) -> int:
+    from app.master import sync
+    from app.master.sources import DAILY_SOURCES
+
+    cfg = settings.business.securities.master
+    root = _master_root(settings)
+    now = dt.datetime.now(dt.UTC)
+    td = sync.snapshot_trade_date(now)
+    eng = _engine(settings)
+    if sources is None:
+        sources = list(DAILY_SOURCES)
+        if trigger == "beat_0730":
+            with eng.connect() as c:
+                sources = sync.sources_to_retry(c, td)
+            if not sources:
+                log.info("master 补拉：上一交易日所有来源均已成功")
+                return 0
+    fetched = sync.collect(_master_fetcher(), sources)  # 外网抓取放在事务外
+    with eng.begin() as conn:
+        res = sync.apply_run(
+            conn, fetched, cfg, trigger=trigger, trade_date=td, now=now, raw_root=root
+        )
+    if res.status == "failed":
+        raise MasterSyncFailedError(res.status)
+    return len(res.snaps)
+
+
+def sync_exchange_lists_task(settings: Settings, trigger: str = "manual") -> int:
+    return _master_run(settings, trigger, None)
+
+
+def sync_bse_code_map_task(settings: Settings, trigger: str = "manual") -> int:
+    return _master_run(settings, trigger, ["bse_code_map"])
+
+
+def purge_snapshots_task(settings: Settings) -> int:
+    from app.master.sync import purge_snapshots
+
+    with _engine(settings).begin() as conn:
+        return purge_snapshots(conn, _master_root(settings))
+
+
+def _record_master_failure(settings: Settings, args: dict[str, Any], exc: BaseException) -> None:
+    if isinstance(exc, MasterSyncFailedError):
+        return  # apply_run 已写 failed
+    from app.master.sync import record_failed_run, snapshot_trade_date
+
+    td = snapshot_trade_date(dt.datetime.now(dt.UTC))
+    with _engine(settings).begin() as conn:
+        record_failed_run(conn, str(args.get("trigger", "manual")), td, type(exc).__name__)
+
+
 #: 任务名 → 实现
 TASKS: Final[dict[str, Task]] = {
     PURGE_COOLDOWNS: purge_expired_cooldowns_task,
     PURGE_IMPORT_ROWS: purge_import_rows_task,
     PURGE_RAW_FILES: purge_raw_files_task,
+    SYNC_LISTS: sync_exchange_lists_task,
+    SYNC_CODE_MAP: sync_bse_code_map_task,
+    PURGE_SNAPSHOTS: purge_snapshots_task,
 }
+#: 失败重试（10 分钟后，共 3 次）且执行时持锁的任务 → 重试用尽时的处理
+RETRY_TASKS: Final[dict[str, Callable[[Settings, dict[str, Any], BaseException], None]]] = {
+    SYNC_LISTS: _record_master_failure,
+    SYNC_CODE_MAP: _record_master_failure,
+}
+LOCKED_TASKS: Final = frozenset({SYNC_LISTS, SYNC_CODE_MAP, PURGE_SNAPSHOTS})
 
 
 def schedule(settings: Settings) -> dict[str, int]:
@@ -144,6 +261,77 @@ def beat_tick(settings: Settings, client: redis.Redis | None = None) -> list[str
     return queued
 
 
+def _hhmm(v: str) -> dt.time:
+    h, m = v.split(":")
+    return dt.time(int(h), int(m))
+
+
+def _first_weekday_of_month(d: dt.date) -> bool:
+    first = d.replace(day=1)
+    while first.weekday() >= 5:
+        first += dt.timedelta(days=1)
+    return d == first
+
+
+def slot_jobs(settings: Settings, now: dt.datetime) -> list[tuple[str, str, dict[str, Any]]]:
+    """当前北京时间落在哪些钟点窗口：``[(任务名, HHMM, args)]``。"""
+    from app.master.sync import BEIJING
+
+    bj = now.astimezone(BEIJING)
+    fetch = settings.business.securities.master.fetch_times
+    wd = bj.weekday()  # 0=周一
+    plan: list[tuple[str, str, dict[str, Any], bool]] = [
+        (SYNC_LISTS, fetch[0], {"trigger": "beat_1800"}, wd <= 4),
+        (SYNC_LISTS, fetch[1], {"trigger": "beat_0730"}, 1 <= wd <= 5),
+        (
+            SYNC_CODE_MAP,
+            CODE_MAP_TIME,
+            {"trigger": "beat_1800"},
+            _first_weekday_of_month(bj.date()),
+        ),
+        (PURGE_SNAPSHOTS, PURGE_SNAPSHOTS_TIME, {}, True),
+    ]
+    out = []
+    for task, hhmm, args, on_day in plan:
+        start = dt.datetime.combine(bj.date(), _hhmm(hhmm), BEIJING)
+        if on_day and start <= bj < start + dt.timedelta(seconds=SLOT_WINDOW_S):
+            out.append((task, f"{bj.date():%Y%m%d}:{hhmm.replace(':', '')}", args))
+    return out
+
+
+def _push(r: redis.Redis, task: str, args: dict[str, Any] | None = None, attempt: int = 1) -> None:
+    body: dict[str, Any] = {"task": task, "enqueued_at": int(time.time())}
+    if args:
+        body["args"] = args
+    if attempt > 1:
+        body["attempt"] = attempt
+    r.lpush(QUEUE_KEY, json.dumps(body, sort_keys=True))
+
+
+def beat_slots(
+    settings: Settings, client: redis.Redis | None = None, now: dt.datetime | None = None
+) -> list[str]:
+    """钟点任务（北京时间）与到期的重试；返回本轮放进队列的任务名。"""
+    r = client or _redis(settings)
+    now = now or dt.datetime.now(dt.UTC)
+    queued: list[str] = []
+    try:
+        for task, slot, args in slot_jobs(settings, now):
+            if r.set(f"{SLOT_PREFIX}{task}:{slot}", 1, nx=True, ex=SLOT_TTL_S):
+                _push(r, task, args)
+                queued.append(task)
+                log.info("beat 钟点排程 %s %s", task, slot)
+        due: list[bytes] = r.zrangebyscore(DELAYED_KEY, 0, now.timestamp())  # type: ignore[assignment]
+        for raw in due:
+            if r.zrem(DELAYED_KEY, raw):  # 多副本时只有一个能移走
+                r.lpush(QUEUE_KEY, raw)
+                queued.append(str(json.loads(raw).get("task", "")))
+    finally:
+        if client is None:
+            r.close()
+    return queued
+
+
 def worker_tick(settings: Settings, client: redis.Redis | None = None) -> list[tuple[str, str]]:
     """执行队列里的任务，返回 ``[(任务名, ok / failed / unknown / bad_payload)]``。"""
     r = client or _redis(settings)
@@ -154,8 +342,11 @@ def worker_tick(settings: Settings, client: redis.Redis | None = None) -> list[t
             if raw is None:
                 break
             try:
-                task = str(json.loads(raw)["task"])  # type: ignore[arg-type]
-            except (ValueError, KeyError, TypeError):
+                body = json.loads(raw)  # type: ignore[arg-type]
+                task = str(body["task"])
+                args = dict(body.get("args") or {})
+                attempt = int(body.get("attempt", 1))
+            except (ValueError, KeyError, TypeError, AttributeError):
                 log.warning("worker 丢弃无法解析的任务")
                 done.append(("", "bad_payload"))
                 continue
@@ -164,15 +355,51 @@ def worker_tick(settings: Settings, client: redis.Redis | None = None) -> list[t
                 log.warning("worker 丢弃未知任务 %s", task[:64])
                 done.append((task[:64], "unknown"))
                 continue
+            lock = f"{LOCK_PREFIX}{task}"
+            token = uuid.uuid4().hex
+            if task in LOCKED_TASKS and not r.set(lock, token, nx=True, ex=LOCK_TTL_S):
+                log.info("worker 任务 %s 正在别处运行，跳过", task)
+                done.append((task, "locked"))
+                continue
             try:
-                n = fn(settings)
+                n = fn(settings, **args)
             except Exception as exc:  # noqa: BLE001  只记类型，不输出连接串或参数
                 log.warning("worker 任务 %s 失败：%s", task, type(exc).__name__)
                 done.append((task, "failed"))
+                _after_failure(settings, r, task, args, attempt, exc)
                 continue
+            finally:
+                if task in LOCKED_TASKS and r.get(lock) == token.encode():
+                    r.delete(lock)
             log.info("worker 任务 %s 完成：%s", task, n)
             done.append((task, "ok"))
+            beat = str(args.get("trigger", "")).startswith("beat_")
+            if task == SYNC_LISTS and beat and RECONCILE_VENDOR in TASKS:
+                # T-B53；首次导入（CLI）从不走这里
+                _push(r, RECONCILE_VENDOR, {"trigger": args["trigger"]})
     finally:
         if client is None:
             r.close()
     return done
+
+
+def _after_failure(
+    settings: Settings,
+    r: redis.Redis,
+    task: str,
+    args: dict[str, Any],
+    attempt: int,
+    exc: BaseException,
+) -> None:
+    final = RETRY_TASKS.get(task)
+    if final is None:
+        return
+    if attempt < MAX_ATTEMPTS:
+        body = {"task": task, "args": args, "attempt": attempt + 1, "enqueued_at": int(time.time())}
+        r.zadd(DELAYED_KEY, {json.dumps(body, sort_keys=True): time.time() + RETRY_DELAY_S})
+        log.info("worker 任务 %s 第 %s 次失败，%ss 后重试", task, attempt, RETRY_DELAY_S)
+        return
+    try:
+        final(settings, args, exc)
+    except Exception as e2:  # noqa: BLE001
+        log.warning("worker 任务 %s 记录失败运行出错：%s", task, type(e2).__name__)

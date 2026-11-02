@@ -1163,9 +1163,35 @@ class SecuritiesAnnouncements(_Strict):
         return v
 
 
+class SecuritiesMaster(_Strict):
+    """``master:`` 段（v0.2.9 内，T-A04；plan 4.6 / 6.1；由 worker 读取；时间均为北京时间）。"""
+
+    #: 周一至周五拉三所列表的时刻；第二个是次日补拉（只补 18:00 未成功的来源）
+    fetch_times: tuple[Annotated[str, Field(pattern=rf"^{_HHMM}$")], ...]
+    #: 行数比该所上一份成功快照少该百分比以上 → 整份拒收
+    reject_drop_pct: Annotated[float, Field(gt=0, lt=100)]
+    #: 代码、简称、上市日期任一缺失率超过该百分比 → 整份拒收
+    reject_key_missing_pct: Annotated[float, Field(ge=0, lt=100)]
+    #: 连续多少份成功快照都没有该代码（且不在终止上市名单）才置 missing_from_list
+    missing_after_snapshots: PosInt
+    vendor_stale_alert_days: PosInt
+    field_mismatch_alert_rows: PosInt
+    #: 巨潮 / AKShare 交叉核对的星期（1=周一 … 7=周日）
+    crosscheck_weekday: Annotated[int, Field(ge=1, le=7)]
+
+    @field_validator("fetch_times")
+    @classmethod
+    def _times(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        if len(v) != 2 or v[0] == v[1]:
+            raise ValueError("master.fetch_times 须为两个不同时刻：[当日拉取, 次日补拉]")
+        return v
+
+
 class SecuritiesConfig(_File):
     search: SecuritiesSearch
     announcements: SecuritiesAnnouncements
+    #: v0.2.9 内（T-A04，T-B52）
+    master: SecuritiesMaster
 
 
 # ---------------------------------------------------------------------------

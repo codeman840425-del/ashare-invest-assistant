@@ -64,7 +64,7 @@ MALFORMED_REGISTER = [
 
 
 @pytest.mark.parametrize("kw", [k for _, k in MALFORMED_REGISTER], ids=[i for i, _ in MALFORMED_REGISTER])
-@pytest.mark.xfail(strict=False, reason=O_REG_ORDER)
+# T-T25 追加：本地 main f72b8c7 已实现、在 c9e1e73 上核实通过，转为硬断言（O_REG_ORDER 仅作说明保留）；origin 0cb78ad 上会失败。
 def test_r1_closed_mode_malformed_body_is_503(app_client: Callable[..., Any], sql: Callable[..., Any],
                                               kw: dict[str, Any]) -> None:
     """裁定 1（架构师裁定 2026-11-02, v0.2.9 687159f）：closed 模式不看请求体，一律 503 REGISTRATION_CLOSED。"""

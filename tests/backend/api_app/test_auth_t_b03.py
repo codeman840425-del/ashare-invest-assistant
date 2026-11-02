@@ -307,8 +307,7 @@ def test_register_invite_mode_without_code_is_400_and_writes_nothing(
 
 # 架构师裁定 2026-11-02, v0.2.9 687159f：closed 模式畸形请求体一律 503 REGISTRATION_CLOSED、绝不 400，注册模式最先判定。
 # 更多畸形体见 test_architect_rulings_t_t25.py（裁定 1）。
-@pytest.mark.xfail(strict=False, reason="后端 T-B03c（注册）：架构师裁定 2026-11-02, v0.2.9 687159f——closed 模式先于请求体校验；"
-                                        "origin 上畸形体返回 400；本地 main f72b8c7 已实现，未推 origin")
+# T-T25 追加：本地 main f72b8c7（T-B03e 追加）已实现并在 c9e1e73 上核实通过，转为硬断言；origin 0cb78ad 上会失败（400），须随 f72b8c7 推 origin。
 def test_register_closed_rejects_even_malformed_body_with_503(app_client: Callable[..., Any], sql: Callable[..., Any]) -> None:
     n0 = sql("SELECT count(*) FROM app.users")[0][0]
     assert_err(app_client("closed").post(f"{API}/auth/register", json={}), 503, "REGISTRATION_CLOSED")
@@ -760,7 +759,7 @@ def test_csrf_header_and_cookie_agree_but_not_session_is_403(session: Callable[.
     assert s.client.get(f"{API}/me").status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason=T_B03_V024 + "（CSRF 只比对请求头与会话令牌，不看 Cookie）")
+# T-T25 追加：本地 main c9e1e73（T-B47“CSRF 双提交比对 Cookie”）已实现并核实通过，转为硬断言；origin 0cb78ad 上会失败（204），须随 c9e1e73 推 origin。
 @pytest.mark.parametrize("cookie", ["mismatch", "absent"])
 def test_csrf_double_submit_requires_cookie_to_match(session: Callable[..., SimpleNamespace], cookie: str) -> None:
     """契约 v0.2.4 #13 / §1.3：双提交以 Cookie 为准，头、Cookie、会话令牌三者须一致；头 = 会话令牌但 Cookie 不符或缺失 → 403。"""

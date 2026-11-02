@@ -48,7 +48,11 @@ PRIVATE_SECRET = "data_licence_seal_private_keys"
 PUBLIC_SECRET = "data_licence_seal_public_keys"
 PRIVATE_ENV_RE = re.compile(r"_PRIVATE_KEYS?$")
 PRIVATE_OWNER = "ingest"
-DB_ROLE_OF = {"api": ("aia_api", "AIA_DB_API_PASSWORD"), "ingest": ("aia_ingest", "AIA_DB_INGEST_PASSWORD")}
+DB_ROLE_OF = {"api": ("aia_api", "AIA_DB_API_PASSWORD"), "ingest": ("aia_ingest", "AIA_DB_INGEST_PASSWORD"),
+              # 冷却记录定时清理（T-B10 部署项）：与 api 同角色调用同一函数，不得用属主
+              "cooldown-purge": ("aia_api", "AIA_DB_API_PASSWORD")}
+# 不挂任何 secret 的服务（只需 DATABASE_URL）
+NO_SECRET_SVCS = ("cooldown-purge",)
 DB_PW_SECRETS = ("db_password_aia_api", "db_password_aia_ingest", "db_password_aia_maint")
 DB_PW_OWNER = "db-roles"
 MAINT_SVC = "maint-cli"
@@ -144,6 +148,8 @@ def check(repo: Path) -> list[str]:
                     (e.split("=", 1)[1] for e in env if isinstance(e, str) and e.startswith(MASTER_REQUIRE_ENV + "=")), None)
                 if str(v) != "1":
                     errs.append(f"{rel}: 服务 {name} 的 {MASTER_REQUIRE_ENV} 必须是 \"1\"（不回落临时主密钥，M1）")
+            if name in NO_SECRET_SVCS and svc.get("secrets"):
+                errs.append(f"{rel}: 服务 {name} 不得挂任何 secret（只以 aia_api 连库调用清理函数）")
             if name == MAINT_SVC and "DATABASE_URL" in _env_keys(svc.get("environment")):
                 errs.append(f"{rel}: 服务 {MAINT_SVC} 不得有 DATABASE_URL（只能以 aia_maint 连接，不回落到属主）")
             env = svc.get("environment")

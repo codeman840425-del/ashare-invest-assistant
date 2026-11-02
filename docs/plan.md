@@ -238,6 +238,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
   | `signal-rt` | 读库与缓存计算信号；SSE 与游标在 `api` | 不需要 | 不得挂载 | 不要求 |
   | `maint-cli` | 删除用户数据 CLI 按 `user_id` 删行、删文件、删 Redis 键，不计算 HMAC；连接串只读 `AIA_MAINT_DATABASE_URL_FILE` | 不需要 | 不得挂载 | 不要求 |
   | `migrate` | alembic 迁移不计算 HMAC；`migrations/env.py` 只在没给 `DATABASE_URL` 时才加载 Settings | 不需要 | 不得挂载 | 不要求 |
+  | `cooldown-purge`（过渡，T-B10 部署项） | 每小时调用 `licences/service.py` 的 `purge_expired_cooldowns` 物理删除过期证书冷却记录；只删行，不计算 HMAC，不加载 Settings；以 `aia_api` 连库（与证书 PUT/DELETE 的读取时清理同角色，不新增权限），不用属主；不挂任何 secret（CI `check_secret_boundary.py` 的 `NO_SECRET_SVCS`）。`beat` 落地定时任务后改由 `beat` 调度、`worker` 执行，并删除本服务 | 不需要 | **不得挂载** | 不要求 |
   | `nginx`、`postgres`、`redis` 及其他基础设施 | 无 | 不需要 | 不得挂载 | — |
 
   - **后端**：Settings 的“非 local/test 必须有 `APP_MASTER_KEY`”只对 `SERVICE_NAME ∈ {api, worker}` 生效；`SERVICE_NAME` 缺省仍按 `api` 处理，取到白名单外的未知值时在非 local/test 下拒绝启动（失败即关闭）。所有用主密钥派生子密钥的函数（游标、邀请码、登录 IP、证书去重与冷却指纹、导入文件密钥）在非 local/test 下取不到主密钥时必须抛错，不得退回进程内临时密钥。`ingest` 启动时发现主密钥即拒绝启动。
@@ -2903,7 +2904,7 @@ admin:
     - **`invite_codes`**：`bound_username` 置 NULL；`used_by` 一类指向该用户的列解除关联（置 NULL）。
     - **`ops.pending_file_purges`**：`path` 可以含 uid 目录名；重试删除文件成功后删除该行。
 - **周期清理与保留期（v0.2.9 内，评审 be607b3/f72b8c7/8fd9502 裁定）；T-B46/T-B47 裁定同步**：
-  - **证书冷却记录**（`DELETE /me/data-licence` 时保留的指纹与删除前的 `status`、`paused_until`，契约 §7.1 DELETE 行）：有 `paused_until` 的保留到 `paused_until`（不另加 24 小时上限，否则删除后重提可绕过较长的冷却）；`paused_until` 为 null（删除时没有处于冷却）的最多保留到删除后 24 小时（契约 v0.2.9 #28①）（v0.2.9 内，T-O11 评审裁定）。周期任务（每小时，由 `beat` 调度、`worker` 执行；上线前必须有，在此之前只靠读取时视为不存在）物理删除过期记录；读取时过期记录一律视为不存在。删除用户时一并物理删除。
+  - **证书冷却记录**（`DELETE /me/data-licence` 时保留的指纹与删除前的 `status`、`paused_until`，契约 §7.1 DELETE 行）：有 `paused_until` 的保留到 `paused_until`（不另加 24 小时上限，否则删除后重提可绕过较长的冷却）；`paused_until` 为 null（删除时没有处于冷却）的最多保留到删除后 24 小时（契约 v0.2.9 #28①）（v0.2.9 内，T-O11 评审裁定）。周期任务（每小时，由 `beat` 调度、`worker` 执行；`beat` 实现之前，由 compose 服务 `cooldown-purge`（`aia_api`、不挂主密钥）每小时调用一次，`beat` 落地后删除该服务；上线前必须有，在此之前只靠读取时视为不存在）物理删除过期记录；读取时过期记录一律视为不存在。删除用户时一并物理删除。
   - **周期评估**：`symbol_horizon_assessments` 每个（用户、证券、分类器版本）的最新一条保留，其余超过 180 天的物理删除，同时删除只被它们引用的 `purpose='horizon'` 快照（问题 75）。
   - **交割单原始文件**：按 `import_batches` 的 `retained_until`（上传时间 + 365 天，问题 21）每日删除到期文件；失败的写入 `ops.pending_file_purges`。
   - 三项都由后端实现为幂等的周期任务，结果只写行数审计。

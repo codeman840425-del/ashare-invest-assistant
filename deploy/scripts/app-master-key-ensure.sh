@@ -50,8 +50,26 @@ if [ -n "${APP_MASTER_KEY+x}" ]; then env_val="$APP_MASTER_KEY"; fi
 if [ -f "$env_file" ]; then
   file_val="$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}APP_MASTER_KEY[[:space:]]*=//p' "$env_file" | tail -n 1)"
   file_val="${file_val%$'\r'}"
-  file_val="${file_val#"${file_val%%[![:space:]]*}"}"; file_val="${file_val%"${file_val##*[![:space:]]}"}"
-  case "$file_val" in \"*\") file_val="${file_val:1:${#file_val}-2}" ;; \'*\') file_val="${file_val:1:${#file_val}-2}" ;; esac
+  file_val="${file_val#"${file_val%%[![:space:]]*}"}"
+  # 与 compose 的 .env 语义一致（评审 m1）：引号值取到配对的引号为止，引号里的 # 原样保留，引号后的内容（如 “# 注释”）忽略；
+  # 未加引号的值遇到“空白 + #”即为行尾注释，去掉后再去尾部空白。引号不配对 → 无法确定值，拒绝（不打印值）。
+  q="${file_val:0:1}"
+  if [ "$q" = '"' ] || [ "$q" = "'" ]; then
+    rest="${file_val:1}"
+    case "$rest" in
+      *"$q"*) file_val="${rest%%"$q"*}" ;;
+      *) unset rest file_val env_val
+         echo "拒绝启动（$tag）：${env_file} 里 APP_MASTER_KEY 的引号不配对，无法确定值；请人工修正后重试。" >&2
+         exit 3 ;;
+    esac
+    unset rest
+  else
+    if [[ "$file_val" =~ [[:space:]]# ]]; then
+      file_val="${file_val%%[[:space:]]#*}"
+    fi
+    file_val="${file_val%"${file_val##*[![:space:]]}"}"
+  fi
+  unset q
 fi
 is_real "$env_val" || env_val=""
 is_real "$file_val" || file_val=""

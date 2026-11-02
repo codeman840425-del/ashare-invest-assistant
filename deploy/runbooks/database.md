@@ -63,6 +63,10 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
 **备份（db-backup.sh）**
 - 格式是 `pg_dump -Fc`。
 - 产物的 `.meta.json` 里记录 PG 和 TimescaleDB 的版本、镜像、sha256。
+- **主密钥要单独离线保存，不要和 dump 放在一起**（评审 1cf643e M2）：dump 里的邀请码 HMAC、证书去重指纹、
+  导入文件密文都依赖 `$AIA_SECRETS_DIR/app_master_key`，丢了主密钥 dump 就恢复不出可用数据；但两者放在一起，
+  拿到备份的人就同时拿到了解密能力。做法：主密钥按 600 拷到离线介质 / 密码管理器（与 dump 不同的位置、不同的权限），
+  不打印、不入库、不进工单；dump 目录（`--out-dir`）里不放任何密钥文件。证书私钥（`data_licence_seal_*`）同理。
 
 **恢复（db-restore.sh）的检查**
 - 校验 sha256。
@@ -75,6 +79,17 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
 4. `pg_restore`，默认串行。TimescaleDB 目录表之间有循环外键，演练实测 `-j 4` 会报外键错误。
 5. `timescaledb_post_restore()`。
 6. `ANALYZE`。
+
+**迁移到新主机 / 灾后恢复：先放主密钥，再 up**（评审 1cf643e M2）
+1. 在新主机上**先**把原主机的 `$AIA_SECRETS_DIR/app_master_key` 从离线备份拷到同一路径（600、属主 10001）。
+   主密钥只有这一份文件，api / worker 共用（plan e56462c 按服务分配：其余服务不挂）；以后若按服务拆分，就逐个拷各服务的密钥文件。
+   证书私钥 / 公钥文件同理先拷（见 `data-licence-seal-keys.md`）。
+2. **然后**才执行 `deploy/scripts/compose.sh up -d --wait`，再 `db-restore.sh` 恢复数据。
+   顺序反过来的后果：新主机 up 时库是空的，`app-master-key-ensure.sh` 会合法地按“全新部署”生成一把新主密钥，
+   restore 之后旧数据的 HMAC 与加密文件全部失效，而且不会报错。
+3. 恢复后核对：`stat -c '%a %u'` 为 `600 10001`；`sha256sum` 与原主机记录一致（只比对摘要，不打印值）；
+   用既有邀请码 / 登录验证 HMAC 仍然一致。
+4. 已经误生成了新主密钥：停服务，用离线备份的原主密钥覆盖（先另存误生成的那份），再起服务；不要在新密钥下接受新数据。
 
 **恢复的保护**
 - 恢复脚本拒绝覆盖容器的 `POSTGRES_DB`（主库 aia）。

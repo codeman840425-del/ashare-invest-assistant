@@ -171,6 +171,46 @@ def test_migrate_from_env_file(e: Env, fmt: str) -> None:
     _no_leak(r, e, k)
 
 
+# 评审 m1：行尾注释与引号（与 compose .env 语义一致）
+@pytest.mark.parametrize("line,expect", [
+    ("{v}={k}  # 线上主密钥\n", "{k}"),
+    ("{v}={k}\t#c\n", "{k}"),
+    ("export {v}={k} # c\r\n", "{k}"),
+    ('{v}="{k}#x" # 注释\n', "{k}#x"),          # 引号里的 # 保留
+    ("{v}='{k} #x'  # c\n", "{k} #x"),
+    ('{v}="{k}"#c\n', "{k}"),                    # 引号后紧跟的内容忽略
+    ("{v}={k}#x\n", "{k}#x"),                    # 未加引号、# 前无空白：不是注释
+])
+def test_migrate_env_file_inline_comment(e: Env, line: str, expect: str) -> None:
+    k = _key()
+    e.env_file.write_text(line.format(v=VAR, k=k), encoding="utf-8", newline="")
+    r = e.run()
+    assert r.returncode == 0, r.stderr
+    _assert_key_file(e, expect.format(k=k))
+    _no_leak(r, e, k)
+
+
+@pytest.mark.parametrize("line", ['{v}="{k}\n', "{v}='{k} # c\n"])
+def test_unbalanced_quote_refused(e: Env, line: str) -> None:
+    k = _key()
+    e.env_file.write_text(line.format(v=VAR, k=k), encoding="utf-8")
+    r = e.run()
+    assert r.returncode == 3 and "引号不配对" in r.stderr
+    assert not e.key.exists()
+    _no_leak(r, e, k)
+
+
+def test_existing_key_equals_env_value_with_comment(e: Env) -> None:
+    # ④：.env 行尾注释不得被当成值的一部分而误判“不一致”
+    e.secrets.mkdir()
+    k = _key()
+    e.key.write_text(k, encoding="utf-8")
+    e.env_file.write_text(f"{VAR}={k}   # 旧值，待删除\n", encoding="utf-8")
+    r = e.run()
+    assert r.returncode == 0, r.stderr
+    _no_leak(r, e, k)
+
+
 def test_migrate_from_process_env(e: Env) -> None:
     k = _key()
     r = e.run({VAR: k})

@@ -6,6 +6,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
+import { preloadRoutes } from '../test/preloadRoutes';
 import type { Bar, BarsResponse } from '../api/types';
 import type { Announcement } from '../api/marketTypes';
 import { consistentPages, mergeBarPages } from '../api/marketQueries';
@@ -16,6 +17,9 @@ import { flattenPages, clampLimit } from '../lib/cursorPaging';
 import { HISTORY_DAYS, dailyBars } from '../mocks/fixtures';
 import { page } from '../mocks/handlerUtils';
 import { server } from '../mocks/server';
+
+// 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
+beforeAll(() => preloadRoutes(routes), 30_000);
 
 // 图表在 jsdom 里不绘制：记录根数，并提供一个“拖到左边缘”的按钮触发 onReachStart
 vi.mock('../components/charts/KlineChart', () => ({

@@ -5,9 +5,13 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
+import { preloadRoutes } from '../test/preloadRoutes';
 import { mockLoginAs } from '../mocks/session';
 import { DILUTED_COST_NOTE } from '../i18n/importLabels';
 import { IMPORT_422_TEXT } from '../api/importCodes';
+
+// 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
+beforeAll(() => preloadRoutes(routes), 30_000);
 
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));

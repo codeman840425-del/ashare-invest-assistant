@@ -276,7 +276,8 @@ export const accountHandlers = [
     const id = String(params.id);
     if (!state.users.some((x) => x.id === id)) return notFound('用户');
     const b = (await request.json().catch(() => ({}))) as { reason?: unknown };
-    const reason = typeof b.reason === 'string' ? b.reason : '';
+    // 评审 d26e1d3 m3：先去掉首尾空白再按 1–200 校验（纯空格视为未填）
+    const reason = typeof b.reason === 'string' ? b.reason.trim() : '';
     if (reason.length < 1 || reason.length > ADMIN_REASON_MAX) return validationError([{ field: 'reason', issue: reason.length ? 'too_long' : 'required' }]);
     const r = op === 'pause' ? adminPause(id, reason) : adminResume(id, reason);
     return r === 'ok' ? noContent() : err(409, 'DATA_LICENCE_NOT_SET', '该用户尚未设置数据证书');

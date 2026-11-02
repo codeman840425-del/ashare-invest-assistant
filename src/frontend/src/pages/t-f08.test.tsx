@@ -7,6 +7,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
+import { preloadRoutes } from '../test/preloadRoutes';
 import type { TodayAlert, TodayDataGap, TodayPlanTrigger, TodayResponse } from '../api/types';
 import { todayPollMs } from '../api/queries';
 import { MORE_ROUTE, safeInternalRoute } from './today/todayRoutes';
@@ -15,6 +16,9 @@ import { ENUMS } from '../api/enums';
 import { DISCLAIMER_TEXT } from '../components/RiskDisclosure';
 import { server } from '../mocks/server';
 import { TERMINAL_ROWS, uid } from '../mocks/fixtures';
+
+// 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
+beforeAll(() => preloadRoutes(routes), 30_000);
 
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));

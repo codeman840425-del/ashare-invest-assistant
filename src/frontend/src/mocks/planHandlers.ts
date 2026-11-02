@@ -12,8 +12,9 @@ import { errorBody, notFound, page, validation } from './handlerUtils';
 import { patchSignal, reasonsNow, signalsNow, TERMINAL_SIGNAL_STATES } from './signalHandlers';
 
 /** 契约 §4：allowed = 用户从 from 出发、经接口可到达的状态（按枚举顺序）；终态为 [] */
-const signalAllowed = (st: CandidateSignalState): CandidateSignalState[] =>
-  TERMINAL_SIGNAL_STATES.includes(st) ? [] : st === 'drafted' ? ['confirmed', 'dismissed'] : ['dismissed'];
+/** 评审 b23401a N7：blocked 可经手动解除原因（§6.0 POST /release）变为 released，所以是 ['released','dismissed'] */
+export const signalAllowed = (st: CandidateSignalState): CandidateSignalState[] =>
+  TERMINAL_SIGNAL_STATES.includes(st) ? [] : st === 'drafted' ? ['confirmed', 'dismissed'] : st === 'blocked' ? ['released', 'dismissed'] : ['dismissed'];
 
 const API = '/api/v1';
 const fail = (status: number, code: string, message: string, details: Record<string, unknown> | null = null) =>

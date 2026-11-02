@@ -7,6 +7,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
+import { preloadRoutes } from '../test/preloadRoutes';
 import { CONTRACT_VERSION } from '../api/enums';
 import { HIGH_RISK_STRATEGY_NOTE } from '../components/StrategyEnableSwitch';
 import { server } from '../mocks/server';
@@ -14,6 +15,9 @@ import { mockLoginAs } from '../mocks/session';
 import { setMockLicence } from '../mocks/licenceStore';
 import { STRATEGY_TEMPLATES } from '../mocks/strategyHandlers';
 import { uid } from '../mocks/fixtures';
+
+// 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
+beforeAll(() => preloadRoutes(routes), 30_000);
 
 let client: QueryClient;
 function renderAt(path: string) {

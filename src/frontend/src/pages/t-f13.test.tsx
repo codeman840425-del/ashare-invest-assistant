@@ -5,10 +5,14 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
+import { preloadRoutes } from '../test/preloadRoutes';
 import { DISCLAIMER_TEXT } from '../components/RiskDisclosure';
 import { DAILY_REPORT_LIST, DAILY_REPORTS, PREV_REPORT_DATE, REPORT_DATE } from '../mocks/fixtures';
 import { server } from '../mocks/server';
 import { PENDING_ROUTE } from './dailyReportRoutes';
+
+// 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
+beforeAll(() => preloadRoutes(routes), 30_000);
 
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
@@ -60,13 +64,16 @@ describe('T-F13 盘后日报', () => {
     expect(hrefs).toEqual([cur.pending.plan_drafts ? PENDING_ROUTE.plan_drafts : null, cur.pending.active_reasons ? PENDING_ROUTE.active_reasons : null].filter(Boolean));
   });
 
-  it('逐股卡片：键盘可达（role=link，Enter 进入候选信号卡）', async () => {
+  it('逐股卡片：键盘经标题链接进入候选信号卡；鼠标点卡片空白处也可进入（评审 b23401a N4）', async () => {
     const router = renderAt(`/daily-reports/${REPORT_DATE}`);
     const s = cur.stocks.find((x) => x.suggestion_id)!;
     const card = await screen.findByTestId(`stc-${s.security_code}`);
-    expect(card.getAttribute('role')).toBe('link');
-    expect(card.getAttribute('tabindex')).toBe('0');
-    fireEvent.keyDown(card, { key: 'Enter' });
+    expect(card.getAttribute('role')).toBeNull();
+    expect(card.hasAttribute('tabindex')).toBe(false);
+    const link = within(card).getByTestId(`stc-link-${s.security_code}`);
+    expect(link.tagName).toBe('A');
+    expect(link.getAttribute('href')).toBe(`/suggestions/${s.suggestion_id}`);
+    fireEvent.click(card);
     await waitFor(() => expect(router.state.location.pathname).toBe(`/suggestions/${s.suggestion_id}`));
   });
 
@@ -125,6 +132,30 @@ describe('T-F13 盘后日报', () => {
     expect(seen).toContain('p2');
   });
 
+  it('“上一期”加载更早时用户已换日期：加载完成后不再跳转（评审 b23401a N6）', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    server.use(http.get(`${API}/daily-reports`, async ({ request }) => {
+      const cursor = new URL(request.url).searchParams.get('cursor');
+      if (cursor === 'p2') { await gate; return HttpResponse.json({ items: [DAILY_REPORT_LIST[1]], next_cursor: null }); }
+      return HttpResponse.json({ items: [DAILY_REPORT_LIST[0]], next_cursor: 'p2' });
+    }), http.get(`${API}/daily-reports/2026-10-20`, () => HttpResponse.json({ ...cur, date: '2026-10-20' })));
+    // 先看过 10-20（进缓存），再回到最新一期；之后切回 10-20 时页面不经过加载态，切换器保持挂载
+    const router = renderAt('/daily-reports/2026-10-20');
+    await screen.findByTestId('daily-report');
+    await router.navigate(`/daily-reports/${REPORT_DATE}`);
+    await waitFor(() => expect(document.querySelector('.report-dates')?.textContent).toContain(REPORT_DATE));
+    const prev = await screen.findByRole('button', { name: '上一期' });
+    await waitFor(() => expect(prev).toBeEnabled());
+    fireEvent.click(prev);
+    await router.navigate('/daily-reports/2026-10-20');
+    await waitFor(() => expect(document.querySelector('.report-dates')?.textContent).toContain('2026-10-20'));
+    // “更早”那一页此时才返回：等待期间地址已变，不应再跳到 10-29
+    release();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(router.state.location.pathname).toBe('/daily-reports/2026-10-20');
+  });
+
   it('切换日期保留 ?filter=（评审 7afbc06 m2）', async () => {
     const router = renderAt(`/daily-reports/${REPORT_DATE}?filter=changed`);
     await screen.findByTestId('daily-report');
@@ -138,20 +169,27 @@ describe('T-F13 盘后日报', () => {
     expect(router.state.location.search).toBe('?filter=changed');
   });
 
-  it('卡片名称取自标题（aria-labelledby）；证据标签可聚焦并显示详情（评审 7afbc06 m3）', async () => {
+  it('卡片名称取自标题（aria-labelledby）；链接名带去向说明；证据标签不在链接内、可聚焦并显示详情（评审 7afbc06 m3、b23401a N2–N5）', async () => {
     const router = renderAt(`/daily-reports/${REPORT_DATE}`);
     const s = cur.stocks.find((x) => x.suggestion_id)!;
     const card = await screen.findByTestId(`stc-${s.security_code}`);
     expect(card.hasAttribute('aria-label')).toBe(false);
     const title = document.getElementById(card.getAttribute('aria-labelledby')!)!;
     expect(card.contains(title)).toBe(true);
-    expect(screen.getByRole('link', { name: `${s.name} ${s.security_code}` })).toBe(card);
+    const link = screen.getByRole('link', { name: `${s.name} ${s.security_code}：查看候选信号卡` });
+    expect(link).toBe(title);
     const chip = card.querySelector<HTMLElement>('.ev-chip:not(.missing):not(.none)');
     expect(chip).not.toBeNull();
     if (chip) {
+      expect(link.contains(chip)).toBe(false);
+      expect(chip.closest('a,[role="link"]')).toBeNull();
+      expect(chip.getAttribute('role')).toBe('button');
       expect(chip.getAttribute('tabindex')).toBe('0');
       expect(chip.getAttribute('aria-label')).toMatch(/^证据 /);
-      fireEvent.keyDown(chip, { key: 'Enter' });
+      // N3：空格被 preventDefault（不滚动页面），Enter / 空格 / 点击都不冒泡到卡片
+      expect(fireEvent.keyDown(chip, { key: ' ' })).toBe(false);
+      expect(fireEvent.keyDown(chip, { key: 'Enter' })).toBe(false);
+      fireEvent.click(chip);
       expect(router.state.location.pathname).toBe(`/daily-reports/${REPORT_DATE}`);
       fireEvent.focus(chip);
       expect(await screen.findByRole('tooltip')).toHaveTextContent('来源：');

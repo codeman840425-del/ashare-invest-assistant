@@ -7,6 +7,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
+import { preloadRoutes } from '../test/preloadRoutes';
 import { ApiError, apiGet, apiPost, apiPut } from '../api/client';
 import { errorText } from '../api/errorPolicy';
 import { useSecuritySearch } from '../api/marketQueries';
@@ -22,6 +23,9 @@ import { LICENCE_RATE, setMockIngestPaused, setMockLicence } from '../mocks/lice
 import { server } from '../mocks/server';
 import { mockLoginAs } from '../mocks/session';
 import { STRATEGY_TEMPLATES, mockAddInstance } from '../mocks/strategyHandlers';
+
+// 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
+beforeAll(() => preloadRoutes(routes), 30_000);
 
 // 图表在 jsdom 里不绘制：保留“空图原因”的渲染，便于断言（评审 M2、m11）
 vi.mock('../components/charts/KlineChart', () => ({

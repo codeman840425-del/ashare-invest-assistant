@@ -4,10 +4,14 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
+import { preloadRoutes } from '../test/preloadRoutes';
 import { calibratedServerNowMs, clockOffsetFromDate, isServerClockCalibrated, noteServerDate, resetServerClock, serverNowMs } from '../lib/serverClock';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { MOCK_INVITE_CODES, mockLoginAs, setRegistrationMode, state } from '../mocks/session';
+
+// 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
+beforeAll(() => preloadRoutes(routes), 30_000);
 
 const PW = 'x'.repeat(12) + '1';
 const CODE = MOCK_INVITE_CODES[0];

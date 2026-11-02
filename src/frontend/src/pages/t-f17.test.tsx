@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
+import { preloadRoutes } from '../test/preloadRoutes';
 import { ApiError } from '../api/client';
 import { errorText } from '../api/errorPolicy';
 import { normalizeEvents } from '../api/signalQueries';
@@ -12,6 +13,9 @@ import { causeText } from '../i18n/signalLabels';
 import { conflictsOf, parseTab, reevalText } from '../lib/signals';
 import { CANDIDATE_SIGNALS, REASONS, SUGGESTIONS, uid } from '../mocks/fixtures';
 import { LifecycleBadge } from './signals/LifecycleBadge';
+
+// 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
+beforeAll(() => preloadRoutes(routes), 30_000);
 
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
@@ -82,7 +86,8 @@ describe('纯函数', () => {
 describe('列表 /candidate-signals', () => {
   it('显示信号、方向冲突标记与观察中徽标', async () => {
     renderAt('/candidate-signals');
-    expect(await screen.findByTestId(`sig-link-${BUY}`)).toBeInTheDocument();
+    // 本文件第一次渲染 AG Grid 表格，冷启动较慢：只在这一处单独放宽等待（评审 b23401a N8）
+    expect(await screen.findByTestId(`sig-link-${BUY}`, undefined, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByTestId(`conflict-${BUY}`)).toHaveTextContent('方向冲突');
     expect(screen.getByTestId(`conflict-${REDUCE}`)).toBeInTheDocument();
     expect(screen.queryByTestId(`conflict-${SELL_T1}`)).toBeNull();

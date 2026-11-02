@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { Alert, Button, Checkbox, Input, Modal, Segmented, Space, Table, Tag, Tooltip, type ButtonProps } from 'antd';
 import { useAdminDataLicences, useAdminLicenceAction, type AdminLicenceOp } from '../../api/adminQueries';
@@ -12,6 +12,8 @@ import { LICENCE_ERROR, LICENCE_STATUS, LICENCE_TIER, expiryLeftText } from '../
 import { fmtTime } from '../../lib/format';
 
 const PAGE_SIZE = 50;
+/** ?user= 定位时最多自动续加载的页数（50×40 = 2000 位用户）；超过后停下，由管理员手动“加载更多” */
+const FOCUS_MAX_PAGES = 40;
 type Filter = 'all' | 'paused' | 'abnormal' | 'not_set';
 const ABNORMAL: readonly DataLicenceState[] = ['invalid', 'expired', 'quota_exceeded', 'ip_limited'];
 const MATCH: Record<Filter, (r: AdminDataLicence) => boolean> = {
@@ -61,6 +63,24 @@ export function AdminDataLicencesPage() {
   const [ack, setAck] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const rows = list.items.filter(MATCH[filter]);
+
+  // 评审 d26e1d3 m2：契约没有按用户查询的参数（§7.9 只有游标分页；?status=/?q= 属问题 72 后续），
+  // 所以按已有能力逐页续加载，直到找到 ?user= 指定的行，再高亮并滚动到该行。
+  const focusFound = !!focusUser && list.items.some((r) => r.user_id === focusUser);
+  const pagesLoaded = list.data?.pages.length ?? 0;
+  const focusCapped = pagesLoaded >= FOCUS_MAX_PAGES;
+  const focusSearching = !!focusUser && !focusFound && !list.isError && (list.isPending || (list.hasNextPage && !focusCapped));
+  const { hasNextPage, isFetchingNextPage, isPending, isError, fetchNextPage } = list;
+  useEffect(() => {
+    if (!focusUser || focusFound || isPending || isError || !hasNextPage || isFetchingNextPage || focusCapped) return;
+    void fetchNextPage();
+  }, [focusUser, focusFound, isPending, isError, hasNextPage, isFetchingNextPage, focusCapped, fetchNextPage]);
+  useEffect(() => {
+    if (!focusFound || !focusUser) return;
+    const el = document.querySelector(`[data-row-key="${focusUser.replace(/["\\]/g, '')}"]`) as HTMLElement | null;
+    el?.scrollIntoView?.({ block: 'center' });
+  }, [focusFound, focusUser]);
+  const focusHidden = focusFound && !rows.some((r) => r.user_id === focusUser);
 
   const open = (row: AdminDataLicence, op: AdminLicenceOp) => {
     action.reset();
@@ -136,6 +156,12 @@ export function AdminDataLicencesPage() {
         />
         {filter !== 'all' ? <span className="muted small" data-testid="lic-filter-note">只筛选已加载的 {list.items.length} 行（接口未提供筛选参数）</span> : null}
       </Space>
+      {focusSearching ? <div className="muted small" style={{ marginBottom: 8 }} data-testid="lic-focus-searching">正在加载更多行以定位该用户（已加载 {list.items.length} 位）…</div> : null}
+      {focusUser && !focusFound && !focusSearching && !list.isError ? (
+        <Alert type="warning" showIcon style={{ marginBottom: 8 }} data-testid="lic-focus-missing"
+          title={focusCapped && list.hasNextPage ? `已加载 ${list.items.length} 位用户仍未找到该用户，可继续“加载更多”` : '列表中没有找到该用户'} />
+      ) : null}
+      {focusHidden ? <div className="muted small" style={{ marginBottom: 8 }} data-testid="lic-focus-hidden">要定位的用户不在当前筛选结果里，切到“全部”可以看到。</div> : null}
       {done ? <Alert type="success" showIcon closable onClose={() => setDone(null)} style={{ marginBottom: 8 }} title={done} data-testid="lic-done" /> : null}
       {list.isError ? <ErrorBox error={list.error} /> : null}
       <Table<AdminDataLicence>

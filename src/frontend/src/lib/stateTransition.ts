@@ -14,14 +14,15 @@ export function transitionText(e: unknown, kind: 'signal' | 'draft', opts: { reg
   if (!(e instanceof ApiError) || e.code !== 'INVALID_STATE_TRANSITION') return null;
   const from = e.details?.from;
   if (typeof from !== 'string') return null;
-  if (kind === 'signal' && from in SIGNAL_STATE) {
+  // 评审 b23401a N1：只认自有键，原型链上的键（如 "toString"）回落到通用文案
+  if (kind === 'signal' && Object.hasOwn(SIGNAL_STATE, from)) {
     const st = from as CandidateSignalState;
     if (st === 'confirmed') return '该信号已被确认为计划';
     if (GONE.includes(st)) return opts.regen ? `信号已失效（${SIGNAL_STATE[st].text}），不能重新生成草案` : `信号已失效（${SIGNAL_STATE[st].text}）`;
     if (st === 'dismissed') return '该信号已忽略';
     return `该信号当前为“${SIGNAL_STATE[st].text}”，不能进行此操作`;
   }
-  if (kind === 'draft' && from in PLAN_DRAFT_STATUS) {
+  if (kind === 'draft' && Object.hasOwn(PLAN_DRAFT_STATUS, from)) {
     const st = from as PlanDraftStatus;
     if (st === 'confirmed') return '该草案已确认为计划';
     if (st === 'discarded') return '该草案已放弃';

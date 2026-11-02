@@ -7,6 +7,10 @@ import { mockLoginAs } from '../mocks/session';
 import { AppProviders } from './AppProviders';
 import { makeQueryClient } from './queryClient';
 import { routes } from './routes';
+import { preloadRoutes } from '../test/preloadRoutes';
+
+// 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
+beforeAll(() => preloadRoutes(routes), 30_000);
 
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));

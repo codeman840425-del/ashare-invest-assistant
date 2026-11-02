@@ -5,12 +5,16 @@ import { http, HttpResponse } from 'msw';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
+import { preloadRoutes } from '../test/preloadRoutes';
 import { ApiError } from '../api/client';
 import { transitionText, stateErrorText } from '../lib/stateTransition';
 import { uid } from '../mocks/fixtures';
 import { draftsNow } from '../mocks/planHandlers';
 import { patchSignal } from '../mocks/signalHandlers';
 import { server } from '../mocks/server';
+
+// 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
+beforeAll(() => preloadRoutes(routes), 30_000);
 
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));

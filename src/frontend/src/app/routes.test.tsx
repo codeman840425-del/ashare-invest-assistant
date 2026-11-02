@@ -3,8 +3,12 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from './AppProviders';
 import { makeQueryClient } from './queryClient';
 import { routes } from './routes';
+import { preloadRoutes } from '../test/preloadRoutes';
 import { DISCLAIMER_TEXT } from '../components/RiskDisclosure';
 import { REPORT_DATE, SUGGESTIONS } from '../mocks/fixtures';
+
+// 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
+beforeAll(() => preloadRoutes(routes), 30_000);
 
 // jsdom 没有 canvas：图表组件换成占位（图表本身在 Playwright 截图里验证）
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));

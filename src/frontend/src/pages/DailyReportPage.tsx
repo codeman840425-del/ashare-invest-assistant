@@ -1,5 +1,5 @@
 import { Alert, Button, Segmented, Select, Tag } from 'antd';
-import { useId, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useDailyReport, useDailyReportPages, useDailyReports } from '../api/queries';
 import type { DailyReport, DailyReportStock, TextWithEvidence } from '../api/types';
@@ -40,14 +40,21 @@ const LOAD_MORE = '__more__';
 function DateSwitcher({ date }: { date: string }) {
   const navigate = useNavigate();
   // 评审 7afbc06 m2：切换日期时保留 ?filter= 等查询参数
-  const { search } = useLocation();
+  const { search, pathname } = useLocation();
   const go = (d: string) => navigate({ pathname: `/daily-reports/${d}`, search });
   const pages = useDailyReportPages();
   const dates = (pages.data?.pages ?? []).flatMap((p) => p.items.map((x) => x.date));
   const idx = dates.indexOf(date);
   // 评审 7afbc06 m1：当前是已加载的最后一项且还有下一页时，加载完直接跳到新一页的第一项
+  // 评审 b23401a N6：等待期间用户换了日期（看地址，不看仍在显示的旧数据）或离开了页面，就不再跳转
+  const pathRef = useRef(pathname);
+  useEffect(() => { pathRef.current = pathname; }, [pathname]);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const loadOlder = async () => {
+    const from = pathname;
     const res = await pages.fetchNextPage();
+    if (!alive.current || pathRef.current !== from) return;
     const all = (res.data?.pages ?? []).flatMap((p) => p.items.map((x) => x.date));
     const i = all.indexOf(date);
     const next = i >= 0 ? all[i + 1] : undefined;
@@ -78,18 +85,23 @@ function StockCard({ s, r }: { s: DailyReportStock; r: DailyReport }) {
   const to = s.suggestion_id ? `/suggestions/${s.suggestion_id}` : null;
   const open = () => to && navigate(to);
   const titleId = useId();
-  const onKey = (e: KeyboardEvent) => {
-    if (to && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); }
-  };
   return (
+    // 评审 b23401a N4/N5：卡片本身不再是 role="link"（避免证据标签这类可聚焦元素嵌套在链接里）；
+    // 键盘和读屏用标题上的真实链接，链接名带“查看候选信号卡”的去向说明；鼠标点卡片空白处仍可进入
     <section
       className={`panel stock-card ${s.change_from_previous === 'removed' ? 'dim' : ''} ${to ? 'clickable' : 'static'}`}
       data-testid={`stc-${s.security_code}`}
-      {...(to ? { role: 'link', tabIndex: 0, 'aria-labelledby': titleId, onClick: open, onKeyDown: onKey } : {})}
+      aria-labelledby={titleId}
+      {...(to ? { onClick: open } : {})}
     >
       <div className="stc-head">
-        {/* 评审 7afbc06 m3：卡片名称取自标题（aria-labelledby），不再用 aria-label 覆盖整张卡 */}
-        <span id={titleId} className="stc-title"><b>{s.name}</b> <span className="mono muted small">{s.security_code}</span></span>
+        {to ? (
+          <Link id={titleId} to={to} className="stc-title" onClick={(e) => e.stopPropagation()} data-testid={`stc-link-${s.security_code}`}>
+            <b>{s.name}</b> <span className="mono muted small">{s.security_code}</span><span className="sr-only">：查看候选信号卡</span>
+          </Link>
+        ) : (
+          <span id={titleId} className="stc-title"><b>{s.name}</b> <span className="mono muted small">{s.security_code}</span></span>
+        )}
         <Tag color={CHANGE[s.change_from_previous].c}>{CHANGE[s.change_from_previous].t}</Tag>
         <span className="spacer" />
         {/* v0.2.3 #3：收盘价、涨跌幅、数据状态、最高风险级别 */}

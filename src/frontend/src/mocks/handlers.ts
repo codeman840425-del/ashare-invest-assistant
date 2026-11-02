@@ -13,6 +13,7 @@ import { candidateHandlers, resetCandidates } from './candidateHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
 import { allNotifications, findNotification, markAllNotificationsRead, markNotificationRead, resetNotificationStore } from './notificationStore';
 import { resetStreamMock, streamHandlers } from './streamHandlers';
+import { resetSuggestions, suggestionHandlers } from './suggestionHandlers';
 import { currentUser, resetSession } from './session';
 import { licenceState } from './licenceStore';
 import { LICENCE_UNAVAILABLE } from '../i18n/licenceLabels';
@@ -20,7 +21,7 @@ import type { DataStatus } from '../api/enums';
 import type { Gap } from '../api/types';
 import {
   ACCOUNT_ID, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOW, PORTFOLIO, QUOTES,
-  SIGNAL_EVENTS, SUGGESTIONS, SUGGESTION_LIST, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, WATCHLIST, dailyBars, intradayBars,
+  SIGNAL_EVENTS, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, WATCHLIST, dailyBars, intradayBars,
 } from './fixtures';
 import {
   ETF_QUOTES, INDEX_SPECS, MARKET_OVERVIEW, announcements, announcementsMeta, factors, financials, fundFlows, indexBars, searchSecurities, sectorFlows,
@@ -38,6 +39,7 @@ const notifications = allNotifications;
 export function resetMockState() {
   resetNotificationStore();
   resetStreamMock();
+  resetSuggestions();
   resetSession();
   resetStrategies();
   resetSignals();
@@ -274,17 +276,8 @@ const routeHandlers = [
     return jsonWithEtag(request, degrade(sectorFlows(kind, limit, sort), `sector_flows.${kind}`, 'unavailable'));
   }),
 
-  http.get(`${API}/suggestions`, ({ request }) => {
-    const url = new URL(request.url);
-    const code = url.searchParams.get('security_code');
-    const status = url.searchParams.get('status') ?? 'active';
-    return HttpResponse.json(page(SUGGESTION_LIST.filter((s) => (!code || s.security_code === code) && s.status === status), url));
-  }),
-  http.get(`${API}/suggestions/:id`, async ({ params }) => {
-    await lag();
-    const sg = SUGGESTIONS.find((s) => s.id === params.id);
-    return sg ? HttpResponse.json(sg) : notFound('建议');
-  }),
+  // 候选信号卡：列表 / 详情 / 刷新 / 用户动作 / 跟踪（T-F12，见 suggestionHandlers.ts）
+  ...suggestionHandlers,
   // 候选信号与不可执行原因（T-F17，见 signalHandlers.ts）
   ...signalHandlers,
   // 计划草案（T-F18，见 planHandlers.ts）

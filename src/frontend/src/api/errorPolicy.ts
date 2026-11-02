@@ -88,6 +88,10 @@ export function errorText(e: unknown): string {
       if (issue === 'security_type_not_supported') return e.details?.security_type === 'etf' ? 'ETF 暂不支持建策略实例' : '该证券类型暂不支持建策略实例';
       if (issue === 'unknown_security') return '证券代码不存在';
     }
+    if (e.code === 'SUGGESTION_REFRESH_TOO_FREQUENT') {
+      const s = Number(e.details?.retry_after_s);
+      if (Number.isFinite(s) && s > 0) return `刷新过于频繁，请 ${fmtWait(s)}后再试`;
+    }
     if (e.code === 'RATE_LIMITED') {
       const s = Number(e.details?.retry_after_s);
       if (Number.isFinite(s) && s > 0) return `操作过于频繁，请 ${fmtWait(s)}后再试`;

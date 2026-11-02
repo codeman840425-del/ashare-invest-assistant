@@ -1,6 +1,7 @@
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../i18n/horizonCaps';
-import { Alert, Button, Select, Tag, Tooltip } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
+import { Alert, Button, Input, Modal, Select, Tag, Tooltip } from 'antd';
+import { useState } from 'react';
+import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useCandidateSignals, useSuggestionReasons, useHorizonAssessment, useSuggestion, useSuggestions } from '../api/queries';
 import { ENUMS } from '../api/enums';
@@ -11,10 +12,18 @@ import { EvidenceChips } from '../components/EvidenceChips';
 import { CardDisclaimer } from '../components/RiskDisclosure';
 import {
   ACTION_SHORT, CHECK_ON, DIMENSION, EPISTEMIC, EVAL_STATE, EXECUTABILITY, GAP_REASON, HORIZON, LIFECYCLE, ORIGIN, REASON_CODE,
-  RELEASE_KIND, RISK_CONTROL, RISK_LEVEL, SIGNAL_STATE, VIEW,
+  RELEASE_KIND, RISK_CONTROL, RISK_LEVEL, SIGNAL_STATE, SUGGESTION_STATUS, VIEW,
 } from '../i18n/labels';
 import { fmtTime, providerText, ruleCountText } from '../lib/format';
 import { AddToResearch } from '../features/research/AddToResearch';
+import { useCreatePlanDraft } from '../api/planQueries';
+import { useMarkViewed, useRefreshSuggestion, useSuggestionAction, useSuggestionTracking } from '../api/suggestionQueries';
+import { canDraft } from '../lib/signals';
+import { stateErrorText } from '../lib/stateTransition';
+import { errorText } from '../api/errorPolicy';
+import { StatValue } from '../components/StatValue';
+import { PendingContract } from '../components/PendingContract';
+import { RuleRefs } from './signals/CandidateSignalDetailPage';
 
 function matrixColumns(sg: Suggestion): DataColumn<DimensionMatrixRow>[] {
   return [
@@ -122,6 +131,9 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
   const signals = useCandidateSignals(sg.security_code);
   const reasons = useSuggestionReasons(sg.id);
   const sig = s.candidate_signal_id ? signals.data?.items.find((c) => c.id === s.candidate_signal_id) : undefined;
+  const create = useCreatePlanDraft();
+  const nav = useNavigate();
+  const [showRules, setShowRules] = useState(false);
   // v0.2.9 #12：生效中的在前，其后是已解除的；已作废（所属信号已结束）不显示
   const rs = (reasons.data?.items ?? []).filter((r) => r.signal_id === s.candidate_signal_id && r.status !== 'obsolete')
     .sort((a, b) => (a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1));
@@ -163,11 +175,25 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
         </div>
       ) : null}
       <div className="sc-foot">
-        <span className="muted small">规则引用 {s.rule_refs.length} 条{s.model_refs.length ? ` · 模型 ${s.model_refs.length}` : ''}</span>
-        <Tooltip title="计划草案接口在后续任务接入；草案需您确认，交易由您在券商端自行完成">
-          <Button size="small" disabled>拟定计划草案</Button>
+        <Button size="small" type="link" onClick={() => setShowRules((v) => !v)} data-testid={`sg-rules-toggle-${s.strategy_key}`}>
+          规则引用 {s.rule_refs.length} 条{s.model_refs.length ? ` · 模型 ${s.model_refs.length}` : ''}{showRules ? '（收起）' : '（展开）'}
+        </Button>
+        <span className="spacer" />
+        {/* T-F12：只对本策略生成的候选信号拟定草案（POST /plan-drafts {signal_ids}，§7）；状态不允许时禁用并说明 */}
+        <Tooltip title={!sig ? '本策略没有候选信号，不能拟定计划草案' : canDraft(sig.state) ? '按你的持仓与资金拟定计划草案；草案需你确认，交易由你在券商端自行完成' : `候选信号为“${SIGNAL_STATE[sig.state].text}”，仅“可拟定草案”或“原因已解除”状态可拟定`}>
+          <Button
+            size="small"
+            disabled={!sig || !canDraft(sig.state) || sg.status !== 'active'}
+            loading={create.isPending}
+            onClick={() => sig && create.mutate([sig.id], { onSuccess: (d) => nav(`/plan-drafts/${d.id}`) })}
+            data-testid={`sg-draft-${s.strategy_key}`}
+          >
+            拟定计划草案
+          </Button>
         </Tooltip>
       </div>
+      {create.isError ? <div className="error-text small" data-testid={`sg-draft-error-${s.strategy_key}`}>{stateErrorText(create.error, 'signal')}</div> : null}
+      {showRules ? <RuleRefs refs={s.rule_refs} evidence={sg.evidence} /> : null}
     </section>
   );
 }
@@ -177,6 +203,9 @@ export function SuggestionDetailPage() {
   const navigate = useNavigate();
   const q = useSuggestion(id);
   const list = useSuggestions();
+  const refresh = useRefreshSuggestion();
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
+  useMarkViewed(q.data?.id);
   if (q.isLoading) return <Loading />;
   if (q.isError || !q.data) return <div className="page-scroll"><ErrorBox error={q.error ?? new Error('未找到候选信号卡')} /></div>;
   const sg = q.data;
@@ -195,11 +224,32 @@ export function SuggestionDetailPage() {
         <DataStatusTag status={sg.data_status} asOf={sg.data_as_of} gaps={sg.gaps} />
         <span className="muted small">候选信号卡 · {ORIGIN[sg.origin]} · 生成 {fmtTime(sg.created_at)} · 快照 {sg.snapshot_id} · {sg.feature_set_version}</span>
         <AddToResearch origin="suggestion" securityCode={sg.security_code} suggestionId={sg.id} />
+        <Tag color={SUGGESTION_STATUS[sg.status].color} data-testid="sg-status">{SUGGESTION_STATUS[sg.status].text}</Tag>
+        <Tooltip title="按已缓存的数据重算本证券的候选信号卡，不额外拉取行情">
+          <Button
+            size="small" icon={<ReloadOutlined />} loading={refresh.isPending} data-testid="sg-refresh"
+            onClick={() => {
+              setRefreshMsg(null);
+              refresh.mutate(sg.security_code, {
+                onSuccess: (newId) => {
+                  if (newId && newId !== sg.id) navigate(`/suggestions/${newId}`);
+                  else setRefreshMsg('已重算，当前卡没有变化');
+                },
+              });
+            }}
+          >
+            刷新
+          </Button>
+        </Tooltip>
         <span className="spacer" />
         <SuitableHorizons sg={sg} />
         <ConsensusBadge status={sg.consensus.status} actions={sg.consensus.actions} />
         <Tag color={exe.color}>{exe.text}{sg.executability.reason_ids.length ? `（${sg.executability.reason_ids.length} 项原因）` : ''}</Tag>
       </div>
+
+      {refresh.isError ? <Alert type="error" showIcon className="div-alert" data-testid="sg-refresh-error" title={errorText(refresh.error)} /> : null}
+      {refreshMsg ? <Alert type="info" showIcon className="div-alert" data-testid="sg-refresh-msg" title={refreshMsg} /> : null}
+      <SupersedeInfo sg={sg} />
 
       {sg.divergence.length ? (
         <Alert
@@ -247,6 +297,9 @@ export function SuggestionDetailPage() {
           <HorizonPanel sg={sg} />
           <div className="panel-head"><span className="panel-title">说明（{sg.explanation.source === 'template' ? '模板生成' : 'LLM 生成'}）</span></div>
           <div className="small explain">{sg.explanation.text}</div>
+          {sg.explanation.source === 'llm' && sg.explanation.llm_call_id ? (
+            <div className="muted small" data-testid="sg-llm-call">LLM 调用记录 <span className="mono">{sg.explanation.llm_call_id}</span>（仅改写已有证据；引用格式待契约）</div>
+          ) : null}
         </section>
       </div>
 
@@ -255,11 +308,73 @@ export function SuggestionDetailPage() {
         {sg.strategies.map((s) => <StrategyCard key={s.strategy_version_id} s={s} sg={sg} />)}
       </div>
 
+      <FollowUp sg={sg} />
+
       <div className="panel-head section-gap"><span className="panel-title">证据（时间 + 来源）</span><span className="muted small">事实 / 估计 / 假设 / 执行 四类分开标注</span></div>
       <section className="panel" style={{ height: Math.min(12, sg.evidence.length) * 28 + 34 }}>
         <DataGrid<Evidence> testId="evidence" rows={sg.evidence} columns={evidenceColumns} getRowId={(e) => e.id} />
       </section>
       <CardDisclaimer />
+    </div>
+  );
+}
+
+/** 取代链（§5.2 supersedes_id / superseded_by_id）：非当前卡给出提示与去当前卡的链接；完整链 /chain 的响应结构待契约 */
+function SupersedeInfo({ sg }: { sg: Suggestion }) {
+  return (
+    <>
+      {sg.status !== 'active' ? (
+        <Alert
+          className="div-alert" type={sg.status === 'invalidated' ? 'error' : 'warning'} showIcon data-testid="sg-inactive"
+          title={<span>本卡{SUGGESTION_STATUS[sg.status].text}，内容仅供回看，不能据此拟定计划草案。</span>}
+          description={sg.superseded_by_id ? <Link to={`/suggestions/${sg.superseded_by_id}`} data-testid="sg-superseded-by">查看取代它的候选信号卡</Link> : null}
+        />
+      ) : null}
+      <div className="muted small sg-chain" data-testid="sg-chain">
+        {sg.supersedes_id ? <span>取代了 <Link to={`/suggestions/${sg.supersedes_id}`} data-testid="sg-supersedes">上一张卡</Link></span> : <span>没有上一张卡</span>}
+        <PendingContract testId="sg-chain-placeholder" what="完整取代链（/suggestions/{id}/chain 的响应结构）" />
+      </div>
+    </>
+  );
+}
+
+/** 跟踪统计（GET /suggestions/{id}/tracking）与用户动作（POST /suggestions/{id}/actions） */
+function FollowUp({ sg }: { sg: Suggestion }) {
+  const tr = useSuggestionTracking(sg.id);
+  const act = useSuggestionAction(sg.id);
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [done, setDone] = useState(false);
+  return (
+    <div className="sg-follow">
+      <section className="panel" data-testid="sg-tracking">
+        <div className="panel-head"><span className="panel-title">事后跟踪（本卡出现后的表现）</span><span className="muted small">每个数字旁是样本量 n；样本少时只作参考</span></div>
+        {tr.isLoading ? <div className="muted small">加载中…</div> : tr.isError || !tr.data ? <div className="muted small">跟踪统计暂不可用</div> : (
+          <div className="sg-track-grid">
+            {(['t1', 't5', 't20'] as const).map((k) => (
+              <div key={k}><label>{k === 't1' ? '1 日后' : k === 't5' ? '5 日后' : '20 日后'}</label><StatValue s={tr.data[k]} kind="ratio" testId={`sg-track-${k}`} /></div>
+            ))}
+          </div>
+        )}
+        <div className="muted small">数值按服务端原值显示（单位与口径待契约）；窗口：{tr.data?.t1.window ?? '—'}</div>
+        <PendingContract testId="sg-track-basis" what="各期的价格依据" />
+      </section>
+      <section className="panel" data-testid="sg-actions">
+        <div className="panel-head"><span className="panel-title">我的处理</span></div>
+        {done ? <div className="small" data-testid="sg-dismissed">已记录：不再关注本卡</div> : (
+          <Button size="small" onClick={() => setOpen(true)} data-testid="sg-dismiss">不再关注本卡</Button>
+        )}
+        <div className="muted small">只记录你的处理，不改变卡片内容；查看会自动记录一次。</div>
+        <PendingContract testId="sg-trade-link-placeholder" what="关联我的成交（acted_trade_linked 的入口与 note 规则）" />
+      </section>
+      <Modal
+        open={open} title="不再关注本卡" okText="记录" cancelText="取消" confirmLoading={act.isPending}
+        onCancel={() => setOpen(false)}
+        onOk={() => act.mutate({ kind: 'dismissed', note: note.trim() || null }, { onSuccess: () => { setOpen(false); setDone(true); } })}
+      >
+        <Input.TextArea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="备注（可不填）" data-testid="sg-dismiss-note" />
+        {act.isError ? <div className="error-text" style={{ marginTop: 8 }} data-testid="sg-dismiss-error">{errorText(act.error)}</div> : null}
+      </Modal>
     </div>
   );
 }

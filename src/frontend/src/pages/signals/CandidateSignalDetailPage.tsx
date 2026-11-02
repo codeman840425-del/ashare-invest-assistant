@@ -171,7 +171,7 @@ function Reasons({ cs }: { cs: CandidateSignal }) {
   );
 }
 
-function RuleRefs({ refs, evidence }: { refs: RuleRef[]; evidence: Evidence[] }) {
+export function RuleRefs({ refs, evidence }: { refs: RuleRef[]; evidence: Evidence[] }) {
   return (
     <section className="panel sig-panel">
       <h4>规则引用（{refs.length}）</h4>

@@ -1,7 +1,7 @@
 import type {
   Action, CandidateSignalState, CheckOn, ConfidenceLevel, DataStatus, Dimension, DimensionView,
   EpistemicType, GapReason, Horizon, Lifecycle, MarketRegime, NotificationKind, ReasonCode,
-  ReleaseKind, RiskControl, RiskLevel, Severity, SuggestionOrigin, RuleRole, StrategyEvalState, MarketSession, SignalKind,
+  ReleaseKind, RiskControl, RiskLevel, Severity, SuggestionOrigin, SuggestionStatus, RuleRole, StrategyEvalState, MarketSession, SignalKind,
   DataProvider, ExecutabilityStatus, ConsensusStatus, ReconciliationStatus, NotificationTargetType, PlanDraftStatus,
   SecurityType, Board, ListingStatus, SecurityRiskFlag, SecurityMatchKind, ReportPeriod, AnnouncementCategory, IndustryTaxonomy, InstanceOrigin,
   AlertStatus, AlertOrigin, PlanConditionKind, DataGapScope,
@@ -90,6 +90,11 @@ export const GAP_REASON: Record<GapReason, string> = {
 };
 export const ORIGIN: Record<SuggestionOrigin, string> = {
   daily_batch: '盘后批处理', intraday_event: '盘中事件', manual_refresh: '手动刷新',
+};
+/** suggestion_status（§3）：只有 active 是当前卡；其余仅供回看（T-F12） */
+export const SUGGESTION_STATUS: Record<SuggestionStatus, { text: string; color: string }> = {
+  active: { text: '当前', color: 'blue' }, superseded: { text: '已被取代', color: 'default' },
+  invalidated: { text: '已失效', color: 'red' }, expired: { text: '已过期', color: 'default' },
 };
 export const REGIME: Record<MarketRegime, string> = { uptrend: '上行', range: '震荡', downtrend: '下行' };
 export const NOTIFY_KIND: Record<NotificationKind, string> = {

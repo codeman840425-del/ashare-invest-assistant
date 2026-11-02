@@ -81,6 +81,7 @@ describe('#36：refresh 以响应体为准', () => {
     const router = renderAt(`/suggestions/${sgBank.id}`);
     fireEvent.click(await screen.findByTestId('sg-refresh'));
     await waitFor(() => expect(router.state.location.pathname).not.toBe(`/suggestions/${sgBank.id}`));
+    expect(await screen.findByTestId('sg-refresh-msg')).toHaveTextContent('已切换到新卡');
     rec.stop();
     const after = rec.seen.slice(rec.seen.findIndex((x) => x.startsWith('POST /api/v1/suggestions/refresh')));
     // 旧实现刷新后另发 GET /suggestions?security_code=&status=active&limit=1 取当前卡；现在以响应体为准

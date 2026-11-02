@@ -5,8 +5,9 @@
 import { http, HttpResponse } from 'msw';
 import type { CandidateSignalEventCause, CandidateSignalState } from '../api/enums';
 import type { CandidateSignal, NonExecutableReason } from '../api/types';
-import { CANDIDATE_SIGNALS, NOW, REASONS, SUGGESTIONS } from './fixtures';
+import { CANDIDATE_SIGNALS, NOW, REASONS } from './fixtures';
 import { errorBody, notFound, page, validation } from './handlerUtils';
+import { suggestionsNow } from './suggestionHandlers';
 
 const API = '/api/v1';
 
@@ -119,7 +120,8 @@ export const signalHandlers = [
         ids = idsParam.split(',').map((x) => x.trim()).filter(Boolean);
         if (ids.length > 100) return validation('signal_ids', 'signal_ids 最多 100 个');
       } else {
-        const sg = SUGGESTIONS.find((x) => x.id === suggestionId);
+        // 含 refresh 新建的卡（原先只查静态 SUGGESTIONS，刷新后新卡 404）
+        const sg = suggestionsNow().find((x) => x.id === suggestionId);
         if (!sg) return notFound('建议');
         ids = sg.candidate_signal_ids;
       }

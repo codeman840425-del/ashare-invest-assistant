@@ -147,7 +147,7 @@ describe('顶栏搜索 UI', { timeout: 15_000 }, () => {
     await type('600000');
     expect(await screen.findByTestId('search-status', {}, { timeout: 3000 })).toHaveTextContent('搜索词不符合要求');
   });
-  it('网关 414（非 JSON）显示“请求地址过长”', async () => {
+  it('网关 414（非 JSON，兜底）显示“请求地址过长”', async () => {
     server.use(http.get(`${API}/securities/search`, () => new HttpResponse('Request-URI Too Large', { status: 414, headers: { 'Content-Type': 'text/html' } })));
     renderAt('/terminal');
     await type('600000');
@@ -190,6 +190,8 @@ describe('#41：不写本地存储；工具函数', { timeout: 15_000 }, () => {
     expect(searchQLength(' ６０００００ ')).toBe(6);
     expect(searchQLength('示例 发展')).toBe(4);
     expect(searchErrorText(new ApiError(414, 'HTTP_ERROR', 'HTTP 414', null, null))).toContain('请求地址过长');
+    // #34：信封里的 414 按通用错误显示 message
+    expect(searchErrorText(new ApiError(414, 'URI_TOO_LONG', '请求地址过长（示例）', { max_bytes: 8192 }, null))).toBe('请求地址过长（示例）');
     expect(searchErrorText(new ApiError(429, 'RATE_LIMITED', 'x', { retry_after_s: 2.2 }, null))).toBe('搜索过于频繁，请 3 秒后再试');
   });
 });

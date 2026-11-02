@@ -282,14 +282,21 @@ describe('SSE /stream 客户端（§8）', () => {
   });
 
   it('心跳超时：主动断开并重连；非 2xx 退避重连', async () => {
+    // 注入 fetch：只发一条注释后不再发数据；中止时结束流（不经 undici，避免中止后的套接字收尾干扰其他用例）
     let calls = 0;
-    server.use(http.get(`*${API}/stream`, () => {
+    const fakeFetch = ((_url: RequestInfo | URL, init?: RequestInit) => {
       calls += 1;
-      if (calls === 1) return new HttpResponse(null, { status: 503 });
-      return new HttpResponse(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(': open\n\n')); /* 之后不再发数据（含心跳） */ } }), { headers: { 'Content-Type': 'text/event-stream' } });
-    }));
+      if (calls === 1) return Promise.resolve(new Response(null, { status: 503 }));
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode(': open\n\n'));
+          init?.signal?.addEventListener('abort', () => c.error(new DOMException('aborted', 'AbortError')));
+        },
+      });
+      return Promise.resolve(new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }));
+    }) as typeof fetch;
     const opened: boolean[] = [];
-    const h = startEventStream({ onMessage: () => undefined, onOpen: (i) => opened.push(i.reconnect), retryMs: 10, maxRetryMs: 20, idleTimeoutMs: 60 });
+    const h = startEventStream({ onMessage: () => undefined, onOpen: (i) => opened.push(i.reconnect), retryMs: 10, maxRetryMs: 20, idleTimeoutMs: 60, fetchImpl: fakeFetch });
     await waitFor(() => expect(calls).toBeGreaterThanOrEqual(3), { timeout: 3_000 });
     h.stop();
     expect(h.state()).toBe('closed');

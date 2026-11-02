@@ -30,6 +30,8 @@ export interface EventStreamOptions {
   retryMs?: number;
   maxRetryMs?: number;
   idleTimeoutMs?: number;
+  /** 测试注入用；默认全局 fetch（只请求后端相对路径） */
+  fetchImpl?: typeof fetch;
 }
 
 export const STREAM_DEFAULTS = { retryMs: 3_000, maxRetryMs: 60_000, idleTimeoutMs: 45_000 } as const;
@@ -95,7 +97,7 @@ export function startEventStream(opts: EventStreamOptions): EventStreamHandle {
     parser.lastEventId = lastId;
     try {
       armIdle();
-      const res = await fetch(url, { headers, credentials: 'same-origin', cache: 'no-store', signal: ctrl.signal });
+      const res = await (opts.fetchImpl ?? fetch)(url, { headers, credentials: 'same-origin', cache: 'no-store', signal: ctrl.signal });
       if (res.status === 401 || res.status === 403) {
         clearIdle();
         stopped = true;

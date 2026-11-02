@@ -34,6 +34,7 @@ from app.db.base import (
 )
 from app.schemas.enums import (
     Action,
+    CandidateSignalEventCause,
     CandidateSignalState,
     CheckOn,
     ConfidenceLevel,
@@ -168,10 +169,7 @@ candidate_signal_events = Table(
     ts("at", nullable=False, default_now=True),
     one_of("from_state", CandidateSignalState),
     one_of("to_state", CandidateSignalState),
-    one_of(
-        "cause",
-        ["executability_check", "reason_released", "user", "expiry", "invalidation", "supersede"],
-    ),
+    one_of("cause", CandidateSignalEventCause),  # v0.2.9 #6：取值与顺序同契约枚举
     schema=APP,
     comment="只追加（触发器）",
 )

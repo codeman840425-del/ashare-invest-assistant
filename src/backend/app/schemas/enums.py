@@ -1,7 +1,7 @@
 """契约 §3 枚举、§4.1 导入提示码与 §6.1 不可执行原因码表 —— **全仓唯一来源**。
 
 ``GET /meta/enums`` 直接下发本模块内容；其他模块需要枚举时从这里导入，不要另行定义。
-已同步到契约 :data:`CONTRACT_VERSION`（v0.2.8；v0.2 为 T-A01 定稿，原 ``PENDING_T_A01`` 标记已解除；
+已同步到契约 :data:`CONTRACT_VERSION`（v0.2.9；v0.2 为 T-A01 定稿，原 ``PENDING_T_A01`` 标记已解除；
 v0.2.1–v0.2.3 未改 §3 枚举、§4 错误码与 §6.1 原因码的取值；v0.2.4 新增的 ``consent_key``、
 ``legal_doc_key``、``consent_presentation``、``assessment_status`` 在 v0.2.5（T-A06）作废并删除，
 同时删除原因码 ``PROFILE_OR_CONSENT_MISSING``（23 → 22）与错误码 ``CONSENT_REQUIRED``、
@@ -11,6 +11,10 @@ v0.2.1–v0.2.3 未改 §3 枚举、§4 错误码与 §6.1 原因码的取值；
 ``data_provider`` 加 ``exchange``；``security_type`` 按编排者 Q3 裁定多一个 ``etf``（契约 §3 该行由
 T-A09 同步），错误码与原因码不变。v0.2.8（T-A09）：``security_type`` 顺序 ``stock cdr etf index``，
 ``gap_reason`` 加 ``not_applicable``；错误码与原因码不变（``INSTANCE_SCOPE_INVALID`` 详情加键）。
+v0.2.9（T-A10 687159f，T-B48）：新增 ``candidate_signal_event_cause``
+（与 ``candidate_signal_events.cause`` 的 CHECK 同值同序）；§6.1 ``BLOCKLISTED`` / ``USER_MUTED``
+只能经 ``/restrictions`` 解除（对其
+``/release`` → ``409 REASON_NOT_MANUALLY_RELEASABLE``），表中“可手动解除”仍为“是”，未改取值。
 
 ``CONTRACT_ENUMS`` 只登记契约 §3 的命名枚举；契约里以内联字面量出现的取值（如 ``/me/profile`` 的
 ``effort``、``experience``）在本模块文末“非 §3 取值”一节集中定义，供 DB CHECK 与请求模型复用，
@@ -405,6 +409,15 @@ class CandidateSignalState(StrEnum):
     SUPERSEDED = "superseded"
 
 
+class CandidateSignalEventCause(StrEnum):  # v0.2.9 #6；与 candidate_signal_events.cause CHECK 一致
+    EXECUTABILITY_CHECK = "executability_check"
+    REASON_RELEASED = "reason_released"
+    USER = "user"
+    EXPIRY = "expiry"
+    INVALIDATION = "invalidation"
+    SUPERSEDE = "supersede"
+
+
 class ReasonCode(StrEnum):  # 契约 §6.1；码类取值用大写（契约 §1 大小写规则）
     DATA_STALE = "DATA_STALE"
     KEY_DATA_MISSING = "KEY_DATA_MISSING"
@@ -717,7 +730,7 @@ class InstancePausedBy(StrEnum):  # StrategyInstance.paused_by（契约 §5.1 �
 # ---------------------------------------------------------------------------
 
 #: 本模块对应的契约版本（``/meta/enums`` 的 ``version``）
-CONTRACT_VERSION: Final = "v0.2.8"
+CONTRACT_VERSION: Final = "v0.2.9"
 
 #: ``/meta/enums`` 的 ``enums``：契约 §3 各表名 → 取值（顺序同 §3）。``reason_code`` 不在其中，
 #: 只在 ``reason_codes`` 里带解除条件展开（契约 §7.10；评审 M7）。
@@ -766,6 +779,7 @@ CONTRACT_ENUMS: Final[dict[str, type[StrEnum]]] = {
     "lifecycle": Lifecycle,
     "instance_status": InstanceStatus,
     "candidate_signal_state": CandidateSignalState,
+    "candidate_signal_event_cause": CandidateSignalEventCause,  # v0.2.9 #6
     "reason_status": ReasonStatus,
     "check_on": CheckOn,
     "release_kind": ReleaseKind,
@@ -847,7 +861,11 @@ REASON_CODE_TABLE: Final[tuple[ReasonCodeSpec, ...]] = (
     ReasonCodeSpec(ReasonCode.SAME_DIRECTION_PLAN_EXISTS, (_K.EVENT,), (_C.PLAN_CHANGE,), False),
     ReasonCodeSpec(ReasonCode.CONFLICTS_CONFIRMED_PLAN, (_K.USER_ACTION,), (_C.USER_ACTION,), True),
     ReasonCodeSpec(
-        ReasonCode.BLOCKLISTED, (_K.USER_ACTION,), (_C.USER_ACTION,), True, "通过 /restrictions"
+        ReasonCode.BLOCKLISTED,
+        (_K.USER_ACTION,),
+        (_C.USER_ACTION,),
+        True,
+        "通过 /restrictions；/release → 409 REASON_NOT_MANUALLY_RELEASABLE",
     ),
     ReasonCodeSpec(ReasonCode.COOLING_OFF, (_K.TIME,), (_C.SCHEDULE,), False),
     ReasonCodeSpec(
@@ -867,7 +885,7 @@ REASON_CODE_TABLE: Final[tuple[ReasonCodeSpec, ...]] = (
         (_K.USER_ACTION, _K.TIME),
         (_C.USER_ACTION, _C.SCHEDULE),
         True,
-        "通过 /restrictions",
+        "通过 /restrictions；/release → 409 REASON_NOT_MANUALLY_RELEASABLE",
     ),
 )
 

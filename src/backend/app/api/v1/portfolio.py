@@ -1,10 +1,13 @@
-"""持仓汇总（契约 v0.2.8 §7.2 ``GET /portfolio?account_id=``；T-B46）。
+"""持仓汇总（契约 v0.2.9 §7.2 ``GET /portfolio?account_id=``；T-B46，v0.2.9 #1–#3 由 T-B48 同步）。
 
 口径：
 - 账户有流水（期初持仓 / 未作废成交）→ 用重放得到的 ``holdings``；没有流水 → 用最新有效持仓快照。
 - 现价只取持仓快照的 ``last_price_ref``（本接口不读日线，不触发取数），``data_status=stale``。
-- 可转债（问题 63）：现价、市值、盈亏为 ``null``，按成本计入总资产与仓位并标 ``estimated``；
-  其他缺现价的持仓同样按成本估算。``instrument_kind`` / ``estimated`` 为附加字段（待架构师确认）。
+- 可转债（问题 63 / U3 已定，v0.2.9 #1–#3）：``security_type=null``（不在证券主数据中），
+  ``market_value``、``pnl``、``pnl_pct`` 为 ``null``（不是 0），按成本计入总资产与仓位并标
+  ``estimated=true``，顶层 ``data_status=partial``。
+  其他缺现价的持仓（未导入持仓快照）同样按成本估算、
+  ``estimated=true``，但 ``security_type`` 仍为主数据类型。
 - ETF 正常列入持仓；本接口不跑策略、不出信号、不做风控止损计算。
 - ``sellable_qty``：一律 T+1 = 持仓 − 当日（北京时间）买入；快照为当日的取快照可卖数。
 - 不传 ``account_id`` 时合并本人全部未归档账户（同代码合并数量与成本）。
@@ -36,7 +39,7 @@ from app.db.tables.accounts import (
 from app.db.tables.market import securities
 from app.domain.portfolio import MONEY_DP, instrument_kind
 from app.importing.pipeline import last_cash_balance, live_snapshots
-from app.schemas.enums import DataStatus, GapReason
+from app.schemas.enums import DataStatus, GapReason, SecurityType
 
 router = APIRouter(tags=["portfolio"])
 
@@ -71,7 +74,7 @@ class Position(BaseModel):
     pnl: str | None
     pnl_pct: str | None
     weight_pct: str | None
-    instrument_kind: str
+    security_type: SecurityType | None
     estimated: bool
 
 
@@ -80,7 +83,6 @@ class Portfolio(BaseModel):
     total_assets: str | None
     positions: list[Position]
     exposure: Exposure
-    estimated: bool
     data_status: DataStatus
     data_as_of: dt.datetime
     gaps: list[Gap]
@@ -272,14 +274,15 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
     gaps: list[dict[str, str]] = []
     rows: list[dict[str, Any]] = []
     total_value = ZERO
-    any_estimated = False
-    no_price = cb = no_cost = False
+    no_price = cb = unknown = no_cost = False
     price_times: list[dt.datetime] = []
     for code in sorted(merged):
         p = merged[code]
         kind = instrument_kind(code, types.get(code))
         cost_price = (p.cost_total / p.qty) if p.cost_known and p.qty else None
-        price = None if kind == "convertible_bond" else p.price
+        # v0.2.9 #1：不在证券主数据中（可转债或其他）→ 无行情、按成本估算
+        stype = types.get(code)
+        price = None if stype is None else p.price
         mv = pnl = pnl_pct = None
         estimated = False
         if price is not None:
@@ -294,6 +297,8 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
             estimated = True
             if kind == "convertible_bond":
                 cb = True
+            elif stype is None:
+                unknown = True
             else:
                 no_price = True
             value = p.cost_total if p.cost_known else None
@@ -301,7 +306,6 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
             no_cost = True
         else:
             total_value += value
-        any_estimated = any_estimated or estimated
         rows.append(
             {
                 "security_code": code,
@@ -313,7 +317,7 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
                 "pnl": _s(pnl),
                 "pnl_pct": _s(pnl_pct, PCT_DP),
                 "weight_pct": None,
-                "instrument_kind": kind,
+                "security_type": stype,
                 "estimated": estimated,
                 "_value": value,
             }
@@ -337,6 +341,14 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
                 "key": "positions.convertible_bond",
                 "reason": GapReason.NO_SOURCE.value,
                 "message": "可转债·无行情：现价与市值不展示，仓位按成本估算",
+            }
+        )
+    if unknown:
+        gaps.append(
+            {
+                "key": "positions.unknown_security",
+                "reason": GapReason.NO_SOURCE.value,
+                "message": "部分持仓不在证券主数据中·无行情：现价与市值不展示，仓位按成本估算",
             }
         )
     if no_price:
@@ -379,7 +391,6 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
         "total_assets": _s(total),
         "positions": rows,
         "exposure": {"sector": []},
-        "estimated": any_estimated,
         "data_status": status.value,
         "data_as_of": as_of.isoformat(),
         "gaps": gaps,

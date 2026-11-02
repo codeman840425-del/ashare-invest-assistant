@@ -8,7 +8,7 @@ import { useHorizonAssessment } from '../../api/queries';
 import type { Bar, BarsResponse, QuoteItem } from '../../api/types';
 import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../components/common';
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../../i18n/horizonCaps';
-import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, SECURITY_RISK_FLAG, SECURITY_TYPE } from '../../i18n/labels';
+import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { PriceChartPanel } from './PriceChartPanel';
 import { AnnouncementsTab, FactorsTab, FinancialsTab, FundFlowTab } from './StockTabs';
@@ -133,7 +133,7 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
         <span className="mono muted">{code}</span>
         {profile.type !== 'stock' ? <Tag color="blue" data-testid="security-type-tag">{SECURITY_TYPE[profile.type]}</Tag> : null}
         {profile.board ? <Tag variant="outlined">{BOARD[profile.board]}</Tag> : null}
-        {profile.risk_flag ? <Tag color="orange" data-testid="risk-flag-tag">{SECURITY_RISK_FLAG[profile.risk_flag]}</Tag> : null}
+        {profile.risk_flag ? <Tag color="orange" data-testid="risk-flag-tag" data-flag={profile.risk_flag} title={SECURITY_RISK_FLAG_TIP[profile.risk_flag]}>{SECURITY_RISK_FLAG[profile.risk_flag]}</Tag> : null}
         {suspended ? <Tag color="default" data-testid="suspended-tag">停牌</Tag> : null}
         {profile.listing_status !== 'listed' ? <Tag color="default" data-testid="listing-status-tag">{LISTING_STATUS[profile.listing_status]}</Tag> : null}
         <AddToResearch origin="from_stock" securityCode={code} securityType={profile.type} />

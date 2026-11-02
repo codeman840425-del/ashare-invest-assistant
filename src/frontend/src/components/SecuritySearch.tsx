@@ -3,7 +3,7 @@ import { AutoComplete, Input } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router';
 import { CODE_RE, useSecuritySearch } from '../api/marketQueries';
-import { LISTING_STATUS, MATCH_KIND, SECURITY_RISK_FLAG, SECURITY_TYPE } from '../i18n/labels';
+import { LISTING_STATUS, MATCH_KIND, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../i18n/labels';
 
 /**
  * 顶栏证券搜索（契约 v0.2.8 §7.3 /securities/search，最多 20 条，按服务端 match_kind 层级排序，前端不重排）：
@@ -30,7 +30,7 @@ export function SecuritySearch() {
         <span>{h.name}</span>
         {/* v0.2.8：默认结果含 ETF（stock > cdr > etf > index），非股票显示类型徽标 */}
         {h.type !== 'stock' ? <span className="search-flag type" data-testid={`search-type-${h.security_code}`}>{SECURITY_TYPE[h.type]}</span> : null}
-        {h.risk_flag ? <span className="search-flag">{SECURITY_RISK_FLAG[h.risk_flag]}</span> : null}
+        {h.risk_flag ? <span className="search-flag" title={SECURITY_RISK_FLAG_TIP[h.risk_flag]} data-testid={`search-risk-${h.security_code}`}>{SECURITY_RISK_FLAG[h.risk_flag]}</span> : null}
         {h.listing_status && h.listing_status !== 'listed' ? <span className="search-flag">{LISTING_STATUS[h.listing_status]}</span> : null}
         {h.matched_text ? <span className="muted">{MATCH_KIND[h.match_kind]}：{h.matched_text}</span> : null}
       </span>

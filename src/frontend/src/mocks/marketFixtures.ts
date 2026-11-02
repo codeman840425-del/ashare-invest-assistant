@@ -4,7 +4,7 @@
  * announcements、/market/sector-flows，以及指数日线与周线（§6.2）。
  * 公告 url 一律用保留域名 example.com 占位，前端只当外链，不取内容。
  */
-import type { Board, DataStatus } from '../api/enums';
+import type { Board, DataStatus, SecurityRiskFlag } from '../api/enums';
 import type { Bar, BarsResponse, Gap, MarketOverview } from '../api/types';
 import type {
   Announcement, AnnouncementsResponse, FactorValue, FactorsResponse, FinancialPeriod, FinancialsResponse, FundFlowDay, FundFlowsResponse,
@@ -162,6 +162,9 @@ const MATCH_ORDER: SecurityHit['match_kind'][] = ['code_exact', 'name_exact', 'i
  * 契约 §7.3 GET /securities/search?q&types&include_delisted&limit（v0.2.7）：按 security_match_kind 层级排序。
  * 示例数据没有拼音与曾用名，只演示代码/名称的精确、前缀、包含三类命中。
  */
+/** 风险标记示例（契约 #29）：演示材料带 *ST（退市风险警示），仅为示例数据 */
+export const DEMO_RISK_FLAG: Record<string, SecurityRiskFlag> = { '002001.SZ': 'star_st' };
+
 export function searchSecurities(q: string, opts: { types?: string[]; limit?: number } = {}): SecuritySearchResponse {
   // 归一化：NFKC、去空白、转大写；600000.SH / SH600000 / 600000 都按代码处理
   const raw = q.normalize('NFKC').replace(/\s+/g, '');
@@ -173,7 +176,7 @@ export function searchSecurities(q: string, opts: { types?: string[]; limit?: nu
   const pool: SecurityHit[] = [
     ...SECURITY_CODES.map((c): SecurityHit => ({
       security_code: c, name: specBrief(c)!.name, type: 'stock', exchange: exchangeOf(c), board: boardOf(c), listing_status: 'listed',
-      risk_flag: null, match_kind: 'fuzzy', matched_text: null, quote_missing: false,
+      risk_flag: DEMO_RISK_FLAG[c] ?? null, match_kind: 'fuzzy', matched_text: null, quote_missing: false,
     })),
     ...ETF_SPECS.map((s): SecurityHit => ({
       security_code: s.code, name: s.name, type: 'etf', exchange: exchangeOf(s.code), board: null, listing_status: 'listed',
@@ -232,7 +235,7 @@ export function securityProfile(code: string): SecurityProfile | null {
   return {
     security_code: s.code, name: s.name, type: 'stock', exchange: exchangeOf(s.code), board: boardOf(s.code),
     list_date: `${listYear}-${String(1 + Math.floor(r() * 12)).padStart(2, '0')}-${String(1 + Math.floor(r() * 27)).padStart(2, '0')}`,
-    list_date_basis: bj ? 'neeq_select' : 'listing', delist_date: null, listing_status: 'listed', risk_flag: null,
+    list_date_basis: bj ? 'neeq_select' : 'listing', delist_date: null, listing_status: 'listed', risk_flag: DEMO_RISK_FLAG[s.code] ?? null,
     // 北交所示例演示代码切换历史（示例）
     former_names: [], code_history: bj ? [{ security_code: `43${s.code.slice(2, 6)}.BJ`, until: '2024-10-08' }] : [],
     master_as_of: MASTER_AS_OF, attribution: ATTRIBUTION,

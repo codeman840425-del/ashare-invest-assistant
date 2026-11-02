@@ -147,7 +147,15 @@ export const BOARD: Record<Board, string> = { main: '主板', chinext: '创业�
 export const LISTING_STATUS: Record<ListingStatus, string> = {
   listed: '上市', delisting_period: '退市整理期', delisted: '已退市', missing_from_list: '交易所列表未收录',
 };
-export const SECURITY_RISK_FLAG: Record<SecurityRiskFlag, string> = { st: 'ST', star_st: '*ST', delisting: '退市风险' };
+/** 契约 v0.2.9 #29（§3 security_risk_flag）：st = 其他风险警示（ST），star_st = 退市风险警示（*ST），delisting = 退市整理标记；
+ *  退市整理期这一上市状态另见 LISTING_STATUS.delisting_period */
+export const SECURITY_RISK_FLAG: Record<SecurityRiskFlag, string> = { st: '其他风险警示', star_st: '退市风险警示', delisting: '退市整理' };
+/** 悬停说明：简称前缀与含义（#29 原文） */
+export const SECURITY_RISK_FLAG_TIP: Record<SecurityRiskFlag, string> = {
+  st: '其他风险警示（ST）',
+  star_st: '退市风险警示（*ST）',
+  delisting: '证券简称带“退”的退市整理标记',
+};
 export const MATCH_KIND: Record<SecurityMatchKind, string> = {
   code_exact: '代码', name_exact: '简称', initials_exact: '拼音首字母', code_prefix: '代码', name_prefix: '简称', initials_prefix: '拼音首字母',
   name_contains: '简称', former_name: '曾用名', former_code: '旧代码', fuzzy: '近似',

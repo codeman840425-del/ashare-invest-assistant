@@ -146,7 +146,11 @@ export function resetCandidates() {
   // 他人的候选：本人任何接口都看不到（404 / 列表不含）
   const d = seed(4, uid(3), '000001.SZ', 'manual', '2026-10-29T10:00:00+08:00');
   d.versions.push(makeVersion(d, 1, d.head.created_at, '他人的研究内容（示例）', [], null, null));
-  store = [a, b, c, d];
+  // 已计划（planned）示例：契约 §7.7A 本版实际不会出现 planned，此条只为演示前端显示，属于管理员示例账户，不影响 demo_user 数据
+  const e = seed(5, uid(3), '300001.SZ', 'manual', '2026-10-22T20:00:00+08:00');
+  e.versions.push(makeVersion(e, 1, e.head.created_at, '示例：订单回暖后的产能利用率（示例）', [], null, null));
+  e.head.status = 'planned';
+  store = [a, b, c, d, e];
 }
 resetCandidates();
 

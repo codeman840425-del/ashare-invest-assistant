@@ -1251,7 +1251,7 @@ class LLMGateway:
 | 涨跌幅 | 主板 10%；创业板、科创板 20%；北交所 30%；**沪深主板 ST/*ST 自 2026-07-06 起为 10%（此前为 5%）【已定，已核实：上证发〔2026〕41 号、深证上〔2026〕551 号，2026-07-06 施行】**；创业板、科创板风险警示股票 20%；北交所风险警示股票 30% |
 | 无涨跌幅限制 | 沪深注册制新股上市前 5 个交易日；北交所新股上市首日；退市整理期首日（以交易所规则为准）。这些情形下有盘中临时停牌机制（较开盘价 ±30%、±60% 各停牌 10 分钟） |
 | 涨跌停价计算 | 前收盘价 × (1 ± 比例)，按四舍五入取至价格最小变动单位（A 股 0.01 元）。**沪 3.3.17、深 3.3.19 已核实**（T006b），含两条边界规则：① 计算出的涨跌停价与前收盘价之差不足一个价格最小变动单位时，按前收盘价 ± 0.01 元；② 计算结果低于 0.01 元时取 0.01 元 |
-| 交易单位 | 买入为 100 股的整数倍；科创板单笔买入 ≥ 200 股（沪第 6.7 条已核实），超出部分“按 1 股递增”【待核实】；北交所单笔不低于 100 股、按 1 股递增【待核实；V1 不扫描北交所，C(8)】；余额不足 100 股须一次性卖出 |
+| 交易单位 | （v0.2.9 内，T-T25 按 T-R10 同步；依据 `docs/strategies/market_rules_T-R10.md`，键见 6.1 `lot`）**买入**：沪深主板、创业板、ETF（含科创板 ETF，科创板 ETF 不适用 6.7 条）为 100 股（份）的整数倍（沪/深 3.3.8，已核实）；科创板股票/CDR 单笔 ≥ 200 股，买卖均适用（沪 2026 第 6.7 条、2023 第 6.1.7 条，已核实），超出部分按 1 股递增【部分核实：规则无明文，依沪 6.1/6.7 与上交所投教材料，T-R10】；北交所单笔不低于 100 股、按 1 股递增【未核实；V1 不扫描北交所，C(8)】。**零股卖出**：余额不足一个申报单位的部分须一次性申报卖出（已核实）；阈值科创板为 200（`star_odd_lot_threshold`），其他板块为 `buy_lot`。V1 判定（设可卖数量为 A）：主板/创业板/ETF 卖出数量 q 合规当且仅当 q ≤ A 且（q 为 100 的整数倍或 q = A）；科创板 A ≥ 200 时 200 ≤ q ≤ A，A < 200 时只能 q = A；用可卖数量而非持仓余额判定是实现约定（未核实），主板“整手连带零股”（如持有 250 卖 150）原文未写明，V1 不允许（第 9 节问题 86）。**单笔申报上限**（已核实）：竞价单笔 ≤ 100 万股（份）（沪/深 3.3.9）；科创板限价 ≤ 10 万股、市价 ≤ 5 万股、盘后固定价格 ≤ 100 万股（沪 2026 第 6.7 条；2023 段盘后为第 6.2.6 条）；创业板限价 ≤ 30 万股、市价 ≤ 15 万股（深 3.3.9）。计划草案数量超过适用上限时截断并提示（本产品不下单，按限价口径计算） |
 | 交易时段 | 集合竞价 9:15–9:25；连续竞价 9:30–11:30、13:00–14:57；收盘集合竞价 14:57–15:00 |
 | 费用 | 印花税：**仅卖出**，0.05%；过户费：双向 0.001%；佣金：双向，按用户费率，单笔最低 5 元（券商常见做法，以用户实际为准，可由导入的成交反推）；滑点：模板参数，默认 0.1% |
 | 冲击成本 | 按参与率（**成交额口径**：拟成交额 = 计划数量 × 参考价，÷ 近 20 个**有效**交易日日成交额均值，停牌日不计；T-A02 已定，与 `_template.md` §18 一致）分 5 档的确定性估算：I1 ≤ 0.1% → 0 bp；I2 ≤ 0.5% → 5 bp；I3 ≤ 1% → 15 bp；I4 ≤ 2% → 30 bp；I5 > 2% → 60 bp。【编排者默认，初值待校准】（第 9 节 C(7)）；`epistemic_type=estimate`；计划草案（2.5.8）、模拟跟踪（2.8.1）、内部评估共用，结果写入卡片的 `costs.impact_*` 展示 |
@@ -1260,7 +1260,7 @@ class LLMGateway:
 | 时点 | 数据可用时刻精确到分钟（2.12.1），不允许使用未来数据 |
 
 - `config/market_rules.yaml` 由**后端**按 6.1 创建和修改（6.1 通用规则）；本节与 6.1 是规则口径的唯一出处，T-A03 的改动由后端同步到该文件。
-- 规则模块有独立的单元测试（T-T19），用交易所示例和边界值验证：涨跌停价（含 3.3.17/3.3.19 两条边界规则）、风险警示买入上限只作用于主板与创业板、限价提示只作用于沪市、整手、费用的最低收费、T+1 可卖数量、2026-07-06 前后 ST 比例的切换（2026-07-03 为 5%、2026-07-06 为 10%）、风险警示股票 50 万股买入上限截断、`modeled_from` 之前返回“规则未建模”。
+- 规则模块有独立的单元测试（T-T19），用交易所示例和边界值验证：涨跌停价（含 3.3.17/3.3.19 两条边界规则）、风险警示买入上限只作用于主板与创业板、限价提示只作用于沪市、整手、费用的最低收费、T+1 可卖数量、2026-07-06 前后 ST 比例的切换（2026-07-03 为 5%、2026-07-06 为 10%）、风险警示股票 50 万股买入上限截断、`modeled_from` 之前返回“规则未建模”；（v0.2.9 内，T-T25）另加：零股卖出（主板 150 股可卖 100 或 150、不可卖 50；科创板 A=250 可卖 200–250、A=199 只能卖 199）、科创板 ETF 按 100 份整数倍、单笔上限截断（全市场 100 万；科创板限价 10 万/市价 5 万；创业板限价 30 万/市价 15 万）、`t0_round_trip.data_source` 为 null 或空串时所有 ETF 返回 T+1。
 
 ---
 
@@ -1367,7 +1367,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `strategy_rules`（物化视图） | strategy_version_id, rule_id, dimension, role, expr, weight, required_data — 由 config 展开，供检索"哪些策略用到某因子/某维度" |
 | `engine_policies` | id, version_no, config(jsonb：动作映射通则、置信度公式、维度观点阈值、分歧检测规则), published_at — 不可变 |
 | `horizon_classifier_versions` | id, version_no, semver(text，唯一，匹配 `^(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$`，即契约 `classifier_version`；T-A03), config(jsonb：特征、各周期打分规则、阈值), published_at — 不可变 |
-| `symbol_horizon_assessments` | id, user_id, security_code, classifier_version_id, snapshot_id, scores(jsonb：{intraday_t,short,swing,long: 0–100}), suitable_horizons(text[]), reasons(jsonb：[{horizon, text, evidence_ids, polarity: for/against}]), inputs_missing(text[] NOT NULL DEFAULT '{}'：缺失的 feature_catalog 键 `f.*`，去重升序，无缺失为空数组，CHECK 每项匹配 `^f\.[a-z0-9_]+$`；T-A03), hints(jsonb NOT NULL DEFAULT '[]'：`HorizonHint[]`，T-A06), caps(jsonb NOT NULL DEFAULT '[]'：[{horizon, cap, kind: gate/data_missing, rule_id, inputs_missing}]；T-A03；v0.2.6（T006e）删 `requires`、加 `gate`), evidence(jsonb：Evidence[]，理由引用的证据，契约 v0.2.3), recommended_strategy_version_ids(uuid[]), trigger(import/watchlist_add/weekly/position_open_close/on_demand；`on_demand` 为 v0.2.9 内 T-B47 裁定新增：GET 时没有可用记录而同步计算), created_at — 只追加。（v0.2.9 内，T-B46/T-B47 裁定）：`user_id` NOT NULL（含 `user.*` 与画像派生内容）；`snapshot_id` NOT NULL，FK→`data_snapshots`（`purpose='horizon'`）；索引 `(user_id, security_code, classifier_version_id, created_at desc)`；保留期：每个（用户、证券、分类器版本）的最新一条长期保留，其余超过 180 天的由周期任务物理删除（问题 75）；删除用户时与对应快照一起物理删除（7.3） |
+| `symbol_horizon_assessments` | id, user_id, security_code, classifier_version_id, snapshot_id, scores(jsonb：{intraday_t,short,swing,long: 0–100}), suitable_horizons(text[]), reasons(jsonb：[{horizon, text, evidence_ids, polarity: for/against}]), inputs_missing(text[] NOT NULL DEFAULT '{}'：缺失的 feature_catalog 键 `f.*`，去重升序，无缺失为空数组，CHECK 每项匹配 `^f\.[a-z0-9_]+$`；T-A03), hints(jsonb NOT NULL DEFAULT '[]'：`HorizonHint[]`，T-A06), caps(jsonb NOT NULL DEFAULT '[]'：[{horizon, cap, kind: gate/data_missing, rule_id, inputs_missing}]；T-A03；v0.2.6（T006e）删 `requires`、加 `gate`), evidence(jsonb：Evidence[]，理由引用的证据，契约 v0.2.3), recommended_strategy_version_ids(uuid[]), trigger(import/watchlist_add/weekly/position_open_close/on_demand；`on_demand` 为 v0.2.9 内 T-B47 裁定新增：GET 时没有可用记录而同步计算；库级 CHECK `ck_symbol_horizon_assessments_trigger` 的取值必须与此列表完全一致（v0.2.9 内，T-T25 裁定：现有迁移 0002 的 CHECK 为 `import/watchlist_add/weekly/position_open_close`，缺 `on_demand`；后端新增迁移补上 `on_demand`，downgrade 前须确认表中没有 `on_demand` 行，有则拒绝降级）), created_at — 只追加。（v0.2.9 内，T-B46/T-B47 裁定）：`user_id` NOT NULL（含 `user.*` 与画像派生内容）；`snapshot_id` NOT NULL，FK→`data_snapshots`（`purpose='horizon'`）；索引 `(user_id, security_code, classifier_version_id, created_at desc)`；保留期：每个（用户、证券、分类器版本）的最新一条长期保留，其余超过 180 天的由周期任务物理删除（问题 75）；删除用户时与对应快照一起物理删除（7.3） |
 | ~~`user_symbol_strategy_settings`~~ | **已废弃**，由 `strategy_instances` 取代（见下方"策略三层"表组）。迁移时把旧行映射为 `status=active` 的实例 |
 | `risk_control_settings` | id, scope(system/user), user_id(nullable), control(position_cap/total_exposure/sector_concentration/stop_take/loss_streak_drawdown/plan_violation), enabled(bool), params(jsonb), updated_at；变更写历史表 |
 | `risk_events` | id, user_id, control, level(info/warning/critical), subject(account/security/strategy), security_code, detail(jsonb), suggestion_id(nullable), trade_id(nullable), created_at — 只追加 |
@@ -2408,17 +2408,30 @@ segments:
       bse_ipo_first_days: 1
       delisting_period_first_day: true
     lot:
-      buy_lot: 100
-      star_min_buy: 200               # 科创板单笔 ≥ 200 股（沪第 6.7 条已核实）；之后按 1 股递增【待核实】
-      star_step: 1
-      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【待核实；V1 不扫描北交所】
-      bse_step: 1
+      buy_lot: 100                    # 沪/深主板、创业板、ETF 竞价买入为 100 股（份）或其整数倍（沪 3.3.8 / 深 3.3.8，已核实）
+      star_min_buy: 200               # 科创板股票/CDR 单笔 ≥ 200 股，买卖均适用（沪 2026 第 6.7 条，已核实）
+      star_step: 1                    # 200 股以上按 1 股递增【部分核实：规则无明文，依沪 6.1/6.7 + 上交所投教 O32–O34（T-R10）】
+      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【未核实；V1 不扫描北交所】
+      bse_step: 1                     # 【未核实】
+      odd_lot_sell_all: true          # 卖出时余额不足一个申报单位的部分须一次性申报卖出（沪 3.3.8、6.7；深 3.3.8；已核实，T-R10）
+      star_odd_lot_threshold: 200     # 科创板零股阈值 = 200（沪 2026 第 6.7 条末句；已核实）；其他板块阈值 = buy_lot
+      max_order_qty: 1000000          # 竞价单笔上限 100 万股（份）（沪 3.3.9 / 深 3.3.9；已核实）
+      star_max_limit_order: 100000    # 科创板限价单笔 ≤ 10 万股（沪 2026 第 6.7 条；已核实）
+      star_max_market_order: 50000    # 科创板市价单笔 ≤ 5 万股（沪 2026 第 6.7 条；已核实）
+      star_max_after_hours: 1000000   # 科创板盘后固定价格单笔 ≤ 100 万股（沪 2026 第 6.7 条；已核实）
+      chinext_max_limit_order: 300000 # 创业板限价单笔 ≤ 30 万股（深 3.3.9；已核实）
+      chinext_max_market_order: 150000  # 创业板市价单笔 ≤ 15 万股（深 3.3.9；已核实）
     sessions:                         # 北京时间
       call_auction: ["09:15", "09:25"]
       morning: ["09:30", "11:30"]
       afternoon: ["13:00", "14:57"]
       closing_auction: ["14:57", "15:00"]
     t_plus: 1
+    t0_round_trip:                    # 实行当日回转交易的品种（沪 3.1.5 / 深 3.1.5；类别已核实，无官方代码清单；T-R10 §3）
+      fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
+      cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
+      unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
+      data_source: null                             # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）
     fees:
       stamp_duty_sell_pct: 0.05       # 印花税仅卖出
       transfer_fee_pct: 0.001         # 过户费双向
@@ -2455,17 +2468,30 @@ segments:
       bse_ipo_first_days: 1
       delisting_period_first_day: true
     lot:
-      buy_lot: 100
-      star_min_buy: 200               # 科创板单笔 ≥ 200 股（沪第 6.7 条已核实）；之后按 1 股递增【待核实】
-      star_step: 1
-      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【待核实；V1 不扫描北交所】
-      bse_step: 1
+      buy_lot: 100                    # 沪/深主板、创业板、ETF 竞价买入为 100 股（份）或其整数倍（沪 3.3.8 / 深 3.3.8，已核实）
+      star_min_buy: 200               # 科创板股票/CDR 单笔 ≥ 200 股，买卖均适用（沪 2023 第 6.1.7 条，已核实）
+      star_step: 1                    # 200 股以上按 1 股递增【部分核实：规则无明文，依沪 6.1/6.1.7 + 上交所投教 O32–O34（T-R10）】
+      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【未核实；V1 不扫描北交所】
+      bse_step: 1                     # 【未核实】
+      odd_lot_sell_all: true          # 卖出时余额不足一个申报单位的部分须一次性申报卖出（沪 3.3.8、6.1.7；深 3.3.8；已核实，T-R10）
+      star_odd_lot_threshold: 200     # 科创板零股阈值 = 200（沪 2023 第 6.1.7 条末句；已核实）；其他板块阈值 = buy_lot
+      max_order_qty: 1000000          # 竞价单笔上限 100 万股（份）（沪 3.3.9 / 深 3.3.9；已核实）
+      star_max_limit_order: 100000    # 科创板限价单笔 ≤ 10 万股（沪 2023 第 6.1.7 条；已核实）
+      star_max_market_order: 50000    # 科创板市价单笔 ≤ 5 万股（沪 2023 第 6.1.7 条；已核实）
+      star_max_after_hours: 1000000   # 科创板盘后固定价格单笔 ≤ 100 万股（沪 2023 第 6.2.6 条；已核实）
+      chinext_max_limit_order: 300000 # 创业板限价单笔 ≤ 30 万股（深 3.3.9；已核实）
+      chinext_max_market_order: 150000  # 创业板市价单笔 ≤ 15 万股（深 3.3.9；已核实）
     sessions:                         # 北京时间
       call_auction: ["09:15", "09:25"]
       morning: ["09:30", "11:30"]
       afternoon: ["13:00", "14:57"]
       closing_auction: ["14:57", "15:00"]
     t_plus: 1
+    t0_round_trip:                    # 实行当日回转交易的品种（沪 3.1.5 / 深 3.1.5；类别已核实，无官方代码清单；T-R10 §3）
+      fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
+      cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
+      unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
+      data_source: null                             # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）
     fees:
       stamp_duty_sell_pct: 0.05       # 印花税仅卖出
       transfer_fee_pct: 0.001         # 过户费双向
@@ -2884,6 +2910,7 @@ admin:
     5. 运维更新 `deploy/db/roles/grants.sql` 与 `verify-roles.sh`：`aia_maint` 只授予 CLI 必需的权限；`aia_api`、`aia_ingest` 对 `ops.pending_file_purges` 没有任何权限；`verify-roles.sh` 断言 `aia_api` 在一个事务里执行“置 `purging` → 删除 → 改回 → 提交”会失败。
     6. **`aia_maint` 角色细则（v0.2.9 内，评审 be607b3/f72b8c7/8fd9502 裁定）**：① `aia_maint` 是 LOGIN 角色，按最小权限只授予 CLI 用到的表与列；`aia_api`、`aia_ingest` 都不得是它的成员（反过来也不得）；② CLI 只从 `AIA_MAINT_DATABASE_URL_FILE` 指向的文件读取连接串（文件不在镜像和仓库中，`api`、`ingest` 容器不挂载）；③ `grants.sql` 中对 `ops` 的 schema 级 GRANT 之后，显式 `REVOKE ALL ON ops.pending_file_purges FROM aia_api, aia_ingest`（必须放在 schema 级 GRANT 与 `ALTER DEFAULT PRIVILEGES` 之后，避免被覆盖）；④ `verify-roles.sh` 增加断言：`aia_maint` 可登录；`aia_api`、`aia_ingest` 不是 `aia_maint` 的成员（`pg_has_role(..., 'MEMBER')` 为 false）；`aia_api`、`aia_ingest` 对 `ops.pending_file_purges` 的 SELECT/INSERT/UPDATE/DELETE 都为 false；⑤ dry-run 也用 `aia_maint` 连接，或用一个对相关表只读的连接，不得用 `aia_api` 的连接。运维改 `deploy/db/roles/`，后端改 CLI 的连接读取。
     7. **`aia_maint` 列级授权原则（v0.2.9 内，T-O11 评审裁定）**：① 不得 SELECT 任何密文列（`user_data_licences.ciphertext`、LLM `api_key_ciphertext` 等）与 `app.users.password_hash`；② 不得 UPDATE `app.users.role`；③ SELECT 与 UPDATE 都按列授予：只授 CLI 实际读的列（主键、`user_id` 类关联列、文件路径等）和实际写的列（`app.users.status` 与匿名化细则列出的列）；DELETE 只对 CLI 清单内的表授予（PostgreSQL 没有列级 DELETE）。**后端**在 CLI 代码中维护一份“表 → SELECT 列 / UPDATE 列 / DELETE”的清单并随 CLI 改动同步，交给运维；**运维**在 `grants.sql` 用列级 GRANT 实现，`verify-roles.sh` 用 `has_column_privilege` 断言 ①② 为 false。
+  - **威胁模型与触发器自检（v0.2.9 内，T-T25 裁定）**：数据库属主、超级用户或能执行 DDL 的角色**不在**删除 CLI 的威胁模型内——这类角色本来就能直接读取或复制全部数据，CLI 无法防御，也不承诺防御（例如预先植入的 AFTER DELETE 触发器把行复制到别处）。作为防误配的完整性检查（不是安全保证）：CLI 在 dry-run 与 `--execute` 前，用只读查询（`pg_trigger` 中 `NOT tgisinternal` 的行）列出删除与匿名化清单内各表上的触发器，与 CLI 代码中维护的白名单（表名 + 触发器名 + 函数名，随迁移同步）比对；dry-run 输出差异，`--execute` 遇到白名单外的触发器拒绝执行并以非零码退出，不提供跳过参数。白名单由后端随迁移维护；不检查函数体内容，不检查清单外的表。
   - **物理删除**（个人财务数据和由它派生的数据）：持仓、成交（`app.trades`）、导入批次与解析行、证书（`ops.data_licences`，含密文）、画像（`app.user_profiles`）、自选、策略实例、候选信号（含各分区）、`signal_events`、`suggestions`、`suggestion_user_actions`、`plan_drafts`、`plan_draft_confirmations`、`risk_events`、风控设置及其历史、`claims` 与 `claim_links`、研究候选（`research_candidates`、`candidate_versions`；T-A11 同步，后端已删）、`symbol_horizon_assessments`、`daily_reports`、通知、会话。另外删除用该用户证书取到的 `market.*` 行（按 `source_licence_id`）以及对应的 Redis 键。
   - **匿名化保留**（有不可变要求的审计和日志表）：`app.audit_logs`、`app.account_reviews`、`ops.data_licence_events`、`ops.ingest_request_log`。
     - 断开关联：`user_id`、`actor_id`、`target_id` 中指向该用户的值置为 NULL，相关列由迁移改为可空。
@@ -2904,7 +2931,7 @@ admin:
     - **`invite_codes`**：`bound_username` 置 NULL；`used_by` 一类指向该用户的列解除关联（置 NULL）。
     - **`ops.pending_file_purges`**：`path` 可以含 uid 目录名；重试删除文件成功后删除该行。
 - **周期清理与保留期（v0.2.9 内，评审 be607b3/f72b8c7/8fd9502 裁定）；T-B46/T-B47 裁定同步**：
-  - **证书冷却记录**（`DELETE /me/data-licence` 时保留的指纹与删除前的 `status`、`paused_until`，契约 §7.1 DELETE 行）：有 `paused_until` 的保留到 `paused_until`（不另加 24 小时上限，否则删除后重提可绕过较长的冷却）；`paused_until` 为 null（删除时没有处于冷却）的最多保留到删除后 24 小时（契约 v0.2.9 #28①）（v0.2.9 内，T-O11 评审裁定）。周期任务（每小时，由 `beat` 调度、`worker` 执行；`beat` 实现之前，由 compose 服务 `cooldown-purge`（`aia_api`、不挂主密钥）每小时调用一次，`beat` 落地后删除该服务；上线前必须有，在此之前只靠读取时视为不存在）物理删除过期记录；读取时过期记录一律视为不存在。删除用户时一并物理删除。
+  - **证书冷却记录**（`DELETE /me/data-licence` 时保留的指纹与删除前的 `status`、`paused_until`，契约 §7.1 DELETE 行）：有 `paused_until` 的保留到 `paused_until`（不另加 24 小时上限，否则删除后重提可绕过较长的冷却）；`paused_until` 为 null（删除时没有处于冷却）的最多保留到删除后 24 小时（契约 v0.2.9 #28①）（v0.2.9 内，T-O11 评审裁定）。**到期边界（v0.2.9 内，T-T25 裁定）**：到期时刻 `expires_at` = `paused_until`（非 null 时）或删除时刻 + 24 小时（`paused_until` 为 null 时）；记录仅在 `now < expires_at` 时有效，`now = expires_at` 即已过期（半开区间，与“`paused_until` 未到期”= `now < paused_until` 同一口径）；时间一律用数据库服务器 UTC 时间比较，不用应用进程时钟。周期任务（每小时，由 `beat` 调度、`worker` 执行；`beat` 实现之前，由 compose 服务 `cooldown-purge`（`aia_api`、不挂主密钥）每小时调用一次，`beat` 落地后删除该服务；上线前必须有，在此之前只靠读取时视为不存在）物理删除过期记录；读取时过期记录一律视为不存在。删除用户时一并物理删除。
   - **周期评估**：`symbol_horizon_assessments` 每个（用户、证券、分类器版本）的最新一条保留，其余超过 180 天的物理删除，同时删除只被它们引用的 `purpose='horizon'` 快照（问题 75）。
   - **交割单原始文件**：按 `import_batches` 的 `retained_until`（上传时间 + 365 天，问题 21）每日删除到期文件；失败的写入 `ops.pending_file_purges`。
   - 三项都由后端实现为幂等的周期任务，结果只写行数审计。
@@ -3011,7 +3038,7 @@ admin:
 | 黄金样例（golden） | pytest + 固定快照 JSON | 给定"策略版本 + 数据快照 + 画像 + 持仓"→ 期望的动作/分数/置信度/理由/反证/失效条件，逐字段比较；规则改动必须更新黄金文件并在 PR 中解释 | 100% 通过；黄金文件变更需评审 |
 | 回放（replay） | 录制的麦蕊响应（脱敏 fixtures）+ 时钟模拟 | 盘中一整天的行情回放：刷新循环、陈旧判定、翻转去抖、幂等 tick、通知合并、429/503 退避与预算 | 回放测试全过；无重复建议 |
 | 集成 | pytest + docker（Postgres/Redis 测试容器） | 迁移、不可变触发器、as-of 查询、越权隔离、导入事务、SSE | 全过 |
-| 契约 | schemathesis（对 OpenAPI）+ 契约文档对照脚本 | 字段、类型、错误码与 `api-contract.md` 一致 | 全过 |
+| 契约 | schemathesis（对 OpenAPI）+ 契约文档对照脚本 | 字段、类型、错误码与 `api-contract.md` 一致。例外（v0.2.9 内，T-T25 裁定）：只允许 schema 无法表达的业务校验，每条写明 方法 + 路径 + 状态码 + 错误码 + `field`，不得按整个接口或整类状态码放行；登记表 `tests/backend/contract/r11_exceptions.py` 归**测试员**维护，是唯一清单；CI 读取的 `src/backend/schemathesis.toml` 位置不变、归**后端**维护，其中每条例外必须能在登记表中找到（测试员加一致性用例只读校验）；R11 #9（`POST /trades`，格式合法但推断不出市场 → `400 VALIDATION_ERROR`，`field: security_code`）与 #10（`PUT /imports/{batch_id}/options`，解析器与批次 kind 不符 → `400 VALIDATION_ERROR`，`field: parser_id`）按此登记；`qty`、`price`、`encoding_override` 的格式错误不得列为例外，由后端收紧 schema 解决 | 全过 |
 | E2E | Playwright（桌面 1440×900，深色主题） | 注册→审核→登录→导入→启用策略→收到盘后日报→盘中信号翻转→建议卡→转计划→模拟跟踪结果 | 主流程全过 |
 | 安全 | 越权用例、CSRF、限速、ZAP 基线扫描、`pip-audit`/`pnpm audit`、gitleaks 密钥扫描（S1–S9）、敏感样式扫描 | 无高危 | 0 高危 |
 | 性能 | locust | 100 并发用户读接口 p95 < 300 ms；一轮实时刷新（4,000 只）端到端 < 刷新间隔 | 达标 |
@@ -3292,7 +3319,7 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 83. **【默认执行，前端待定裁定新增，后续版本补充】计划条件类型本版只开放 5 种**：`price_above`、`price_below`、`pct_change`、`date`、`custom`；`indicator`、`event` 的参数与判定尚未定义，写入返回 `400 not_supported`；`custom` 只作文字记录，不自动判定。需要谁定：架构师（后续版本定义参数与判定）。
 84. **【默认执行，前端待定裁定新增】登录与注册的 `Origin` 校验**：CSRF 白名单只有 `POST /auth/login`、`/auth/register`；这两个端点带了外站 `Origin` → `403 CSRF_FAILED`，不带 `Origin` 的非浏览器客户端放行（契约 §1.3）。需要谁定：架构师；若以后要支持第三方网页客户端再议。
 85. **【默认执行，前端待定裁定新增，用户可改】持仓行业分布的“未分类”**：行业数据接入后，没有行业归属的持仓（可转债等）按成本估算值合并为“未分类”计入 `exposure.sector`，不参与 RC4 行业集中度判断。需要谁定：用户（产品）。
-86. **【默认执行，前端待定裁定新增，补测后复核】卖出零股规则**：主板、创业板、ETF 起卖 100、步长 100，科创板起卖 200、步长 1；卖出数量须为全部可卖余量，或不少于起卖量且超出部分为步长的整数倍（科创板余量不足 200 股时只能一次卖完）（契约 §7.7 `lot_rule`）【以交易所规则为准，研究员核对】。需要谁定：策略研究员。
+86. **【默认执行，前端待定裁定新增，补测后复核】卖出零股规则**：主板、创业板、ETF 起卖 100、步长 100，科创板起卖 200、步长 1；卖出数量须为全部可卖余量，或不少于起卖量且超出部分为步长的整数倍（科创板余量不足 200 股时只能一次卖完）（契约 §7.7 `lot_rule`）【以交易所规则为准；T-R10 已核对，与规则一致，“余额”按可卖数量判定、整手连带零股不允许属实现约定，见 2.13 交易单位行（v0.2.9 内，T-T25）】。需要谁定：策略研究员。
 87. **【默认执行，T-B46-47 前端待定新增，用户可改】持仓估算行的标注与数据状态**：在证券主数据中、但既没有日线收盘价也没有快照参考价的持仓（问题 79），行上只标“估算”（不在主数据中的标“不在主数据·估算”），不细分原因标签，原因写在页面说明里；只要有一行估算，持仓页整体数据状态就显示为“部分缺失”（契约 §7.2 `/portfolio`，v0.2.9 #31）。需要谁定：用户（产品）。
 88. **【默认执行，T-B46-47 前端待定新增，补测后复核】管理端采集告警的展示**：同类告警只出一条（不按证书逐张列出，逐张情况看证书列表）；文案固定、不带数值与证书数量；严重在前、警告在后；14 天内到期单列为“有证书即将到期”；不新增心跳时间字段（契约 §7.9，v0.2.9 #31）。需要谁定：运维、用户；T003 实测后与问题 78 一并复核。
 89. **【默认执行，T-B46-47 前端待定新增，用户可改】周期评估“数据不足”的显示口径**：某周期因数据缺失被封顶、且没有被硬门槛排除时显示“数据不足”；没有适合周期且至少一个周期“数据不足”时整体显示“数据不足”，否则显示“—”；界面不说“都不适合”（契约 §7.3 `/horizon-assessments`，v0.2.9 #31）。需要谁定：用户（产品）。

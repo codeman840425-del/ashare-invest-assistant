@@ -71,6 +71,16 @@ V025_DOCS_PENDING = "plan §6.1 仍为 v0.2.4：架构师 T-A06 bd33f83（v0.2.5
 #: plan v0.2.6（T-A07 308afd3）新增的顶层段；所用 docs 尚无时快照比对 xfail
 V026_ADDED = {"ingest": ("licences", "data_sharing")}
 V026_DOCS_PENDING = "plan §6.1 仍为 v0.2.5：架构师 T-A07 308afd3（v0.2.6，每用户证书）不在所用 docs 中"
+#: v0.2.9 内 T-B47 裁定（架构师 4532478，仅本地 main）新增的顶层段：plan 已加、快照已同步（T-T25）
+V029_ADDED = {"realtime": ("admin_alerts",)}
+V029_DOCS_PENDING = "plan §6.1 尚无 realtime.admin_alerts：架构师 4532478（v0.2.9 内 T-B47 裁定）未推到 origin（运维推送）"
+#: 上述新段在仓库 config/*.yaml 与后端 pydantic 模型（extra="forbid"）中尚未落地 → 仅这些键的差异 xfail
+V029_BACKEND_PENDING = "后端 T-B47-x（R10）：config/realtime.yaml 与 app/config_files.py 尚无 admin_alerts（plan §6.1 v0.2.9 内裁定，问题 78）"
+
+
+def _only_v029_keys(name: str, paths: list[str]) -> bool:
+    keys = V029_ADDED.get(name, ())
+    return bool(paths) and all(p.split(".", 1)[0].split("（", 1)[0] in keys for p in paths)
 
 
 class _Yaml12Loader(yaml.SafeLoader):
@@ -386,6 +396,8 @@ def test_snapshot_equals_plan_block(docs_dir, name):
         pytest.xfail(V025_DOCS_PENDING)
     if name in V026_ADDED and not set(V026_ADDED[name]) & set(plan) and set(V026_ADDED[name]) <= set(snap(name)):
         pytest.xfail(V026_DOCS_PENDING)
+    if name in V029_ADDED and not set(V029_ADDED[name]) & set(plan) and set(V029_ADDED[name]) <= set(snap(name)):
+        pytest.xfail(V029_DOCS_PENDING)
     assert plan == snap(name), f"plan §6.1 的 {name}.yaml 已变，请同步快照"
 
 
@@ -417,6 +429,9 @@ def test_backend_model_accepts_plan_snapshot(cfgtools, name):
     try:
         model.model_validate(snap(name))
     except Exception as exc:  # pydantic.ValidationError
+        errs = getattr(exc, "errors", None)
+        if callable(errs) and _only_v029_keys(name, [".".join(map(str, e["loc"])) for e in errs()]):
+            pytest.xfail(V029_BACKEND_PENDING)
         if name in OWNER:
             locs = sorted({".".join(map(str, e["loc"])) for e in getattr(exc, "errors", list)()})[:8]
             pytest.xfail(f"后端模型拒绝 plan §6.1 快照的 {name}.yaml（{locs}）：{OWNER[name]}")
@@ -438,6 +453,8 @@ def _repo_file(name: str) -> Path:
 def test_repo_yaml_equals_plan_defaults(name):
     got = load12(_repo_file(name).read_text(encoding="utf-8"))
     diffs = diff_paths(got, snap(name))
+    if _only_v029_keys(name, diffs):
+        pytest.xfail(V029_BACKEND_PENDING)
     if diffs and name in OWNER:
         pytest.xfail(f"仓库 config/{name}.yaml 与 plan §6.1 快照不一致 {diffs[:8]}：{OWNER[name]}")
     assert diffs == []

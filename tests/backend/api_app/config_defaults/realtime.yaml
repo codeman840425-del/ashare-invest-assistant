@@ -1,4 +1,4 @@
-# plan v0.2.2 §6.1 `config/realtime.yaml` 代码块原文快照（测试维护，T-T01b）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。
+# plan v0.2.2 §6.1 `config/realtime.yaml` 代码块原文快照（测试维护，T-T01b）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。 T-T25：按本地 main 4532478（v0.2.9 内 T-B47 裁定）同步，新增 admin_alerts。
 schema_version: 1
 intervals:
   quote_interval_s: 15          # int，多股快照一轮间隔；下限 5【待 T003】
@@ -11,7 +11,7 @@ boards:                         # V1 扫描范围（第 9 节问题 10、C(8)）
   chinext: true
   star: true
   bse: false                    # V1 不含北交所【编排者默认，用户可否决】
-  etf_cb_holdings_only: true    # ETF、可转债只做持仓展示
+  etf_cb_holdings_only: true    # ETF 只做搜索、行情与持仓展示，不进策略扫描；可转债本版不纳入主数据（问题 53，契约 v0.2.8）
 universe:
   tier1_cap: 1500               # int，Tier-1 只数【待 T003】
   universe_hard_cap: 4000       # int，系统去重池硬上限
@@ -38,3 +38,17 @@ degraded_profile:               # 证书到期降级档（7.x 风险表），管
   holdings_only: true
   quote_interval_s: 60
   tier2_enabled: false
+admin_alerts:                   # v0.2.9 内 T-B47 裁定：/admin/ingest/status 的 freshness 与 alerts 口径（api 读取；初值，问题 78）
+  queue_p0_warning_s: 60        # ◇ 盘中 p0_intraday 最早任务等待超过即 warning
+  queue_p0_critical_s: 300      # ◇ 超过即 critical
+  queue_p1_warning_s: 3600      # ◇ p1_daily
+  budget_warning_ratio: 0.9     # ◇ used_last_minute / per_minute_limit
+  ip_limit_critical_count: 1    # ◇ 24 小时 ip_limited 事件数
+  upstream_error_warning_count: 20   # ◇ 单个上游错误码 24 小时次数
+  licence_days_left_warning: 14      # ◇
+  freshness:                    # 数据集固定 6 个，顺序即响应顺序；quotes 用 intervals.stale_threshold_s
+    minute_bars_stale_s: 180    # ◇ 盘中
+    daily_bars_due: "17:00"     # ◇ 交易日该时刻后仍不是当日 → stale
+    announcements_due: "20:00"  # ◇
+    security_master_stale_trading_days: 1
+    financials_stale_days: 120  # ◇

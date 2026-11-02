@@ -32,6 +32,10 @@ sys.dont_write_bytecode = True
 TESTS_DIR = Path(__file__).resolve().parents[2]
 REPO_ROOT = TESTS_DIR.parent
 BACKEND_DIR = Path(os.environ.get("AIA_BACKEND_DIR", REPO_ROOT / "src" / "backend")).resolve()
+# T-T25：模块级即把后端目录放进 sys.path，单独运行某个用例/文件（如 test_a11_01_db_check_matches_contract
+# 直接 import app.db.tables.research、不经 backend fixture）时无需外部 PYTHONPATH=src/backend。
+if (BACKEND_DIR / "app").is_dir() and str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 DOCS_DIR = Path(os.environ.get("AIA_DOCS_DIR", REPO_ROOT / "docs")).resolve()
 CONFIG_SRC_DIR = Path(os.environ.get("AIA_CONFIG_DIR", REPO_ROOT / "config")).resolve()
 SNAPSHOT_DIR = Path(__file__).resolve().parent / "config_defaults"

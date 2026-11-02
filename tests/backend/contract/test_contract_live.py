@@ -5,6 +5,10 @@
 
 ``/health/ready``（及 ``/health``）在 db/redis 不可用时按契约 §7.10 返回 ``503 {status: "down", …}``（已在 OpenAPI 中声明，
 非错误外壳），因此这两个路径不做 ``not_a_server_error`` 检查；响应体仍按 OpenAPI 校验（T-T01b）。
+
+裁定 R11（T-B46-47-rulings.md）第 1、3、4、5 项：带 ``cursor`` 的 GET /accounts、/imports、/imports/{batch_id}/rows、
+/trades 返回 ``400 INVALID_CURSOR`` 时只排除 ``positive_data_acceptance``（ST202）；条件见 r11_exceptions.py。
+（第 8 项是 POST，本用例只测 GET，不涉及。）
 """
 
 from __future__ import annotations
@@ -12,6 +16,8 @@ from __future__ import annotations
 import pytest
 import schemathesis
 from schemathesis.checks import not_a_server_error
+
+import r11_exceptions
 
 pytestmark = pytest.mark.contract
 
@@ -22,4 +28,7 @@ HEALTH_503_PATHS = {"/api/v1/health/ready", "/api/v1/health"}
 @schema.include(method="GET").parametrize()
 def test_live_api_conforms_to_openapi(case) -> None:  # type: ignore[no-untyped-def]
     declared_503 = case.path in HEALTH_503_PATHS and "503" in case.operation.definition.raw.get("responses", {})
-    case.call_and_validate(excluded_checks=[not_a_server_error] if declared_503 else None)
+    response = case.call()
+    excluded = [not_a_server_error] if declared_503 else []
+    excluded += r11_exceptions.excluded_checks(case, response)  # R11-1/3/4/5：仅 cursor → 400 INVALID_CURSOR
+    case.validate_response(response, excluded_checks=excluded or None)

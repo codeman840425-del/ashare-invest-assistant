@@ -2,8 +2,10 @@
 
 A. ``test_reg_closed_*``：``registration_mode=closed`` 下 13 种请求体（12 种 → ``503 REGISTRATION_CLOSED``，
    超过框架上限的 1 种 → ``413 PAYLOAD_TOO_LARGE``）。依据：契约 v0.2.9 §7.1 判定顺序 / 变更表 #16（架构师裁定 1）、
-   §4 #22 与错误码表 413。**待决问题**：契约没有写 /auth/register 上 413 与 503 谁先；本文件按“413 是网关 /
-   框架层兜底（nginx client_max_body_size 与 BodySizeLimitMiddleware 都在路由之前）”断言 413。
+   §4 #22 与错误码表 413。原待决问题“/auth/register 上 413 与 503 谁先”已由**追加裁定 E**
+   （T-B46-47-rulings.md，提交 4532478）解决：超过全局上限的请求体由中间件在路由之前返回
+   ``413 PAYLOAD_TOO_LARGE``，即使 ``registration_mode=closed`` 也先于 ``503 REGISTRATION_CLOSED``；
+   契约 #16 的“一律先返回 503”只适用于未超上限的请求。本文件的 413 用例即裁定 E 要求的测试员用例。
 B. ``test_cooldown_*`` / ``test_resume_*``：删除后在冷却期内重新提交同一证书（契约 v0.2.8 #13 补充、§7.1 DELETE
    行）——契约规定的不是错误码，而是 ``202`` 并**恢复**删除前的 ``status`` 与 ``paused_until``、到期前不验证；
    换证书照常验证。resume 重复调用：结果相同、无重复副作用（暂停记录、验证意图、证书事件、通知、审计）。
@@ -127,7 +129,8 @@ def test_reg_closed_every_body_is_503(app_client: Callable[..., Any], sql: Calla
 
 def test_reg_closed_oversized_is_413_before_mode(app_client: Callable[..., Any], sql: Callable[..., Any]) -> None:
     """超过框架层上限（config/imports.yaml max_request_bytes）→ 413 PAYLOAD_TOO_LARGE {max_bytes}，先于注册模式判定。
-    待决问题：契约 §7.1 判定顺序未列 413；按 §4 #22“网关 / 框架层兜底”理解为路由之前。"""
+    裁定 E（T-B46-47-rulings.md）：closed 模式下超大请求体期望 413，先于 503 REGISTRATION_CLOSED（原待决问题已解决）；
+    用户数不变（未进入注册路由）。"""
     import yaml
 
     limit = int(yaml.safe_load((Path(__file__).resolve().parents[3] / "config" / "imports.yaml")

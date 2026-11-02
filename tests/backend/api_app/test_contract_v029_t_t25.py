@@ -196,29 +196,58 @@ def test_01_frontend_contract_version_v029() -> None:
 
 # =============================== 第 2 条：可转债持仓 ===============================
 def test_02_convertible_bond_position_estimated(session: Callable[..., SimpleNamespace]) -> None:
-    """第 2 条：import_as_is 可转债行 → security_type=null、estimated=true、market_value/pnl/pnl_pct=null、weight_pct 按成本；
-    顶层 data_status=partial；股票/ETF 行 estimated=false；/terminal 的 holding 一致。"""
+    """第 2 条 + 裁定 R6：import_as_is 可转债行 → security_type=null、estimated=true、market_value/pnl/pnl_pct=null、
+    weight_pct 按成本（不为 null）；顶层 data_status=partial、无顶层 estimated；有日线或快照参考价的股票/ETF 行
+    estimated=false；/terminal 的 holding 一致。手工成交 / 快照路径的 R6 断言见 test_rulings_t_b46_47_t_t25d.py。"""
     s = session()
     require_route(s.client, "GET", "/portfolio", O_PORTFOLIO)
     require_route(s.client, "POST", "/imports", O_PORTFOLIO + "（导入端点 T-B18/T-B19）")
     pytest.xfail(O_PORTFOLIO + "：导入夹具（含可转债行的交割单）待端点落地后补")  # pragma: no cover
 
 
+#: 裁定 R6 ③：持仓行上这些字段永不为 null（顶层 cash、total_assets 同理，见 test_r6_* in test_rulings_t_b46_47_t_t25d.py）
+R6_ROW_NON_NULL = ("qty", "sellable_qty", "cost_price", "weight_pct")
+
+
 @pytest.mark.parametrize("row", [
     {"security_type": None, "estimated": True, "market_value": None, "pnl": None, "pnl_pct": None},
-    {"security_type": "stock", "estimated": False},
-], ids=["cb", "stock"])
+    {"security_type": "stock", "estimated": True, "market_value": None, "pnl": None, "pnl_pct": None},
+    {"security_type": "stock", "estimated": False, "market_value": "1000.00", "pnl": "0.00", "pnl_pct": "0.00"},
+    {"security_type": None, "estimated": False, "market_value": "1000.00", "pnl": "0.00", "pnl_pct": "0.00"},
+], ids=["cb_not_in_master", "stock_no_price_estimated", "stock_priced", "not_in_master_snapshot_priced"])
 def test_02_position_row_shape_rules(row: dict[str, Any]) -> None:
-    """第 2 条（规则自检，严格）：估值行与非估值行的字段组合规则（供端点落地后 _check_position 复用）。"""
-    assert _check_position({"weight_pct": "1.00", "qty": "10", "cost_price": "100", **row}) is None
+    """第 2 条 + 裁定 R6（规则自检，严格）：估值行与非估值行的字段组合规则（供 _check_position 复用）。
+    R6 ①：``security_type: security_type|null``（null = 不在主数据中），不再有 ``instrument_kind``；
+    R6 ② 第 3 步：日线与快照参考价都没有时才估算——估算与是否在主数据无关（股票同样可能估算）。"""
+    assert _check_position({"weight_pct": "1.00", "qty": "10", "sellable_qty": "10", "cost_price": "100", **row}) is None
+
+
+@pytest.mark.parametrize("bad", [
+    {"estimated": True, "market_value": "0.00"},  # 估算行市值是 null，不是 0（问题 79）
+    {"instrument_kind": "stock"},  # R6 ① 驳回 instrument_kind
+    {"security_type": "convertible_bond"},  # 不是契约 security_type 取值
+    {"weight_pct": None},  # R6 ③
+    {"cost_price": None},  # R6 ③
+], ids=["estimated_mv_zero", "instrument_kind", "bad_security_type", "weight_null", "cost_null"])
+def test_02_position_row_shape_rejects(bad: dict[str, Any]) -> None:
+    """R6 规则自检的反例：每一条都必须被 _check_position 拒绝（防止断言形同虚设）。"""
+    row = {"security_type": "stock", "estimated": False, "market_value": "1000.00", "pnl": "0.00", "pnl_pct": "0.00",
+           "weight_pct": "1.00", "qty": "10", "sellable_qty": "10", "cost_price": "100", **bad}
+    with pytest.raises(AssertionError):
+        _check_position(row)
 
 
 def _check_position(p: dict[str, Any]) -> None:
+    """裁定 R6 的持仓行规则（T-B46-47-rulings.md）。"""
+    assert "instrument_kind" not in p, "R6 ①：驳回 instrument_kind，改用 security_type"
+    assert "security_type" in p and p["security_type"] in {"stock", "cdr", "etf", None}, p.get("security_type")
+    assert isinstance(p["estimated"], bool)
     if p["estimated"]:
-        assert p["security_type"] is None
-        assert p["market_value"] is None and p["pnl"] is None and p["pnl_pct"] is None, "无行情不是 0"
+        assert p["market_value"] is None and p["pnl"] is None and p["pnl_pct"] is None, "无行情不是 0（R6 ② / 问题 79）"
     else:
-        assert p["security_type"] in {"stock", "cdr", "etf"}
+        assert p["market_value"] is not None, "有现价（日线收盘或快照参考价）时市值不为 null"
+    for k in R6_ROW_NON_NULL:
+        assert p.get(k) is not None, f"R6 ③：{k} 不为 null"
 
 
 # =============================== 第 3 条 + 不兼容 #6：候选信号事件分页 ===============================

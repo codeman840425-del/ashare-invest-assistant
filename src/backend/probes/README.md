@@ -206,6 +206,17 @@ done
 3. 发送前再对压缩包扫一次：`py -3 scan_licence.py T003-results.zip`（zip 有压缩，此项仅作补充，以第 1 步为准）。
 4. 清除证书：PowerShell `Remove-Item Env:MAIRUI_LICENCE` / cmd `set MAIRUI_LICENCE=` / bash `unset MAIRUI_LICENCE`。
 
+## 8A. 离线重放 p11 第 6/7 项（T-B48，不出网）
+
+p11 的因子解析修好后（`factor/all` 的 `data.factors`、`factor/batch` 的 `data.items.{code}`、小数截断不算前视），可用已有运行目录的结果离线重算 GAP6/GAP7，不发任何请求：
+
+```
+cd src/backend/probes
+env -u MAIRUI_LICENCE python3 p11_replay.py results/run-20261101-190106
+```
+
+结果写到运行目录下的 `p11_gaps.replay-T-B48.json`，不覆盖原 `p11_gaps.json`。重放期间 socket、requests 和 `common.call` 都被换成抛异常的桩，一旦尝试出网，退出码为 2。自检：`cd src/backend && env -u MAIRUI_LICENCE python3 selfchecks/tb48_p11.py`。
+
 ## 安全与限流约束（脚本内已强制）
 - 证书只从 `os.environ["MAIRUI_LICENCE"]` 读取；控制台、日志、样例、结果中的 URL 一律替换成 `***`，写盘前断言不含证书。dry-run 用假证书。
 - 严格串行（in-flight 计数断言 + 连接池 `pool_maxsize=1, pool_block=True`），调用间隔与冷却都用 `time.sleep`；不做压测，总量约 268 次。

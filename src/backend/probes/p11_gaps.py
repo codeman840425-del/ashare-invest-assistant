@@ -59,7 +59,9 @@ DOC_FACTORS = {
 DOC_FACTOR_IDS = [f for v in DOC_FACTORS.values() for f in v.split()]
 DOC_NORTH_EMPTY = ["north_5d_net", "north_20d_net", "north_holding_ratio"]
 DOC_82 = [f for f in DOC_FACTOR_IDS if f not in DOC_NORTH_EMPTY]
-FACTOR_META = {"code", "name", "trade_date", "update_time", "report_period", "calc_version", "dm", "mc"}
+FACTOR_META = {"code", "name", "trade_date", "update_time", "report_period", "calc_version", "dm", "mc", "theme"}
+# 小数位数相同到这一位就视为“同一个值”（T-B48：history 里出现 1.4714182949831487 ↔ 1.471418 这类截断，不是真跳变）
+PRECISION_MAX_DECIMALS = 8
 
 # 上市较早的股票（上市日期为公开常识：000001 平安银行(原深发展) 1991-04-03；600000 浦发银行 1999-11-10；
 # 600519 贵州茅台 2001-08-27，与 T003 实测日线首行 2001-08-27 一致）
@@ -230,15 +232,42 @@ def analyze_fin_rows(rows: list) -> dict:
     }
 
 
+def _decimals(x: float) -> int:
+    s = repr(float(x))
+    if "e" in s or "E" in s:
+        return 99
+    return len(s.split(".")[1].rstrip("0")) if "." in s else 0
+
+
+def precision_only(a, b) -> bool:
+    """a、b 只是小数位数不同（一方是另一方四舍五入或截断到较少位数的结果）→ True。
+    例：1.4714182949831487 与 1.471418（截断到 6 位）、82.98214819072565 与 82.982148。
+    较短一方的小数位数必须 ≤ PRECISION_MAX_DECIMALS，否则不算（避免把真实的小变化当成精度差）。"""
+    x, y = _num(a), _num(b)
+    if x is None or y is None or x == y:
+        return False
+    k = min(_decimals(x), _decimals(y))
+    if k > PRECISION_MAX_DECIMALS:
+        return False
+    if round(x, k) == round(y, k):
+        return True
+    m = 10 ** k
+    return math.trunc(x * m) / m == math.trunc(y * m) / m
+
+
 def change_points(series: list) -> list:
-    """series: [(YYYY-MM-DD, value)] 升序 → 值发生变化的日期列表（含前后值）。"""
+    """series: [(YYYY-MM-DD, value)] 升序 → 值发生变化的日期列表（含前后值）。
+    只是小数位数不同的变化标 precision_only=True（T-B48），由 classify_pit 单独计数、不算前视。"""
     out, prev = [], None
     for d, v in series:
         x = _num(v)
         if x is None:
             continue
         if prev is not None and abs(x - prev[1]) > 1e-9 * max(1.0, abs(prev[1])):
-            out.append({"date": d, "from": prev[1], "to": x})
+            ch = {"date": d, "from": prev[1], "to": x}
+            if precision_only(prev[1], x):
+                ch["precision_only"] = True
+            out.append(ch)
         prev = (d, x)
     return out
 
@@ -247,9 +276,13 @@ def classify_pit(changes: list, reports: list, window_days: int = 10) -> dict:
     """reports: [{"jzrq","plrq"}]（YYYY-MM-DD）。对每个变化点判定：
     after_plrq —— 变化日落在某份报告披露日之后 window 天内（与“按时点”一致）；
     before_disclosure —— 变化日落在某报告期末之后、但该报告披露日之前（前视：用到了尚未披露的数据）；
-    unexplained —— 其他（可能是口径、股本或行情驱动，需人工看）。"""
-    res = {"after_plrq": [], "before_disclosure": [], "unexplained": []}
+    unexplained —— 其他（可能是口径、股本或行情驱动，需人工看）；
+    precision_only —— 只是小数位数变化（截断/四舍五入，T-B48），不是值的变化，不参与判定。"""
+    res = {"after_plrq": [], "before_disclosure": [], "unexplained": [], "precision_only": []}
     for ch in changes:
+        if ch.get("precision_only"):
+            res["precision_only"].append({**ch, "tag": "precision_only"})
+            continue
         d = date.fromisoformat(ch["date"])
         tag = "unexplained"
         for r in reports:
@@ -264,7 +297,7 @@ def classify_pit(changes: list, reports: list, window_days: int = 10) -> dict:
                 tag = "before_disclosure"
         res[tag].append({**ch, "tag": tag})
     n = {k: len(v) for k, v in res.items()}
-    if not changes:
+    if not changes or len(changes) == n["precision_only"]:
         verdict = "no_change_in_window"
     elif n["before_disclosure"]:
         verdict = "lookahead_suspected"
@@ -276,12 +309,44 @@ def classify_pit(changes: list, reports: list, window_days: int = 10) -> dict:
 
 
 def factor_keys(d) -> tuple:
+    """factor/all 返回 → (扁平 dict, 因子 id 列表)。
+    实测结构（T-B48）：{"code":200,"data":{"code","name","theme","trade_date","factors":{85 个因子}},"msg"}；
+    也兼容旧设想的扁平结构 {"data":{因子...}} 与直接给 dict。元数据键与因子键合并进同一个 dict。"""
     if isinstance(d, dict) and isinstance(d.get("data"), dict):
         d = d["data"]
     if not isinstance(d, dict):
         return None, None
-    ks = [k for k in d if k not in FACTOR_META and not k.endswith("_rank")]
+    if isinstance(d.get("factors"), dict):
+        flat = {k: v for k, v in d.items() if k != "factors"}
+        flat.update(d["factors"])
+        ks = [k for k in d["factors"] if k not in FACTOR_META and not k.endswith("_rank")]
+        return flat, ks
+    ks = [k for k in d if k not in FACTOR_META and not k.endswith("_rank") and k != "factors"]
     return d, ks
+
+
+def batch_values(d, code: str) -> tuple:
+    """factor/batch 返回 → ({因子 id: 值}, trade_date)。
+    实测结构（T-B48）：{"code":200,"data":{"items":{"600519":{"profit_yoy":..,"roe_ttm":..}},"trade_date":"20260130"}}；
+    也兼容 items 为列表（[{"code":..,"factors":{..}}] 或 [{"code":.., 因子...}]）和 data 为列表。"""
+    if isinstance(d, dict) and isinstance(d.get("data"), (dict, list)):
+        d = d["data"]
+    td = d.get("trade_date") if isinstance(d, dict) else None
+    items = d.get("items") if isinstance(d, dict) else d
+    row = None
+    if isinstance(items, dict):
+        row = items.get(code)
+        if row is None and len(items) == 1 and isinstance(next(iter(items.values())), dict):
+            row = next(iter(items.values()))
+    elif isinstance(items, list):
+        cand = [x for x in items if isinstance(x, dict)]
+        row = next((x for x in cand if str(x.get("code", x.get("dm", ""))).split(".")[0] == code),
+                   cand[0] if len(cand) == 1 else None)
+    if not isinstance(row, dict):
+        return {}, td
+    td = row.get("trade_date", td)
+    vals = row.get("factors") if isinstance(row.get("factors"), dict) else row
+    return {k: v for k, v in vals.items() if k not in FACTOR_META}, td
 
 
 def selftest_pure() -> list:
@@ -301,8 +366,21 @@ def selftest_pure() -> list:
     cp = change_points([("2025-08-01", 1), ("2025-08-13", 2), ("2025-09-30", 2), ("2025-10-05", 3)])
     pit = classify_pit(cp, [{"jzrq": "2025-06-30", "plrq": "2025-08-12"}, {"jzrq": "2025-09-30", "plrq": "2025-10-25"}])
     out.append(("时点性判定：披露后跳变=一致，披露前跳变=前视", pit["counts"] == {
-        "after_plrq": 1, "before_disclosure": 1, "unexplained": 0} and pit["verdict"] == "lookahead_suspected",
-        str(pit["counts"])))
+        "after_plrq": 1, "before_disclosure": 1, "unexplained": 0, "precision_only": 0}
+        and pit["verdict"] == "lookahead_suspected", str(pit["counts"])))
+    cp2 = change_points([("2026-04-27", 1.4714182949831487), ("2026-08-03", 1.471418),
+                         ("2026-08-14", 1.4714182949831487), ("2026-08-15", -1.9515948550279467)])
+    pit2 = classify_pit(cp2, [{"jzrq": "2026-06-30", "plrq": "2026-08-15"}])
+    out.append(("时点性判定：小数截断（1.4714182949831487↔1.471418）不算前视（T-B48）",
+                pit2["counts"] == {"after_plrq": 1, "before_disclosure": 0, "unexplained": 0, "precision_only": 2}
+                and pit2["verdict"] == "consistent_with_pit", str(pit2["counts"])))
+    fd, fk = factor_keys({"code": 200, "data": {"code": "600519", "name": "贵州茅台", "theme": "x",
+                                                "trade_date": "20261030", "factors": {"pe_ttm": 20.1, "seal_ratio": None}}})
+    bv, btd = batch_values({"code": 200, "data": {"items": {"600519": {"profit_yoy": 6.2, "roe_ttm": 90.1}},
+                                                  "trade_date": "20260130"}}, "600519")
+    out.append(("嵌套解析：factor/all 的 data.factors、factor/batch 的 data.items.{code}（T-B48）",
+                sorted(fk) == ["pe_ttm", "seal_ratio"] and fd.get("trade_date") == "20261030"
+                and bv == {"profit_yoy": 6.2, "roe_ttm": 90.1} and btd == "20260130", f"{fk} / {bv} / {btd}"))
     return out
 
 
@@ -594,14 +672,17 @@ def item67_factors(res, shared):
     probe_day = ser[len(ser) // 2][0] if ser else "2025-10-15"
     b = probe(res, "pit_batch_hist_date", "/factor/batch/{licence}", method="POST",
               json_body={"codes": ["600519"], "factor_ids": PIT_FACTORS, "trade_date": probe_day.replace("-", "")})
-    brow = next((x for x in c.rows(b.data) if isinstance(x, dict)), {})
-    bf = brow.get("factors") if isinstance(brow.get("factors"), dict) else brow
+    bf, b_td = batch_values(b.data, "600519")
+    day = norm_date(b_td) or probe_day          # 以 batch 实际返回的 trade_date 为准（T-B48）
     cmp_ = {}
     for fid in PIT_FACTORS:
-        hv = dict(hist_dates.get(fid) or []).get(probe_day)
-        cmp_[fid] = {"date": probe_day, "history": hv, "batch": bf.get(fid) if isinstance(bf, dict) else None}
+        hv = dict(hist_dates.get(fid) or []).get(day)
+        bv = bf.get(fid)
+        cmp_[fid] = {"date": day, "requested_date": probe_day, "history": hv, "batch": bv,
+                     "equal": (hv is not None and bv is not None and _num(hv) == _num(bv))}
     has_asof = {k: sorted(v) for k, v in meta_seen.items()}
     verdicts = {fid: v["verdict"] for fid, v in pit.items()}
+    prec_n = {fid: v["counts"].get("precision_only", 0) for fid, v in pit.items()}
     if any(v == "lookahead_suspected" for v in verdicts.values()):
         pit_c = "存在前视嫌疑：财务因子在报告披露日之前就已跳变（历史可能用后来披露的数据回填）"
         st6 = "measured"
@@ -614,7 +695,8 @@ def item67_factors(res, shared):
     _item(res, name6, item6, st6, {
         "summary": f"空值因子 {list(null_any)}；时点性：{pit_c}",
         "null_factors": null_any, "doc_declared_empty": DOC_NORTH_EMPTY + ["attention_score(FAQ)", "ev_ebitda(可 null)"],
-        "pit_verdict": verdicts, "pit_conclusion": pit_c, "asof_fields_in_factor_all": has_asof,
+        "pit_verdict": verdicts, "pit_conclusion": pit_c, "precision_only_changes": prec_n,
+        "asof_fields_in_factor_all": has_asof,
         "history_vs_batch_same_day": cmp_},
         evidence={"per_stock": per, "pit": pit, "reports_used": reports},
         limits=["factor/history 文档注明“历史表随日终追加”：上线之后的点天然按时点；上线前若有回填，口径未知",

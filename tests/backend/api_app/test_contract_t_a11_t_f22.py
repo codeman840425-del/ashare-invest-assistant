@@ -564,7 +564,7 @@ def test_a11_09_delete_user_data_purges_candidates(cli: SimpleNamespace, roles: 
     fp = _a11_footprint(sql, u.id)
     assert all(fp[k] >= 1 for k in fp), fp
     by_before = _a11_footprint(sql, by.id)
-    cli.mp.setenv("AIA_MAINT_DATABASE_URL", roles.maint)
+    _t24.use_maint_dsn(cli, roles.maint)
     r = _t24._run(cli, capsys, "--user-id", u.id, "--execute", confirm=u.id)
     assert r.rc == 0, r.text[-1500:]
     fp = _a11_footprint(sql, u.id)

@@ -428,7 +428,7 @@ def _unplant(sql: Callable[..., Any]) -> None:
 
 
 def _execute(cli: SimpleNamespace, capsys: pytest.CaptureFixture[str], roles: SimpleNamespace, uid: str) -> Any:
-    cli.mp.setenv("AIA_MAINT_DATABASE_URL", roles.maint)
+    _t24.use_maint_dsn(cli, roles.maint)
     return _run(cli, capsys, "--user-id", uid, "--execute", confirm=uid)
 
 

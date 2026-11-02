@@ -69,8 +69,8 @@ def _dsn(url: str, user: str, pw: str) -> str:
     return urlunsplit(("postgresql+psycopg", netloc, p.path, p.query, p.fragment))
 
 
-def _mk_role(authdb: SimpleNamespace, name: str) -> str:
-    """测试容器内临时角色（集群级，随机口令），授予本库 app/ops/market 的 DML；返回 DSN。"""
+def _mk_role(authdb: SimpleNamespace, name: str, *, dml: bool = True) -> str:
+    """测试容器内临时角色（集群级，随机口令），授予本库 app/ops/market 的 DML（``dml=False`` 只授 SELECT）；返回 DSN。"""
     import psycopg
 
     pw = secrets.token_hex(16)
@@ -81,7 +81,7 @@ def _mk_role(authdb: SimpleNamespace, name: str) -> str:
         c.execute(f'GRANT CONNECT ON DATABASE "{authdb.name}" TO {name}')
         for s in ("app", "ops", "market"):
             c.execute(f"GRANT USAGE ON SCHEMA {s} TO {name}")
-            c.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {s} TO {name}")
+            c.execute(f"GRANT {'SELECT, INSERT, UPDATE, DELETE' if dml else 'SELECT'} ON ALL TABLES IN SCHEMA {s} TO {name}")
             c.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {s} TO {name}")
             c.execute(f"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA {s} TO {name}")
     return _dsn(authdb.url, name, pw)
@@ -89,7 +89,8 @@ def _mk_role(authdb: SimpleNamespace, name: str) -> str:
 
 @pytest.fixture(scope="module")
 def roles(authdb: SimpleNamespace) -> Iterator[SimpleNamespace]:
-    yield SimpleNamespace(maint=_mk_role(authdb, MAINT), other=_mk_role(authdb, "tt24_notmaint"))
+    yield SimpleNamespace(maint=_mk_role(authdb, MAINT), other=_mk_role(authdb, "tt24_notmaint"),
+                          ro=_mk_role(authdb, "tt24_readonly", dml=False))
 
 
 @pytest.fixture
@@ -106,6 +107,17 @@ def cli(authdb: SimpleNamespace, sql: Callable[..., Any], monkeypatch: pytest.Mo
     monkeypatch.setenv("AIA_IMPORTS_DIR", str(imports))
     return SimpleNamespace(mod=mod, imports=imports, tmp=tmp_path, mp=monkeypatch, db=authdb.url,
                            redis=authdb.redis_url)
+
+
+def use_maint_dsn(cli: SimpleNamespace, dsn: str, name: str = "maint.dsn") -> Path:
+    """按 T-B49（review m1）口径交 aia_maint DSN：写入一次性目录里的密钥文件（0600）并设
+    ``AIA_MAINT_DATABASE_URL_FILE``；明文环境变量 ``AIA_MAINT_DATABASE_URL`` 一律清掉（新 CLI 见到即拒绝）。"""
+    f = cli.tmp / name
+    f.write_text(dsn, encoding="utf-8")
+    f.chmod(0o600)
+    cli.mp.delenv("AIA_MAINT_DATABASE_URL", raising=False)
+    cli.mp.setenv("AIA_MAINT_DATABASE_URL_FILE", str(f))
+    return f
 
 
 def _run(cli: SimpleNamespace, capsys: pytest.CaptureFixture[str], *argv: str, confirm: str = "") -> SimpleNamespace:
@@ -160,9 +172,11 @@ def test_cli_dispatcher_usage(cli: SimpleNamespace, capsys: pytest.CaptureFixtur
 
 
 def test_cli_dry_run_is_read_only(cli: SimpleNamespace, victim: SimpleNamespace, sql: Callable[..., Any],
-                                  capsys: pytest.CaptureFixture[str]) -> None:
+                                  roles: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
     before = _footprint(sql, victim.uid)
     assert before["users"] == 1 and before["licences"] >= 1 and before["holds"] == 1
+    # T-B49（review-a8e055b m2）：dry-run 只用 aia_maint（_FILE）或只读角色
+    use_maint_dsn(cli, roles.maint)
     r = _run(cli, capsys, "--user-id", victim.uid)
     assert r.rc == 0, r.text[-800:]
     assert "dry-run" in r.out and "app.user_data_licences" in r.out
@@ -185,12 +199,59 @@ def test_cli_execute_guards_change_nothing(cli: SimpleNamespace, victim: SimpleN
     monkeypatch.setenv("AIA_MAINT_DATABASE_URL_FILE", str(cli.tmp / "missing.dsn"))
     with pytest.raises(SystemExit):
         _run(cli, capsys, "--user-id", victim.uid)
-    monkeypatch.delenv("AIA_MAINT_DATABASE_URL_FILE")
-    monkeypatch.setenv("AIA_MAINT_DATABASE_URL", roles.other)
+    use_maint_dsn(cli, roles.other, "other.dsn")
     r = _run(cli, capsys, "--user-id", victim.uid, "--execute", confirm=victim.uid)
-    assert r.rc == 1 and "不是 aia_maint" in r.err
+    # 旧 CLI：确认后 current_user 检查拒绝；T-B49 起预检查的 dry-run 角色判定先拒（有写权限，非只读角色）
+    assert r.rc == 1 and ("不是 aia_maint" in r.err or "不是只读角色" in r.err), r.err[-400:]
     assert _footprint(sql, victim.uid) == before
     assert victim.s.client.get(f"{API}/me").status_code == 200, "守卫失败时不得吊销会话"
+
+
+O_B49_DRY = "后端 T-B49（review-a8e055b m2：dry-run 只允许 aia_maint 或只读角色；在本地 main 6670b10，未推 origin）"
+
+
+@pytest.mark.parametrize("who", ["superuser_database_url", "writer_file", "readonly_file"])
+def test_cli_dry_run_role_gate(cli: SimpleNamespace, victim: SimpleNamespace, roles: SimpleNamespace,
+                               sql: Callable[..., Any], capsys: pytest.CaptureFixture[str], who: str) -> None:
+    """dry-run 角色判定：超级用户（DATABASE_URL 回落）与有写权限的角色拒绝（rc=1，不打印计划）；只读角色允许。
+    无论放行与否，库都不变、不回显证书明文。"""
+    before = _footprint(sql, victim.uid)
+    if who == "writer_file":
+        use_maint_dsn(cli, roles.other, "other.dsn")
+    elif who == "readonly_file":
+        use_maint_dsn(cli, roles.ro, "ro.dsn")
+    r = _run(cli, capsys, "--user-id", victim.uid)
+    assert _footprint(sql, victim.uid) == before
+    assert leak_count(victim.lic, r.text) == 0
+    if who == "readonly_file":
+        assert r.rc == 0, r.text[-800:]
+        assert "dry-run" in r.out
+        return
+    if r.rc == 0:
+        pytest.xfail(O_B49_DRY + f"：{who} 的 dry-run 被放行")
+    assert r.rc == 1 and "拒绝" in r.err and "app.user_data_licences" not in r.out
+
+
+O_B49_FILE = "后端 T-B49（review m1：aia_maint DSN 只认 AIA_MAINT_DATABASE_URL_FILE，明文环境变量拒绝；在本地 main 6670b10，未推 origin）"
+
+
+def test_cli_refuses_plaintext_maint_dsn_env(cli: SimpleNamespace, victim: SimpleNamespace, roles: SimpleNamespace,
+                                             sql: Callable[..., Any], capsys: pytest.CaptureFixture[str]) -> None:
+    """T-B49：设置了明文 ``AIA_MAINT_DATABASE_URL`` → 拒绝（不回落、不连库），--execute 不删任何行；拒绝信息只点名
+    变量，不回显 DSN。"""
+    before = _footprint(sql, victim.uid)
+    cli.mp.delenv("AIA_MAINT_DATABASE_URL_FILE", raising=False)
+    cli.mp.setenv("AIA_MAINT_DATABASE_URL", roles.maint)
+    try:
+        r = _run(cli, capsys, "--user-id", victim.uid, "--execute", confirm=victim.uid)
+        refused, text = r.rc != 0, r.text
+    except SystemExit as exc:
+        refused, text = True, str(exc) + capsys.readouterr().err
+    if not refused:
+        pytest.xfail(O_B49_FILE + "：明文环境变量被接受并执行")
+    assert "AIA_MAINT_DATABASE_URL" in text
+    assert roles.maint.split("@")[0].rsplit(":", 1)[-1] not in text, "拒绝信息不得回显 DSN 口令"
+    assert _footprint(sql, victim.uid) == before
 
 
 def test_0013_trigger_only_maint_may_set_purging(victim: SimpleNamespace, roles: SimpleNamespace,
@@ -224,7 +285,7 @@ def test_cli_execute_purges_and_anonymizes(cli: SimpleNamespace, victim: SimpleN
     (stale / "x.csv").write_text("x", encoding="utf-8")
     sql("INSERT INTO ops.pending_file_purges (path) VALUES (:p)", p=str(stale))
     t0 = sql("SELECT now()")[0][0]
-    monkeypatch.setenv("AIA_MAINT_DATABASE_URL", roles.maint)
+    use_maint_dsn(cli, roles.maint)
     r = _run(cli, capsys, "--user-id", uid, "--execute", confirm=uid)
     assert r.rc == 0, r.text[-1500:]
     assert "已提交" in r.out

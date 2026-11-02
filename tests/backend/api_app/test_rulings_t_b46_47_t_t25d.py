@@ -57,6 +57,22 @@ pytestmark = [pytest.mark.integration]
 # ---- 责任人 ----
 O_R6 = "后端 T-B46（/portfolio、手工成交 v0.2.9；c9e1e73 等在本地 main，未推 origin）"
 O_R6X = "后端 T-B46-x（裁定 R6）"
+
+
+def _has_migration(prefix: str) -> bool:
+    """被测后端的迁移目录里是否有某版本（按 app 包位置找 src/backend/migrations/versions）。"""
+    spec = importlib.util.find_spec("app")
+    if spec is None or not spec.origin:
+        return False
+    versions = Path(spec.origin).resolve().parent.parent / "migrations" / "versions"
+    return any(versions.glob(f"{prefix}_*.py"))
+
+
+#: T-B49（本地 main 6670b10：/portfolio 按契约 #31、迁移 0017 purpose=horizon + user_scoped CHECK）。
+#: 有 0017 的后端上，下列 R6 / D / purpose 用例不再挂 xfail（通过即严格通过、回归即失败）；
+#: 没有 0017（origin 0cb78ad）时仍 xfail(strict=False)。
+HAS_B49 = _has_migration("0017")
+O_B49 = "后端 T-B49（6670b10，在本地 main，未推 origin）"
 O_R8 = "后端 T-B47-x（裁定 R8：/horizon-assessments 落库、pattern、purpose=horizon）"
 O_R8_B30A = "后端 T-B30a（裁定 R8：f.* 特征落地前全部 data_missing 封顶）"
 O_R10 = "后端 T-B47-x（裁定 R10：/admin/ingest/status）"
@@ -198,13 +214,13 @@ def test_r6_cash_gap_and_sector_gap(pf: SimpleNamespace) -> None:
     assert any(f == "exposure.sector" for f, _ in g), sorted(g)
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_R6X}：无现金记录时 cash 应为 \"0.00\"（并保留 user_input_missing 缺口），本地 main 为 null")
+@pytest.mark.xfail(not HAS_B49, strict=False, reason=f"{O_R6X}／{O_B49}：无现金记录时 cash 应为 \"0.00\"（并保留 user_input_missing 缺口），本地 main 为 null")
 def test_r6_cash_zero_string(pf: SimpleNamespace) -> None:
     p = _portfolio(pf.call, pf.acc)
     assert p["cash"] == "0.00"
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_R6X}：cash、total_assets、cost_price、weight_pct 不得为 null")
+@pytest.mark.xfail(not HAS_B49, strict=False, reason=f"{O_R6X}／{O_B49}：cash、total_assets、cost_price、weight_pct 不得为 null")
 def test_r6_non_null_fields(pf: SimpleNamespace) -> None:
     p = _portfolio(pf.call, pf.acc)
     assert p["cash"] is not None and p["total_assets"] is not None
@@ -212,7 +228,7 @@ def test_r6_non_null_fields(pf: SimpleNamespace) -> None:
         assert row["cost_price"] is not None and row["weight_pct"] is not None, row["security_code"]
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_R6X}：日线收盘价优先（estimated=false，市值=收盘×数量），本地 main 不读日线")
+@pytest.mark.xfail(not HAS_B49, strict=False, reason=f"{O_R6X}／{O_B49}：日线收盘价优先（estimated=false，市值=收盘×数量），本地 main 不读日线")
 def test_r6_daily_close_priority(pf: SimpleNamespace) -> None:
     row = _rows(_portfolio(pf.call, pf.acc))[pf.a]
     assert row["estimated"] is False
@@ -256,7 +272,7 @@ def test_r6_snapshot_reference_price_used(session: Callable[..., SimpleNamespace
     assert _dec(row["market_value"]) == decimal.Decimal("1100")
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_R6X}：日线收盘价优先于快照参考价")
+@pytest.mark.xfail(not HAS_B49, strict=False, reason=f"{O_R6X}／{O_B49}：日线收盘价优先于快照参考价")
 def test_r6_daily_close_beats_snapshot(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
     c = _snap_ctx(session, sql)
     code = f"{_uniq_code('601')}.SH"
@@ -268,7 +284,7 @@ def test_r6_daily_close_beats_snapshot(session: Callable[..., SimpleNamespace], 
     assert _dec(row["market_value"]) == decimal.Decimal("1234")
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_R6X}：只有 exposure.sector 缺口（行业数据未接入）时 data_status 不应为 partial")
+@pytest.mark.xfail(not HAS_B49, strict=False, reason=f"{O_R6X}／{O_B49}：只有 exposure.sector 缺口（行业数据未接入）时 data_status 不应为 partial")
 def test_r6_sector_gap_alone_is_not_partial(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
     c = _snap_ctx(session, sql)
     code = f"{_uniq_code('601')}.SH"
@@ -474,7 +490,7 @@ def test_d_compliant_rows_accepted(sql: Callable[..., Any], mkuser: Callable[...
     _insert_snapshot(sql, "screen", None)
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_D}：candidate / plan / horizon 行 user_id 为 null 应被库级 CHECK 拒绝（23514）")
+@pytest.mark.xfail(not HAS_B49, strict=False, reason=f"{O_D}／{O_B49}：candidate / plan / horizon 行 user_id 为 null 应被库级 CHECK 拒绝（23514）")
 @pytest.mark.parametrize("purpose", PERSONAL_PURPOSES)
 def test_d_personal_purpose_requires_user(sql: Callable[..., Any], purpose: str) -> None:
     _need_user_col(sql)
@@ -485,7 +501,7 @@ def test_d_personal_purpose_requires_user(sql: Callable[..., Any], purpose: str)
     assert _constraint(ei.value) != "ck_data_snapshots_purpose", _constraint(ei.value)
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_R8}：purpose 允许值应含 horizon")
+@pytest.mark.xfail(not HAS_B49, strict=False, reason=f"{O_R8}／{O_B49}：purpose 允许值应含 horizon")
 def test_d_horizon_purpose_allowed(sql: Callable[..., Any], mkuser: Callable[..., Any]) -> None:
     _need_user_col(sql)
     _insert_snapshot(sql, "horizon", mkuser().id)

@@ -387,6 +387,8 @@ jobs:
   # > max_file_bytes × max_files_per_upload，且 = 413 信封 max_bytes。imports.yaml 不存在时明确失败。
   # T-O10：limit_req 静态规则（zone 键、429 RATE_LIMITED 信封、Retry-After = ceil(1/速率)、dev 只 dry run）
   # + 运行时冒烟（临时 nginx + 桩上游，正例 429 / 反例不误伤 / 413 不被 429 盖住）。
+  # T-O13：上游动态解析（resolver 127.0.0.11 + 变量 proxy_pass）、nginx 健康检查探上游 /health/live；
+  # 冒烟 upstream 模式：路由/前缀/头不变，桩上游换 IP 后网关不重启即恢复。
   # 正反例在 scripts/ci/tests/test_gateway_limits.py（secret-scan.yml selftest job 运行）。
   gateway-limits:
     name: gateway-limits (nginx client_max_body_size ↔ config/imports.yaml)

@@ -2,21 +2,25 @@
 # nginx 限流运行时冒烟（T-O10）：临时网络 + 桩上游（别名 api:8000，恒 200）+ 仓库 nginx.conf 与指定 limits 文件，
 # 正例：登录/注册、导入（写）、全局 /api/ 超限 → 429 RATE_LIMITED 信封 + Retry-After = details.retry_after_s；
 # 反例：GET /api/v1/imports（列表）不进导入桶；dev 限流文件（limit_req_dry_run）下连发不触发 429、只记日志；超大请求体仍是 413（不被 429 盖住）。
-# 不连真实后端、不读任何密钥；容器/网络结束即删。用法：scripts/ci/nginx_limits_smoke.sh [prod|dev|both]（默认 both）
+# 上游动态解析（T-O13，upstream 模式）：路由/前缀/参数/编码原样转发、/health/live 改写带参数、X-Request-Id 透传与重生成、
+# X-Real-IP 覆盖、方法透传与 405；桩上游删掉 → 非 200（通常 502），换一个不同 IP 重建 → 不重启网关即恢复 200（静态 upstream 会一直 502）。
+# 不连真实后端、不读任何密钥；容器/网络结束即删。用法：scripts/ci/nginx_limits_smoke.sh [prod|dev|upstream|both]（默认 both = 三者）
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMG="$(sed -n 's/^ *image: *\(nginx:[^ ]*\).*/\1/p' "$ROOT/deploy/compose/docker-compose.yml" | head -1)"
 [ -n "$IMG" ] || { echo "找不到 nginx 镜像" >&2; exit 2; }
 id="o10smoke-$$"; net="$id-net"; work="$(mktemp -d)"; fail=0
-cleanup() { docker rm -f "$id-gw" "$id-api" >/dev/null 2>&1 || true; docker network rm "$net" >/dev/null 2>&1 || true; rm -rf "$work"; }
+cleanup() { docker rm -f "$id-gw" "$id-api" "$id-filler" >/dev/null 2>&1 || true; docker network rm "$net" >/dev/null 2>&1 || true; rm -rf "$work"; }
 trap cleanup EXIT
 cat > "$work/stub.conf" <<'CONF'
 events {}
-http { server { listen 8000; client_max_body_size 100m;
-  location / { default_type application/json; return 200 '{"ok":true}'; } } }
+http { server { listen 8000; client_max_body_size 100m; add_header X-Stub 1 always;
+  location / { default_type application/json;
+    return 200 '{"ok":true,"method":"$request_method","uri":"$request_uri","real_ip":"$http_x_real_ip","rid":"$http_x_request_id"}'; } } }
 CONF
 docker network create "$net" >/dev/null
-docker run -d --name "$id-api" --network "$net" --network-alias api -v "$work/stub.conf:/etc/nginx/nginx.conf:ro" "$IMG" >/dev/null
+start_stub() { docker run -d --name "$id-api" --network "$net" --network-alias api -v "$work/stub.conf:/etc/nginx/nginx.conf:ro" "$IMG" >/dev/null; }
+start_stub
 
 ok()  { echo "OK   $*"; }
 bad() { echo "FAIL $*"; fail=1; }
@@ -26,7 +30,9 @@ start_gw() {  # $1 = limits 文件
     -v "$ROOT/deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$1:/etc/nginx/aia-limits.conf:ro" "$IMG" >/dev/null
   for _ in $(seq 1 30); do
     port="$(docker port "$id-gw" 80/tcp 2>/dev/null | head -1 | sed 's/.*://')"
-    [ -n "$port" ] && curl -fsS -o /dev/null "http://127.0.0.1:$port/healthz" 2>/dev/null && return 0
+    if [ -n "$port" ] && curl -fsS -o /dev/null "http://127.0.0.1:$port/healthz" 2>/dev/null; then
+      gw_started="$(docker inspect -f '{{.RestartCount}} {{.State.StartedAt}}' "$id-gw")"; return 0
+    fi
     sleep 0.5
   done
   docker logs "$id-gw" | tail -5; echo "网关没起来" >&2; exit 2
@@ -83,9 +89,61 @@ run_dev() {
   docker logs "$id-gw" > "$work/gw.log" 2>&1 || true   # 先落文件再 grep：管道里 grep -q 提前退出会让 docker logs 吃 SIGPIPE，pipefail 下误判
   grep -q 'limiting requests, dry run' "$work/gw.log" && ok "dev 限流 zone 生效（dry run 只记日志）" || bad "dev 日志里没有 dry run 记录"
 }
+run_upstream() {
+  echo "== upstream（动态解析，T-O13；用 limits.dev.conf，避免限流干扰）"
+  start_gw "$ROOT/deploy/nginx/limits.dev.conf"
+  local base="http://127.0.0.1:$port" j
+  # 期望字段比对：$1 = 响应 JSON，其余为 key=value（value 以 ~ 开头表示正则）
+  expect() {
+    python3 - "$@" <<'PY'
+import json, re, sys
+d = json.loads(sys.argv[1])
+for kv in sys.argv[2:]:
+    k, v = kv.split("=", 1)
+    got = str(d.get(k))
+    ok = re.fullmatch(v[1:], got) if v.startswith("~") else got == v
+    assert ok, f"{k}: 期望 {v}，实际 {got}"
+PY
+  }
+  j="$(curl -s -H 'X-Request-Id: smoke.T-O13:1' -H 'X-Real-IP: 6.6.6.6' "$base/api/v1/meta/enums?a=1&b=%2F")"
+  expect "$j" 'uri=/api/v1/meta/enums?a=1&b=%2F' method=GET rid=smoke.T-O13:1 'real_ip=~(?!6\.6\.6\.6$)[0-9.]+' \
+    && ok "/api/ 原样转发（前缀、查询参数、编码），X-Request-Id 透传，X-Real-IP 被覆盖" || bad "/api/ 转发不对：$j"
+  j="$(curl -s --path-as-is "$base/api/v1/a%2Fb/../c")"
+  expect "$j" 'uri=/api/v1/a%2Fb/../c' && ok "/api/ 转发客户端原始 URI（不解码、不归一化，与静态写法一致）" || bad "原始 URI 被改写：$j"
+  j="$(curl -s -H 'X-Request-Id: bad id!' "$base/health/live?probe=1")"
+  expect "$j" 'uri=/api/v1/health/live?probe=1' 'rid=~req_[0-9a-f]{32}' \
+    && ok "/health/live → /api/v1/health/live（带参数）；非法 X-Request-Id 重生成 req_<32hex>" || bad "/health/live 改写不对：$j"
+  j="$(curl -s "$base/health/live")"; expect "$j" 'uri=/api/v1/health/live' && ok "/health/live 无参数时不带多余的 ?" || bad "/health/live：$j"
+  j="$(curl -s -X DELETE "$base/api/v1/auth/login")"; expect "$j" method=DELETE uri=/api/v1/auth/login && ok "登录 location 方法透传" || bad "登录 location：$j"
+  j="$(curl -s -X PATCH "$base/api/v1/imports")"; expect "$j" method=PATCH uri=/api/v1/imports && ok "导入 location 方法透传" || bad "导入 location：$j"
+  local h="$work/h405"
+  curl -s -o /dev/null -D "$h" -X TRACE "$base/api/v1/x"
+  grep -q '^HTTP/1.1 405' "$h" && grep -qi '^X-Stub: 1' "$h" && ok "TRACE /api/… 经 @nginx_405 转到上游（变量在命名 location 里有效）" \
+    || bad "TRACE /api/ 没到上游：$(head -1 "$h")"
+  curl -s -o /dev/null -D "$h" -X TRACE "$base/other"
+  grep -q '^HTTP/1.1 405' "$h" && grep -qi '^Allow: GET, HEAD' "$h" && ! grep -qi '^X-Stub' "$h" && ok "TRACE 非 /api/ → 网关自答 405 + Allow" \
+    || bad "TRACE 非 /api/：$(head -1 "$h")"
+  # 上游换 IP：删桩 → 502；占位容器先占掉旧 IP，再重建桩 → 新 IP；网关不重启，应在 resolver valid（10s）内恢复
+  local old new code t
+  old="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$id-api")"
+  docker rm -f "$id-api" >/dev/null
+  # 一般主机上名字查不到 → nginx 502；若宿主 DNS 对未知名字给假 IP（如沙箱的 198.18.0.0/15），会是出口代理的错误码。
+  # 两种都只要求：不是 200、也不是桩应答。
+  code="$(curl -s -o /dev/null -D "$h" -w '%{http_code}' "$base/health/live")"
+  [ "$code" != 200 ] && ! grep -qi '^X-Stub' "$h" && ok "上游删除 → $code（不再连旧 IP）" || bad "上游删除后仍 $code"
+  docker run -d --name "$id-filler" --network "$net" --entrypoint sleep "$IMG" 300 >/dev/null
+  start_stub
+  new="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$id-api")"
+  [ "$old" != "$new" ] && ok "桩上游换了 IP（$old → $new）" || bad "桩上游 IP 没变（$old），测不出重新解析"
+  for t in $(seq 1 40); do
+    code="$(curl -s -o /dev/null -w '%{http_code}' "$base/health/live")"; [ "$code" = 200 ] && break; sleep 0.5
+  done
+  [ "$code" = 200 ] && ok "网关未重启，约 $((t / 2)) 秒内连上新 IP（200）" || bad "换 IP 后 20 秒仍是 $code（没有重新解析）"
+  [ "$(docker inspect -f '{{.RestartCount}} {{.State.StartedAt}}' "$id-gw")" = "$gw_started" ] && ok "网关全程未重启" || bad "网关被重启过"
+}
 case "${1:-both}" in
-  prod) run_prod ;; dev) run_dev ;; both) run_prod; run_dev ;;
-  *) echo "用法：$0 [prod|dev|both]" >&2; exit 2 ;;
+  prod) run_prod ;; dev) run_dev ;; upstream) run_upstream ;; both) run_prod; run_dev; run_upstream ;;
+  *) echo "用法：$0 [prod|dev|upstream|both]" >&2; exit 2 ;;
 esac
 [ "$fail" = 0 ] && echo "nginx_limits_smoke: 全部通过" || echo "nginx_limits_smoke: 有失败"
 exit "$fail"

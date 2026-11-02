@@ -128,3 +128,38 @@ def test_global_api_limit_required(gw_repo: Path) -> None:
     assert head in conf
     (gw_repo / cgl.NGINX_CONF).write_text(conf.replace(head, "    location /api/ {\n"), encoding="utf-8")
     assert any("location /api/ 没有 limit_req zone=aia_api" in e for e in cgl.check_rate_limits(gw_repo))
+
+
+# ---- 上游动态解析（T-O13）----
+
+def test_repo_dynamic_upstream_ok(gw_repo: Path) -> None:
+    assert cgl.check_dynamic_upstream(gw_repo) == []
+
+
+@pytest.mark.parametrize("rel,old,new,needle", [
+    (cgl.NGINX_CONF, "  resolver 127.0.0.11 valid=10s ipv6=off;\n", "", "需要且只能有一条 resolver"),
+    (cgl.NGINX_CONF, "resolver 127.0.0.11 valid=10s", "resolver 8.8.8.8 valid=10s", "127.0.0.11"),
+    (cgl.NGINX_CONF, "resolver 127.0.0.11 valid=10s", "resolver 127.0.0.11 valid=300s", "valid=≤30s"),
+    (cgl.NGINX_CONF, "resolver 127.0.0.11 valid=10s ipv6=off;", "resolver 127.0.0.11 ipv6=off;", "valid=≤30s"),
+    (cgl.NGINX_CONF, "  resolver_timeout 3s;\n", "  resolver_timeout 3s;\n  upstream api_upstream { server api:8000; }\n", "静态 upstream"),
+    (cgl.NGINX_CONF, '    default "api:8000";\n', '    default "api:9000";\n', "map $host $aia_api_upstream"),
+    # 回退成静态主机名（location /api/ 那一处）
+    (cgl.NGINX_CONF, "location /api/ {\n      limit_req zone=aia_api burst=100 nodelay;\n      proxy_pass http://$aia_api_upstream;",
+     "location /api/ {\n      limit_req zone=aia_api burst=100 nodelay;\n      proxy_pass http://api:8000;", "静态主机名不会重新解析"),
+    (cgl.NGINX_CONF, "/api/v1/health/live$is_args$args;", "/api/v1/health/live;", "$is_args$args"),
+    (cgl.COMPOSE_BASE, "http://127.0.0.1/health/live || exit 1", "http://127.0.0.1/healthz || exit 1", "探上游"),
+    (cgl.COMPOSE_DEV, "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n",
+     "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n    healthcheck:\n      test: [\"CMD\", \"true\"]\n",
+     "不得覆盖 nginx healthcheck"),
+])
+def test_dynamic_upstream_negative(gw_repo: Path, rel: str, old: str, new: str, needle: str) -> None:
+    _sub(gw_repo, rel, old, new)
+    errs = cgl.check_dynamic_upstream(gw_repo)
+    assert any(needle in e for e in errs), errs
+
+
+def test_dynamic_upstream_in_cli(gw_repo: Path) -> None:
+    _sub(gw_repo, cgl.NGINX_CONF, "  resolver 127.0.0.11 valid=10s ipv6=off;\n", "")
+    r = subprocess.run([sys.executable, str(CI_DIR / "check_gateway_limits.py"), "--repo", str(gw_repo)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "resolver" in r.stdout, r.stdout

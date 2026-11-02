@@ -20,6 +20,11 @@
   6. nginx.conf：include /etc/nginx/aia-limits.conf、limit_req_status 429；location /api/ 有 aia_api；登录/注册 location 有 aia_auth；
      = /api/v1/imports 有 aia_import；error_page 429 @rate_limited，信封含 RATE_LIMITED、details.retry_after_s、Retry-After、X-Request-Id。
   7. compose：基础文件把 limits.conf 挂到 /etc/nginx/aia-limits.conf，dev 叠加文件改挂 limits.dev.conf。
+上游动态解析（T-O13；api 容器重建换 IP 后静态 upstream 一直连旧地址 → 502）：
+  8. nginx.conf：resolver 127.0.0.11（Docker DNS），valid ≤ 30s；不得再有 upstream 块；
+     map $host $aia_api_upstream 的 default 为 "api:8000"；每一处 proxy_pass 都是 http://$aia_api_upstream，
+     不带 URI（原样转发）或带 URI 时以 $is_args$args 结尾（变量形式不会自动追加参数）。
+  9. compose：基础文件 nginx 健康检查经 nginx 探上游 /health/live（不是自答的 /healthz）；dev 叠加文件不得覆盖 healthcheck。
 用法：check_gateway_limits.py [--repo DIR]   不一致或缺文件时退出码 1，输出 ::error。
 """
 
@@ -222,11 +227,69 @@ def check_rate_limits(repo: Path) -> list[str]:
     return errors
 
 
+RESOLVER_RE = re.compile(r"^\s*resolver\s+([^;]*);", re.M)
+PROXY_PASS_RE = re.compile(r"^\s*proxy_pass\s+(\S+)\s*;", re.M)
+UPSTREAM_VAR = "$aia_api_upstream"
+UPSTREAM_HOST = "api:8000"
+
+
+def check_dynamic_upstream(repo: Path) -> list[str]:
+    errors: list[str] = []
+    f = repo / NGINX_CONF
+    if not f.is_file():
+        return [f"{NGINX_CONF} 不存在"]
+    conf = strip_comments(f.read_text(encoding="utf-8"))
+    rs = RESOLVER_RE.findall(conf)
+    if len(rs) != 1:
+        errors.append(f"{NGINX_CONF}: 需要且只能有一条 resolver（Docker DNS 127.0.0.11），实际 {len(rs)} 条")
+    else:
+        parts = rs[0].split()
+        if "127.0.0.11" not in parts:
+            errors.append(f"{NGINX_CONF}: resolver 必须指向 Docker DNS 127.0.0.11（实际：{rs[0].strip()}）")
+        valid = [p for p in parts if p.startswith("valid=")]
+        m = re.fullmatch(r"valid=(\d+)(s?)", valid[0]) if valid else None
+        if not m or int(m.group(1)) > 30:
+            errors.append(f"{NGINX_CONF}: resolver 需要 valid=≤30s 的短缓存（实际：{rs[0].strip()}）")
+    if re.search(r"^\s*upstream\s+\S+\s*\{", conf, re.M):
+        errors.append(f"{NGINX_CONF}: 不得再用静态 upstream 块（只在启动时解析一次，api 换 IP 后 502）")
+    m = re.search(r"map\s+\$host\s+" + re.escape(UPSTREAM_VAR) + r"\s*\{(.*?)\}", conf, re.S)
+    if not m or not re.search(r'^\s*default\s+"?' + re.escape(UPSTREAM_HOST) + r'"?\s*;', m.group(1), re.M):
+        errors.append(f'{NGINX_CONF}: 缺少 map $host {UPSTREAM_VAR} {{ default "{UPSTREAM_HOST}"; }}（不能用 set：@nginx_405 里会是空值）')
+    targets = PROXY_PASS_RE.findall(conf)
+    if not targets:
+        errors.append(f"{NGINX_CONF}: 没有 proxy_pass")
+    prefix = "http://" + UPSTREAM_VAR
+    for t in targets:
+        if not t.startswith(prefix):
+            errors.append(f"{NGINX_CONF}: proxy_pass {t} 不是 {prefix}（静态主机名不会重新解析）")
+        elif t != prefix and not t.endswith("$is_args$args"):
+            errors.append(f"{NGINX_CONF}: proxy_pass {t} 带 URI 但没有 $is_args$args（变量形式不会自动追加查询参数）")
+
+    for rel in (COMPOSE_BASE, COMPOSE_DEV):
+        cf = repo / rel
+        if not cf.is_file():
+            errors.append(f"{rel} 不存在")
+            continue
+        nginx = ((yaml.safe_load(cf.read_text(encoding="utf-8")) or {}).get("services") or {}).get("nginx") or {}
+        hc = nginx.get("healthcheck")
+        if rel == COMPOSE_DEV:
+            if hc is not None:
+                errors.append(f"{rel}: dev 叠加文件不得覆盖 nginx healthcheck（应与基础文件一致探上游 /health/live）")
+            continue
+        test = " ".join(hc.get("test") or []) if isinstance(hc, dict) and isinstance(hc.get("test"), list) else str((hc or {}).get("test", ""))
+        if "http://127.0.0.1/health/live" not in test:
+            errors.append(f"{rel}: nginx healthcheck 必须经 nginx 探上游 http://127.0.0.1/health/live（实际：{test or '无'}）")
+    if not errors:
+        print(f"OK   上游动态解析：resolver 127.0.0.11，{len(targets)} 处 proxy_pass 全部经 {UPSTREAM_VAR}；nginx 健康检查探上游 /health/live")
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo", type=Path, default=Path.cwd())
     args = ap.parse_args(argv)
-    errors = check(args.repo.resolve()) + check_rate_limits(args.repo.resolve())
+    repo = args.repo.resolve()
+    errors = check(repo) + check_rate_limits(repo) + check_dynamic_upstream(repo)
     for e in errors:
         print(f"::error title=gateway-limits::{e}")
     print(f"check_gateway_limits: {len(errors)} 个问题")

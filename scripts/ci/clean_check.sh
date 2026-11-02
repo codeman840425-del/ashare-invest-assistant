@@ -106,7 +106,7 @@ start_db() {  # 临时 timescale（+ redis），导出 DATABASE_URL / REDIS_URL
 
 job_ignored-sources() { python3 scripts/ci/check_ignored_sources.py; }
 job_fixtures()        { pyrun scripts/ci/check_fixtures.py; }
-job_gateway-limits()  {  # 与 CI 同步（T-O10）：静态规则 + 有 docker 时跑 nginx 限流运行时冒烟
+job_gateway-limits()  {  # 与 CI 同步（T-O10/T-O13）：静态规则 + 有 docker 时跑 nginx 冒烟（限流 + 上游动态解析）
   pyrun scripts/ci/check_gateway_limits.py || return 1
   if docker info >/dev/null 2>&1; then bash scripts/ci/nginx_limits_smoke.sh both; else echo "（没有 docker，跳过 nginx_limits_smoke.sh；CI 会跑）"; fi
 }

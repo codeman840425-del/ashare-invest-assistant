@@ -241,6 +241,8 @@ def list_trades(
     cond: list[Any] = [t.c.user_id == auth.user_id]
     with engine.connect() as conn:
         if account_id is not None:
+            # G-7 / 契约 §7.6（v0.2.9 #27 ⑦）：不是本人账户（含不存在、已归档）→ 404
+            owned_account(conn, auth, account_id)
             cond.append(t.c.account_id == account_id)
         if security_code:
             cond.append(t.c.security_code == normalize_code(conn, security_code))

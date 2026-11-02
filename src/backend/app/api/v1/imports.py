@@ -468,6 +468,9 @@ def list_imports(
     b = import_batches
     cond = [b.c.user_id == auth.user_id]
     if account_id is not None:
+        # G-7 / 契约 §7.5（v0.2.9 #27 ⑦）：不是本人账户（含不存在、已归档）→ 404，与 /portfolio 一致
+        with engine.connect() as conn:
+            owned_account(conn, auth, account_id)
         cond.append(b.c.account_id == account_id)
     if status is not None:
         cond.append(b.c.status == status.value)

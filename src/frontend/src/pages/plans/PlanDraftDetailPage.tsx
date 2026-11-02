@@ -3,7 +3,7 @@ import { Alert, Button, Checkbox, Input, Modal, Radio, Space, Tag, type ButtonPr
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../../api/client';
-import { errorText } from '../../api/errorPolicy';
+import { stateErrorText } from '../../lib/stateTransition';
 import { useConfirmPlanDraft, useCreatePlanDraft, useDiscardPlanDraft, usePlanDraft } from '../../api/planQueries';
 import type { ChecklistAnswerValue, PlanDraft } from '../../api/planTypes';
 import { ActionBadge, ErrorBox, Loading } from '../../components/common';
@@ -79,7 +79,7 @@ function StatusBanner({ d }: { d: PlanDraft }) {
         description={
           <div>
             <div className="small">可以按原候选信号重新生成一份新草案；新草案与本草案互不关联，本草案保持不变。</div>
-            {regen.isError ? <div className="error-text small" data-testid="regen-error">{errorText(regen.error)}</div> : null}
+            {regen.isError ? <div className="error-text small" data-testid="regen-error">{stateErrorText(regen.error, 'signal', { regen: true })}</div> : null}
           </div>
         }
         action={
@@ -230,7 +230,7 @@ function ConfirmForm({ d }: { d: PlanDraft }) {
         我已了解：草案由规则自动生成，仅供参考；最大亏损和费用为估算；交易由我在券商端自行完成，盈亏自负。
       </Checkbox>
 
-      {confirm.isError ? <div className="error-text small" style={{ marginTop: 8 }} data-testid="confirm-error">{errorText(confirm.error)}{fieldsOf(confirm.error)}</div> : null}
+      {confirm.isError ? <div className="error-text small" style={{ marginTop: 8 }} data-testid="confirm-error">{stateErrorText(confirm.error, 'draft')}{fieldsOf(confirm.error)}</div> : null}
       <Space style={{ marginTop: 12 }} wrap>
         <Button type="primary" disabled={!ready} onClick={() => setReview(true)} data-testid="confirm-btn">确认并生成计划</Button>
         <Button danger onClick={() => { discard.reset(); setDiscardNote(''); setDiscardOpen(true); }} data-testid="discard-btn">放弃草案</Button>
@@ -264,7 +264,7 @@ function ConfirmForm({ d }: { d: PlanDraft }) {
       >
         <div className="muted small" style={{ marginBottom: 8 }}>放弃后该草案不能再确认；候选信号仍可再次拟定草案。</div>
         <Input.TextArea rows={3} maxLength={200} showCount value={discardNote} onChange={(e) => setDiscardNote(e.target.value)} placeholder="可选：放弃原因" data-testid="discard-note" />
-        {discard.isError ? <div className="error-text" style={{ marginTop: 8 }} data-testid="discard-error">{errorText(discard.error)}</div> : null}
+        {discard.isError ? <div className="error-text" style={{ marginTop: 8 }} data-testid="discard-error">{stateErrorText(discard.error, 'draft')}</div> : null}
       </Modal>
     </section>
   );

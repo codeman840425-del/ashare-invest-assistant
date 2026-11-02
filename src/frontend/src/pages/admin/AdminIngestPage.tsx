@@ -4,7 +4,7 @@ import { useAdminIngestStatus } from '../../api/adminQueries';
 import type { IngestLicenceStatus } from '../../api/adminTypes';
 import { ErrorBox } from '../../components/common';
 import { DATA_STATUS } from '../../i18n/labels';
-import { LICENCE_ERROR, LICENCE_STATUS, LICENCE_TIER } from '../../i18n/licenceLabels';
+import { LICENCE_ERROR, LICENCE_STATUS, LICENCE_TIER, expiryLeftText } from '../../i18n/licenceLabels';
 import { fmtTime } from '../../lib/format';
 
 const PRIORITY: Record<string, string> = { p0_intraday: 'P0 盘中', p1_daily: 'P1 日频', p2_backfill: 'P2 回补' };
@@ -26,7 +26,7 @@ export function AdminIngestPage() {
       render: (s: IngestLicenceStatus['status']) => <Tag color={LICENCE_STATUS[s].color} data-testid={`ingest-status-${s}`}>{LICENCE_STATUS[s].text}</Tag>,
     },
     { title: '档位', key: 'tier', render: (_: unknown, r: IngestLicenceStatus) => <span>{r.tier ? LICENCE_TIER[r.tier] : '—'}{r.has_quant_pro ? <Tag style={{ marginLeft: 4 }}>量化Pro</Tag> : null}</span> },
-    { title: '到期', key: 'exp', render: (_: unknown, r: IngestLicenceStatus) => (r.expires_on ? `${r.expires_on}（剩 ${r.days_left} 天）` : '未填') },
+    { title: '到期', key: 'exp', render: (_: unknown, r: IngestLicenceStatus) => (r.expires_on ? (r.days_left != null ? `${r.expires_on}（${expiryLeftText(r.days_left)}）` : r.expires_on) : '未填') },
     { title: '今日调用', key: 'today', align: 'right' as const, render: (_: unknown, r: IngestLicenceStatus) => `${r.calls_today}${r.daily_limit !== null ? ` / ${r.daily_limit}` : ''}` },
     { title: '近 1 分钟 / 上限', key: 'min', align: 'right' as const, render: (_: unknown, r: IngestLicenceStatus) => `${r.calls_last_minute} / ${r.per_minute_limit}` },
     { title: '队列 P0/P1/P2', key: 'queue', align: 'right' as const, render: (_: unknown, r: IngestLicenceStatus) => `${r.queue_depth.p0} / ${r.queue_depth.p1} / ${r.queue_depth.p2}` },

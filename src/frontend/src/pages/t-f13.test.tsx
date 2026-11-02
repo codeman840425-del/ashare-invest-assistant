@@ -109,7 +109,7 @@ describe('T-F13 盘后日报', () => {
     expect(screen.getByRole('button', { name: '上一期' })).toBeDisabled();
   });
 
-  it('日期列表按 §1.2 游标分页：最早一期在第二页时“上一期”触发加载更早', async () => {
+  it('日期列表按 §1.2 游标分页：最早一期在第二页时，点一次“上一期”就加载更早并跳转（评审 7afbc06 m1）', async () => {
     const seen: (string | null)[] = [];
     server.use(http.get(`${API}/daily-reports`, ({ request }) => {
       const cursor = new URL(request.url).searchParams.get('cursor');
@@ -121,9 +121,41 @@ describe('T-F13 盘后日报', () => {
     const prev = await screen.findByRole('button', { name: '上一期' });
     await waitFor(() => expect(prev).toBeEnabled());
     fireEvent.click(prev);
-    await waitFor(() => expect(seen).toContain('p2'));
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/daily-reports/${PREV_REPORT_DATE}`));
+    expect(seen).toContain('p2');
+  });
+
+  it('切换日期保留 ?filter=（评审 7afbc06 m2）', async () => {
+    const router = renderAt(`/daily-reports/${REPORT_DATE}?filter=changed`);
+    await screen.findByTestId('daily-report');
+    await waitFor(() => expect(screen.getByRole('button', { name: '上一期' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '上一期' }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/daily-reports/${PREV_REPORT_DATE}`));
+    expect(router.state.location.search).toBe('?filter=changed');
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一期' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '下一期' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/daily-reports/${REPORT_DATE}`));
+    expect(router.state.location.search).toBe('?filter=changed');
+  });
+
+  it('卡片名称取自标题（aria-labelledby）；证据标签可聚焦并显示详情（评审 7afbc06 m3）', async () => {
+    const router = renderAt(`/daily-reports/${REPORT_DATE}`);
+    const s = cur.stocks.find((x) => x.suggestion_id)!;
+    const card = await screen.findByTestId(`stc-${s.security_code}`);
+    expect(card.hasAttribute('aria-label')).toBe(false);
+    const title = document.getElementById(card.getAttribute('aria-labelledby')!)!;
+    expect(card.contains(title)).toBe(true);
+    expect(screen.getByRole('link', { name: `${s.name} ${s.security_code}` })).toBe(card);
+    const chip = card.querySelector<HTMLElement>('.ev-chip:not(.missing):not(.none)');
+    expect(chip).not.toBeNull();
+    if (chip) {
+      expect(chip.getAttribute('tabindex')).toBe('0');
+      expect(chip.getAttribute('aria-label')).toMatch(/^证据 /);
+      fireEvent.keyDown(chip, { key: 'Enter' });
+      expect(router.state.location.pathname).toBe(`/daily-reports/${REPORT_DATE}`);
+      fireEvent.focus(chip);
+      expect(await screen.findByRole('tooltip')).toHaveTextContent('来源：');
+    }
   });
 
   it('不存在的日期：显示错误并给出回到最新一期的链接', async () => {

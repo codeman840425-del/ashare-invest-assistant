@@ -6,10 +6,14 @@
 import { http, HttpResponse } from 'msw';
 import type { CandidateSignal } from '../api/types';
 import type { ChecklistItem, PlanDraft, PlanDraftConfirm } from '../api/planTypes';
-import type { PlanDraftStatus } from '../api/enums';
+import type { CandidateSignalState, PlanDraftStatus } from '../api/enums';
 import { CANDIDATE_SIGNALS, NOW, PORTFOLIO, QUOTES, sectorOf, uid } from './fixtures';
 import { errorBody, notFound, page, validation } from './handlerUtils';
-import { patchSignal, reasonsNow, signalsNow } from './signalHandlers';
+import { patchSignal, reasonsNow, signalsNow, TERMINAL_SIGNAL_STATES } from './signalHandlers';
+
+/** 契约 §4：allowed = 用户从 from 出发、经接口可到达的状态（按枚举顺序）；终态为 [] */
+const signalAllowed = (st: CandidateSignalState): CandidateSignalState[] =>
+  TERMINAL_SIGNAL_STATES.includes(st) ? [] : st === 'drafted' ? ['confirmed', 'dismissed'] : ['dismissed'];
 
 const API = '/api/v1';
 const fail = (status: number, code: string, message: string, details: Record<string, unknown> | null = null) =>
@@ -121,7 +125,7 @@ export const planHandlers = [
     const sim = css.find((c) => c.lifecycle === 'simulating');
     if (sim) return fail(409, 'STRATEGY_VERSION_NOT_RUNNABLE', '模拟期策略不能拟定计划草案', { lifecycle: sim.lifecycle });
     const bad = css.find((c) => c.state !== 'drafted' && c.state !== 'released');
-    if (bad) return fail(409, 'INVALID_STATE_TRANSITION', `候选信号状态为 ${bad.state}，不能拟定计划草案`, { from: bad.state, to: 'drafted' });
+    if (bad) return fail(409, 'INVALID_STATE_TRANSITION', `候选信号状态为 ${bad.state}，不能拟定计划草案`, { from: bad.state, to: 'drafted', allowed: signalAllowed(bad.state) });
     const active = reasonsNow().filter((r) => ids.includes(r.signal_id) && r.status === 'active').map((r) => r.id);
     if (active.length) return fail(409, 'SIGNAL_NOT_EXECUTABLE', '信号存在未解除的不可执行原因', { reason_ids: active });
     const unexplained = css.find((c) => !c.rule_refs.some((r) => EXPLAINABLE_ROLES.has(r.role) && r.passed === true));
@@ -138,7 +142,7 @@ export const planHandlers = [
     const d = drafts.find((x) => x.id === params.id);
     if (!d) return notFound('计划草案');
     if (d.status === 'stale' || d.status === 'expired') return fail(409, 'PLAN_DRAFT_STALE', '草案已失效，请重新生成', { status: d.status });
-    if (d.status !== 'pending') return fail(409, 'INVALID_STATE_TRANSITION', `草案状态为 ${d.status}，不能确认`, { from: d.status, to: 'confirmed' });
+    if (d.status !== 'pending') return fail(409, 'INVALID_STATE_TRANSITION', `草案状态为 ${d.status}，不能确认`, { from: d.status, to: 'confirmed', allowed: [] });
     const b = (await request.json().catch(() => ({}))) as Partial<PlanDraftConfirm>;
     const answers = Array.isArray(b.checklist_answers) ? b.checklist_answers : [];
     const missing = d.judgment_checklist.filter((c) => c.required && !answers.some((a) => a.id === c.id && ['yes', 'no', 'unsure'].includes(a.answer))).map((c) => c.id);
@@ -161,7 +165,7 @@ export const planHandlers = [
   http.post(`${API}/plan-drafts/:id/discard`, async ({ params, request }) => {
     const d = drafts.find((x) => x.id === params.id);
     if (!d) return notFound('计划草案');
-    if (d.status !== 'pending') return fail(409, 'INVALID_STATE_TRANSITION', `草案状态为 ${d.status}，不能放弃`, { from: d.status, to: 'discarded' });
+    if (d.status !== 'pending') return fail(409, 'INVALID_STATE_TRANSITION', `草案状态为 ${d.status}，不能放弃`, { from: d.status, to: 'discarded', allowed: [] });
     await request.json().catch(() => null); // {note}：示例不保存
     const next: PlanDraft = { ...d, status: 'discarded' };
     drafts = drafts.map((x) => (x.id === d.id ? next : x));

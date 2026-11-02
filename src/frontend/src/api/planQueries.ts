@@ -47,11 +47,22 @@ function useInvalidateDrafts() {
 export function useCreatePlanDraft() {
   const inv = useInvalidateDrafts();
   const key = useRef(newIdempotencyKey());
+  const lastBody = useRef<string | null>(null);
   return useMutation({
-    mutationFn: (signal_ids: string[]) => apiPost<PlanDraft>('/plan-drafts', { signal_ids }, { idempotencyKey: key.current }),
+    mutationFn: (signal_ids: string[]) => {
+      // 请求体变了（换了信号）就换键，避免同键异体 409 IDEMPOTENCY_CONFLICT
+      const body = JSON.stringify(signal_ids);
+      if (lastBody.current !== null && lastBody.current !== body) key.current = newIdempotencyKey();
+      lastBody.current = body;
+      return apiPost<PlanDraft>('/plan-drafts', { signal_ids }, { idempotencyKey: key.current });
+    },
     onSuccess: async () => {
       key.current = newIdempotencyKey();
       await inv();
+    },
+    /** 评审 53468a5 m1：与确认一致，服务端已给出明确结果（如 409 SIGNAL_NOT_EXECUTABLE）就换键；只有网络错误才复用同键重试 */
+    onError: (e) => {
+      if (e instanceof ApiError && e.code !== 'NETWORK_ERROR') key.current = newIdempotencyKey();
     },
   });
 }

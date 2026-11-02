@@ -61,6 +61,7 @@ a { color: #58a6ff; cursor: pointer; }
 .conf-tag .num { color: #c9d1d9; }
 .ev-chip { display: inline-block; margin-left: 4px; padding: 0 4px; font-size: 10px; line-height: 15px; border-radius: 2px; background: #182233; color: #79c0ff; font-family: var(--mono); cursor: help; white-space: nowrap; }
 .ev-chip.none { background: transparent; color: #59636e; cursor: default; }
+.ev-chip:focus-visible { outline: 1px solid #79c0ff; outline-offset: 1px; }
 .ev-tip { font-size: 12px; line-height: 1.6; }
 
 /* tables */
@@ -190,6 +191,7 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .stock-card.dim { opacity: 0.75; }
 .stc-head { display: flex; align-items: baseline; gap: 8px; }
 .stc-head b { font-size: 13px; color: #fff; }
+.stc-title { display: inline-flex; align-items: baseline; gap: 8px; }
 .stc-facts { display: flex; flex-wrap: wrap; gap: 2px 10px; color: #c9d1d9; }
 .stc-facts i { font-style: normal; font-size: 10px; margin-left: 2px; }
 .stc-strat { display: flex; align-items: center; gap: 8px; white-space: nowrap; }

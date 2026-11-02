@@ -13,7 +13,7 @@ import { ENUMS } from '../api/enums';
 import { LICENCE_RE, type DataLicencePatch, type DataLicencePut } from '../api/licenceTypes';
 import { OVERRIDE_CHOICES } from '../i18n/importLabels';
 import {
-  MOCK_INVITE_CODES, emptyStats, finding, applyParse, currentUser, publicBatch, reconciliationFor, state, toAdminUser, toMe,
+  MOCK_INVITE_CODES, MOCK_REGISTER_IP_PER_HOUR, emptyStats, finding, applyParse, currentUser, publicBatch, reconciliationFor, state, toAdminUser, toMe,
   type MockBatch, type MockUser,
 } from './session';
 import { errorBody, page } from './handlerUtils';
@@ -92,13 +92,20 @@ export const accountHandlers = [
     return noContent();
   }),
   http.post(`${API}/auth/register`, async ({ request }) => {
+    // §7.1 判定顺序：注册模式 → IP 限速（每次尝试都计，含校验失败与蜜罐命中）→ 字段与邀请码 400 → 409 → 待审核数上限 503 → 蜜罐
     if (state.registrationMode === 'closed') return err(503, 'REGISTRATION_CLOSED', '暂未开放注册');
+    const now = Date.now();
+    state.registerHits = state.registerHits.filter((t) => now - t < 3_600_000);
+    if (state.registerHits.length >= MOCK_REGISTER_IP_PER_HOUR) return rateLimited(Math.max(1, Math.ceil((state.registerHits[0] + 3_600_000 - now) / 1000)));
+    state.registerHits.push(now);
     const raw = (await request.json()) as Record<string, unknown>;
     const b = raw as Partial<RegisterRequest>;
     const fields: { field: string; issue: string }[] = [];
     // §7.1 extra=forbid：未知字段 400；agreements（v0.2.5 旧客户端）忽略；website、form_started_at 是正式字段（v0.2.8 #11）
     for (const k of Object.keys(raw)) if (!REGISTER_KEYS.has(k) && k !== 'agreements') fields.push({ field: k, issue: 'extra_forbidden' });
     const fsa = raw.form_started_at;
+    // 契约 §7.1：website 类型为 string | null，不校验内容与长度；类型不对按 400（与后端 RegisterIn.website: str | None 一致）
+    if (raw.website !== undefined && raw.website !== null && typeof raw.website !== 'string') fields.push({ field: 'website', issue: 'invalid' });
     if (fsa !== undefined && fsa !== null && !Number.isInteger(fsa)) fields.push({ field: 'form_started_at', issue: 'invalid' });
     const name = b.username ?? '';
     if (!USERNAME_RE.test(name)) fields.push({ field: 'username', issue: '4–32 位小写字母、数字或下划线' });
@@ -118,6 +125,7 @@ export const accountHandlers = [
     // v0.2.5 #1：旧客户端仍发 agreements 时服务端忽略（不报错、不记录）
     if (fields.length) return validationError(fields);
     if (state.users.some((x) => x.username === name)) return err(409, 'CONFLICT', '用户名已被使用');
+    if (state.users.filter((x) => x.status === 'pending').length >= state.pendingCap) return err(503, 'REGISTRATION_CLOSED', '暂未开放注册');
     // v0.2.8 #11 蜜罐：website 去空白后非空，或填写不足 3000 毫秒（含未来时间）→ 返回与正常注册相同的 201，但不建用户、不消耗邀请码
     const hpWebsite = typeof raw.website === 'string' && raw.website.trim() !== '';
     const hpFast = typeof fsa === 'number' && Date.now() - fsa < HONEYPOT_MIN_FILL_MS;
@@ -156,10 +164,8 @@ export const accountHandlers = [
 
   // ---------------- §7.1 数据证书（v0.2.6，T-F22）：任何响应都不含证书值 ----------------
   http.get(`${API}/me/data-licence`, () => json(licenceOf(me().id))),
+  // 顺序（契约 §7.1 v0.2.8 补充，与后端一致）：请求体格式 400 → 设置开关 503 → 限速 429 → 409 等
   http.put(`${API}/me/data-licence`, async ({ request }) => {
-    if (!mockLicenceSettingsEnabled()) return err(503, 'MAINTENANCE', '设置暂未开放（示例）');
-    const wait = rateHit('put', me().id);
-    if (wait) return rateLimited(wait);
     const b = (await request.json()) as Partial<DataLicencePut>;
     const licence = typeof b.licence === 'string' ? b.licence.trim() : '';
     const fields: { field: string; issue: string }[] = [];
@@ -169,12 +175,14 @@ export const accountHandlers = [
     if (typeof b.has_quant_pro !== 'boolean') fields.push({ field: 'has_quant_pro', issue: '必须为布尔值' });
     if (b.expires_on != null && !/^\d{4}-\d{2}-\d{2}$/.test(b.expires_on)) fields.push({ field: 'expires_on', issue: '日期格式 YYYY-MM-DD' });
     if (fields.length) return validationError(fields);
+    if (!mockLicenceSettingsEnabled()) return err(503, 'MAINTENANCE', '设置暂未开放（示例）');
+    const wait = rateHit('put', me().id);
+    if (wait) return rateLimited(wait);
     const r = putLicence(me().id, licence, { tier: b.tier!, has_quant_pro: b.has_quant_pro!, expires_on: b.expires_on ?? null });
     if (!r.ok) return err(409, 'DATA_LICENCE_IN_USE', '该证书已绑定到另一个账号');
     return json(r.s, 202);
   }),
   http.patch(`${API}/me/data-licence`, async ({ request }) => {
-    if (!mockLicenceSettingsEnabled()) return err(503, 'MAINTENANCE', '设置暂未开放（示例）');
     const b = (await request.json()) as DataLicencePatch & { licence?: unknown };
     const fields: { field: string; issue: string }[] = [];
     if ('licence' in b) fields.push({ field: 'licence', issue: 'PATCH 不能修改证书，请用 PUT' });
@@ -182,6 +190,7 @@ export const accountHandlers = [
     if (b.has_quant_pro !== undefined && typeof b.has_quant_pro !== 'boolean') fields.push({ field: 'has_quant_pro', issue: '必须为布尔值' });
     if (b.expires_on != null && !/^\d{4}-\d{2}-\d{2}$/.test(b.expires_on)) fields.push({ field: 'expires_on', issue: '日期格式 YYYY-MM-DD' });
     if (fields.length) return validationError(fields);
+    if (!mockLicenceSettingsEnabled()) return err(503, 'MAINTENANCE', '设置暂未开放（示例）');
     const patch: DataLicencePatch = {};
     if (b.tier !== undefined) patch.tier = b.tier;
     if (b.has_quant_pro !== undefined) patch.has_quant_pro = b.has_quant_pro;
@@ -195,12 +204,15 @@ export const accountHandlers = [
   }),
   http.post(`${API}/me/data-licence/test`, () => {
     if (!mockLicenceSettingsEnabled()) return err(503, 'MAINTENANCE', '设置暂未开放（示例）');
-    const wait = rateHit('test', me().id);
-    if (wait) return rateLimited(wait);
+    // 顺序与后端 test_licence 一致（评审 9547181 m4）：暂停 409 → 未设置 409 → 限速 429 → 采集暂停 503
     // v0.2.8 #14：管理员暂停期间测试 → 409 DATA_LICENCE_UNAVAILABLE{status:"paused_by_admin"}
     if (licenceState(me().id) === 'paused_by_admin') return err(409, 'DATA_LICENCE_UNAVAILABLE', '管理员已暂停该证书，暂不能测试', { status: 'paused_by_admin' });
+    if (licenceState(me().id) === 'not_set') return err(409, 'DATA_LICENCE_NOT_SET', '尚未设置数据证书');
+    const wait = rateHit('test', me().id);
+    if (wait) return rateLimited(wait);
     if (mockIngestPaused()) return err(503, 'INGEST_PAUSED', '采集服务已暂停（示例）');
-    return testLicence(me().id) ? json({ verification_id: uid(4100 + Math.floor(Math.random() * 1000)) }, 202) : err(409, 'DATA_LICENCE_NOT_SET', '尚未设置数据证书');
+    testLicence(me().id);
+    return json({ verification_id: uid(4100 + Math.floor(Math.random() * 1000)) }, 202);
   }),
 
   // ---------------- §7.9 管理端：用户审核 ----------------

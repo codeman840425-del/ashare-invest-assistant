@@ -41,5 +41,7 @@ export default defineConfig(({ mode }) => ({
     exclude: ['prototype/**', 'node_modules/**', 'dist/**', 'dist-mock/**'],
     setupFiles: ['src/test/setup.ts'],
     css: false,
+    // 评审 7afbc06 m5：高负载下（CI、全量并发）页面级用例偶发超时；单个用例给足时间，异步查询超时见 src/test/setup.ts
+    testTimeout: 20_000,
   },
 }));

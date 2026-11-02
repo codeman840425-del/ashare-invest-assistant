@@ -7,6 +7,7 @@ import { useCreatePlanDraft } from '../../api/planQueries';
 import { useDismissSignal, useReleaseReason, useSignal, useSignalEvents, useSignalReasonsAll, useStrategyTracking } from '../../api/signalQueries';
 import { useStrategyTemplates } from '../../api/strategyQueries';
 import { errorText } from '../../api/errorPolicy';
+import { stateErrorText } from '../../lib/stateTransition';
 import type { CandidateSignal, Evidence, NonExecutableReason, RuleRef } from '../../api/types';
 import { ActionBadge, ConfidenceTag, DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/common';
 import { EvidenceChips } from '../../components/EvidenceChips';
@@ -225,7 +226,7 @@ function Actions({ cs }: { cs: CandidateSignal }) {
         </Tooltip>
         <Button size="small" danger disabled={terminal} onClick={() => { dismiss.reset(); setNote(''); setOpen(true); }} data-testid="dismiss-btn">忽略该信号</Button>
       </Space>
-      {create.isError ? <div className="error-text small" style={{ marginTop: 6 }} data-testid="draft-error">{errorText(create.error)}</div> : null}
+      {create.isError ? <div className="error-text small" style={{ marginTop: 6 }} data-testid="draft-error">{stateErrorText(create.error, 'signal')}</div> : null}
       {cs.plan_draft_ids.length ? (
         <div className="small" style={{ marginTop: 6 }}>
           关联计划草案：{cs.plan_draft_ids.map((d) => <Link key={d} to={`/plan-drafts/${d}`} className="mono" style={{ marginRight: 6 }}>{d.slice(-8)}</Link>)}
@@ -242,7 +243,7 @@ function Actions({ cs }: { cs: CandidateSignal }) {
       >
         <div className="muted small" style={{ marginBottom: 8 }}>忽略后该信号结束，生效中的不可执行原因随之作废，不能恢复。</div>
         <Input.TextArea rows={3} maxLength={200} showCount value={note} onChange={(e) => setNote(e.target.value)} placeholder="可选：备注" data-testid="dismiss-note" />
-        {dismiss.isError ? <div className="error-text" style={{ marginTop: 8 }} data-testid="dismiss-error">{errorText(dismiss.error)}</div> : null}
+        {dismiss.isError ? <div className="error-text" style={{ marginTop: 8 }} data-testid="dismiss-error">{stateErrorText(dismiss.error, 'signal')}</div> : null}
       </Modal>
     </section>
   );

@@ -29,3 +29,11 @@ export const LICENCE_ERROR: Record<DataLicenceErrorCode, string> = {
 export const LICENCE_UNAVAILABLE: readonly DataLicenceState[] = ['invalid', 'expired', 'quota_exceeded', 'ip_limited', 'paused_by_admin'];
 export const LICENCE_BANNER_TEXT = '你的数据证书不可用：行情与候选信号可能停在旧数据，不会用他人的证书补齐。';
 export const LICENCE_NOT_SET_TEXT = '你还没有设置数据证书：行情数据只能用你本人的麦蕊证书获取。';
+
+/** 到期剩余天数的文案（评审 9547181 m5）：过期后显示“已过期”，不显示“剩 -N 天” */
+export function expiryLeftText(days: number | null): string | null {
+  if (days == null) return null;
+  if (days < 0) return '已过期';
+  if (days === 0) return '今天到期';
+  return `剩 ${days} 天`;
+}

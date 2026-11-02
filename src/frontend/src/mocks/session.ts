@@ -297,11 +297,18 @@ export function applyParse(b: MockBatch) {
 export const MOCK_INVITE_CODES = ['DEMO-INVITE-OK'];
 /** 同 IP 高亮阈值（示例；真实值是服务端配置 admin.same_ip_highlight_threshold） */
 export const MOCK_SAME_IP_THRESHOLD = 3;
+/** 注册 IP 限速（与后端默认 auth_abuse.register_ip_per_hour 一致，示例只模拟小时窗口） */
+export const MOCK_REGISTER_IP_PER_HOUR = 5;
+export const MOCK_PENDING_CAP = 200;
 export interface SessionState {
   currentUserId: string | null;
   registrationMode: 'closed' | 'invite' | 'open';
   /** v0.2.8 #11：蜜罐命中记录（模拟审计 auth.register_honeypot，只记 trigger，不记表单内容） */
   honeypotHits: ('website' | 'too_fast' | 'both')[];
+  /** §7.1 注册 IP 限速：本 IP（mock 只有一个）每次尝试的时间戳，含校验失败与蜜罐命中 */
+  registerHits: number[];
+  /** §7.1 待审核数上限（服务端配置 pending_cap，默认 200）；全站 pending 数 ≥ 它 → 503 REGISTRATION_CLOSED */
+  pendingCap: number;
   users: MockUser[];
   profiles: Map<string, Profile>;
   accounts: BrokerAccount[];
@@ -346,7 +353,7 @@ function initialBatches(): MockBatch[] {
 }
 
 export const state: SessionState = {
-  currentUserId: uid(2), registrationMode: 'invite', honeypotHits: [], users: [], profiles: new Map(), accounts: [], trades: [], batches: [], reconciled: new Set(), tradeIdem: new Map(),
+  currentUserId: uid(2), registrationMode: 'invite', honeypotHits: [], registerHits: [], pendingCap: MOCK_PENDING_CAP, users: [], profiles: new Map(), accounts: [], trades: [], batches: [], reconciled: new Set(), tradeIdem: new Map(),
 };
 
 export function resetSession() {
@@ -354,6 +361,8 @@ export function resetSession() {
   state.currentUserId = uid(2);
   state.registrationMode = 'invite';
   state.honeypotHits = [];
+  state.registerHits = [];
+  state.pendingCap = MOCK_PENDING_CAP;
   state.users = initialUsers();
   state.profiles = new Map([
     [uid(2), { ...DEMO_PROFILE }], [uid(3), { ...DEMO_PROFILE, version_no: 1 }],

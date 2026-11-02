@@ -7,12 +7,17 @@ import {
 } from '../../api/licenceQueries';
 import { LICENCE_RE, type DataLicenceStatus } from '../../api/licenceTypes';
 import { ErrorBox, Loading } from '../../components/common';
-import { LICENCE_ERROR, LICENCE_STATUS, LICENCE_TIER } from '../../i18n/licenceLabels';
+import { LICENCE_ERROR, LICENCE_STATUS, LICENCE_TIER, expiryLeftText } from '../../i18n/licenceLabels';
 import { applyFieldErrors } from '../../lib/formErrors';
 import { fmtTime } from '../../lib/format';
 
 interface FormValues { licence: string; tier: DataLicenceTier; has_quant_pro: boolean; expires_on: string }
 const FIELDS = ['licence', 'tier', 'has_quant_pro', 'expires_on'] as const;
+/**
+ * 202 后是否处于冷却（契约 #13：quota_exceeded / ip_limited，或带 paused_until）；只有这时才提示“冷却到期前不会重新验证”。
+ * paused_until 是否到期由服务端判断（到期则已转为 pending_verification），前端不拿本地时钟比较。
+ */
+const inCooldown = (r: DataLicenceStatus) => r.status === 'quota_exceeded' || r.status === 'ip_limited' || !!r.paused_until;
 const DEFAULTS: FormValues = { licence: '', tier: 'diamond', has_quant_pro: false, expires_on: '' };
 
 export function LicenceBadge({ s }: { s: DataLicenceStatus['status'] }) {
@@ -79,7 +84,9 @@ export function DataLicencePage() {
         ? '证书已加密保存，之后不会再显示。管理员暂停期间不会验证，管理员恢复后才会验证。'
         : r.status === 'pending_verification'
           ? '已提交，正在验证。证书已加密保存，之后不会再显示。'
-          : `证书已加密保存，之后不会再显示。当前状态“${LICENCE_STATUS[r.status].text}”，冷却到期前不会重新验证。`),
+          : inCooldown(r)
+            ? `证书已加密保存，之后不会再显示。当前状态“${LICENCE_STATUS[r.status].text}”，冷却到期前不会重新验证。`
+            : `证书已加密保存，之后不会再显示。当前状态“${LICENCE_STATUS[r.status].text}”。`),
       onError: onMutError,
     });
   };
@@ -111,7 +118,7 @@ export function DataLicencePage() {
         <Descriptions.Item label="档位（自报）">{s.tier ? LICENCE_TIER[s.tier] : '—'}{s.has_quant_pro ? <Tag style={{ marginLeft: 6 }}>Quant Pro</Tag> : null}</Descriptions.Item>
         <Descriptions.Item label="到期日（自填）">
           {s.expires_on ?? '—'}
-          {s.days_to_expiry != null ? <span className={s.days_to_expiry <= 7 ? 'down' : 'muted'}>（剩 {s.days_to_expiry} 天）</span> : null}
+          {s.days_to_expiry != null ? <span className={s.days_to_expiry <= 7 ? 'down' : 'muted'}>（{expiryLeftText(s.days_to_expiry)}）</span> : null}
         </Descriptions.Item>
         <Descriptions.Item label="设置时间">{s.set_at ? fmtTime(s.set_at) : '—'}</Descriptions.Item>
         <Descriptions.Item label="最近验证">{s.last_verified_at ? fmtTime(s.last_verified_at) : '—'}</Descriptions.Item>

@@ -79,7 +79,7 @@ export const signalHandlers = [
     const body = (await request.json().catch(() => null)) as { note?: unknown } | null;
     if (!body || (body.note !== null && body.note !== undefined && typeof body.note !== 'string')) return validation('note', 'note 须为字符串或 null');
     if (TERMINAL_SIGNAL_STATES.includes(cs.state)) {
-      return HttpResponse.json(errorBody('INVALID_STATE_TRANSITION', `候选信号当前为 ${cs.state}，不能忽略`), { status: 409 });
+      return HttpResponse.json(errorBody('INVALID_STATE_TRANSITION', `候选信号当前为 ${cs.state}，不能忽略`, { from: cs.state, to: 'dismissed', allowed: [] }), { status: 409 });
     }
     signalPatch.set(cs.id, { ...signalPatch.get(cs.id), state: 'dismissed' });
     // 所属信号终止 → 生效中的原因作废（§6：active → obsolete）

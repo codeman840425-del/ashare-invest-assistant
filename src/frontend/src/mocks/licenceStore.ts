@@ -13,6 +13,9 @@ export const NOT_SET: DataLicenceStatus = {
   last_verified_at: null, last_error_code: null, last_error_at: null, paused_until: null,
 };
 const store = new Map<string, Entry>();
+type Cooldown = { digest: string; s: Pick<DataLicenceStatus, 'status' | 'paused_until' | 'last_error_code' | 'last_error_at'> };
+/** v0.2.8 #13 补充：冷却中 DELETE 时记下（摘要 + 删除前状态），到期前重提同一证书时恢复；只在内存，不出现在任何响应中 */
+const cooldowns = new Map<string, Cooldown>();
 
 /** FNV-1a 两轮，只在内存里比对是否重复；不导出 */
 function digest(v: string) {
@@ -68,6 +71,7 @@ export const isAdminPaused = (userId: string) => adminPaused.has(userId);
 export function resetLicences() {
   store.clear();
   hits.clear();
+  cooldowns.clear();
   ingestPaused = false;
   settingsEnabled = true;
   adminPaused.clear();
@@ -107,17 +111,43 @@ export function licenceOf(userId: string): DataLicenceStatus {
 export const licenceState = (userId: string) => store.get(userId)?.s.status ?? (adminPaused.has(userId) ? 'paused_by_admin' : 'not_set');
 
 export type PutResult = { ok: true; s: DataLicenceStatus } | { ok: false; code: 'IN_USE' };
+/** 上游冷却状态（与后端 COOLDOWN_STATUSES 一致） */
+const COOLDOWN_STATUSES: readonly string[] = ['quota_exceeded', 'ip_limited'];
+/** 契约 #13：quota_exceeded / ip_limited，或 paused_until 未到期 → 重复提交同一证书保留当前状态、不验证 */
+const keepsState = (s: DataLicenceStatus) => COOLDOWN_STATUSES.includes(s.status) || (!!s.paused_until && Date.parse(s.paused_until) > Date.parse(NOW));
+function takeCooldown(userId: string, d: string): Cooldown['s'] | null {
+  const rec = cooldowns.get(userId);
+  cooldowns.delete(userId); // 取出即作废：换证、到期或不匹配都不再保留
+  if (!rec || rec.digest !== d) return null;
+  if (rec.s.paused_until) return Date.parse(rec.s.paused_until) > Date.parse(NOW) ? rec.s : null;
+  return COOLDOWN_STATUSES.includes(rec.s.status) ? rec.s : null;
+}
+/**
+ * PUT /me/data-licence（契约 §7.1，v0.2.8 #12/#13 及补充，对齐后端 be607b3 set_licence）：
+ * - 同一证书且（管理员暂停 / 冷却中）→ 原证书原状态，只更新 tier/has_quant_pro/expires_on，不验证，licence_id 不变；
+ * - 冷却中删除后、到期前重提同一证书 → 恢复删除前的 status 与 paused_until，不验证；
+ * - 管理员暂停期间 → 新行仍为 paused_by_admin，不验证；
+ * - 其余 → pending_verification 并验证。
+ */
 export function putLicence(userId: string, licence: string, meta: { tier: DataLicenceTier; has_quant_pro: boolean; expires_on: string | null }): PutResult {
   const d = digest(licence);
   for (const [owner, e] of store) if (owner !== userId && e.digest === d) return { ok: false, code: 'IN_USE' };
+  const old = store.get(userId);
+  const held = adminPaused.has(userId) || old?.s.status === 'paused_by_admin';
+  if (old && old.digest === d && (held || keepsState(old.s))) {
+    old.s = { ...old.s, ...meta, days_to_expiry: daysTo(meta.expires_on), ...(held ? { status: 'paused_by_admin' as const } : {}) };
+    return { ok: true, s: { ...old.s } };
+  }
+  const restored = old ? null : takeCooldown(userId, d);
+  if (old) cooldowns.delete(userId);
   // 示例约定：以 “X-INVALID-” 开头的虚构证书验证结果为无效（102）
   const verdict = licence.startsWith('X-INVALID-') ? 'invalid' : 'active';
-  // v0.2.8 #12：管理员暂停期间 PUT → 202，状态仍为 paused_by_admin，不验证
-  const paused = adminPaused.has(userId);
+  const status = held ? 'paused_by_admin' : restored ? restored.status : 'pending_verification';
   const s: DataLicenceStatus = {
-    ...NOT_SET, status: paused ? 'paused_by_admin' : 'pending_verification', ...meta, days_to_expiry: daysTo(meta.expires_on), set_at: NOW,
+    ...NOT_SET, status, ...meta, days_to_expiry: daysTo(meta.expires_on), set_at: NOW,
+    ...(restored ? { paused_until: restored.paused_until, last_error_code: restored.last_error_code, last_error_at: restored.last_error_at } : {}),
   };
-  store.set(userId, { s, digest: d, pollsLeft: paused ? 0 : 1, verdict, licence_id: nextLicenceId() });
+  store.set(userId, { s, digest: d, pollsLeft: status === 'pending_verification' ? 1 : 0, verdict, licence_id: nextLicenceId() });
   return { ok: true, s: { ...s } };
 }
 export function patchLicence(userId: string, b: Partial<Pick<DataLicenceStatus, 'tier' | 'has_quant_pro' | 'expires_on'>>): DataLicenceStatus | null {
@@ -127,7 +157,16 @@ export function patchLicence(userId: string, b: Partial<Pick<DataLicenceStatus, 
   e.s.days_to_expiry = daysTo(e.s.expires_on);
   return { ...e.s };
 }
-export const deleteLicence = (userId: string) => void store.delete(userId);
+/** DELETE：冷却中（active/quota_exceeded/ip_limited 且 keepsState）记下摘要与删除前状态，否则清除旧记录（后端 _remember_cooldown） */
+export function deleteLicence(userId: string) {
+  const e = store.get(userId);
+  cooldowns.delete(userId);
+  if (e && e.digest && ['active', ...COOLDOWN_STATUSES].includes(e.s.status) && keepsState(e.s)) {
+    const { status, paused_until, last_error_code, last_error_at } = e.s;
+    cooldowns.set(userId, { digest: e.digest, s: { status, paused_until, last_error_code, last_error_at } });
+  }
+  store.delete(userId);
+}
 export function testLicence(userId: string): boolean {
   const e = store.get(userId);
   if (!e) return false;

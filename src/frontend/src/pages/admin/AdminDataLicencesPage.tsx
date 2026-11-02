@@ -8,7 +8,7 @@ import { errorText } from '../../api/errorPolicy';
 import type { DataLicenceState } from '../../api/enums';
 import { CursorPager } from '../../components/CursorPager';
 import { ErrorBox } from '../../components/common';
-import { LICENCE_ERROR, LICENCE_STATUS, LICENCE_TIER } from '../../i18n/licenceLabels';
+import { LICENCE_ERROR, LICENCE_STATUS, LICENCE_TIER, expiryLeftText } from '../../i18n/licenceLabels';
 import { fmtTime } from '../../lib/format';
 
 const PAGE_SIZE = 50;
@@ -99,7 +99,7 @@ export function AdminDataLicencesPage() {
       ),
     },
     { title: '档位', key: 'tier', render: (_: unknown, r: AdminDataLicence) => <span>{r.tier ? LICENCE_TIER[r.tier] : '—'}{r.has_quant_pro ? <Tag style={{ marginLeft: 4 }}>量化Pro</Tag> : null}</span> },
-    { title: '到期', key: 'exp', render: (_: unknown, r: AdminDataLicence) => (r.expires_on ? `${r.expires_on}（剩 ${r.days_to_expiry} 天）` : r.licence_id ? '未填' : '—') },
+    { title: '到期', key: 'exp', render: (_: unknown, r: AdminDataLicence) => (r.expires_on ? (r.days_to_expiry != null ? `${r.expires_on}（${expiryLeftText(r.days_to_expiry)}）` : r.expires_on) : r.licence_id ? '未填' : '—') },
     { title: '最近验证', key: 'ver', render: (_: unknown, r: AdminDataLicence) => (r.last_verified_at ? <span className="mono">{fmtTime(r.last_verified_at)}</span> : '—') },
     { title: '今日调用', dataIndex: 'calls_today', key: 'today', align: 'right' as const },
     { title: '近 1 分钟 / 上限', key: 'min', align: 'right' as const, render: (_: unknown, r: AdminDataLicence) => `${r.calls_last_minute} / ${r.per_minute_limit}` },

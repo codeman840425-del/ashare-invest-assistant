@@ -1,6 +1,6 @@
 import { Alert, Button, Segmented, Select, Tag } from 'antd';
-import type { KeyboardEvent } from 'react';
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
+import { useId, type KeyboardEvent } from 'react';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useDailyReport, useDailyReportPages, useDailyReports } from '../api/queries';
 import type { DailyReport, DailyReportStock, TextWithEvidence } from '../api/types';
 import { ActionBadge, ConsensusBadge, DataStatusTag, ErrorBox, Loading } from '../components/common';
@@ -39,9 +39,20 @@ const LOAD_MORE = '__more__';
 /** 日期切换：游标分页的日期下拉 + 上一期 / 下一期（列表按日期倒序） */
 function DateSwitcher({ date }: { date: string }) {
   const navigate = useNavigate();
+  // 评审 7afbc06 m2：切换日期时保留 ?filter= 等查询参数
+  const { search } = useLocation();
+  const go = (d: string) => navigate({ pathname: `/daily-reports/${d}`, search });
   const pages = useDailyReportPages();
   const dates = (pages.data?.pages ?? []).flatMap((p) => p.items.map((x) => x.date));
   const idx = dates.indexOf(date);
+  // 评审 7afbc06 m1：当前是已加载的最后一项且还有下一页时，加载完直接跳到新一页的第一项
+  const loadOlder = async () => {
+    const res = await pages.fetchNextPage();
+    const all = (res.data?.pages ?? []).flatMap((p) => p.items.map((x) => x.date));
+    const i = all.indexOf(date);
+    const next = i >= 0 ? all[i + 1] : undefined;
+    if (next) go(next);
+  };
   const older = idx >= 0 ? dates[idx + 1] : undefined;
   const newer = idx > 0 ? dates[idx - 1] : undefined;
   const options = [
@@ -52,12 +63,12 @@ function DateSwitcher({ date }: { date: string }) {
   return (
     <span className="report-dates">
       <Button size="small" disabled={!older && !pages.hasNextPage} aria-label="上一期"
-        onClick={() => (older ? navigate(`/daily-reports/${older}`) : void pages.fetchNextPage())}>‹ 上一期</Button>
+        onClick={() => (older ? go(older) : void loadOlder())}>‹ 上一期</Button>
       <Select
         size="small" value={date} style={{ width: 130 }} aria-label="选择日期" options={options} loading={pages.isLoading}
-        onChange={(d) => (d === LOAD_MORE ? void pages.fetchNextPage() : navigate(`/daily-reports/${d}`))}
+        onChange={(d) => (d === LOAD_MORE ? void pages.fetchNextPage() : go(d))}
       />
-      <Button size="small" disabled={!newer} aria-label="下一期" onClick={() => newer && navigate(`/daily-reports/${newer}`)}>下一期 ›</Button>
+      <Button size="small" disabled={!newer} aria-label="下一期" onClick={() => newer && go(newer)}>下一期 ›</Button>
     </span>
   );
 }
@@ -66,6 +77,7 @@ function StockCard({ s, r }: { s: DailyReportStock; r: DailyReport }) {
   const navigate = useNavigate();
   const to = s.suggestion_id ? `/suggestions/${s.suggestion_id}` : null;
   const open = () => to && navigate(to);
+  const titleId = useId();
   const onKey = (e: KeyboardEvent) => {
     if (to && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); }
   };
@@ -73,10 +85,11 @@ function StockCard({ s, r }: { s: DailyReportStock; r: DailyReport }) {
     <section
       className={`panel stock-card ${s.change_from_previous === 'removed' ? 'dim' : ''} ${to ? 'clickable' : 'static'}`}
       data-testid={`stc-${s.security_code}`}
-      {...(to ? { role: 'link', tabIndex: 0, 'aria-label': `${s.name} ${s.security_code} 候选信号卡`, onClick: open, onKeyDown: onKey } : {})}
+      {...(to ? { role: 'link', tabIndex: 0, 'aria-labelledby': titleId, onClick: open, onKeyDown: onKey } : {})}
     >
       <div className="stc-head">
-        <b>{s.name}</b><span className="mono muted small">{s.security_code}</span>
+        {/* 评审 7afbc06 m3：卡片名称取自标题（aria-labelledby），不再用 aria-label 覆盖整张卡 */}
+        <span id={titleId} className="stc-title"><b>{s.name}</b> <span className="mono muted small">{s.security_code}</span></span>
         <Tag color={CHANGE[s.change_from_previous].c}>{CHANGE[s.change_from_previous].t}</Tag>
         <span className="spacer" />
         {/* v0.2.3 #3：收盘价、涨跌幅、数据状态、最高风险级别 */}

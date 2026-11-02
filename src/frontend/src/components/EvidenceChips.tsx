@@ -15,6 +15,7 @@ export function EvidenceChips({ ids, evidence }: { ids: string[]; evidence: Evid
         return (
           <Tooltip
             key={id}
+            trigger={['hover', 'focus']}
             title={
               <div className="ev-tip">
                 <div><b>{e.key}</b> = {String(e.value)}{e.unit ?? ''}（{EPISTEMIC[e.epistemic_type].text}）</div>
@@ -23,7 +24,11 @@ export function EvidenceChips({ ids, evidence }: { ids: string[]; evidence: Evid
               </div>
             }
           >
-            <span className="ev-chip">{id} · {fmtTime(e.data_as_of).slice(5, 16)}</span>
+            {/* 评审 7afbc06 m3：可用 Tab 聚焦，聚焦时显示证据详情；Enter/空格不冒泡到外层可点击卡片 */}
+            <span className="ev-chip" tabIndex={0} aria-label={`证据 ${id}：${e.key} = ${String(e.value)}${e.unit ?? ''}，${EPISTEMIC[e.epistemic_type].text}`}
+              onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') ev.stopPropagation(); }}>
+              {id} · {fmtTime(e.data_as_of).slice(5, 16)}
+            </span>
           </Tooltip>
         );
       })}

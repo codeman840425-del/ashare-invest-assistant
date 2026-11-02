@@ -67,6 +67,12 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
   导入文件密文都依赖 `$AIA_SECRETS_DIR/app_master_key`，丢了主密钥 dump 就恢复不出可用数据；但两者放在一起，
   拿到备份的人就同时拿到了解密能力。做法：主密钥按 600 拷到离线介质 / 密码管理器（与 dump 不同的位置、不同的权限），
   不打印、不入库、不进工单；dump 目录（`--out-dir`）里不放任何密钥文件。证书私钥（`data_licence_seal_*`）同理。
+- **主密钥备份 / 核对 / 恢复脚本**（T-O12）：`deploy/scripts/app-master-key-backup.sh`
+  - `backup --dest <离线目录>`：拷成 `app_master_key-<UTC>.key`（600）+ 同名 `.sha256`；目录在仓库里、是密钥目录本身、或里面有 `*.dump` 时拒绝。
+  - `fingerprint`：打印 sha256（与下面手工命令同一口径）；`verify <备份>`：备份与当前主密钥是否同一把。
+  - `restore <备份> --dir <密钥目录>`：目标已存在就拒绝（从不覆盖），先核对 `.sha256`，600、属主 10001。
+  - `drill`：用假密钥在临时目录走一遍 备份→丢失→恢复→核对。
+  - V1 不轮换主密钥（T-O11 裁定 ⑤）；轮换前提与方案见 reports/T-O12.md（需要后端先给加密数据加密钥编号）。
 - **每次备份时记录主密钥的 sha256**（评审 8cf9771 n5；只记摘要，不记内容），写进备份记录（与 dump 同目录的
   `<dump>.keyhash.txt` 或运维台账），恢复 / 迁移时用它核对拷来的是不是同一把：
   ```bash

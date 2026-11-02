@@ -15,17 +15,30 @@ segments:
       bse_ipo_first_days: 1
       delisting_period_first_day: true
     lot:
-      buy_lot: 100
-      star_min_buy: 200               # 科创板单笔 ≥ 200 股（沪第 6.7 条已核实）；之后按 1 股递增【待核实】
-      star_step: 1
-      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【待核实；V1 不扫描北交所】
-      bse_step: 1
+      buy_lot: 100                    # 沪/深主板、创业板、ETF 竞价买入为 100 股（份）或其整数倍（沪 3.3.8 / 深 3.3.8，已核实）
+      star_min_buy: 200               # 科创板股票/CDR 单笔 ≥ 200 股，买卖均适用（沪 2026 第 6.7 条，已核实）
+      star_step: 1                    # 200 股以上按 1 股递增【部分核实：规则无明文，依沪 6.1/6.7 + 上交所投教 O32–O34（T-R10）】
+      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【未核实；V1 不扫描北交所】
+      bse_step: 1                     # 【未核实】
+      odd_lot_sell_all: true          # 卖出时余额不足一个申报单位的部分须一次性申报卖出（沪 3.3.8、6.7；深 3.3.8；已核实，T-R10）
+      star_odd_lot_threshold: 200     # 科创板零股阈值 = 200（沪 2026 第 6.7 条末句；已核实）；其他板块阈值 = buy_lot
+      max_order_qty: 1000000          # 竞价单笔上限 100 万股（份）（沪 3.3.9 / 深 3.3.9；已核实）
+      star_max_limit_order: 100000    # 科创板限价单笔 ≤ 10 万股（沪 2026 第 6.7 条；已核实）
+      star_max_market_order: 50000    # 科创板市价单笔 ≤ 5 万股（沪 2026 第 6.7 条；已核实）
+      star_max_after_hours: 1000000   # 科创板盘后固定价格单笔 ≤ 100 万股（沪 2026 第 6.7 条；已核实）
+      chinext_max_limit_order: 300000 # 创业板限价单笔 ≤ 30 万股（深 3.3.9；已核实）
+      chinext_max_market_order: 150000  # 创业板市价单笔 ≤ 15 万股（深 3.3.9；已核实）
     sessions:                         # 北京时间
       call_auction: ["09:15", "09:25"]
       morning: ["09:30", "11:30"]
       afternoon: ["13:00", "14:57"]
       closing_auction: ["14:57", "15:00"]
     t_plus: 1
+    t0_round_trip:                    # 实行当日回转交易的品种（沪 3.1.5 / 深 3.1.5；类别已核实，无官方代码清单；T-R10 §3）
+      fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
+      cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
+      unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
+      data_source: null                             # 未接入：ETF 类别数据来源见 reports/T-B47-R10.md；接入前全部按 T+1
     fees:
       stamp_duty_sell_pct: 0.05       # 印花税仅卖出
       transfer_fee_pct: 0.001         # 过户费双向
@@ -62,17 +75,30 @@ segments:
       bse_ipo_first_days: 1
       delisting_period_first_day: true
     lot:
-      buy_lot: 100
-      star_min_buy: 200               # 科创板单笔 ≥ 200 股（沪第 6.7 条已核实）；之后按 1 股递增【待核实】
-      star_step: 1
-      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【待核实；V1 不扫描北交所】
-      bse_step: 1
+      buy_lot: 100                    # 沪/深主板、创业板、ETF 竞价买入为 100 股（份）或其整数倍（沪 3.3.8 / 深 3.3.8，已核实）
+      star_min_buy: 200               # 科创板股票/CDR 单笔 ≥ 200 股，买卖均适用（沪 2023 第 6.1.7 条，已核实）
+      star_step: 1                    # 200 股以上按 1 股递增【部分核实：规则无明文，依沪 6.1/6.1.7 + 上交所投教 O32–O34（T-R10）】
+      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【未核实；V1 不扫描北交所】
+      bse_step: 1                     # 【未核实】
+      odd_lot_sell_all: true          # 卖出时余额不足一个申报单位的部分须一次性申报卖出（沪 3.3.8、6.1.7；深 3.3.8；已核实，T-R10）
+      star_odd_lot_threshold: 200     # 科创板零股阈值 = 200（沪 2023 第 6.1.7 条末句；已核实）；其他板块阈值 = buy_lot
+      max_order_qty: 1000000          # 竞价单笔上限 100 万股（份）（沪 3.3.9 / 深 3.3.9；已核实）
+      star_max_limit_order: 100000    # 科创板限价单笔 ≤ 10 万股（沪 2023 第 6.1.7 条；已核实）
+      star_max_market_order: 50000    # 科创板市价单笔 ≤ 5 万股（沪 2023 第 6.1.7 条；已核实）
+      star_max_after_hours: 1000000   # 科创板盘后固定价格单笔 ≤ 100 万股（沪 2023 第 6.2.6 条；已核实）
+      chinext_max_limit_order: 300000 # 创业板限价单笔 ≤ 30 万股（深 3.3.9；已核实）
+      chinext_max_market_order: 150000  # 创业板市价单笔 ≤ 15 万股（深 3.3.9；已核实）
     sessions:                         # 北京时间
       call_auction: ["09:15", "09:25"]
       morning: ["09:30", "11:30"]
       afternoon: ["13:00", "14:57"]
       closing_auction: ["14:57", "15:00"]
     t_plus: 1
+    t0_round_trip:                    # 实行当日回转交易的品种（沪 3.1.5 / 深 3.1.5；类别已核实，无官方代码清单；T-R10 §3）
+      fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
+      cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
+      unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
+      data_source: null                             # 未接入：ETF 类别数据来源见 reports/T-B47-R10.md；接入前全部按 T+1
     fees:
       stamp_duty_sell_pct: 0.05       # 印花税仅卖出
       transfer_fee_pct: 0.001         # 过户费双向

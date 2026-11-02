@@ -39,6 +39,7 @@ from app.importing.parsers.tdx import (
     split_row,
 )
 from app.importing.text import fmt_decimal, fmt_qty, parse_decimal, to_halfwidth, tokenize
+from app.market_rules.lots import buy_qty_on_grid
 
 BEIJING: Final = ZoneInfo("Asia/Shanghai")
 AMOUNT_TOLERANCE: Final = Decimal("0.05")
@@ -752,20 +753,21 @@ def _in_session(d: dt.date, t: dt.time, ctx: PreviewContext) -> bool:
     return any(a <= t <= b for a, b in windows)
 
 
-def _lot_ok(code: str, qty: Decimal, d: dt.date, ctx: PreviewContext) -> bool:
+def _lot_ok(code: str, qty: Decimal, d: dt.date, ctx: PreviewContext, *, side: str) -> bool:
+    """成交行的申报单位检查（T-B47-R10：区分买卖）。
+
+    卖出一律视为合规：余额不足一个申报单位的零股须一次性卖出（沪/深 3.3.8、沪 6.7），
+    导入时不知道当时的可卖余量，无法判断，按 T-R10 §2.2 不告警。
+    """
+    if side != "buy":
+        return True
     seg = ctx.market_rules.segment_for(d) if ctx.market_rules else None
     info = ctx.securities.get(code) if ctx.securities else None
     market = info.exchange if info else infer_market(code)
     board = (info.board if info and info.board else None) or infer_board(code, market)
-    buy_lot = seg.lot.buy_lot if seg else 100
-    q = abs(qty)
-    if board == "star" and (info is None or info.type != "etf"):
-        mn, step = (seg.lot.star_min_buy, seg.lot.star_step) if seg else (200, 1)
-        return q >= mn and (q - mn) % step == 0
-    if board == "bse":
-        mn, step = (seg.lot.bse_min_buy, seg.lot.bse_step) if seg else (100, 1)
-        return q >= mn and (q - mn) % step == 0
-    return q % buy_lot == 0
+    return buy_qty_on_grid(
+        seg, board=board, security_type=info.type if info else None, qty=abs(qty)
+    )
 
 
 def _row_warnings(
@@ -819,7 +821,7 @@ def _row_warnings(
             r.findings.append(
                 _mk(ctx, "IMPORT_TIME_OUTSIDE_SESSION", row_no=r.row_no, field="trade_time")
             )
-        if side == "buy" and not _lot_ok(code, p["qty"], d, ctx):
+        if not _lot_ok(code, p["qty"], d, ctx, side=side):
             r.findings.append(_mk(ctx, "IMPORT_LOT_SIZE_IRREGULAR", row_no=r.row_no, field="qty"))
 
 

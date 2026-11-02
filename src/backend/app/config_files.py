@@ -317,11 +317,78 @@ class NoLimit(_Strict):
 
 
 class Lot(_Strict):
+    """申报数量规则（plan §6.1 ``lot``）。
+
+    T-R10 新增键见 ``docs/strategies/market_rules_T-R10.md`` §5。
+
+    T-R10 新增键都给了与规则原文相同的默认值：旧快照（无这些键）仍能加载，仓库文件写全。
+    """
+
     buy_lot: PosInt
     star_min_buy: PosInt
     star_step: PosInt
     bse_min_buy: PosInt
     bse_step: PosInt
+    #: 卖出时余额不足一个申报单位的部分须一次性申报卖出（沪 3.3.8、6.7；深 3.3.8）
+    odd_lot_sell_all: bool = True
+    #: 科创板股票/CDR 的零股阈值（沪 6.7 末句）；其他板块阈值 = ``buy_lot``
+    star_odd_lot_threshold: PosInt = 200
+    #: 竞价单笔上限（沪/深 3.3.9）
+    max_order_qty: PosInt = 1_000_000
+    star_max_limit_order: PosInt = 100_000
+    star_max_market_order: PosInt = 50_000
+    star_max_after_hours: PosInt = 1_000_000
+    chinext_max_limit_order: PosInt = 300_000
+    chinext_max_market_order: PosInt = 150_000
+
+    @model_validator(mode="after")
+    def _check_caps(self) -> Lot:
+        if self.star_odd_lot_threshold < self.star_min_buy:
+            raise ValueError("star_odd_lot_threshold 不能小于 star_min_buy")
+        caps = (
+            self.star_max_limit_order,
+            self.star_max_market_order,
+            self.star_max_after_hours,
+            self.chinext_max_limit_order,
+            self.chinext_max_market_order,
+        )
+        if any(c > self.max_order_qty for c in caps):
+            raise ValueError("板块单笔上限不能大于 max_order_qty")
+        if self.star_min_buy > min(caps[:3]) or self.buy_lot > min(caps[3:]):
+            raise ValueError("单笔上限不能小于起买量")
+        return self
+
+
+#: 实行当日回转交易的基金类别（沪/深 3.1.5；T-R10 §3）
+T0FundCategory = Literal[
+    "bond_etf",
+    "money_etf",
+    "gold_etf",
+    "commodity_futures_etf",
+    "cross_border_etf",
+    "cross_border_lof",
+]
+
+_T0_DEFAULT: tuple[T0FundCategory, ...] = (
+    "bond_etf",
+    "money_etf",
+    "gold_etf",
+    "commodity_futures_etf",
+    "cross_border_etf",
+    "cross_border_lof",
+)
+
+
+class T0RoundTrip(_Strict):
+    """当日回转（T+0）品种：只按类别判定，交易所无官方代码清单（T-R10 §3.2）。"""
+
+    fund_categories: list[T0FundCategory] = Field(default_factory=lambda: list(_T0_DEFAULT))
+    #: 跨境类仅限所跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
+    cross_border_requires_t0_constituents: bool = True
+    #: 实现约定（非规则原文）：类别缺失按 T+1
+    unknown_category_default_t_plus: Literal[1] = 1
+    #: 类别数据来源；``null`` = 未接入（全部按 ``unknown_category_default_t_plus``）
+    data_source: str | None = None
 
 
 Session = tuple[dt.time, dt.time]
@@ -429,6 +496,7 @@ class MarketRuleSegment(_Strict):
     impact_cost: ImpactCost
     unfillable: Unfillable
     risk_warning: RiskWarning
+    t0_round_trip: T0RoundTrip = Field(default_factory=T0RoundTrip)
 
 
 class MarketRulesConfig(_File):

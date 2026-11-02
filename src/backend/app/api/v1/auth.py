@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Callable, Coroutine
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
@@ -31,11 +33,37 @@ from app.auth.deps import (
 )
 from app.auth.sessions import CSRF_COOKIE, SESSION_COOKIE
 from app.common.errors import AppError, ErrorCode
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.db.tables.users import users
 from app.schemas.enums import AccountStatus, RegistrationMode, Role
 
 router = APIRouter(tags=["auth"])
+
+
+def require_registration_open(settings: SettingsDep) -> None:
+    """架构师裁定（T-T23 #1）：``closed`` 时 ``/auth/register`` 一律 ``503 REGISTRATION_CLOSED``，
+    先于请求体校验（任何请求体，包括畸形的）。作为依赖挂在路由上，在请求体模型之前求值。"""
+    if settings.registration_mode == RegistrationMode.CLOSED:
+        raise AppError(ErrorCode.REGISTRATION_CLOSED)
+
+
+class _RegistrationGateRoute(APIRoute):
+    """FastAPI 在求值依赖之前就解析 JSON：无法解析的请求体会先得到 400。本路由类在解析请求体
+    之前调用同一个判定，保证 ``closed`` 时畸形 JSON 也是 503。"""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def gated(request: Request) -> Response:
+            provider = request.app.dependency_overrides.get(get_settings, get_settings)
+            require_registration_open(provider())
+            return await handler(request)
+
+        return gated
+
+
+#: 只放 ``POST /auth/register``（见 :class:`_RegistrationGateRoute`）
+register_router = APIRouter(tags=["auth"], route_class=_RegistrationGateRoute)
 
 #: plan §3.6 / users.username CHECK：4–32 位小写字母、数字、下划线（契约写 3–32，取更严的库约束）
 USERNAME_RE = re.compile(r"^[a-z0-9_]{4,32}$")
@@ -135,7 +163,9 @@ def honeypot_trigger(body: RegisterIn, *, now_ms: int) -> str | None:
     return None
 
 
-@router.post("/auth/register", status_code=201)
+@register_router.post(
+    "/auth/register", status_code=201, dependencies=[Depends(require_registration_open)]
+)
 def register(
     body: RegisterIn,
     request: Request,
@@ -144,11 +174,10 @@ def register(
     passwords: PasswordsDep,
     rds: RedisDep,
 ) -> RegisterOut:
-    # 契约 v0.2.8 §7.1 判定顺序：注册模式（closed → 503）→ IP 限速（蜜罐命中同样计数）→
-    # 字段与邀请码校验（400）→ 用户名冲突（409）→ 待审核数上限（503）→ 蜜罐。
+    # 契约 v0.2.8 §7.1 判定顺序：注册模式（closed → 503，见 require_registration_open，先于
+    # 请求体校验）→ IP 限速（蜜罐命中同样计数）→ 字段与邀请码校验（400）→ 用户名冲突（409）→
+    # 待审核数上限（503）→ 蜜罐。
     mode = settings.registration_mode
-    if mode == RegistrationMode.CLOSED:
-        raise AppError(ErrorCode.REGISTRATION_CLOSED)
 
     # 防滥用（plan §3.6）：同一 IP 每小时/每日上限（每次尝试都计，含校验失败）→ 429
     policy = settings.auth_abuse

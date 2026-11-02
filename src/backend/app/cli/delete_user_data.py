@@ -409,11 +409,17 @@ def _count(conn: Connection, table: str, where: str, params: dict[str, Any]) -> 
 
 
 def _market_licence_tables(conn: Connection) -> list[str]:
+    """market 下带 ``source_licence_id`` 列的表（不含分区子表）。
+
+    aia_maint-grants：查 pg_catalog 而不是 information_schema.columns——后者只列出当前角色
+    有列权限的列，最小授权下漏授的新表会被**静默跳过**；这里照样发现，随后的 count/DELETE
+    因缺权限直接报错，整笔清除回滚。"""
     rows = conn.execute(
         text(
-            "SELECT table_schema || '.' || table_name FROM information_schema.columns "
-            "WHERE table_schema = 'market' AND column_name = 'source_licence_id' "
-            "AND table_name IN (SELECT tablename FROM pg_tables WHERE schemaname = 'market') "
+            "SELECT n.nspname || '.' || c.relname FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'market' AND c.relkind IN ('r', 'p') AND NOT c.relispartition "
+            "AND a.attname = 'source_licence_id' AND a.attnum > 0 AND NOT a.attisdropped "
             "ORDER BY 1"
         )
     ).scalars()

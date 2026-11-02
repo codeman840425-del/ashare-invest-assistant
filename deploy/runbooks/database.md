@@ -232,3 +232,18 @@ secret 没挂上时 `secret-env.sh` 拒绝启动，后端不会回落到临时�
   “置 purging → 删不可变行 → 改回 → 提交”序列失败、aia_maint 不能改回 / 不删行提交、正规删除路径可提交。
 - 删除用户数据（先 dry-run）：`deploy/scripts/compose.sh --profile maint run --rm --no-deps maint-cli --user-id <uuid> [--execute]`。
 - 原始导入文件卷 `<卷前缀>_imports` 只挂给 api 与 maint-cli，挂载点跟随 `IMPORT_STORAGE_PATH`，卷根 10001:10001、700。
+
+## 7. 迁移 0017 预检查（T-B49；review-6670b10）
+
+0017 给 `app.data_snapshots` 加约束：`purpose IN ('candidate','plan','horizon')` 时 `user_id` 必须非空。
+**任何共享库（含 aia-t01）升级到 0017 之前**，先只读查违规行；查到就停下，不跑 0017，交后端/架构师按报告 T-B49.md 人工处理。
+
+```bash
+deploy/scripts/db-precheck-0017.sh            # 0 可以升级 / 1 有违规行（停止）/ 2 出错
+```
+
+- SQL 与迁移里的 `PRECHECK_SQL` 相同，在只读事务里执行，只输出 purpose 和行数。
+- 已在 0017 或之后、空库、没有 `app.data_snapshots` 时直接返回 0。
+- `up.sh` 在仓库带 0017 迁移且 postgres 已在运行时自动先跑它，不通过就不执行 up；
+  postgres 没在运行时由迁移自身的预检查兜底（报错退出、不改数据）。
+- 不要主动升级到 0017：只有按发布计划部署新版本时才会经 `migrate` 升级。

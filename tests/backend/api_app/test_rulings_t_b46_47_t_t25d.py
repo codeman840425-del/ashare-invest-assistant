@@ -279,14 +279,28 @@ def test_r6_sector_gap_alone_is_not_partial(session: Callable[..., SimpleNamespa
     assert p["data_status"] != "partial"
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_R6X}：不在主数据但有快照参考价的行是否 estimated 待架构师确认（见 T-T25.md 待决问题）")
 def test_r6_not_in_master_snapshot_priced(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
+    """T-T25 裁定 #6（docs 46538a6 契约 §7.2 /portfolio、#32 ②）：不在主数据中（security_type=null）的行即使快照里
+    有参考价也**不**采用，一律按成本估算：estimated=true，market_value/pnl/pnl_pct 为 null，weight_pct 按成本
+    qty×cost_price（total_assets 同样计入成本估算值），gaps 含 positions.convertible_bond（113xxx 属可转债段），
+    顶层 data_status=partial。"""
     c = _snap_ctx(session, sql)
     code = f"113{secrets.randbelow(1000):03d}.SH"
     acc = _snapshot_account(c.call, sql, str(c.s.user.id), [(code, 10, "100.00", "101.00")])
-    row = _rows(_portfolio(c.call, acc))[code]
+    p = _portfolio(c.call, acc)
+    row = _rows(p)[code]
     assert row["security_type"] is None
-    assert row["estimated"] is False and _dec(row["market_value"]) == decimal.Decimal("1010")
+    if row["estimated"] is False or row["market_value"] is not None:
+        pytest.xfail(f"{O_R6X}：T-T25 裁定 #6——security_type=null 的行仍采用了快照参考价"
+                     f"（estimated={row['estimated']}，market_value={row['market_value']}）")
+    assert row["estimated"] is True
+    assert row["market_value"] is None and row["pnl"] is None and row["pnl_pct"] is None
+    cost = decimal.Decimal(10) * decimal.Decimal("100.00")
+    total = _dec(p["total_assets"])
+    assert total == _dec(p["cash"]) + cost, (p["total_assets"], p["cash"])
+    assert abs(_dec(row["weight_pct"]) - cost / total * 100) < decimal.Decimal("0.01"), row["weight_pct"]
+    assert ("positions.convertible_bond", "no_source") in _gaps(p), sorted(_gaps(p))
+    assert p["data_status"] == "partial"
 
 
 # =============================== R8：/horizon-assessments ===============================

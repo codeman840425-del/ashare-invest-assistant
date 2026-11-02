@@ -8,14 +8,20 @@ A. ``test_reg_closed_*``：``registration_mode=closed`` 下 13 种请求体（12
    契约 #16 的“一律先返回 503”只适用于未超上限的请求。本文件的 413 用例即裁定 E 要求的测试员用例。
 B. ``test_cooldown_*`` / ``test_resume_*``：删除后在冷却期内重新提交同一证书（契约 v0.2.8 #13 补充、§7.1 DELETE
    行）——契约规定的不是错误码，而是 ``202`` 并**恢复**删除前的 ``status`` 与 ``paused_until``、到期前不验证；
-   换证书照常验证。resume 重复调用：结果相同、无重复副作用（暂停记录、验证意图、证书事件、通知、审计）。
+   换证书照常验证。T-T25 裁定 #5（契约 #32 ①、plan 7.3）：到期判定是半开区间——到期时刻 = ``paused_until``（非 null）
+   或删除时刻 + 24h（null），仅当 now < 到期时刻有效，now = 到期时刻即过期；``test_cooldown_boundary_*`` 以注入
+   时钟（服务层函数的 ``now`` 参数，固定时刻，不依赖墙钟）覆盖到期前 1µs / 恰好 / 后 1µs。resume 重复调用：结果相同、无重复副作用（暂停记录、验证意图、证书事件、通知、审计）。
 C. ``test_purge_attack_*``：删除用户数据 CLI（plan §7.3，迁移 0011/0013）的触发器攻击。威胁模型（按代码理解）：
    不可变表只靠“属主是 purging 用户”这一数据状态门放行删改，所以攻击面是 ① 非 aia_maint 角色把人置 purging、
    ② 以数据库对象（触发器 / 函数 / 关触发器 / session_replication_role）绕过或篡改这道门、
    ③ 有建触发器权限的人在 CLI 删除路径上预埋触发器，借删除把数据另存（窃取）或让删除静默跳过（保留）。
    ①② 用测试容器里的临时角色（aia_maint、普通 DML 角色，测试侧近似运维 grants.sql）验证全部被拒；
-   ③ 以库属主身份预埋，断言“保留”类攻击使 CLI 整体回滚，“另存”类攻击 CLI 应发现并拒绝——目前 CLI 不检查
-   触发器清单，按 xfail(strict=False) 记后端 T-B16，并作为待决问题（是否属于威胁模型）。
+   ③ 以库属主身份预埋，断言“保留”类攻击使 CLI 整体回滚。
+   T-T25 裁定 #4（docs 46538a6 plan 7.3，reports/T-T25-rulings.md 二.4）：库属主 / 超级用户 / 能执行 DDL 的角色
+   **不在**删除 CLI 的威胁模型内，不再要求 CLI 防御属主级攻击；改为防误配的**触发器白名单自检**——清单内表上
+   出现白名单（表 + 触发器名 + 函数名）外的非内部触发器时，dry-run 列出差异，``--execute`` 拒绝执行（非零退出、
+   不删任何行，无跳过参数）。``test_purge_trigger_allowlist_*`` 按此断言；CLI 尚未实现自检时
+   xfail(strict=False)，owner 后端 T-B16。只在一次性 testcontainers 库里预埋 / 清理触发器。
 
 本地 main 已实现、origin 缺对应提交的部分：按能力（而非行为）检测后 imperative xfail，写明依赖的后端提交。
 不联网、不调用麦蕊；证书为运行时随机生成的测试值，不输出。
@@ -27,6 +33,7 @@ import datetime as dt
 import importlib
 import importlib.util
 import json
+import secrets
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -60,8 +67,9 @@ O_COOLDOWN = ("后端 T-B04a-x / T-B03e（契约 v0.2.8 #13 补充：删除后�
               "licence_cooldowns 在本地 main，未推 origin）")
 O_F22_IDEMP = ("后端 T-B45 / T-B03e（契约 v0.2.9 439746e #26①：resume 幂等——已设置未暂停时 resume 仍写审计；"
                "改 be607b3 的 _admin_transition）")
-O_PURGE_TRIGGERS = ("后端 T-B16（删除用户数据 CLI：--execute 前未核对删除路径上的触发器 / 函数清单，库属主预埋的 "
-                    "AFTER DELETE 触发器可把被删行另存；待决：架构师确认库属主级攻击是否在威胁模型内）")
+O_PURGE_TRIGGERS = ("后端 T-B16（T-T25 裁定 #4 / plan 7.3：删除 CLI 在 dry-run 与 --execute 前只读列出清单内表上的"
+                    "非内部触发器并与白名单比对——dry-run 报差异，--execute 遇白名单外触发器拒绝执行、非零退出；"
+                    "所测 CLI 尚未实现）")
 
 
 # ============================== A. 关闭注册：13 种请求体 ==============================
@@ -223,6 +231,83 @@ def test_cooldown_resubmit_after_expiry_verifies(session: Callable[..., SimpleNa
     assert verify_intents(authdb.redis, licence_ids(sql, s.user.id)) == n0 + 1
 
 
+#: 冷却边界用例的固定到期时刻（注入时钟；带微秒，验证 1µs 粒度）
+EXPIRY = dt.datetime(2031, 3, 4, 5, 6, 7, 123456, tzinfo=dt.UTC)
+US = dt.timedelta(microseconds=1)
+#: (到期前 1µs, 恰好到期, 到期后 1µs) → 是否仍有效（半开区间 [起点, 到期)）
+BOUNDARY = [(-US, True), (dt.timedelta(0), False), (US, False)]
+BOUNDARY_IDS = ["minus_1us_valid", "exact_expired", "plus_1us_expired"]
+
+
+def _cooldown_svc() -> Any:
+    svc = importlib.import_module("app.licences.service")
+    if not all(hasattr(svc, n) for n in ("purge_expired_cooldowns", "_take_cooldown", "keeps_state")):
+        pytest.xfail(O_COOLDOWN + "：所测后端没有可注入时钟的冷却判定函数")
+    return svc
+
+
+def _seed_cooldown(sql: Callable[..., Any], settings: Any, uid: str, status: str,
+                   paused_until: dt.datetime | None, deleted_at: dt.datetime) -> bytes:
+    """一次性库里直接写一条冷却记录（指纹按被测设置计算；去重摘要是随机测试值，不是证书）。返回去重摘要。"""
+    seal = importlib.import_module("app.licences.seal")
+    digest = secrets.token_bytes(32)
+    fp = seal.cooldown_fingerprint(settings, uuid.UUID(uid), digest)
+    sql("DELETE FROM app.user_data_licence_cooldowns WHERE user_id = :u", u=uid)
+    sql("INSERT INTO app.user_data_licence_cooldowns (user_id, fingerprint, status, paused_until, deleted_at) "
+        "VALUES (:u, :f, :s, :p, :d)", u=uid, f=fp, s=status, p=paused_until, d=deleted_at)
+    return digest
+
+
+def _probe(authdb: SimpleNamespace, svc: Any, settings: Any, uid: str, digest: bytes,
+           now: dt.datetime) -> tuple[bool, bool]:
+    """在注入的 now 下：(周期清理 purge_expired_cooldowns 后记录是否仍在, 同一证书能否恢复)。每次探测在事务里
+    做完后回滚，库不变。（不用 ``~_cooldown_expired(now)`` 直接查：paused_until 为空时 SQL 三值逻辑得 NULL。）"""
+    from sqlalchemy import select
+
+    cd = importlib.import_module("app.db.tables.licences").user_data_licence_cooldowns
+    with authdb.engine.connect() as conn:
+        tx = conn.begin()
+        try:
+            svc.purge_expired_cooldowns(conn, now)
+            alive = conn.execute(select(cd.c.user_id).where(cd.c.user_id == uuid.UUID(uid))).first() is not None
+            restored = svc._take_cooldown(conn, settings, uuid.UUID(uid), digest, now) is not None
+        finally:
+            tx.rollback()
+    return alive, restored
+
+
+@pytest.mark.parametrize("offset,valid", BOUNDARY, ids=BOUNDARY_IDS)
+@pytest.mark.parametrize("kind", ["paused_until", "null_until_24h"])
+def test_cooldown_boundary_half_open(authdb: SimpleNamespace, sql: Callable[..., Any], mkuser: Callable[..., Any],
+                                     make_settings: Callable[..., Any], kind: str, offset: dt.timedelta,
+                                     valid: bool) -> None:
+    """T-T25 裁定 #5：到期时刻 = paused_until（非 null）或删除时刻 + 24h（null）；now < 到期 → 有效（同一证书恢复
+    删除前状态、不验证），now = 到期 → 已过期（按新提交处理），now > 到期 → 已过期。清理与恢复两处口径一致。"""
+    _require_cooldown(sql)
+    svc = _cooldown_svc()
+    settings = make_settings(database_url=authdb.url, redis_url=authdb.redis_url)
+    uid = str(mkuser().id)
+    if kind == "paused_until":
+        digest = _seed_cooldown(sql, settings, uid, "quota_exceeded", EXPIRY, EXPIRY - dt.timedelta(hours=1))
+    else:
+        digest = _seed_cooldown(sql, settings, uid, "ip_limited", None, EXPIRY - dt.timedelta(hours=24))
+    try:
+        assert _probe(authdb, svc, settings, uid, digest, EXPIRY + offset) == (valid, valid)
+        assert sql("SELECT count(*) FROM app.user_data_licence_cooldowns WHERE user_id = :u", u=uid)[0][0] == 1, \
+            "探测在回滚事务里做，记录应仍在"
+    finally:
+        sql("DELETE FROM app.user_data_licence_cooldowns WHERE user_id = :u", u=uid)
+
+
+@pytest.mark.parametrize("offset,valid", BOUNDARY, ids=BOUNDARY_IDS)
+def test_cooldown_boundary_put_paused_until_not_expired(offset: dt.timedelta, valid: bool) -> None:
+    """T-T25 裁定 #5：PUT 行的“paused_until 未到期”同样指 now < paused_until；恰好相等按到期后的新提交处理。
+    （active 行；quota_exceeded / ip_limited 不按时间判定，不在本用例。）纯函数，注入 now。"""
+    svc = _cooldown_svc()
+    row = SimpleNamespace(status="active", paused_until=EXPIRY)
+    assert svc.keeps_state(row, EXPIRY + offset) is valid
+
+
 def test_resume_repeated_is_idempotent(session: Callable[..., SimpleNamespace], mkuser: Callable[..., Any],
                                        sql: Callable[..., Any], authdb: SimpleNamespace) -> None:
     """pause → resume ×3：第一次恢复（pending_verification、入队一次验证、暂停记录解除）；之后每次 204、
@@ -364,11 +449,30 @@ def test_purge_attack_planted_skip_trigger_rolls_back(cli: SimpleNamespace, vict
         _unplant(sql)
 
 
-def test_purge_attack_planted_exfil_trigger_detected(cli: SimpleNamespace, victim: SimpleNamespace,
-                                                     roles: SimpleNamespace, sql: Callable[..., Any],
-                                                     capsys: pytest.CaptureFixture[str]) -> None:
-    """③ 窃取：预埋 AFTER DELETE 触发器把被删证书行另存到 public 表 → CLI 应发现删除路径上的非迁移触发器并拒绝
-    （库不变、另存表无行）。CLI 目前不核对触发器清单：攻击得逞时 xfail（O_PURGE_TRIGGERS）。"""
+def test_purge_trigger_allowlist_dry_run_lists_unlisted(cli: SimpleNamespace, victim: SimpleNamespace,
+                                                         sql: Callable[..., Any],
+                                                         capsys: pytest.CaptureFixture[str]) -> None:
+    """裁定 #4：清单内表（app.user_data_licences）上有白名单外的触发器 → dry-run 仍只读（rc 0、库不变），
+    输出列出该触发器（表 + 触发器名 + 函数名中至少触发器名与表）。"""
+    try:
+        _plant(sql, "RETURN OLD;", "AFTER")
+        before = _footprint(sql, victim.uid)
+        r = _run(cli, capsys, "--user-id", victim.uid)
+        assert leak_count(victim.lic, r.text) == 0
+        assert _footprint(sql, victim.uid) == before, "dry-run 必须只读"
+        if "tt25c_plant" not in r.text:
+            pytest.xfail(f"{O_PURGE_TRIGGERS}：dry-run 未列出白名单外触发器")
+        assert r.rc == 0, r.text[-800:]
+        assert "app.user_data_licences" in r.text
+    finally:
+        _unplant(sql)
+
+
+def test_purge_trigger_allowlist_execute_refuses(cli: SimpleNamespace, victim: SimpleNamespace,
+                                                 roles: SimpleNamespace, sql: Callable[..., Any],
+                                                 capsys: pytest.CaptureFixture[str]) -> None:
+    """裁定 #4：白名单外触发器（这里是一个把被删行另存的 AFTER DELETE 触发器，只含 id）→ ``--execute`` 拒绝执行：
+    非零退出、不删任何行（足迹不变、用户未停在 purging）、触发器从未被触发（另存表无行）。"""
     try:
         _plant(sql, "INSERT INTO public.tt25c_loot (licence_id, user_id) VALUES (OLD.id, OLD.user_id); RETURN OLD;",
                "AFTER")
@@ -376,9 +480,19 @@ def test_purge_attack_planted_exfil_trigger_detected(cli: SimpleNamespace, victi
         r = _execute(cli, capsys, roles, victim.uid)
         loot = sql("SELECT count(*) FROM public.tt25c_loot WHERE user_id = :u", u=victim.uid)[0][0]
         assert leak_count(victim.lic, r.text) == 0
-        if r.rc == 0 and loot:
-            pytest.xfail(f"{O_PURGE_TRIGGERS}：攻击得逞，另存 {loot} 行（只含 id，测试值）")
-        assert r.rc != 0 and loot == 0
+        if r.rc == 0:
+            pytest.xfail(f"{O_PURGE_TRIGGERS}：--execute 未拒绝（rc 0，另存 {loot} 行，只含 id，测试值）")
+        assert loot == 0
         assert _footprint(sql, victim.uid) == before
+        assert sql("SELECT status FROM app.users WHERE id = :u", u=victim.uid)[0][0] == "approved"
     finally:
         _unplant(sql)
+
+
+def test_purge_trigger_allowlist_has_no_skip_flag(cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
+    """裁定 #4：自检没有跳过参数——CLI 帮助里不出现 skip/ignore/force 类触发器开关。"""
+    with pytest.raises(SystemExit):
+        _run(cli, capsys, "--help")
+    text = capsys.readouterr().out.lower()
+    assert not [w for w in ("--skip-trigger", "--ignore-trigger", "--no-trigger-check", "--force")
+                if w in text], text[-800:]

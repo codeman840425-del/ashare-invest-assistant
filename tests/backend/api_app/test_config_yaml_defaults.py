@@ -79,11 +79,27 @@ V029_BACKEND_PENDING = "后端 T-B47-x（R10）：config/realtime.yaml 与 app/c
 
 
 #: T-R10（docs/strategies/market_rules_T-R10.md，后端 07b8d74 已并入 config/market_rules.yaml 与 config_files）新增键：
-#: 快照已叠加（T-T25，取值与 T-R10 文档逐项核对一致）；plan §6.1 尚未同步 → 仅这些键的差异 xfail（架构师）
+#: 快照已叠加（T-T25，取值与 T-R10 文档逐项核对一致）。架构师 46538a6（T-T25 裁定，契约 #32）已把 plan §6.1 同步
+#: T-R10，plan 块解析后与快照完全相等 → market_rules 比对改为严格（不再按 TR10_PATH 放行差异）。
+#: 只有所用 docs 早于 46538a6（plan 两段 lot 里一个 T-R10 键都没有、也没有 t0_round_trip，如 origin 0cb78ad）时
+#: xfail，待运维推送；plan 一旦含任一 T-R10 键，任何差异都直接失败。
 TR10_LOT_KEYS = ("odd_lot_sell_all", "star_odd_lot_threshold", "max_order_qty", "star_max_limit_order",
                  "star_max_market_order", "star_max_after_hours", "chinext_max_limit_order", "chinext_max_market_order")
 TR10_PATH = re.compile(r"^segments\[\d+\]\.(lot\.(" + "|".join(TR10_LOT_KEYS) + r")|t0_round_trip)（")
-TR10_PLAN_PENDING = "架构师：plan §6.1 config/market_rules.yaml 尚未同步 T-R10 新增键（lot 单笔上限/零股、t0_round_trip；后端 07b8d74 已合并）"
+TR10_DOCS_PENDING = "plan §6.1 尚无 T-R10 键：架构师 46538a6（T-T25 裁定，market_rules 同步 T-R10）未推到 origin（运维推送）"
+
+
+def _plan_lacks_tr10(plan: dict) -> bool:
+    """plan 的 market_rules 一个 T-R10 键都没有（所用 docs 早于 46538a6）。"""
+    segs = plan.get("segments") or []
+    return bool(segs) and all(not set(TR10_LOT_KEYS) & set(sg.get("lot") or {}) and "t0_round_trip" not in sg
+                              for sg in segs)
+
+
+#: T-O11 裁定 C5（架构师 e56462c，reports/T-O11-rulings.md）：SH5/SW2/SW3 的 unit 由 sign 改 pct、阈值 0（与
+#: feature_catalog 一致）。快照已同步；所用 docs 早于 e56462c（这三项仍是 sign，如 origin 0cb78ad）时 xfail，待运维推送
+C5_UNIT_PATH = re.compile(r"^rules\.horizons\.(short|swing)\.components\[\d+\]\.unit$")
+C5_DOCS_PENDING = "plan §6.1 分类器 SH5/SW2/SW3 仍为 unit: sign：架构师 e56462c（T-O11 裁定 C5，改 pct）未推到 origin（运维推送）"
 
 
 def _only_v029_keys(name: str, paths: list[str]) -> bool:
@@ -406,10 +422,14 @@ def test_snapshot_equals_plan_block(docs_dir, name):
         pytest.xfail(V026_DOCS_PENDING)
     if name in V029_ADDED and not set(V029_ADDED[name]) & set(plan) and set(V029_ADDED[name]) <= set(snap(name)):
         pytest.xfail(V029_DOCS_PENDING)
-    if name == "market_rules" and plan != snap(name):
+    if name == "horizon_classifier" and plan != snap(name):
+        d = diff_paths(plan, snap(name))
+        if d and all(C5_UNIT_PATH.match(p) for p in d) and "unit: sign" in blocks[name]:
+            pytest.xfail(C5_DOCS_PENDING)
+    if name == "market_rules" and plan != snap(name) and _plan_lacks_tr10(plan):
         d = diff_paths(plan, snap(name))
         if d and all(TR10_PATH.match(p) for p in d):
-            pytest.xfail(TR10_PLAN_PENDING)
+            pytest.xfail(TR10_DOCS_PENDING)
     assert plan == snap(name), f"plan §6.1 的 {name}.yaml 已变，请同步快照"
 
 

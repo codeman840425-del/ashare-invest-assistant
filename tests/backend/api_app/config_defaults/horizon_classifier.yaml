@@ -99,7 +99,7 @@ rules:
         - {id: SH4, input: f.volatility_20d, transform: rank_pct,
            bands: [{op: between, value: [0.4, 0.9], pts: 10}],
            text: "近 20 日波动率位于全市场 {v:pct} 分位（0.4–0.9 加分，过低或过高不加）"}
-        - {id: SH5, input: f.ma_trend, unit: sign,
+        - {id: SH5, input: f.ma_trend, unit: pct,
            bands: [{op: gt, value: 0, pts: 10}],
            text: "均线趋势值 {v}（> 0 为多头排列）"}
         - {id: SH6, input: profile.horizon_pref,
@@ -117,10 +117,10 @@ rules:
         - {id: SW1, input: f.amount_20d_avg, unit: CNY,
            bands: [{op: ge, value: 100000000, pts: 15}, {op: ge, value: 50000000, pts: 8}],
            text: "近 20 日日均成交额 {v:yi} 亿元"}
-        - {id: SW2, input: f.ma_trend, unit: sign,
+        - {id: SW2, input: f.ma_trend, unit: pct,
            bands: [{op: gt, value: 0, pts: 20}],
            text: "均线趋势值 {v}（> 0 为多头排列）"}
-        - {id: SW3, input: f.momentum_60d, unit: sign,
+        - {id: SW3, input: f.momentum_60d, unit: pct,
            bands: [{op: gt, value: 0, pts: 15}],
            text: "近 60 日动量 {v}（> 0 为上涨）"}
         - {id: SW4, input: f.volatility_20d, transform: rank_pct,

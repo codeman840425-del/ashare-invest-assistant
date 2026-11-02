@@ -257,8 +257,10 @@ def user_session_keys(authdb: SimpleNamespace, uid: str) -> set[str]:
 # 0007 T-B45 数据证书表、0008 T-B03c 邀请码；aia-t01 运维重建后同为 0008）
 # ---------------------------------------------------------------------------
 #: DB 自检期望的迁移 head：0008（新迁移推到 origin 时同步此处）。T-T23：契约 v0.2.8 后端在本地 main 带来
-#: 0009（T-B02y，ETF/策略类型触发器）与 0010（T-B03d，user_data_licence_holds），推到 origin 后 head 为 0010
-KNOWN_HEADS = ("0008", "0010")
+#: 0009（T-B02y，ETF/策略类型触发器）与 0010（T-B03d，user_data_licence_holds）；T-T24：本地 main 又有
+#: 0011（T-B16 删除用户数据）、0012（T-B03e 证书冷却）、0013（T-B16-core-r2 aia_maint/purging）。
+#: 精确集合：origin 0008、main 0013；中间版本在分批推送时可能成为 head。
+KNOWN_HEADS = ("0008", "0010", "0011", "0012", "0013")
 
 
 def test_alembic_head_is_known(authdb: SimpleNamespace, sql: Callable[..., Any]) -> None:

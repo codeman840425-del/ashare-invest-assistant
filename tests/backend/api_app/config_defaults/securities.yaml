@@ -1,10 +1,18 @@
-# plan v0.2.7 §6.1 `config/securities.yaml` 代码块原文快照（测试维护，T-A08 fa6d55d 新增）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。
+# plan v0.2.7 §6.1 `config/securities.yaml` 代码块原文快照（测试维护，T-A08 fa6d55d 新增；v0.2.9 内 T-A04 加 master 段，评审 d018fad M4）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。
 schema_version: 1
 search:
   similarity_threshold: 0.3     # ◇ pg_trgm 相似度下限；查询中至少 2 个汉字才启用模糊匹配
   initials_max_variants: 16     # ◇ 多音字拼音首字母组合上限
   limit_default: 20             # ◇
   limit_max: 50                 # ◇
+master:                         # v0.2.9 内，T-A04（4.6）；由 worker 读取；时间均为北京时间
+  fetch_times: ["18:00", "07:30"]   # ◇ 周一至周五拉三所列表；07:30 是次日补拉
+  reject_drop_pct: 2.0          # ◇ 行数比该所上一份成功快照少 2% 以上 → 整份拒收
+  reject_key_missing_pct: 0.5   # ◇ 代码、简称、上市日期任一缺失率超过 0.5% → 整份拒收
+  missing_after_snapshots: 2    # ◇ 连续 2 份成功快照都没有该代码（且不在终止上市名单）才置 missing_from_list
+  vendor_stale_alert_days: 5    # ◇ vendor_stale_listed 连续超过 5 个工作日才告警
+  field_mismatch_alert_rows: 10 # ◇ 未关闭的 field_mismatch ≥ 10 条才告警
+  crosscheck_weekday: 6         # ◇ 巨潮/AKShare 交叉核对：每周六（1=周一）
 announcements:
   url_host_allowlist:           # ◇ 只有 https 且主机在此列表内的原文链接才返回给前端
     - www.sse.com.cn

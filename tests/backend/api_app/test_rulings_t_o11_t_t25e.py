@@ -181,9 +181,15 @@ def test_etf_without_data_source_t_plus_1_baseline(config_dir: Path, data_source
         assert lots.fund_t_plus(seg, security_type="etf", **kw) == 1, (str(seg.effective_from), kw)
 
 
-@pytest.mark.xfail(strict=False, reason=O_T1_GATE)
-@pytest.mark.parametrize("data_source", [None, ""], ids=["null", "empty_string"])
-@pytest.mark.parametrize("kw", T0_CANDIDATES)
+#: 架构师裁定（逐参数标记）+ 评审 d018fad m1：9e693b2 起 null 与空串 "" 共 12 项在本地 main 均稳定通过 → 全部严格，
+#: 不再带 xfail（空串项原 xfail(strict=True) 的前提“仍失败”已不成立）。origin 上无 app.market_rules.lots 时由 _lots()
+#: 运行时 xfail（O_LOTS，后端 T-B47-R10），不令 origin 变红。O_T1_GATE 仅作历史记录。
+T0_GATE_CASES = [
+    pytest.param(ds, p.values[0], id=f"{p.id}-{ds_id}") for p in T0_CANDIDATES for ds, ds_id in ((None, "null"), ("", "empty_string"))
+]
+
+
+@pytest.mark.parametrize(("data_source", "kw"), T0_GATE_CASES)
 def test_etf_without_data_source_always_t_plus_1(config_dir: Path, data_source: Any, kw: dict[str, Any]) -> None:
     """data_source 为 null / 空串：即使调用方传入 T+0 类别（债券/货币/黄金/商品期货/跨境 ETF、跨境 LOF），也必须返回 1。"""
     lots = _lots()

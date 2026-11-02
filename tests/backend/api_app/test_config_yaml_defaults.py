@@ -72,10 +72,14 @@ V025_DOCS_PENDING = "plan §6.1 仍为 v0.2.4：架构师 T-A06 bd33f83（v0.2.5
 V026_ADDED = {"ingest": ("licences", "data_sharing")}
 V026_DOCS_PENDING = "plan §6.1 仍为 v0.2.5：架构师 T-A07 308afd3（v0.2.6，每用户证书）不在所用 docs 中"
 #: v0.2.9 内 T-B47 裁定（架构师 4532478，仅本地 main）新增的顶层段：plan 已加、快照已同步（T-T25）
-V029_ADDED = {"realtime": ("admin_alerts",)}
+V029_ADDED = {"realtime": ("admin_alerts",), "securities": ("master",)}  # securities.master：评审 d018fad M4（T-A04 4.6）
 V029_DOCS_PENDING = "plan §6.1 尚无 realtime.admin_alerts：架构师 4532478（v0.2.9 内 T-B47 裁定）未推到 origin（运维推送）"
 #: 上述新段在仓库 config/*.yaml 与后端 pydantic 模型（extra="forbid"）中尚未落地 → 仅这些键的差异 xfail
 V029_BACKEND_PENDING = "后端 T-B47-x（R10）：config/realtime.yaml 与 app/config_files.py 尚无 admin_alerts（plan §6.1 v0.2.9 内裁定，问题 78）"
+#: 按文件区分的文档 / 后端待办说明（未列出的文件用上面两条 realtime 的说明）
+V029_DOCS_PENDING_BY = {"securities": "plan §6.1 securities.yaml 尚无 master 段：架构师 T-A04（4.6，本地 main）未推到 origin（运维推送）"}
+V029_BACKEND_PENDING_BY = {"securities": "后端 T-B51（T-A04 4.6 证券主数据）：config/securities.yaml 与 app/config_files.py "
+                                         "SecuritiesConfig 尚无 master 段（plan §6.1 v0.2.9 内，由 worker 读取）"}
 
 
 #: T-R10（docs/strategies/market_rules_T-R10.md，后端 07b8d74 已并入 config/market_rules.yaml 与 config_files）新增键：
@@ -421,7 +425,7 @@ def test_snapshot_equals_plan_block(docs_dir, name):
     if name in V026_ADDED and not set(V026_ADDED[name]) & set(plan) and set(V026_ADDED[name]) <= set(snap(name)):
         pytest.xfail(V026_DOCS_PENDING)
     if name in V029_ADDED and not set(V029_ADDED[name]) & set(plan) and set(V029_ADDED[name]) <= set(snap(name)):
-        pytest.xfail(V029_DOCS_PENDING)
+        pytest.xfail(V029_DOCS_PENDING_BY.get(name, V029_DOCS_PENDING))
     if name == "horizon_classifier" and plan != snap(name):
         d = diff_paths(plan, snap(name))
         if d and all(C5_UNIT_PATH.match(p) for p in d) and "unit: sign" in blocks[name]:
@@ -463,7 +467,7 @@ def test_backend_model_accepts_plan_snapshot(cfgtools, name):
     except Exception as exc:  # pydantic.ValidationError
         errs = getattr(exc, "errors", None)
         if callable(errs) and _only_v029_keys(name, [".".join(map(str, e["loc"])) for e in errs()]):
-            pytest.xfail(V029_BACKEND_PENDING)
+            pytest.xfail(V029_BACKEND_PENDING_BY.get(name, V029_BACKEND_PENDING))
         if name in OWNER:
             locs = sorted({".".join(map(str, e["loc"])) for e in getattr(exc, "errors", list)()})[:8]
             pytest.xfail(f"后端模型拒绝 plan §6.1 快照的 {name}.yaml（{locs}）：{OWNER[name]}")
@@ -486,7 +490,7 @@ def test_repo_yaml_equals_plan_defaults(name):
     got = load12(_repo_file(name).read_text(encoding="utf-8"))
     diffs = diff_paths(got, snap(name))
     if _only_v029_keys(name, diffs):
-        pytest.xfail(V029_BACKEND_PENDING)
+        pytest.xfail(V029_BACKEND_PENDING_BY.get(name, V029_BACKEND_PENDING))
     if diffs and name in OWNER:
         pytest.xfail(f"仓库 config/{name}.yaml 与 plan §6.1 快照不一致 {diffs[:8]}：{OWNER[name]}")
     assert diffs == []

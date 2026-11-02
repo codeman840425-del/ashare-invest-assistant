@@ -31,7 +31,8 @@ TODO = "后端 /meta/enums 未同步契约（T-B01 v0.2 修订；v0.2.3 由后�
 CONTRACT_VERSION = "v0.2.9"
 #: 用旧一版文档（origin/main 仍为 v0.2.7）运行时 xfail 而不是失败
 DOCS_PENDING = "docs 仍为 v0.2.7：契约 v0.2.8（T-A09 6ef79c4）未推到 origin（运维推送）"
-#: 各版本契约的错误码 / 原因码个数（v0.2.7、v0.2.8 无新增错误码、原因码：59 / 22）
+#: 各版本契约的错误码 / 原因码个数（v0.2.7、v0.2.8 无新增错误码、原因码：59 / 22）。评审 d018fad M2：错误码个数改为从
+#: 契约 §4 表解析（contract_error_row_count；v0.2.9 #34 加 414 URI_TOO_LONG 后为 60），此处第 1 项仅作历史记录，不再断言
 CODE_COUNTS = {"v0.2.4": (58, 23), "v0.2.5": (56, 22), "v0.2.6": (59, 22), "v0.2.7": (59, 22), "v0.2.8": (59, 22),
                "v0.2.9": (59, 22)}  # v0.2.9（T-A10）无新增错误码 / 原因码
 #: 契约 v0.2.8（T-A09 #4–#9）改动的已有枚举：security_type 加 etf（位于 cdr 与 index 之间）、gap_reason 加 not_applicable
@@ -110,6 +111,20 @@ def parse_enums(contract: str) -> dict[str, list[str]]:
 def parse_error_codes(contract: str) -> dict[str, int]:
     sec = _section(contract, "## 4. 错误码表", "\n### 4.1")
     return {m.group(2): int(m.group(1)) for m in re.finditer(r"^\| (\d{3}) \| `([A-Z0-9_]+)` \|", sec, re.M)}
+
+
+def contract_error_row_count(contract: str) -> int:
+    """契约 §4 错误码表的数据行数（宽松匹配“| 3 位状态码 |”开头的行），作为错误码个数的唯一来源（评审 d018fad M2：
+    不再写死 59 / 60；与严格解析器 ``parse_error_codes`` 的结果互相校验，防止漏行、重名或格式漂移）。"""
+    sec = _section(contract, "## 4. 错误码表", "\n### 4.1")
+    return len(re.findall(r"^\|\s*\d{3}\s*\|", sec, re.MULTILINE))
+
+
+def _assert_codes_count(contract: str) -> None:
+    errors = parse_error_codes(contract)
+    n = contract_error_row_count(contract)
+    assert n >= 56 and len(errors) == n, (len(errors), n)  # 严格解析 == §4 表行数（无重名、无漏行）
+    assert len(parse_reason_codes(contract)) == CODE_COUNTS[_docs_version(contract)][1]
 
 
 def parse_reason_codes(contract: str) -> dict[str, dict[str, Any]]:
@@ -199,17 +214,17 @@ def test_contract_parsers_sanity(contract):
     # v0.2.3：新增 413 PAYLOAD_TOO_LARGE（57 → 58）；v0.2.5：删 CONSENT_REQUIRED、STRATEGY_FIT_ACK_REQUIRED（58 → 56），
     # 删原因码 PROFILE_OR_CONSENT_MISSING（23 → 22）；v0.2.6：加 3 个 DATA_LICENCE_*（56 → 59）；v0.2.7：不变（59 / 22）
     assert errors["METHOD_NOT_ALLOWED"] == 405 and errors["PAYLOAD_TOO_LARGE"] == 413
-    assert (len(errors), len(parse_reason_codes(contract))) == CODE_COUNTS[_docs_version(contract)]
+    _assert_codes_count(contract)
 
 
 def test_v025_contract_drops_consent_and_assessment_items(contract):
     """v0.2.5 组 1（文档层）：契约 §3/§4/§6.1 不再有同意/测评枚举、``CONSENT_REQUIRED``、``STRATEGY_FIT_ACK_REQUIRED``、
-    ``PROFILE_OR_CONSENT_MISSING``；原因码 22 个（错误码个数见 CODE_COUNTS）。"""
+    ``PROFILE_OR_CONSENT_MISSING``；原因码 22 个（错误码个数取契约 §4 表行数）。"""
     if not _is_v025(contract):
         pytest.xfail(DOCS_PENDING)
     enums, errors, reasons = parse_enums(contract), parse_error_codes(contract), parse_reason_codes(contract)
     assert not set(V025_RETIRED_ENUMS) & set(enums)
-    assert not set(V025_RETIRED_ERRORS) & set(errors) and len(errors) == CODE_COUNTS[_docs_version(contract)][0]
+    assert not set(V025_RETIRED_ERRORS) & set(errors) and len(errors) == contract_error_row_count(contract)
     assert not set(V025_RETIRED_REASONS) & set(reasons) and len(reasons) == 22
 
 
@@ -259,7 +274,7 @@ def test_v027_contract_adds_enums(contract):
     assert {k: enums.get(k) for k in want} == want
     for name, value in V027_ENUM_ADDED.items():
         assert value in enums[name], name
-    assert (len(parse_error_codes(contract)), len(parse_reason_codes(contract))) == CODE_COUNTS[_docs_version(contract)]
+    _assert_codes_count(contract)
 
 
 def test_v027_meta_enums_has_new_enums(payload):
@@ -283,7 +298,7 @@ def test_v028_contract_changes_enums(contract):
     assert {k: enums.get(k) for k in V028_ENUM_CHANGED} == V028_ENUM_CHANGED
     for name, value in V028_ENUM_ADDED.items():
         assert enums[name][-1] == value, name  # 追加在末尾
-    assert (len(parse_error_codes(contract)), len(parse_reason_codes(contract))) == CODE_COUNTS["v0.2.8"]
+    _assert_codes_count(contract)
 
 
 def test_v028_meta_enums(payload):
@@ -415,3 +430,60 @@ def test_risk_control_labels(payload):
         "stop_take": "RC1", "position_cap": "RC2", "total_exposure": "RC3",
         "sector_concentration": "RC4", "loss_streak_drawdown": "RC5", "plan_violation": "RC6",
     }
+
+
+# ---------------- v0.2.9 #30 / T-A04 #33 / #34（T-B50，d3be426 在本地 main，未推 origin） ----------------
+#: 契约 §3（v0.2.9 #30）：操作计划状态与计划条件类型；（T-A04 #33）证券主数据对账差异种类与来源。取值顺序按契约 §3。
+V029_PLAN_ENUMS = {
+    "plan_status": ["active", "triggered", "done", "cancelled"],
+    "plan_condition_type": ["price_above", "price_below", "pct_change", "indicator", "event", "date", "custom"],
+}
+V029_RECON_ENUMS = {
+    "security_reconciliation_kind": ["vendor_stale_listed", "vendor_unknown", "quote_missing", "quote_conflict",
+                                     "field_mismatch"],
+    "security_reconciliation_source": ["mairui_lists", "mairui_real_all", "cninfo", "akshare"],
+}
+B_T_B50 = "后端 T-B50（契约 v0.2.9：/meta/enums 加 plan_status、plan_condition_type 等；d3be426 在本地 main，未推 origin）"
+DOCS_PENDING_T_B50 = "docs 未含契约 v0.2.9 #30/#33/#34（4b40e5c 等在本地 main，未推 origin；运维推送）"
+
+
+@pytest.mark.parametrize("name", sorted({**V029_PLAN_ENUMS, **V029_RECON_ENUMS}))
+def test_v029_contract_lists_t_b50_enums(contract, name):
+    """契约自检：§3 列出这 4 个枚举且取值与本文件常量一致（旧版 docs → xfail，运维推送）。"""
+    enums = parse_enums(contract)
+    if name not in enums:
+        pytest.xfail(DOCS_PENDING_T_B50 + f"：§3 无 {name}")
+    assert enums[name] == {**V029_PLAN_ENUMS, **V029_RECON_ENUMS}[name]
+
+
+@pytest.mark.parametrize("name", sorted(V029_PLAN_ENUMS))
+def test_v029_meta_enums_has_plan_enums(payload, name):
+    """契约 v0.2.9 #30 验收 8：``/meta/enums`` 含 plan_status、plan_condition_type，值与 §3 一致（逐值、按序）。
+    已实现即严格；缺键 → xfail，owner 后端 T-B50。"""
+    if name not in payload["enums"]:
+        pytest.xfail(B_T_B50 + f"：enums 缺 {name}")
+    assert list(payload["enums"][name]) == V029_PLAN_ENUMS[name]
+
+
+@pytest.mark.parametrize("name", sorted(V029_RECON_ENUMS))
+def test_v029_meta_enums_has_security_reconciliation_enums(payload, name):
+    """契约 v0.2.9 #33（T-A04）验收 1：``/meta/enums`` 含 security_reconciliation_kind / _source，值与 §3 一致。"""
+    if name not in payload["enums"]:
+        pytest.xfail(B_T_B50 + f"：enums 缺 {name}（T-A04 #33）")
+    assert list(payload["enums"][name]) == V029_RECON_ENUMS[name]
+
+
+def test_v029_error_codes_has_uri_too_long_414(payload):
+    """契约 v0.2.9 #34：``error_codes`` 登记 URI_TOO_LONG，HTTP 414（后端是否实际产生 414 不在本用例范围）。"""
+    got = {e["code"]: e for e in payload["error_codes"]}
+    if "URI_TOO_LONG" not in got:
+        pytest.xfail(B_T_B50 + "：error_codes 缺 URI_TOO_LONG（#34）")
+    assert got["URI_TOO_LONG"]["http_status"] == 414
+
+
+def test_v029_contract_has_uri_too_long_414(contract):
+    """契约自检（评审 d018fad M2）：§4 登记 ``414 URI_TOO_LONG``（v0.2.9 #34）；旧版 docs → xfail（运维推送）。"""
+    errors = parse_error_codes(contract)
+    if "URI_TOO_LONG" not in errors:
+        pytest.xfail(DOCS_PENDING_T_B50 + "：§4 无 URI_TOO_LONG")
+    assert errors["URI_TOO_LONG"] == 414 and len(errors) == contract_error_row_count(contract)

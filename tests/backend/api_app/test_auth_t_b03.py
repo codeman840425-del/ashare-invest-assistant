@@ -262,13 +262,33 @@ def user_session_keys(authdb: SimpleNamespace, uid: str) -> set[str]:
 #: 精确集合：origin 0008、main 0016（T-T25 追加：0014 bbf58a0 T-B46 imports/trades、0015 a8e055b T-B03f 评审修复、
 #: 0016 83a031c T-B10 research_candidates 部分唯一索引；0017 6670b10 T-B49 data_snapshots purpose=horizon + user_scoped CHECK，
 #: 须与 6670b10 一起推送）；中间版本在分批推送时可能成为 head。
-KNOWN_HEADS = ("0008", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017")
+#: 评审 d018fad M1：0018 9e693b2 T-B49b（horizon 触发器 on_demand）、0019 1398351 T-B51（证券主表）。
+#: 另以被测树 migrations/versions 的 revision/down_revision 链推出唯一 head，库中版本须等于它——以后新增迁移时
+#: 本用例会以"head 未登记"的明确信息失败，提醒同步本集合与 DB 自检。
+KNOWN_HEADS = ("0008", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019")
+
+_REV_RE = re.compile(r"""^(down_revision|revision)\b[^=]*=\s*(.+)$""", re.MULTILINE)
+
+
+def _tree_heads() -> set[str]:
+    """被测树迁移目录中没有被任何 down_revision 引用的 revision（正常应恰好一个）。"""
+    revs: set[str] = set()
+    downs: set[str] = set()
+    for f in sorted((BACKEND_DIR / "migrations" / "versions").glob("*.py")):
+        for key, val in _REV_RE.findall(f.read_text(encoding="utf-8")):
+            ids = set(re.findall(r"""['"]([^'"]+)['"]""", val))
+            (revs if key == "revision" else downs).update(ids)
+    return revs - downs
 
 
 def test_alembic_head_is_known(authdb: SimpleNamespace, sql: Callable[..., Any]) -> None:
-    """head 必须是已登记的版本（新迁移落地时同步本用例与 DB 自检）。"""
+    """head 必须是已登记的版本，且等于被测树迁移链的唯一 head（新迁移落地时同步本用例与 DB 自检）。"""
     assert (BACKEND_DIR / "migrations" / "versions").is_dir()
-    assert sql("SELECT version_num FROM alembic_version")[0][0] in KNOWN_HEADS
+    heads = _tree_heads()
+    assert len(heads) == 1, f"迁移目录应恰好一个 head：{sorted(heads)}"
+    v = sql("SELECT version_num FROM alembic_version")[0][0]
+    assert v == next(iter(heads)), (v, sorted(heads))
+    assert v in KNOWN_HEADS, f"head {v} 未登记到 KNOWN_HEADS（同步本集合与 DB 自检）"
 
 
 # ---------------------------------------------------------------------------
@@ -1059,11 +1079,33 @@ def test_v025_no_403_gate_without_or_with_low_profile(session: Callable[..., Sim
             assert r.json()["error"]["code"] not in {"CONSENT_REQUIRED", "CSRF_FAILED"}, (method, path)
 
 
-@pytest.mark.xfail(strict=False, reason="后端 T-B30（周期分类器 1.2.0 与 GET /horizon-assessments 尚未实现；T-A06 §3）")
+def _route_mounted(app: Any, method: str, path: str) -> bool:
+    """路由表里是否挂载 ``method path``（展开 Mount / 子路由 / effective_candidates，同 t23 的 app_routes）。"""
+    def walk(nodes: Any) -> bool:
+        for n in nodes:
+            if hasattr(n, "effective_candidates"):
+                if walk(n.effective_candidates()):
+                    return True
+            elif getattr(n, "path", None) and getattr(n, "methods", None):
+                if n.path == path and method in n.methods:
+                    return True
+            elif getattr(n, "routes", None) and walk(n.routes):
+                return True
+        return False
+
+    return walk(getattr(app, "routes", []))
+
+
+#: 评审 d018fad §3 / m2：接口层行为（GET /horizon-assessments、classifier 1.2.0、SH0C/IT0C 仅入 hints）已由
+#: 后端 T-B47（c9e1e73）交付并稳定通过 → 严格断言，归属 T-B47。T-B30/T-B30a 的真正验收（f.* 特征、落库真实
+#: snapshot_id、三种重算触发、proposed strategy_instances）见 test_horizon_t_b30a_acceptance.py（xfail strict）。
 def test_v025_horizon_assessment_has_hints_and_classifier_1_2_0(session: Callable[..., SimpleNamespace]) -> None:
     """v0.2.5 组 4（接口层）：``/horizon-assessments`` 返回 ``hints: HorizonHint[]``（永不为 null）、``classifier_version`` 1.2.0；
     novice 画像 → hints 含 SH0C/IT0C 且 caps 不含二者。规则层期望见 unit/test_horizon_cases.py。"""
     s = session()
+    if not _route_mounted(s.client.app, "GET", f"{API}/horizon-assessments"):
+        # origin 0cb78ad 尚无 T-B47（c9e1e73 在本地 main）：条件 xfail，不让 origin 变红；路由存在即严格断言
+        pytest.xfail("后端 T-B47（c9e1e73：GET /horizon-assessments 未推 origin）")
     hdr = {"X-CSRF-Token": s.csrf}
     assert s.client.put(f"{API}/me/profile", json=V025_LOW_PROFILE, headers=hdr).status_code == 200
     r = s.client.get(f"{API}/horizon-assessments", params={"security_code": "600000"})

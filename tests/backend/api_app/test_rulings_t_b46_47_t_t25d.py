@@ -108,9 +108,10 @@ def _account(call: Rec) -> str:
     return str(r.json()["id"])
 
 
-def _trade(call: Rec, acc: str, code: str, qty: int = 100, price: str = "10.00", fee: str | None = "5.00") -> Any:
+def _trade(call: Rec, acc: str, code: str, qty: int | str = 100, price: str = "10.00", fee: str | None = "5.00") -> Any:
+    # 评审 d018fad M3：契约 v0.2.9 R11 #9（后端 9e693b2）qty/price 为 string(decimal)，一律按字符串发送
     body: dict[str, Any] = {"account_id": acc, "trade_date": TRADE_DAY.isoformat(), "security_code": code,
-                            "side": "buy", "qty": qty, "price": price}
+                            "side": "buy", "qty": str(qty), "price": str(price)}
     if fee is not None:
         body["fee_total"] = fee
     return call("POST", "/trades", json=body)
@@ -323,7 +324,7 @@ def test_r8_malformed_code_is_400(hz: SimpleNamespace) -> None:
     assert r.status_code == 400, r.text[:300]
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_R8}：OpenAPI 的 security_code 参数应带 pattern")
+# 评审 d018fad m1：9e693b2 已给 security_code 加 pattern，稳定通过 → 严格（origin 无该路由时由 hz 的 require_route 运行时 xfail）
 def test_r8_openapi_has_pattern(hz: SimpleNamespace) -> None:
     spec = hz.s.client.get(f"{API}/openapi.json").json()
     params = spec["paths"][f"{API}/horizon-assessments"]["get"]["parameters"]

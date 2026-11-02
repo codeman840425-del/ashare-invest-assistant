@@ -2,12 +2,12 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | **v1.0.2（按 T003 探针 run-20261101-190106 p11 更新 §11 V1/V4/V7 状态与 §13 C7；v1.0.1 为 T-R11a/b 修订；v1.0 为 T-R11 首版，2026-11-01）**。本目录此前没有同类文件（已检索 `docs/strategies/`），本文为新建，不是更新 |
+| 版本 | **v1.1.0（T-R12：新增 §7A L-01 时点财务特征 F42–F46、§7B plrq 多版本、§7C 线上切换条件；F08/F33/F34 对 L-01 降为对照用；§11 V5 改为部分实测）**；此前 v1.0.2（按 T003 探针 run-20261101-190106 p11 更新 §11 V1/V4/V7 状态与 §13 C7；v1.0.1 为 T-R11a/b 修订；v1.0 为 T-R11 首版，2026-11-01）**。本目录此前没有同类文件（已检索 `docs/strategies/`），本文为新建，不是更新 |
 | 作者/维护 | 策略研究员（`docs/strategies/` 由研究员维护，架构师不改该目录，plan T-R11 行） |
-| 覆盖范围 | 仓库 `docs/`、`config/` 中出现的全部正式特征键 `f.*`，共 **41 个**：分类器 15 个（T-B30a）+ P0 策略卡 25 个（T-B43 / `_template.md` / `catalog.md`）+ P1 1 个（`validation.md`）。另列前端 mock 中出现的 11 个**非正式**键（§8），不计入 41 |
+| 覆盖范围 | 仓库 `docs/`、`config/` 中出现的全部正式特征键 `f.*`，共 **46 个**：分类器 15 个（T-B30a）+ P0 策略卡 25 个（T-B43 / `_template.md` / `catalog.md`）+ L-01 时点财务 5 个（v1.1.0，§7A，T-B55）+ P1 1 个（`validation.md`）。另列前端 mock 中出现的 11 个**非正式**键（§8），不计入 46 |
 | 消费方 | T-B30a（分类器 15 键数据层）、T-B43（P0 策略特征）、T-B35（特征底座 `feature_catalog` / `market.feature_bars_daily`）、T-B42（DSL 求值器） |
 | 依据 | `docs/plan.md`（2.5.3、2.5.10/2.5.11、2.5.11A、2.12.1–2.12.2、2.13、3A、第 9 节问题 76/77）；`docs/strategies/horizon_classifier.md` v1.2.0；`_template.md`；`catalog.md`；`market_rules_check.md`；`security_master.md`；`validation.md`；`team/reports/T003-mairui-capability.md`（以下简称 T003）；`team/reports/T-B46-47-rulings.md`（以下简称“裁定”）；`docs/api-contract.md` |
-| 不做的事 | 未调用麦蕊接口；未读取证书；未改 src/tests/deploy/config/plan。所有麦蕊接口与字段名**只引自上述文档**，文档未给出的一律标【待核实】 |
+| 不做的事 | 未调用麦蕊接口；未读取证书；未改 src/tests/deploy/config/plan。所有麦蕊接口与字段名**只引自上述文档**，文档未给出的一律标【待核实】。v1.1.0（T-R12）同样未调用麦蕊接口，只读仓库已有探针结果（run-20261101-190106）与巨潮公开原文；L-01 口径依据 `team/reports/L-01-basis-ruling.md` 与 plan 2.12.1 |
 
 > 与裁定的位置差异：裁定 R9 / plan T-R11 行要求口径写在 `horizon_classifier.md` 附录。本次按任务要求主文写在本文件，`horizon_classifier.md` 末尾只加了“附录：15 个 `f.*` 特征口径与手算样例”指针节（见 §13 冲突 C1）。
 
@@ -35,7 +35,7 @@
 | 日线派生（价、量、额、波动、均线、涨停计数） | d 日收盘快照 15:05 定版，日线落库后（`daily_bars` 新鲜度阈 17:00） | plan 第 146 行（15:05 收盘快照定版）、第 2276 行 `daily_bars_due` | d 日盘后及 d+1 日盘中。**d 日盘中不得使用 d 日的值** |
 | 麦蕊因子（`/factor/...`） | d 日 16:30 后 | plan 第 1983 行；T003“因子全是日频，不能用于盘中” | 同上 |
 | 资金流日数据 | d 日 15:40 后 | `_template.md` data_needs `f.main_net_20d`；T003 | 同上 |
-| 财务报表 | 披露日 `plrq` 的**次一交易日 09:30**（只有日期、无时刻 → 按盘后处理） | plan 2.12.1 第 1157–1160 行；`_template.md` `f.np_yoy_latest` | 次一交易日起 |
+| 财务报表 | 披露日 `plrq` 的**次一交易日 09:30**（只有日期、无时刻 → 按盘后处理）；`plrq ≤ jzrq` 占位行丢弃；同一报告期多版本取 T 时可见的最新版本（§7A.0、§7B） | plan 2.12.1 第 1157–1160、1178–1185 行；`_template.md` `f.np_yoy_latest` | 次一交易日起 |
 | 公告 | `max(公告时间戳, first_seen_at)`；盘后/只有日期 → 次一交易日开盘 | plan 2.5.11A ⑦、2.12.2 | 次一交易日开盘起 |
 | 证券主数据（上市日期、简称、ST、上市状态） | 每日 18:00 拉取、07:30 补拉 | `security_master.md` §6-1（每个交易日 18:00 拉取、次日 07:30 补拉，均为建议值） | d+1 起（d 日 18:00 前的评估用 d−1 的快照） |
 | 申万行业归属 | 每周更新，**无历史成分** | T003 `/hszg/*` | 只能从落库之日起按周快照做时点回看 |
@@ -45,7 +45,7 @@
 1. 每个 `feature_bars_daily` 行除 `trade_date = d` 外，还应记录 `available_at`（该值最早可被使用的时刻）。求值器只能读 `available_at ≤ 评估时刻` 的行（plan 2.12.1）。
 2. 分类器（`horizon_classifier.md` §1）读取“评估时刻前最近一个已完成盘后落库的 d”：交易时段内评估 → d = T−1；T 日日线已落库后（约 17:00 后）的评估 → d = T；周六重算 → d = 周五。快照 `snapshot_id` 记录 d。
 3. 前复权序列在每次除权后整列重算（`_template.md` §7.3）。**回测**中任何“价格水平”比较（如低价股 < 2 元、与涨跌停价比较）必须用不复权价，前复权只用于比值类（收益、均线比、波动）。见 §1.3。
-4. 历史回算：麦蕊因子是否为“当时口径”未核实（T003、catalog L-01 ④）。**在 T-B05 核实前，因子历史值只用于实时（当日值），回测/回算用本地按本文公式派生的值**，并在 `feature_catalog.pit_rule` 写明。
+4. 历史回算：麦蕊因子是否为“当时口径”未核实（T003、catalog L-01 ④）。**在 T-B05 核实前，因子历史值只用于实时（当日值），回测/回算用本地按本文公式派生的值**，并在 `feature_catalog.pit_rule` 写明。L-01 的 PE、ROE、现金流比、负债率改用 §7A 时点自算键（v1.1.0）。
 
 ### 1.2 窗口与有效 K 线
 
@@ -181,12 +181,13 @@
 ### F08 `f.roe_ttm` — ROE(TTM)
 - **含义**：滚动 12 个月净资产收益率。
 - **公式（主口径）**：麦蕊因子 `roe_ttm`（质量 quality 类）原值。分类器按 `pct` 使用（12 表示 12%，`horizon_classifier.md` 单位约定）。因子返回单位是 12 还是 0.12【待核实】；若为小数，入库时 ×100 并在 `feature_catalog.derivation` 写明。取 2 位小数。
-- **公式（备选）**：归母净利润 TTM / 平均归母净资产 × 100；所需报表字段名【待核实：T003 只列出 `jzrq`、`plrq` 两个字段，其余未摘录】。
+- **公式（备选）**：v1.1.0 起即 F44 `f.roe_ttm_pit`（§7A，字段 `gsmgsyzzdjlr`、`gsmgdqsyhj` 已实测）。
+- **v1.1.0 角色**：对 L-01 **降为对照用**（L-01 改读 F44，切换条件见 §7C）；分类器 SW5、LG0B、LG2 仍读本键（L-01 裁定“分类器不变”）。
 - **来源**：`/factor/quality/{code}`；报表 `/hsstock/financial/{income|balance}/...`（T003）。
 - **可得时点**：因子 d 日 16:30 后；底层财报遵循 `plrq` 次一交易日 09:30 规则（因子是否已按此对齐【待核实】，T-B05 核对一家在 d 日盘后披露年报的公司 d 与 d+1 的因子值）。
 - **边界**：负 ROE 是真实值，保留负数；无财报/因子空 → null（LG0B 封顶）；金融股无特殊处理。
 - **rank_pct**：不使用。
-- **引用**：SW5、LG0B、LG2；L-01 质量护栏（`catalog.md` L-01 列 `roe_ttm`）；P0。
+- **引用**：SW5、LG0B、LG2；L-01 对照（v1.1.0 前为 L-01 质量护栏）；P0。
 
 ### F09 `f.profit_cagr_3y` — 近 3 年净利润复合增速
 - **含义**：成长性。
@@ -217,7 +218,7 @@
 
 ### F12 `f.fin_report_count` — 已披露财报期数
 - **含义**：基本面历史完整度（≥ 12 期 ≈ 3 年季报）。
-- **公式**：`count(distinct jzrq)`，计入条件：该报告期的利润表在 d 日收盘时已可得，即 `next_trading_day(plrq) ≤ d`（`plrq` 只有日期 → 按盘后，次一交易日 09:30 可得，plan 2.12.1）。一季报、半年报、三季报、年报各算 1 期；同一报告期的更正/补充不重复计。单位 `count`，整数。
+- **公式**：`count(distinct jzrq)`，计入条件：该报告期的利润表在 d 日收盘时已可得，即 `next_trading_day(plrq) ≤ d`（`plrq` 只有日期 → 按盘后，次一交易日 09:30 可得，plan 2.12.1）。一季报、半年报、三季报、年报各算 1 期；同一报告期的更正/补充/次年比较数不重复计；`plrq ≤ jzrq` 的占位行不计（v1.1.0，§7B R1）。单位 `count`，整数。
 - **来源**：`/hsstock/financial/income/{code}`（T003）字段 `jzrq`（截止日期）、`plrq`（披露日期）【两字段名见 T003，返回内容未实测：待核实】。
 - **可得时点**：随财报，次一交易日 09:30。
 - **边界**：接口无数据 → null（不是 0）；`plrq` 为空的历史期【建议】按法定最晚披露日估计可得日（一季报/三季报次月末、半年报 8 月 31 日、年报次年 4 月 30 日，出处待补：仓库内未找到），并在 `pit_rule` 标 `estimated_available`；只统计上市后的报告期还是含招股书期【待核实】。
@@ -288,7 +289,7 @@
 
 ### F22 `f.np_yoy_latest` — 最新一期归母净利润同比
 - **公式**：取 `next_trading_day(plrq) ≤ d` 的最新一期报告（按 `jzrq` 最大，同 `jzrq` 取最晚披露版本），`(NP_本期 / NP_上年同期 − 1) × 100`；两期都是“年初至报告期末”累计口径。单位 `pct`，2 位小数。
-- **来源**：`/hsstock/financial/income/{code}`；`jzrq`、`plrq` 见 T003；**净利润字段名【待核实】**。对照：麦蕊因子 `profit_yoy`（growth 类，基期 ≤ 0 为 null）。
+- **来源**：`/hsstock/financial/income/{code}`；`jzrq`、`plrq` 见 T003；净利润字段 = `gsmgsyzzdjlr`（归母，v1.1.0 已实测，§7A.0）。版本选择按 §7B R1–R2（“同 `jzrq` 取最晚披露版本”指 T 时可见版本中最晚的）。对照：麦蕊因子 `profit_yoy`（growth 类，基期 ≤ 0 为 null）。
 - **可得时点**：披露日次一交易日 09:30（`_template.md` data_needs，plan 2.12.1）。
 - **边界**：上年同期 ≤ 0 → null；上年同期缺失 → null；更正公告覆盖原值时，回测必须按各版本的披露日取当时可见值（plan 2.12.1 第 1157 行“按当时可得”）。
 - **引用**：W-01（`_template.md` 夹具 `f.np_yoy_latest: 12.0`；null 夹具 → 数据缺失分支）；W-05（P1）；P0。
@@ -376,13 +377,15 @@
 - **来源**：`/factor/valuation/{code}`；快照字段 `pe`（T003）只作对照（口径可能是动态 PE，不得混用）。
 - **可得时点**：d 日 16:30 后。
 - **边界**：空 → null；≤ 0 保留原值但不进入 F34 的分位计算。
-- **引用**：L-01（`rank_pct_in(f.pe_ttm, f.sw_l1)`，catalog）；P0。
+- **v1.1.0 角色**：对 L-01 **降为对照用**，L-01 改读 F42 `f.pe_ttm_pit`（切换条件 §7C）。
+- **引用**：L-01 对照（v1.1.0 前为 `rank_pct_in(f.pe_ttm, f.sw_l1)`）；P0。
 
 ### F34 `f.pe_ttm_ind_pct` — PE_TTM 行业内分位
 - **公式**：`rank_pct_in(f.pe_ttm, f.sw_l1)`：池 = §1.4 股票池（L-01 另可叠加 plan 2.12.1 因子池排除，由卡决定）且 `f.pe_ttm > 0`；按 d 日 `f.sw_l1` 分组；组内升序平均秩 / 组内 N。单位 `ratio`（0–1），4 位小数。
 - **边界**：`f.pe_ttm ≤ 0` 或 null → null；组内 N < 5 → null【建议】；`f.sw_l1` null → null。
 - **可得时点**：d 日 16:30 后且行业快照已存在。
-- **引用**：L-01（每月首个交易日盘后）；P0。
+- **v1.1.0 角色**：对 L-01 **降为对照用**，L-01 改读 F43 `f.pe_ttm_pit_ind_pct`（§7C）。
+- **引用**：L-01 对照；P0。
 
 ### F35 `f.limit_up_price` / F36 `f.limit_down_price` — 当日涨/跌停价
 - **公式**：`round_half_up(基准价 × (1 ± 比例), 0.01)`，含沪 3.3.17、深 3.3.19 的两条舍入边界条款（`market_rules_check.md` 已核实）；比例按 `market_rules.yaml` 生效日分段（沪深主板 10%，ST/*ST 2026-07-06 起 10%、此前 5%；创业板/科创板 20%（含风险警示）；北交所 30%）。**基准价 = 交易所当日“前收盘价”，除权除息日为除权（息）参考价**；数据上优先取日线 `pc` / 快照 `yc`（昨收）【待核实：二者在除权日是否已是参考价；如不是，需用除权数据自行计算】。不复权。单位 `CNY_per_share`，2 位小数。
@@ -403,6 +406,190 @@
 - **边界**：同 F37。
 - **引用**：G-01 `LIMIT_LOCKED`（plan 2.5.14 ⑯）；W-01 夹具 `f.limit_locked_up: true`；P0。
 
+## 7A. L-01 时点财务特征（v1.1.0，T-R12；依据 L-01 口径裁定与 plan 2.12.1“财务按时点自算”）
+
+本节登记 L-01 研究、回测（以及切换后的线上）使用的时点（point-in-time，PIT）特征键。数值由 T-B55 计算并写入 `market.financial_derived`，T-B35 读取。键名与 `financial_derived.metric` 的对应关系：`f.pe_ttm_pit`↔`pe_ttm`、`f.roe_ttm_pit`↔`roe_ttm`、`f.ocf_to_np_ttm_pit`↔`ocf_to_np_ttm`、`f.debt_ratio_pit`↔`debt_ratio`（plan 第 1491 行）。`f.pe_ttm_pit_ind_pct` 是截面派生，不落 `financial_derived`。
+
+**范围**：只登记裁定与 L-01 卡实际用到的 5 个键（F42–F46）。TTM 归母净利润、归母权益只是**分量**（§7A.0 的 C1–C3），不另设特征键。L-01 卡中的 **PB 分位裁定没有给出口径，本次不登记键**，见 §11 G3。
+
+**旧键降级**：F33 `f.pe_ttm`、F34 `f.pe_ttm_ind_pct`、F08 `f.roe_ttm` 对 L-01 降为“对照用”（只出截面对照报告，不进入 L-01 规则）。分类器 SW5、LG0B、LG2 仍读 F08（裁定“分类器不变”）。L-01 线上何时改读新键，按 §7C 的切换条件执行。
+
+### 7A.0 共用定义
+
+**来源字段（只用已实测字段；实测出处：探针 run-20261101-190106 的 `samples/p05_fin_*.json`、`results/p05_fundamental.json` 和 `results/p11_gaps.json`，以及巨潮原文核对）**
+
+| 分量 | 接口 | 字段 | 实测证据 | 状态 |
+|---|---|---|---|---|
+| 报告期、披露日 | 三张报表都有 | `jzrq`（截止日期）、`plrq`（披露日期） | p11 GAP3：三只样本 `plrq` 空值率 0 | 已实测 |
+| 归母净利润（YTD） | `/hsstock/financial/income/{code.市场}` | `gsmgsyzzdjlr` | 600519 2026-06-30 行：`jlr` 46,033,330,566.78 − `ssgdsy` 1,516,450,144.92 = `gsmgsyzzdjlr` 44,516,880,421.86（逐分相等）。巨潮核对：600519 2001H1 = 223,407,942.67 元（《股票上市公告书暨2001年中期财务报告》，2001-08-22）；000001 2026Q3 = 39,186 百万元（《2026年三季度报告》，2026-10-24）。两处都与麦蕊值相同 | 已实测；单位为**元**（麦蕊已把百万元换算成元） |
+| 累计口径 | 同上 | — | 600519 2026Q1 = 27,242,512,886.45，2026H1 = 44,516,880,421.86（年初至报告期末累计）；巨潮季报“年初至报告期末”列与之对应（§7B 样本 1、2） | 已实测（income） |
+| 归母权益 | `/hsstock/financial/balance/{code.市场}` | `gsmgdqsyhj` | 600519：`gsmgdqsyhj` 251,253,594,419.50 + `ssgdqy` 10,842,757,754.86 = `syzqyhj` 262,096,352,174.36 | 600519 已实测；**银行、保险的 balance 未实测（pending，V5b）** |
+| 负债、资产合计 | 同上 | `fzhj`、`zczj` | 600519 样本中字段存在 | 字段存在已实测；数值关系未核（pending，V5b） |
+| 经营活动现金流净额（YTD） | `/hsstock/financial/cashflow/{code.市场}` | 主用 `jyhdcsdxjlxj`；`jyhdcsdxjlje` 只作回退 | 600519 2026-06-30：`jyhdcsdxjlxj` = 70,690,750,119.06 = 流入 `jyhdxjlrxj` 109,245,728,301.02 − 流出 `jyhdxjlcxj` 38,554,978,181.96；同一行 `jyhdcsdxjlje` = `'-'`（2026-03-31 行也是 `'-'`）。plan 写的是 `jyhdcsdxjlje` | **pending（V5c）**：两字段在其他公司、其他年份的填充情况未实测；在架构师确认前按“`jyhdcsdxjlxj` 非空取它，否则取 `jyhdcsdxjlje`，都空 → null”执行，并在 `basis.ocf_field` 记录实际取用的字段 |
+| 总股本 | `/hsstock/financial/capital/{code.市场}`（探针 p05 实测路径） | `zgb`、`bdrq`（变动日期）、`plrq` | 600519：`bdrq` "20260930"、`plrq` "2026-09-30"、`zgb` 1,250,081,601（股） | 字段已实测；**`plrq` = `bdrq` 的含义未核实（V5d）** |
+| 不复权收盘价 | `/hsstock/history/{code.市场}/d/n` | `c` | 探针样本 `p02_latest_d_n.json` 中有 `c` 字段；该接口的 `a`、`v` 单位已实测（V1） | 字段已实测（同 G1 `f.close_raw`） |
+
+空值：麦蕊用字符串 `'-'` 表示空，一律视为 null，不得当 0。
+
+**版本选择（裁定原文 + 本节补充；对所有分量相同）**
+
+1. 版本 = `market.financial_reports` 中同一 (code, report_type, jzrq) 的一行。
+2. **占位行丢弃**：`plrq ≤ jzrq` 的行不参与任何计算（裁定）。实例见 §7B 样本 5。
+3. `available_from`：
+   - 基本规则：`next_trading_day(plrq)` 09:30（只有日期 → 按盘后处理；裁定 / plan 2.12.1）。
+   - 上线后新出现的版本：取 `max(next_trading_day(plrq) 09:30, first_seen_at 之后的下一个 09:30 开盘)`（裁定“与 `plrq` 不一致时以较晚者为准”）。
+   - 【补充，避免历史全部失效】T-B55 首次全量回填时写入的行，`first_seen_at` 是回填时间，不代表当年的可见时间。这些行**只按 `plrq` 计算**，并标 `basis.pit_basis = plrq_only`。判定方法：`plrq < 首次全量回填日`。
+   - 【补充】`available_from` 不早于该证券上市日（招股书期数据在上市前没有价格，无影响，只为避免排序歧义）。
+4. **取当时可见的最新版本**：在评估时刻 T，对每个 (report_type, jzrq) 只取 `available_from ≤ T` 的行中 `available_from` 最大的一行。若 `available_from` 相同，取 `first_seen_at` 较晚的；仍相同且数值不同 → 该分量 null，并告警 `data_conflict`。
+5. **重述不回写**：新版本只从它自己的 `available_from` 起生效。在它之前计算并落库的 `financial_derived` 行保持不变；新版本生效后另起新行（PK 中有 `version_available_from`）。
+6. 同一个 TTM 可以混用不同版本的分量（例如本年 YTD 用首发版，上年同期 YTD 用次年报告中的比较数）。这正是 T 时市场可见的信息。各分量所用版本的 `plrq` 记入 `basis.versions`。
+7. 不做版本间的数值精确相等比较：同一数值在次年报告中可能按千元或百万元列示，存在取整差（§7B 样本 3）。
+
+**TTM 与报告期回退（裁定原文 + 本节补充）**
+
+- `YTD(y,q)`：y 年第 q 季度的年初至报告期末累计值；`FY(y)` = `YTD(y,4)`。
+- `TTM(y,q) = YTD(y,q) + FY(y−1) − YTD(y−1,q)`；q = 4 时 `TTM = FY(y)`。
+- 报告期 P 的选法：从 T 时可见的最新 `jzrq` 开始往前逐期尝试，取第一个“所需分量在 T 时都可见且非 null”的 P。
+- 回退下限：`jzrq(P) ≥ T 的日期往前推 15 个自然月的同一日`（该月没有这一日时取月末）。没有满足条件的 P → null，并标 `basis.fallback = exhausted`。只要 P 不是最新一期，就标 `basis.fallback = true`，并记录跳过的期数。
+- 【补充】若有分量需要同时计算 TTM 归母净利润和 TTM 经营现金流（`f.ocf_to_np_ttm_pit`），两者必须用**同一个 P**，不得分子、分母各自回退。
+
+**分量（不设特征键）**
+
+- **C1 TTM 归母净利润** `NP_TTM(P)`：用 `gsmgsyzzdjlr` 按上式计算。单位为元。
+- **C2 归母权益** `E(P)`：P 期 `gsmgdqsyhj`。这是时点值，不做 TTM。
+- **C3 TTM 经营现金流** `OCF_TTM(P)`：按 `ocf_field` 计算 TTM。cashflow 是否为累计口径：600519 2026Q1 = 26,909,891,269.13，2026H1 = 70,690,750,119.06，与累计口径一致，但只有一家公司的实测，**需 T-B05 复核（V5c）**。
+
+**金融类处理**
+
+- 银行（000001、600000 样本）的 income 中 `jlr`、`gsmgsyzzdjlr` 都有值，C1 照常计算。因此 F42–F45 对金融类**不做特殊处理**。
+- F46 资产负债率：银行、保险为 null（裁定）。银行 = `f.sw_l1` 为“银行”。保险 = 申万二级“保险”。**目前没有申万二级特征，`f.sw_l1` 代码格式也未核实（V9）→ 保险的识别是 pending（V5e）**。证券公司照常计算（裁定没有排除）。
+
+**时点总结**
+
+财务类分量在 `next_trading_day(plrq) 09:30` 起可见（遵循上面第 3 条）。含价格的键（F42、F43）在 d 日日线落库后可得，适用于 d 日盘后和 d+1 日。
+
+### F42 `f.pe_ttm_pit` — 市盈率 TTM（时点自算）
+- **公式**：`pe = close_raw(d) × zgb(d) ÷ NP_TTM(P)`，单位“倍”，2 位小数。
+- **市值口径**：d 日不复权收盘价 `c`（`/hsstock/history/{code.市场}/d/n`）× 总股本 `zgb(d)`，单位为元。
+  - `zgb(d)` 取 capital 中 `bdrq ≤ d` 且 `next_trading_day(plrq) ≤ d` 的行里 `bdrq` 最大的一行（裁定“`bdrq ≤ T` 且已披露”）。
+  - `bdrq` 相同时，按第 4 条版本规则处理。
+  - 用总股本，不用流通股本（`ysltag`、`xsltgf` 不用）。
+- **归母口径**：分母为 C1，即归母净利润 `gsmgsyzzdjlr`，不用 `jlr`（含少数股东损益）。
+- **不用每股字段**：`jbmgsy`、`xsmgsy` 等会因送转被追溯重述（§7B 样本 2），不得用“价格 ÷ EPS”计算。
+- **可得时点**：d 日日线落库后（约 17:00，`daily_bars_due`），且所用财报 `available_from ≤ d 09:30`。
+- **边界**：
+  - `NP_TTM ≤ 0` → null（裁定：不给负 PE）。
+  - C1 缺期或回退耗尽 → null。
+  - d 日无日线（停牌）→ null。
+  - `zgb` 缺失 → null。
+  - 金融类照常计算。
+- **basis**：所用 P、各分量 `plrq`、`zgb` 的 `bdrq`、`fallback`、`calc_version`。
+- **引用**：L-01（替代 F33）；P0。
+
+### F43 `f.pe_ttm_pit_ind_pct` — PE_TTM（时点）行业内分位
+- **公式**：`rank_pct_in(f.pe_ttm_pit, f.sw_l1)`。池 = §1.4 股票池叠加 plan 2.12.1 因子池排除（停牌、ST/*ST、退市整理、上市 < 60 个交易日），并要求 `f.pe_ttm_pit` 非 null。按 d 日 `f.sw_l1` 分组，组内升序平均秩 / 组内 N。单位 `ratio`（0–1），4 位小数。L-01“PE 分位 ≤ 30%”写成 ≤ 0.3。
+- **边界**：
+  - `f.pe_ttm_pit` 为 null → null（因此亏损股不进入分母）。
+  - 组内 N < 5 → null【建议，同 F34】。
+  - `f.sw_l1` 为 null → null。
+- **可得时点**：同 F42，且行业快照已存在。
+- **引用**：L-01（替代 F34）；P0。
+
+### F44 `f.roe_ttm_pit` — ROE TTM（时点自算）
+- **公式**：`roe = NP_TTM(P) ÷ avg(E(P), E(P−4)) × 100`，单位 `pct`（12 = 12%），2 位小数。L-01“ROE_TTM ≥ 8%”写成 ≥ 8。P−4 是上年同期的报告期。
+- **分母**：取期初、期末平均，即 `(E(P) + E(P−4)) / 2`（裁定）。E(P−4) 必须在 T 时可见。
+  - E(P−4) 缺失 → 只用 E(P)，并标 `basis.roe_basis = single_period`（裁定）。
+  - 【补充】E(P−4) ≤ 0 时同样按缺失处理（标 `single_period`，`reason = prior_equity_nonpositive`）。
+- **归母口径**：分子用 C1，分母用 C2（`gsmgdqsyhj`，不含少数股东权益 `ssgdqy`）。
+- **可得时点**：`next_trading_day(plrq) 09:30`（按版本规则）。日频读取时，取 T 时最新可算的 P。
+- **边界**：
+  - `E(P) ≤ 0` 或 null → null。
+  - C1 缺期或回退耗尽 → null。
+  - `NP_TTM ≤ 0` 时**保留负值**。裁定只规定了 PE 和现金流比在净利润 ≤ 0 时为 null；这与 F08“负 ROE 是真实值”一致。对 L-01 来说，负值同样不满足 ≥ 8。
+  - 金融类照常计算。银行、保险的 `gsmgdqsyhj` 未实测（V5b），实测前该类证券本键标 `declared`。
+- **引用**：L-01 质量护栏（替代 F08）；P0。
+
+### F45 `f.ocf_to_np_ttm_pit` — 经营现金流 / 归母净利润（TTM，时点）
+- **公式**：`OCF_TTM(P) ÷ NP_TTM(P)`，同一个 P。单位 `ratio`，4 位小数。L-01“≥ 0.8”写成 ≥ 0.8。
+- **口径说明**：
+  - 分子是合并口径的经营现金流（报表没有归母现金流），分母是归母净利润。这是裁定原文的口径，本文不改。
+  - 少数股东占比高的公司比值会偏高，需在 L-01 研究报告中说明。
+- **来源字段**：`jyhdcsdxjlxj`（主用）/ `jyhdcsdxjlje`（回退），**pending（V5c）**。
+- **可得时点**：同 F44。
+- **边界**：
+  - `NP_TTM ≤ 0` → null（裁定）。
+  - `OCF_TTM` 任一分量缺失 → null，且不单独回退（§7A.0）。
+  - 金融类照常计算。银行经营现金流受存贷款变动驱动，对 L-01 意义有限，是否排除由研究员在 L-01 卡中决定，本键不处理。
+- **引用**：L-01；P0。
+
+### F46 `f.debt_ratio_pit` — 资产负债率（时点）
+- **公式**：`fzhj(P) ÷ zczj(P)`，P 为 T 时可见的最新 balance 报告期，回退规则同 §7A.0（不做 TTM）。单位 `ratio`，4 位小数。
+- **L-01 用法**：“不在行业前 10%”写成 `rank_pct_in(f.debt_ratio_pit, f.sw_l1) ≤ 0.9`。池同 F43，不另设分位键。
+- **边界**：
+  - 银行、保险 → null（裁定）。识别方法 pending（V5e）。
+  - `zczj ≤ 0` 或 null → null。
+  - `fzhj` 为 null → null。
+- **可得时点**：同 F44。
+- **引用**：L-01；P0。
+
+---
+
+## 7B. 同一报告期多个 `plrq` 版本的含义与处理（T-R12）
+
+**现象**：探针 p11 GAP3 发现 income 中同一 `jzrq` 有多行，`plrq` 不同，并列出了差异字段名，但**没有保存各版本的数值**。探针曾推测“披露日 − 报告期 > 400 天的行可能是被更正公告覆盖”。本节用巨潮原文核对这一推测。
+
+**核对样本**（巨潮资讯网；PDF 文本对照，数值单位见各行）
+
+| # | 证券、报告期 | 麦蕊 `plrq` 版本与差异字段（p11） | 原始报告 | 后一版本对应的公告 | 差异原因（原文核对结论） |
+|---|---|---|---|---|---|
+| 1 | 600519 2009-03-31 | 2009-04-21 / 2010-04-26；`gsssgdzhsyz`、`xsmgsy`、`zhsyz` | 《2009年第一季度报告》2009-04-21，https://static.cninfo.com.cn/finalpage/2009-04-21/51494501.PDF ：归母净利润 1,217,009,471.66 元；**没有**稀释每股收益和综合收益行 | 《2010年第一季度报告》2010-04-26，https://static.cninfo.com.cn/finalpage/2010-04-26/57870509.PDF ：上年同期列归母净利润同为 1,217,009,471.66；新增稀释 EPS 1.29、综合收益总额 1,278,840,567.82、归母综合收益 1,217,009,471.66 | **次年同期报告的比较数**，新增列报项目；利润额不变 |
+| 2 | 600519 2010-09-30 | 2010-10-29 / 2011-10-18；`jbmgsy` 等每股字段 | 《2010年第三季度报告》2010-10-29，https://static.cninfo.com.cn/finalpage/2010-10-29/58594788.PDF ：年初至报告期末归母净利润 4,174,173,993.26，EPS 4.42 | 《2011年第三季度报告》2011-10-18，https://static.cninfo.com.cn/finalpage/2011-10-18/60069945.PDF ：上年同期归母净利润同为 4,174,173,993.26，EPS 重述为 4.02，注明“按照公司根据2010年度股东大会决议实施2010年度利润分配方案后的股本总数重新计算”。依据：《2010年度利润分配实施公告》2011-06-27，https://static.cninfo.com.cn/finalpage/2011-06-27/59599592.PDF （每 10 股送 1 股派 23 元，除权日 2011-07-01） | **送股导致每股指标追溯重述**；利润额不变 |
+| 3 | 000001 2007-03-31 | 2007-04-26 / 2008-04-24；`jlr`、`gsmgsyzzdjlr`、`lrze`、`sdsfy`、`gyjzbdsy` 等 | 《2007年第一季度报告》2007-04-26，https://static.cninfo.com.cn/finalpage/2007-04-26/23091333.PDF （单位元）：净利润 535,083,658；公允价值变动收益 2,979,632；另列“投资性房地产公允价值变动” 534,080 | 《2008年第一季度报告》2008-04-24，https://static.cninfo.com.cn/finalpage/2008-04-24/39078279.PDF （**单位千元**）：上年同期净利润 535,084；公允价值变动收益 3,514（= 2,979,632 + 534,080 = 3,513,712，重分类后取整） | **列报重分类 + 单位变为千元导致取整差**。麦蕊 `jlr` 等字段出现差异，推测是千元取整造成的（麦蕊两版数值未保存在探针中：**未核实**） |
+| 4 | 600000 2007-03-31 | 2007-04-28 / 2008-04-26；`jlr`、`gsmgsyzzdjlr`、`yysr` 等 | 《2007年第一季度报告》2007-04-28，https://static.cninfo.com.cn/finalpage/2007-04-28/23195982.PDF ：旧版银行报表格式，净利润 978,286,343.73 元 | 《2008年第一季度报告》2008-04-26，https://static.cninfo.com.cn/finalpage/2008-04-26/39207138.PDF ：上年同期净利润 981,189,275.46 元（+2,902,931.73） | **真实的数值重述**（比较数被追溯调整）。原文没有写原因；推测与 2007 年执行新会计准则有关（**未核实**） |
+| 5 | 600000 1996-12-31 | `plrq` = 1996-12-31（= `jzrq`） | 1996 年数据最早公开于《上海浦东发展银行股份有限公司招股说明书概要》1999-09-20，https://static.cninfo.com.cn/finalpage/1999-09-20/171672.html （审计范围含 1996-12-31 资产负债表和 1996 年度利润表） | — | **占位行**：`plrq` 不是真实披露日。按 `plrq ≤ jzrq` 丢弃（裁定） |
+
+另有两处直接数值核对（单版本）：600519 2001H1 `gsmgsyzzdjlr` 223,407,942.67 = 巨潮《股票上市公告书暨2001年中期财务报告》（2001-08-22，https://static.cninfo.com.cn/finalpage/2001-08-22/53299295.PDF ）的净利润，`plrq` 与公告日相同；000001 2026Q3 `gsmgsyzzdjlr` 39,186,000,000 = 巨潮《2026年三季度报告》（2026-10-24，https://static.cninfo.com.cn/finalpage/2026-10-24/1225620609.PDF ）的“归属于本行股东的净利润”年初至报告期末 39,186 百万元，`plrq` 与公告日相同。
+
+**结论**
+
+1. 样本中的后一版本都是**下一年同期定期报告里的“上年同期”比较数**。麦蕊把它作为同一 `jzrq` 的新一行保存，`plrq` 记为该定期报告的披露日。
+2. 差异分三类：
+   - (a) 新增列报项目，数值不变（样本 1）；
+   - (b) 每股指标因送转追溯重述，或金额因单位或重分类出现取整差（样本 2、3）；
+   - (c) 真实的金额追溯调整（样本 4）。
+3. 探针“披露日 − 报告期 > 400 天 = 被更正公告覆盖”的推测，在样本中**不成立**：长滞后行来自次年报告的比较数。
+4. 本次样本中**没有出现**“会计差错更正公告”“更正后的定期报告”类型。麦蕊如何记录这类版本（是否新增行、`plrq` 是否为更正公告日）**未核实**（V5f）。
+5. 版本数值在次年的取值可能变化（样本 4），因此必须按版本的可见时间选用。若一律取最新版本，就是用了未来信息。
+
+**确定性处理规则（写入 T-B55；与 §7A.0 版本选择一致）**
+
+| # | 规则 |
+|---|---|
+| R1 | `plrq ≤ jzrq` → 丢弃（占位行）|
+| R2 | 其余每一行都是独立版本，`available_from` 按 §7A.0 第 3 条计算；评估时刻 T 只取 `available_from ≤ T` 的最新版本 |
+| R3 | 新版本不回写已落库的派生值；从自己的 `available_from` 起生效（这正是样本 4 应有的效果：2008-04-28 前用 978,286,343.73，之后用 981,189,275.46） |
+| R4 | 版本类型只作为元数据记录（`basis.version_kind`），不影响计算。规则：同一 (code, report_type, jzrq) 中 `plrq` 最早的非占位行为 `original`；后续行的 `plrq` 等于该公司另一个 `jzrq′ > jzrq` 报告行的 `plrq` 时为 `comparative`；其余为 `other`（可能是更正或补充，待 V5f 核实） |
+| R5 | 不用每股字段（`jbmgsy`、`xsmgsy` 等）参与 F42–F46；不做跨版本数值精确相等比较 |
+| R6 | 同一 `available_from` 出现两行且数值不同 → 先取 `first_seen_at` 较晚的；仍无法区分 → 分量 null，并告警 `data_conflict` |
+| R7 | F12 `f.fin_report_count`、F22 `f.np_yoy_latest` 同样适用 R1、R2（F12 只计 distinct `jzrq`，不受多版本影响） |
+
+---
+
+## 7C. L-01 线上从麦蕊因子切到自算口径的条件（T-R12）
+
+裁定只规定研究与回测改为自算，**没有给出线上切换时点**（plan 第 829 行⑤：由研究员决定）。下列条件全部满足后才能切换。阈值除注明“裁定”的外，均为研究员设定的确定值，修改需要升 feature_spec 版本。
+
+| # | 条件 | 检验方法（确定性） | 出处 |
+|---|---|---|---|
+| S1 | 新键已实现并落库 | T-B55 已交付并通过验收（属性测试“任一 T 只用 `available_from ≤ T` 的数据”、净利润 ≤ 0 时 PE 为 null、银行和保险负债率为 null、T-B35 能读取）；F42–F46 在 `feature_catalog.status` 中为 **`verified_live`**（L-01 published 的前提是“必需字段全部 verified_live”，plan 第 867 行）。V5b、V5c、V5e 已关闭 | plan T-B55、第 867、1400 行 |
+| S2 | 全市场截面覆盖率 | 在对照期的每个 L-01 月度截面 d，池 U = F43 的池（§1.4 + 因子池排除）。要求：`f.roe_ttm_pit` 非 null 比例 ≥ 95%；`f.debt_ratio_pit` 在 U 中剔除银行、保险后非 null 比例 ≥ 95%；在 `NP_TTM > 0` 的子集中，`f.pe_ttm_pit` 非 null 比例 ≥ 99%、`f.ocf_to_np_ttm_pit` 非 null 比例 ≥ 95%。另外，`f.pe_ttm_pit` 非 null 数不得少于同日 `f.pe_ttm`（麦蕊，> 0）非 null 数的 95% | 研究员设定 |
+| S3 | 巨潮原文抽样核对 | 每次核对抽 30 只证券：5 只银行或非银金融、5 只历史上有多版本的、20 只按固定种子随机抽取（种子为核对日 YYYYMMDD）。每只取 T 时所用 P 的 `gsmgsyzzdjlr`（YTD）和 `gsmgdqsyhj`，与巨潮定期报告原文比较，误差 ≤ 原文报告单位的 0.5 倍（元、千元、百万元）。所用版本的 `plrq` 不得早于巨潮公告日（0 容忍，否则就是未来函数），也不得晚于公告日后 1 个交易日。**30/30 通过**才算通过；任一失败须查明原因并修复，然后用新种子重新抽 30 只 | 研究员设定 |
+| S4 | 对照期长度 | 自算键与麦蕊因子在线上**并行**计算，至少覆盖**连续 3 个** L-01 月度截面，且其中至少一个截面在法定披露截止日（4-30、8-31、10-31）之后 10 个交易日内，以检验版本切换。每个截面输出对照报告：Spearman ρ、两侧前 30 名的重合数、覆盖率。**Spearman 只报告，不作为门禁（裁定）**。对照期内 L-01 线上信号仍用旧键 | 裁定（Spearman）；长度由研究员设定 |
+| S5 | 切换时点与版本 | 在 S1–S4 全部满足后的第一个交易日**盘后**（日线落库后、当日 L-01 扫描之前）执行：L-01 卡的 `strategy_versions.version_no` +1，新版本引用 F42–F46；旧版本退役，不修改已发布内容。切换后的第一个 L-01 月度扫描起使用新键 | plan“发布后不可改，改内容即递增 version_no” |
+| S6 | 旧信号标注 | 切换前产生的 L-01 候选和信号保留原值，不重算，元数据标 `basis = mairui_factor`、旧 `version_no`；切换后的标 `basis = pit_self_calc`。回测报告继续带 `survivorship_bias = true`（裁定） | 裁定（survivorship） |
+
+一句话：**F42–F46 为 `verified_live`，连续 3 个月度截面覆盖率达标，巨潮 30 只抽样全部通过，满足以上条件后的第一个交易日盘后，L-01 递增版本号并切换到新键；旧信号标 `basis = mairui_factor`。**
+
 ---
 
 ## 8. P1 特征与非正式键
@@ -414,7 +601,7 @@
 - **可得时点**：d 日盘后。
 - **引用**：验证模块；P1。
 
-### 前端 mock 中的非正式键（不登记、不计入 41）
+### 前端 mock 中的非正式键（不登记、不计入 46）
 `src/frontend/src/mocks/marketFixtures.ts` 第 328–339 行与 `fixtures.ts` 第 820–822 行除正式键 `f.pe_ttm`、`f.roe_ttm`、`f.ma_trend` 外，还用了 **11 个不在任何策略文档或 catalog 中的键**：`f.pb`、`f.dividend_yield`、`f.gross_margin`、`f.revenue_yoy`、`f.np_yoy`、`f.mom_20d`、`f.mom_60d`、`f.vol_60d`、`f.turnover_20d`、`f.amount_20d`、`f.atr_pct`。其中 4 个与正式键近名易混：`f.amount_20d`→`f.amount_20d_avg`、`f.turnover_20d`→`f.turnover_20d_avg`、`f.mom_60d`→`f.momentum_60d`、`f.np_yoy`→`f.np_yoy_latest`。建议前端改用正式键，或在 mock 注明“展示用、非 catalog 键”；其余 7 个如需上线，先由研究员登记到本文。本文不修改前端。
 ---
 
@@ -566,7 +753,12 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 | V2 | 日线 `pc` / 快照 `yc` 在除权日是否为除权参考价 | F24、F35–F40、F11 | T-B05 | 取一只近期除权股，对比除权日 `pc` 与前一日 `c` |
 | V3 | 麦蕊因子公式与单位：`turnover_20d_avg`、`amihud_20d`、`volatility_20d`、`intraday_amplitude_20d`、`ma_trend`、`momentum_60d`、`roe_ttm`（12 还是 0.12）、`profit_cagr_3y`、`dividend_continuous_years`（从未分红返回 0 还是空）、`limit_up_count_20d`、`pe_ttm`（亏损返回负数还是空）、`boll_squeeze`、`rsi_14` | F02–F11、F20、F31、F33 | T-B05 + 研究员 | 全市场同日截面对照 §2 主口径，Spearman ≥ 0.95（建议） |
 | V4 | 因子历史值是否“当时口径”（as-of） | F02、F03、F08–F10、F33 | T-B05 | **部分实测（run-20261101-190106/p11 GAP6_factor_nulls_pit）**：600519 `profit_yoy`、`roe_ttm` 历史（2025-05-06～2026-10-30，369 点）5 次真实跳变均在 `plrq` 当日或其后首个交易日；探针标的 2 处"披露前跳变"为 6 位小数截断差异，非前视。未覆盖：其他股票/因子（含 F02、F03、F09、F10、F33）、2025-05-06 前是否回填。仍待：间隔 ≥1 周重取比对；用 `plrq ≤ T` 报表自算逐点比对 |
-| V5 | 财务报表除 `jzrq`、`plrq` 外的字段名（净利润、归母净资产） | F08 备选、F12、F22 | T-B05 | 拉一份 income/balance 原始响应入探针结果 |
+| V5 | 财务报表除 `jzrq`、`plrq` 外的字段名（净利润、归母净资产） | F08 备选、F12、F22、F42–F46 | T-B05 | **部分实测（v1.1.0，探针 p05 样本 + 巨潮核对，§7A.0）**：归母净利润 `gsmgsyzzdjlr`（累计、元）、归母权益 `gsmgdqsyhj`、`fzhj`、`zczj`、`zgb`/`bdrq`/`plrq` 已见于样本；余项见 V5b–V5f |
+| V5b | 银行、保险的 balance 字段（`gsmgdqsyhj`、`fzhj`、`zczj`）是否有值、单位 | F44、F46 | T-B05 | 对 000001、600000 及一家保险拉 balance 原始响应入探针 |
+| V5c | 现金流字段：plan 写 `jyhdcsdxjlje`，600519 样本中该字段为 `'-'`、有值的是 `jyhdcsdxjlxj`（= 流入 − 流出）；cashflow 是否累计口径只有 1 家实测 | F45 | T-B05 实测 + **架构师定字段**（改 plan 2.12.1 / T-B55） | 抽 ≥ 5 家（含银行）cashflow 原始响应，统计两字段非空率 |
+| V5d | capital 中 `plrq` 与 `bdrq` 相同（600519 2026-09-30 行）的含义；股本变动日与披露日的先后 | F42 | T-B05 + 研究员 | 对照巨潮一次送转（如 600519 除权日 2011-07-01）的 capital 行 `bdrq`/`plrq` |
+| V5e | 银行、保险的识别（`f.sw_l1` 代码格式 V9；没有申万二级特征） | F46 | T-B05 + 架构师 | `/hszg` 返回中“银行”“保险”的代码 |
+| V5f | 更正公告/更正后定期报告在麦蕊中如何成行（是否新增行、`plrq` 是否取更正公告日）；p11 多版本行的数值未保存 | F42–F46、§7B R4 | T-B05 | 探针保存多版本行的完整数值；选一家公开发布过差错更正的公司对照巨潮 |
 | V6 | 资金流大单字段名与单位 | F21 | T-B05 | `/hsstock/history/transaction` 原始响应 |
 | V7 | 公告接口路径与字段 | F23 | T-B05 | **已实测（run-20261101-190106/p11 GAP5_announcement_time_precision）**：`/hsstock/announcement/{code}` 返回 `t`、`zt`、`gs`、`nr`、`jb`、`lx`；`t` 只到日（1,000 条全为纯日期），F23 的 `available_from` 一律按"只有日期 → 次一交易日开盘"；样本历史起点 2021-03 |
 | V8 | 指数代码写法（沪深300、中证全指）、申万指数是否可取 | F25、F27 | T-B05 | `/hsindex/history` |
@@ -576,6 +768,7 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 | V12 | 前复权价小数位 | F16–F18 | T-B05 | — |
 | G1 | **缺口**：没有“不复权收盘价”正式键，G-01“价格 < 2 元”与回测中的价格水平比较无键可用 | G-01 | 研究员提、T-B43 实现 | 建议新增 `f.close_raw`（日线 `n`，不复权，P0） |
 | G2 | 覆盖率门槛 0.75、组内 N ≥ 5、σ 的 n ≥ 15、fin_report 的法定披露日估计 | 多项 | 架构师确认 | 写入 `feature_catalog.pit_rule` |
+| G3 | **缺口**：L-01 卡“PB 分位 ≤ 30%”没有正式键，L-01 裁定也没有给出 PB 口径 | L-01 | 架构师裁定口径，研究员登记 | 本文不新造键。若裁定按 F42 同一套规则（不复权收盘 × `zgb` ÷ T 时可见最新 `gsmgdqsyhj`），可在下一版登记 `f.pb_pit`、`f.pb_pit_ind_pct` |
 
 ---
 
@@ -590,7 +783,7 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 | F05 | f.intraday_amplitude_20d | 20 日平均振幅 | 本地日线 | qfq | ratio | 20，≥15 | d 盘后 | P0 | IT1 |
 | F06 | f.ma_trend | MA20/MA60−1 | 本地日线 | qfq | pct | 20/60，≥15/45 | d 盘后 | P0 | SH5 SW2 |
 | F07 | f.momentum_60d | 60 日动量 | 本地日线 | qfq | pct | 60，≥45 | d 盘后 | P0 | SW3 |
-| F08 | f.roe_ttm | ROE TTM | 因子 roe_ttm | — | pct | TTM | d 16:30 后 | P0 | SW5 LG0B LG2 L-01 |
+| F08 | f.roe_ttm | ROE TTM | 因子 roe_ttm | — | pct | TTM | d 16:30 后 | P0 | SW5 LG0B LG2；L-01 对照 |
 | F09 | f.profit_cagr_3y | 3 年利润 CAGR | 因子 profit_cagr_3y | — | pct | 3 年 | d 16:30 后 | P0 | LG3 |
 | F10 | f.dividend_continuous_years | 连续分红年数 | 因子（试用） | — | years | — | d 16:30 后 | P0 | LG4 L-03 |
 | F11 | f.limit_up_count_20d | 20 日收盘涨停次数 | 本地 | none | count | 20，≥15 | d 盘后 | P0 | SH3 |
@@ -615,22 +808,27 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 | F30 | f.intraday_sigma | 日内累计 σ | 1m | none | ratio | 当日，n≥15 | d 盘中 | P0 | T-01 |
 | F31 | f.boll_bw20 | 布林带宽 | 本地 | qfq | ratio | 20 有效 K | d 盘后 | P0 | W-02 |
 | F32 | f.boll_bw20_pct120 | 带宽 120 日分位 | 本地 | — | ratio | 120，≥90 | d 盘后 | P0 | W-02 |
-| F33 | f.pe_ttm | PE TTM | 因子 pe_ttm | — | 倍 | TTM | d 16:30 后 | P0 | L-01 |
-| F34 | f.pe_ttm_ind_pct | PE 行业分位 | 本地截面 | — | ratio | 当日 | d 16:30 后 | P0 | L-01 |
+| F33 | f.pe_ttm | PE TTM | 因子 pe_ttm | — | 倍 | TTM | d 16:30 后 | P0 | L-01 对照 |
+| F34 | f.pe_ttm_ind_pct | PE 行业分位 | 本地截面 | — | ratio | 当日 | d 16:30 后 | P0 | L-01 对照 |
 | F35 | f.limit_up_price | 涨停价 | 规则模块 | none | CNY_per_share | — | d 开盘前 | P0 | G-01 G5 F11 |
 | F36 | f.limit_down_price | 跌停价 | 规则模块 | none | CNY_per_share | — | d 开盘前 | P0 | G5 |
 | F37 | f.is_limit_up_close | 收盘涨停 | 本地 | none | bool | — | d 收盘后 | P0 | F11 H-01 |
 | F38 | f.is_limit_down_close | 收盘跌停 | 本地 | none | bool | — | d 收盘后 | P0 | H-01 |
 | F39 | f.limit_locked_up | 一字涨停 | 本地 | none | bool | — | d 收盘后（盘中临时） | P0 | G-01 W-01 夹具 |
 | F40 | f.limit_locked_down | 一字跌停 | 本地 | none | bool | — | d 收盘后（盘中临时） | P0 | G-01 |
+| F42 | f.pe_ttm_pit | PE TTM（时点自算） | 不复权 c × zgb ÷ TTM gsmgsyzzdjlr | none | 倍 | TTM | d 日线落库后；财报 next_trading_day(plrq) 09:30 | P0 | L-01 |
+| F43 | f.pe_ttm_pit_ind_pct | PE（时点）行业分位 | 本地截面 | — | ratio | 当日 | 同 F42 + 行业快照 | P0 | L-01 |
+| F44 | f.roe_ttm_pit | ROE TTM（时点自算） | TTM gsmgsyzzdjlr ÷ avg(gsmgdqsyhj P, P−4) | — | pct | TTM | next_trading_day(plrq) 09:30 | P0 | L-01 |
+| F45 | f.ocf_to_np_ttm_pit | 经营现金流/归母净利润 | TTM jyhdcsdxjlxj（pending V5c）÷ TTM gsmgsyzzdjlr | — | ratio | TTM | next_trading_day(plrq) 09:30 | P0 | L-01 |
+| F46 | f.debt_ratio_pit | 资产负债率（时点） | fzhj ÷ zczj；银行保险 null | — | ratio | 最新一期 | next_trading_day(plrq) 09:30 | P0 | L-01 |
 | F41 | f.excess_ret_std_60d | 60 日超额收益标准差 | 本地 | qfq | ratio | 60，≥45 | d 盘后 | P1 | validation |
 
-**合计 41 个；P0 = 40（分类器 15 + 策略 25），P1 = 1。** 另建议新增 `f.close_raw`（G1，P0，未计入）。
+**合计 46 个；P0 = 45（分类器 15 + 策略 25 + L-01 时点财务 5），P1 = 1。** F08、F33、F34 对 L-01 为对照用（F08 仍供分类器）。另建议新增 `f.close_raw`（G1，P0，未计入）；PB 键缺口见 G3（未计入）。
 
 机器可读草案（供 T-B30a/T-B43 写 `feature_catalog`；`status` 一律从 `declared` 起步，T-B05 核实后再升级；字段名与表 `app.feature_catalog` 列一致）：
 
 ```yaml
-feature_spec_version: "1.0.2"
+feature_spec_version: "1.1.0"
 rank_pct_universe: "T−1 日盘后落库截面：沪深 A 股股票，剔除北交所、停牌、上市 < 20 个交易日；平均秩 / N，取值 [0, 1]"
 window_rule: {calendar: exchange_trading_days, min_valid_ratio: 0.75, null_fill: forbidden}   # 0.75 待架构师确认
 all_null_when: {listing_status: [delisted, missing_from_list]}   # T-R11b：这两类证券全部 f.* 为 null
@@ -642,7 +840,7 @@ features:
   - {feature_key: f.intraday_amplitude_20d, unit: ratio, adjust: qfq, frequency: daily, priority: P0, derivation: "mean((h-l)/prev_c)", pit_rule: {window: 20, min_valid: 15, exclude: [ipo_first_5d, relist_day1, delisting_period_day1]}}
   - {feature_key: f.ma_trend, unit: pct, adjust: qfq, frequency: daily, priority: P0, derivation: "(MA20/MA60-1)*100", pit_rule: {min_valid: [15, 45]}}
   - {feature_key: f.momentum_60d, unit: pct, adjust: qfq, frequency: daily, priority: P0, derivation: "(c(d*)/c(b*)-1)*100", pit_rule: {window: 60, min_valid: 45}}
-  - {feature_key: f.roe_ttm, unit: pct, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/factor/quality/{code}", field: roe_ttm}, pit_rule: {available_at: "d 日 16:30 后"}}
+  - {feature_key: f.roe_ttm, unit: pct, adjust: none, frequency: daily, priority: P0, l01_role: comparison, source: {provider: mairui, endpoint: "/factor/quality/{code}", field: roe_ttm}, pit_rule: {available_at: "d 日 16:30 后"}}
   - {feature_key: f.profit_cagr_3y, unit: pct, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/factor/growth/{code}", field: profit_cagr_3y}, pit_rule: {null_when: "base <= 0"}}
   - {feature_key: f.dividend_continuous_years, unit: years, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/factor/dividend/{code}", field: dividend_continuous_years}, pit_rule: {zero_vs_null: "0=从未分红, null=未知"}}
   - {feature_key: f.limit_up_count_20d, unit: count, adjust: none, frequency: daily, priority: P0, derivation: "count(c == limit_up_price)", pit_rule: {window: 20, min_valid: 15}}
@@ -656,7 +854,7 @@ features:
   - {feature_key: f.amount, unit: CNY, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsstock/history/{code.市场}/d/n", field: a}}
   - {feature_key: f.rsi14, unit: index_0_100, adjust: qfq, frequency: daily, priority: P0, derivation: "Wilder RSI(14)", pit_rule: {warmup_bars: 28}}
   - {feature_key: f.main_net_20d, unit: CNY, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsstock/history/transaction/{code}", field: pending}, pit_rule: {available_at: "d 日 15:40 后", window: 20, min_valid: 15}}
-  - {feature_key: f.np_yoy_latest, unit: pct, adjust: none, frequency: quarterly, priority: P0, source: {provider: mairui, endpoint: "/hsstock/financial/income/{code}", field: pending}, pit_rule: {available_at: "next_trading_day(plrq) 09:30", null_when: "base <= 0"}}
+  - {feature_key: f.np_yoy_latest, unit: pct, adjust: none, frequency: quarterly, priority: P0, source: {provider: mairui, endpoint: "/hsstock/financial/income/{code}", field: gsmgsyzzdjlr}, pit_rule: {available_at: "next_trading_day(plrq) 09:30", drop_when: "plrq <= jzrq", version: latest_visible_at_T, null_when: "base <= 0"}}
   - {feature_key: f.ann_risk_count_10d, unit: count, adjust: none, frequency: event, priority: P0, source: {provider: mairui, endpoint: "/hsstock/announcement/{code}", field: [t, zt, nr]}, pit_rule: {window: 10, available_at: "次一交易日 09:30", null_when: "公告源缺失或过期"}}
   - {feature_key: f.market_breadth, unit: ratio, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsrl/ssjy/all", field: pc}, pit_rule: {available_at: "d 日 15:05 后"}}
   - {feature_key: f.market_regime, unit: enum, adjust: qfq, frequency: daily, priority: P0, derivation: "沪深300 MA20/MA60 + ma(f.market_breadth,20)，2 日防抖", pit_rule: {values: [uptrend, range, downtrend]}}
@@ -667,18 +865,23 @@ features:
   - {feature_key: f.intraday_sigma, unit: ratio, adjust: none, frequency: 1m, priority: P0, source: {provider: mairui, endpoint: "/hsstock/pro/history/{code}/1/n", field: c}, pit_rule: {min_returns: 15}}
   - {feature_key: f.boll_bw20, unit: ratio, adjust: qfq, frequency: daily, priority: P0, derivation: "4*std_pop(c,20)/MA20"}
   - {feature_key: f.boll_bw20_pct120, unit: ratio, adjust: qfq, frequency: daily, priority: P0, derivation: "ts_pct_rank(f.boll_bw20,120)", pit_rule: {min_valid: 90}}
-  - {feature_key: f.pe_ttm, unit: times, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/factor/valuation/{code}", field: pe_ttm}}
-  - {feature_key: f.pe_ttm_ind_pct, unit: ratio, adjust: none, frequency: daily, priority: P0, derivation: "rank_pct_in(f.pe_ttm>0, f.sw_l1)", pit_rule: {min_group_n: 5}}
+  - {feature_key: f.pe_ttm, unit: times, adjust: none, frequency: daily, priority: P0, l01_role: comparison, source: {provider: mairui, endpoint: "/factor/valuation/{code}", field: pe_ttm}}
+  - {feature_key: f.pe_ttm_ind_pct, unit: ratio, adjust: none, frequency: daily, priority: P0, l01_role: comparison, derivation: "rank_pct_in(f.pe_ttm>0, f.sw_l1)", pit_rule: {min_group_n: 5}}
   - {feature_key: f.limit_up_price, unit: CNY_per_share, adjust: none, frequency: daily, priority: P0, derivation: "round_half_up(base*(1+pct),0.01)", pit_rule: {null_when: no_price_limit_day}}
   - {feature_key: f.limit_down_price, unit: CNY_per_share, adjust: none, frequency: daily, priority: P0, derivation: "round_half_up(base*(1-pct),0.01)", pit_rule: {null_when: no_price_limit_day}}
   - {feature_key: f.is_limit_up_close, unit: bool, adjust: none, frequency: daily, priority: P0, derivation: "c == f.limit_up_price"}
   - {feature_key: f.is_limit_down_close, unit: bool, adjust: none, frequency: daily, priority: P0, derivation: "c == f.limit_down_price"}
   - {feature_key: f.limit_locked_up, unit: bool, adjust: none, frequency: daily, priority: P0, derivation: "o == l == f.limit_up_price and v > 0"}
   - {feature_key: f.limit_locked_down, unit: bool, adjust: none, frequency: daily, priority: P0, derivation: "o == h == f.limit_down_price and v > 0"}
+  - {feature_key: f.pe_ttm_pit, unit: times, adjust: none, frequency: daily, priority: P0, status: declared, l01_role: primary, source: {provider: mairui, endpoint: ["/hsstock/history/{code.市场}/d/n", "/hsstock/financial/capital/{code.市场}", "/hsstock/financial/income/{code.市场}"], field: [c, zgb, bdrq, plrq, jzrq, gsmgsyzzdjlr]}, derivation: "c_raw(d) * zgb(bdrq<=d and next_trading_day(plrq)<=d) / TTM(gsmgsyzzdjlr)", pit_rule: {available_at: "next_trading_day(plrq) 09:30", drop_when: "plrq <= jzrq", version: latest_visible_at_T, first_seen_rule: "max(plrq rule, first_seen_at); backfill rows plrq_only", ttm: "YTD(y,q)+FY(y-1)-YTD(y-1,q)", fallback_limit_months: 15, null_when: ["TTM np <= 0", "no bar on d", "zgb missing", "fallback exhausted"], store: "market.financial_derived metric=pe_ttm"}}
+  - {feature_key: f.pe_ttm_pit_ind_pct, unit: ratio, adjust: none, frequency: daily, priority: P0, status: declared, l01_role: primary, derivation: "rank_pct_in(f.pe_ttm_pit, f.sw_l1) over §1.4 pool + factor-pool exclusions", pit_rule: {min_group_n: 5, null_when: ["f.pe_ttm_pit null", "f.sw_l1 null"]}}
+  - {feature_key: f.roe_ttm_pit, unit: pct, adjust: none, frequency: quarterly, priority: P0, status: declared, l01_role: primary, source: {provider: mairui, endpoint: ["/hsstock/financial/income/{code.市场}", "/hsstock/financial/balance/{code.市场}"], field: [gsmgsyzzdjlr, gsmgdqsyhj, jzrq, plrq]}, derivation: "TTM(np) / avg(E(P), E(P-4)) * 100; E(P-4) missing or <=0 -> E(P) only, roe_basis=single_period", pit_rule: {available_at: "next_trading_day(plrq) 09:30", drop_when: "plrq <= jzrq", version: latest_visible_at_T, first_seen_rule: "max(plrq rule, first_seen_at); backfill rows plrq_only", ttm: "YTD(y,q)+FY(y-1)-YTD(y-1,q)", fallback_limit_months: 15, null_when: ["E(P) <= 0", "fallback exhausted"], keep_negative: true, pending: [V5b], store: "market.financial_derived metric=roe_ttm"}}
+  - {feature_key: f.ocf_to_np_ttm_pit, unit: ratio, adjust: none, frequency: quarterly, priority: P0, status: declared, l01_role: primary, source: {provider: mairui, endpoint: ["/hsstock/financial/cashflow/{code.市场}", "/hsstock/financial/income/{code.市场}"], field: [jyhdcsdxjlxj, jyhdcsdxjlje, gsmgsyzzdjlr, jzrq, plrq]}, derivation: "TTM(ocf) / TTM(np), same P; ocf = jyhdcsdxjlxj if not null else jyhdcsdxjlje", pit_rule: {available_at: "next_trading_day(plrq) 09:30", drop_when: "plrq <= jzrq", version: latest_visible_at_T, first_seen_rule: "max(plrq rule, first_seen_at); backfill rows plrq_only", ttm: "YTD(y,q)+FY(y-1)-YTD(y-1,q)", fallback_limit_months: 15, null_when: ["TTM np <= 0", "any ocf component missing"], pending: [V5c], store: "market.financial_derived metric=ocf_to_np_ttm"}}
+  - {feature_key: f.debt_ratio_pit, unit: ratio, adjust: none, frequency: quarterly, priority: P0, status: declared, l01_role: primary, source: {provider: mairui, endpoint: "/hsstock/financial/balance/{code.市场}", field: [fzhj, zczj, jzrq, plrq]}, derivation: "fzhj / zczj at latest visible P", pit_rule: {available_at: "next_trading_day(plrq) 09:30", drop_when: "plrq <= jzrq", version: latest_visible_at_T, fallback_limit_months: 15, null_when: ["bank", "insurance", "zczj <= 0", "fzhj null"]}, pending: [V5b, V5e], store: "market.financial_derived metric=debt_ratio"}
   - {feature_key: f.excess_ret_std_60d, unit: ratio, adjust: qfq, frequency: daily, priority: P1, derivation: "stdev(r - r_bench)", pit_rule: {window: 60, min_valid: 45}}
 ```
 
-注：`unit` 中 `pending`、`per_CNY`、`times`、`index_0_100`、`code`、`enum` 是本文建议的取值，`feature_catalog.unit` 目前没有枚举约束（`app.feature_catalog` 只约束 `adjust`、`frequency`、`status`），如架构师要约束，请以本文为初稿；`priority` 不是表的列，仅供任务拆分。`f.market_regime` 的 `adjust: qfq` 指其指数均线输入。
+注：`unit` 中 `pending`、`per_CNY`、`times`、`index_0_100`、`code`、`enum` 是本文建议的取值，`feature_catalog.unit` 目前没有枚举约束（`app.feature_catalog` 只约束 `adjust`、`frequency`、`status`），如架构师要约束，请以本文为初稿；`priority` 不是表的列，仅供任务拆分；`l01_role`（primary / comparison）、`pending`、`store`、`keep_negative` 同样只是说明，不是表的列。F42–F46 的 `status` 写 `declared`，满足 §7C S1 后才升级到 `verified_live`。`f.market_regime` 的 `adjust: qfq` 指其指数均线输入。
 
 ---
 
@@ -698,6 +901,10 @@ features:
 | C6 | 分类器“20 日窗口”（交易日）vs DSL `ma(x,n)`（有效 K 线） | §1.2 明确两者不同 | 澄清 | T-B30a / T-B42 实现时区分 |
 | C7 | 因子数 77（任务描述）/ 82（因子页）/ 85（plan 第 962 行） | 本文只引用在 T003 因子表中出现的 ID | **已实测：85 个**（run-20261101-190106/p11 GAP7：`factor/all` 3 只样本各 85 个，与 `factor/list` 一致；文档 `ev_ebitda` 实为 `ev_ebit`；p11 自动摘要"实返 2 个"为解析层级错误）。本文引用的因子 ID 均在其中 | 已解决 | 无（`ev_ebit` 名称差异如被引用需更正） |
 | C8 | R9 未写统计维度；SH8/SW7/LG7 文本为“该股” | §10.1-1 建议按（用户, 证券） | 歧义 | 用户/架构师确认 |
+| A5 | L-01 口径裁定 / plan 2.12.1 第 1178–1185 行：版本选择、TTM、15 个月回退、pe/roe/现金流比/负债率公式 | §7A F42–F46 照抄并补充：回填行只按 `plrq`、同 `available_from` 冲突处理、E(P−4) ≤ 0 视为缺失、现金流比同一 P | 一致 + 补充 | 架构师确认补充项并入 T-B55 |
+| C9 | plan 2.12.1：经营现金流字段 `jyhdcsdxjlje` | 600519 样本中该字段为 `'-'`，有值的是 `jyhdcsdxjlxj`；F45 主用 `jyhdcsdxjlxj`、回退 `jyhdcsdxjlje` | **字段冲突（实测）** | T-B05 扩样（V5c）；架构师改 plan / T-B55 |
+| C10 | L-01 卡：PB 分位；裁定未给 PB 口径 | 不登记键（G3） | 缺口 | 架构师裁定 |
+| C11 | plan 第 829 行⑤：线上切换时点由研究员决定 | §7C 给出 S1–S6 | 一致 | 架构师在 plan L-01 行引用 §7C |
 
 ---
 
@@ -705,6 +912,7 @@ features:
 
 | 版本 | 日期 | 作者 | 说明 |
 |---|---|---|---|
+| 1.1.0 | 2026-11-01 | 研究员（T-R12） | 新增 §7A：L-01 时点财务键 F42 `f.pe_ttm_pit`、F43 `f.pe_ttm_pit_ind_pct`、F44 `f.roe_ttm_pit`、F45 `f.ocf_to_np_ttm_pit`、F46 `f.debt_ratio_pit`（合计 46）；新增 §7B：plrq 多版本含义（巨潮 5 个样本 + 2 处数值核对）与 R1–R7；新增 §7C：线上切换条件 S1–S6；F08/F33/F34 对 L-01 降为对照用；F12/F22 补占位行与字段名；§11 V5 改为部分实测，新增 V5b–V5f、G3；§13 新增 A5、C9–C11 |
 | 1.0.2 | 2026-11-01 | 研究员（T003 GAP） | 依据 run-20261101-190106/p11：V1 已实测（GAP2）、V4 部分实测（GAP6）、V7 已实测（GAP5）；§13 C7 因子数定为 85（GAP7）。其余 V 项未动 |
 | 1.0.1 | 2026-11-01 | 研究员（T-R11a/b） | C5：SH5/SW2/SW3 改 `unit: pct`；§10.2 第 4 条已定：`delisted`/`missing_from_list` 全部 `f.*` 为 null（F15 边界与 §1 同步）；V1–V12 待 T-B05 实测后补 |
 | 1.0 | 2026-11-01 | 研究员（T-R11） | 首版：41 个正式键（P0 40、P1 1）口径、3 组手算样例、问题 76/77 复核、与 T-B46-47 裁定对照；`horizon_classifier.md` 末尾加附录指针 |

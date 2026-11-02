@@ -2,7 +2,7 @@ import { Link } from 'react-router';
 import { Alert, Card, Descriptions, Space, Table, Tag } from 'antd';
 import { useAdminIngestStatus } from '../../api/adminQueries';
 import type { IngestAlert, IngestLicenceStatus } from '../../api/adminTypes';
-import type { IngestHealth } from '../../api/enums';
+import { ENUMS, type IngestHealth } from '../../api/enums';
 import { ErrorBox } from '../../components/common';
 import { DATA_STATUS } from '../../i18n/labels';
 import { INGEST_DATASET_NAME } from '../../i18n/ingestLabels';
@@ -16,6 +16,11 @@ const levelView = (lv: string) => ALERT_LEVEL[lv as IngestAlert['level']] ?? { t
 /** v0.2.9 #38：heartbeat 显示；缺失或不认识的取值按 unknown 显示“无法判断”；不据此生成告警（告警只由服务端给） */
 const HEARTBEAT: Record<IngestHealth, { text: string; color: string }> = {
   ok: { text: '正常', color: 'green' }, stale: { text: '心跳超时', color: 'red' }, paused: { text: '已暂停', color: 'orange' }, unknown: { text: '无法判断', color: 'default' },
+};
+/** T-F25：master.<kind> 告警链到对账页并按该 kind 筛选（只按 key 拼链接，文案仍原样显示）；master.snapshot_rejected 不是对账差异，不加链接 */
+const reconLinkOf = (key: string) => {
+  const kind = key.startsWith('master.') ? key.slice('master.'.length) : '';
+  return (ENUMS.security_reconciliation_kind as readonly string[]).includes(kind) ? `/admin/securities/reconciliation?kind=${kind}` : null;
 };
 const heartbeatView = (v: unknown) => (typeof v === 'string' && Object.hasOwn(HEARTBEAT, v) ? HEARTBEAT[v as IngestHealth] : HEARTBEAT.unknown);
 const dash = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : String(v));
@@ -60,6 +65,7 @@ export function AdminIngestPage() {
                   <Tag color={levelView(a.level).color}>{levelView(a.level).text}</Tag>
                   <span>{a.message}</span>
                   <span className="mono muted small" style={{ marginInlineStart: 8 }}>{a.key}</span>
+                  {reconLinkOf(a.key) ? <Link to={reconLinkOf(a.key)!} className="small" style={{ marginInlineStart: 8 }} data-testid={`ingest-alert-recon-${a.key}`}>查看对账差异</Link> : null}
                 </li>
               ))}
             </ul>

@@ -7,6 +7,7 @@ import { resetIngestAlertsMock } from './ingestAlerts';
 import type { TerminalScope, TodayResponse } from '../api/types';
 import type { SectorKind } from '../api/marketTypes';
 import { accountHandlers } from './accountHandlers';
+import { reconHandlers } from './reconMock';
 import { resetStrategies, strategyHandlers } from './strategyHandlers';
 import { reasonsNow, resetSignals, signalHandlers, signalsNow } from './signalHandlers';
 import { draftsNow, planHandlers, resetPlanDrafts } from './planHandlers';
@@ -124,6 +125,8 @@ const routeHandlers = [
   ...streamHandlers,
   // 鉴权、账号、券商账户、成交、导入、对账（T-F02/T-F02a/T-F04，见 accountHandlers.ts）
   ...accountHandlers,
+  // 证券主数据对账（T-F25，见 reconMock.ts；管理员校验在 accountHandlers 前置处理里）
+  ...reconHandlers,
   // 策略库最小模拟（T-F22，见 strategyHandlers.ts）
   ...strategyHandlers,
   http.get(`${API}/health/ready`, () => HttpResponse.json(HEALTH_READY)),

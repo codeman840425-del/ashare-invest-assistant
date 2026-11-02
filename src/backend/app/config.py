@@ -457,6 +457,9 @@ class Settings(BaseSettings):
 
     # --- 密钥 ---
     app_master_key: SecretStr | None = None
+    #: ``IMPORT_STORAGE_PATH``（T-B46，plan §3.5A）：原始导入文件根目录（仓库外、加密存放）。
+    #: 未设置时 local/test 用系统临时目录，其他环境上传返回 ``503 MAINTENANCE``。
+    import_storage_path: Path | None = None
     #: 证书封装公钥（T-A07 / T-O09）：单行 JSON ``{"<版本>": "<base64 SPKI DER>"}``；环境变量
     #: ``DATA_LICENCE_SEAL_PUBLIC_KEYS`` 或 ``/run/secrets/data_licence_seal_public_keys``。
     #: 未配置时 ``PUT /me/data-licence`` 返回 503（不落明文）。api **没有**私钥。

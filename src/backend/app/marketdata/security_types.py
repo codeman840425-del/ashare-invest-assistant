@@ -10,8 +10,11 @@
   ``data_status="unavailable"``、``gaps[].reason="not_applicable"``；指数保持 ``no_source``
   （v0.2.8 U5 默认不改）；
 - ETF 价格保留 3 位小数；导入整手按 100 份整数倍（``IMPORT_LOT_SIZE_IRREGULAR``，仅提示）；
-- 可转债本版不收录（仍按 ``IMPORT_UNKNOWN_SECURITY``）；其持仓展示（plan 第 9 节问题 63）
-  **未定，不实现**。
+- 可转债本版不收录（仍按 ``IMPORT_UNKNOWN_SECURITY``）。按 ``import_as_is`` 导入后的持仓展示
+  （plan 第 9 节问题 63，已定，T-B46 实现，见 :func:`is_convertible_bond`、
+  :mod:`app.domain.portfolio`）：导入时保留原代码；展示标注“可转债·无行情”，现价、市值为
+  null（前端显示“—”）；总仓位与集中度按**成本**估算并标注“估算”；**不跑策略、不出信号、
+  不进入风控止损计算**（可转债不在 ``securities``，``STRATEGY_ELIGIBLE_SECURITY_TYPES`` 也不含它）。
 """
 
 from __future__ import annotations
@@ -80,3 +83,16 @@ def price_dp(security_type: SecurityType | str) -> int:
 def etf_lot_irregular(quantity: Decimal | int) -> bool:
     """ETF 买入数量不是 100 份整数倍 → True（导入只出 warning，不阻断）。"""
     return Decimal(quantity) % ETF_LOT != 0
+
+
+#: 可转债代码段（plan 第 9 节问题 63；沪 110/111/113/118，深 123/127/128）。只在“主数据中查不到”
+#: 时用于持仓展示分类，不据此建主数据。
+CONVERTIBLE_BOND_PREFIXES: Final = ("110", "111", "113", "118", "123", "127", "128")
+#: 问题 63 的展示标注
+CONVERTIBLE_BOND_LABEL: Final = "可转债·无行情"
+ESTIMATED_LABEL: Final = "估算"
+
+
+def is_convertible_bond(code: str) -> bool:
+    """6 位代码落在可转债代码段 → True（调用方须先确认它不在证券主数据中）。"""
+    return len(code) == 6 and code.isdigit() and code.startswith(CONVERTIBLE_BOND_PREFIXES)

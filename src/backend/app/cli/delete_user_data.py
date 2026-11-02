@@ -439,7 +439,15 @@ def _unhandled_fk_refs(conn: Connection, uid: uuid.UUID) -> list[tuple[str, int]
 
 
 def imports_root() -> Path:
-    return Path(os.environ.get("AIA_IMPORTS_DIR", DEFAULT_IMPORTS_DIR))
+    """原始导入文件根目录。
+
+    优先级：``AIA_IMPORTS_DIR`` > ``IMPORT_STORAGE_PATH``（API 写入用，T-B46）> 默认。
+    """
+    return Path(
+        os.environ.get("AIA_IMPORTS_DIR")
+        or os.environ.get("IMPORT_STORAGE_PATH")
+        or DEFAULT_IMPORTS_DIR
+    )
 
 
 def _inside(root: Path, p: Path) -> bool:

@@ -5,7 +5,16 @@
 
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Column, PrimaryKeyConstraint, Table, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    Index,
+    Numeric,
+    PrimaryKeyConstraint,
+    Table,
+    UniqueConstraint,
+    text,
+)
 
 from app.db.base import (
     APP,
@@ -15,6 +24,7 @@ from app.db.base import (
     jsonb,
     metadata,
     money,
+    num,
     one_of,
     pk_uuid,
     text_array,
@@ -31,6 +41,9 @@ from app.schemas.enums import (
     ReconciliationStatus,
     TradeSide,
 )
+
+#: 成交价格 / 摊薄成本价：不限精度 numeric（plan §3.5A 最多 8 位小数，应用层量化；迁移 0014）
+PRICE8 = Numeric()
 
 accounts = Table(
     "accounts",
@@ -90,7 +103,13 @@ import_batches = Table(
     created_at(),
     ts("committed_at"),
     ts("reverted_at"),
+    # 0014（T-B46，契约 §7.2 GET /imports/{id}）
+    txt("kind", nullable=False, server_default=text("'trades'")),
+    num("encoding_confidence"),
+    num("format_score"),
+    text_array("detected_columns"),
     one_of("status", ImportStatus),
+    one_of("kind", ["trades", "positions"]),
     schema=APP,
 )
 
@@ -117,7 +136,8 @@ trades = Table(
     txt("security_code", nullable=False),
     txt("side", nullable=False),
     money("quantity", nullable=False),
-    money("price", nullable=False),
+    # 0014：plan §3.5A 成交价格最多 8 位小数，原样保存（不限精度列）
+    Column("price", PRICE8, nullable=False),
     money("amount"),
     money("commission"),
     money("stamp_tax"),
@@ -146,7 +166,14 @@ trades = Table(
     one_of("source", ["manual", "import", "csv_template"]),
     # plan：epistemic_type 恒为 execution
     one_of("epistemic_type", ["execution"]),
-    UniqueConstraint("account_id", "dedup_key"),
+    # 0014：只约束未作废的成交（批次回滚只作废、不删除，回滚后可重新导入同一文件）
+    Index(
+        "uq_trades_account_id_dedup_key_live",
+        "account_id",
+        "dedup_key",
+        unique=True,
+        postgresql_where=text("voided_at IS NULL"),
+    ),
     schema=APP,
     comment="成交事实；只允许改 voided_at / void_reason / plan_version_id（触发器）",
 )
@@ -197,7 +224,8 @@ import_rows = Table(
     txt("dedup_status"),
     uuid_col("committed_trade_id", fk="app.trades.id"),
     uuid_col("committed_event_id", fk="app.account_events.id"),
-    one_of("kind", ["trade", "event", "ignored"]),
+    # 0014：snapshot_position = 持仓快照文件的明细行
+    one_of("kind", ["trade", "event", "ignored", "snapshot_position"]),
     one_of("status", ImportRowStatus),
     one_of("dedup_status", DedupStatus),
     schema=APP,
@@ -221,7 +249,7 @@ holdings = Table(
     uuid_col("account_id", nullable=False, fk="app.accounts.id"),
     txt("security_code", nullable=False),
     money("quantity", nullable=False),
-    money("avg_cost"),
+    Column("avg_cost", PRICE8),  # 0014：摊薄成本价，应用层量化到 8 位小数
     money("realized_pnl"),
     ts("last_trade_at"),
     ts("rebuilt_at"),

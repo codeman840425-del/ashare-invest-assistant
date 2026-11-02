@@ -12,6 +12,7 @@ import { server } from '../mocks/server';
 import { mockLoginAs } from '../mocks/session';
 import { LICENCE_RATE, setMockLicence, setMockLicenceSettingsEnabled } from '../mocks/licenceStore';
 import { uid } from '../mocks/fixtures';
+import { apiFetch } from '../test/apiFetch';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -30,15 +31,15 @@ const fakeLicence = () => Array.from({ length: 28 }, () => ALPHA[Math.floor(Math
 const FUTURE = '2026-11-03T00:01:00+08:00';
 const PAST = '2026-11-01T00:01:00+08:00';
 async function put(licence: string, tier = 'free') {
-  const r = await fetch(`${API}/me/data-licence`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ licence, tier, has_quant_pro: false, expires_on: null }) });
+  const r = await apiFetch(`${API}/me/data-licence`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ licence, tier, has_quant_pro: false, expires_on: null }) });
   return { status: r.status, body: (await r.json()) as DataLicenceStatus & { error?: { code: string } } };
 }
 const ACTIVE_NO_PAUSE: DataLicenceStatus = {
   status: 'active', tier: 'diamond', has_quant_pro: false, expires_on: null, days_to_expiry: null, set_at: null,
   last_verified_at: null, last_error_code: null, last_error_at: null, paused_until: null,
 };
-const del = () => fetch(`${API}/me/data-licence`, { method: 'DELETE' });
-const getStatus = async () => (await (await fetch(`${API}/me/data-licence`)).json()) as DataLicenceStatus;
+const del = () => apiFetch(`${API}/me/data-licence`, { method: 'DELETE' });
+const getStatus = async () => (await (await apiFetch(`${API}/me/data-licence`)).json()) as DataLicenceStatus;
 
 describe('m1：重复 PUT 同一证书（契约 #13）', () => {
   it('quota_exceeded 时重提同一证书 → 202，保持状态与 paused_until，只更新档位', async () => {
@@ -173,28 +174,28 @@ describe('m3：PUT 与 PATCH 收到 503 MAINTENANCE', () => {
     setMockLicenceSettingsEnabled(false);
     expect((await put('短')).status).toBe(400);
     expect((await put(fakeLicence())).status).toBe(503);
-    const bad = await fetch(`${API}/me/data-licence`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tier: 'nope' }) });
+    const bad = await apiFetch(`${API}/me/data-licence`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tier: 'nope' }) });
     expect(bad.status).toBe(400);
     await del();
-    const r = await fetch(`${API}/me/data-licence`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tier: 'free' }) });
+    const r = await apiFetch(`${API}/me/data-licence`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tier: 'free' }) });
     expect(r.status).toBe(503);
   });
 });
 
 describe('m4：/test 判断顺序与后端一致（暂停 409 先于限速）', () => {
   it('暂停期间即使测试次数已用完也返回 409 DATA_LICENCE_UNAVAILABLE', async () => {
-    for (let i = 0; i < LICENCE_RATE.test; i++) await fetch(`${API}/me/data-licence/test`, { method: 'POST' });
-    expect((await fetch(`${API}/me/data-licence/test`, { method: 'POST' })).status).toBe(429);
+    for (let i = 0; i < LICENCE_RATE.test; i++) await apiFetch(`${API}/me/data-licence/test`, { method: 'POST' });
+    expect((await apiFetch(`${API}/me/data-licence/test`, { method: 'POST' })).status).toBe(429);
     setMockLicence(uid(2), { status: 'paused_by_admin' });
-    const r = await fetch(`${API}/me/data-licence/test`, { method: 'POST' });
+    const r = await apiFetch(`${API}/me/data-licence/test`, { method: 'POST' });
     expect(r.status).toBe(409);
     expect(((await r.json()) as { error: { code: string } }).error.code).toBe('DATA_LICENCE_UNAVAILABLE');
   });
   it('未设置时返回 409 DATA_LICENCE_NOT_SET，且不消耗测试次数', async () => {
     await del();
-    for (let i = 0; i < LICENCE_RATE.test + 1; i++) expect((await fetch(`${API}/me/data-licence/test`, { method: 'POST' })).status).toBe(409);
+    for (let i = 0; i < LICENCE_RATE.test + 1; i++) expect((await apiFetch(`${API}/me/data-licence/test`, { method: 'POST' })).status).toBe(409);
     await put(fakeLicence());
-    expect((await fetch(`${API}/me/data-licence/test`, { method: 'POST' })).status).toBe(202);
+    expect((await apiFetch(`${API}/me/data-licence/test`, { method: 'POST' })).status).toBe(202);
   });
 });
 

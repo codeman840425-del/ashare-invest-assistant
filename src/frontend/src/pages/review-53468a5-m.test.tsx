@@ -12,6 +12,7 @@ import { uid } from '../mocks/fixtures';
 import { draftsNow } from '../mocks/planHandlers';
 import { patchSignal } from '../mocks/signalHandlers';
 import { server } from '../mocks/server';
+import { apiFetch } from '../test/apiFetch';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -62,7 +63,7 @@ describe('P18：按 details.from 区分文案', () => {
     expect(stateErrorText(other, 'signal')).toBeTruthy();
   });
   it('mock 的 409 带契约要求的 {from, to, allowed}', async () => {
-    const res = await fetch(`${API}/plan-drafts/${uid(7703)}/discard`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const res = await apiFetch(`${API}/plan-drafts/${uid(7703)}/discard`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(res.status).toBe(409);
     const j = (await res.json()) as { error: { details: Record<string, unknown> } };
     expect(j.error.details).toEqual({ from: 'discarded', to: 'discarded', allowed: [] });

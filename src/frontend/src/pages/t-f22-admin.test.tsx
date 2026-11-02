@@ -9,6 +9,7 @@ import type { AdminDataLicence, AdminIngestStatus } from '../api/adminTypes';
 import { mockLoginAs } from '../mocks/session';
 import { adminLicenceLog } from '../mocks/licenceStore';
 import { uid } from '../mocks/fixtures';
+import { apiFetch } from '../test/apiFetch';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -18,9 +19,9 @@ vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div
 
 const API = '/api/v1';
 type Page<T> = { items: T[]; next_cursor: string | null; has_more: boolean };
-const list = async () => (await (await fetch(`${API}/admin/data-licences?limit=100`)).json()) as Page<AdminDataLicence>;
+const list = async () => (await (await apiFetch(`${API}/admin/data-licences?limit=100`)).json()) as Page<AdminDataLicence>;
 const act = (id: string, op: 'pause' | 'resume', reason: unknown = '示例理由') =>
-  fetch(`${API}/admin/data-licences/${id}/${op}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason }) });
+  apiFetch(`${API}/admin/data-licences/${id}/${op}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason }) });
 const rowOf = async (id: string) => (await list()).items.find((x) => x.user_id === id)!;
 function renderAt(path: string) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
@@ -36,7 +37,7 @@ const KEYS = [
 
 describe('示例接口与契约一致', () => {
   it('普通用户访问管理端接口为 404', async () => {
-    expect((await fetch(`${API}/admin/data-licences`)).status).toBe(404);
+    expect((await apiFetch(`${API}/admin/data-licences`)).status).toBe(404);
     expect((await act(uid(13), 'pause')).status).toBe(404);
   });
   it('每位用户一行（含未设置）；字段与 AdminDataLicence 一致，不含证书值或片段', async () => {
@@ -55,7 +56,7 @@ describe('示例接口与契约一致', () => {
   });
   it('与 /admin/ingest/status 同一证书的 licence_id、今日调用、队列一致', async () => {
     mockLoginAs('admin');
-    const ingest = (await (await fetch(`${API}/admin/ingest/status`)).json()) as AdminIngestStatus;
+    const ingest = (await (await apiFetch(`${API}/admin/ingest/status`)).json()) as AdminIngestStatus;
     const rows = (await list()).items;
     for (const l of ingest.licences) {
       const r = rows.find((x) => x.licence_id === l.licence_id)!;

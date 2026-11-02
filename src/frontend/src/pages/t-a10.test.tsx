@@ -16,6 +16,7 @@ import { adminLicenceLog } from '../mocks/licenceStore';
 import { mockLoginAs } from '../mocks/session';
 import { server } from '../mocks/server';
 import { STRATEGY_TEMPLATES } from '../mocks/strategyHandlers';
+import { apiFetch } from '../test/apiFetch';
 
 beforeAll(() => preloadRoutes(routes), 30_000);
 
@@ -23,8 +24,8 @@ vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
 
 const API = '/api/v1';
-const get = async <T,>(path: string) => { const r = await fetch(`${API}${path}`); return { status: r.status, body: (await r.json()) as T }; };
-const post = (path: string, body: unknown) => fetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const get = async <T,>(path: string) => { const r = await apiFetch(`${API}${path}`); return { status: r.status, body: (await r.json()) as T }; };
+const post = (path: string, body: unknown) => apiFetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 function renderAt(path: string) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
   Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });

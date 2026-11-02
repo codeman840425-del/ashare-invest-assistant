@@ -15,6 +15,7 @@ import { server } from '../mocks/server';
 import { mockLoginAs } from '../mocks/session';
 import { setMockLicence, setMockLicenceSettingsEnabled } from '../mocks/licenceStore';
 import { PORTFOLIO, uid } from '../mocks/fixtures';
+import { apiFetch } from '../test/apiFetch';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -23,7 +24,7 @@ vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
 
 const API = '/api/v1';
-const getJson = async <T,>(path: string) => (await (await fetch(`${API}${path}`)).json()) as T;
+const getJson = async <T,>(path: string) => (await (await apiFetch(`${API}${path}`)).json()) as T;
 function renderAt(path: string) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
   Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
@@ -74,14 +75,14 @@ describe('数据证书（v0.2.8 #12/#14，补充裁定③）', () => {
     renderAt('/settings/data-licence');
     expect(await screen.findByTestId('licence-paused')).toBeInTheDocument();
     expect(screen.getByTestId('licence-test')).toBeDisabled();
-    const r = await fetch(`${API}/me/data-licence/test`, { method: 'POST' });
+    const r = await apiFetch(`${API}/me/data-licence/test`, { method: 'POST' });
     expect(r.status).toBe(409);
     expect(((await r.json()) as { error: { code: string; details: { status: string } } }).error).toMatchObject({ code: 'DATA_LICENCE_UNAVAILABLE', details: { status: 'paused_by_admin' } });
   });
   it('暂停期间 PUT → 202，状态仍为管理员暂停', async () => {
     setMockLicence(uid(2), { status: 'paused_by_admin' });
     const licence = Array.from({ length: 28 }, () => 'QXZJKVWY'[Math.floor(Math.random() * 8)]).join('');
-    const r = await fetch(`${API}/me/data-licence`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ licence, tier: 'free', has_quant_pro: false, expires_on: null }) });
+    const r = await apiFetch(`${API}/me/data-licence`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ licence, tier: 'free', has_quant_pro: false, expires_on: null }) });
     expect(r.status).toBe(202);
     expect(((await r.json()) as { status: string }).status).toBe('paused_by_admin');
   });
@@ -99,11 +100,11 @@ describe('数据证书（v0.2.8 #12/#14，补充裁定③）', () => {
 
 describe('管理端采集状态（v0.2.8 #1）', () => {
   it('非管理员 404', async () => {
-    expect((await fetch(`${API}/admin/ingest/status`)).status).toBe(404);
+    expect((await apiFetch(`${API}/admin/ingest/status`)).status).toBe(404);
   });
   it('按证书一行、not_set 不列出、异常状态在前；不含全站 licence 键与证书值', async () => {
     mockLoginAs('admin');
-    const res = await fetch(`${API}/admin/ingest/status`);
+    const res = await apiFetch(`${API}/admin/ingest/status`);
     const text = await res.text();
     const d = JSON.parse(text) as AdminIngestStatus & { licence?: unknown };
     expect(d.licence).toBeUndefined();

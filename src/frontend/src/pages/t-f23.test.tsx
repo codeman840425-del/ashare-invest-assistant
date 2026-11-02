@@ -11,6 +11,7 @@ import type { ResearchCandidate, ResearchCandidateSummary, CandidateVersion } fr
 import { uid } from '../mocks/fixtures';
 import { candidatesNow } from '../mocks/candidateHandlers';
 import { mockLoginAs, state as session } from '../mocks/session';
+import { apiFetch } from '../test/apiFetch';
 
 beforeAll(() => preloadRoutes(routes), 30_000);
 
@@ -20,9 +21,9 @@ vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div
 const API = '/api/v1';
 type Paged<T> = { items: T[]; next_cursor: string | null };
 type Err = { error: { code: string; details: Record<string, unknown> } };
-const get = async <T,>(path: string) => { const r = await fetch(`${API}${path}`); return { status: r.status, body: (await r.json()) as T }; };
+const get = async <T,>(path: string) => { const r = await apiFetch(`${API}${path}`); return { status: r.status, body: (await r.json()) as T }; };
 const post = async <T,>(path: string, body: unknown, key?: string) => {
-  const r = await fetch(`${API}${path}`, {
+  const r = await apiFetch(`${API}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) },
     body: JSON.stringify(body),

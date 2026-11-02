@@ -12,6 +12,7 @@ import { causeText } from '../i18n/signalLabels';
 import { conflictsOf, parseTab, reevalText } from '../lib/signals';
 import { CANDIDATE_SIGNALS, REASONS, SUGGESTIONS, uid } from '../mocks/fixtures';
 import { LifecycleBadge } from './signals/LifecycleBadge';
+import { apiFetch } from '../test/apiFetch';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -20,7 +21,7 @@ vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
 
 const API = '/api/v1';
-const post = (path: string, body: unknown) => fetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const post = (path: string, body: unknown) => apiFetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 function renderAt(path: string) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
   Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
@@ -105,9 +106,9 @@ describe('列表 /candidate-signals', () => {
     expect(await within(table).findByText(/演示材料/)).toBeInTheDocument();
   });
   it('released_since 只返回之后解除的原因；格式错误 400', async () => {
-    const late = await (await fetch(`${API}/non-executable-reasons?status=released&released_since=${encodeURIComponent('2099-01-01T00:00:00+08:00')}`)).json() as { items: unknown[] };
+    const late = await (await apiFetch(`${API}/non-executable-reasons?status=released&released_since=${encodeURIComponent('2099-01-01T00:00:00+08:00')}`)).json() as { items: unknown[] };
     expect(late.items).toEqual([]);
-    expect((await fetch(`${API}/non-executable-reasons?released_since=abc`)).status).toBe(400);
+    expect((await apiFetch(`${API}/non-executable-reasons?released_since=abc`)).status).toBe(400);
   });
 });
 

@@ -13,7 +13,7 @@ import { ENUMS } from '../api/enums';
 import { LICENCE_RE, type DataLicencePatch, type DataLicencePut } from '../api/licenceTypes';
 import { OVERRIDE_CHOICES } from '../i18n/importLabels';
 import {
-  MOCK_INVITE_CODES, MOCK_REGISTER_IP_PER_HOUR, emptyStats, finding, applyParse, currentUser, publicBatch, reconciliationFor, state, toAdminUser, toMe,
+  MOCK_INVITE_CODES, MOCK_REGISTER_IP_PER_HOUR, emptyStats, finding, applyParse, currentUser, publicBatch, reconciliationFor, requestCookies, rotateCsrf, setSessionCsrf, state, toAdminUser, toMe,
   type MockBatch, type MockUser,
 } from './session';
 import { errorBody, page } from './handlerUtils';
@@ -35,6 +35,18 @@ const rateLimited = (s: number) =>
   HttpResponse.json(errorBody('RATE_LIMITED', '操作过于频繁（示例）', { retry_after_s: s }) as unknown as Record<string, unknown>, { status: 429, headers: { 'Retry-After': String(s) } });
 
 const PUBLIC = [/^\/meta\//, /^\/health/, /^\/auth\/login$/, /^\/auth\/register$/];
+
+/**
+ * 契约 §1.3 CSRF 双提交：POST/PUT/PATCH/DELETE 须带请求头 X-CSRF-Token，且与 Cookie csrf_token、会话内令牌三者一致，否则 403 CSRF_FAILED。
+ * 登录、注册是登录前的请求（还没有令牌），契约未写例外——mock 暂不校验，列为待定（reports/csrf-frontend.md）。
+ */
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+function csrfFailed(request: Request): boolean {
+  if (!WRITE_METHODS.has(request.method.toUpperCase())) return false;
+  const header = request.headers.get('X-CSRF-Token');
+  const cookie = requestCookies(request).csrf_token;
+  return !header || !cookie || header !== cookie || cookie !== state.csrfToken;
+}
 
 const me = () => currentUser()!;
 const myAccount = (id: string | null) => state.accounts.find((a) => a.id === id);
@@ -65,11 +77,12 @@ export const accountHandlers = [
     if (path.startsWith('/admin')) {
       // §1.3 / §7.9：不是已登录的 admin 一律 404，与不存在的路径无法区分
       if (!user || user.role !== 'admin' || user.status !== 'approved') return err(404, 'NOT_FOUND', `示例数据未覆盖该端点：${new URL(request.url).pathname}`);
-      return undefined;
+      return csrfFailed(request) ? err(403, 'CSRF_FAILED', 'CSRF 令牌缺失或不符') : undefined;
     }
     if (PUBLIC.some((re) => re.test(path))) return undefined;
     if (!user) return err(401, 'AUTH_REQUIRED', '请先登录');
     if (user.status !== 'approved') return err(403, 'ACCOUNT_NOT_APPROVED', '账号未通过审核', { status: user.status });
+    if (csrfFailed(request)) return err(403, 'CSRF_FAILED', 'CSRF 令牌缺失或不符');
     return undefined;
   }),
 
@@ -84,11 +97,15 @@ export const accountHandlers = [
     if (user.status !== 'approved') {
       return err(403, 'ACCOUNT_NOT_APPROVED', '账号未通过审核', { status: user.status, ...(user.review_reason ? { reason: user.review_reason } : {}) });
     }
+    // §1.3：登录轮换会话与 CSRF 令牌；响应体与 Cookie 给出同一个值
     state.currentUserId = user.id;
-    return json({ user: toMe(user), csrf_token: 'mock-csrf' });
+    const token = rotateCsrf();
+    setSessionCsrf(token);
+    return HttpResponse.json({ user: toMe(user), csrf_token: token }, { headers: { 'Set-Cookie': `csrf_token=${token}; Path=/; SameSite=Lax` } });
   }),
   http.post(`${API}/auth/logout`, () => {
     state.currentUserId = null;
+    setSessionCsrf(null);
     return noContent();
   }),
   http.post(`${API}/auth/register`, async ({ request }) => {

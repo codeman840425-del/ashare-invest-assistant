@@ -302,6 +302,8 @@ export const MOCK_REGISTER_IP_PER_HOUR = 5;
 export const MOCK_PENDING_CAP = 200;
 export interface SessionState {
   currentUserId: string | null;
+  /** 契约 §1.3 CSRF：当前会话内的令牌（未登录为 null）；与 Cookie `csrf_token`、请求头 `X-CSRF-Token` 三者须一致 */
+  csrfToken: string | null;
   registrationMode: 'closed' | 'invite' | 'open';
   /** v0.2.8 #11：蜜罐命中记录（模拟审计 auth.register_honeypot，只记 trigger，不记表单内容） */
   honeypotHits: ('website' | 'too_fast' | 'both')[];
@@ -352,13 +354,45 @@ function initialBatches(): MockBatch[] {
   return [committed, reverted];
 }
 
+/** 示例会话的初始 CSRF 令牌（不是密钥，只是示例字符串） */
+export const MOCK_CSRF = 'mock-csrf';
+let csrfSeq = 0;
+/** 登录、改密时轮换（契约 §1.3）：新令牌 */
+export const rotateCsrf = () => `mock-csrf-${++csrfSeq}`;
+/**
+ * 设置会话令牌并模拟浏览器应用 Set-Cookie: csrf_token（非 HttpOnly）。
+ * MSW 不会把模拟响应的 Set-Cookie 写进 document.cookie，所以示例环境在这里直接写；null = 清除 Cookie。
+ */
+export function setSessionCsrf(token: string | null) {
+  state.csrfToken = token;
+  if (typeof document === 'undefined') return;
+  document.cookie = token ? `csrf_token=${encodeURIComponent(token)}; Path=/; SameSite=Lax` : 'csrf_token=; Path=/; Max-Age=0';
+}
+/**
+ * 请求实际会带上的 Cookie：请求头 Cookie，加上 credentials 不为 omit 时浏览器附带的 document.cookie
+ * （同源相对路径，same-origin 与 include 都会带）。
+ */
+export function requestCookies(request: Request): Record<string, string> {
+  const out: Record<string, string> = {};
+  const add = (raw: string | null) => {
+    for (const part of (raw ?? '').split(';')) {
+      const i = part.indexOf('=');
+      if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    }
+  };
+  if (request.credentials !== 'omit' && typeof document !== 'undefined') add(document.cookie);
+  add(request.headers.get('cookie'));
+  return out;
+}
+
 export const state: SessionState = {
-  currentUserId: uid(2), registrationMode: 'invite', honeypotHits: [], registerHits: [], pendingCap: MOCK_PENDING_CAP, users: [], profiles: new Map(), accounts: [], trades: [], batches: [], reconciled: new Set(), tradeIdem: new Map(),
+  currentUserId: uid(2), csrfToken: null, registrationMode: 'invite', honeypotHits: [], registerHits: [], pendingCap: MOCK_PENDING_CAP, users: [], profiles: new Map(), accounts: [], trades: [], batches: [], reconciled: new Set(), tradeIdem: new Map(),
 };
 
 export function resetSession() {
   findingSeq = 0;
   state.currentUserId = uid(2);
+  setSessionCsrf(MOCK_CSRF);
   state.registrationMode = 'invite';
   state.honeypotHits = [];
   state.registerHits = [];
@@ -387,9 +421,10 @@ export const toAdminUser = (x: MockUser): AdminUser => ({
   reviewed_at: x.reviewed_at, review_reason: x.review_reason, register_ip_region: x.register_ip_region, same_ip_registrations: x.same_ip_registrations,
   same_ip_flag: x.same_ip_registrations >= MOCK_SAME_IP_THRESHOLD, last_login_at: x.last_login_at ?? null,
 });
-/** 测试辅助：切换当前登录用户（null = 未登录） */
+/** 测试辅助：切换当前登录用户（null = 未登录）；登录态同时给出 CSRF 令牌与 Cookie */
 export function mockLoginAs(username: string | null) {
   state.currentUserId = username ? (state.users.find((x) => x.username === username)?.id ?? null) : null;
+  setSessionCsrf(state.currentUserId ? MOCK_CSRF : null);
 }
 export function setRegistrationMode(m: SessionState['registrationMode']) {
   state.registrationMode = m;

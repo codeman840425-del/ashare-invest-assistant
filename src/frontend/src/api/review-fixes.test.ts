@@ -10,6 +10,7 @@ import { ERROR_TEXT, errorText, globalErrorAction, handleGlobalError, onGlobalAp
 import type { Evidence, MarketOverview, NonExecutableReason, Paged, SignalEvent, Suggestion, TerminalResponse, TodayResponse } from './types';
 import { chartStops, markerSignals } from '../features/terminal/chartStops';
 import { providerText, ruleCountText } from '../lib/format';
+import { apiFetch } from '../test/apiFetch';
 
 const CONTRACT = readFileSync(resolve(__dirname, '../../../../docs/api-contract.md'), 'utf8');
 const err = (status: number, code: string, details: Record<string, unknown> | null = null) => new ApiError(status, code, 'x', details, 'req-1');
@@ -203,11 +204,11 @@ describe('契约 v0.2.3 同步', () => {
 
 describe('m2：mock 兜底区分 404 / 405', () => {
   it('方法不对 → 405 METHOD_NOT_ALLOWED + Allow 头；路径不存在 → 404；/admin/* 一律 404', async () => {
-    const r = await fetch(`${location.origin}/api/v1/terminal`, { method: 'DELETE' });
+    const r = await apiFetch(`${location.origin}/api/v1/terminal`, { method: 'DELETE' });
     expect(r.status).toBe(405);
     expect(r.headers.get('Allow')).toBe('GET');
     expect(((await r.json()) as { error: { code: string } }).error.code).toBe('METHOD_NOT_ALLOWED');
-    expect((await fetch(`${location.origin}/api/v1/no-such-endpoint`)).status).toBe(404);
-    expect((await fetch(`${location.origin}/api/v1/admin/users`, { method: 'DELETE' })).status).toBe(404);
+    expect((await apiFetch(`${location.origin}/api/v1/no-such-endpoint`)).status).toBe(404);
+    expect((await apiFetch(`${location.origin}/api/v1/admin/users`, { method: 'DELETE' })).status).toBe(404);
   });
 });

@@ -12,6 +12,7 @@ import { deviationFields, lotWarning, missingRequired, parseStatuses, priceError
 import { uid } from '../mocks/fixtures';
 import { CHECKLIST, draftsNow } from '../mocks/planHandlers';
 import { server } from '../mocks/server';
+import { apiFetch } from '../test/apiFetch';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -20,7 +21,7 @@ vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
 
 const API = '/api/v1';
-const post = (path: string, body: unknown) => fetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const post = (path: string, body: unknown) => apiFetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 function renderAt(path: string) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
   Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
@@ -71,12 +72,12 @@ describe('纯函数', () => {
 
 describe('mock 与契约 §7.7 一致', () => {
   it('列表：status 多值、signal_id 筛选，按 created_at 倒序', async () => {
-    const r = await (await fetch(`${API}/plan-drafts?status=pending,stale`)).json();
+    const r = await (await apiFetch(`${API}/plan-drafts?status=pending,stale`)).json();
     expect(r.items.map((x: PlanDraft) => x.status)).toEqual(['pending', 'stale', 'pending']);
     expect(r.next_cursor).toBeNull();
-    const all = await (await fetch(`${API}/plan-drafts`)).json();
+    const all = await (await apiFetch(`${API}/plan-drafts`)).json();
     expect(all.items).toHaveLength(5);
-    const bySig = await (await fetch(`${API}/plan-drafts?signal_id=${SIG_DRAFTED}`)).json();
+    const bySig = await (await apiFetch(`${API}/plan-drafts?signal_id=${SIG_DRAFTED}`)).json();
     expect(bySig.items.every((x: PlanDraft) => x.signal_ids.includes(SIG_DRAFTED))).toBe(true);
   });
   it('草案字段：金额为字符串，含清单、快照与费用认知类型', () => {
@@ -93,7 +94,7 @@ describe('mock 与契约 §7.7 一致', () => {
     expect(ok.status).toBe(201);
     const d = (await ok.json()) as PlanDraft;
     expect([d.status, d.signal_ids]).toEqual(['pending', [SIG_DRAFTED]]);
-    const cs = await (await fetch(`${API}/candidate-signals/${SIG_DRAFTED}`)).json();
+    const cs = await (await apiFetch(`${API}/candidate-signals/${SIG_DRAFTED}`)).json();
     expect(cs.plan_draft_ids).toContain(d.id);
   });
   it('确认：清单 → 风险 → 偏离 → 成功；重复确认与失效草案报错', async () => {
@@ -120,7 +121,7 @@ describe('mock 与契约 §7.7 一致', () => {
     expect((await post(`/plan-drafts/${STALE}/discard`, { note: null })).status).toBe(409);
   });
   it('/today 待确认草案取自草案当前状态（pending + stale）', async () => {
-    const t = await (await fetch(`${API}/today`)).json();
+    const t = await (await apiFetch(`${API}/today`)).json();
     expect(t.pending_plan_drafts.items.map((x: { id: string }) => x.id).sort()).toEqual([PENDING, uid(1022), STALE].sort());
   });
 });

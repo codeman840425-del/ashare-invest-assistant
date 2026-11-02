@@ -11,6 +11,7 @@ import type { BarsResponse } from '../api/types';
 import type { StrategyInstance } from '../api/strategyTypes';
 import { mockAddInstance, STRATEGY_TEMPLATES } from '../mocks/strategyHandlers';
 import { uid } from '../mocks/fixtures';
+import { apiFetch } from '../test/apiFetch';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -19,8 +20,8 @@ vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
 
 const API = '/api/v1';
-const post = (path: string, body?: unknown) => fetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-const getJson = async <T,>(path: string) => (await (await fetch(`${API}${path}`)).json()) as T;
+const post = (path: string, body?: unknown) => apiFetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+const getJson = async <T,>(path: string) => (await (await apiFetch(`${API}${path}`)).json()) as T;
 type InstancePage = { items: StrategyInstance[]; next_cursor: string | null };
 
 function renderAt(path: string) {
@@ -72,9 +73,9 @@ describe('策略实例状态机（§6.0A）', () => {
   it('游标与筛选/排序不一致 → 400 INVALID_CURSOR', async () => {
     const p1 = await getJson<InstancePage>('/strategy-instances?limit=1&order=created_at_desc');
     expect(p1.next_cursor).not.toBeNull();
-    const ok = await fetch(`${API}/strategy-instances?limit=1&order=created_at_desc&cursor=${encodeURIComponent(p1.next_cursor!)}`);
+    const ok = await apiFetch(`${API}/strategy-instances?limit=1&order=created_at_desc&cursor=${encodeURIComponent(p1.next_cursor!)}`);
     expect(ok.status).toBe(200);
-    const bad = await fetch(`${API}/strategy-instances?limit=1&order=updated_at_desc&cursor=${encodeURIComponent(p1.next_cursor!)}`);
+    const bad = await apiFetch(`${API}/strategy-instances?limit=1&order=updated_at_desc&cursor=${encodeURIComponent(p1.next_cursor!)}`);
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { error: { code: string } }).error.code).toBe('INVALID_CURSOR');
   });
@@ -86,7 +87,7 @@ describe('证券搜索 /securities/search（v0.2.7）', () => {
     expect(r.items.length).toBeGreaterThan(0);
     expect(r.items[0].security_code).toMatch(/^600000\./);
     expect(r.items[0].match_kind).toBeTruthy();
-    expect((await fetch(`${API}/securities/search?q=${'1'.repeat(21)}`)).status).toBe(400);
+    expect((await apiFetch(`${API}/securities/search?q=${'1'.repeat(21)}`)).status).toBe(400);
   });
 });
 

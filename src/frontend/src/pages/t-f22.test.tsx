@@ -15,6 +15,7 @@ import { mockLoginAs } from '../mocks/session';
 import { setMockLicence } from '../mocks/licenceStore';
 import { STRATEGY_TEMPLATES } from '../mocks/strategyHandlers';
 import { uid } from '../mocks/fixtures';
+import { apiFetch } from '../test/apiFetch';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -118,7 +119,7 @@ describe('T-F22 设置 → 数据证书', () => {
     expect(await screen.findByText(/格式不符/)).toBeInTheDocument();
     expect((screen.getByTestId('licence-input') as HTMLInputElement).value).toBe('');
     expect(leaks(document.body.innerHTML, bad.slice(0, 28))).toBeNull();
-    const r = await fetch('/api/v1/me/data-licence', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ licence: bad, tier: 'free', has_quant_pro: false, expires_on: null }) });
+    const r = await apiFetch('/api/v1/me/data-licence', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ licence: bad, tier: 'free', has_quant_pro: false, expires_on: null }) });
     expect(r.status).toBe(400);
     const body = await r.json();
     expect(body.error.code).toBe('VALIDATION_ERROR');
@@ -128,7 +129,7 @@ describe('T-F22 设置 → 数据证书', () => {
 
   it('同一证书已绑定其他账号 → 409 DATA_LICENCE_IN_USE；前者删除后可设置', async () => {
     const licence = fakeLicence();
-    const put = () => fetch('/api/v1/me/data-licence', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ licence, tier: 'monthly', has_quant_pro: false, expires_on: null }) });
+    const put = () => apiFetch('/api/v1/me/data-licence', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ licence, tier: 'monthly', has_quant_pro: false, expires_on: null }) });
     mockLoginAs('new_user');
     expect((await put()).status).toBe(202);
     mockLoginAs('demo_user');
@@ -138,21 +139,21 @@ describe('T-F22 设置 → 数据证书', () => {
     expect(JSON.parse(text).error.code).toBe('DATA_LICENCE_IN_USE');
     expect(leaks(text, licence)).toBeNull();
     mockLoginAs('new_user');
-    expect((await fetch('/api/v1/me/data-licence', { method: 'DELETE' })).status).toBe(204);
-    expect((await fetch('/api/v1/me/data-licence', { method: 'DELETE' })).status).toBe(204);
+    expect((await apiFetch('/api/v1/me/data-licence', { method: 'DELETE' })).status).toBe(204);
+    expect((await apiFetch('/api/v1/me/data-licence', { method: 'DELETE' })).status).toBe(204);
     mockLoginAs('demo_user');
     expect((await put()).status).toBe(202);
   });
 
   it('未设置时 PATCH / 测试证书 → 409 DATA_LICENCE_NOT_SET；GET 只有契约字段，无证书类键', async () => {
     mockLoginAs('new_user');
-    const p = await fetch('/api/v1/me/data-licence', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tier: 'free' }) });
+    const p = await apiFetch('/api/v1/me/data-licence', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tier: 'free' }) });
     expect(p.status).toBe(409);
     expect((await p.json()).error.code).toBe('DATA_LICENCE_NOT_SET');
-    const t = await fetch('/api/v1/me/data-licence/test', { method: 'POST' });
+    const t = await apiFetch('/api/v1/me/data-licence/test', { method: 'POST' });
     expect((await t.json()).error.code).toBe('DATA_LICENCE_NOT_SET');
     mockLoginAs('demo_user');
-    const s = await (await fetch('/api/v1/me/data-licence')).json();
+    const s = await (await apiFetch('/api/v1/me/data-licence')).json();
     expect(Object.keys(s).sort()).toEqual([
       'days_to_expiry', 'expires_on', 'has_quant_pro', 'last_error_at', 'last_error_code', 'last_verified_at', 'paused_until', 'set_at', 'status', 'tier',
     ]);

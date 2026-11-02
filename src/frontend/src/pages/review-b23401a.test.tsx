@@ -15,6 +15,7 @@ import { transitionText } from '../lib/stateTransition';
 import { CANDIDATE_SIGNALS, uid } from '../mocks/fixtures';
 import { server } from '../mocks/server';
 import { mockLoginAs } from '../mocks/session';
+import { apiFetch } from '../test/apiFetch';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -31,11 +32,11 @@ function renderAt(path: string) {
   return router;
 }
 const act = (id: string, op: 'pause' | 'resume', reason: unknown) =>
-  fetch(`${API}/admin/data-licences/${id}/${op}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason }) });
+  apiFetch(`${API}/admin/data-licences/${id}/${op}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason }) });
 
 /** 以示例列表第一行为模板造 n 行（user_id 用 uid，username 为 demo_NNN） */
 async function manyRows(n: number, patch: (i: number) => Partial<AdminDataLicence> = () => ({})): Promise<AdminDataLicence[]> {
-  const base = ((await (await fetch(`${API}/admin/data-licences?limit=1`)).json()) as { items: AdminDataLicence[] }).items[0];
+  const base = ((await (await apiFetch(`${API}/admin/data-licences?limit=1`)).json()) as { items: AdminDataLicence[] }).items[0];
   return Array.from({ length: n }, (_, i) => ({ ...base, user_id: uid(20000 + i), username: `demo_${String(i).padStart(3, '0')}`, display_name: `示例用户${i}`, ...patch(i) }));
 }
 function serveRows(rows: AdminDataLicence[], seen: (string | null)[] = []) {
@@ -132,7 +133,7 @@ describe('N1：409 文案只认自有键', () => {
 describe('N7：blocked 信号的 allowed 含 released', () => {
   it('对 blocked 信号拟定草案 → 409 allowed = [released, dismissed]（按枚举顺序）', async () => {
     const blocked = CANDIDATE_SIGNALS.find((c) => c.state === 'blocked')!;
-    const r = await fetch(`${API}/plan-drafts`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ signal_ids: [blocked.id] }) });
+    const r = await apiFetch(`${API}/plan-drafts`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ signal_ids: [blocked.id] }) });
     expect(r.status).toBe(409);
     const b = (await r.json()) as { error: { code: string; details: { from: string; allowed: string[] } } };
     expect(b.error.code).toBe('INVALID_STATE_TRANSITION');

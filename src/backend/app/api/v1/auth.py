@@ -42,7 +42,10 @@ router = APIRouter(tags=["auth"])
 
 def require_registration_open(settings: SettingsDep) -> None:
     """架构师裁定（T-T23 #1）：``closed`` 时 ``/auth/register`` 一律 ``503 REGISTRATION_CLOSED``，
-    先于请求体校验（任何请求体，包括畸形的）。作为依赖挂在路由上，在请求体模型之前求值。"""
+    先于请求体校验（任何请求体，包括畸形的）。作为依赖挂在路由上，在请求体模型之前求值。
+
+    注意（review-f72b8c7 m2）：真正先生效的是 :class:`_RegistrationGateRoute`（解析请求体之前），
+    本依赖保留给 OpenAPI 与非 JSON 路径；改判定时只改本函数，两处共用。"""
     if settings.registration_mode == RegistrationMode.CLOSED:
         raise AppError(ErrorCode.REGISTRATION_CLOSED)
 
@@ -55,8 +58,10 @@ class _RegistrationGateRoute(APIRoute):
         handler = super().get_route_handler()
 
         async def gated(request: Request) -> Response:
-            provider = request.app.dependency_overrides.get(get_settings, get_settings)
-            require_registration_open(provider())
+            # T-B03f（review-f72b8c7 m1）：读 create_app 写入的 app.state.settings，不直接调用
+            # get_settings 的 override（带依赖参数的 override 会 TypeError → 500）
+            settings = getattr(request.app.state, "settings", None)
+            require_registration_open(settings if settings is not None else get_settings())
             return await handler(request)
 
         return gated

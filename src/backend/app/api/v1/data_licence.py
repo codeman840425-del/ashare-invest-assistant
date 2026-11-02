@@ -18,7 +18,7 @@ from typing import Annotated, Any
 import redis
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, SecretStr, StringConstraints, field_validator
-from sqlalchemy import and_, select, tuple_
+from sqlalchemy import Connection, and_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import service as auth_service
@@ -38,9 +38,16 @@ from app.common.pagination import Page, PageParams, build_page, decode_cursor, p
 from app.config import Settings
 from app.db.tables.licences import user_data_licence_holds as holds
 from app.db.tables.licences import user_data_licence_status as v
+from app.db.tables.notify import notifications
 from app.db.tables.users import users
 from app.licences import service
-from app.schemas.enums import DataLicenceStatus, DataLicenceTier
+from app.schemas.enums import (
+    DataLicenceStatus,
+    DataLicenceTier,
+    NotificationKind,
+    NotificationTargetType,
+    Severity,
+)
 
 router = APIRouter(tags=["data-licence"])
 
@@ -291,6 +298,28 @@ def list_licences(
     )
 
 
+# 契约 §7.9 v0.2.9（T-F22 遗留 5，问题 74 默认执行）：标题固定；正文为固定说明，
+# **不含管理员填写的理由与管理员身份**（理由只进审计 ``detail.reason``）。
+ADMIN_PAUSE_TITLE = "数据证书已被管理员暂停"
+ADMIN_RESUME_TITLE = "数据证书已被管理员恢复"
+_ADMIN_PAUSE_BODY = "管理员暂停了你的数据证书，暂停期间不会使用它拉取数据。如有疑问请联系管理员。"
+_ADMIN_RESUME_BODY = "管理员已解除对你的数据证书的暂停；如证书仍在，系统会重新验证后恢复使用。"
+
+
+def _notify_admin_transition(conn: Connection, user_id: uuid.UUID, *, pause: bool) -> None:
+    """状态确实变化时给该用户发一条站内通知（与状态变更同一事务，回滚则不发）。"""
+    conn.execute(
+        notifications.insert().values(
+            user_id=user_id,
+            kind=NotificationKind.DATA_LICENCE.value,
+            severity=(Severity.ATTENTION if pause else Severity.INFO).value,
+            title=ADMIN_PAUSE_TITLE if pause else ADMIN_RESUME_TITLE,
+            body=_ADMIN_PAUSE_BODY if pause else _ADMIN_RESUME_BODY,
+            target_type=NotificationTargetType.NONE.value,
+        )
+    )
+
+
 def _admin_transition(
     *,
     admin: AuthContext,
@@ -310,6 +339,12 @@ def _admin_transition(
     重复暂停幂等（契约 v0.2.8 #17⑤，T-B03e）：已处于管理员暂停（有暂停记录，或证书行已是
     ``paused_by_admin``）时再次 pause → 204，不论证书是否已删除；状态不变，**不写审计、不写事件**。
     只缺暂停记录的旧数据（0010 之前）顺手补上记录（状态本来就是暂停，不算变化）。
+
+    resume 幂等（契约 v0.2.9 §7.9 T-F22 遗留 1，T-B03f）：已设置证书、既无暂停记录也不是
+    ``paused_by_admin`` 时 resume → 204，**不写审计、不写事件、不发通知**（be607b3 曾写
+    from=to 审计，已改）；未暂停且未设置证书仍 409 NOT_SET。
+    通知（T-F22 遗留 5，T-B03f）：pause/resume 成功且状态确实变化时（含暂停期间证书已删除、
+    resume 后为 ``not_set``）发一条 ``data_licence`` 通知，正文不含理由与管理员身份。
     """
     verification_id: uuid.UUID | None = None
     with engine.begin() as conn:
@@ -340,7 +375,10 @@ def _admin_transition(
                 },
                 ip_hash=ip_hash(settings, client_ip(request, settings)),
             )
+            _notify_admin_transition(conn, user_id, pause=False)
             return None, None
+        if not pause and not released and row.status != S.PAUSED_BY_ADMIN:
+            return row.id, None
         before = str(row.status)
         after = before
         if pause:
@@ -374,6 +412,7 @@ def _admin_transition(
             },
             ip_hash=ip_hash(settings, client_ip(request, settings)),
         )
+        _notify_admin_transition(conn, user_id, pause=pause)
     return row.id, verification_id
 
 

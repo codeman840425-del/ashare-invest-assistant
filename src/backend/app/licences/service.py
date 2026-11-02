@@ -28,7 +28,19 @@ from typing import Any, Final
 
 import redis
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
-from sqlalchemy import Connection, Row, and_, case, delete, func, insert, select, update
+from sqlalchemy import (
+    ColumnElement,
+    Connection,
+    Row,
+    and_,
+    case,
+    delete,
+    func,
+    insert,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.auth.service import BEIJING, bj, now_utc
@@ -236,12 +248,37 @@ def hmac_in_use_by_other(conn: Connection, user_id: uuid.UUID, digest: bytes) ->
 _COOLDOWN_KEEP: Final = frozenset({S.ACTIVE.value, *COOLDOWN_STATUSES})
 
 
+#: T-B03f（review-be607b3 M1）：``paused_until`` 为空的冷却记录（quota_exceeded/ip_limited
+#: 不按时间到期）最多保留 24 小时（自 deleted_at 起）。上限口径待架构师在契约第 776 行确认。
+COOLDOWN_NULL_UNTIL_TTL: Final = dt.timedelta(hours=24)
+
+
+def _cooldown_expired(now: dt.datetime) -> ColumnElement[bool]:
+    """到期条件（SQL 表达式）：``paused_until <= now``，或 ``paused_until`` 为空且
+    ``deleted_at <= now - 24h``。"""
+    cd = user_data_licence_cooldowns
+    return or_(
+        cd.c.paused_until <= now,
+        and_(cd.c.paused_until.is_(None), cd.c.deleted_at <= now - COOLDOWN_NULL_UNTIL_TTL),
+    )
+
+
+def purge_expired_cooldowns(conn: Connection, now: dt.datetime | None = None) -> int:
+    """T-B03f（review-be607b3 M1，契约第 776 行“指纹只保留到 paused_until 为止”）：删除全部
+    已到期的冷却记录，返回删除行数。项目里没有周期任务框架（beat 仍是占位），采用
+    cleanup-on-access：每次证书 PUT/DELETE 先调用；beat 落地后也可直接定时调用本函数。"""
+    cd = user_data_licence_cooldowns
+    res = conn.execute(delete(cd).where(_cooldown_expired(now or now_utc())))
+    return int(res.rowcount or 0)
+
+
 def _remember_cooldown(
     conn: Connection, settings: Settings, row: Row[Any], digest: bytes, now: dt.datetime
 ) -> bool:
     """T-B03e（契约 v0.2.8 #13 补充）：冷却中 DELETE → 记下指纹与删除前状态（覆盖旧记录）；
     否则清除该用户的旧记录。返回是否记下。"""
     cd = user_data_licence_cooldowns
+    purge_expired_cooldowns(conn, now)
     conn.execute(delete(cd).where(cd.c.user_id == row.user_id))
     if row.status not in _COOLDOWN_KEEP or not keeps_state(row, now):
         return False
@@ -264,8 +301,10 @@ def _take_cooldown(
     conn: Connection, settings: Settings, user_id: uuid.UUID, digest: bytes, now: dt.datetime
 ) -> Row[Any] | None:
     """取出并删除该用户的冷却记录；指纹相同且未到期时返回它（``paused_until`` 为空的
-    quota_exceeded/ip_limited 与证书行上的语义一致：不按时间到期，直到换证）。"""
+    quota_exceeded/ip_limited 不按 paused_until 到期，但记录本身最多保留
+    :data:`COOLDOWN_NULL_UNTIL_TTL`）。先清理全部已到期记录（T-B03f）。"""
     cd = user_data_licence_cooldowns
+    purge_expired_cooldowns(conn, now)
     rec = conn.execute(delete(cd).where(cd.c.user_id == user_id).returning(*cd.c)).first()
     if rec is None:
         return None
@@ -276,6 +315,8 @@ def _take_cooldown(
     if until is not None and until <= now:
         return None
     if until is None and rec.status not in COOLDOWN_STATUSES:
+        return None
+    if until is None and rec.deleted_at <= now - COOLDOWN_NULL_UNTIL_TTL:
         return None
     return rec
 

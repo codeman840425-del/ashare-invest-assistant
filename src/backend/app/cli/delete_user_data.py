@@ -57,7 +57,7 @@ from typing import Any, Final
 
 import redis
 from sqlalchemy import Connection, Engine, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from app.auth.sessions import SessionStore
 from app.db.engine import engine_for
@@ -65,6 +65,7 @@ from app.db.engine import engine_for
 AUDIT_ACTION: Final = "admin.user_data_deleted"
 MAINT_ROLE: Final = "aia_maint"
 MAINT_URL_ENV: Final = "AIA_MAINT_DATABASE_URL"
+SERVICE_ROLES: Final = frozenset({"aia_api", "aia_ingest"})
 DEFAULT_IMPORTS_DIR: Final = "/srv/aia/imports"
 
 # ---- 子查询（:uid = 目标用户；:lids = 该用户全部证书行 id，含软删；其余绑定见 _bind） ----
@@ -394,6 +395,7 @@ class Plan:
     blockers: list[tuple[str, int]]
     files: list[Path]
     pending: list[tuple[str, int, str | None]]
+    pending_readable: bool = True
 
 
 def _params(plan_or_uid: Any, **extra: Any) -> dict[str, Any]:  # noqa: ANN401
@@ -656,14 +658,7 @@ def build_plan(conn: Connection, uid: uuid.UUID) -> Plan:
         )
     )
     blockers += _unhandled_fk_refs(conn, uid)
-    pending = [
-        (r.path, int(r.attempts), r.last_error)
-        for r in conn.execute(
-            text(
-                "SELECT path, attempts, last_error FROM ops.pending_file_purges ORDER BY created_at"
-            )
-        ).all()
-    ]
+    pending, pending_readable = _read_pending(conn)
     return Plan(
         user_id=uid,
         username=user.username,
@@ -679,7 +674,23 @@ def build_plan(conn: Connection, uid: uuid.UUID) -> Plan:
         blockers=[b for b in blockers if b[1] > 0],
         files=_user_files(conn, uid),
         pending=pending,
+        pending_readable=pending_readable,
     )
+
+
+def _read_pending(conn: Connection) -> tuple[list[tuple[str, int, str | None]], bool]:
+    """读 ``ops.pending_file_purges``。T-B03f（review-8fd9502 m2）：运维收回 aia_api/aia_ingest
+    对该表的权限后，用 api DSN 跑 dry-run 会 permission denied；此时在 SAVEPOINT 里降级为
+    “无权限，跳过”（返回 ``readable=False``），``--execute`` 据此拒绝。"""
+    sql = text("SELECT path, attempts, last_error FROM ops.pending_file_purges ORDER BY created_at")
+    try:
+        with conn.begin_nested():
+            rows = conn.execute(sql).all()
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) != "42501":  # insufficient_privilege
+            raise
+        return [], False
+    return [(r.path, int(r.attempts), r.last_error) for r in rows], True
 
 
 def run_purge(conn: Connection, plan: Plan) -> dict[str, int]:
@@ -881,7 +892,13 @@ def print_plan(plan: Plan, out: Callable[[str], None]) -> None:
         f"原始导入文件候选：{sum(1 for f in plan.files if f.exists())} 个"
         f"（根目录 {imports_root()}）"
     )
-    out(f"ops.pending_file_purges：{len(plan.pending)} 条")
+    if not plan.pending_readable:
+        out(
+            "ops.pending_file_purges：当前连接无权读取，已跳过"
+            f"（用 {MAINT_URL_ENV}_FILE 的 aia_maint DSN 运行 dry-run 才能列出）"
+        )
+    else:
+        out(f"ops.pending_file_purges：{len(plan.pending)} 条")
     for path, attempts, err in plan.pending:
         out(f"  - {path}（attempts={attempts}，last_error={err}）")
     if plan.blockers:
@@ -915,6 +932,18 @@ def main(argv: list[str] | None = None, *, confirm: Callable[[str], str] = input
 
     try:
         with engine.connect() as conn:
+            # T-B03f（review-8fd9502 m2）：dry-run / 预检查在只读事务里执行（首条语句），
+            # 不论连接是 aia_maint 还是 api DSN，都不可能写库
+            conn.execute(text("SET TRANSACTION READ ONLY"))
+            # plan 7.3 aia_maint 细则 ⑤：dry-run 不得用服务账号（aia_api / aia_ingest）的连接
+            who = conn.execute(text("SELECT current_user")).scalar_one()
+            if who in SERVICE_ROLES:
+                print(
+                    f"拒绝：当前数据库角色是 {who}（服务账号），dry-run 请用 {MAINT_URL_ENV}_FILE"
+                    " 的 aia_maint DSN 或一个只读角色的 DSN。",
+                    file=sys.stderr,
+                )
+                return 1
             plan = build_plan(conn, uid)
             conn.rollback()
     except PurgeRefusedError as exc:
@@ -948,6 +977,8 @@ def main(argv: list[str] | None = None, *, confirm: Callable[[str], str] = input
             plan = build_plan(conn, uid)  # 事务内重新取（锁在 run_purge 内）
             if plan.blockers:
                 raise PurgeRefusedError("存在阻断引用")
+            if not plan.pending_readable:
+                raise PurgeRefusedError(f"{MAINT_ROLE} 无权读取 ops.pending_file_purges")
             rows = run_purge(conn, plan)
     except PurgeRefusedError as exc:
         print(f"拒绝：{exc}", file=sys.stderr)

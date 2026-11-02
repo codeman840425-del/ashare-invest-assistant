@@ -130,7 +130,12 @@ user_data_licence_cooldowns = Table(
     "user_data_licence_cooldowns",
     metadata,
     uuid_col("user_id", nullable=False, fk="app.users.id", primary_key=True),
-    Column("fingerprint", BYTEA, nullable=False, comment="HMAC(K_cooldown, user_id||licence)"),
+    Column(
+        "fingerprint",
+        BYTEA,
+        nullable=False,
+        comment="HMAC(K_cooldown, user_id||0x00||licence_hmac)",
+    ),
     txt("status", nullable=False),
     ts("paused_until"),
     txt("last_error_code"),

@@ -44,6 +44,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.dependency_overrides[get_settings] = lambda: settings
 
     app.state.api_prefix = cfg.api_prefix
+    #: 生效的 Settings（T-B03f / review-f72b8c7 m1：路由类在依赖注入之外读取，不调用 override）
+    app.state.settings = cfg
     install_exception_handlers(app)
     # add_middleware 后加的在外层：RequestId 在最外，413 也带 X-Request-Id
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=cfg.business.imports.max_request_bytes)

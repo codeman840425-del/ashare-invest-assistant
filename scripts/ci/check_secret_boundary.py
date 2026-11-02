@@ -19,6 +19,9 @@
      （不回落到属主）；任何服务的 environment 里都没有 AIA_MAINT_DATABASE_URL*（只由入口包装在容器内生成）。
   7. APP_MASTER_KEY 只走 secret 文件（T-O11）：任何服务的 environment 里都没有 APP_MASTER_KEY；基础 compose 顶层
      secret app_master_key 用 file: 定义，api / worker 都挂了它，其他服务不得挂；.env.example 不得给它赋值。
+  8. 不悄悄换主密钥（T-O11 评审 M1）：deploy/scripts/compose.sh 不直接调用 app-master-keygen.sh，只经
+     app-master-key-ensure.sh（已有 → 用；旧 .env 有 → 迁移；库有数据 → 拒绝；全新空库 → 生成）；基础 compose 里
+     api / worker 设 AIA_REQUIRE_APP_MASTER_KEY: "1"（没挂 secret 就拒绝启动，不回落临时密钥），任何 compose 文件都不得改掉它。
 
 失败退出码 1，依赖缺失退出码 2。用法：check_secret_boundary.py [--repo DIR]
 """
@@ -54,6 +57,10 @@ MAINT_URL_ENV_RE = re.compile(r"^AIA_MAINT_DATABASE_URL")
 MASTER_ENV = "APP_MASTER_KEY"
 MASTER_SECRET = "app_master_key"
 MASTER_OWNERS = ("api", "worker")
+MASTER_REQUIRE_ENV = "AIA_REQUIRE_APP_MASTER_KEY"
+COMPOSE_SH = "deploy/scripts/compose.sh"
+KEY_ENSURE = "app-master-key-ensure.sh"
+KEY_GEN = "app-master-keygen.sh"
 DB_URL_RE = re.compile(r"^postgresql(?:\+\w+)?://([^:@/]+):(\$\{(\w+)[^}]*\})@")
 
 
@@ -131,6 +138,12 @@ def check(repo: Path) -> list[str]:
                     errs.append(f"{rel}: 服务 {name} 的 environment 有 {MASTER_ENV}（只走 secret 文件 {MASTER_SECRET}，T-O11）")
                 if MAINT_URL_ENV_RE.match(k):
                     errs.append(f"{rel}: 服务 {name} 的 environment 有 {k}（aia_maint 连接串只由入口包装在容器内生成）")
+            env = svc.get("environment")
+            if name in MASTER_OWNERS and MASTER_REQUIRE_ENV in _env_keys(env):
+                v = env.get(MASTER_REQUIRE_ENV) if isinstance(env, dict) else next(
+                    (e.split("=", 1)[1] for e in env if isinstance(e, str) and e.startswith(MASTER_REQUIRE_ENV + "=")), None)
+                if str(v) != "1":
+                    errs.append(f"{rel}: 服务 {name} 的 {MASTER_REQUIRE_ENV} 必须是 \"1\"（不回落临时主密钥，M1）")
             if name == MAINT_SVC and "DATABASE_URL" in _env_keys(svc.get("environment")):
                 errs.append(f"{rel}: 服务 {MAINT_SVC} 不得有 DATABASE_URL（只能以 aia_maint 连接，不回落到属主）")
             env = svc.get("environment")
@@ -162,10 +175,26 @@ def check(repo: Path) -> list[str]:
                 errs.append(f"{BASE_COMPOSE}: 服务 {svc} 没有显式 DATABASE_URL（必须用独立角色）")
         need = {PRIVATE_OWNER: {PRIVATE_SECRET, PUBLIC_SECRET}, "api": {PUBLIC_SECRET, MASTER_SECRET},
                 "worker": {MASTER_SECRET}}
+        for svc in MASTER_OWNERS:
+            env = (svcs.get(svc) or {}).get("environment")
+            if not (isinstance(env, dict) and str(env.get(MASTER_REQUIRE_ENV)) == "1"):
+                errs.append(f"{BASE_COMPOSE}: 服务 {svc} 缺少 {MASTER_REQUIRE_ENV}: \"1\"（没挂 app_master_key 要拒绝启动，M1）")
         for svc, want in need.items():
             have = set(_secret_names((svcs.get(svc) or {}).get("secrets")))
             if not want <= have:
                 errs.append(f"{BASE_COMPOSE}: 服务 {svc} 缺少 secrets {sorted(want - have)}")
+
+    csh = repo / COMPOSE_SH
+    if csh.is_file():
+        code = [ln.split("#", 1)[0] for ln in csh.read_text(encoding="utf-8").splitlines()]
+        if any(KEY_GEN in ln for ln in code):
+            errs.append(f"{COMPOSE_SH}: 不得直接调用 {KEY_GEN}（会给已有部署悄悄换主密钥），改经 {KEY_ENSURE}（M1）")
+        if not any(KEY_ENSURE in ln for ln in code):
+            errs.append(f"{COMPOSE_SH}: 没有调用 {KEY_ENSURE}（缺主密钥文件时的迁移 / 拒绝判定，M1）")
+    else:
+        errs.append(f"{COMPOSE_SH} 不存在")
+    if not (repo / "deploy/scripts" / KEY_ENSURE).is_file():
+        errs.append(f"deploy/scripts/{KEY_ENSURE} 不存在")
 
     ex = repo / ENV_EXAMPLE
     if ex.is_file():

@@ -9,6 +9,11 @@
 set -eu
 sd="${AIA_SECRET_ENV_DIR:-/run/secrets}"
 
+# AIA_REQUIRE_APP_MASTER_KEY=1（compose 给 api / worker 设）：没挂 secret 就拒绝启动，
+# 不让后端在 local/test 下回落到临时随机主密钥（等于悄悄换了主密钥，T-O11 评审 M1）。
+if [ "${AIA_REQUIRE_APP_MASTER_KEY:-0}" = 1 ] && [ ! -e "$sd/app_master_key" ]; then
+  echo "secret-env: 缺少 $sd/app_master_key（compose secret app_master_key 没挂上），拒绝启动；不会生成或回落到临时主密钥" >&2; exit 2
+fi
 if [ -e "$sd/app_master_key" ]; then
   if [ -n "${APP_MASTER_KEY:-}" ]; then
     echo "secret-env: APP_MASTER_KEY 只能来自 secret 文件，环境里不应再设置" >&2; exit 2

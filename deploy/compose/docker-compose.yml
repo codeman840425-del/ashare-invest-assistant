@@ -115,6 +115,8 @@ services:
       IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
       # 证书封装：api 只有公钥（只能加密）；当前版本号
       DATA_LICENCE_SEAL_KEY_VERSION: ${DATA_LICENCE_SEAL_KEY_VERSION:-1}
+      # 没挂 app_master_key 就拒绝启动，不回落临时主密钥（T-O11 评审 M1）
+      AIA_REQUIRE_APP_MASTER_KEY: "1"
     entrypoint: *secret-env-entrypoint
     secrets:
       - data_licence_seal_public_keys
@@ -144,6 +146,7 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      AIA_REQUIRE_APP_MASTER_KEY: "1"
     entrypoint: *secret-env-entrypoint
     secrets:
       - app_master_key
@@ -382,6 +385,7 @@ secrets:
   # 删除用户数据 CLI 角色口令（T-O11）：同上生成，属主容器用户；只挂给 db-roles 与 maint-cli（CI 检查）。
   db_password_aia_maint:
     file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/db_password_aia_maint
-  # APP_MASTER_KEY（T-O11）：deploy/scripts/app-master-keygen.sh 生成（600，属主容器用户，不覆盖）；只挂给 api 与 worker。
+  # APP_MASTER_KEY（T-O11；M1）：compose.sh 经 deploy/scripts/app-master-key-ensure.sh 准备（已有→用；旧 .env→迁移；
+  # 库有数据→拒绝启动；只有全新空库才生成；600，属主容器用户，不覆盖）；只挂给 api 与 worker。
   app_master_key:
     file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/app_master_key

@@ -213,3 +213,50 @@ def test_env_example_master_key_value(repo: Path) -> None:
 def test_gitignore_blocks_master_key_and_role_passwords(path: str) -> None:
     r = subprocess.run(["git", "-C", str(REPO), "check-ignore", "-q", "--no-index", path])
     assert r.returncode == 0, f".gitignore 应排除 {path}"
+
+
+# --- M1：不悄悄换主密钥 ---
+def test_compose_sh_must_not_call_keygen(repo: Path) -> None:
+    with (repo / ccs.COMPOSE_SH).open("a", encoding="utf-8") as f:
+        f.write('[ -e "$d/app_master_key" ] || "$ROOT/deploy/scripts/app-master-keygen.sh" "$d"\n')
+    assert any("不得直接调用 app-master-keygen.sh" in e for e in ccs.check(repo))
+
+
+def test_compose_sh_keygen_in_comment_ok(repo: Path) -> None:
+    with (repo / ccs.COMPOSE_SH).open("a", encoding="utf-8") as f:
+        f.write("# 人工：deploy/scripts/app-master-keygen.sh\n")
+    assert ccs.check(repo) == []
+
+
+def test_compose_sh_must_call_ensure(repo: Path) -> None:
+    p = repo / ccs.COMPOSE_SH
+    p.write_text(p.read_text(encoding="utf-8").replace("app-master-key-ensure.sh", "true"), encoding="utf-8")
+    assert any("没有调用 app-master-key-ensure.sh" in e for e in ccs.check(repo))
+
+
+def test_ensure_script_must_exist(repo: Path) -> None:
+    (repo / "deploy/scripts/app-master-key-ensure.sh").unlink()
+    assert any("app-master-key-ensure.sh 不存在" in e for e in ccs.check(repo))
+
+
+@pytest.mark.parametrize("svc", ["api", "worker"])
+def test_require_master_key_flag_in_base(repo: Path, svc: str) -> None:
+    p = repo / ccs.BASE_COMPOSE
+    text = p.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    # 删掉该服务块里的 AIA_REQUIRE_APP_MASTER_KEY 行
+    start = lines.index(f"  {svc}:")
+    for i in range(start + 1, len(lines)):
+        if lines[i].strip().startswith("AIA_REQUIRE_APP_MASTER_KEY"):
+            del lines[i]
+            break
+    else:
+        raise AssertionError("基础 compose 里没找到该行")
+    p.write_text("\n".join(lines), encoding="utf-8")
+    assert any(f"服务 {svc} 缺少 AIA_REQUIRE_APP_MASTER_KEY" in e for e in ccs.check(repo))
+
+
+@pytest.mark.parametrize("value", ['"0"', '""'])
+def test_overlay_cannot_disable_require_flag(repo: Path, value: str) -> None:
+    errs = _overlay(repo, f"services:\n  worker:\n    environment:\n      AIA_REQUIRE_APP_MASTER_KEY: {value}\n")
+    assert any("服务 worker 的 AIA_REQUIRE_APP_MASTER_KEY 必须是" in e for e in errs), errs

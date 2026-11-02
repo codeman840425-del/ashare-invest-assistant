@@ -140,9 +140,32 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
 | `aia_maint` | 只给删除用户数据 CLI（plan §7.3）；唯一能把 `app.users.status` 写成 purging 的角色 | secret `db_password_aia_maint`，只挂 `db-roles`、`maint-cli` |
 | `app_master_key` | 后端 `APP_MASTER_KEY`（邀请码 / 证书 HMAC 等） | secret，只挂 `api`、`worker`；入口包装 `deploy/docker/secret-env.sh` 在容器内转成环境变量 |
 
-- 口令 / 密钥文件都在仓库外 `$AIA_SECRETS_DIR`（默认 `~/.config/aia/secrets/<卷前缀>`），600；`compose.sh` 缺失时生成，**已存在从不覆盖**。
+- 口令 / 密钥文件都在仓库外 `$AIA_SECRETS_DIR`（默认 `~/.config/aia/secrets/<卷前缀>`），600；`compose.sh` 缺失时生成（主密钥例外，见下文“APP_MASTER_KEY 迁移”），**已存在从不覆盖**。
   `db_password_aia_maint`、`app_master_key` 属主是容器用户 10001（生成时 sudo -n chown）。
 - **换 APP_MASTER_KEY 会让既有邀请码哈希、证书 HMAC 失效**：只能在确认无存量数据或有迁移方案时人工删文件重建。
+
+### APP_MASTER_KEY 迁移（T-O11 评审 M1）
+
+`compose.sh` 不再直接生成主密钥；`app_master_key` 文件缺失时由 `deploy/scripts/app-master-key-ensure.sh` 判定：
+
+| 情况 | 行为 |
+|---|---|
+| `$AIA_SECRETS_DIR/app_master_key` 已存在 | 直接用（为空则拒绝，不覆盖） |
+| 文件不存在，调用方环境或 `deploy/env/.env` 里有非占位的 `APP_MASTER_KEY` | 迁移进密钥文件（600，属主 10001，不打印），提示“已从 … 迁移”；**不删 .env 那一行**，由人确认后再删。两处值不一致、或短于 32 字符 → 拒绝 |
+| 两边都没有，库已初始化（有任何业务表，含 `alembic_version`）或 `app.users` / `app.invite_codes` / `app.user_data_licences` / `app.import_files` 有行、或导入卷里有文件 | **拒绝启动**（退出 3），提示找回原密钥 |
+| 两边都没有，数据卷存在但 postgres 没在跑 / 查不了 / docker 不可用 | 无法确认是空库 → 拒绝（fail-closed） |
+| 两边都没有，数据卷不存在或库里没有业务表、导入卷为空 | 生成新主密钥（`app-master-keygen.sh`） |
+
+占位值（空、含 `<` `>`、`changeme` / `example` 开头）视为没有。api / worker 另设 `AIA_REQUIRE_APP_MASTER_KEY=1`：
+secret 没挂上时 `secret-env.sh` 拒绝启动，后端不会回落到临时随机主密钥。
+
+升级旧部署（主密钥原来在 `.env`）：
+1. 先备份库与 `.env`；`compose.sh up …` 时自动迁移，看到“已从 … 迁移”；
+2. 验证：`stat -c '%a %u' $AIA_SECRETS_DIR/app_master_key` 为 `600 10001`；用既有邀请码 / 登录验证 HMAC 仍然一致；
+3. 确认无误后，由人决定删除 `.env` 里的 `APP_MASTER_KEY` 行（compose 已不读它）。
+
+被拒绝时：从备份 / 原部署机找回原主密钥，写入密钥文件（600、属主 10001）后重试。只有确认要放弃旧数据
+（邀请码、证书去重、加密导入文件都将不可用）时，才由人工运行 `deploy/scripts/app-master-keygen.sh <密钥目录>`。
 - `aia_api` / `aia_ingest` 对 `ops.pending_file_purges` 无任何权限；`verify-roles.sh` 断言 api/ingest 的
   “置 purging → 删不可变行 → 改回 → 提交”序列失败、aia_maint 不能改回 / 不删行提交、正规删除路径可提交。
 - 删除用户数据（先 dry-run）：`deploy/scripts/compose.sh --profile maint run --rm --no-deps maint-cli --user-id <uuid> [--execute]`。

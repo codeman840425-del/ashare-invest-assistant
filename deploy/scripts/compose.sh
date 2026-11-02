@@ -102,10 +102,6 @@ AIA_DB_INGEST_PASSWORD="$(tr -d '\n' < "$secrets_dir/db_password_aia_ingest")"
   || { echo "$secrets_dir/db_password_aia_{api,ingest} 格式不对（应为十六进制，见 db-role-passwords.sh）" >&2; exit 2; }
 export AIA_DB_API_PASSWORD AIA_DB_INGEST_PASSWORD
 
-# APP_MASTER_KEY（T-O11）：只走 secret 文件 $AIA_SECRETS_DIR/app_master_key（600，属主容器用户），缺失时生成、从不覆盖；
-# compose 不再从 .env 插值它（.env 里残留的 APP_MASTER_KEY 行不再生效）。
-[ -e "$secrets_dir/app_master_key" ] || "$ROOT/deploy/scripts/app-master-keygen.sh" "$secrets_dir" >&2
-
 # daemon 没起来（机器重启后）或 docker.sock ACL 丢失（dockerd 被别处重启）时，自动修复一次（T-O08）。
 if ! docker info >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null)" != "systemd" ] \
    && command -v dockerd >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
@@ -119,6 +115,13 @@ elif sudo -n docker info >/dev/null 2>&1; then
 else
   echo "无法访问 Docker daemon：请先运行 deploy/scripts/start-dockerd.sh，或把当前用户加入 docker 组。" >&2
   exit 1
+fi
+
+# APP_MASTER_KEY（T-O11；评审 M1）：只走 secret 文件 $AIA_SECRETS_DIR/app_master_key（600，属主容器用户），从不覆盖。
+# compose 不再从 .env 插值它。文件缺失时由 app-master-key-ensure.sh 判定：旧 .env / 环境里有值 → 迁移（不删 .env 那一行）；
+# 都没有且库已初始化 / 有数据 / 无法确认 → 拒绝（退出 3）；只有全新空库才生成。绝不悄悄换主密钥。
+if [ ! -e "$secrets_dir/app_master_key" ]; then
+  AIA_DOCKER="${DOCKER[*]}" "$ROOT/deploy/scripts/app-master-key-ensure.sh" "$secrets_dir" "$ENV_FILE" "$prefix" >&2 || exit $?
 fi
 
 FILES=(-f "$ROOT/deploy/compose/docker-compose.yml")

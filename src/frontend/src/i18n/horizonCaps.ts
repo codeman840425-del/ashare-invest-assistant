@@ -1,4 +1,5 @@
-import type { HorizonCap } from '../api/types';
+import type { Horizon } from '../api/enums';
+import type { HorizonAssessment, HorizonCap } from '../api/types';
 
 /**
  * 周期封顶说明（契约 v0.2.3 #23、v0.2.5 #2、v0.2.6 T006e）：按 HorizonCap.kind / rule_id 显示，不查原因码文案（rule_id 不是 reason_code）。
@@ -25,4 +26,20 @@ export function capExplanation(c: HorizonCap): string {
   if (c.rule_id && HORIZON_CAP_RULE_TEXT[c.rule_id]) return HORIZON_CAP_RULE_TEXT[c.rule_id];
   if (c.kind === 'data_missing') return `缺少输入 ${c.inputs_missing.join('、') || '—'}`;
   return `闸门 ${c.rule_id ?? '—'} 命中`;
+}
+
+/**
+ * T-B46/T-B47 裁定 R8/R9：分类器数据层（T-B48/T-B30a）接上之前，所有证券都因 data_missing 封顶，这是预期行为；
+ * 前端显示“数据不足”，不说“都不适合”。
+ */
+export const HORIZON_DATA_MISSING = '数据不足';
+
+/** 该周期不在 suitable 中，且有 kind=data_missing 的封顶 */
+export function horizonDataMissing(a: Pick<HorizonAssessment, 'suitable' | 'caps'>, h: Horizon): boolean {
+  return !a.suitable.includes(h) && a.caps.some((c) => c.horizon === h && c.kind === 'data_missing');
+}
+
+/** 没有适合的周期，且至少一个周期因 data_missing 封顶：整体显示“数据不足”（判定口径待定，见 reports/T-B46-47-frontend.md） */
+export function noSuitableForLackOfData(a: Pick<HorizonAssessment, 'suitable' | 'caps'>): boolean {
+  return a.suitable.length === 0 && a.caps.some((c) => c.kind === 'data_missing');
 }

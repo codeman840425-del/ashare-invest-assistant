@@ -10,7 +10,6 @@ import { ApiError } from '../api/client';
 import { CONTRACT_VERSION } from '../api/enums';
 import { errorText } from '../api/errorPolicy';
 import type { AdminIngestStatus } from '../api/adminTypes';
-import { isConvertibleBondCode } from '../lib/securityKind';
 import { server } from '../mocks/server';
 import { mockLoginAs } from '../mocks/session';
 import { setMockLicence, setMockLicenceSettingsEnabled } from '../mocks/licenceStore';
@@ -123,27 +122,24 @@ describe('管理端采集状态（v0.2.8 #1）', () => {
   });
 });
 
-describe('可转债持仓（编排者 Q63）', () => {
-  it('代码前缀识别', () => {
-    expect(['110001.SH', '113050.SH', '118000.SH', '123001.SZ', '127001.SZ', '128001.SZ'].every(isConvertibleBondCode)).toBe(true);
-    expect(['600000.SH', '000001.SZ', '510300.SH', '300750.SZ', '112001.SH'].some(isConvertibleBondCode)).toBe(false);
-  });
-  it('显示“可转债·无行情”，现价/市值/盈亏为“—”，仓位与总资产标“估算”', async () => {
+describe('可转债持仓（编排者 Q63；T-B46 R6 起只看 security_type / estimated）', () => {
+  it('不在主数据的行显示“不在主数据·估算”，现价/市值/盈亏为“—”，仓位与总资产标“估算”，不链接个股页', async () => {
     renderAt('/portfolio');
-    const tag = await screen.findByTestId('cb-tag-113050.SH');
-    expect(tag).toHaveTextContent('可转债·无行情');
+    const tag = await screen.findByTestId('est-label-113050.SH');
+    expect(tag).toHaveTextContent('不在主数据·估算');
     const row = tag.closest('tr')!;
     expect(within(row).getAllByText('—').length).toBe(4);
-    expect(screen.getByTestId('cb-weight-113050.SH')).toHaveTextContent('估算');
+    expect(screen.getByTestId('est-weight-113050.SH')).toHaveTextContent('估算');
     expect(screen.getByTestId('total-est')).toHaveTextContent('估算');
-    expect(screen.getByTestId('cb-note')).toBeInTheDocument();
+    expect(screen.getByTestId('est-note')).toHaveTextContent('部分持仓不在证券主数据中');
     expect(within(row).queryByRole('link')).toBeNull();
   });
-  it('不含可转债时不标估算', async () => {
+  it('没有估算行时不标估算', async () => {
     server.use(http.get(`${API}/portfolio`, () =>
-      HttpResponse.json({ ...PORTFOLIO, positions: PORTFOLIO.positions.filter((x) => !isConvertibleBondCode(x.security_code)) })));
+      HttpResponse.json({ ...PORTFOLIO, positions: PORTFOLIO.positions.filter((x) => !x.estimated) })));
     renderAt('/portfolio');
     await screen.findByTestId('positions-tab');
     expect(screen.queryByTestId('total-est')).toBeNull();
+    expect(screen.queryByTestId('est-note')).toBeNull();
   });
 });

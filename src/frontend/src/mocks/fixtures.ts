@@ -179,7 +179,7 @@ const MV = positionsRaw.reduce((a, p) => a + p.mv, 0);
 /**
  * 示例可转债持仓（契约 v0.2.9 #1/#2，U3 已定）：不在证券主数据中（security_type=null）、无行情（estimated=true），
  * market_value / pnl / pnl_pct 为 null，weight_pct 与 total_assets 按成本估算，顶层 data_status=partial。
- * 不放进 SPECS（没有行情、自选与个股页数据）。
+ * 不放进 SPECS（没有行情、自选与个股页数据）。前端只按 security_type / estimated 显示（T-B46 R6），不看代码前缀。
  */
 const CB = { code: '113050.SH', name: '示例转债', qty: 100, sellable: 100, cost: 118.5 };
 const CB_MV = CB.qty * CB.cost;
@@ -862,4 +862,15 @@ export function noviceAssessment(a: HorizonAssessment): HorizonAssessment {
       { horizon: 'intraday_t', rule_id: 'IT0C', text: '做T 需要盘中决断与纪律，您自报的经验为新手' },
     ],
   };
+}
+
+/**
+ * 示例：分类器数据层（T-B48/T-B30a）接上之前的周期分类（T-B46/T-B47 裁定 R8/R9）：四个周期都因必需特征缺失按 data_missing 封顶，
+ * suitable 为空。默认 mock 不用它（保留各周期的示例分布），测试与截图通过 server.use 覆盖。
+ */
+export function allDataMissingAssessment(a: HorizonAssessment): HorizonAssessment {
+  const keys: Record<Horizon, string> = { intraday_t: 'f.intraday_amplitude_20d', short: 'f.turnover_20d_avg', swing: 'f.ma_trend', long: 'f.roe_ttm' };
+  const caps: HorizonCap[] = ENUMS.horizon.map((h) => ({ horizon: h, cap: 59, kind: 'data_missing', rule_id: null, inputs_missing: [keys[h]] }));
+  const scores = Object.fromEntries(ENUMS.horizon.map((h) => [h, Math.min(a.scores[h], 59)])) as Record<Horizon, number>;
+  return { ...a, suitable: [], scores, caps, inputs_missing: [...new Set(Object.values(keys))].sort() };
 }

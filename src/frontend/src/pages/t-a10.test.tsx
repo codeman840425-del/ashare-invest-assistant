@@ -67,9 +67,9 @@ describe('#1–#3 持仓：无行情行 null、estimated、security_type', () =>
     };
     server.use(http.get(`${API}/portfolio`, () => HttpResponse.json(body)));
     renderAt('/portfolio');
-    expect(await screen.findByTestId(`cb-tag-${stock.security_code}`, undefined, { timeout: 5000 })).toHaveTextContent('无行情');
-    expect(screen.getByTestId(`cb-tag-${stock.security_code}`)).not.toHaveTextContent('可转债');
-    expect(screen.queryByTestId(`cb-tag-${cb.security_code}`)).toBeNull();
+    // T-B46 R6 ②：在主数据中但无现价的行也按成本估算，只标“估算”，不标“不在主数据”
+    expect(await screen.findByTestId(`est-label-${stock.security_code}`, undefined, { timeout: 5000 })).toHaveTextContent(/^估算$/);
+    expect(screen.queryByTestId(`est-label-${cb.security_code}`)).toBeNull();
     // 示例数据横幅的契约版本跟随 CONTRACT_VERSION
     expect(screen.getByText(/按契约 v0\.2\.9 结构/)).toBeInTheDocument();
   });

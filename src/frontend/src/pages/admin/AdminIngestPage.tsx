@@ -1,13 +1,15 @@
 import { Link } from 'react-router';
 import { Alert, Card, Descriptions, Space, Table, Tag } from 'antd';
 import { useAdminIngestStatus } from '../../api/adminQueries';
-import type { IngestLicenceStatus } from '../../api/adminTypes';
+import type { IngestAlert, IngestLicenceStatus } from '../../api/adminTypes';
 import { ErrorBox } from '../../components/common';
 import { DATA_STATUS } from '../../i18n/labels';
 import { LICENCE_ERROR, LICENCE_STATUS, LICENCE_TIER, expiryLeftText } from '../../i18n/licenceLabels';
 import { fmtTime } from '../../lib/format';
 
 const PRIORITY: Record<string, string> = { p0_intraday: 'P0 盘中', p1_daily: 'P1 日频', p2_backfill: 'P2 回补' };
+/** T-B47 裁定③：告警只有两级；顺序按服务端返回，message 原样显示 */
+const ALERT_LEVEL: Record<IngestAlert['level'], { text: string; color: string }> = { critical: { text: '严重', color: 'red' }, warning: { text: '警告', color: 'orange' } };
 const dash = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : String(v));
 
 /**
@@ -40,9 +42,22 @@ export function AdminIngestPage() {
     <div className="page" data-testid="admin-ingest">
       <h2>采集状态（管理）</h2>
       <Space orientation="vertical" style={{ width: '100%' }} size={12}>
+        <Card size="small" title={`告警（${d.alerts.length}）`} data-testid="ingest-alerts">
+          {d.alerts.length ? (
+            <ul className="ingest-alerts">
+              {d.alerts.map((a) => (
+                <li key={a.key} data-testid={`ingest-alert-${a.key}`} data-level={a.level}>
+                  <Tag color={ALERT_LEVEL[a.level].color}>{ALERT_LEVEL[a.level].text}</Tag>
+                  <span>{a.message}</span>
+                  <span className="mono muted small" style={{ marginInlineStart: 8 }}>{a.key}</span>
+                </li>
+              ))}
+            </ul>
+          ) : <span className="muted" data-testid="ingest-alerts-empty">当前无告警</span>}
+        </Card>
         <Card size="small" title="全部证书合计">
           <Descriptions size="small" column={3}>
-            <Descriptions.Item label="采集主实例">{d.leader ? `${d.leader.instance_id}（出口 ${d.leader.egress_ip_masked}，租约到 ${fmtTime(d.leader.lease_expires_at)}）` : '无'}</Descriptions.Item>
+            <Descriptions.Item label="采集主实例">{d.leader ? `${d.leader.instance_id}（出口 ${dash(d.leader.egress_ip_masked)}，租约到 ${fmtTime(d.leader.lease_expires_at)}）` : '无（没有未过期的租约）'}</Descriptions.Item>
             <Descriptions.Item label="近 1 分钟调用 / 上限">{d.budget.used_last_minute} / {d.budget.per_minute_limit}</Descriptions.Item>
             <Descriptions.Item label="24 小时 IP 受限告警">{d.ip_limit_alerts_24h}</Descriptions.Item>
             <Descriptions.Item label="队列">{d.queues.map((x) => `${PRIORITY[x.priority] ?? x.priority} ${x.depth}（最久 ${x.oldest_age_s} 秒）`).join('；')}</Descriptions.Item>

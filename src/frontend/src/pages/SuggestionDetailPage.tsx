@@ -1,4 +1,4 @@
-import { CAP_KIND_TEXT, capExplanation } from '../i18n/horizonCaps';
+import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../i18n/horizonCaps';
 import { Alert, Button, Select, Tag, Tooltip } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -54,6 +54,20 @@ const evidenceColumns: DataColumn<Evidence>[] = [
   { key: 'fetched', header: '抓取时间', width: 130, value: (e) => e.fetched_at, render: (e) => <span className="mono small">{fmtTime(e.fetched_at)}</span> },
 ];
 
+/**
+ * 头部“适合周期”：suitable 为空时不显示为“都不适合”——周期分类有 data_missing 封顶则显示“数据不足”（T-B46/T-B47 R8/R9），
+ * 否则显示“—”。周期分类与卡片共用同一个查询缓存。
+ */
+function SuitableHorizons({ sg }: { sg: Suggestion }) {
+  const q = useHorizonAssessment(sg.security_code);
+  const list = sg.horizon_assessment.suitable;
+  return (
+    <span className="small" data-testid="sg-suitable">适合周期：{list.length ? list.map((h) => <Tag key={h}>{HORIZON[h]}</Tag>)
+      : q.data && noSuitableForLackOfData(q.data) ? <Tag data-testid="sg-hz-data-missing">{HORIZON_DATA_MISSING}</Tag> : <span className="muted">—</span>}
+    </span>
+  );
+}
+
 /** v0.2.2/v0.2.3 周期分类：按周期分组展示“支持 / 不支持”理由与缺失输入 */
 function HorizonPanel({ sg }: { sg: Suggestion }) {
   const q = useHorizonAssessment(sg.security_code);
@@ -72,7 +86,8 @@ function HorizonPanel({ sg }: { sg: Suggestion }) {
             return (
               <div key={h} className="hz-row">
                 <div><Tag color={a.suitable.includes(h) ? 'blue' : undefined}>{HORIZON[h]}</Tag><span className="mono">{a.scores[h]}</span>
-                  {a.suitable.includes(h) ? <span className="muted">　适合</span> : null}</div>
+                  {a.suitable.includes(h) ? <span className="muted">　适合</span>
+                    : horizonDataMissing(a, h) ? <span className="muted" data-testid={`hz-dm-${h}`}>　{HORIZON_DATA_MISSING}</span> : null}</div>
                 {(['for', 'against'] as const).map((pol) => rs.filter((x) => x.polarity === pol).map((x, i) => (
                   <div key={`${pol}-${i}`} className={`hz-reason ${pol}`}>
                     <span className="hz-pol">{pol === 'for' ? '支持' : '不支持'}</span>{x.text}
@@ -181,7 +196,7 @@ export function SuggestionDetailPage() {
         <span className="muted small">候选信号卡 · {ORIGIN[sg.origin]} · 生成 {fmtTime(sg.created_at)} · 快照 {sg.snapshot_id} · {sg.feature_set_version}</span>
         <AddToResearch origin="suggestion" securityCode={sg.security_code} suggestionId={sg.id} />
         <span className="spacer" />
-        <span className="small">适合周期：{sg.horizon_assessment.suitable.map((h) => <Tag key={h}>{HORIZON[h]}</Tag>)}</span>
+        <SuitableHorizons sg={sg} />
         <ConsensusBadge status={sg.consensus.status} actions={sg.consensus.actions} />
         <Tag color={exe.color}>{exe.text}{sg.executability.reason_ids.length ? `（${sg.executability.reason_ids.length} 项原因）` : ''}</Tag>
       </div>

@@ -156,7 +156,11 @@ const routeHandlers = [
   http.get(`${API}/portfolio`, ({ request }) => {
     const id = new URL(request.url).searchParams.get('account_id');
     if (!id || id === ACCOUNT_ID) return HttpResponse.json(PORTFOLIO);
-    return HttpResponse.json({ ...PORTFOLIO, total_assets: '0.00', cash: '0.00', positions: [], exposure: { sector: [] } });
+    // T-B46 R6 ③：示例的其他账户没有现金记录 → cash="0.00"，gaps 列 cash / user_input_missing；没有估算行，不为 partial
+    return HttpResponse.json({
+      ...PORTFOLIO, total_assets: '0.00', cash: '0.00', positions: [], exposure: { sector: [] }, data_status: 'fresh',
+      gaps: [{ key: 'cash', reason: 'user_input_missing', message: '该账户还没有现金记录（示例）' }],
+    });
   }),
   http.get(`${API}/quotes`, ({ request }) => {
     const codes = (new URL(request.url).searchParams.get('codes') ?? '').split(',').filter(Boolean);

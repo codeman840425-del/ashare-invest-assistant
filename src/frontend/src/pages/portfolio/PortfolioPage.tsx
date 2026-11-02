@@ -14,7 +14,7 @@ import { DILUTED_COST_NOTE, IMPORT_STATUS, RECON_KIND, RECON_STATUS, TRADE_SIDE,
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { applyFieldErrors } from '../../lib/formErrors';
 import { TERM } from '../../i18n/statementTerms';
-import { isConvertibleBondCode } from '../../lib/securityKind';
+import { SECURITY_TYPE } from '../../i18n/labels';
 
 type TabKey = 'positions' | 'trades' | 'imports' | 'reconciliation';
 const TABS: TabKey[] = ['positions', 'trades', 'imports', 'reconciliation'];
@@ -112,12 +112,14 @@ function PositionsTab({ accountId }: { accountId: string }) {
   if (q.isPending) return <Loading />;
   if (q.isError) return <ErrorBox error={q.error} />;
   const p = q.data;
-  // 契约 v0.2.9 #1/#2：无行情的行 estimated=true，现价、市值、盈亏为 null 显示“—”，仓位按成本估算并标“估算”。
-  // 是否无行情、能否进个股页只看 estimated / security_type；代码前缀只用来决定“可转债”这一文案
+  // 契约 v0.2.9 #1/#2 与 T-B46 裁定 R6：证券类型只看 security_type（null = 不在证券主数据中），不看代码前缀；
+  // 是否估算只看行上的 estimated（顶层没有 estimated）。估算行现价、市值、盈亏为 null 显示“—”，仓位按成本估算并标“估算”。
   const est = (r: PortfolioPosition) => r.estimated;
   const hasEst = p.positions.some(est);
-  const hasCb = p.positions.some((r) => r.estimated && isConvertibleBondCode(r.security_code));
-  const noQuoteLabel = (r: PortfolioPosition) => (r.security_type === null && isConvertibleBondCode(r.security_code) ? '可转债·无行情' : '无行情');
+  const hasOffMaster = p.positions.some((r) => r.security_type === null);
+  // R6 ②：在主数据中、但既没有日线收盘价也没有持仓快照参考价的行（问题 79）
+  const hasNoPrice = p.positions.some((r) => r.estimated && r.security_type !== null);
+  const estLabel = (r: PortfolioPosition) => (r.security_type === null ? '不在主数据·估算' : '估算');
   const dashCell = <span className="mono muted">—</span>;
   const estTag = <Tag className="est-tag" style={{ marginInlineStart: 4, marginInlineEnd: 0 }}>估算</Tag>;
   const lastPrice = (r: PortfolioPosition) => {
@@ -135,8 +137,9 @@ function PositionsTab({ accountId }: { accountId: string }) {
         <span className="muted">成本为摊薄成本（分红计入成本）</span>
       </Space>
       {hasEst ? (
-        <div className="muted small" data-testid="cb-note" style={{ margin: '4px 0 8px' }}>
-          {hasCb ? '持仓含可转债：本版没有可转债行情' : '部分持仓没有行情'}，其现价、市值、盈亏显示“—”；仓位与总资产按成本估算。
+        <div className="muted small" data-testid="est-note" style={{ margin: '4px 0 8px' }}>
+          {[hasOffMaster ? '部分持仓不在证券主数据中' : null, hasNoPrice ? '部分持仓没有日线收盘价，也没有持仓快照参考价' : null].filter(Boolean).join('；')}
+          ，其现价、市值、盈亏显示“—”；仓位与总资产按成本估算。
         </div>
       ) : null}
       <Table<PortfolioPosition>
@@ -146,7 +149,13 @@ function PositionsTab({ accountId }: { accountId: string }) {
           { title: '代码', dataIndex: 'security_code', render: (v: string, r) => (r.security_type === null ? <span className="mono">{v}</span> : <Link className="mono" to={`/stocks/${v}`}>{v}</Link>) },
           {
             title: '名称', dataIndex: 'name',
-            render: (v: string, r) => (est(r) ? <span>{v}<Tag color="default" style={{ marginInlineStart: 6 }} data-testid={`cb-tag-${r.security_code}`}>{noQuoteLabel(r)}</Tag></span> : v),
+            render: (v: string, r) => (
+              <span>
+                {v}
+                {r.security_type !== null && r.security_type !== 'stock' ? <Tag style={{ marginInlineStart: 6 }} data-testid={`type-tag-${r.security_code}`}>{SECURITY_TYPE[r.security_type]}</Tag> : null}
+                {est(r) ? <Tag color="default" style={{ marginInlineStart: 6 }} data-testid={`est-label-${r.security_code}`}>{estLabel(r)}</Tag> : null}
+              </span>
+            ),
           },
           { title: '数量', dataIndex: 'qty', align: 'right', render: (v: string) => <span className="mono">{fmtNum(v, 0)}</span> },
           { title: '可卖', dataIndex: 'sellable_qty', align: 'right', render: (v: string) => <span className="mono">{fmtNum(v, 0)}</span> },
@@ -160,7 +169,7 @@ function PositionsTab({ accountId }: { accountId: string }) {
           { title: '盈亏%', dataIndex: 'pnl_pct', align: 'right', render: (v: string | null) => (v === null ? dashCell : <span className={`mono ${pctClass(v)}`}>{signed(v)}%</span>) },
           {
             title: '仓位%', dataIndex: 'weight_pct', align: 'right',
-            render: (v: string, r) => <span className="mono" data-testid={est(r) ? `cb-weight-${r.security_code}` : undefined}>{fmtNum(v)}%{est(r) ? estTag : null}</span>,
+            render: (v: string, r) => <span className="mono" data-testid={est(r) ? `est-weight-${r.security_code}` : undefined}>{fmtNum(v)}%{est(r) ? estTag : null}</span>,
           },
         ]}
       />

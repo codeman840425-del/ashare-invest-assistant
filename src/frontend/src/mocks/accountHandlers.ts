@@ -19,6 +19,7 @@ import {
 import { errorBody, page } from './handlerUtils';
 import { adminPause, adminResume, deleteLicence, licenceEntries, licenceEntryOf, licenceOf, licenceState, mockIngestPaused, mockLicenceSettingsEnabled, patchLicence, putLicence, rateHit, testLicence } from './licenceStore';
 import { NOW, uid } from './fixtures';
+import { ingestAlerts } from './ingestAlerts';
 
 const API = '/api/v1';
 const REGISTER_KEYS = new Set(['username', 'password', 'display_name', 'invite_code', 'apply_note', 'website', 'form_started_at']);
@@ -251,7 +252,8 @@ export const accountHandlers = [
       .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status)
         || (a.days_left ?? Infinity) - (b.days_left ?? Infinity)
         || a.username.localeCompare(b.username));
-    const body: AdminIngestStatus = {
+    // v0.2.9 内 T-B47 裁定：freshness 固定 6 行（顺序固定，data_status 只取 fresh/stale/pending/unavailable）；alerts 永不为 null
+    const base: Omit<AdminIngestStatus, 'alerts'> = {
       leader: { instance_id: 'ingest-示例-1', egress_ip_masked: '203.0.113.x', lease_expires_at: '2026-11-02T10:00:30+08:00' },
       budget: { per_minute_limit: rows.reduce((t, r) => t + r.per_minute_limit, 0), used_last_minute: rows.reduce((t, r) => t + r.calls_last_minute, 0) },
       queues: [
@@ -260,15 +262,19 @@ export const accountHandlers = [
         { priority: 'p2_backfill', depth: rows.reduce((t, r) => t + r.queue_depth.p2, 0), oldest_age_s: 1260 },
       ],
       errors_24h: [{ upstream_code: '101', count: 1 }, { upstream_code: 'http_5xx', count: 3 }],
-      ip_limit_alerts_24h: 0,
+      ip_limit_alerts_24h: 1,
       freshness: [
-        { dataset: 'quotes_rt', data_as_of: '2026-11-02T09:59:57+08:00', data_status: 'fresh' },
-        { dataset: 'bars_daily', data_as_of: '2026-10-30', data_status: 'fresh' },
-        { dataset: 'financials', data_as_of: '2026-10-30', data_status: 'stale' },
+        { dataset: 'quotes', data_as_of: '2026-11-02T09:59:57+08:00', data_status: 'fresh' },
+        { dataset: 'minute_bars', data_as_of: '2026-11-02T09:59:00+08:00', data_status: 'fresh' },
+        { dataset: 'daily_bars', data_as_of: '2026-10-30', data_status: 'fresh' },
+        { dataset: 'financials', data_as_of: '2026-06-30', data_status: 'stale' },
+        { dataset: 'announcements', data_as_of: '2026-10-30', data_status: 'fresh' },
+        { dataset: 'security_master', data_as_of: '2026-10-30', data_status: 'fresh' },
       ],
       licences: rows.slice(0, 500),
       licences_truncated: rows.length > 500,
     };
+    const body: AdminIngestStatus = { ...base, alerts: ingestAlerts(base) };
     return json(body);
   }),
   // §7.9 管理端证书列表（v0.2.6，分页；v0.2.8 加 licence_id）：每位用户一行，含未设置证书的用户；按注册时间倒序（示例）

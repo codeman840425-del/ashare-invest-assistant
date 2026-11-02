@@ -432,3 +432,7 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .cand-panel { margin-bottom: 8px; padding-bottom: 8px; }
 .cand-panel > :not(.panel-head) { margin-left: 10px; margin-right: 10px; }
 .cand-panel > .panel-head { margin-bottom: 8px; }
+
+/* T-B47：管理端采集状态告警列表 */
+.ingest-alerts { list-style: none; margin: 0; padding: 0; }
+.ingest-alerts li { padding: 2px 0; }

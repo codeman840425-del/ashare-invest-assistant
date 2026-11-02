@@ -7,7 +7,7 @@ import type { SecurityProfile } from '../../api/marketTypes';
 import { useHorizonAssessment } from '../../api/queries';
 import type { Bar, BarsResponse, QuoteItem } from '../../api/types';
 import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../components/common';
-import { CAP_KIND_TEXT, capExplanation } from '../../i18n/horizonCaps';
+import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../../i18n/horizonCaps';
 import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, SECURITY_RISK_FLAG, SECURITY_TYPE } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { PriceChartPanel } from './PriceChartPanel';
@@ -210,6 +210,8 @@ function HorizonPanel({ code }: { code: string }) {
       <div className="panel-head">
         <span className="panel-title">周期分类</span>
         {q.data ? <span className="muted small mono">v{q.data.classifier_version}</span> : null}
+        {/* T-B46/T-B47 R8/R9：没有适合周期且有 data_missing 封顶时显示“数据不足”，不说“都不适合” */}
+        {q.data && noSuitableForLackOfData(q.data) ? <Tag color="warning" variant="outlined" data-testid="hz-data-missing">{HORIZON_DATA_MISSING}</Tag> : null}
         <span className="spacer" />
         <span className="muted small">只描述适合的持有周期</span>
       </div>
@@ -227,7 +229,9 @@ function HorizonPanel({ code }: { code: string }) {
                 <span className="hz-name">{HORIZON[h]}</span>
                 <span className="track"><span className="fill" style={{ width: `${score}%` }} /></span>
                 <span className="mono hz-score">{score}</span>
-                {ok ? <Tag color="blue" variant="outlined">适合</Tag> : <span className="hz-tag-gap" />}
+                {ok ? <Tag color="blue" variant="outlined">适合</Tag>
+                  : horizonDataMissing(q.data, h) ? <Tag variant="outlined" data-testid={`hz-dm-${h}`}>{HORIZON_DATA_MISSING}</Tag>
+                    : <span className="hz-tag-gap" />}
                 {/* 评审 T-F22a m10：封顶/提示可 Tab 聚焦、Enter/Space 打开，读屏读到全文 */}
                 {caps.length ? (
                   <KeyTip lines={caps.map((c) => `封顶 ${c.cap}（${CAP_KIND_TEXT[c.kind]}）：${capExplanation(c)}`)} className="warn small" testId={`cap-${h}`}>封顶</KeyTip>

@@ -227,6 +227,22 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 - **容器清单**（`deploy/compose/docker-compose.yml`）：`nginx`（静态前端、反向代理、SSE 透传）、`api`（uvicorn 2–4 workers）、`worker`（Celery，队列 `default/batch/llm/notify/evaluation`）、**`ingest`（行情采集服务，`replicas: 1`，全站唯一调用麦蕊，唯一能解密用户证书（只有它注入 `DATA_LICENCE_SEAL_PRIVATE_KEYS`），2.1A、2.1B）**、`signal-rt`（盘中信号计算，单实例，**无 licence**）、`beat`（唯一）、`postgres`（PG16 + TimescaleDB 镜像，版本固定）、`redis`。出口 IP 即主机的固定公网 IP；`ingest` 启动时自检。
 - **资源估算**：4 vCPU / 8 GB 内存 / 100 GB SSD 足够（分钟线保留 90 天约 3–4 GB，见 3.3）；测试期用开发者本机（Docker Desktop 或 Linux）即可。
 - **配置全部走环境变量**（pydantic-settings；`deploy/env/.env.example` 只有变量名与假值）：`DATABASE_URL`、`REDIS_URL`、`MAIRUI_BASE_URL`、`MAIRUI_PRO_BASE_URL`、`APP_MASTER_KEY`（加密 LLM key / 股东代码 HMAC / 原始文件）、`IMPORT_STORAGE_PATH`、`PUBLIC_BASE_URL`、`SESSION_COOKIE_SECURE`、`REGISTRATION_MODE`（默认 `closed`）、`SMTP_*`；运行参数（实时间隔、预算、上限）在数据库配置表 + `config/*.yaml` 默认值中，可在后台修改。 **T-A07 起生产不再使用 `MAIRUI_LICENCE`**（每用户证书加密存库，2.1B）：`DATA_LICENCE_SEAL_PUBLIC_KEYS`、`DATA_LICENCE_SEAL_KEY_VERSION` 注入 `api`；**`DATA_LICENCE_SEAL_PRIVATE_KEYS` 只注入 `ingest` 容器**，其他容器的 env 文件不含私钥，CI 会检查；`ingest` 发现 `MAIRUI_LICENCE` 非空即拒绝启动（只有本机实测脚本可在用户本人电脑的 shell 中临时设置它）。
+- **`APP_MASTER_KEY` 按服务分配（v0.2.9 内，T-O11 评审裁定）**：主密钥只通过 compose secret 文件 `app_master_key` 提供，只有确实要用它的服务挂载；其余服务不挂载、启动也不要求它。依据是当前代码的实际用途（2026-11-01 核对 `src/backend/app`）：
+
+  | 服务 | 用途（代码位置） | 需要主密钥 | secret 文件 | 启动检查（非 local/test） |
+  |---|---|---|---|---|
+  | `api` | 分页游标签名（`common/pagination.py`）、邀请码 HMAC（`auth/invites.py`）、登录 IP HMAC（`auth/deps.py`）、证书去重 HMAC 与冷却指纹（`licences/seal.py`，由 `licences/service.py` 调用）、导入文件加密密钥（`importing/keys.py`、`importing/storage.py`）、LLM 密钥密文 | 需要 | 挂载 | 缺失或少于 32 字符 → 拒绝启动 |
+  | `worker` | 现为心跳占位；规划中的导入解析（读加密原始文件）与 LLM 网关（解密 `api_key_ciphertext`）要用 | 需要 | 挂载 | 同 `api` |
+  | `ingest` | 只用证书私钥 `DATA_LICENCE_SEAL_PRIVATE_KEYS`（X25519，见 2.1B），不用主密钥 | 不需要 | **不得挂载** | 不要求；如检测到主密钥（环境变量或 secret 文件）→ 拒绝启动，避免同一容器同时持有私钥与主密钥 |
+  | `beat` | 只调度；周期任务（含每小时清理证书冷却记录）在 `worker` 执行 | 不需要 | 不得挂载 | 不要求 |
+  | `signal-rt` | 读库与缓存计算信号；SSE 与游标在 `api` | 不需要 | 不得挂载 | 不要求 |
+  | `maint-cli` | 删除用户数据 CLI 按 `user_id` 删行、删文件、删 Redis 键，不计算 HMAC；连接串只读 `AIA_MAINT_DATABASE_URL_FILE` | 不需要 | 不得挂载 | 不要求 |
+  | `migrate` | alembic 迁移不计算 HMAC；`migrations/env.py` 只在没给 `DATABASE_URL` 时才加载 Settings | 不需要 | 不得挂载 | 不要求 |
+  | `nginx`、`postgres`、`redis` 及其他基础设施 | 无 | 不需要 | 不得挂载 | — |
+
+  - **后端**：Settings 的“非 local/test 必须有 `APP_MASTER_KEY`”只对 `SERVICE_NAME ∈ {api, worker}` 生效；`SERVICE_NAME` 缺省仍按 `api` 处理，取到白名单外的未知值时在非 local/test 下拒绝启动（失败即关闭）。所有用主密钥派生子密钥的函数（游标、邀请码、登录 IP、证书去重与冷却指纹、导入文件密钥）在非 local/test 下取不到主密钥时必须抛错，不得退回进程内临时密钥。`ingest` 启动时发现主密钥即拒绝启动。
+  - **CI 规则 7（`scripts/ci/check_secret_boundary.py`）改为显式白名单**：脚本内写死一张表，`api`、`worker` 必须挂载 `app_master_key`，表中列出的其余服务必须不挂载；compose 中出现表里没有的服务 → CI 失败，新增服务时必须先在表里登记“挂或不挂”。`.env.example` 仍只有变量名与假值。
+  - **升级约束**（运维实现于 `deploy/scripts/`，runbook 同步）：① 升级流程的任何一步都**不得自动生成**主密钥；只有全新部署（secret 文件不存在、旧 `.env` 与环境里没有非占位值、数据库为空）才允许生成。② secret 文件缺失、但旧 `.env`（或环境变量）里有非占位值的 `APP_MASTER_KEY` → 把该值迁移进 secret 文件（权限 600，不打印、不写日志），提示从 `.env` 删除该行，不生成新值。③ 两者都没有、但数据库已有数据（`app.users`、`app.invite_codes`、`app.user_data_licences` 任一非空）→ **拒绝启动**，提示从备份恢复主密钥；连不上数据库时同样拒绝。④ secret 文件与旧 `.env` 都有且不一致 → 拒绝启动，等人工确认。⑤ 主密钥轮换不在 V1 范围。
 - **无云厂商锁定**：只依赖 PostgreSQL、Redis、本地卷（或任意 S3 兼容存储，通过 `IMPORT_STORAGE_BACKEND=local|s3` 切换）；不用托管专有服务；镜像可在任意主机运行。
 - **迁移流程（本地 → 服务器）**：`pg_dump` 加原始文件卷打包（加密）→ 新主机 `docker compose up`（**先不启动 `ingest`**）→ `pg_restore` → 修改 `PUBLIC_BASE_URL` 与 DNS → **停止本地 `ingest` → 等待 ≥ 60 秒 → 启动服务器 `ingest` → 核对出口 IP → 从本地 `.env` 删除 licence**。迁移期间及之后，开发机不得用同一证书做真实调用（2.1A；第 9 节问题 27）。操作手册写在 `deploy/scripts/migrate.md` 和 `deploy/runbooks/ingest-failover.md`（T-O06、T-O07）。
 - **测试期访问**：本地 `http://localhost`，不对公网开放；如需让少数测试用户访问，用内网/VPN（如自建 WireGuard）而非把未备案域名解析到境内主机。
@@ -1158,7 +1174,7 @@ class LLMGateway:
   - 财务数据**以披露日为准**，不以报告期为准。麦蕊财报接口带 `jzrq`（截止日期）和 `plrq`（披露日期）【文档已列·待 T003 验证】。入库时保存 `report_period`、`announce_date` 和 `available_from`：盘后披露的从下一交易日开盘可用，盘中披露的从披露时刻的下一根 1 分钟 bar 可用；时刻不详时按盘后处理。
   - 行情与因子保存 `first_seen_at`。
   - 因子接口返回 `trade_date`、`update_time`、`report_period`、`calc_version`【文档已列·待 T003 验证】。**历史截面是否按当时已知信息计算（是否回填、是否随 `calc_version` 重算）【待 T003 验证：T-B05】**。在核实之前，内部评估一律用我们自己按时点落库的截面，不用回溯拉取的历史因子。
-- **因子池排除**：停牌、ST/*ST、退市整理、上市不满 60 个交易日的次新股（阈值可配置）不进入截面排名和分位计算。
+- **因子池排除**：停牌、ST/*ST、退市整理、上市不满 60 个交易日的次新股（阈值可配置）不进入截面排名和分位计算。**例外**（v0.2.9 内，T-O11 评审裁定）：分类器特征的 `rank_pct_universe`（如 `f.volatility_20d` 的全市场分位）不排除 ST、*ST、退市整理股，只要求上市满 20 个交易日（并排除北交所与当日停牌）；定义以 `docs/strategies/feature_spec.md` §1.4 为准。
 - **统一复权口径**：价格类特征统一用**前复权**（`qfq`，用于趋势和指标）。收益计算用**后复权或总收益口径**（`hfq`，避免除权缺口），并在 `feature_catalog.adjust` 中标明；1 分钟数据麦蕊只有不复权（`n`）【文档已列·待 T003 验证】，跨除权日的日内计算要截断。
 - **单因子检验**（内部评估模块，2.12.4）：IC 和 RankIC（均值、IR、t 值）、分组单调性（5 组）、换手率、衰减（1/5/20 日 IC 曲线）。
 - **去冗余**：同一模板内的因子两两 |Spearman ρ| > 0.8 时提示合并；G6 同时检查模板之间命中集合的重合度。
@@ -1230,6 +1246,7 @@ class LLMGateway:
 | 规则 | 内容（2026-11-01 网上核实；以交易所最新规则为准；规则只建模到 2023-04-10，更早的回看标“交易规则未建模”，见 `market_rules.yaml` `modeled_from`） |
 |---|---|
 | T+1 | 当日买入的股票下一交易日才可卖出；可卖数量 = 昨日持仓 − 今日已卖 |
+| ETF 当日回转 | 交易所允许部分类别 ETF（债券、货币、黄金、商品期货、跨境等）当日回转，但需要可靠的 ETF 类别数据源。**在 `market_rules.yaml` 的 `t0_round_trip.data_source` 选定并接入前，所有 ETF 一律按 T+1**（v0.2.9 内，T-O11 评审裁定）；实现必须以 `data_source` 非空为前提：为 null 时即使调用方传入类别也按 T+1。来源：麦蕊优先，但麦蕊公开文档只有“基金-ETF基金行情/净值”等大类，未见 ETF 子类字段【待核实，T-B05 实测】；备选为交易所公开基金列表的分类字段【待核实】。选定后由架构师裁定、后端接入 |
 | 涨跌幅 | 主板 10%；创业板、科创板 20%；北交所 30%；**沪深主板 ST/*ST 自 2026-07-06 起为 10%（此前为 5%）【已定，已核实：上证发〔2026〕41 号、深证上〔2026〕551 号，2026-07-06 施行】**；创业板、科创板风险警示股票 20%；北交所风险警示股票 30% |
 | 无涨跌幅限制 | 沪深注册制新股上市前 5 个交易日；北交所新股上市首日；退市整理期首日（以交易所规则为准）。这些情形下有盘中临时停牌机制（较开盘价 ±30%、±60% 各停牌 10 分钟） |
 | 涨跌停价计算 | 前收盘价 × (1 ± 比例)，按四舍五入取至价格最小变动单位（A 股 0.01 元）。**沪 3.3.17、深 3.3.19 已核实**（T006b），含两条边界规则：① 计算出的涨跌停价与前收盘价之差不足一个价格最小变动单位时，按前收盘价 ± 0.01 元；② 计算结果低于 0.01 元时取 0.01 元 |
@@ -1457,7 +1474,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 **快照与行情**（麦蕊来源按证书隔离，见本节“数据归属”；只有证券公开主数据全站一份）
 | 表 | 关键字段 |
 |---|---|
-| `data_snapshots` | id, created_at, purpose(candidate/plan/alert/review/screen/horizon；`horizon` 为 v0.2.9 内 T-B47 裁定新增，周期评估快照，`user_id` 必填), items(jsonb: [{key（如 quote.{symbol}.close）, value, unit, data_as_of, fetched_at, provider, endpoint, raw_payload_id}]), known_events(jsonb: 当时已知的公告/事件 id 列表), hash；**user_id**(FK→users，可空；含持仓、成交、账户或其派生内容时必填), **licence_id**(可空；用某用户证书取到的数据时填)（T-B16 裁定：带 user_id 的快照在删除用户时物理删除；user_id 为空的快照只允许存市场级内容，见 7.3）。**写入方验收（v0.2.9 内，评审 be607b3/f72b8c7/8fd9502 裁定）**：每个写 `data_snapshots` 的模块（候选、计划、提醒、复盘、筛选、周期评估及以后新增的写入方）上线前都要有一条验收用例：快照含个人内容（持仓、成交、账户、画像、`user.*`）或由其派生的内容时必须写 `user_id`；用到某用户证书取到的数据时还必须写 `licence_id`；两条任一不满足即拒写（应用层断言 + 表 CHECK：`purpose IN ('plan','horizon')` 时 `user_id IS NOT NULL`）。测试员在 T-T16 中按写入方逐个覆盖 |
+| `data_snapshots` | id, created_at, purpose(candidate/plan/alert/review/screen/horizon；`horizon` 为 v0.2.9 内 T-B47 裁定新增，周期评估快照，`user_id` 必填), items(jsonb: [{key（如 quote.{symbol}.close）, value, unit, data_as_of, fetched_at, provider, endpoint, raw_payload_id}]), known_events(jsonb: 当时已知的公告/事件 id 列表), hash；**user_id**(FK→users，可空；含持仓、成交、账户或其派生内容时必填), **licence_id**(可空；用某用户证书取到的数据时填)（T-B16 裁定：带 user_id 的快照在删除用户时物理删除；user_id 为空的快照只允许存市场级内容，见 7.3）。**写入方验收（v0.2.9 内，评审 be607b3/f72b8c7/8fd9502 裁定）**：每个写 `data_snapshots` 的模块（候选、计划、提醒、复盘、筛选、周期评估及以后新增的写入方）上线前都要有一条验收用例：快照含个人内容（持仓、成交、账户、画像、`user.*`）或由其派生的内容时必须写 `user_id`；用到某用户证书取到的数据时还必须写 `licence_id`；两条任一不满足即拒写（应用层断言 + 表 CHECK：`purpose IN ('candidate','plan','horizon')` 时 `user_id IS NOT NULL`；v0.2.9 内，T-O11 评审裁定：`candidate` 也必填，因为研究候选快照含本人持仓派生的适配评估；后端用新迁移把 `horizon` 加进 `purpose` 的 CHECK 并加这条 CHECK，迁移前先查已有违规行）。测试员在 T-T16 中按写入方逐个覆盖 |
 | `market.securities` | ~~code, name, exchange, board, list_date, status, industry_codes, updated_at~~ → v0.2.7：security_id, code("600000.SH"), type(stock/cdr/etf/index；契约 v0.2.8 加 etf), name, exchange(SH/SZ/BJ), board, list_date, list_date_basis, delist_date, listing_status, risk_flag, name_norm, name_initials(text[]), master_source, master_as_of, updated_at。**证券公开主数据，全站一份**（第 9 节问题 51：只含代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示；不存公司全称）；`master_source` 来源【待问题 52 / T-A04 补测】，确认前只用交易所公开列表。行业、概念、股本移到按证书的表（带 `source_licence_id`，2.1B）。另建 `security_name_history`、`security_code_history`、`security_risk_flag_history`（T007 §5）；索引 `gin (name_norm gin_trgm_ops)`、`gin (name_initials)`（迁移中 `CREATE EXTENSION IF NOT EXISTS pg_trgm`） |
 | `market.trading_calendar` | date, is_open |
 | `market.daily_bars` | code, trade_date, open, high, low, close, volume, amount, adj_type, fetched_at（按年分区） |
@@ -1988,6 +2005,15 @@ class BrokerStatementParser(Protocol):
 | 5 | 历史日 K（结果计算） | `/hsstock/history/...` | — |
 
 京市（`/bj/...`）有对应的实时、历史分时、财务接口；**京市公告/问董秘接口文档未见**【待 T003 验证】。
+
+**研究候选 RC4 的行业与停牌数据来源（v0.2.9 内，T-O11 评审裁定）**（只读麦蕊公开文档，未用任何证书调用；未实测的标【待核实】）：
+
+| 数据 | 麦蕊接口（文档所载更新时间） | 落库 | 采集方 | 状态 |
+|---|---|---|---|---|
+| 申万一级行业归属 | 主：`/hszg/zg/{code}`（个股所属指数、行业、概念，每周六 11:00）；行业树 `/hszg/list`（每周六 03:05）；备选 `/hslt/primarylist`、`/hslt/sectors`（申万一级，每周六 / 每日 16:20） | 按证书的行业归属表（带 `source_licence_id`，与 3.3 `market.securities` 说明一致），表名与字段由后端在 T-B43 设计【待定】；一级行业代码格式【待核实】 | `ingest`（全站唯一调用麦蕊），周更 | 【待核实，T-B05 实测】 |
+| 停牌 | 主：日 K 的 `sf` 字段（1 停牌，0 不停牌），随日 K 采集；补充：`/hitc/jrts` 今日交易提示的停牌列表 `tp`（每日 15:40） | 日 K 行上的停牌标记，或 `market.market_events`（新增 `suspension` 类型）；由后端在 T-B43 选定【待定】 | `ingest`，日更 | 【待核实，T-B05 实测】 |
+
+接入前 RC4 对行业集中与停牌照常出 gap（不判定、不静默），`exposure.sector` 仍为未知。
 
 ### 4.3 调用频率与配额估算（钻石版，1 分钟上限 6000；我们自设上限 3000/分钟）
 > **【待 T003 验证】本节所有数据可用性结论**（接口、字段、因子、限流、历史深度、刷新间隔、上限推算）都来自文档推导，须以后端实测报告 `/workspace/team/reports/T003-mairui-capability.md` 为准；报告出来后逐项替换本节标记。
@@ -2610,7 +2636,7 @@ rules:
         - {id: SH4, input: f.volatility_20d, transform: rank_pct,
            bands: [{op: between, value: [0.4, 0.9], pts: 10}],
            text: "近 20 日波动率位于全市场 {v:pct} 分位（0.4–0.9 加分，过低或过高不加）"}
-        - {id: SH5, input: f.ma_trend, unit: sign,
+        - {id: SH5, input: f.ma_trend, unit: pct,
            bands: [{op: gt, value: 0, pts: 10}],
            text: "均线趋势值 {v}（> 0 为多头排列）"}
         - {id: SH6, input: profile.horizon_pref,
@@ -2628,10 +2654,10 @@ rules:
         - {id: SW1, input: f.amount_20d_avg, unit: CNY,
            bands: [{op: ge, value: 100000000, pts: 15}, {op: ge, value: 50000000, pts: 8}],
            text: "近 20 日日均成交额 {v:yi} 亿元"}
-        - {id: SW2, input: f.ma_trend, unit: sign,
+        - {id: SW2, input: f.ma_trend, unit: pct,
            bands: [{op: gt, value: 0, pts: 20}],
            text: "均线趋势值 {v}（> 0 为多头排列）"}
-        - {id: SW3, input: f.momentum_60d, unit: sign,
+        - {id: SW3, input: f.momentum_60d, unit: pct,
            bands: [{op: gt, value: 0, pts: 15}],
            text: "近 60 日动量 {v}（> 0 为上涨）"}
         - {id: SW4, input: f.volatility_20d, transform: rank_pct,
@@ -2678,7 +2704,7 @@ rules:
 ```
 `rules` 为空时分类器不输出“适合”，前端显示“周期分类规则未配置”，用户可手动选择周期。规则见 `docs/strategies/horizon_classifier.md` v1（T006a；判定顺序见该文 §3，比较语义见 §4 末尾“边界与比较语义”）。
 
-- **用户输入口径（v0.2.9 内，T-B46/T-B47 裁定）**：`user.avg_holding_days` = 本人全部账户最近 365 个自然日内**已平仓**的买入批次，按 FIFO 配对卖出，持有交易日数（买入日到卖出日的交易日数，同日买卖为 0）按成交数量加权平均，四舍五入取整；作废成交不计；已平仓批次少于 3 个时为 null，按未填写处理（不封顶、不提示，问题 76）。`f.is_st` = 主数据 `risk_flag ∈ {st, star_st, delisting}`（`delisting` 即退市风险警示，按风险计入，问题 77）；`f.is_delisting_period` 只看 `listing_status = delisting_period`。
+- **用户输入口径（v0.2.9 内，T-B46/T-B47 裁定）**：`user.avg_holding_days` **按证券计算**（v0.2.9 内，T-O11 评审裁定）：只统计本人在**该证券**上的已平仓买入批次（本人全部账户、最近 365 个自然日内），按 FIFO 配对卖出，持有交易日数（买入日到卖出日的交易日数，同日买卖为 0）按成交数量加权平均，四舍五入取整；作废成交不计；该证券的已平仓批次少于 3 个时为 null，按未填写处理（不封顶、不提示，问题 76）；逐条细则（各账户分别 FIFO 后合并、按卖出日落窗、转入与无法追溯的期初持仓不计等）见 `docs/strategies/feature_spec.md` §10.1。`f.is_st` = 主数据 `risk_flag ∈ {st, star_st, delisting}`（`st` = ST，`star_st` = *ST 即“退市风险警示”，`delisting` = 证券简称带“退”、处于退市整理期的标记；三者都按风险计入，问题 77；措辞更正（v0.2.9 内，T-O11 评审裁定））；`f.is_delisting_period` 只看 `listing_status = delisting_period`。
 - **导入器（T-A02 已定）**：采用结构化 `rule_schema: 1`（`gates` / `requires` / `components` / `bands`），不改写为 DSL 字符串；导入时校验：`f.*` 的 `unit` 与 feature_catalog 一致（不一致拒绝导入，不静默换算）、所有 `id` 唯一、每个周期 components 满分合计 = 100。
 - **输出（契约 v0.2.2）**：`scores` 四个周期都给 0–100 整数、不为 null（闸门/前提判 0 分时附不适合理由）；`reasons[]` 元素带 `horizon` 与 `polarity: for/against`，与 `symbol_horizon_assessments.reasons` 一致；另返回 `inputs_missing: string[]`（缺失的 `f.*` 键），用来区分“真 0 分”与“缺数据被封顶”（horizon_classifier.md §8 缺口 1、2 均由契约 v0.2.2 解决）。**契约 v0.2.3**：`inputs_missing` 只含 feature_catalog 键（`f.*`），去重、升序，永不为 null，无缺失为 `[]`；新增 `caps[]`（`{horizon, cap, kind, rule_id, inputs_missing}`，说明每个周期为何被封顶；`kind` 现为 `gate|data_missing`，见下）；响应带 `snapshot_id` 与 `evidence[]`，理由的 `evidence_ids` 只在本响应内解析；`classifier_version` 为语义化版本字符串（如 `"1.1.0"`），与 `horizon_classifier_versions.semver` 一致。**契约 v0.2.5（T-A06）**：新增 `hints[]`（`{horizon, rule_id, text}`，画像类 `mode: hint` 规则在画像已填写且不满足时的提示，永不为 null）；画像类规则不再进 `caps[]`；当前版本 `"1.2.0"`。**契约 v0.2.6（T006e）**：`caps[].kind` 改为 `gate | data_missing`（HG1–HG6 → `gate`；`LG0`/`LG0B` → `data_missing`）；`IT0` 判 0 分不进 `caps`；`hints[]` 与分数无关（已判 0 分的周期照样给提示）。
 - `intraday_t` 列为“适合”只表示周期匹配；T-01 在 C(5) 下仍只出盘后统计，前端文案需说明。
@@ -2856,6 +2882,7 @@ admin:
     4. “不得用维护会话或专用角色绕过触发器”不变；`aia_maint` 只是能写入 `purging`，不影响触发器对它的判定。
     5. 运维更新 `deploy/db/roles/grants.sql` 与 `verify-roles.sh`：`aia_maint` 只授予 CLI 必需的权限；`aia_api`、`aia_ingest` 对 `ops.pending_file_purges` 没有任何权限；`verify-roles.sh` 断言 `aia_api` 在一个事务里执行“置 `purging` → 删除 → 改回 → 提交”会失败。
     6. **`aia_maint` 角色细则（v0.2.9 内，评审 be607b3/f72b8c7/8fd9502 裁定）**：① `aia_maint` 是 LOGIN 角色，按最小权限只授予 CLI 用到的表与列；`aia_api`、`aia_ingest` 都不得是它的成员（反过来也不得）；② CLI 只从 `AIA_MAINT_DATABASE_URL_FILE` 指向的文件读取连接串（文件不在镜像和仓库中，`api`、`ingest` 容器不挂载）；③ `grants.sql` 中对 `ops` 的 schema 级 GRANT 之后，显式 `REVOKE ALL ON ops.pending_file_purges FROM aia_api, aia_ingest`（必须放在 schema 级 GRANT 与 `ALTER DEFAULT PRIVILEGES` 之后，避免被覆盖）；④ `verify-roles.sh` 增加断言：`aia_maint` 可登录；`aia_api`、`aia_ingest` 不是 `aia_maint` 的成员（`pg_has_role(..., 'MEMBER')` 为 false）；`aia_api`、`aia_ingest` 对 `ops.pending_file_purges` 的 SELECT/INSERT/UPDATE/DELETE 都为 false；⑤ dry-run 也用 `aia_maint` 连接，或用一个对相关表只读的连接，不得用 `aia_api` 的连接。运维改 `deploy/db/roles/`，后端改 CLI 的连接读取。
+    7. **`aia_maint` 列级授权原则（v0.2.9 内，T-O11 评审裁定）**：① 不得 SELECT 任何密文列（`user_data_licences.ciphertext`、LLM `api_key_ciphertext` 等）与 `app.users.password_hash`；② 不得 UPDATE `app.users.role`；③ SELECT 与 UPDATE 都按列授予：只授 CLI 实际读的列（主键、`user_id` 类关联列、文件路径等）和实际写的列（`app.users.status` 与匿名化细则列出的列）；DELETE 只对 CLI 清单内的表授予（PostgreSQL 没有列级 DELETE）。**后端**在 CLI 代码中维护一份“表 → SELECT 列 / UPDATE 列 / DELETE”的清单并随 CLI 改动同步，交给运维；**运维**在 `grants.sql` 用列级 GRANT 实现，`verify-roles.sh` 用 `has_column_privilege` 断言 ①② 为 false。
   - **物理删除**（个人财务数据和由它派生的数据）：持仓、成交（`app.trades`）、导入批次与解析行、证书（`ops.data_licences`，含密文）、画像（`app.user_profiles`）、自选、策略实例、候选信号（含各分区）、`signal_events`、`suggestions`、`suggestion_user_actions`、`plan_drafts`、`plan_draft_confirmations`、`risk_events`、风控设置及其历史、`claims` 与 `claim_links`、研究候选（`research_candidates`、`candidate_versions`；T-A11 同步，后端已删）、`symbol_horizon_assessments`、`daily_reports`、通知、会话。另外删除用该用户证书取到的 `market.*` 行（按 `source_licence_id`）以及对应的 Redis 键。
   - **匿名化保留**（有不可变要求的审计和日志表）：`app.audit_logs`、`app.account_reviews`、`ops.data_licence_events`、`ops.ingest_request_log`。
     - 断开关联：`user_id`、`actor_id`、`target_id` 中指向该用户的值置为 NULL，相关列由迁移改为可空。
@@ -2876,7 +2903,7 @@ admin:
     - **`invite_codes`**：`bound_username` 置 NULL；`used_by` 一类指向该用户的列解除关联（置 NULL）。
     - **`ops.pending_file_purges`**：`path` 可以含 uid 目录名；重试删除文件成功后删除该行。
 - **周期清理与保留期（v0.2.9 内，评审 be607b3/f72b8c7/8fd9502 裁定）；T-B46/T-B47 裁定同步**：
-  - **证书冷却记录**（`DELETE /me/data-licence` 时保留的指纹与删除前的 `status`、`paused_until`，契约 §7.1 DELETE 行）：有 `paused_until` 的保留到 `paused_until`；`paused_until` 为 null（删除时没有处于冷却）的最多保留到删除后 24 小时；两者以先到者为准，契约规定更短期限的以更短者为准。周期任务（每小时）物理删除过期记录；读取时过期记录一律视为不存在。删除用户时一并物理删除。
+  - **证书冷却记录**（`DELETE /me/data-licence` 时保留的指纹与删除前的 `status`、`paused_until`，契约 §7.1 DELETE 行）：有 `paused_until` 的保留到 `paused_until`（不另加 24 小时上限，否则删除后重提可绕过较长的冷却）；`paused_until` 为 null（删除时没有处于冷却）的最多保留到删除后 24 小时（契约 v0.2.9 #28①）（v0.2.9 内，T-O11 评审裁定）。周期任务（每小时，由 `beat` 调度、`worker` 执行；上线前必须有，在此之前只靠读取时视为不存在）物理删除过期记录；读取时过期记录一律视为不存在。删除用户时一并物理删除。
   - **周期评估**：`symbol_horizon_assessments` 每个（用户、证券、分类器版本）的最新一条保留，其余超过 180 天的物理删除，同时删除只被它们引用的 `purpose='horizon'` 快照（问题 75）。
   - **交割单原始文件**：按 `import_batches` 的 `retained_until`（上传时间 + 365 天，问题 21）每日删除到期文件；失败的写入 `ops.pending_file_purges`。
   - 三项都由后端实现为幂等的周期任务，结果只写行数审计。
@@ -3116,7 +3143,7 @@ admin:
 | T-B42 | **DSL 与上下文扩展**（2.5.11A、2.5.14 H）：`max2/min2`（及 `greatest/least` 别名）、`std`、`ts_pct_rank`、`rank_pct_in`、`for/within N bars`、`for p.x days`；`ctx.cost_price`、`ctx.position_weight`、`ctx.sector_weight`、`ctx.highest_close_since_entry`、`ctx.now_hhmm`；`ref` 校验、`validation_summary` 分离、夹具键校验；`system_components` 挂载与 H-01 系统实例；`scan.mode=post_close_stats`、`scan.schedule=monthly_first_trading_day`、`screen.per_group_cap` | 后端 | 2 | T-B20b, T-B20d |
 | T-B43 | **P0 策略所需特征**（2.5.11A，数据可得性【待 T003】）：`f.list_days`、`f.market_breadth`（每日落库 + 分批回算）、`f.ann_risk_count_10d`（关键词表进 `event_definitions`）、`f.sw_l1`、`f.vwap_intraday`/`f.vwap_dev`/`f.intraday_sigma`、`f.boll_bw20`/`f.boll_bw20_pct120`、`f.ind_rs20`、`f.main_net_20d`、`f.np_yoy_latest`、`f.pe_ttm_ind_pct`；ST/退市整理状态来源 | 后端 | 2 | T-B35, T-B05 |
 | T-B30a | **分类器所需 `f.*` 数据层（v0.2.9 内，T-B46/T-B47 裁定）**：在 T-B35 特征底座上产出 2.5.3 / 6.1 `horizon_classifier.yaml` `features` 列出的 15 个 `f.*`（`f.amount_20d_avg`、`f.turnover_20d_avg`、`f.amihud_20d`、`f.volatility_20d`、`f.intraday_amplitude_20d`、`f.ma_trend`、`f.momentum_60d`、`f.roe_ttm`、`f.profit_cagr_3y`、`f.dividend_continuous_years`、`f.limit_up_count_20d`、`f.fin_report_count`、`f.list_days`、`f.is_st`、`f.is_delisting_period`），写入 `feature_catalog`（单位、可得时点、核实状态）与 `feature_bars_daily`；与 T-B43 重叠的键只实现一次；分类器读取路径接上后，缺失的键照常进 `inputs_missing`；周期评估快照按 3.3 写 `user_id`/`licence_id`。验收：用回放数据为样例证券产出全部 15 个键，`/horizon-assessments` 对数据齐全的样例不再因 `data_missing` 封顶 | 后端 | 2 | T-B35, T-B07, T-R11 |
-| T-R11 | **分类器特征口径**（v0.2.9 内，T-B46/T-B47 裁定）：为 T-B30a 的 15 个 `f.*` 写明定义（窗口、复权、单位、缺失与停牌处理、可得时点）、对应的麦蕊接口与字段（【待 T003】的标出）和 3 组手算样例，放在 `docs/strategies/horizon_classifier.md` 附录（研究员维护；架构师不改该目录） | 研究员 | 2 | T-B35 |
+| T-R11 | **分类器特征口径**（v0.2.9 内，T-B46/T-B47 裁定）：为 T-B30a 的 15 个 `f.*` 写明定义（窗口、复权、单位、缺失与停牌处理、可得时点）、对应的麦蕊接口与字段（【待 T003】的标出）和 3 组手算样例，定义以 `docs/strategies/feature_spec.md` 为准，`horizon_classifier.md` 附录只保留指向它的说明（v0.2.9 内，T-O11 评审裁定）（研究员维护；架构师不改该目录） | 研究员 | 2 | T-B35 |
 | T-B44 | **终端聚合接口与日报结构**（契约 v0.2）：`GET /terminal`、`GET /today`（一次查询、无 N+1，弱 ETag + 304）、`DailyReport` 结构（regime 建议仓位区间、对账状态）、`Bar`/`WatchlistItem`/`Notification` 结构、所有带 `security_code` 的对象带 `name`、SSE `signal_kind` | 后端 | 2 | T-B41, T-B24 |
 | T-O02a | **密钥与敏感信息扫描**（7.4A）：`.gitleaks.toml`（S1–S9）、`.secretscan-allow.yaml` 与 CODEOWNERS、夹具豁免检查脚本（meta.json 标记、sha256 固定、`generate.py` 可复现、`fake_identifiers`）、`expected.json` 与契约码表一致性检查（3.5A-2）、PR 全提交扫描 + 每日全量扫描、pre-commit 钩子、正反例测试 | 运维 | 1 | T-O02 |
 | T-F17 | 候选信号卡与不可执行原因（显示解除条件和自动重评状态；契约 v0.2.7 §7.6 已补列表与 `released_since`）、冲突并列展示、"模拟中 / 观察中"徽标、统计数字旁显示 n 和"样本少"标记 | 前端 | 2 | T-B33 |
@@ -3254,8 +3281,8 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 73. **【未决，T-F22 遗留 3】`GET /admin/audit-logs` 的查询参数与元素结构未定义**：本版管理员通过审计查看证书暂停的理由与操作人（`data_licence.paused`/`data_licence.resumed`），不在证书接口中返回。需要谁定：架构师。
 74. **【默认执行，T-F22 遗留 5，用户可改】管理员暂停或恢复数据证书时通知用户**：状态确实变化时发一条 `data_licence` 站内通知（标题“数据证书已被管理员暂停”或“…已恢复”），正文不含管理员填写的理由；幂等的重复调用不发。需要谁定：用户（产品）。
 75. **【默认执行，T-B47 新增，用户可改】周期评估结果的保留期**：每个（用户、证券、分类器版本）的最新一条长期保留，其余超过 180 天的物理删除；删除用户时全部删除。需要谁定：用户（产品）。
-76. **【默认执行，T-B47 新增，用户可改】“历史平均持有天数”的口径**：最近 365 天已平仓的买入批次，FIFO 配对，按数量加权的持有交易日数；少于 3 个已平仓批次视为未知（不封顶、不提示）。需要谁定：用户（产品）、研究员。
-77. **【默认执行，T-B47 新增，用户可改】退市风险警示（`risk_flag=delisting`）按 ST 处理**：计入 `f.is_st`，分类器按风险警示股封顶，宁可少推荐。需要谁定：用户（产品）、研究员。
+76. **【默认执行，T-B47 新增，用户可改】“历史平均持有天数”的口径**：**按证券计算**，只统计本人在该证券上、最近 365 天已平仓的买入批次（v0.2.9 内，T-O11 评审裁定），FIFO 配对，按数量加权的持有交易日数；该证券少于 3 个已平仓批次视为未知（不封顶、不提示）；细则见 `feature_spec.md` §10.1。需要谁定：用户（产品）、研究员。
+77. **【默认执行，T-B47 新增，用户可改】退市整理标记（`risk_flag=delisting`）与 *ST（`risk_flag=star_st`，即“退市风险警示”）都按 ST 处理**：计入 `f.is_st`（措辞更正（v0.2.9 内，T-O11 评审裁定）：原文把 `delisting` 写成“退市风险警示”；结论不变），分类器按风险警示股封顶，宁可少推荐。需要谁定：用户（产品）、研究员。
 78. **【默认执行，T-B47 新增，补测后复核】管理端采集状态的告警阈值与数据新鲜度阈值**：见 6.1 `config/realtime.yaml` 的 `admin_alerts` 与契约 §7.9 `/admin/ingest/status`（如盘中实时行情超过 30 秒为 stale、P0 队列等待超过 60/300 秒告警、出现 1 次 IP 超限即严重告警）。需要谁定：运维、用户；T003 实测后调整。
 79. **【默认执行，T-B46 新增，用户可改】非可转债持仓缺现价时的展示**：既没有日线收盘价也没有快照参考价时，与可转债行一样按成本估算并标“估算”，市值和盈亏显示“—”，不用其他价格推算。需要谁定：用户（产品）。
 

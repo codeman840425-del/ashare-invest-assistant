@@ -45,7 +45,7 @@ from app.db.tables.accounts import (
     opening_positions,
     trades,
 )
-from app.db.tables.market import daily_bars, securities
+from app.db.tables.market import daily_bars, securities, trading_calendar
 from app.domain.portfolio import MONEY_DP, instrument_kind
 from app.importing.pipeline import last_cash_balance, live_snapshots
 from app.schemas.enums import BarAdjust, DataStatus, GapReason, SecurityType
@@ -148,6 +148,37 @@ def latest_daily_close(
         code: (Decimal(close), dt.datetime.combine(d, CLOSE_TIME, BEIJING))
         for code, d, close in rows
     }
+
+
+def latest_close_at(conn: Connection, now: dt.datetime) -> dt.datetime:
+    """最近一个**已收盘**交易日的收盘时点（北京时间 15:00）。
+
+    T-B49 / review-6670b10 m1：现价时点不早于它即为 FRESH（今日收盘后的今日收盘价不算过期）。
+    交易日历覆盖该日期时按 ``market.trading_calendar``；不覆盖时退回周一至周五（与导入预览一致）。
+    今天是交易日但未到 15:00 时，最近已收盘的是上一交易日。
+    """
+    now = now.astimezone(BEIJING)
+    lo, hi = conn.execute(
+        select(func.min(trading_calendar.c.date), func.max(trading_calendar.c.date))
+    ).one()
+    d = now.date() if now.time() >= CLOSE_TIME else now.date() - dt.timedelta(days=1)
+    start = d - dt.timedelta(days=40)
+    opened: set[dt.date] = set()
+    if lo is not None and hi is not None:
+        opened = set(
+            conn.execute(
+                select(trading_calendar.c.date).where(
+                    trading_calendar.c.is_open,
+                    trading_calendar.c.date.between(start, d),
+                )
+            ).scalars()
+        )
+    while d >= start:
+        covered = lo is not None and hi is not None and lo <= d <= hi
+        if (d in opened) if covered else d.weekday() < 5:
+            break
+        d -= dt.timedelta(days=1)
+    return dt.datetime.combine(d, CLOSE_TIME, BEIJING)
 
 
 def _has_ledger(conn: Connection, account_id: uuid.UUID) -> bool:
@@ -421,7 +452,7 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
     # #31 ②：exposure.sector 缺口不单独降级；估算行（cb / unknown / no_price）都已列缺口
     if any(g["key"] != "exposure.sector" for g in gaps) or any(r["estimated"] for r in rows):
         status = DataStatus.PARTIAL
-    elif price_times:
+    elif price_times and min(price_times) < latest_close_at(conn, now):
         status = DataStatus.STALE
     else:
         status = DataStatus.FRESH

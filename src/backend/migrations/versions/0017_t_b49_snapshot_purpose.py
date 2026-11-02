@@ -12,7 +12,9 @@ Create Date: 2026-11-02 19:30:00+08:00
 升级前先做预检查：库中已有违反新约束的行（上述三类且 user_id 为空）→ 迁移报错并给出行数，
 **不自动修改或删除**；由运维按报告 T-B49.md 的预检查 SQL 查出、人工处理后再升级。
 
-downgrade：删除新约束，purpose 检查恢复 0001 的取值（库中已有 horizon 行时会失败，需先处理）。
+downgrade：先做预检查——库中有 ``purpose='horizon'`` 的快照行时直接报错（中文提示 + 行数），
+不改任何约束、不自动删除数据（review-6670b10 m3）；
+无此类行时删除新约束、purpose 检查恢复 0001 的取值。
 """
 
 from __future__ import annotations
@@ -70,7 +72,19 @@ def upgrade() -> None:
     )
 
 
+#: 降级预检查：0016 及更早的 CHECK 不认识 horizon
+HORIZON_ROWS = "SELECT count(*) FROM app.data_snapshots WHERE purpose = 'horizon'"
+
+
 def downgrade() -> None:
+    n = op.get_bind().execute(sa.text(HORIZON_ROWS)).scalar_one()
+    if n:
+        raise RuntimeError(
+            f"0017 降级拒绝：app.data_snapshots 中有 {n} 行 purpose='horizon' 的快照；"
+            "旧版本不认识该取值。请先按报告 T-B49.md 人工处理（例如对相关用户执行"
+            "删除用户数据 CLI，或在确认无用后删除这些快照及引用它们的周期评估行），"
+            "再降级；本迁移不自动修改数据。"
+        )
     op.drop_constraint(
         op.f("ck_data_snapshots_user_scoped"), "data_snapshots", schema="app", type_="check"
     )

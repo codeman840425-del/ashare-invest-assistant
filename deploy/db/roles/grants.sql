@@ -161,6 +161,67 @@ BEGIN
 END
 $purges$;
 
+-- T-A04 ④（架构师裁定，review-028c077 M1）：worker 改用 aia_api 连接，不再用库属主。
+-- worker 任务实际读写的表（app/workers/jobs.py TASKS），只补 DML、不给 DDL：
+--   licences.purge_expired_cooldowns      → app.user_data_licence_cooldowns：SELECT、DELETE
+--   imports.purge_preview_rows（9e693b2） → app.import_rows：SELECT、DELETE；app.import_batches：SELECT
+--   imports.purge_expired_raw_files        → app.import_files：SELECT（含 FOR UPDATE SKIP LOCKED），UPDATE (deleted_at, storage_path)
+-- 上面 $grants$ 的 ALL TABLES 授权目前已覆盖这些权限；这里显式再授一遍并自检，作为 worker 的依赖声明：
+-- 将来收窄 aia_api 时这里会报错而不是让 worker 静默失效。aia_api 仍读不到密文列（$grants$ 的 aia_deny）。
+DO $worker$
+DECLARE
+  spec text[] := ARRAY[
+    'app.user_data_licence_cooldowns|SELECT|', 'app.user_data_licence_cooldowns|DELETE|',
+    'app.import_rows|SELECT|', 'app.import_rows|DELETE|',
+    'app.import_batches|SELECT|',
+    'app.import_files|SELECT|', 'app.import_files|UPDATE|deleted_at,storage_path'];
+  e text; t text; p text; cols text; c text; s text;
+BEGIN
+  FOREACH e IN ARRAY spec LOOP
+    t := split_part(e, '|', 1); p := split_part(e, '|', 2); cols := split_part(e, '|', 3);
+    IF to_regclass(t) IS NULL THEN
+      RAISE WARNING 'db-roles: worker 用表 % 不存在（迁移未到？），跳过', t;
+      CONTINUE;
+    END IF;
+    IF cols = '' THEN
+      EXECUTE format('GRANT %s ON TABLE %s TO aia_api', p, t);
+      IF NOT has_table_privilege('aia_api', t, p) THEN
+        RAISE EXCEPTION 'db-roles: aia_api 缺少 worker 所需的 % ON %', p, t;
+      END IF;
+    ELSE
+      EXECUTE format('GRANT %s (%s) ON TABLE %s TO aia_api', p,
+                     (SELECT string_agg(quote_ident(x), ', ') FROM unnest(string_to_array(cols, ',')) x), t);
+      FOREACH c IN ARRAY string_to_array(cols, ',') LOOP
+        IF NOT has_column_privilege('aia_api', t, c, p) THEN
+          RAISE EXCEPTION 'db-roles: aia_api 缺少 worker 所需的 %(%) ON %', p, c, t;
+        END IF;
+      END LOOP;
+    END IF;
+  END LOOP;
+  -- 不给 DDL：aia_api 不拥有任何对象、在业务 schema 与库上无 CREATE、对任何表无 TRUNCATE/REFERENCES/TRIGGER
+  IF EXISTS (SELECT 1 FROM pg_class WHERE relowner = 'aia_api'::regrole)
+     OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = 'aia_api'::regrole) THEN
+    RAISE EXCEPTION 'db-roles: aia_api 拥有表或 schema（不得有 DDL 能力）';
+  END IF;
+  IF has_database_privilege('aia_api', current_database(), 'CREATE') THEN
+    RAISE EXCEPTION 'db-roles: aia_api 对库有 CREATE';
+  END IF;
+  FOR s IN SELECT n.nspname FROM pg_namespace n
+            WHERE n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema' LOOP
+    IF has_schema_privilege('aia_api', s, 'CREATE') THEN
+      RAISE EXCEPTION 'db-roles: aia_api 在 schema % 上有 CREATE', s;
+    END IF;
+  END LOOP;
+  IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               CROSS JOIN unnest(ARRAY['TRUNCATE','REFERENCES','TRIGGER']) pr
+              WHERE n.nspname IN ('app','ops','market') AND c.relkind IN ('r','p')
+                AND has_table_privilege('aia_api', c.oid, pr)) THEN
+    RAISE EXCEPTION 'db-roles: aia_api 有表级 TRUNCATE/REFERENCES/TRIGGER';
+  END IF;
+  RAISE NOTICE 'db-roles: worker（aia_api）所需 DML 已就位，无 DDL';
+END
+$worker$;
+
 -- T-O11：aia_maint（删除用户数据 CLI 专用）——列级最小授权（升级部署门槛）。
 -- 清单来源：后端 reports/aia_maint-grants.md §3（78c5281；由 CLI 实际语句的 RTEPermissionInfo 采集）。
 --   SELECT / UPDATE / INSERT 只按列授予；DELETE 是表级权限，只在清单里的表上给；不给任何表级 SELECT/UPDATE/INSERT、

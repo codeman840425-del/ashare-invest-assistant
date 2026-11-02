@@ -64,7 +64,9 @@ PRIVATE_SECRET = "data_licence_seal_private_keys"
 PUBLIC_SECRET = "data_licence_seal_public_keys"
 PRIVATE_ENV_RE = re.compile(r"_PRIVATE_KEYS?$")
 PRIVATE_OWNER = "ingest"
-DB_ROLE_OF = {"api": ("aia_api", "AIA_DB_API_PASSWORD"), "ingest": ("aia_ingest", "AIA_DB_INGEST_PASSWORD")}
+# worker 也用 aia_api（T-A04 ④，review-028c077 M1）：只跑清理任务，所需 DML 由 grants.sql $worker$ 段授予并自检
+DB_ROLE_OF = {"api": ("aia_api", "AIA_DB_API_PASSWORD"), "worker": ("aia_api", "AIA_DB_API_PASSWORD"),
+              "ingest": ("aia_ingest", "AIA_DB_INGEST_PASSWORD")}
 # 不挂任何 secret 的服务（只需 DATABASE_URL）。原 cooldown-purge 服务已删除（冷却清理改由 beat 调度、worker 执行，后端 6670b10）
 NO_SECRET_SVCS: tuple[str, ...] = ()
 DB_PW_SECRETS = ("db_password_aia_api", "db_password_aia_ingest", "db_password_aia_maint")

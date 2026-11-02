@@ -4,6 +4,7 @@
 #   “置 purging → 删不可变行 → 改回 → 提交”的攻击序列必须失败（只有失败才算通过）；aia_maint 只有 CLI 所需权限，
 #   且它自己也不能把 purging 改回、不能不删行就提交；aia_maint 必须 LOGIN，aia_api/aia_ingest 不得是其成员。
 #   aia_maint 是列级授权：清单外的列读不到、写不了，DELETE 只在清单里的表上（第 4 节）。
+# T-A04 ④：worker 用 aia_api，其任务所需 DML 可用；aia_api 无 DDL、读不到证书密文列（第 6 节）。
 # T-O10 部分只读（SELECT … LIMIT 0）。T-O11 的事务用例会插入名为 t_o11_<随机> 的探针用户：失败的序列整体回滚；
 #   需要落库的探针最后用正规删除路径（aia_maint：purging → 删 → 提交）清掉，并用属主连接确认无残留。
 #   属主连接 = 调用方的 PGUSER/PGPASSWORD（compose db-roles / CI 都是库属主）。连接参数同 apply-roles.sh（PGHOST/PGPORT/PGDATABASE；口令目录 AIA_DB_ROLE_PASSWORD_DIR）。
@@ -173,6 +174,30 @@ done
 expect_attr "aia_maint 没有成员、也不属于任何角色（pg_auth_members）" \
   "SELECT NOT EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.rolname = 'aia_maint' WHERE m.roleid = r.oid OR m.member = r.oid)"
 
+
+# DDL 被拒：非属主 ALTER/DROP/CREATE INDEX 报 must be owner，CREATE 报 permission denied，两者都算通过
+expect_ddl_denied() {
+  if out="$(as "$1" -c "$2")"; then echo "FAIL $1 不应可执行: $2"; fail=1
+  elif grep -Eq 'must be owner|permission denied' <<<"$out"; then echo "OK   $1 DDL 被拒: $2"
+  else echo "FAIL $1 预期 DDL 被拒，实际: $out"; fail=1; fi
+}
+# 6) T-A04 ④：worker 以 aia_api 连接，只需这些 DML（app/workers/jobs.py）；aia_api 无 DDL、读不到证书密文列
+expect_ok     aia_api "SELECT user_id FROM app.user_data_licence_cooldowns WHERE false"
+expect_ok     aia_api "DELETE FROM app.user_data_licence_cooldowns WHERE false"
+expect_ok     aia_api "SELECT id, batch_id FROM app.import_rows WHERE false"
+expect_ok     aia_api "DELETE FROM app.import_rows WHERE false"
+expect_ok     aia_api "SELECT id, status FROM app.import_batches WHERE false"
+expect_ok     aia_api "SELECT id, batch_id, storage_path FROM app.import_files WHERE false FOR UPDATE SKIP LOCKED"
+expect_ok     aia_api "UPDATE app.import_files SET deleted_at = deleted_at, storage_path = storage_path WHERE false"
+expect_denied aia_api "SELECT ciphertext FROM app.user_data_licences WHERE false"
+expect_denied aia_api "TRUNCATE app.import_rows"
+expect_ddl_denied aia_api "ALTER TABLE app.import_files ADD COLUMN t_a04_probe int"
+expect_ddl_denied aia_api "DROP TABLE app.user_data_licence_cooldowns"
+expect_ddl_denied aia_api "CREATE INDEX t_a04_probe ON app.import_rows (batch_id)"
+expect_attr "aia_api 不拥有任何表或 schema；库与业务 schema 上无 CREATE" \
+  "SELECT NOT EXISTS (SELECT 1 FROM pg_class WHERE relowner = 'aia_api'::regrole) AND NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = 'aia_api'::regrole) AND NOT has_database_privilege('aia_api', current_database(), 'CREATE') AND NOT EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema' AND has_schema_privilege('aia_api', n.oid, 'CREATE'))"
+expect_attr "aia_api 在 app/ops/market 无表级 TRUNCATE/REFERENCES/TRIGGER" \
+  "SELECT NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace CROSS JOIN unnest(ARRAY['TRUNCATE','REFERENCES','TRIGGER']) p WHERE n.nspname IN ('app','ops','market') AND c.relkind IN ('r','p') AND has_table_privilege('aia_api', c.oid, p))"
 [ "$(own -c "SELECT count(*) FROM app.users WHERE username LIKE 't\_o11\_%'")" = 0 ] \
   || { echo "FAIL 仍有 t_o11_ 探针用户残留"; fail=1; }
 exit "$fail"

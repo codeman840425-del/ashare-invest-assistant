@@ -158,6 +158,8 @@ services:
     environment:
       <<: *app-env
       SERVICE_NAME: worker
+      # T-A04 ④（review-028c077 M1）：worker 以 aia_api 连库（不用属主）；所需 DML 见 deploy/db/roles/grants.sql $worker$
+      DATABASE_URL: *db-api-url
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}

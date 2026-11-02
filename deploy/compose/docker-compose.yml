@@ -44,6 +44,15 @@ x-app-env: &app-env
   # 业务配置目录（仓库 config/ 只读挂载到这里；后端 Settings.config_dir）
   CONFIG_DIR: /app/config
 
+# APP_MASTER_KEY（T-O11）：不再经 .env/environment 传入，只走 secret 文件 app_master_key（600，属主容器用户），
+# 由 deploy/docker/secret-env.sh（只读挂载为入口包装）在容器进程内转成 APP_MASTER_KEY；docker inspect 看不到它。
+x-secret-env-entrypoint: &secret-env-entrypoint ["sh", "/aia/secret-env.sh"]
+x-secret-env-mount: &secret-env-mount ../docker/secret-env.sh:/aia/secret-env.sh:ro
+
+# 原始导入文件卷（T-B46 / T-O11，plan §3.5A）：挂载点跟随 IMPORT_STORAGE_PATH；只挂给写入/读取的 api，
+# 以及删除用户数据时清文件的 maint-cli（按需 run）。worker / ingest / beat / signal-rt 不挂。
+# 卷根目录属主 10001、权限 700（镜像内预建目录决定新卷的初始属主；已有卷由运维 chmod 一次）。
+
 x-app-depends: &app-depends
   postgres:
     condition: service_healthy
@@ -94,7 +103,6 @@ services:
       DATABASE_URL: *db-api-url
       API_PREFIX: ${API_PREFIX:-/api/v1}
       HEALTH_CHECK_TIMEOUT_S: ${HEALTH_CHECK_TIMEOUT_S:-1.0}
-      APP_MASTER_KEY: ${APP_MASTER_KEY:?APP_MASTER_KEY 未设置}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       # 契约 registration_mode：closed（V1 默认，/auth/register → 503 REGISTRATION_CLOSED）| invite | open（保留，V1 不用）
       REGISTRATION_MODE: ${REGISTRATION_MODE:-closed}
@@ -104,11 +112,14 @@ services:
       IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
       # 证书封装：api 只有公钥（只能加密）；当前版本号
       DATA_LICENCE_SEAL_KEY_VERSION: ${DATA_LICENCE_SEAL_KEY_VERSION:-1}
+    entrypoint: *secret-env-entrypoint
     secrets:
       - data_licence_seal_public_keys
+      - app_master_key
     volumes:
-      - imports:/var/lib/aia-dev/imports
+      - imports:${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
       - ../../config:/app/config:ro
+      - *secret-env-mount
     depends_on: *app-depends
     # 存活探针 ${API_PREFIX}/health/live（不依赖 db/redis，T-B02 §8.1）；就绪看 /health/ready 的 HTTP 码
     healthcheck:
@@ -125,17 +136,17 @@ services:
     environment:
       <<: *app-env
       SERVICE_NAME: worker
-      APP_MASTER_KEY: ${APP_MASTER_KEY:?APP_MASTER_KEY 未设置}
-      IMPORT_STORAGE_BACKEND: ${IMPORT_STORAGE_BACKEND:-local}
-      IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
+    entrypoint: *secret-env-entrypoint
+    secrets:
+      - app_master_key
     volumes:
-      - imports:/var/lib/aia-dev/imports
       - ../../config:/app/config:ro
+      - *secret-env-mount
     depends_on: *app-depends
     healthcheck:
       <<: *worker-healthcheck
@@ -259,6 +270,7 @@ services:
     secrets:
       - db_password_aia_api
       - db_password_aia_ingest
+      - db_password_aia_maint
     volumes:
       - ../db/roles:/aia/deploy/db/roles:ro
     depends_on:
@@ -268,6 +280,40 @@ services:
         condition: service_completed_successfully
       timescale-apply:
         condition: service_completed_successfully
+
+  # 删除用户数据 CLI（T-O11，plan §7.3）：只按需运行，up 不会启动它（profile maint）。以 aia_maint 连库：
+  # secret db_password_aia_maint 只挂给它和 db-roles，secret-env.sh 在容器内拼 DSN、导出 AIA_MAINT_DATABASE_URL_FILE。
+  # 没有属主 DATABASE_URL（不回落到属主）。用法（先 dry-run，确认后再 --execute，会交互要求输入完整 user-id）：
+  #   deploy/scripts/compose.sh --profile maint run --rm --no-deps maint-cli --user-id <uuid> [--execute]
+  maint-cli:
+    image: *backend-image
+    profiles: ["maint"]
+    entrypoint: ["sh", "/aia/secret-env.sh", "python", "-m", "app.cli", "delete-user-data"]
+    command: ["--help"]
+    restart: "no"
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      SERVICE_NAME: maint-cli
+      TZ: Asia/Shanghai
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CONFIG_DIR: /app/config
+      REDIS_URL: redis://redis:6379/0
+      AIA_MAINT_DB_HOST: postgres
+      AIA_MAINT_DB_PORT: "5432"
+      AIA_MAINT_DB_NAME: ${POSTGRES_DB:-aia}
+      IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
+      AIA_IMPORTS_DIR: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
+    secrets:
+      - db_password_aia_maint
+    volumes:
+      - imports:${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
+      - ../../config:/app/config:ro
+      - *secret-env-mount
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   postgres:
     # TimescaleDB 2.31.0 + PostgreSQL 16.15（digest 固定 PG 小版本；plan §3A.1 避开 16.5/17.1）
@@ -330,3 +376,9 @@ secrets:
     file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/db_password_aia_api
   db_password_aia_ingest:
     file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/db_password_aia_ingest
+  # 删除用户数据 CLI 角色口令（T-O11）：同上生成，属主容器用户；只挂给 db-roles 与 maint-cli（CI 检查）。
+  db_password_aia_maint:
+    file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/db_password_aia_maint
+  # APP_MASTER_KEY（T-O11）：deploy/scripts/app-master-keygen.sh 生成（600，属主容器用户，不覆盖）；只挂给 api 与 worker。
+  app_master_key:
+    file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/app_master_key

@@ -29,6 +29,13 @@ data_licence_seal_private_keys.*
 data_licence_seal_public_keys
 data_licence_seal_public_keys.*
 data_licence_seal_keys.meta.json
+# T-O11：APP_MASTER_KEY 与分库角色口令文件（compose.sh 生成在仓库外 $AIA_SECRETS_DIR）；万一落进工作树：
+app_master_key
+app_master_key.*
+.app_master_key.*
+db_password_*
+.db_password_*
+*.dsn
 # 私钥 / 证书文件格式（扩展名）
 *.pem
 *.key

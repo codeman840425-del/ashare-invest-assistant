@@ -142,3 +142,74 @@ def test_db_password_secret_must_be_file(repo: Path) -> None:
     assert "  db_password_aia_ingest:\n    file:" in text
     _sub(repo, ccs.BASE_COMPOSE, "  db_password_aia_ingest:\n    file:", "  db_password_aia_ingest:\n    x-file:")
     assert any("顶层 secrets 缺少 db_password_aia_ingest" in e for e in ccs.check(repo))
+
+
+# ---------------------------------------------------------------- aia_maint / APP_MASTER_KEY（T-O11）
+
+def _overlay(repo: Path, text: str) -> list[str]:
+    (repo / "deploy/compose/docker-compose.x.yml").write_text(text, encoding="utf-8")
+    return ccs.check(repo)
+
+
+def test_maint_password_only_for_db_roles_and_maint_cli(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  api:\n    secrets: [db_password_aia_maint]\n")
+    assert any("服务 api 挂了 db_password_aia_maint" in e for e in errs), errs
+    assert _overlay(repo, "services:\n  maint-cli:\n    secrets: [db_password_aia_maint]\n") == []
+
+
+def test_maint_cli_cannot_take_other_role_passwords(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  maint-cli:\n    secrets: [db_password_aia_api]\n")
+    assert any("服务 maint-cli 挂了 db_password_aia_api" in e for e in errs), errs
+
+
+def test_maint_cli_without_owner_database_url(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  maint-cli:\n    environment:\n      DATABASE_URL: postgresql://aia:x@postgres/aia\n")
+    assert any("maint-cli 不得有 DATABASE_URL" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("key", ["AIA_MAINT_DATABASE_URL", "AIA_MAINT_DATABASE_URL_FILE"])
+def test_maint_url_never_in_environment(repo: Path, key: str) -> None:
+    errs = _overlay(repo, f"services:\n  api:\n    environment: [\"{key}=x\"]\n")
+    assert any(key in e for e in errs), errs
+
+
+def test_maint_password_secret_must_be_file(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "  db_password_aia_maint:\n    file:", "  db_password_aia_maint:\n    x-file:")
+    assert any("顶层 secrets 缺少 db_password_aia_maint" in e for e in ccs.check(repo))
+
+
+@pytest.mark.parametrize("svc", ["api", "worker", "ingest"])
+def test_master_key_never_in_environment(repo: Path, svc: str) -> None:
+    errs = _overlay(repo, f"services:\n  {svc}:\n    environment:\n      APP_MASTER_KEY: x\n")
+    assert any(f"服务 {svc} 的 environment 有 APP_MASTER_KEY" in e for e in errs), errs
+
+
+def test_master_key_secret_only_api_worker(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  ingest:\n    secrets: [app_master_key]\n")
+    assert any("服务 ingest 挂了 app_master_key" in e for e in errs), errs
+
+
+def test_master_key_secret_must_be_file_and_mounted(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "  app_master_key:\n    file:", "  app_master_key:\n    x-file:")
+    assert any("顶层 secrets 缺少 app_master_key" in e for e in ccs.check(repo))
+
+
+def test_worker_must_mount_master_key(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "    secrets:\n      - app_master_key\n    volumes:\n      - ../../config:/app/config:ro",
+         "    volumes:\n      - ../../config:/app/config:ro")
+    assert any("服务 worker 缺少 secrets ['app_master_key']" in e for e in ccs.check(repo))
+
+
+def test_env_example_master_key_value(repo: Path) -> None:
+    with (repo / ccs.ENV_EXAMPLE).open("a", encoding="utf-8") as f:
+        f.write("APP_MASTER_KEY=placeholder\n")
+    assert any("APP_MASTER_KEY 不得出现在 .env" in e for e in ccs.check(repo))
+
+
+@pytest.mark.parametrize("path", [
+    "app_master_key", "deploy/x/app_master_key", "deploy/x/db_password_aia_maint", "x/.db_password_aia_api.AbC123",
+    "x/aia-maint.dsn",
+])
+def test_gitignore_blocks_master_key_and_role_passwords(path: str) -> None:
+    r = subprocess.run(["git", "-C", str(REPO), "check-ignore", "-q", "--no-index", path])
+    assert r.returncode == 0, f".gitignore 应排除 {path}"

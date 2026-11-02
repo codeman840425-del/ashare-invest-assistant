@@ -131,3 +131,19 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
 - 全市场 3 年：**≥ 300 GB SSD**。计算：DB 80 + WAL 10 + 本地备份 120 + 30% 余量。
 - 只做 Tier-1：≥ 120 GB。
 - 当前 box 的 /var/lib/docker 为 128 GB（已用 11 GB），够 Tier-1，不够全市场 3 年。
+
+## 6. 数据库角色与应用密钥文件（T-O10 / T-O11）
+
+| 角色 / 文件 | 用途 | 谁拿得到 |
+|---|---|---|
+| `aia_api` / `aia_ingest` | api / ingest 的 DATABASE_URL | compose.sh 插值（口令文件 `$AIA_SECRETS_DIR/db_password_aia_{api,ingest}`） |
+| `aia_maint` | 只给删除用户数据 CLI（plan §7.3）；唯一能把 `app.users.status` 写成 purging 的角色 | secret `db_password_aia_maint`，只挂 `db-roles`、`maint-cli` |
+| `app_master_key` | 后端 `APP_MASTER_KEY`（邀请码 / 证书 HMAC 等） | secret，只挂 `api`、`worker`；入口包装 `deploy/docker/secret-env.sh` 在容器内转成环境变量 |
+
+- 口令 / 密钥文件都在仓库外 `$AIA_SECRETS_DIR`（默认 `~/.config/aia/secrets/<卷前缀>`），600；`compose.sh` 缺失时生成，**已存在从不覆盖**。
+  `db_password_aia_maint`、`app_master_key` 属主是容器用户 10001（生成时 sudo -n chown）。
+- **换 APP_MASTER_KEY 会让既有邀请码哈希、证书 HMAC 失效**：只能在确认无存量数据或有迁移方案时人工删文件重建。
+- `aia_api` / `aia_ingest` 对 `ops.pending_file_purges` 无任何权限；`verify-roles.sh` 断言 api/ingest 的
+  “置 purging → 删不可变行 → 改回 → 提交”序列失败、aia_maint 不能改回 / 不删行提交、正规删除路径可提交。
+- 删除用户数据（先 dry-run）：`deploy/scripts/compose.sh --profile maint run --rm --no-deps maint-cli --user-id <uuid> [--execute]`。
+- 原始导入文件卷 `<卷前缀>_imports` 只挂给 api 与 maint-cli，挂载点跟随 `IMPORT_STORAGE_PATH`，卷根 10001:10001、700。

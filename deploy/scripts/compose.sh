@@ -91,14 +91,20 @@ fi
 
 # 分库角色口令（T-O10）：api/ingest 的 DATABASE_URL 用 aia_api/aia_ingest，口令只存在 $AIA_SECRETS_DIR（600），
 # 缺失时生成（从不覆盖），读出后导出给 compose 插值；不写 .env、不打印。
-for role in aia_api aia_ingest; do
-  [ -s "$secrets_dir/db_password_$role" ] || "$ROOT/deploy/scripts/db-role-passwords.sh" "$secrets_dir" >&2
+# aia_maint（T-O11）只挂给 db-roles 与 maint-cli，不导出给插值；新生成时属主改成容器用户（maint-cli 以它运行）。
+for role in aia_api aia_ingest aia_maint; do
+  [ -e "$secrets_dir/db_password_$role" ] \
+    || AIA_MAINT_PW_OWNER="${AIA_APP_UID:-10001}" "$ROOT/deploy/scripts/db-role-passwords.sh" "$secrets_dir" >&2
 done
 AIA_DB_API_PASSWORD="$(tr -d '\n' < "$secrets_dir/db_password_aia_api")"
 AIA_DB_INGEST_PASSWORD="$(tr -d '\n' < "$secrets_dir/db_password_aia_ingest")"
 [[ "$AIA_DB_API_PASSWORD" =~ ^[0-9a-f]{16,}$ && "$AIA_DB_INGEST_PASSWORD" =~ ^[0-9a-f]{16,}$ ]] \
   || { echo "$secrets_dir/db_password_aia_{api,ingest} 格式不对（应为十六进制，见 db-role-passwords.sh）" >&2; exit 2; }
 export AIA_DB_API_PASSWORD AIA_DB_INGEST_PASSWORD
+
+# APP_MASTER_KEY（T-O11）：只走 secret 文件 $AIA_SECRETS_DIR/app_master_key（600，属主容器用户），缺失时生成、从不覆盖；
+# compose 不再从 .env 插值它（.env 里残留的 APP_MASTER_KEY 行不再生效）。
+[ -e "$secrets_dir/app_master_key" ] || "$ROOT/deploy/scripts/app-master-keygen.sh" "$secrets_dir" >&2
 
 # daemon 没起来（机器重启后）或 docker.sock ACL 丢失（dockerd 被别处重启）时，自动修复一次（T-O08）。
 if ! docker info >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null)" != "systemd" ] \

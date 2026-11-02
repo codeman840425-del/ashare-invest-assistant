@@ -4,7 +4,15 @@
 --                但下表 deny 列表里的“密文列”一律不可 SELECT（列级授权：同表其余列可 SELECT，表级 INSERT/UPDATE 保留，
 --                api 只用公钥封装后写入、注销时置空，从不读回；T-B45“api 不读证书密文”）。
 --   aia_ingest ：同上且全列可读（ingest 持私钥，需要读密文解封）。
--- 口令不在本文件：apply-roles.sh 以 psql 变量 :'api_pw' / :'ingest_pw' 传入（来自 secret 文件，不经环境变量、不入库）。
+--   两者对 ops.pending_file_purges（待清文件队列，path 含 uid）没有任何权限（T-O11，评审 45589c2 m3、plan §7.3）。
+--   aia_maint  ：只给删除用户数据 CLI（app.cli.delete_user_data）用，api/ingest 进程不持有其凭据（T-O11，plan §7.3
+--                “purging 的写入权”）。只有 0013 的触发器认它能把 app.users.status 写成 purging；对其他不可变表
+--                它和普通角色一样受触发器约束。权限只到 CLI 必需：app 全表 SELECT/UPDATE/DELETE（删除/匿名化/解除关联）、
+--                app.audit_logs INSERT（admin.user_data_deleted）、ops.data_licence_events / ops.ingest_request_log
+--                SELECT/UPDATE/DELETE（匿名化）、ops.pending_file_purges 增删改查、market 全表 SELECT/DELETE
+--                （按 source_licence_id 删）。不给 CREATE/TRUNCATE/REFERENCES/TRIGGER、INSERT（audit/pending 以外）、
+--                SUPERUSER/BYPASSRLS、任何角色成员身份；NOINHERIT。
+-- 口令不在本文件：apply-roles.sh 以 psql 变量 :'api_pw' / :'ingest_pw' / :'maint_pw' 传入（来自 secret 文件，不经环境变量、不入库）。
 -- 新迁移若新增“密文列”，把 schema.table.column 加进 deny 列表（下方两处 aia_deny 数组保持一致）。
 \set ON_ERROR_STOP on
 SET client_min_messages = notice;
@@ -17,17 +25,22 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aia_ingest') THEN
     CREATE ROLE aia_ingest LOGIN;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aia_maint') THEN
+    CREATE ROLE aia_maint LOGIN;
+  END IF;
 END
 $roles$;
 
 ALTER ROLE aia_api    LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT;
 ALTER ROLE aia_ingest LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT;
+ALTER ROLE aia_maint  LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
 
 -- 口令：本会话关闭语句日志，避免 ALTER ROLE ... PASSWORD 进服务器日志。
 SET log_statement = 'none';
 SET log_min_duration_statement = -1;
 ALTER ROLE aia_api    PASSWORD :'api_pw';
 ALTER ROLE aia_ingest PASSWORD :'ingest_pw';
+ALTER ROLE aia_maint  PASSWORD :'maint_pw';
 RESET log_min_duration_statement;
 RESET log_statement;
 
@@ -89,3 +102,115 @@ BEGIN
   END LOOP;
 END
 $grants$;
+
+-- T-O11：待清文件队列只给 aia_maint（上面的 ALL TABLES 授权与默认权限会把它也授给 api/ingest，这里每次都撤回）。
+DO $purges$
+DECLARE
+  seq record;
+BEGIN
+  IF to_regclass('ops.pending_file_purges') IS NULL THEN
+    RAISE WARNING 'db-roles: ops.pending_file_purges 不存在（迁移 0011 未到？），跳过撤权';
+    RETURN;
+  END IF;
+  REVOKE ALL ON TABLE ops.pending_file_purges FROM aia_api, aia_ingest;
+  FOR seq IN
+    SELECT DISTINCT format('%I.%I', sn.nspname, s.relname) AS q
+      FROM pg_depend d
+      JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
+      JOIN pg_namespace sn ON sn.oid = s.relnamespace
+     WHERE d.refobjid = 'ops.pending_file_purges'::regclass AND d.deptype IN ('a', 'i')
+  LOOP
+    EXECUTE format('REVOKE ALL ON SEQUENCE %s FROM aia_api, aia_ingest', seq.q);
+  END LOOP;
+  RAISE NOTICE 'db-roles: aia_api、aia_ingest 对 ops.pending_file_purges 无任何权限';
+END
+$purges$;
+
+-- T-O11：aia_maint（删除用户数据 CLI 专用）。整段在一个 DO 里：先撤后授，事务内完成，不留中间态。
+DO $maint$
+DECLARE
+  owner_role text := current_user;
+  t          text;
+  r          record;
+  p          text;
+BEGIN
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO aia_maint', current_database());
+  -- 不允许任何角色成员身份（NOINHERIT 之外再收一道）
+  FOR r IN SELECT g.rolname FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
+            WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'aia_maint') LOOP
+    EXECUTE format('REVOKE %I FROM aia_maint', r.rolname);
+  END LOOP;
+
+  FOR t IN SELECT unnest(ARRAY['app', 'ops', 'market']) LOOP
+    IF to_regnamespace(t) IS NULL THEN CONTINUE; END IF;
+    EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM aia_maint', t);
+    EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM aia_maint', t);
+    EXECUTE format('GRANT USAGE ON SCHEMA %I TO aia_maint', t);
+  END LOOP;
+
+  -- app：删除 / 匿名化 / 解除关联；新表由默认权限覆盖（plan §7.3 物理删除清单会随迁移增加）
+  GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO aia_maint;
+  GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app TO aia_maint;
+  EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA app GRANT SELECT, UPDATE, DELETE ON TABLES TO aia_maint', owner_role);
+  IF to_regclass('app.audit_logs') IS NOT NULL THEN
+    GRANT INSERT ON TABLE app.audit_logs TO aia_maint;
+  END IF;
+
+  -- ops：只到匿名化的两张审计/日志表 + 待清文件队列
+  FOREACH t IN ARRAY ARRAY['ops.data_licence_events', 'ops.ingest_request_log'] LOOP
+    IF to_regclass(t) IS NULL THEN RAISE WARNING 'db-roles: % 不存在，aia_maint 跳过', t; CONTINUE; END IF;
+    EXECUTE format('GRANT SELECT, UPDATE, DELETE ON TABLE %s TO aia_maint', t::regclass);
+  END LOOP;
+  IF to_regclass('ops.pending_file_purges') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ops.pending_file_purges TO aia_maint;
+  END IF;
+
+  -- market：按 source_licence_id 删除用该用户证书取到的行
+  IF to_regnamespace('market') IS NOT NULL THEN
+    GRANT SELECT, DELETE ON ALL TABLES IN SCHEMA market TO aia_maint;
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA market GRANT SELECT, DELETE ON TABLES TO aia_maint', owner_role);
+  END IF;
+
+  -- 需要 INSERT 的两张表若用序列取号，只给它们自己的序列
+  FOR r IN
+    SELECT DISTINCT format('%I.%I', sn.nspname, s.relname) AS q
+      FROM pg_depend d
+      JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
+      JOIN pg_namespace sn ON sn.oid = s.relnamespace
+     WHERE d.deptype IN ('a', 'i')
+       AND d.refobjid IN (SELECT x::regclass FROM unnest(ARRAY['app.audit_logs', 'ops.pending_file_purges']) x
+                           WHERE to_regclass(x) IS NOT NULL)
+  LOOP
+    EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %s TO aia_maint', r.q);
+  END LOOP;
+
+  -- 自检：aia_maint 不得有 TRUNCATE / REFERENCES / TRIGGER，INSERT 只在两张表上；api/ingest 对待清队列无权限
+  FOR r IN
+    SELECT c.oid::regclass::text AS q FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND n.nspname IN ('app', 'ops', 'market')
+  LOOP
+    FOREACH p IN ARRAY ARRAY['TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+      IF has_table_privilege('aia_maint', r.q, p) THEN
+        RAISE EXCEPTION 'db-roles: aia_maint 不应有 % ON %', p, r.q;
+      END IF;
+    END LOOP;
+    IF has_table_privilege('aia_maint', r.q, 'INSERT')
+       AND r.q NOT IN ('app.audit_logs', 'ops.pending_file_purges') THEN
+      RAISE EXCEPTION 'db-roles: aia_maint 不应有 INSERT ON %', r.q;
+    END IF;
+  END LOOP;
+  IF to_regclass('ops.pending_file_purges') IS NOT NULL THEN
+    FOREACH t IN ARRAY ARRAY['aia_api', 'aia_ingest'] LOOP
+      FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+        IF has_table_privilege(t, 'ops.pending_file_purges', p) THEN
+          RAISE EXCEPTION 'db-roles: % 仍有 % ON ops.pending_file_purges', t, p;
+        END IF;
+      END LOOP;
+    END LOOP;
+  END IF;
+  IF (SELECT rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolinherit FROM pg_roles WHERE rolname = 'aia_maint') THEN
+    RAISE EXCEPTION 'db-roles: aia_maint 角色属性不是最小（SUPERUSER/BYPASSRLS/CREATEROLE/CREATEDB/INHERIT）';
+  END IF;
+  RAISE NOTICE 'db-roles: aia_maint 已按 CLI 最小权限授权';
+END
+$maint$;

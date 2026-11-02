@@ -15,6 +15,10 @@
   6. 数据库角色分离（T-O10，契约 v0.2.6 验收“api 数据库角色 SELECT ciphertext 被拒”）：基础 compose 里
      api / ingest 的 DATABASE_URL 用户分别是 aia_api / aia_ingest（不是属主），口令只经 ${AIA_DB_*_PASSWORD} 插值；
      db_password_* secret 用 file: 定义、只挂给 db-roles；任何 compose 文件都不得把 api/ingest 改回属主。
+     T-O11：db_password_aia_maint（删除用户数据 CLI 角色）只挂给 db-roles 与 maint-cli；maint-cli 没有 DATABASE_URL
+     （不回落到属主）；任何服务的 environment 里都没有 AIA_MAINT_DATABASE_URL*（只由入口包装在容器内生成）。
+  7. APP_MASTER_KEY 只走 secret 文件（T-O11）：任何服务的 environment 里都没有 APP_MASTER_KEY；基础 compose 顶层
+     secret app_master_key 用 file: 定义，api / worker 都挂了它，其他服务不得挂；.env.example 不得给它赋值。
 
 失败退出码 1，依赖缺失退出码 2。用法：check_secret_boundary.py [--repo DIR]
 """
@@ -42,8 +46,14 @@ PUBLIC_SECRET = "data_licence_seal_public_keys"
 PRIVATE_ENV_RE = re.compile(r"_PRIVATE_KEYS?$")
 PRIVATE_OWNER = "ingest"
 DB_ROLE_OF = {"api": ("aia_api", "AIA_DB_API_PASSWORD"), "ingest": ("aia_ingest", "AIA_DB_INGEST_PASSWORD")}
-DB_PW_SECRETS = ("db_password_aia_api", "db_password_aia_ingest")
+DB_PW_SECRETS = ("db_password_aia_api", "db_password_aia_ingest", "db_password_aia_maint")
 DB_PW_OWNER = "db-roles"
+MAINT_SVC = "maint-cli"
+DB_PW_ALLOWED = {s: {DB_PW_OWNER} for s in DB_PW_SECRETS} | {"db_password_aia_maint": {DB_PW_OWNER, MAINT_SVC}}
+MAINT_URL_ENV_RE = re.compile(r"^AIA_MAINT_DATABASE_URL")
+MASTER_ENV = "APP_MASTER_KEY"
+MASTER_SECRET = "app_master_key"
+MASTER_OWNERS = ("api", "worker")
 DB_URL_RE = re.compile(r"^postgresql(?:\+\w+)?://([^:@/]+):(\$\{(\w+)[^}]*\})@")
 
 
@@ -110,9 +120,19 @@ def check(repo: Path) -> list[str]:
                     errs.append(f"{where} 挂载了私钥路径，只允许 {PRIVATE_OWNER}")
         for name, svc in (doc.get("services") or {}).items():
             svc = svc or {}
-            if name != DB_PW_OWNER:
-                for sn in set(_secret_names(svc.get("secrets"))) & set(DB_PW_SECRETS):
-                    errs.append(f"{rel}: 服务 {name} 挂了 {sn}，只允许 {DB_PW_OWNER}")
+            names = set(_secret_names(svc.get("secrets")))
+            for sn in sorted(names & set(DB_PW_SECRETS)):
+                if name not in DB_PW_ALLOWED[sn]:
+                    errs.append(f"{rel}: 服务 {name} 挂了 {sn}，只允许 {'/'.join(sorted(DB_PW_ALLOWED[sn]))}")
+            if MASTER_SECRET in names and name not in MASTER_OWNERS:
+                errs.append(f"{rel}: 服务 {name} 挂了 {MASTER_SECRET}，只允许 {'/'.join(MASTER_OWNERS)}")
+            for k in _env_keys(svc.get("environment")):
+                if k == MASTER_ENV:
+                    errs.append(f"{rel}: 服务 {name} 的 environment 有 {MASTER_ENV}（只走 secret 文件 {MASTER_SECRET}，T-O11）")
+                if MAINT_URL_ENV_RE.match(k):
+                    errs.append(f"{rel}: 服务 {name} 的 environment 有 {k}（aia_maint 连接串只由入口包装在容器内生成）")
+            if name == MAINT_SVC and "DATABASE_URL" in _env_keys(svc.get("environment")):
+                errs.append(f"{rel}: 服务 {MAINT_SVC} 不得有 DATABASE_URL（只能以 aia_maint 连接，不回落到属主）")
             env = svc.get("environment")
             url = env.get("DATABASE_URL") if isinstance(env, dict) else next(
                 (e.split("=", 1)[1] for e in (env or []) if isinstance(e, str) and e.startswith("DATABASE_URL=")), None)
@@ -132,7 +152,7 @@ def check(repo: Path) -> list[str]:
         for s in (PRIVATE_SECRET, PUBLIC_SECRET):
             if not (isinstance(top.get(s), dict) and "file" in top[s]):
                 errs.append(f"{BASE_COMPOSE}: 顶层 secrets 缺少 {s}（file:）")
-        for s in DB_PW_SECRETS:
+        for s in (*DB_PW_SECRETS, MASTER_SECRET):
             if not (isinstance(top.get(s), dict) and "file" in top[s]):
                 errs.append(f"{BASE_COMPOSE}: 顶层 secrets 缺少 {s}（file:）")
         svcs = doc.get("services") or {}
@@ -140,7 +160,8 @@ def check(repo: Path) -> list[str]:
             env = (svcs.get(svc) or {}).get("environment")
             if not (isinstance(env, dict) and "DATABASE_URL" in env):
                 errs.append(f"{BASE_COMPOSE}: 服务 {svc} 没有显式 DATABASE_URL（必须用独立角色）")
-        need = {PRIVATE_OWNER: {PRIVATE_SECRET, PUBLIC_SECRET}, "api": {PUBLIC_SECRET}}
+        need = {PRIVATE_OWNER: {PRIVATE_SECRET, PUBLIC_SECRET}, "api": {PUBLIC_SECRET, MASTER_SECRET},
+                "worker": {MASTER_SECRET}}
         for svc, want in need.items():
             have = set(_secret_names((svcs.get(svc) or {}).get("secrets")))
             if not want <= have:
@@ -152,6 +173,8 @@ def check(repo: Path) -> list[str]:
             key = line.split("=", 1)[0].strip()
             if "=" in line and not line.lstrip().startswith("#") and PRIVATE_ENV_RE.search(key):
                 errs.append(f"{ENV_EXAMPLE}:{i}: 私钥不得出现在 .env（只走 secret 文件）")
+            if "=" in line and not line.lstrip().startswith("#") and key == MASTER_ENV:
+                errs.append(f"{ENV_EXAMPLE}:{i}: {MASTER_ENV} 不得出现在 .env（只走 secret 文件 {MASTER_SECRET}，T-O11）")
     return errs
 
 

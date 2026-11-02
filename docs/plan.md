@@ -1280,7 +1280,22 @@ class LLMGateway:
        - 不是季末的 `bdrq`（股本变动日）照旧按 `plrq` 处理。
        - 由 T-B05 用 600519 等样例确认麦蕊是否回填。确认 `plrq` 是真实披露日时，取消这条保守规则（只改本条，不改原因码）。
     2. **B、H 股识别（V5g）**：capital 没有 B/H 字段，就用配置里的 A+B、A+H 公司名单识别，名单必须注明来源和日期，做法与 V5e 的保险名单一样。名单内的公司按第 6 条打 `non_a_share_capital`，名单外的记 `share_class_check=list`（不再是 `unavailable`）。V5g 的关闭条件改为两项：名单已接入；`zgb` 是否包含 B、H 股已用一家 A+H、一家 A+B 公司对照巨潮披露的总股本核实过。不按代码段或名称推断这一条不变。
-    3. **CDR 股本单位（新增 V5j，S1 关闭项）**：在 T-B05 核实 CDR 的 `zgb` 是按基础股份还是按 CDR 份数计之前，CDR 证券的 `pe_ttm`、`pb` 照常计算，但打 `basis.verify_pending` 含 `cdr_unit`，规则同银行、保险的标记：不进入 PE 和 PB 行业分位，也不计入 S2 覆盖率的分子和分母。`security_type` 目前没有 CDR 取值，所以用配置里的 CDR 名单识别（注明来源和日期），不按代码段推断。核实后：如果 `zgb` 按 CDR 份数计，就换算成 c × CDR 份数（不再乘转换比例），并清除这个标记。
+    3. **CDR 股本单位（新增 V5j，S1 关闭项）**：在 T-B05 核实 CDR 的 `zgb` 是按基础股份还是按 CDR 份数计之前，CDR 证券的 `pe_ttm`、`pb` 照常计算，但打 `basis.verify_pending` 含 `cdr_unit`，不计入 S2 覆盖率的分子和分母；行业分位见 T-R12f 第 6 条。CDR 以 `market.securities.type = cdr` 识别（T-R12f 更正）。核实后：如果 `zgb` 按 CDR 份数计，就换算成 c × CDR 份数（不再乘转换比例），并清除这个标记。
+  - **T-R12f 补充裁定（v0.2.9 内，架构师；对应 feature_spec v1.1.5 的 8 个待定点，并更正 T-R12e 的措辞）**：
+    1. **V5i 适用范围**：适用条件是 `bdrq` 为季末日，并且 `plrq = bdrq` 或 `plrq` 也是季末日。`plrq = bdrq` 但两者都不是季末日的行，照旧按 `plrq` 处理。可见时间取 `max(next_trading_day(plrq), 截止日规则)`；截止日按 `bdrq` 所属的报告期取，因为股本数属于这个期间，而且这样取更保守。
+    2. **截止日的可见时刻**：取 `next_trading_day(截止日) 09:30`，与财务行的规则一致。
+    3. **`basis.pit_basis` 改为字符串数组**，与 `verify_pending` 一样，可以同时含 `plrq_only` 和 `capital_deadline`；没有任何特例时为空数组或不写。T-B55 按数组实现。
+    4. **`share_class_check` 的取值**：
+       - 名单接入前，所有行记 `unavailable`。
+       - 名单接入后，所有行记 `list`，表示按名单判定。名单内的公司另外打 `non_a_share_capital`。
+       - 将来如果 capital 有了区分字段，改记 `field`。
+    5. **CDR 识别**：更正 T-R12e，CDR 以 `market.securities.type = cdr` 识别，不另设名单。
+    6. **CDR 与分位**：按 feature_spec §1.4，`type = cdr` 的证券本来就不在 F43、F48 的分位池里，所以：
+       - 不需要另设池剔除规则，YAML 去掉 `pool_exclude_verify_pending`；
+       - 不需要新的元数据原因；
+       - `cdr_unit` 只影响 F42、F47 的值和 S2 覆盖率的剔除。
+    7. **V5j 中 `zgb` 按基础股份计的情况**：总市值 = c（每份 CDR 的价格）× `zgb` × 每股基础股份对应的 CDR 份数。转换比例写在配置里，按证券单列，并注明来源（招股书或上市公告）。T-B05 确认单位、配置也接入后，清除 `cdr_unit`。如果 `zgb` 按 CDR 份数计，总市值 = c × `zgb`。
+    8. **银行、保险标记**：维持 T-R12a 的规定，继承标记，照常参与排序。T-R12e 原文中“规则同银行、保险的标记：不进入行业分位”这句措辞有误，已更正。
   - **补充规则（`feature_spec.md` §7A.0 / §13 A5，4 条）——【已确认 v0.2.9 内，架构师 T-R12】**，并入 T-B55：① 首次全量回填写入、`plrq` 早于回填日的行只按 `plrq` 计算，标 `basis.pit_basis=plrq_only`；② 同一 (code, report_type, jzrq) 的两行 `available_from` 相同 → 取 `first_seen_at` 较晚者，仍无法区分且数值不同 → 该分量 `null` 并告警 `data_conflict`；③ E(P−4) ≤ 0 按缺失处理（`roe_basis=single_period`）；④ 现金流比的分子、分母用同一个 P，不各自回退。说明：P 按“该键所需分量都可见且非空”逐期回退，所以同一 T 下不同键（如 `pe_ttm` 与 `ocf_to_np_ttm`）的 P 可以不同，各自记入 `basis.period`。
   - **线上切换**：条件与阈值以 `feature_spec.md` §7C（S1–S6）为准——【已确认 v0.2.9 内，架构师 T-R12】；本文不重复。保险识别（V5e）若 T-B05 确认麦蕊没有申万二级，按配置中的保险证券名单识别（名单注明来源），以此关闭 V5e，不因缺申万二级而阻塞切换。等待期的产品取舍见第 9 节问题 93。
   - 幸存者偏差：已退市证券的财报接口返回 404，历史截面缺这些证券；回测报告必须带 `survivorship_bias=true` 标记，不能当作无偏结果。
@@ -1590,7 +1605,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `market.trading_calendar` | date, is_open |
 | `market.daily_bars` | code, trade_date, open, high, low, close, volume, amount, adj_type, fetched_at（按年分区） |
 | `market.quotes_snapshot` | code, ts, price, pct_change, … （只保留当日+近 5 日，热数据在 Redis） |
-| `market.financial_derived` | v0.2.9 内（L-01 裁定，T-B55）：`code`、`period_end`、`version_available_from`、`metric`（`pe_ttm`/`pb`/`roe_ttm`/`ocf_to_np_ttm`/`debt_ratio`；`pe_ttm`、`pb` 按交易日存；`pb` 为 T-R12 裁定新增）、`trade_date null`、`value numeric null`、`basis jsonb`（所用报告期、各分量版本、`roe_basis`、`ocf_field`（经营现金流实际所用字段）、`pit_basis`、回退标记；T-R12a 起加 `null_reason`（封闭枚举，见 2.12.1 T-R12b 补充裁定 1）、`zgb_bdrq`、`mcap_basis`、`share_change_check`、`verify_pending`（字符串数组，见 2.12.1）；T-R12b 起加 `single_period_reason`、`share_class_check`）、`calc_version`、`computed_at`。PK `(code, metric, period_end, version_available_from, coalesce(trade_date))` 以唯一索引实现；btree `(metric, trade_date)`。按证书数据计算时带 `source_licence_id`（2.1B） |
+| `market.financial_derived` | v0.2.9 内（L-01 裁定，T-B55）：`code`、`period_end`、`version_available_from`、`metric`（`pe_ttm`/`pb`/`roe_ttm`/`ocf_to_np_ttm`/`debt_ratio`；`pe_ttm`、`pb` 按交易日存；`pb` 为 T-R12 裁定新增）、`trade_date null`、`value numeric null`、`basis jsonb`（所用报告期、各分量版本、`roe_basis`、`ocf_field`（经营现金流实际所用字段）、`pit_basis`（T-R12f 起为字符串数组）、回退标记；T-R12a 起加 `null_reason`（封闭枚举，见 2.12.1 T-R12b 补充裁定 1）、`zgb_bdrq`、`mcap_basis`、`share_change_check`、`verify_pending`（字符串数组，见 2.12.1）；T-R12b 起加 `single_period_reason`、`share_class_check`）、`calc_version`、`computed_at`。PK `(code, metric, period_end, version_available_from, coalesce(trade_date))` 以唯一索引实现；btree `(metric, trade_date)`。按证书数据计算时带 `source_licence_id`（2.1B） |
 | `market.financial_reports` | code, report_type(balance/income/cashflow/pershareindex), period_end, payload(jsonb), first_seen_at, last_seen_at, payload_hash — **数据变化时新增行**，保留"重述"历史，支持 as-of；增加 announce_date(公告日 plrq【待 T003 验证】), available_from（按时点可用时间，2.12.1）。v0.2.9 内（L-01 裁定）：`plrq` 已由 T003 缺口目录第 3 项核实（空值率 0，三表都有）；同一报告期多行的含义待研究员对照巨潮原文；派生值另存 `market.financial_derived`（T-B55） |
 | `market.fund_flows` | code, trade_date, payload(jsonb), fetched_at |
 | `market.factor_values` | code, trade_date, factor_id, value, calc_version, fetched_at, available_from, first_seen_at — hypertable（chunk 1 个月） |

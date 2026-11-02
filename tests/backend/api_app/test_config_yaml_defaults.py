@@ -78,6 +78,14 @@ V029_DOCS_PENDING = "plan §6.1 尚无 realtime.admin_alerts：架构师 4532478
 V029_BACKEND_PENDING = "后端 T-B47-x（R10）：config/realtime.yaml 与 app/config_files.py 尚无 admin_alerts（plan §6.1 v0.2.9 内裁定，问题 78）"
 
 
+#: T-R10（docs/strategies/market_rules_T-R10.md，后端 07b8d74 已并入 config/market_rules.yaml 与 config_files）新增键：
+#: 快照已叠加（T-T25，取值与 T-R10 文档逐项核对一致）；plan §6.1 尚未同步 → 仅这些键的差异 xfail（架构师）
+TR10_LOT_KEYS = ("odd_lot_sell_all", "star_odd_lot_threshold", "max_order_qty", "star_max_limit_order",
+                 "star_max_market_order", "star_max_after_hours", "chinext_max_limit_order", "chinext_max_market_order")
+TR10_PATH = re.compile(r"^segments\[\d+\]\.(lot\.(" + "|".join(TR10_LOT_KEYS) + r")|t0_round_trip)（")
+TR10_PLAN_PENDING = "架构师：plan §6.1 config/market_rules.yaml 尚未同步 T-R10 新增键（lot 单笔上限/零股、t0_round_trip；后端 07b8d74 已合并）"
+
+
 def _only_v029_keys(name: str, paths: list[str]) -> bool:
     keys = V029_ADDED.get(name, ())
     return bool(paths) and all(p.split(".", 1)[0].split("（", 1)[0] in keys for p in paths)
@@ -398,6 +406,10 @@ def test_snapshot_equals_plan_block(docs_dir, name):
         pytest.xfail(V026_DOCS_PENDING)
     if name in V029_ADDED and not set(V029_ADDED[name]) & set(plan) and set(V029_ADDED[name]) <= set(snap(name)):
         pytest.xfail(V029_DOCS_PENDING)
+    if name == "market_rules" and plan != snap(name):
+        d = diff_paths(plan, snap(name))
+        if d and all(TR10_PATH.match(p) for p in d):
+            pytest.xfail(TR10_PLAN_PENDING)
     assert plan == snap(name), f"plan §6.1 的 {name}.yaml 已变，请同步快照"
 
 

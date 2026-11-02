@@ -71,7 +71,7 @@ O_WRITERS = {
     "horizon": O_R8,
 }
 
-PERSONAL_PURPOSES = ("plan", "horizon")  # 追加裁定 D：含个人数据，user_id 必填
+PERSONAL_PURPOSES = ("candidate", "plan", "horizon")  # 追加裁定 D（T-O11 补 candidate）：含个人数据，user_id 必填
 
 
 def _uniq_code(prefix: str = "603") -> str:
@@ -460,7 +460,7 @@ def test_d_compliant_rows_accepted(sql: Callable[..., Any], mkuser: Callable[...
     _insert_snapshot(sql, "screen", None)
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_D}：plan / horizon 行 user_id 为 null 应被库级 CHECK 拒绝（23514）")
+@pytest.mark.xfail(strict=False, reason=f"{O_D}：candidate / plan / horizon 行 user_id 为 null 应被库级 CHECK 拒绝（23514）")
 @pytest.mark.parametrize("purpose", PERSONAL_PURPOSES)
 def test_d_personal_purpose_requires_user(sql: Callable[..., Any], purpose: str) -> None:
     _need_user_col(sql)

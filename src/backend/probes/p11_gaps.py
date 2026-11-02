@@ -658,7 +658,9 @@ def item67_factors(res, shared):
     reports = [r for r in reports if r["jzrq"] and r["jzrq"] >= "2024-01-01"]
     pit, hist_dates = {}, {}
     for fid in PIT_FACTORS:
+        # 保存完整序列（≤400 行），供 ≥1 周后复取比对是否回填（T-B05 复测 3）
         r = probe(res, f"pit_history_{fid}_600519", f"/factor/history/{fid}/600519/{{licence}}",
+                  sample=f"p11_pit_history_{fid}_600519", n=400,
                   st=PIT_ST, et=PIT_ET, limit=400)
         ser = sorted((norm_date(x.get("trade_date")), x.get("value")) for x in c.rows(r.data)
                      if isinstance(x, dict) and norm_date(x.get("trade_date")))

@@ -163,3 +163,44 @@ def test_dynamic_upstream_in_cli(gw_repo: Path) -> None:
     r = subprocess.run([sys.executable, str(CI_DIR / "check_gateway_limits.py"), "--repo", str(gw_repo)],
                        capture_output=True, text=True)
     assert r.returncode == 1 and "resolver" in r.stdout, r.stdout
+
+
+# ---- 规则 10：414 / 494 JSON 信封（T-D） ----
+
+def test_repo_header_limits_ok(gw_repo: Path) -> None:
+    assert cgl.check_header_limits(gw_repo) == []
+
+
+@pytest.mark.parametrize("rel,old,new,needle", [
+    (cgl.NGINX_CONF, "    large_client_header_buffers 4 8k;\n", "", "large_client_header_buffers"),
+    (cgl.NGINX_CONF, "large_client_header_buffers 4 8k;", "large_client_header_buffers 4 16k;", "不一致"),
+    (cgl.NGINX_CONF, "error_page 414 /__aia_errors/414;", "error_page 414 @uri_too_long;", "命名 location"),
+    (cgl.NGINX_CONF, "    error_page 414 /__aia_errors/414;\n", "", "error_page 414"),
+    (cgl.NGINX_CONF, "location = /__aia_errors/414 {\n      internal;\n", "location = /__aia_errors/414 {\n", "internal"),
+    (cgl.NGINX_CONF, '"code":"URI_TOO_LONG"', '"code":"BAD_REQUEST"', "URI_TOO_LONG"),
+    (cgl.NGINX_CONF, 'return 414 \'{"error":{"code":"URI_TOO_LONG","message":"请求地址过长","details":{"max_bytes":8192}',
+     'return 414 \'{"error":{"code":"URI_TOO_LONG","message":"请求地址过长","details":{"max_bytes":4096}', "不一致"),
+    (cgl.NGINX_CONF, "    error_page 494 =400 @header_too_large;\n", "", "error_page 494"),
+    (cgl.NGINX_CONF, '"code":"REQUEST_HEADER_TOO_LARGE"', '"code":"X"', "REQUEST_HEADER_TOO_LARGE"),
+    (cgl.LIMITS_DEV, "limit_req_dry_run on;", "limit_req_dry_run on;\nlarge_client_header_buffers 4 32k;", "不得设置"),
+])
+def test_header_limits_negative(gw_repo: Path, rel: str, old: str, new: str, needle: str) -> None:
+    _sub(gw_repo, rel, old, new)
+    errs = cgl.check_header_limits(gw_repo)
+    assert any(needle in e for e in errs), errs
+
+
+def test_header_limits_x_request_id_required(gw_repo: Path) -> None:
+    p = gw_repo / cgl.NGINX_CONF
+    t = p.read_text(encoding="utf-8")
+    i = t.index("location = /__aia_errors/414 {")
+    j = t.index("\n    }\n", i)
+    p.write_text(t[:i] + t[i:j].replace("add_header X-Request-Id $aia_request_id always;", "") + t[j:], encoding="utf-8")
+    assert any("X-Request-Id" in e for e in cgl.check_header_limits(gw_repo))
+
+
+def test_header_limits_in_cli(gw_repo: Path) -> None:
+    _sub(gw_repo, cgl.NGINX_CONF, "error_page 414 /__aia_errors/414;", "error_page 414 @uri_too_long;")
+    r = subprocess.run([sys.executable, str(CI_DIR / "check_gateway_limits.py"), "--repo", str(gw_repo)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "命名 location" in r.stdout, r.stdout

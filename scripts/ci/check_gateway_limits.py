@@ -25,6 +25,12 @@
      map $host $aia_api_upstream 的 default 为 "api:8000"；每一处 proxy_pass 都是 http://$aia_api_upstream，
      不带 URI（原样转发）或带 URI 时以 $is_args$args 结尾（变量形式不会自动追加参数）。
   9. compose：基础文件 nginx 健康检查经 nginx 探上游 /health/live（不是自答的 /healthz）；dev 叠加文件不得覆盖 healthcheck。
+请求行 / 请求头过长（T-D，T-live-0f8129b F-1；与 413 同一信封）：
+  10. nginx.conf：server 级显式写且只写一条 large_client_header_buffers N SIZE；
+      error_page 414 指向内部 URI location（不能是命名 location：读请求行阶段 URI 尚未解析，跳命名 location 会变 500），
+      该 location 为 internal、return 414、信封含 URI_TOO_LONG、details.max_bytes == SIZE 字节、request_id、X-Request-Id 头；
+      error_page 494 =400 指向的 location return 400、信封含 REQUEST_HEADER_TOO_LARGE、max_bytes == SIZE、X-Request-Id 头。
+      limits*.conf 不得再写 large_client_header_buffers（prod / dev 共用 nginx.conf 的值，信封里的 max_bytes 才一致）。
 用法：check_gateway_limits.py [--repo DIR]   不一致或缺文件时退出码 1，输出 ::error。
 """
 
@@ -284,12 +290,87 @@ def check_dynamic_upstream(repo: Path) -> list[str]:
     return errors
 
 
+LCHB_RE = re.compile(r"^\s*large_client_header_buffers\s+(\d+)\s+(\d+)([kKmM]?)\s*;", re.M)
+LCHB_ANY_RE = re.compile(r"^\s*large_client_header_buffers\b", re.M)
+
+
+def _location_body(conf: str, name: str) -> str | None:
+    """`location = /x {` 或 `location @x {` 的内容：到第一个只含 `}` 的行（信封 JSON 里有 `}`；这些 location 没有嵌套块）。"""
+    head = f"location = {name} {{" if name.startswith("/") else f"location {name} {{"
+    i = conf.find(head)
+    if i < 0:
+        return None
+    m = re.compile(r"^\s*}\s*$", re.M).search(conf, i + len(head))
+    return conf[i + len(head):m.start() if m else len(conf)]
+
+
+def _check_envelope(body: str, what: str, status: int, code: str, size: int) -> list[str]:
+    errs = []
+    for needle, why in ((f"return {status} ", f"状态 {status}"), (f'"code":"{code}"', f"code {code}"),
+                        ('"request_id":"$aia_request_id"', "request_id"), ("add_header X-Request-Id $aia_request_id always", "X-Request-Id 头"),
+                        ("application/json", "JSON Content-Type")):
+        if needle not in body:
+            errs.append(f"{NGINX_CONF}: {what} 缺少{why}（{needle}）")
+    vals = {int(v) for v in ENVELOPE_RE.findall(body)}
+    if vals != {size}:
+        errs.append(f"{NGINX_CONF}: {what} 信封 max_bytes={sorted(vals) or '无'} 与 large_client_header_buffers 单个缓冲 {size} 字节不一致")
+    return errs
+
+
+def check_header_limits(repo: Path) -> list[str]:
+    errors: list[str] = []
+    nc = repo / NGINX_CONF
+    if not nc.is_file():
+        return [f"{NGINX_CONF} 不存在"]
+    conf = strip_comments(nc.read_text(encoding="utf-8"))
+    found = LCHB_RE.findall(conf)
+    if len(found) != 1 or len(LCHB_ANY_RE.findall(conf)) != 1:
+        errors.append(f"{NGINX_CONF}: 需要且只能有一条 large_client_header_buffers N SIZE;（实际 {len(LCHB_ANY_RE.findall(conf))} 条）")
+        size = None
+    else:
+        size = int(found[0][1]) * UNITS[found[0][2].lower()]
+    for rel in (LIMITS_PROD, LIMITS_DEV):
+        lf = repo / rel
+        if lf.is_file() and LCHB_ANY_RE.search(strip_comments(lf.read_text(encoding="utf-8"))):
+            errors.append(f"{rel}: 不得设置 large_client_header_buffers（prod/dev 共用 nginx.conf 的值）")
+
+    m414 = re.findall(r"^\s*error_page\s+414\s+(\S+)\s*;", conf, re.M)
+    if len(m414) != 1:
+        errors.append(f"{NGINX_CONF}: 需要且只能有一条 error_page 414 <内部 URI>（实际 {len(m414)} 条）")
+    elif m414[0].startswith("@"):
+        errors.append(f"{NGINX_CONF}: error_page 414 不能指向命名 location {m414[0]}（URI 尚未解析，nginx 报 empty URI 并返回 500）；改用 internal 的 URI location")
+    elif not m414[0].startswith("/"):
+        errors.append(f"{NGINX_CONF}: error_page 414 目标 {m414[0]} 不是本机内部 URI")
+    else:
+        body = _location_body(conf, m414[0])
+        if body is None:
+            errors.append(f"{NGINX_CONF}: 没有 location = {m414[0]}（414 JSON 信封）")
+        else:
+            if not re.search(r"^\s*internal\s*;", body, re.M):
+                errors.append(f"{NGINX_CONF}: location = {m414[0]} 必须 internal（外部不可直接访问）")
+            if size is not None:
+                errors += _check_envelope(body, f"414 location {m414[0]}", 414, "URI_TOO_LONG", size)
+
+    m494 = re.findall(r"^\s*error_page\s+494\s+=400\s+(\S+)\s*;", conf, re.M)
+    if len(m494) != 1:
+        errors.append(f"{NGINX_CONF}: 需要且只能有一条 error_page 494 =400 <location>（请求头过大对外 400 + JSON 信封）")
+    else:
+        body = _location_body(conf, m494[0])
+        if body is None:
+            errors.append(f"{NGINX_CONF}: 没有 location {m494[0]}（494→400 JSON 信封）")
+        elif size is not None:
+            errors += _check_envelope(body, f"494 location {m494[0]}", 400, "REQUEST_HEADER_TOO_LARGE", size)
+    if not errors:
+        print(f"OK   请求行/请求头上限 large_client_header_buffers 单个 {size} 字节 = 414/400 信封 max_bytes；414 走 internal URI location")
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo", type=Path, default=Path.cwd())
     args = ap.parse_args(argv)
     repo = args.repo.resolve()
-    errors = check(repo) + check_rate_limits(repo) + check_dynamic_upstream(repo)
+    errors = check(repo) + check_rate_limits(repo) + check_dynamic_upstream(repo) + check_header_limits(repo)
     for e in errors:
         print(f"::error title=gateway-limits::{e}")
     print(f"check_gateway_limits: {len(errors)} 个问题")

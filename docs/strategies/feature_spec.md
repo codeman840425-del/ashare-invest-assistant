@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | **v1.0（T-R11，2026-11-01 首版）**。本目录此前没有同类文件（已检索 `docs/strategies/`），本文为新建，不是更新 |
+| 版本 | **v1.0.1（T-R11a/b 修订；v1.0 为 T-R11 首版，2026-11-01）**。本目录此前没有同类文件（已检索 `docs/strategies/`），本文为新建，不是更新 |
 | 作者/维护 | 策略研究员（`docs/strategies/` 由研究员维护，架构师不改该目录，plan T-R11 行） |
 | 覆盖范围 | 仓库 `docs/`、`config/` 中出现的全部正式特征键 `f.*`，共 **41 个**：分类器 15 个（T-B30a）+ P0 策略卡 25 个（T-B43 / `_template.md` / `catalog.md`）+ P1 1 个（`validation.md`）。另列前端 mock 中出现的 11 个**非正式**键（§8），不计入 41 |
 | 消费方 | T-B30a（分类器 15 键数据层）、T-B43（P0 策略特征）、T-B35（特征底座 `feature_catalog` / `market.feature_bars_daily`）、T-B42（DSL 求值器） |
@@ -102,7 +102,7 @@
 - 北交所：分类器 HG2 直接 0 分；北交所证券不进 `rank_pct` 池；本文的特征**仍可为北交所计算**（G-01 等系统组件可能需要），但不进入分类器截面。北交所涨跌幅 30%（`market_rules_check.md`）。
 - ST/*ST：进入 `rank_pct` 池；涨跌停价按 `market_rules.yaml` 分段（沪深主板 ST/*ST 2026-07-06 起 10%、此前 5%；创业板/科创板 20%；北交所 30%）。
 - 退市整理期：`f.is_delisting_period = true` → HG3 0 分；其首日无涨跌幅限制（`f.limit_*` 为 null）。
-- `listing_status ∈ {delisted, missing_from_list}`：不应再被评估；若被评估，所有日线派生特征按“无有效 K 线”自然得到 null，`f.is_st`、`f.is_delisting_period` 见 F14/F15。
+- `listing_status ∈ {delisted, missing_from_list}`：**全部 `f.*` 置为 null**（T-R11b，§10.2 第 4 条），包括 `f.is_st`、`f.is_delisting_period` 等布尔键与主数据派生键，不得返回 false 或 0。
 
 ---
 
@@ -246,7 +246,7 @@
 - **公式**：`listing_status = delisting_period` → true；`listing_status` 为其他非空值 → false；`listing_status` 为空 → null（分类器按 false 处理）。与 `inputs.py` 现有实现一致。
 - **来源**：主数据 `listing_status`（契约枚举 `listed / delisting_period / delisted / missing_from_list`；`delisting_period` 靠简称含“退”识别，`security_master.md` §5-1）。
 - **可得时点**：同 F14。
-- **边界**：退市整理期首日无涨跌幅限制；`delisted / missing_from_list` 返回 false（不是退市整理期），但这类证券不应再被分类，见 §10.2 第 4 条。
+- **边界**：退市整理期首日无涨跌幅限制；`delisted / missing_from_list` 返回 null（与其他特征一致，T-R11b），见 §10.2 第 4 条。
 - **引用**：HG3；G-01（退市整理期）；P0。
 
 ---
@@ -553,7 +553,7 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 | 1 | 术语 | **有异议** | `security_master.md` §5-5：`*ST` 前缀 → `*ST`；简称含“退” → `退`（例：“\*ST萃华→萃华退”）。`*ST` 即“退市风险警示”，对应 `star_st`；`delisting` 对应简称含“退”，即**退市整理期/已退市**的证券。plan 第 3258 行、第 2681 行把 `delisting` 写成“退市风险警示”，`src/backend/app/research/content.py` 第 53 行 `_RISK_TEXT["delisting"]`的说明文字（“该证券处于退市风险警示状态”）同样有误 | 改称：`star_st` = 退市风险警示（\*ST）；`delisting` = 退市整理（简称含“退”）。plan 第 3258/2681 行与 content.py 第 53 行的措辞由架构师/后端修订（研究员无权改） |
 | 2 | 计入 `f.is_st` 的实际影响 | 同意 | `star_st` 本来就在集合内（真正的“退市风险警示”已被覆盖）；`delisting` 证券绝大多数同时 `listing_status = delisting_period` → HG3 直接 0 分，HG4 的 59 封顶是冗余的、无害 | 保持 `inputs.py` 现状，不改代码 |
 | 3 | ST 与 \*ST 同等处理的交易规则依据 | 同意 | `market_rules_check.md`：沪深主板 ST 与 \*ST 涨跌幅相同（2026-07-06 起 10%、此前 5%）；风险警示股票单只当日累计买入 ≤ 50 万股（沪 4.4.10；深交所同类条款“未逐字核对”，M5）、只能限价申报（沪 4.4.9，M6），条文对象是“风险警示股票”，不区分 ST 与 \*ST | v1 不新增 `f.is_delisting_risk`；如需在理由中区分 \*ST，用 `sec.risk_flag` 生成文本即可（P1 提示，不影响分数） |
-| 4 | 一致性与边界 | 补充 | 契约 `listing_status` 另有 `delisted`、`missing_from_list` | ① `risk_flag = delisting` 而 `listing_status ≠ delisting_period`（或反之）→ 数据质量告警（主数据两字段都由简称派生，应一致）；② `listing_status ∈ {delisted, missing_from_list}` 的证券不应再进入分类：建议 T-B30a 对这两类直接不产出特征（全部 null）并由分类器入口拒绝，**待架构师定** |
+| 4 | 一致性与边界 | 补充 | 契约 `listing_status` 另有 `delisted`、`missing_from_list` | ① `risk_flag = delisting` 而 `listing_status ≠ delisting_period`（或反之）→ 数据质量告警（主数据两字段都由简称派生，应一致）；② **【已定，T-R11b】`listing_status ∈ {delisted, missing_from_list}` 的证券，全部 `f.*` 置为 null**（含 `f.is_st`、`f.is_delisting_period`，不返回 false），T-B30a 不产出数值；判定以 d 日 18:00 主数据快照为准，回测取 t 当日有效区间。是否另由分类器入口拒绝属实现，由架构师定 |
 | 5 | 时点 | 补充 | 主数据 18:00 拉取（`security_master.md` §6-1）；历史区间表 `security_risk_flag_history` | d 日的 `f.is_st` 用 d 日 18:00 快照，用于 d+1；回测取 t 当日有效区间；沪/京历史只从上线日起可得，之前的回测期 ST 状态缺失 → null（按 true 处理会把历史 ST 未知的股票都封顶，**回测时需注明此偏差**） |
 
 ---
@@ -630,9 +630,10 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 机器可读草案（供 T-B30a/T-B43 写 `feature_catalog`；`status` 一律从 `declared` 起步，T-B05 核实后再升级；字段名与表 `app.feature_catalog` 列一致）：
 
 ```yaml
-feature_spec_version: "1.0"
+feature_spec_version: "1.0.1"
 rank_pct_universe: "T−1 日盘后落库截面：沪深 A 股股票，剔除北交所、停牌、上市 < 20 个交易日；平均秩 / N，取值 [0, 1]"
 window_rule: {calendar: exchange_trading_days, min_valid_ratio: 0.75, null_fill: forbidden}   # 0.75 待架构师确认
+all_null_when: {listing_status: [delisted, missing_from_list]}   # T-R11b：这两类证券全部 f.* 为 null
 features:
   - {feature_key: f.amount_20d_avg, unit: CNY, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsstock/history/{code.市场}/d/n", field: a}, pit_rule: {window: 20, min_valid: 15, available_at: "d 日日线落库后"}}
   - {feature_key: f.turnover_20d_avg, unit: pending, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/factor/scale/{code}", field: turnover_20d_avg}, pit_rule: {available_at: "d 日 16:30 后", history: local_only_until_verified}}
@@ -704,4 +705,5 @@ features:
 
 | 版本 | 日期 | 作者 | 说明 |
 |---|---|---|---|
+| 1.0.1 | 2026-11-01 | 研究员（T-R11a/b） | C5：SH5/SW2/SW3 改 `unit: pct`；§10.2 第 4 条已定：`delisted`/`missing_from_list` 全部 `f.*` 为 null（F15 边界与 §1 同步）；V1–V12 待 T-B05 实测后补 |
 | 1.0 | 2026-11-01 | 研究员（T-R11） | 首版：41 个正式键（P0 40、P1 1）口径、3 组手算样例、问题 76/77 复核、与 T-B46-47 裁定对照；`horizon_classifier.md` 末尾加附录指针 |

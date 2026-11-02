@@ -1273,6 +1273,14 @@ class LLMGateway:
     1. **`debt_ratio` 的 `zczj ≤ 0`**：并入 `component_missing`，不新增原因码。资产合计 ≤ 0 只能是源数据错误，和“分量取不到可用值”处理方式相同，单独设码没有下游用途；“`value` 为 null ⇔ 有 `null_reason`”继续成立。T-B55 同时写一条 `data_quality` 告警（不打断计算），便于 T-B05 回查。
     2. **`single_period_reason` 多命中时的优先级**：确认 `p4_pre_listing` → `p4_missing` → `p4_non_positive`，只写第一个。理由：P−4 早于上市日时，即使有值也不能用，先于“缺失”；缺失时无法判断正负。
     3. **退市证券**：T-B55 不为退市证券补写 null 行，所以不需要新增原因码。规则：只为有可见报告期的证券计算；`pe_ttm`、`pb` 只为有日线的交易日写行，退市后没有日线就没有行，不写 null 行。退市前的历史行照常计算，按上表写码。`listing_status ∈ {delisted, missing_from_list}` 时 f.* 全为 null，这是特征层规则（feature_spec §1.7、T-B35），与 `financial_derived` 无关。
+  - **T-R12e 补充裁定（v0.2.9 内，架构师；对应后端 af589c0 探针中提出的 3 个口径问题，实测结论写入 `docs/mairui-verified.md`）**：
+    1. **capital 行可见时间（新增 V5i，S1 关闭项）**：`plrq = bdrq`，或 `plrq` 恰好是季末日时，不能当作真实披露日，否则回填数据会把股本提前放出（前视）。
+       - 可见时间取 `max(next_trading_day(plrq), first_seen_at)`。
+       - 首次全量回填的这类行没有可信的 `first_seen_at`，按法定披露截止日保守处理：Q1 → 4-30，H1 → 8-31，Q3 → 10-31，年报 → 次年 4-30；记 `basis.pit_basis=capital_deadline`。
+       - 不是季末的 `bdrq`（股本变动日）照旧按 `plrq` 处理。
+       - 由 T-B05 用 600519 等样例确认麦蕊是否回填。确认 `plrq` 是真实披露日时，取消这条保守规则（只改本条，不改原因码）。
+    2. **B、H 股识别（V5g）**：capital 没有 B/H 字段，就用配置里的 A+B、A+H 公司名单识别，名单必须注明来源和日期，做法与 V5e 的保险名单一样。名单内的公司按第 6 条打 `non_a_share_capital`，名单外的记 `share_class_check=list`（不再是 `unavailable`）。V5g 的关闭条件改为两项：名单已接入；`zgb` 是否包含 B、H 股已用一家 A+H、一家 A+B 公司对照巨潮披露的总股本核实过。不按代码段或名称推断这一条不变。
+    3. **CDR 股本单位（新增 V5j，S1 关闭项）**：在 T-B05 核实 CDR 的 `zgb` 是按基础股份还是按 CDR 份数计之前，CDR 证券的 `pe_ttm`、`pb` 照常计算，但打 `basis.verify_pending` 含 `cdr_unit`，规则同银行、保险的标记：不进入 PE 和 PB 行业分位，也不计入 S2 覆盖率的分子和分母。`security_type` 目前没有 CDR 取值，所以用配置里的 CDR 名单识别（注明来源和日期），不按代码段推断。核实后：如果 `zgb` 按 CDR 份数计，就换算成 c × CDR 份数（不再乘转换比例），并清除这个标记。
   - **补充规则（`feature_spec.md` §7A.0 / §13 A5，4 条）——【已确认 v0.2.9 内，架构师 T-R12】**，并入 T-B55：① 首次全量回填写入、`plrq` 早于回填日的行只按 `plrq` 计算，标 `basis.pit_basis=plrq_only`；② 同一 (code, report_type, jzrq) 的两行 `available_from` 相同 → 取 `first_seen_at` 较晚者，仍无法区分且数值不同 → 该分量 `null` 并告警 `data_conflict`；③ E(P−4) ≤ 0 按缺失处理（`roe_basis=single_period`）；④ 现金流比的分子、分母用同一个 P，不各自回退。说明：P 按“该键所需分量都可见且非空”逐期回退，所以同一 T 下不同键（如 `pe_ttm` 与 `ocf_to_np_ttm`）的 P 可以不同，各自记入 `basis.period`。
   - **线上切换**：条件与阈值以 `feature_spec.md` §7C（S1–S6）为准——【已确认 v0.2.9 内，架构师 T-R12】；本文不重复。保险识别（V5e）若 T-B05 确认麦蕊没有申万二级，按配置中的保险证券名单识别（名单注明来源），以此关闭 V5e，不因缺申万二级而阻塞切换。等待期的产品取舍见第 9 节问题 93。
   - 幸存者偏差：已退市证券的财报接口返回 404，历史截面缺这些证券；回测报告必须带 `survivorship_bias=true` 标记，不能当作无偏结果。

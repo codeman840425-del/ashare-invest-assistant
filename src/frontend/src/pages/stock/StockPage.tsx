@@ -12,6 +12,7 @@ import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, SECURITY_R
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { PriceChartPanel } from './PriceChartPanel';
 import { AnnouncementsTab, FactorsTab, FinancialsTab, FundFlowTab } from './StockTabs';
+import { AddToResearch } from '../../features/research/AddToResearch';
 
 const TABS = ['financials', 'fund-flow', 'factors', 'announcements'] as const;
 type TabKey = (typeof TABS)[number];
@@ -135,6 +136,7 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
         {profile.risk_flag ? <Tag color="orange" data-testid="risk-flag-tag">{SECURITY_RISK_FLAG[profile.risk_flag]}</Tag> : null}
         {suspended ? <Tag color="default" data-testid="suspended-tag">停牌</Tag> : null}
         {profile.listing_status !== 'listed' ? <Tag color="default" data-testid="listing-status-tag">{LISTING_STATUS[profile.listing_status]}</Tag> : null}
+        <AddToResearch origin="from_stock" securityCode={code} securityType={profile.type} />
       </div>
       {quote.isPending ? <span className="muted">行情加载中…</span> : q ? (
         <div className="sh-quote">

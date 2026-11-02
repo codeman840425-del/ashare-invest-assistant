@@ -12,6 +12,7 @@ export const NAV_MAIN = [
 export const NAV_MORE = [
   { path: '/market', label: '市场概览' },
   { path: '/candidate-signals', label: '候选信号列表' },
+  { path: '/candidates', label: '研究候选' },
   { path: '/plan-drafts', label: '计划草案' },
   { path: '/strategy-instances', label: '我的策略实例' },
   { path: '/strategy-cards', label: '策略知识卡' },

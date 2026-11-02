@@ -24,7 +24,6 @@ export const PLACEHOLDERS: [string, string][] = [
   ['notifications', '通知中心'],
   ['alerts', '提醒中心'],
   ['reviews', '复盘'],
-  ['candidates', '候选池'],
   ['discover', '发现'],
 ];
 
@@ -58,6 +57,8 @@ export const routes: RouteObject[] = [
       { path: 'strategies', lazy: lazyPage(() => import('../pages/strategies/StrategiesPage'), (m) => m.StrategiesPage) },
       { path: 'candidate-signals', lazy: lazyPage(() => import('../pages/signals/CandidateSignalsPage'), (m) => m.CandidateSignalsPage) },
       { path: 'candidate-signals/:id', lazy: lazyPage(() => import('../pages/signals/CandidateSignalDetailPage'), (m) => m.CandidateSignalDetailPage) },
+      { path: 'candidates', lazy: lazyPage(() => import('../pages/research/CandidatesPage'), (m) => m.CandidatesPage) },
+      { path: 'candidates/:id', lazy: lazyPage(() => import('../pages/research/CandidateDetailPage'), (m) => m.CandidateDetailPage) },
       { path: 'plan-drafts', lazy: lazyPage(() => import('../pages/plans/PlanDraftsPage'), (m) => m.PlanDraftsPage) },
       { path: 'plan-drafts/:id', lazy: lazyPage(() => import('../pages/plans/PlanDraftDetailPage'), (m) => m.PlanDraftDetailPage) },
       ...PLACEHOLDERS.map(([path, title]) => ({ path, element: <PlaceholderPage title={title} /> })),

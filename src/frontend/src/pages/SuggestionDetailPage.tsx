@@ -14,6 +14,7 @@ import {
   RELEASE_KIND, RISK_CONTROL, RISK_LEVEL, SIGNAL_STATE, VIEW,
 } from '../i18n/labels';
 import { fmtTime, providerText, ruleCountText } from '../lib/format';
+import { AddToResearch } from '../features/research/AddToResearch';
 
 function matrixColumns(sg: Suggestion): DataColumn<DimensionMatrixRow>[] {
   return [
@@ -178,6 +179,7 @@ export function SuggestionDetailPage() {
         <span className="mono muted">{sg.security_code}</span>
         <DataStatusTag status={sg.data_status} asOf={sg.data_as_of} gaps={sg.gaps} />
         <span className="muted small">候选信号卡 · {ORIGIN[sg.origin]} · 生成 {fmtTime(sg.created_at)} · 快照 {sg.snapshot_id} · {sg.feature_set_version}</span>
+        <AddToResearch origin="suggestion" securityCode={sg.security_code} suggestionId={sg.id} />
         <span className="spacer" />
         <span className="small">适合周期：{sg.horizon_assessment.suitable.map((h) => <Tag key={h}>{HORIZON[h]}</Tag>)}</span>
         <ConsensusBadge status={sg.consensus.status} actions={sg.consensus.actions} />

@@ -158,6 +158,7 @@ export type HealthStatus = E<'health_status'>;
 export type ComponentHealth = E<'component_health'>;
 export type IngestHealth = E<'ingest_health'>;
 export type SecurityType = E<'security_type'>;
+export type SourceKind = E<'source_kind'>;
 export type Board = E<'board'>;
 export type ListingStatus = E<'listing_status'>;
 export type SecurityRiskFlag = E<'security_risk_flag'>;

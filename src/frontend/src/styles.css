@@ -422,3 +422,13 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 
 /* 管理端证书列表：从采集状态页带 ?user= 跳转时高亮该行 */
 .ant-table-tbody > tr.row-focus > td { background: rgba(88, 166, 255, 0.12); }
+
+/* T-F23 研究候选 */
+.cand-version .sc-sec { margin-bottom: 10px; }
+.cand-version .pre-wrap { white-space: pre-wrap; }
+.cand-cond-edit { border: 1px solid #2a3442; border-radius: 3px; padding: 8px 10px 0; margin-bottom: 8px; }
+.cand-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 12px; }
+@media (max-width: 960px) { .cand-grid { grid-template-columns: minmax(0, 1fr); } }
+.cand-panel { margin-bottom: 8px; padding-bottom: 8px; }
+.cand-panel > :not(.panel-head) { margin-left: 10px; margin-right: 10px; }
+.cand-panel > .panel-head { margin-bottom: 8px; }

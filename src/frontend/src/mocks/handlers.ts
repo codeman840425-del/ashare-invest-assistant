@@ -9,6 +9,7 @@ import { accountHandlers } from './accountHandlers';
 import { resetStrategies, strategyHandlers } from './strategyHandlers';
 import { reasonsNow, resetSignals, signalHandlers, signalsNow } from './signalHandlers';
 import { draftsNow, planHandlers, resetPlanDrafts } from './planHandlers';
+import { candidateHandlers, resetCandidates } from './candidateHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
 import { currentUser, resetSession } from './session';
 import { licenceState } from './licenceStore';
@@ -39,6 +40,7 @@ export function resetMockState() {
   resetStrategies();
   resetSignals();
   resetPlanDrafts();
+  resetCandidates();
 }
 
 /** 浏览器里加一点延迟让加载态可见；测试（node）里不延迟 */
@@ -279,6 +281,8 @@ const routeHandlers = [
   ...signalHandlers,
   // 计划草案（T-F18，见 planHandlers.ts）
   ...planHandlers,
+  // 研究候选（T-F23，见 candidateHandlers.ts）
+  ...candidateHandlers,
   http.get(`${API}/signals`, ({ request }) => {
     const url = new URL(request.url);
     const code = url.searchParams.get('security_code');

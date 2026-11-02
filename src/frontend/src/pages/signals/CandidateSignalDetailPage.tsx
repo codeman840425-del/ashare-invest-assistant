@@ -20,6 +20,7 @@ import { fmtTime } from '../../lib/format';
 import { canDraft, conflictsOf, isTerminal } from '../../lib/signals';
 import { LifecycleBadge } from './LifecycleBadge';
 import { ReasonCard } from './ReasonCard';
+import { AddToResearch } from '../../features/research/AddToResearch';
 
 /** RuleRef.passed 三态：true 满足 / false 不满足 / null 数据缺失无法求值 */
 export function PassedTag({ passed }: { passed: boolean | null }) {
@@ -231,6 +232,7 @@ function Actions({ cs }: { cs: CandidateSignal }) {
           </Button>
         </Tooltip>
         <Button size="small" danger disabled={terminal} onClick={() => { dismiss.reset(); setNote(''); setOpen(true); }} data-testid="dismiss-btn">忽略该信号</Button>
+        <AddToResearch origin="from_stock" securityCode={cs.security_code} />
       </Space>
       {create.isError ? <div className="error-text small" style={{ marginTop: 6 }} data-testid="draft-error">{stateErrorText(create.error, 'signal')}</div> : null}
       {cs.plan_draft_ids.length ? (

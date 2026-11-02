@@ -1297,6 +1297,15 @@ class LLMGateway:
        - `cdr_unit` 只是 F42、F47 值上的标记。S2 池 U 按 §1.4 本来就不含 CDR，所以不再写 S2 剔除条款（T-R12g）。
     7. **V5j 中 `zgb` 按基础股份计的情况**：总市值 = c（每份 CDR 的价格）× `zgb` × 每股基础股份对应的 CDR 份数。转换比例写在配置里，按证券单列，并注明来源（招股书或上市公告）。T-B05 确认单位、配置也接入后，清除 `cdr_unit`。如果 `zgb` 按 CDR 份数计，总市值 = c × `zgb`，不需要配置，T-B05 确认后即清除 `cdr_unit`（T-R12g）。
     8. **银行、保险标记**：维持 T-R12a 的规定，继承标记，照常参与排序。T-R12e 原文中“规则同银行、保险的标记：不进入行业分位”这句措辞有误，已更正。
+  - **T-R12h 补充裁定（v0.2.9 内，架构师；对应后端 reports/T-R12ef-lists.md 的 3 点）**：
+    1. **A+B、A+H 名单接入配置**，放在 `config/share_class_list.yaml`。
+       - 文件头写 `list_version`、`as_of`、`sources`（来源和取数日期）。
+       - 每条记录写 `code`、`class`（`B` 或 `H`）、配对代码、`effective_from`、`effective_to`（可为空）、`source`、`verified`（布尔值）。
+       - 计算 d 日的值时，只用 `effective_from ≤ d` 且 `effective_to` 为空或 `effective_to > d` 的记录，这样历史回测不会用到之后才上市的 H 股。
+       - 用到的名单版本记在 `basis.share_class_list_version`。
+       - 名单更新时整版替换，`list_version` 加一，不改旧行。T-B55 重算时按新版本覆盖。
+    2. **手工对应的 45 对**：先记 `verified=false` 接入，照常打 `non_a_share_capital`。V5g 的关闭条件加一项：名单内所有记录都要 `verified=true`，核对来源是巨潮或港交所披露。
+    3. **211 对与 209 对的差异**：先取两个来源的并集接入，差出来的记录记 `verified=false`。宁可多标待核实，也不漏标。差异查明之前 V5g 不关闭。查明后，在名单的 `sources` 里写明结论。
   - **补充规则（`feature_spec.md` §7A.0 / §13 A5，4 条）——【已确认 v0.2.9 内，架构师 T-R12】**，并入 T-B55：① 首次全量回填写入、`plrq` 早于回填日的行只按 `plrq` 计算，标 `basis.pit_basis=plrq_only`；② 同一 (code, report_type, jzrq) 的两行 `available_from` 相同 → 取 `first_seen_at` 较晚者，仍无法区分且数值不同 → 该分量 `null` 并告警 `data_conflict`；③ E(P−4) ≤ 0 按缺失处理（`roe_basis=single_period`）；④ 现金流比的分子、分母用同一个 P，不各自回退。说明：P 按“该键所需分量都可见且非空”逐期回退，所以同一 T 下不同键（如 `pe_ttm` 与 `ocf_to_np_ttm`）的 P 可以不同，各自记入 `basis.period`。
   - **线上切换**：条件与阈值以 `feature_spec.md` §7C（S1–S6）为准——【已确认 v0.2.9 内，架构师 T-R12】；本文不重复。保险识别（V5e）若 T-B05 确认麦蕊没有申万二级，按配置中的保险证券名单识别（名单注明来源），以此关闭 V5e，不因缺申万二级而阻塞切换。等待期的产品取舍见第 9 节问题 93。
   - 幸存者偏差：已退市证券的财报接口返回 404，历史截面缺这些证券；回测报告必须带 `survivorship_bias=true` 标记，不能当作无偏结果。

@@ -86,11 +86,11 @@ describe('R6 持仓：证券类型只看 security_type，估算只看行上的 e
     expect(screen.queryByTestId(`est-label-${stock.security_code}`)).toBeNull();
   });
 
-  it('R6 ③④：没有现金记录 → cash="0.00" + gaps cash/user_input_missing；行业未接入 → sector=[] + gaps，不单独降为 partial', async () => {
+  it('R6 ③④：没有现金记录 → cash="0.00" + gaps cash/user_input_missing（#31 ①：为 partial）；行业未接入 → sector=[] + gaps，不单独降为 partial', async () => {
     const other = await getJson<Portfolio>('/portfolio?account_id=other-account');
     expect(other.cash).toBe('0.00');
     expect(other.gaps).toContainEqual(expect.objectContaining({ key: 'cash', reason: 'user_input_missing' }));
-    expect(other.data_status).not.toBe('partial');
+    expect(other.data_status).toBe('partial');
     const body: Portfolio = {
       ...PORTFOLIO, positions: PORTFOLIO.positions.filter((p) => !p.estimated), exposure: { sector: [] }, data_status: 'fresh',
       gaps: [{ key: 'exposure.sector', reason: 'no_source', message: '行业数据未接入（示例）' }],
@@ -137,7 +137,7 @@ describe('R10 采集状态：leader 可为 null、freshness 固定 6 行、alert
     const ip = within(box).getByTestId('ingest-alert-ip_limit');
     expect(ip).toHaveAttribute('data-level', 'critical');
     expect(ip).toHaveTextContent('严重');
-    expect(ip).toHaveTextContent('24 小时内出现 IP 受限（示例）');
+    expect(ip).toHaveTextContent('24 小时内出现 IP 受限');
     expect(within(box).getByTestId('ingest-alert-freshness.financials')).toHaveTextContent('警告');
   });
 

@@ -4,11 +4,12 @@ import { useAdminIngestStatus } from '../../api/adminQueries';
 import type { IngestAlert, IngestLicenceStatus } from '../../api/adminTypes';
 import { ErrorBox } from '../../components/common';
 import { DATA_STATUS } from '../../i18n/labels';
+import { INGEST_DATASET_NAME } from '../../i18n/ingestLabels';
 import { LICENCE_ERROR, LICENCE_STATUS, LICENCE_TIER, expiryLeftText } from '../../i18n/licenceLabels';
 import { fmtTime } from '../../lib/format';
 
 const PRIORITY: Record<string, string> = { p0_intraday: 'P0 盘中', p1_daily: 'P1 日频', p2_backfill: 'P2 回补' };
-/** T-B47 裁定③：告警只有两级；顺序按服务端返回，message 原样显示 */
+/** T-B47 裁定③、#31 ④：告警只有两级（严重/警告）；顺序按服务端返回，message 原样显示 */
 const ALERT_LEVEL: Record<IngestAlert['level'], { text: string; color: string }> = { critical: { text: '严重', color: 'red' }, warning: { text: '警告', color: 'orange' } };
 const dash = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : String(v));
 
@@ -45,8 +46,9 @@ export function AdminIngestPage() {
         <Card size="small" title={`告警（${d.alerts.length}）`} data-testid="ingest-alerts">
           {d.alerts.length ? (
             <ul className="ingest-alerts">
-              {d.alerts.map((a) => (
-                <li key={a.key} data-testid={`ingest-alert-${a.key}`} data-level={a.level}>
+              {/* #31 每个 key 最多一条；key 加序号作防御（评审 5969886 nit1） */}
+              {d.alerts.map((a, i) => (
+                <li key={`${a.key}-${i}`} data-testid={`ingest-alert-${a.key}`} data-level={a.level}>
                   <Tag color={ALERT_LEVEL[a.level].color}>{ALERT_LEVEL[a.level].text}</Tag>
                   <span>{a.message}</span>
                   <span className="mono muted small" style={{ marginInlineStart: 8 }}>{a.key}</span>
@@ -63,7 +65,7 @@ export function AdminIngestPage() {
             <Descriptions.Item label="队列">{d.queues.map((x) => `${PRIORITY[x.priority] ?? x.priority} ${x.depth}（最久 ${x.oldest_age_s} 秒）`).join('；')}</Descriptions.Item>
             <Descriptions.Item label="24 小时上游错误">{d.errors_24h.length ? d.errors_24h.map((x) => `${x.upstream_code} × ${x.count}`).join('；') : '无'}</Descriptions.Item>
             <Descriptions.Item label="数据新鲜度">
-              {d.freshness.map((f) => <Tag key={f.dataset} color={DATA_STATUS[f.data_status].color}>{f.dataset} {dash(f.data_as_of)} {DATA_STATUS[f.data_status].text}</Tag>)}
+              {d.freshness.map((f) => <Tag key={f.dataset} color={DATA_STATUS[f.data_status].color} data-testid={`ingest-fresh-${f.dataset}`}>{INGEST_DATASET_NAME[f.dataset] ?? f.dataset} {dash(f.data_as_of)} {DATA_STATUS[f.data_status].text}</Tag>)}
             </Descriptions.Item>
           </Descriptions>
         </Card>

@@ -164,9 +164,10 @@ const routeHandlers = [
   http.get(`${API}/portfolio`, ({ request }) => {
     const id = new URL(request.url).searchParams.get('account_id');
     if (!id || id === ACCOUNT_ID) return HttpResponse.json(PORTFOLIO);
-    // T-B46 R6 ③：示例的其他账户没有现金记录 → cash="0.00"，gaps 列 cash / user_input_missing；没有估算行，不为 partial
+    // T-B46 R6 ③：示例的其他账户没有现金记录 → cash="0.00"，gaps 列 cash / user_input_missing；
+    // v0.2.9 #31 ①：除 exposure.sector 外任一缺口（含 cash）使 data_status=partial（评审 5969886 m1）
     return HttpResponse.json({
-      ...PORTFOLIO, total_assets: '0.00', cash: '0.00', positions: [], exposure: { sector: [] }, data_status: 'fresh',
+      ...PORTFOLIO, total_assets: '0.00', cash: '0.00', positions: [], exposure: { sector: [] }, data_status: 'partial',
       gaps: [{ key: 'cash', reason: 'user_input_missing', message: '该账户还没有现金记录（示例）' }],
     });
   }),

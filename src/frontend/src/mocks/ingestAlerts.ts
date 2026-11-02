@@ -1,9 +1,12 @@
 /**
- * 示例：/admin/ingest/status 的 alerts[]（契约 §7.9，v0.2.9 内 T-B47 裁定③；阈值取 plan 6.1 `admin_alerts` 初值，问题 78）。
- * 真实口径由后端计算；本 mock 只按响应中已有字段复刻能复刻的部分，示例时刻按盘中处理，心跳不建模（只看 leader 是否为 null）。
- * message 为示例文案（契约只规定“固定中文文案”，未给原文），不含证书值、IP 全文或管理员理由。
+ * 示例：/admin/ingest/status 的 alerts[]（契约 §7.9，v0.2.9 内 T-B47 裁定③ + #31 ②–④；阈值取 plan 6.1 `admin_alerts` 初值，问题 78）。
+ * 真实口径由后端计算；本 mock 只按响应中已有字段复刻能复刻的部分，示例时刻按盘中处理。
+ * #31：每个 key 最多一条（按证书聚合；同一 key 同时满足两级只出 critical）；key/level/message 用契约固定表；
+ * 排序 critical 在前，同级按固定 key 顺序（errors.* 按 upstream_code 升序，freshness.* 按 freshness 固定顺序）。
+ * 心跳不在响应中（#31 ⑤ 不新增心跳时间字段），mock 用 setMockIngestHeartbeat() 模拟 §8 的心跳判定（示例场景）。
  */
-import type { AdminIngestStatus, IngestAlert, IngestDataset } from '../api/adminTypes';
+import { INGEST_DATASETS, type AdminIngestStatus, type IngestAlert, type IngestDataset } from '../api/adminTypes';
+import { INGEST_DATASET_NAME } from '../i18n/ingestLabels';
 
 export const ADMIN_ALERTS = {
   queue_p0_warning_s: 60,
@@ -15,39 +18,77 @@ export const ADMIN_ALERTS = {
   licence_days_left_warning: 14,
 } as const;
 
-const DATASET_TEXT: Record<IngestDataset, string> = {
-  quotes: '实时行情', minute_bars: '分钟线', daily_bars: '日线', financials: '财务数据', announcements: '公告', security_master: '证券主数据',
-};
+/** #31 ② 固定文案（只允许 {upstream_code}、{dataset_name} 两个占位） */
+export const INGEST_ALERT_TEXT = {
+  leader: '没有采集主实例（无未过期的租约）',
+  heartbeat: '采集主实例心跳超时',
+  'queue.p0_intraday': '盘中队列（P0）等待过久',
+  'queue.p1_daily': '日频队列（P1）等待过久',
+  budget: '近 1 分钟调用量接近上限',
+  ip_limit: '24 小时内出现 IP 受限',
+  errors: (code: string) => `上游错误码 ${code} 24 小时内次数过多`,
+  'freshness.quotes': '实时行情过期或不可用',
+  freshness: (d: IngestDataset) => `${INGEST_DATASET_NAME[d]}已过期`,
+  'licence.invalid': '有证书无效',
+  'licence.ip_limited': '有证书 IP 受限',
+  'licence.expired': '有证书已过期',
+  'licence.quota_exceeded': '有证书今日额度已用完',
+  'licence.expiring': '有证书即将到期',
+} as const;
 
-export function ingestAlerts(d: Omit<AdminIngestStatus, 'alerts'>): IngestAlert[] {
-  const out: IngestAlert[] = [];
+/** #31 ② 的 key 顺序（同级排序用；errors.* / freshness.* 各占一个位置） */
+const KEY_ORDER = ['leader', 'heartbeat', 'queue.p0_intraday', 'queue.p1_daily', 'budget', 'ip_limit', 'errors', 'freshness',
+  'licence.invalid', 'licence.ip_limited', 'licence.expired', 'licence.quota_exceeded', 'licence.expiring'];
+
+/** §8 ingest 心跳判定（示例场景）：fresh / stale / unknown；只有 leader 不为 null 时才出 heartbeat 告警 */
+export type MockHeartbeat = 'fresh' | 'stale' | 'unknown';
+let heartbeat: MockHeartbeat = 'fresh';
+export const setMockIngestHeartbeat = (v: MockHeartbeat) => { heartbeat = v; };
+
+function rank(a: IngestAlert): [number, number, string | number] {
+  const [head, ...rest] = a.key.split('.');
+  const tail = rest.join('.');
+  const group = head === 'errors' || head === 'freshness' ? head : a.key;
+  const sub = head === 'freshness' ? INGEST_DATASETS.indexOf(tail as IngestDataset) : head === 'errors' ? tail : 0;
+  return [a.level === 'critical' ? 0 : 1, KEY_ORDER.indexOf(group), sub];
+}
+
+export function ingestAlerts(d: Omit<AdminIngestStatus, 'alerts'>, hb: MockHeartbeat = heartbeat): IngestAlert[] {
+  const byKey = new Map<string, IngestAlert>();
   const add = (level: IngestAlert['level'], key: string, message: string) => {
-    if (!out.some((a) => a.key === key)) out.push({ level, key, message });
+    const prev = byKey.get(key);
+    if (!prev || (prev.level === 'warning' && level === 'critical')) byKey.set(key, { level, key, message });
   };
-  if (!d.leader) add('critical', 'leader', '没有采集主实例（示例）');
+  if (!d.leader) add('critical', 'leader', INGEST_ALERT_TEXT.leader);
+  else if (hb !== 'fresh') add('critical', 'heartbeat', INGEST_ALERT_TEXT.heartbeat);
   for (const q of d.queues) {
-    if (q.priority === 'p0_intraday' && q.oldest_age_s > ADMIN_ALERTS.queue_p0_critical_s) add('critical', 'queue.p0_intraday', '盘中队列等待超过 300 秒（示例）');
-    else if (q.priority === 'p0_intraday' && q.oldest_age_s > ADMIN_ALERTS.queue_p0_warning_s) add('warning', 'queue.p0_intraday', '盘中队列等待超过 60 秒（示例）');
-    else if (q.priority === 'p1_daily' && q.oldest_age_s > ADMIN_ALERTS.queue_p1_warning_s) add('warning', 'queue.p1_daily', '日频队列等待超过 3600 秒（示例）');
+    if (q.priority === 'p0_intraday' && q.oldest_age_s > ADMIN_ALERTS.queue_p0_critical_s) add('critical', 'queue.p0_intraday', INGEST_ALERT_TEXT['queue.p0_intraday']);
+    else if (q.priority === 'p0_intraday' && q.oldest_age_s > ADMIN_ALERTS.queue_p0_warning_s) add('warning', 'queue.p0_intraday', INGEST_ALERT_TEXT['queue.p0_intraday']);
+    else if (q.priority === 'p1_daily' && q.oldest_age_s > ADMIN_ALERTS.queue_p1_warning_s) add('warning', 'queue.p1_daily', INGEST_ALERT_TEXT['queue.p1_daily']);
   }
   if (d.budget.per_minute_limit > 0 && d.budget.used_last_minute >= ADMIN_ALERTS.budget_warning_ratio * d.budget.per_minute_limit) {
-    add('warning', 'budget', '近 1 分钟调用量达到上限的 90%（示例）');
+    add('warning', 'budget', INGEST_ALERT_TEXT.budget);
   }
-  if (d.ip_limit_alerts_24h >= ADMIN_ALERTS.ip_limit_critical_count) add('critical', 'ip_limit', '24 小时内出现 IP 受限（示例）');
+  if (d.ip_limit_alerts_24h >= ADMIN_ALERTS.ip_limit_critical_count) add('critical', 'ip_limit', INGEST_ALERT_TEXT.ip_limit);
   for (const e of d.errors_24h) {
-    if (e.count >= ADMIN_ALERTS.upstream_error_warning_count) add('warning', `errors.${e.upstream_code}`, '单个上游错误码 24 小时内超过 20 次（示例）');
+    if (e.count >= ADMIN_ALERTS.upstream_error_warning_count) add('warning', `errors.${e.upstream_code}`, INGEST_ALERT_TEXT.errors(e.upstream_code));
   }
   for (const f of d.freshness) {
-    if (f.dataset === 'quotes' && (f.data_status === 'stale' || f.data_status === 'unavailable')) add('critical', 'freshness.quotes', '盘中实时行情过期或不可用（示例）');
-    else if (f.dataset !== 'quotes' && f.data_status === 'stale') add('warning', `freshness.${f.dataset}`, `${DATASET_TEXT[f.dataset]}已过期（示例）`);
+    if (f.dataset === 'quotes' && (f.data_status === 'stale' || f.data_status === 'unavailable')) add('critical', 'freshness.quotes', INGEST_ALERT_TEXT['freshness.quotes']);
+    else if (f.dataset !== 'quotes' && f.data_status === 'stale') add('warning', `freshness.${f.dataset}`, INGEST_ALERT_TEXT.freshness(f.dataset));
   }
   for (const l of d.licences) {
-    if (l.status === 'invalid' || l.status === 'ip_limited') add('critical', `licence.${l.status}`, '有证书无效或 IP 受限（示例）');
+    if (l.status === 'invalid' || l.status === 'ip_limited' || l.status === 'expired' || l.status === 'quota_exceeded') {
+      const key = `licence.${l.status}` as const;
+      add(l.status === 'invalid' || l.status === 'ip_limited' ? 'critical' : 'warning', key, INGEST_ALERT_TEXT[key]);
+    }
+    // #31 ②：状态不是 expired 且 0 ≤ days_left ≤ 14 → licence.expiring（不再用 licence.<status>）
+    if (l.status !== 'expired' && l.days_left !== null && l.days_left >= 0 && l.days_left <= ADMIN_ALERTS.licence_days_left_warning) {
+      add('warning', 'licence.expiring', INGEST_ALERT_TEXT['licence.expiring']);
+    }
   }
-  for (const l of d.licences) {
-    if (l.status === 'expired' || l.status === 'quota_exceeded') add('warning', `licence.${l.status}`, '有证书已过期或今日额度已用完（示例）');
-    // 待定：days_left ≤ 14 的告警 key 契约未单列，示例按 licence.<status> 处理
-    else if (l.days_left !== null && l.days_left <= ADMIN_ALERTS.licence_days_left_warning) add('warning', `licence.${l.status}`, '有证书 14 天内到期（示例）');
-  }
-  return out;
+  return [...byKey.values()].sort((a, b) => {
+    const [x, y] = [rank(a), rank(b)];
+    return x[0] - y[0] || x[1] - y[1] || (typeof x[2] === 'number' && typeof y[2] === 'number' ? x[2] - y[2] : String(x[2]).localeCompare(String(y[2])));
+  });
 }

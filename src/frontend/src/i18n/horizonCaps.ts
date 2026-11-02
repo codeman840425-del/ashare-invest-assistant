@@ -34,12 +34,16 @@ export function capExplanation(c: HorizonCap): string {
  */
 export const HORIZON_DATA_MISSING = '数据不足';
 
-/** 该周期不在 suitable 中，且有 kind=data_missing 的封顶 */
+/**
+ * 契约 v0.2.9 #31 ③（问题 89）：该周期不在 suitable 中、有 kind=data_missing 的封顶，且**没有** kind=gate 的封顶（硬门槛优先）
+ */
 export function horizonDataMissing(a: Pick<HorizonAssessment, 'suitable' | 'caps'>, h: Horizon): boolean {
-  return !a.suitable.includes(h) && a.caps.some((c) => c.horizon === h && c.kind === 'data_missing');
+  if (a.suitable.includes(h)) return false;
+  const caps = a.caps.filter((c) => c.horizon === h);
+  return caps.some((c) => c.kind === 'data_missing') && !caps.some((c) => c.kind === 'gate');
 }
 
-/** 没有适合的周期，且至少一个周期因 data_missing 封顶：整体显示“数据不足”（判定口径待定，见 reports/T-B46-47-frontend.md） */
+/** #31 ③：整体“数据不足”= suitable 为空，且至少一个周期按 horizonDataMissing 判为数据不足；否则显示“—” */
 export function noSuitableForLackOfData(a: Pick<HorizonAssessment, 'suitable' | 'caps'>): boolean {
-  return a.suitable.length === 0 && a.caps.some((c) => c.kind === 'data_missing');
+  return a.suitable.length === 0 && [...new Set(a.caps.map((c) => c.horizon))].some((h) => horizonDataMissing(a, h));
 }

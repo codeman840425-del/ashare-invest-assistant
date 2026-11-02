@@ -53,16 +53,18 @@ def plan_checks() -> None:
     )
     check("调用计划：无重复 key", len(keys) == len(set(keys)))
     check(
-        "调用计划：①② 含银行 000001/600000、保险 601318、更正样例 600525",
+        "调用计划：① 含银行 000001/600000，①② 含银行 000001、保险 601318、更正样例 600525；② 不含 600000（M1）",
         all(
             f"{t}_{x}" in keys
             for t in ("cashflow", "balance")
-            for x in ("000001", "600000", "601318", "600525")
-        ),
+            for x in ("000001", "601318", "600525")
+        )
+        and "cashflow_600000" in keys
+        and "balance_600000" not in keys,
     )
     check(
-        "调用计划：⑦ A+H 601318、A+B 000550 取 capital；⑨ CDR 689009 取 balance",
-        {"capital_601318", "capital_000550", "balance_689009"} <= set(keys),
+        "调用计划：⑦ A+H 601318、A+B 000550 取 capital；⑨ CDR 689009 取 balance；V5j 689009 取 capital",
+        {"capital_601318", "capital_000550", "balance_689009", "capital_689009"} <= set(keys),
     )
     check(
         "调用计划：⑥ 日线是不复权 /d/n、区间 20260901–20261031",

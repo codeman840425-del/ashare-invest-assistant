@@ -28,6 +28,15 @@ EXPECT = {
     "600519_bonus_2011": {"ex_date": "2011-07-01", "zgb_before": 943_800_000, "zgb_after": 1_038_180_000},
     "601318_capital": {"after": "2025-09-03", "a": 10_660_065_083, "h": 7_447_576_912, "total": 18_107_641_995},
     "000550_capital": {"a": 519_214_000, "b": 344_000_000, "total": 863_214_000},
+    # V5j（review-af589c0 M1）：九号公司 10 份 CDR = 1 股基础股票。来源：九号 2025 年年度报告（巨潮
+    # https://static.cninfo.com.cn/finalpage/2026-03-31/1225063705.PDF，第七节“股份变动”）：存托凭证总数
+    # 2024-12-31 为 717,120,523 份、2025-12-31 为 720,335,578 份（2025-12-17 行权登记后）；基础股数 = 份数 / 10
+    # （年报“存托凭证所代表的基础股票数量”同样按 1/10 列示，含小数）。
+    "689009_cdr": {"ratio": 10, "source": "cninfo 2026-03-31 九号公司 2025 年年度报告", "checkpoints": [
+        {"name": "fy2024_end", "not_before": "2024-10-01", "at": "2024-12-31", "cdr_units": 717_120_523,
+         "base_shares": 71_712_052.3},
+        {"name": "fy2025_end", "not_before": "2025-12-17", "at": "2025-12-31", "cdr_units": 720_335_578,
+         "base_shares": 72_033_557.8}]},
 }
 INSURERS_SW = {"601318": "中国平安", "601628": "中国人寿", "601601": "中国太保", "601336": "新华保险",
                "601319": "中国人保"}
@@ -412,6 +421,35 @@ def bonus_visibility(cap_rows: list, events: list) -> dict:
             "rule": "多数（>50%）送转事件的 capital 行在除权日之后才可见 → 必须接入分红送转数据（plan 2.12.1 边界 2 / V5d）"}
 
 
+def row_in_window(rows: list, at: str | None, not_before: str | None = None):
+    """bdrq ∈ [not_before, at] 中 bdrq 最大的行（at=None → 最后一行）。"""
+    cr = [r for r in capital_rows(rows) if (not at or r["_bdrq"] <= at) and (not not_before or r["_bdrq"] >= not_before)]
+    return cr[-1] if cr else None
+
+
+V5J_VALUES = ("zgb≈基础股数", "zgb≈CDR份数", "neither")
+
+
+def cdr_unit_check(rows: list, exp: dict) -> dict:
+    """V5j：689009 的 zgb 按基础股份还是 CDR 份数计。各核对点取 bdrq ∈ [not_before, at] 的最后一行；
+    所有核对点同一口径才给定论，否则 neither。"""
+    res = []
+    for cp in exp.get("checkpoints", []):
+        r = row_in_window(rows, cp["at"], cp.get("not_before"))
+        z = num(r.get("zgb")) if r else None
+        v = ("neither" if z is None
+             else "zgb≈CDR份数" if close_enough(z, cp["cdr_units"], abs_tol=1e3, rel_tol=0.002)
+             else "zgb≈基础股数" if close_enough(z, cp["base_shares"], abs_tol=1e3, rel_tol=0.002) else "neither")
+        res.append({**cp, "row": _cap_view(r) if r else None, "zgb": z, "verdict": v,
+                    "zgb_over_cdr_units": round(z / cp["cdr_units"], 6) if z else None})
+    vs = {x["verdict"] for x in res}
+    verdict = vs.pop() if len(vs) == 1 else "neither"
+    return {"checkpoints": res, "v5j_cdr_unit": verdict, "ratio": exp.get("ratio"), "source": exp.get("source"),
+            "rows": len(capital_rows(rows)),
+            "rule": "zgb≈CDR份数 → 总市值 = c × zgb，不乘转换比；zgb≈基础股数 → 总市值 = c × zgb × 10（比例入配置，"
+                    "注明来源）；neither → 保留 verify_pending cdr_unit（T-R12e 第 3 条、T-R12f 第 7 条）"}
+
+
 # --------------------------------------------------------------------------- ⑤ 申万
 def sw_codes(list_rows: list, zg: dict, gg: dict) -> dict:
     sw = [r for r in list_rows if "申万" in str(r.get("name", "")) or str(r.get("code", "")).startswith("sw")]
@@ -615,6 +653,11 @@ def analyze(raw: dict, plan: dict) -> dict:
     out["7_share_class"] = {
         "601318_A+H": share_split_check(R.get("capital_601318", []), EXPECT["601318_capital"], "2025-09-03"),
         "000550_A+B": share_split_check(R.get("capital_000550", []), EXPECT["000550_capital"])}
+    # V5j：CDR 以 securities.type=cdr 识别（T-R12f 第 5 条）；探针里用 plan.kinds == "CDR" 代替
+    cdrs = sorted(c for c, k in kinds.items() if k == "CDR")
+    out["10_cdr"] = {c: cdr_unit_check(R.get(f"capital_{c}", []), EXPECT[f"{c}_cdr"]) for c in cdrs
+                     if f"{c}_cdr" in EXPECT}
+    out["v5j_cdr_unit"] = {c: v["v5j_cdr_unit"] for c, v in out["10_cdr"].items()}
     ev = {c: dividend_events(R.get(f"jnfh_{c}", [])) for c in plan.get("jnfh", [])}
     out["8_dividend"] = {"has_dividend_feed": any(R.get(f"jnfh_{c}") for c in plan.get("jnfh", [])),
                          "fields": {c: sorted({k for r in R.get(f"jnfh_{c}", []) for k in r}) for c in plan.get("jnfh", [])},
@@ -672,6 +715,9 @@ def summary_lines(a: dict) -> list:
             if v["key_hits"] or v["string_value_hits"]}
     L.append(f"⑨ 币种/单位疑似字段：{hits or '无'}；结论：{a.get('9_currency_unit', {}).get('conclusion')}")
     L.append(f"⑧ 总判定：{a.get('8_dividend', {}).get('overall_decision')}")
+    for c, v in a.get("10_cdr", {}).items():
+        L.append(f"V5j {c}: " + "; ".join(f"{x['name']} zgb={x['zgb']} → {x['verdict']}" for x in v["checkpoints"])
+                 + f" → v5j_cdr_unit={v['v5j_cdr_unit']}")
     return L
 
 
@@ -757,6 +803,15 @@ def selftest_pure() -> list:
     t("PB：无可见股本行 → no_capital_row", pb_at({"t": "2025-10-30", "c": 5.0}, [], bal)["basis"].get("null_reason")
       == "no_capital_row")
     t("PB：plrq ≤ jzrq 的占位行不作为可见报告", equity_at(bal[2:], "2001-07-05") is None)
+    cdr_rows = [{"bdrq": "20241231", "plrq": "2025-04-01", "zgb": 717_120_523},
+                {"bdrq": "20251217", "plrq": "2025-12-17", "zgb": 720_335_578}]
+    t("V5j：两核对点 zgb = CDR 份数 → zgb≈CDR份数", cdr_unit_check(cdr_rows, EXPECT["689009_cdr"])["v5j_cdr_unit"]
+      == "zgb≈CDR份数")
+    t("V5j：zgb = 份数/10 → zgb≈基础股数；两点口径不一或缺行 → neither",
+      cdr_unit_check([{**r, "zgb": r["zgb"] / 10} for r in cdr_rows], EXPECT["689009_cdr"])["v5j_cdr_unit"]
+      == "zgb≈基础股数"
+      and cdr_unit_check([cdr_rows[0], {**cdr_rows[1], "zgb": 1}], EXPECT["689009_cdr"])["v5j_cdr_unit"] == "neither"
+      and cdr_unit_check(cdr_rows[:1], EXPECT["689009_cdr"])["v5j_cdr_unit"] == "neither")
     pc = industry_pct({"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0, "e": 5.0, "f": None, "g": 1.0},
                       {"a": "X", "b": "X", "c": "X", "d": "X", "e": "X", "f": "X", "g": "Y"})
     t("行业分位：null 不进分母、组内 N<5 → null", pc["a"] == 0.0 and pc["e"] == 1.0 and pc["f"] is None

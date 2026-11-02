@@ -211,9 +211,9 @@ python3 run_all.py p13 --p13-restated 600590.SH --p13-announce 2024-11-09 --p13-
 | 项 | 调用 | 次数 |
 |---|---|---|
 | ① 现金流 OCF 两字段非空率、xj 恒等式、xj/je 一致性、YTD 判定 | `financial/cashflow`：600519、000001（银行）、600000（银行）、601318（保险）、300750、更正样例 600525 | 6 |
-| ② 银行/保险资产负债：gsmgdqsyhj、fzhj、zczj、单位、权益 ≤0 | `financial/balance`：同 ① 6 只 | 6 |
+| ② 银行/保险资产负债：gsmgdqsyhj、fzhj、zczj、单位、权益 ≤0 | `financial/balance`：同 ① 去掉 600000（银行由 000001 覆盖） | 5 |
 | ③ 同 jzrq 多 plrq 版本全量保存、对照 cninfo 更正公告 | `financial/income` 更正样例（cashflow/balance 复用 ①②） | 1 |
-| ④ capital plrq 语义（600519 2011-07-01 送股）；⑦ zgb 是否含 B/H；⑥ zgb | `financial/capital`：600519、000001、601318（A+H）、000550（A+B） | 4 |
+| ④ capital plrq 语义（600519 2011-07-01 送股）；⑦ zgb 是否含 B/H；⑥ zgb；V5j CDR zgb 按基础股数还是 CDR 份数（输出 `v5j_cdr_unit`） | `financial/capital`：600519、000001、601318（A+H）、000550（A+B）、689009（CDR） | 5 |
 | ⑤ `/hszg/list` 申万一级代码、银行/保险节点、是否有申万二级 | `hszg/list` 1 + `hszg/gg/<银行节点>`、`hszg/gg/<保险节点>`（按 list 动态选，找不到就不调）+ `hszg/zg/000001`、`hszg/zg/601318` | 5 |
 | ⑥ PB = 不复权 c × zgb / 归母权益 | `history/<code>/d/n` 600519、000001、601318，2026-09-01..10-31 | 3 |
 | ⑧ 送转事件 vs capital 行可见时间（V5d） | `hscp/jnfh`：600519、000001 | 2 |

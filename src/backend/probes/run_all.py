@@ -495,6 +495,11 @@ def _p13_phase(check, args, st_api, st_pro, base_api, base_pro, echo_url):
             pb = a.get("6_pb", {})
             check("p13 mock：⑥ 三只 PB 均有值且 basis 含 zgb_bdrq/mcap_basis",
                   all(x and x[-1].get("value") and x[-1]["basis"].get("zgb_bdrq") for x in pb.values()) and len(pb) == 3)
+            check("p13 mock：V5j 689009 capital 已采集、v5j_cdr_unit 有结论（mock 按 CDR 份数 → zgb≈CDR份数）",
+                  a.get("v5j_cdr_unit", {}).get("689009") == "zgb≈CDR份数"
+                  and a.get("10_cdr", {}).get("689009", {}).get("rows", 0) > 0, str(a.get("v5j_cdr_unit")))
+            check("p13 mock：② balance 不含 600000（M1 腾出 1 次）、600000 cashflow 保留",
+                  "600000" not in a.get("2_balance", {}) and "600000" in a.get("1_cashflow", {}))
             sw = a.get("5_sw", {})
             check("p13 mock：⑤ 识别出银行/保险节点与申万二级", sw.get("has_sw_l2") and sw.get("bank_nodes")
                   and sw.get("insurance_nodes"))

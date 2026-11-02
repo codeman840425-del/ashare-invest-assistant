@@ -305,9 +305,14 @@ def test_register_invite_mode_without_code_is_400_and_writes_nothing(
     assert sql("SELECT count(*) FROM app.users WHERE username=:u", u=name)[0][0] == 0
 
 
-@pytest.mark.xfail(strict=True, reason="契约 §7.1“closed 一律 503”；后端先做 schema 校验，畸形请求体返回 400（待架构师裁定）")
-def test_register_closed_rejects_even_malformed_body_with_503(app_client: Callable[..., Any]) -> None:
+# 架构师裁定 2026-11-02, v0.2.9 687159f：closed 模式畸形请求体一律 503 REGISTRATION_CLOSED、绝不 400，注册模式最先判定。
+# 更多畸形体见 test_architect_rulings_t_t25.py（裁定 1）。
+@pytest.mark.xfail(strict=False, reason="后端 T-B03c（注册）：架构师裁定 2026-11-02, v0.2.9 687159f——closed 模式先于请求体校验；"
+                                        "origin 上畸形体返回 400；本地 main f72b8c7 已实现，未推 origin")
+def test_register_closed_rejects_even_malformed_body_with_503(app_client: Callable[..., Any], sql: Callable[..., Any]) -> None:
+    n0 = sql("SELECT count(*) FROM app.users")[0][0]
     assert_err(app_client("closed").post(f"{API}/auth/register", json={}), 503, "REGISTRATION_CLOSED")
+    assert sql("SELECT count(*) FROM app.users")[0][0] == n0
 
 
 @pytest.mark.parametrize("display_name", ["", "   "], ids=["empty", "blank"])

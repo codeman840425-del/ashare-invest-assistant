@@ -14,7 +14,7 @@
 
     env -u MAIRUI_LICENCE python3 p11_replay.py results/run-20261101-190106
 
-输出写到 ``<运行目录>/p11_gaps.replay-T-B48.json``（不覆盖原 p11_gaps.json），并在终端打印 GAP6/GAP7 摘要。
+输出写到 ``<运行目录>/p11_gaps.replay-<tag>.json``（缺省 tag=T-B48，``--tag T-B05`` 另存）（不覆盖原 p11_gaps.json），并在终端打印 GAP6/GAP7 摘要。
 """
 from __future__ import annotations
 
@@ -124,6 +124,10 @@ def replay(run_dir: Path) -> dict:
     import p11_gaps as g
     results = json.loads((run_dir / "p11_gaps.json").read_text(encoding="utf-8"))
     fx, shared, orig_points = build_fixtures(results)
+    # batch 请求日用原运行的请求日（重建序列只含跳变点，中点会漂移到别的日期，造成假的 as_of_mismatch）
+    g6c = _by_name(results)["GAP6_factor_nulls_pit"]["conclusion"].get("history_vs_batch_same_day") or {}
+    k0 = next(iter(g6c.values()), {}) if g6c else {}
+    orig_day = k0.get("requested_date") or k0.get("date")
     used: list = []
 
     def fake_probe(res, name, path_tpl, *a, **k):
@@ -135,10 +139,11 @@ def replay(run_dir: Path) -> dict:
     out: list = []
     with no_network() as hits:
         saved_probe, g.probe = g.probe, fake_probe
+        saved_day, g.PIT_BATCH_DAY = g.PIT_BATCH_DAY, orig_day
         try:
             g.item67_factors(out, shared)
         finally:
-            g.probe = saved_probe
+            g.probe, g.PIT_BATCH_DAY = saved_probe, saved_day
     if hits:
         raise NetworkBlocked(f"重放期间有 {len(hits)} 次网络调用被拦截：{hits[:3]}")
     gaps = {e["name"]: e for e in out if e["name"].startswith("GAP")}
@@ -147,7 +152,7 @@ def replay(run_dir: Path) -> dict:
         gaps["GAP6_factor_nulls_pit"]["evidence"]["pit"][key]["points_replayed"] = \
             gaps["GAP6_factor_nulls_pit"]["evidence"]["pit"][key]["points"]
         gaps["GAP6_factor_nulls_pit"]["evidence"]["pit"][key]["points"] = n
-    return {"source_run": run_dir.name, "replayed_calls": used, "network_calls_blocked": len(hits),
+    return {"source_run": run_dir.name, "batch_request_day": orig_day, "replayed_calls": used, "network_calls_blocked": len(hits),
             "items": list(gaps.values())}
 
 
@@ -156,13 +161,20 @@ def main(argv=None) -> int:
     if os.environ.get(ENV_NAME):
         print("拒绝运行：环境里有证书变量（请 env -u 该变量）")
         return 3
+    tag = "T-B48"
+    if "--tag" in argv:                    # 例：--tag T-B05 → p11_gaps.replay-T-B05.json（不覆盖旧重放）
+        i = argv.index("--tag")
+        tag, argv = argv[i + 1], argv[:i] + argv[i + 2:]
     run_dir = Path(argv[0] if argv else "results/run-20261101-190106")
     try:
         rep = replay(run_dir)
     except NetworkBlocked as e:
         print(f"FAIL 网络护栏触发：{e}")
         return 2
-    dst = run_dir / "p11_gaps.replay-T-B48.json"
+    dst = run_dir / f"p11_gaps.replay-{tag}.json"
+    if dst.exists():
+        print(f"拒绝覆盖已有重放结果：{dst}（换一个 --tag）")
+        return 4
     dst.write_text(json.dumps(rep, ensure_ascii=False, indent=2), encoding="utf-8")
     for e in rep["items"]:
         print(f"{e['name']} [{e['status']}] {e['conclusion']['summary']}")

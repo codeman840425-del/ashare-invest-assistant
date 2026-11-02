@@ -113,6 +113,18 @@ def _gap_routes(path, segs, q, js):
                     "a": 2152393900.0, "pc": 11.54, "sf": 0}])
     if path.startswith("/hsstock/financial/") and segs[2] in ("income", "balance", "cashflow"):
         return js([{"jzrq": j, "plrq": p, "jlr": 100.0 + i} for i, (j, p) in enumerate(_MOCK_FIN)])
+    if path.startswith("/hslt/ztgc/"):
+        # 涨停池：fbt 用接近 00:00 的时刻，保证取样时刻（真实当前时间）之后几乎总在其后；
+        # 另含 1 只 fbt=23:59:59（取样时刻之后封板 → 不选）、1 只无 fbt、1 只原样本（排除）
+        return js([{"dm": "600519", "mc": "原样本", "p": 1500.0, "zf": 10.0, "fbt": "00:00:00", "lbt": "00:00:00",
+                    "zbc": 0, "lbc": 1},
+                   {"dm": "002001", "mc": "涨停A", "p": 11.0, "zf": 10.0, "fbt": "00:00:01", "lbt": "00:00:01",
+                    "zbc": 0, "lbc": 2},
+                   {"dm": "603001", "mc": "涨停B", "p": 22.0, "zf": 10.0, "fbt": "00:00:02", "lbt": "00:00:05",
+                    "zbc": 1, "lbc": 1},
+                   {"dm": "300001", "mc": "无封板时间", "p": 12.0, "zf": 20.0, "lbc": 1},
+                   {"dm": "603002", "mc": "晚封板", "p": 33.0, "zf": 10.0, "fbt": "23:59:59", "lbt": "23:59:59",
+                    "zbc": 0, "lbc": 1}])
     if path.startswith("/hslt/list/"):
         return js([{"dm": f"{i:06d}", "mc": f"股票{i}", "jys": "sz"} for i in range(1, 50)]
                   + [{"dm": "600519", "mc": "贵州茅台", "jys": "sh"}])
@@ -126,6 +138,8 @@ def _gap_routes(path, segs, q, js):
              "calc_version": "1.0"}
         for f in _MOCK_FACTORS:
             d[f] = None if f.startswith("north") or f == "attention_score" else 1.0
+        for f in ("limit_up_streak", "seal_ratio", "seal_to_float"):   # 复测 2：涨停股有值，其他为空
+            d[f] = 1.0 if segs[2] in ("002001", "603001") else None
             d[f + "_rank"] = None
         return js({"code": 200, "msg": "success", "data": d})
     if path.startswith("/factor/history/"):
@@ -179,9 +193,14 @@ def route(state: MockState, method: str, raw_path: str, body: bytes):
         return js([{"dm": f"{i:06d}", "p": 10.0, "t": "2026-10-30 15:00:00"} for i in range(1500)])
     if method == "POST":
         try:
-            json.loads(body or b"{}")
+            jb = json.loads(body or b"{}")
         except ValueError:
             return js({"detail": "bad json"}, 400)
+        if path.startswith("/factor/batch/") and isinstance(jb, dict) and jb.get("trade_date"):
+            # p11 GAP7：按 T-B48 真实结构（data.items.{code} + 响应层 data.trade_date）回显请求日期
+            td = str(jb["trade_date"])
+            return js({"code": 200, "msg": "success", "data": {"trade_date": td, "items": {
+                cd: {f: 11.0 for f in jb.get("factor_ids") or []} for cd in jb.get("codes") or []}}})
         return js({"code": 200, "data": {"list": [{"code": "600519", "pe_ttm": 25.1, "roe_ttm": None}]}})
     gap = _gap_routes(path, segs, q, js)        # p11_gaps 新增接口的伪造响应
     if gap is not None:

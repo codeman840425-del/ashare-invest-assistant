@@ -107,6 +107,8 @@ py -3 run_all.py --dry-run          # Linux/macOS: python3 run_all.py --dry-run
 确认默认模式下代理端口收到 0 个请求、`--use-env-proxy` 时请求改走代理；
 另对 p11 分别强制走“盘中采样”和“盘后跳过”两个分支，检查 7 项都输出结构化结论、盘后不发采样请求，并离线单测时段判定、单位推断、时间精度和时点判定逻辑。
 对 p12 检查：全流程只新增 2 次调用（`/hslt/list` 与两个全市场接口全程各只调 1 次）、单独运行（阶段 1c）调用 5 次；原始响应可解析且 sha256 一致；`codes.csv` 表头/行数正确；`mairui_dm_*.txt` 按 compare 脚本的读法得到 6 位代码集合；输出不含证书。
+另跑“阶段 5 开关矩阵”（见 §6A）：每个 T-B05 复测开关单独跑一遍，核对客户端调用数 = 服务端增量 = 预计次数、结果只含该开关的项、输出不含证书，非法参数一律拒绝（退出码 2）；跑完复原缺省值。`--skip-switch-matrix` 可跳过。
+带开关的 dry-run（如 `python3 run_all.py --dry-run p11 --p11-only gap6-nulls`）在阶段 1 也按开关执行并核对。
 最后应看到 **“全部通过”**，退出码 0。dry-run 输出在 `results/dryrun/run-*-dryrun*/`（可删除，不需要回传）。
 （Windows 防火墙一般不会对只绑定 127.0.0.1 的程序弹窗；如弹窗，选择“取消/不允许”也不影响本地自检。）
 
@@ -142,16 +144,29 @@ p12 新增 **2 次**（`/bj/list/all`、`/kc/list/all`，api 主机）；`/hslt/
 
 | 项 | 做法 | 调用 |
 |---|---|---|
-| GAP1 快照延迟 | 仅在北京时间工作日 9:30–11:30 / 13:00–15:00 内执行（先查交易日历排除节假日）；对 000001 交替取 `real/time`（券商源）与 `hsrl/ssjy`（网络源）各 6 次、间隔 5 秒，延迟 = 本机收到时刻 − 快照 `t`；同时用响应头 `Date` 估算本机与服务端钟差。盘外记“盘后无法测”并跳过。**本机 NTP 偏差未知**，结论里如实标注 | 13（盘外 0） |
+| GAP1 快照延迟 | 仅在北京时间工作日 9:30–11:30 / 13:00–15:00 内执行（先查交易日历排除节假日）；对 000001 交替取 `real/time`（券商源）与 `hsrl/ssjy`（网络源）各 6 次、间隔 5 秒，延迟 = 本机收到时刻 − 快照 `t`；同时用响应头 `Date` 估算本机与服务端钟差。盘外记“盘后无法测”并跳过。每个 源×股票 和每个源合并后都给 p50/p95/max 两套：未修正、按 NTP 偏差修正（`--local-ahead-s`/`--ntp-file` 提供时；否则 `ntp_offset="unknown"`）；`stale_threshold.ref_p95_s` = 各源修正后 p95 的最大值（无 NTP 时退回未修正 p95 并在 `basis` 注明），建议值 = max(2×参考, 10s) 向上取整（后端经验值，待确认） | 13（盘外 0；`--gap1-codes` N 只时 1+12N） |
 | GAP2 cje/v 单位 | 对 000001、600519 的快照（复用 GAP1 样本）与最新日线，用 成交额 ÷(成交量 × 价格) 反推单位，要求 VWAP 落在当日最高/最低价之间；与文档对照 | 4（盘外 6） |
 | GAP3 plrq | 600519 / 000001 / 600000 利润表全量 + 600519 资产负债表、现金流量表：最早报告期是否有 plrq、空值率（含 2007 年前）、同报告期多行、疑似更正/版本字段、披露滞后 > 400 天的行 | 5 |
 | GAP4 退市股 | 股票列表 1 次 + 4 只已退市股（600087 长航油运、600432 吉恩镍业、000979 中弘股份、002450 康得新；文档无退市列表接口，代码凭公开报道列举，见源码注释）各取基础信息 / 日线 / 利润表，判断幸存者偏差 | 13 |
 | GAP5 公告时间精度 | 600519、000001 公告各 1 次，判断 `t` 精度为天/时/分/秒（时间恒为 00:00:00 视为“天”） | 2 |
-| GAP6 因子空值与时点性 | `factor/all` 取 600519、000001、300750 统计逐因子空值；`factor/history` 取 600519 的 profit_yoy、roe_ttm（2025-05-01～2026-10-31），把跳变日与利润表 plrq 对照（披露前跳变 = 前视嫌疑）；`factor/batch` 指定历史 trade_date 与 history 同日比对。单次运行无法定论时给出原因与后续步骤（隔周重取比对、按 plrq 自行重算） | 7（与 GAP7 共用） |
+| GAP6 因子空值与时点性 | `factor/all` 取 600519、000001、300750 统计逐因子空值；`factor/history` 取 600519 的 profit_yoy、roe_ttm（2025-05-01～2026-10-31），把跳变日与利润表 plrq 对照（披露前跳变 = 前视嫌疑）；`factor/batch` 指定历史 trade_date 与 history 同日比对；**数据日期一律取响应自带日期**（记录层优先，没有则取响应层 `data.trade_date`），缺失或与请求日不同记 `batch_as_of.status=as_of_mismatch`，该批 `equal=null`、不参与比对和回填（plan 34d475d）。精度差（`precision_only`）只认“较长一方截断或四舍五入到较短一方的小数位后与之完全相等，且较短一方 ≥4 位小数”，如 1.4714182949831487↔1.471418；15.0↔14.97 不算。单次运行无法定论时给出原因与后续步骤（隔周重取比对、按 plrq 自行重算） | 7（与 GAP7 共用） |
 | GAP7 因子数量 | `factor/list` 与 `factor/all` 实返字段数对照文档 85 / 82，列出缺少/多出的字段名 | 含在上行 |
 
 建议在北京时间交易时段内运行（例如北京时间周一 09:55 开始），GAP1 才能实测；盘后运行其它项不受影响。
 单独重跑 p11：`py -3 run_all.py p11`（同样受 STOP、冷却、熔断约束）。
+
+## 6A. T-B05 复测开关（缺省 = 原行为；都受 STOP、冷却、熔断约束）
+
+| 开关 | 作用 | 调用次数 |
+|---|---|---|
+| `--gap1-codes 000001,600519,300750,688981,920000` | GAP1 采样股票（6 位代码，去重，≤10 只）；每轮依次对每只取两个快照源，轮间停 5 秒 | 盘中 1（交易日历）+ N×2×6；5 只 = **61**/时段；盘外 0 |
+| `--p11-only gap1` | p11 只跑 GAP1（不跑 GAP2–7） | 同上；三个时段共 183 |
+| `--local-ahead-s X`（可重复）/ `--ntp-file F`（可重复） | 本机比 NTP 快多少秒（本机 − NTP，正 = 本机快），多次取均值，用于修正延迟；`--ntp-file` 读 `w32tm /stripchart /computer:ntp.aliyun.com /samples:3 /dataonly` 的输出（按“正值 = 本机比目标快”读入；结论里另和 HTTP `Date` 钟差比对符号，`ntp_sign_check`），原文存进 GAP1 evidence | 0（只读本地文件） |
+| `--p11-only gap6-history [--history-baseline <run_id 或样例目录>]` | 只取 600519 的 profit_yoy、roe_ttm 两条 `factor/history`（完整序列存 `samples/<run_id>/p11_pit_history_*.json`）；给基线时离线逐日比对：已有日期的值变了、插入或删除了日期 → `rewritten`，只有精度差和末尾新增 → `no_rewrite` | **2**（比对 0） |
+| `--p11-only gap6-nulls [--zt-codes a,b]` | 先取当日涨停池 `/hslt/ztgc/<日期>` 并记下取样时刻，只从**当时已在池中**（首次封板时间 `fbt` ≤ 取样时刻）的股票里按封板先后选 2 只（排除原样本），再加 600519、300750、000001、688981、920000 共 7 只各取 `factor/all`，看封板类因子（limit_up_streak/seal_ratio/seal_to_float）在涨停股上是否有值。收盘后复跑用 `--zt-codes` 沿用盘中选出的代码（仍取 1 次涨停池核对是否仍在池中） | **8**（盘中 + 收盘后共 16） |
+| `--p12-only hslt` | p12 只取 `/hslt/list` | 单独 **1**；与完整 p11 同次运行时复用 GAP4 的响应，**0** |
+
+不带任何开关时 p11 仍是 44 次（盘后 33 次），p12 仍是 5 次（全流程复用后 2 次）。参数非法（代码不是 6 位、超过 10 只、NTP 文件不存在或解析不出数值、`--history-baseline` 不配 `gap6-history`、`--zt-codes` 不配 `gap6-nulls`、基线目录不存在）时直接退出码 2，不发请求。
 
 **p12 代码集合**（security_master.md §7 第 1 条；§7 未规定格式，按“原始响应 + 规范化清单”保存，约 5 秒、写 4–8 MB）。输出在 `results/run-<…>/code_lists/`：
 
@@ -213,9 +228,10 @@ p11 的因子解析修好后（`factor/all` 的 `data.factors`、`factor/batch` 
 ```
 cd src/backend/probes
 env -u MAIRUI_LICENCE python3 p11_replay.py results/run-20261101-190106
+env -u MAIRUI_LICENCE python3 p11_replay.py --tag T-B05 results/run-20261101-190106   # 另存，不覆盖旧重放
 ```
 
-结果写到运行目录下的 `p11_gaps.replay-T-B48.json`，不覆盖原 `p11_gaps.json`。重放期间 socket、requests 和 `common.call` 都被换成抛异常的桩，一旦尝试出网，退出码为 2。自检：`cd src/backend && env -u MAIRUI_LICENCE python3 selfchecks/tb48_p11.py`。
+结果写到运行目录下的 `p11_gaps.replay-<tag>.json`（缺省 T-B48；同名已存在则拒绝写），不覆盖原 `p11_gaps.json`。batch 请求日取原运行记录的请求日（重建序列只含跳变点，中点会漂移）。T-B05 收紧精度规则后的自检：`env -u MAIRUI_LICENCE python3 selfchecks/tb05_switches.py`。重放期间 socket、requests 和 `common.call` 都被换成抛异常的桩，一旦尝试出网，退出码为 2。自检：`cd src/backend && env -u MAIRUI_LICENCE python3 selfchecks/tb48_p11.py`。
 
 ## 安全与限流约束（脚本内已强制）
 - 证书只从 `os.environ["MAIRUI_LICENCE"]` 读取；控制台、日志、样例、结果中的 URL 一律替换成 `***`，写盘前断言不含证书。dry-run 用假证书。

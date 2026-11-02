@@ -139,9 +139,12 @@ def unit_cases() -> None:
         and pit["verdict"] == "consistent_with_pit",
         str(pit["counts"]),
     )
-    pit2 = g.classify_pit(g.change_points([("2026-08-01", 1.0), ("2026-08-03", 1.0000001)]), [])
+    # T-B05 收紧：较短一方至少 4 位小数才可能算精度差；原用例 1.0↔1.0000001（较短一方 0 位）与 15.0↔14.97 同类，改为 6 位截断
+    pit2 = g.classify_pit(
+        g.change_points([("2026-08-01", 1.234567), ("2026-08-03", 1.2345671234)]), []
+    )
     check(
-        "classify_pit：只有精度变化 → no_change_in_window",
+        "classify_pit：只有精度变化（6 位截断）→ no_change_in_window",
         pit2["verdict"] == "no_change_in_window",
         pit2["verdict"],
     )

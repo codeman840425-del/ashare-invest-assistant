@@ -436,3 +436,18 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 /* T-B47：管理端采集状态告警列表 */
 .ingest-alerts { list-style: none; margin: 0; padding: 0; }
 .ingest-alerts li { padding: 2px 0; }
+
+/* T-F14 通知中心 */
+.nc-items { padding: 0; }
+.nc-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.nc-item:last-child { border-bottom: none; }
+.nc-item.read { opacity: 0.6; }
+.nc-main { flex: 1; min-width: 0; }
+.nc-main:focus-visible { outline: 1px solid var(--accent); }
+.nc-head { display: flex; align-items: center; gap: 6px; }
+.nc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); display: inline-block; }
+.nc-title { margin-top: 4px; font-weight: 500; }
+.nc-item.unread .nc-title { font-weight: 600; }
+.nc-body { margin-top: 2px; }
+.nc-target { margin-top: 4px; }
+.nc-target .link { color: var(--accent); }

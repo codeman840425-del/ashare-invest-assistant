@@ -2,6 +2,7 @@ import { Tabs, Tag } from 'antd';
 import { useNavigate } from 'react-router';
 import { useDailyReports, useMarkNotificationRead, useNotifications, useSignals } from '../../api/queries';
 import { NOTIFY_KIND, RECONCILIATION, REGIME, SEVERITY, SIGNAL_KIND } from '../../i18n/labels';
+import { notificationRoute } from '../../lib/notificationTarget';
 import { fmtTime } from '../../lib/format';
 
 /** 底部面板：盘中规则事件（/signals，不含动作建议）、通知、日报 */
@@ -45,7 +46,8 @@ export function BottomPanel({ selected, onSelect }: { selected: string | null; o
                     className={`list-row ${n.read_at ? 'read' : ''}`}
                     onClick={() => {
                       if (!n.read_at) mark.mutate(n.id);
-                      if (n.target.route) navigate(n.target.route);
+                      const route = notificationRoute(n.target);
+                      if (route) navigate(route);
                     }}
                   >
                     <span className="mono muted">{fmtTime(n.created_at).slice(5, 16)}</span>

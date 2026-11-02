@@ -1,4 +1,5 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useStreamLive } from '../app/streamContext';
 import { apiGet, apiPost } from './client';
 import type {
   BarsResponse, CandidateSignal, DailyReport, DailyReportListItem, HorizonAssessment, Me, NonExecutableReason, Notification, Paged, Portfolio,
@@ -38,26 +39,31 @@ export const ME_POLL_MS = 60_000;
 export const useMe = () =>
   useQuery({ queryKey: qk.me, queryFn: ({ signal }) => apiGet<Me>('/me', undefined, signal), refetchInterval: ME_POLL_MS });
 
-export const useTerminal = (scope: TerminalScope) =>
-  useQuery({
+export const useTerminal = (scope: TerminalScope) => {
+  const live = useStreamLive();
+  return useQuery({
     queryKey: qk.terminal(scope),
     queryFn: ({ signal }) => apiGet<TerminalResponse>('/terminal', { scope }, signal),
     placeholderData: keepPreviousData,
-    // SSE 未接入前的兜底轮询：契约 §8 要求 ≥ 15 秒
-    refetchInterval: 15_000,
+    // 契约 §8：SSE 连上时由 quote / suggestion 等事件更新；断线（或未启用）时退回 ≥ 15 秒带 If-None-Match 轮询（T-F14）
+    refetchInterval: live ? false : 15_000,
   });
+};
 
 /** 评审 T-F08 m6：收盘后与非交易日数据基本不变，轮询放慢到 60 秒；其余时段 15 秒（契约 §8 要求 ≥ 15 秒） */
 export const todayPollMs = (session: TodayResponse['session'] | undefined) => (session === 'closed' || session === 'non_trading_day' ? 60_000 : 15_000);
 
 /** T-F08：首页聚合 GET /today（契约 §7.3，弱 ETag；SSE 未接入前按 §8 带 If-None-Match 轮询） */
-export const useToday = () =>
-  useQuery({
+export const useToday = () => {
+  const live = useStreamLive();
+  return useQuery({
     queryKey: qk.today,
     queryFn: ({ signal }) => apiGet<TodayResponse>('/today', undefined, signal),
     placeholderData: keepPreviousData,
-    refetchInterval: (query) => todayPollMs(query.state.data?.session),
+    // T-F14：SSE 连上时不轮询（事件触发失效重拉），断线时按 §8 退回轮询
+    refetchInterval: (query) => (live ? false : todayPollMs(query.state.data?.session)),
   });
+};
 
 export const useBars = (code: string | undefined, freq: BarFreq) => {
   const adjust: BarAdjust = freq === '1m' ? 'none' : 'qfq';
@@ -107,8 +113,16 @@ export const useSignals = () =>
 export const useNotifications = () =>
   useQuery({ queryKey: qk.notifications, queryFn: ({ signal }) => apiGet<Paged<Notification>>('/notifications', { limit: 50 }, signal) });
 
-export const useUnreadCount = () =>
-  useQuery({ queryKey: qk.unread, queryFn: ({ signal }) => apiGet<UnreadCount>('/notifications/unread-count', undefined, signal), refetchInterval: 30_000 });
+/** 契约 §8：SSE 连上时未读数随 notification 事件刷新；断线（或未启用）时退回轮询 /notifications/unread-count */
+export const UNREAD_POLL_MS = 30_000;
+export const useUnreadCount = () => {
+  const live = useStreamLive();
+  return useQuery({
+    queryKey: qk.unread,
+    queryFn: ({ signal }) => apiGet<UnreadCount>('/notifications/unread-count', undefined, signal),
+    refetchInterval: live ? false : UNREAD_POLL_MS,
+  });
+};
 
 export const useDailyReports = () =>
   useQuery({ queryKey: qk.dailyReports, queryFn: ({ signal }) => apiGet<Paged<DailyReportListItem>>('/daily-reports', { limit: 20 }, signal) });

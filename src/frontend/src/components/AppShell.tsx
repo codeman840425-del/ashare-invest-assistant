@@ -13,6 +13,8 @@ import { navMoreFor, NAV_MAIN } from '../app/nav';
 import { useApiErrorRedirect } from '../app/useApiErrorRedirect';
 import { useLogout } from '../api/accountQueries';
 import { LicenceBanner } from './LicenceBanner';
+import { StreamProvider } from '../app/StreamProvider';
+import { notificationRoute } from '../lib/notificationTarget';
 
 function NotificationPanel({ onNavigate }: { onNavigate: (route: string) => void }) {
   const { data } = useNotifications();
@@ -28,7 +30,9 @@ function NotificationPanel({ onNavigate }: { onNavigate: (route: string) => void
             className={`notif-item ${n.read_at ? 'read' : ''}`}
             onClick={() => {
               if (!n.read_at) mark.mutate(n.id);
-              if (n.target.route) onNavigate(n.target.route);
+              // §5.1：按服务端 route 跳转；route 不是站内路径或与类型不符时按 type + id 拼（T-F14）
+              const route = notificationRoute(n.target);
+              if (route) onNavigate(route);
             }}
           >
             <div style={{ width: '100%' }}>
@@ -48,7 +52,16 @@ function NotificationPanel({ onNavigate }: { onNavigate: (route: string) => void
   );
 }
 
+/** 登录后的外壳：挂 SSE 连接（契约 §8，T-F14），连接状态决定未读数 / 终端 / 首页是否轮询 */
 export function AppShell() {
+  return (
+    <StreamProvider>
+      <Shell />
+    </StreamProvider>
+  );
+}
+
+function Shell() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const unread = useUnreadCount();
@@ -88,9 +101,11 @@ export function AppShell() {
           <div className="topbar-right">
             <SecuritySearch />
             <Popover content={<NotificationPanel onNavigate={(r) => navigate(r)} />} title="通知" trigger="click" placement="bottomRight">
-              <Badge count={unread.data?.count ?? 0} size="small" offset={[-2, 2]}>
-                <Button size="small" type="text" icon={<BellOutlined style={{ fontSize: 16 }} />} aria-label="通知" />
-              </Badge>
+              <span data-testid="unread-badge" data-count={unread.data?.count ?? 0}>
+                <Badge count={unread.data?.count ?? 0} size="small" offset={[-2, 2]}>
+                  <Button size="small" type="text" icon={<BellOutlined style={{ fontSize: 16 }} />} aria-label="通知" />
+                </Badge>
+              </span>
             </Popover>
             <Dropdown menu={{ items: userMenu, onClick: onUserMenu }} trigger={['click']}>
               <a className="user" data-testid="user-menu">{me.data?.display_name ?? '—'} <DownOutlined style={{ fontSize: 10 }} /></a>

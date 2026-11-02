@@ -3,7 +3,7 @@
  * 未实现的端点统一返回 404 + 契约错误信封（code=NOT_FOUND），便于发现漏接。
  */
 import { http, HttpResponse, delay, matchRequestUrl } from 'msw';
-import type { Notification, TerminalScope, TodayResponse } from '../api/types';
+import type { TerminalScope, TodayResponse } from '../api/types';
 import type { SectorKind } from '../api/marketTypes';
 import { accountHandlers } from './accountHandlers';
 import { resetStrategies, strategyHandlers } from './strategyHandlers';
@@ -11,13 +11,15 @@ import { reasonsNow, resetSignals, signalHandlers, signalsNow } from './signalHa
 import { draftsNow, planHandlers, resetPlanDrafts } from './planHandlers';
 import { candidateHandlers, resetCandidates } from './candidateHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
+import { allNotifications, findNotification, markAllNotificationsRead, markNotificationRead, resetNotificationStore } from './notificationStore';
+import { resetStreamMock, streamHandlers } from './streamHandlers';
 import { currentUser, resetSession } from './session';
 import { licenceState } from './licenceStore';
 import { LICENCE_UNAVAILABLE } from '../i18n/licenceLabels';
 import type { DataStatus } from '../api/enums';
 import type { Gap } from '../api/types';
 import {
-  ACCOUNT_ID, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOTIFICATIONS, NOW, PORTFOLIO, QUOTES,
+  ACCOUNT_ID, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOW, PORTFOLIO, QUOTES,
   SIGNAL_EVENTS, SUGGESTIONS, SUGGESTION_LIST, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, WATCHLIST, dailyBars, intradayBars,
 } from './fixtures';
 import {
@@ -31,11 +33,11 @@ export { errorBody };
 
 const API = '/api/v1';
 
-// 会话内可变状态：已读
-const readAt = new Map<string, string>();
-const notifications = (): Notification[] => NOTIFICATIONS.map((n) => ({ ...n, read_at: n.read_at ?? readAt.get(n.id) ?? null }));
+// 会话内可变状态：通知已读 / SSE 推送新增（notificationStore，T-F14）
+const notifications = allNotifications;
 export function resetMockState() {
-  readAt.clear();
+  resetNotificationStore();
+  resetStreamMock();
   resetSession();
   resetStrategies();
   resetSignals();
@@ -112,6 +114,8 @@ function todayBody(): TodayResponse {
 }
 
 const routeHandlers = [
+  // SSE /stream（契约 §8，T-F14，见 streamHandlers.ts；全部在本地生成，不发外网请求）
+  ...streamHandlers,
   // 鉴权、账号、券商账户、成交、导入、对账（T-F02/T-F02a/T-F04，见 accountHandlers.ts）
   ...accountHandlers,
   // 策略库最小模拟（T-F22，见 strategyHandlers.ts）
@@ -300,17 +304,21 @@ const routeHandlers = [
   http.get(`${API}/notifications/unread-count`, () => HttpResponse.json({ count: notifications().filter((n) => n.read_at === null).length })),
   http.get(`${API}/notifications`, ({ request }) => {
     const url = new URL(request.url);
-    const unread = url.searchParams.get('unread') === 'true';
-    return HttpResponse.json(page(notifications().filter((n) => !unread || n.read_at === null), url));
+    const unreadRaw = url.searchParams.get('unread');
+    if (unreadRaw !== null && unreadRaw !== 'true' && unreadRaw !== 'false') return validation('unread', 'unread 取值为 true|false');
+    const kind = url.searchParams.get('kind');
+    if (kind !== null && !(ENUMS.notification_kind as readonly string[]).includes(kind)) return validation('kind', 'kind 不是有效的通知类型');
+    const unread = unreadRaw === 'true';
+    return HttpResponse.json(page(notifications().filter((n) => (!unread || n.read_at === null) && (!kind || n.kind === kind)), url));
   }),
+  // §7.8：已读 / 全部已读幂等，204；重复调用不改已读时间
   http.post(`${API}/notifications/read-all`, () => {
-    NOTIFICATIONS.forEach((n) => readAt.set(n.id, NOW));
+    markAllNotificationsRead();
     return new HttpResponse(null, { status: 204 });
   }),
   http.post(`${API}/notifications/:id/read`, ({ params }) => {
-    const n = NOTIFICATIONS.find((x) => x.id === params.id);
-    if (!n) return notFound('通知');
-    readAt.set(n.id, NOW);
+    if (!findNotification(String(params.id))) return notFound('通知');
+    markNotificationRead(String(params.id));
     return new HttpResponse(null, { status: 204 });
   }),
 

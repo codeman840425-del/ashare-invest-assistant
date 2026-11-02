@@ -21,7 +21,6 @@ export const PLACEHOLDERS: [string, string][] = [
   ['plans/:id', '计划详情'],
   ['risk-controls', '风控'],
   ['restrictions', '禁投 / 冷静期 / 屏蔽'],
-  ['notifications', '通知中心'],
   ['alerts', '提醒中心'],
   ['reviews', '复盘'],
   ['discover', '发现'],
@@ -61,6 +60,7 @@ export const routes: RouteObject[] = [
       { path: 'candidates/:id', lazy: lazyPage(() => import('../pages/research/CandidateDetailPage'), (m) => m.CandidateDetailPage) },
       { path: 'plan-drafts', lazy: lazyPage(() => import('../pages/plans/PlanDraftsPage'), (m) => m.PlanDraftsPage) },
       { path: 'plan-drafts/:id', lazy: lazyPage(() => import('../pages/plans/PlanDraftDetailPage'), (m) => m.PlanDraftDetailPage) },
+      { path: 'notifications', lazy: lazyPage(() => import('../pages/NotificationsPage'), (m) => m.NotificationsPage) },
       ...PLACEHOLDERS.map(([path, title]) => ({ path, element: <PlaceholderPage title={title} /> })),
       { path: 'admin', element: <AdminGate><Navigate to="/admin/users" replace /></AdminGate> },
       {

@@ -7,7 +7,8 @@ import type {
   AdminUserPatch, BrokerAccountCreate, ImportConfirmRequest, ImportOptions, LoginRequest, ProfileInput, RegisterRequest,
   ImportBatchSummary, ResolveFindingRequest, Trade, TradeCreate,
 } from '../api/accountTypes';
-import type { AdminIngestStatus, IngestLicenceStatus } from '../api/adminTypes';
+import { ADMIN_REASON_MAX, type AdminDataLicence, type AdminIngestStatus, type IngestLicenceStatus } from '../api/adminTypes';
+import type { DataLicenceStatus } from '../api/licenceTypes';
 import { ENUMS } from '../api/enums';
 import { LICENCE_RE, type DataLicencePatch, type DataLicencePut } from '../api/licenceTypes';
 import { OVERRIDE_CHOICES } from '../i18n/importLabels';
@@ -16,7 +17,7 @@ import {
   type MockBatch, type MockUser,
 } from './session';
 import { errorBody, page } from './handlerUtils';
-import { deleteLicence, licenceEntries, licenceOf, licenceState, mockIngestPaused, mockLicenceSettingsEnabled, patchLicence, putLicence, rateHit, testLicence } from './licenceStore';
+import { adminPause, adminResume, deleteLicence, licenceEntries, licenceEntryOf, licenceOf, licenceState, mockIngestPaused, mockLicenceSettingsEnabled, patchLicence, putLicence, rateHit, testLicence } from './licenceStore';
 import { NOW, uid } from './fixtures';
 
 const API = '/api/v1';
@@ -44,6 +45,17 @@ const nextId = () => uid(++seq);
 
 const USERNAME_RE = /^[a-z0-9_]{4,32}$/; // 契约 #24
 const RESERVED = ['admin', 'root', 'system'];
+
+/** 示例调用量与队列：/admin/ingest/status 与 /admin/data-licences 共用，保证同一证书数值一致（契约 §9 v0.2.8 第 2 条） */
+function licenceMetrics(s: DataLicenceStatus, i: number) {
+  const live = s.status === 'active';
+  return {
+    calls_today: s.status === 'quota_exceeded' ? 200 : live ? 1180 + 37 * i : 0,
+    per_minute_limit: s.tier === 'diamond' ? 300 : s.tier === 'free' ? 30 : 120,
+    calls_last_minute: live ? 12 + 5 * i : 0,
+    queue_depth: live ? { p0: 0, p1: 3 + i, p2: 40 + 10 * i } : { p0: 0, p1: 0, p2: 0 },
+  };
+}
 
 export const accountHandlers = [
   // —— 统一前置：鉴权与审核状态（契约 §1.3）。返回 undefined 时继续交给后续处理器 ——
@@ -199,15 +211,11 @@ export const accountHandlers = [
       .filter((e) => e.s.status !== 'not_set')
       .map((e, i) => {
         const u = state.users.find((x) => x.id === e.userId);
-        const live = e.s.status === 'active';
         return {
           licence_id: e.licence_id, user_id: e.userId, username: u?.username ?? '—', display_name: u?.display_name ?? '—',
           status: e.s.status, tier: e.s.tier, has_quant_pro: e.s.has_quant_pro, expires_on: e.s.expires_on, days_left: e.s.days_to_expiry,
-          calls_today: e.s.status === 'quota_exceeded' ? 200 : live ? 1180 + 37 * i : 0,
+          ...licenceMetrics(e.s, i),
           daily_limit: e.s.status === 'quota_exceeded' ? 200 : null,
-          per_minute_limit: e.s.tier === 'diamond' ? 300 : e.s.tier === 'free' ? 30 : 120,
-          calls_last_minute: live ? 12 + 5 * i : 0,
-          queue_depth: live ? { p0: 0, p1: 3 + i, p2: 40 + 10 * i } : { p0: 0, p1: 0, p2: 0 },
           paused_until: e.s.paused_until, last_error_code: e.s.last_error_code, last_error_at: e.s.last_error_at,
         };
       })
@@ -233,6 +241,33 @@ export const accountHandlers = [
       licences_truncated: rows.length > 500,
     };
     return json(body);
+  }),
+  // §7.9 管理端证书列表（v0.2.6，分页；v0.2.8 加 licence_id）：每位用户一行，含未设置证书的用户；按注册时间倒序（示例）
+  http.get(`${API}/admin/data-licences`, ({ request }) => {
+    const idx = new Map(licenceEntries().map((e, i) => [e.licence_id, i]));
+    const items: AdminDataLicence[] = state.users
+      .slice()
+      .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))
+      .map((u) => {
+        const e = licenceEntryOf(u.id);
+        const s: DataLicenceStatus = e ? e.s : licenceOf(u.id);
+        return {
+          ...s, licence_id: e?.licence_id ?? null, user_id: u.id, username: u.username, display_name: u.display_name,
+          ...(e ? licenceMetrics(s, idx.get(e.licence_id) ?? 0) : { calls_today: 0, per_minute_limit: 0, calls_last_minute: 0, queue_depth: { p0: 0, p1: 0, p2: 0 } }),
+        };
+      });
+    return json(page(items, new URL(request.url)));
+  }),
+  http.post(`${API}/admin/data-licences/:id/:op`, async ({ params, request }) => {
+    const op = params.op;
+    if (op !== 'pause' && op !== 'resume') return err(404, 'NOT_FOUND', '示例数据未覆盖该端点');
+    const id = String(params.id);
+    if (!state.users.some((x) => x.id === id)) return notFound('用户');
+    const b = (await request.json().catch(() => ({}))) as { reason?: unknown };
+    const reason = typeof b.reason === 'string' ? b.reason : '';
+    if (reason.length < 1 || reason.length > ADMIN_REASON_MAX) return validationError([{ field: 'reason', issue: reason.length ? 'too_long' : 'required' }]);
+    const r = op === 'pause' ? adminPause(id, reason) : adminResume(id, reason);
+    return r === 'ok' ? noContent() : err(409, 'DATA_LICENCE_NOT_SET', '该用户尚未设置数据证书');
   }),
   http.get(`${API}/admin/users`, ({ request }) => {
     const url = new URL(request.url);

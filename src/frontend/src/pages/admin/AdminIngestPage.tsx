@@ -1,3 +1,4 @@
+import { Link } from 'react-router';
 import { Alert, Card, Descriptions, Space, Table, Tag } from 'antd';
 import { useAdminIngestStatus } from '../../api/adminQueries';
 import type { IngestLicenceStatus } from '../../api/adminTypes';
@@ -19,7 +20,7 @@ export function AdminIngestPage() {
   if (q.isError) return <div className="page" data-testid="admin-ingest"><ErrorBox error={q.error} /></div>;
   const d = q.data;
   const columns = [
-    { title: '用户', key: 'user', render: (_: unknown, r: IngestLicenceStatus) => <span>{r.display_name}<span className="muted small">（{r.username}）</span></span> },
+    { title: '用户', key: 'user', render: (_: unknown, r: IngestLicenceStatus) => <Link to={`/admin/data-licences?user=${r.user_id}`}>{r.display_name}<span className="muted small">（{r.username}）</span></Link> },
     {
       title: '状态', dataIndex: 'status', key: 'status',
       render: (s: IngestLicenceStatus['status']) => <Tag color={LICENCE_STATUS[s].color} data-testid={`ingest-status-${s}`}>{LICENCE_STATUS[s].text}</Tag>,
@@ -53,7 +54,7 @@ export function AdminIngestPage() {
         </Card>
         <Card size="small" title={`按证书（${d.licences.length} 张；未设置证书的用户不列出）`}>
           {d.licences_truncated ? (
-            <Alert type="info" showIcon data-testid="ingest-truncated" style={{ marginBottom: 8 }} title="只显示前 500 张证书" description="完整列表见管理端证书列表（/admin/data-licences）。" />
+            <Alert type="info" showIcon data-testid="ingest-truncated" style={{ marginBottom: 8 }} title="只显示前 500 张证书" description={<span>完整列表见 <Link to="/admin/data-licences" data-testid="ingest-to-licences">数据证书（管理）</Link>。</span>} />
           ) : null}
           <Table<IngestLicenceStatus> rowKey="licence_id" size="small" pagination={false} dataSource={d.licences} columns={columns} data-testid="ingest-licences" />
         </Card>

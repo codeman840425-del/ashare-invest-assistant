@@ -57,7 +57,7 @@ export function AppShell() {
   const userMenu = [
     { key: '/settings/profile', label: '投资画像' },
     { key: '/settings/data-licence', label: '数据证书' },
-    ...(me.data?.role === 'admin' ? [{ key: '/admin/users', label: '用户审核（管理）' }, { key: '/admin/ingest', label: '采集状态（管理）' }] : []),
+    ...(me.data?.role === 'admin' ? [{ key: '/admin/users', label: '用户审核（管理）' }, { key: '/admin/ingest', label: '采集状态（管理）' }, { key: '/admin/data-licences', label: '数据证书（管理）' }] : []),
     { type: 'divider' as const },
     { key: 'logout', label: '退出登录', danger: true },
   ];

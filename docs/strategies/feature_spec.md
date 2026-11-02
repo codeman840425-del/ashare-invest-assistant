@@ -20,7 +20,7 @@
 - **有效 K 线**（valid bar）：该股在该交易日有日 K 且 `sf ≠ 1` 且 `v > 0`，并且不是 T-B05a 标出的“疑似伪停牌”（日线 `sf=1` 但同日快照有成交，plan 2.5.11A G-01 ②）。T003 已列出的日线字段：`t, o, h, l, c, v, a(成交额), pc(前收), sf(停牌标记)`。
 - **null**：特征无法按口径算出时写 `null`（JSON null / SQL NULL）。**一律不得用 0、前值或插值填充**（`_template.md` §7.3“停牌期间不插值”）。0 只在“数据齐全且真实结果为 0”时出现（例如 20 日内确实没有涨停 → `f.limit_up_count_20d = 0`）。
 - **取整**：除另有说明外一律 `ROUND_HALF_UP`（四舍五入，非银行家舍入），只在**落库最终值**时取整一次，中间计算保留全精度（Python `Decimal` 或 float64，见 §1.6）。
-- **单位记号**（与 `feature_catalog.unit` 对应的建议值）：`CNY`（元）、`CNY_per_share`（元/股）、`pct`（百分数，12 表示 12%）、`ratio`（小数，0.12 表示 12%）、`count`、`years`、`trading_days`、`bool`、`enum`、`code`。分类器规则写的 `unit: sign` 不是物理单位，见 §1.5。
+- **单位记号**（与 `feature_catalog.unit` 对应的建议值）：`CNY`（元）、`CNY_per_share`（元/股）、`pct`（百分数，12 表示 12%）、`ratio`（小数，0.12 表示 12%）、`count`、`years`、`trading_days`、`bool`、`enum`、`code`。`unit: sign` 已取消（C5 裁定），见 §1.5。
 - **P0 / P1**：P0 = 分类器（T-B30a 的 15 键）或 P0 策略卡（`catalog.md` 的 9 项：G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01）必需；P1 = 只被 P1 卡或验证模块引用。
 - 【待核实】= 仓库文档里找不到确证，需 T-B05（麦蕊实测）或架构师确认；【建议】= 研究员提出的口径，尚未经裁定。
 
@@ -87,8 +87,8 @@
 
 ### 1.5 单位与 `unit: sign`
 
-- 分类器规则 `SH5/SW2`（`f.ma_trend`）、`SW3`（`f.momentum_60d`）写 `unit: sign`，只比较 `> 0`。本文给这两个特征定义了有意义的数值单位 `pct`（文本模板会显示 `{v}`），因此 `feature_catalog.unit = pct`。
-- `horizon_classifier.md` 规定“导入器拒收与 feature_catalog 单位不一致的规则”。**需架构师确认**：导入器把 `unit: sign` 视为“任何数值单位均兼容”，否则这两条规则会被拒收（见 §13 冲突 C5）。
+- **已定（C5 裁定，T-R11a）**：不设 `unit: sign`。分类器规则 `SH5/SW2`（`f.ma_trend`）、`SW3`（`f.momentum_60d`）改为 `unit: pct`，与 `feature_catalog.unit = pct` 一致；“只判符号”用阈值 0 表达（`op: gt, value: 0`），文本模板显示 `{v}%`。
+- 判定语义不变（null 仍按缺失处理，0 不加分），导入器“拒收单位不一致的规则”的约束照常适用，无需特例。
 - 只经 `rank_pct` 使用的特征（换手、波动、振幅）单位不影响分类结果，但仍须在 catalog 写明。
 
 ### 1.6 数值精度
@@ -693,7 +693,7 @@ features:
 | C2 | plan 第 3258 / 2681 行：“`delisting` 即退市风险警示” | 本文：`delisting` = 退市整理（含“退”），退市风险警示 = `star_st` | **术语冲突**（结果不变） | 架构师改 plan 措辞；后端改 `content.py` 第 53 行 |
 | C3 | `horizon_classifier.md` `rank_pct_universe`（ST 不剔除、上市 ≥ 20 日） vs plan 2.12.1 第 1161 行“因子池排除 ST/*ST、退市整理、上市不满 60 日” | 分类器沿用自身口径（§1.4）；L-01 等策略可另用因子池 | **口径冲突（已知、有意）** | 架构师在 plan 2.12.1 注明“分类器分位例外” |
 | C4 | 裁定 R9：T-R11 依赖 T-B35；T-B30a 依赖 T-R11 | 本文已完成；但若干来源依赖 T-B05 实测，未核实项均标【待核实】（§11 V1–V12），主口径尽量用已实测的日线 | 依赖补充 | T-B05 核实后，T-B30a 才能把对应键从 `declared` 升级 |
-| C5 | `horizon_classifier.md`：导入器拒收与 catalog 单位不一致的规则；SH5/SW2/SW3 写 `unit: sign` | 本文给 `f.ma_trend`、`f.momentum_60d` 定 `unit: pct` | **潜在冲突** | 架构师：导入器把 `sign` 视为与任意数值单位兼容，或改规则单位 |
+| C5 | `horizon_classifier.md`：导入器拒收与 catalog 单位不一致的规则；SH5/SW2/SW3 写 `unit: sign` | 本文给 `f.ma_trend`、`f.momentum_60d` 定 `unit: pct` | **已解决（T-R11a）** | 规则改为 `unit: pct`、阈值 0；`unit: sign` 取消 |
 | C6 | 分类器“20 日窗口”（交易日）vs DSL `ma(x,n)`（有效 K 线） | §1.2 明确两者不同 | 澄清 | T-B30a / T-B42 实现时区分 |
 | C7 | 因子数 77（任务描述）/ 82（因子页）/ 85（plan 第 962 行） | 本文只引用在 T003 因子表中出现的 ID | 文档不一致（不影响本文） | T-B05 实测因子总数 |
 | C8 | R9 未写统计维度；SH8/SW7/LG7 文本为“该股” | §10.1-1 建议按（用户, 证券） | 歧义 | 用户/架构师确认 |

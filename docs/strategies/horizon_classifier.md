@@ -174,9 +174,9 @@ rules:
         - {id: SH4, input: f.volatility_20d, transform: rank_pct,
            bands: [{op: between, value: [0.4, 0.9], pts: 10}],
            text: "近 20 日波动率位于全市场 {v:pct} 分位（0.4–0.9 加分，过低或过高不加）"}
-        - {id: SH5, input: f.ma_trend, unit: sign,
+        - {id: SH5, input: f.ma_trend, unit: pct,      # C5（T-R11a）：原 unit: sign；只判符号，用阈值 0 表达
            bands: [{op: gt, value: 0, pts: 10}],
-           text: "均线趋势值 {v}（> 0 为多头排列）"}
+           text: "均线趋势值 {v}%（> 0 为多头排列）"}
         - {id: SH6, input: profile.horizon_pref,
            bands: [{op: contains, value: short, pts: 15}],
            text: "画像周期偏好：{v}"}
@@ -192,12 +192,12 @@ rules:
         - {id: SW1, input: f.amount_20d_avg, unit: CNY,
            bands: [{op: ge, value: 100000000, pts: 15}, {op: ge, value: 50000000, pts: 8}],
            text: "近 20 日日均成交额 {v:yi} 亿元"}
-        - {id: SW2, input: f.ma_trend, unit: sign,
+        - {id: SW2, input: f.ma_trend, unit: pct,      # C5（T-R11a）：原 unit: sign
            bands: [{op: gt, value: 0, pts: 20}],
-           text: "均线趋势值 {v}（> 0 为多头排列）"}
-        - {id: SW3, input: f.momentum_60d, unit: sign,
+           text: "均线趋势值 {v}%（> 0 为多头排列）"}
+        - {id: SW3, input: f.momentum_60d, unit: pct,  # C5（T-R11a）：原 unit: sign
            bands: [{op: gt, value: 0, pts: 15}],
-           text: "近 60 日动量 {v}（> 0 为上涨）"}
+           text: "近 60 日动量 {v}%（> 0 为上涨）"}
         - {id: SW4, input: f.volatility_20d, transform: rank_pct,
            bands: [{op: le, value: 0.8, pts: 10}],
            text: "近 20 日波动率位于全市场 {v:pct} 分位（≤ 0.8 加分）"}
@@ -392,6 +392,6 @@ plan §2.5.3 还提到 ATR% 和“交易频率”。v1 规则未使用：ATR% �
 - 总则（可得时点、窗口、复权、`rank_pct_universe` 计算细节、单位、精度）：§1；
 - 15 个键逐项口径（F01–F15）：§2；
 - 3 组手算样例（合成数据）：§9；
-- 问题 76/77 复核：§10；与裁定的冲突（含本附录位置、`unit: sign`、因子池口径）：§13。
+- 问题 76/77 复核：§10；与裁定的冲突（含本附录位置、因子池口径）：§13。`unit: sign` 已按 C5 裁定取消，SH5/SW2/SW3 改为 `unit: pct`、阈值 0（T-R11a；判定语义不变，`classifier_version` 不变）。
 
 本节只是指针，不改变第 4 节规则，`classifier_version` 不变。

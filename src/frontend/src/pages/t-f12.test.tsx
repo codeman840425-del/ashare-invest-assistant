@@ -141,7 +141,8 @@ describe('候选信号卡详情页补全', () => {
     await waitFor(() => expect(screen.getByTestId('sg-refresh')).not.toBeDisabled(), W);
     fireEvent.click(screen.getByTestId('sg-refresh'));
     expect(await screen.findByTestId('sg-refresh-error', undefined, W)).toHaveTextContent(/刷新过于频繁，请 \d+ 秒后再试/);
-  });
+    // 干净检出全量并行时本用例跨两次跳转约 5.3 秒，用例总时限放宽到 20 秒（单步等待仍为 5 秒）
+  }, 20_000);
 
   it('LLM 说明：显示 llm_call_id', async () => {
     const llm = { ...sgBank, explanation: { source: 'llm' as const, text: '示例：LLM 改写的说明', llm_call_id: uid(77) } };

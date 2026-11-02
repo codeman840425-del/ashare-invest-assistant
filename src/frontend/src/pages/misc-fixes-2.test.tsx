@@ -86,7 +86,7 @@ describe('#36：refresh 以响应体为准', () => {
     const after = rec.seen.slice(rec.seen.findIndex((x) => x.startsWith('POST /api/v1/suggestions/refresh')));
     // 旧实现刷新后另发 GET /suggestions?security_code=&status=active&limit=1 取当前卡；现在以响应体为准
     expect(after.some((x) => x.startsWith('GET /api/v1/suggestions?') && x.includes('security_code=') && x.includes('limit=1'))).toBe(false);
-  });
+  }, 20_000);
 
   it('无变化：changed=false 且 suggestion 是当前卡 → 留在本页并提示没有变化', async () => {
     server.use(http.post(`${API}/suggestions/refresh`, () => HttpResponse.json({ suggestion: sgBank, changed: false, superseded_id: null, data_as_of: sgBank.data_as_of })));

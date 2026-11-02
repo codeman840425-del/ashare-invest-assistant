@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # nginx 限流运行时冒烟（T-O10）：临时网络 + 桩上游（别名 api:8000，恒 200）+ 仓库 nginx.conf 与指定 limits 文件，
 # 正例：登录/注册、导入（写）、全局 /api/ 超限 → 429 RATE_LIMITED 信封 + Retry-After = details.retry_after_s；
+# 证券搜索（T-A04 ⑤）：/securities/search 与带 ?q= 的 /securities 同一 aia_search 桶（5r/s、突发 20）→ 429 + Retry-After；
+#   不带 q 的 /securities/* 不进搜索桶；/securities/* 的 200 / 429 / 502 都只带 Cache-Control: private, no-store（桩上游故意回 public）。
 # 反例：GET /api/v1/imports（列表）不进导入桶；dev 限流文件（limit_req_dry_run）下连发不触发 429、只记日志；超大请求体仍是 413（不被 429 盖住）。
 # 上游动态解析（T-O13，upstream 模式）：路由/前缀/参数/编码原样转发、/health/live 改写带参数、X-Request-Id 透传与重生成、
 # X-Real-IP 覆盖、方法透传与 405；桩上游删掉 → 非 200（通常 502），换一个不同 IP 重建 → 不重启网关即恢复 200（静态 upstream 会一直 502）。
@@ -14,7 +16,7 @@ cleanup() { docker rm -f "$id-gw" "$id-api" "$id-filler" >/dev/null 2>&1 || true
 trap cleanup EXIT
 cat > "$work/stub.conf" <<'CONF'
 events {}
-http { server { listen 8000; client_max_body_size 100m; add_header X-Stub 1 always;
+http { server { listen 8000; client_max_body_size 100m; add_header X-Stub 1 always; add_header Cache-Control "public, max-age=60" always;
   location / { default_type application/json;
     return 200 '{"ok":true,"method":"$request_method","uri":"$request_uri","real_ip":"$http_x_real_ip","rid":"$http_x_request_id"}'; } } }
 CONF
@@ -44,6 +46,8 @@ burst() {  # $1 方法 $2 路径 $3 次数
   for _ in $(seq 1 "$3"); do printf 'url = "http://127.0.0.1:%s%s"\noutput = "/dev/null"\nwrite-out = "%%{http_code}\\n"\n' "$port" "$2" >> "$cfg"; done
   curl -s -X "$1" -K "$cfg" | sort | uniq -c | awk '{printf "%s×%s ", $2, $1}'
 }
+# 响应头里 Cache-Control 恰好一条且为 private, no-store
+cc_only() { [ "$(grep -i '^Cache-Control:' "$1" | tr -d '\r' | tr 'A-Z' 'a-z')" = "cache-control: private, no-store" ]; }
 check_429() {  # $1 方法 $2 路径 $3 期望 retry [$4 = 全局桶：不是 429 就先连发 150 次再试，最多 5 次，避免令牌回补造成的偶发]
   local h="$work/h" b t
   for t in 1 2 3 4 5; do
@@ -56,6 +60,7 @@ check_429() {  # $1 方法 $2 路径 $3 期望 retry [$4 = 全局桶：不是 42
   grep -qi "^Retry-After: $3"$'\r'"\?$" "$h" || bad "$1 $2 Retry-After 应为 $3：$(grep -i retry-after "$h" || echo 无)"
   grep -qi '^Content-Type: application/json' "$h" || bad "$1 $2 429 不是 JSON"
   grep -qi '^X-Request-Id: .' "$h" || bad "$1 $2 429 缺 X-Request-Id"
+  cc_only "$h" || bad "$1 $2 429 的 Cache-Control 应只有 private, no-store：$(grep -i '^Cache-Control' "$h" | tr -d '\r' | tr '\n' '|')"
   python3 - "$b" "$3" <<'PY' && ok "$1 $2 → 429 RATE_LIMITED，Retry-After = retry_after_s = $3" || bad "$1 $2 信封不对：$b"
 import json, sys
 e = json.loads(sys.argv[1])["error"]
@@ -77,6 +82,19 @@ run_prod() {
   [[ "$r" == *"429×"* && "$r" == *"200×"* ]] && ok "全局 /api/ 400 次连发：$r" || bad "全局 /api/ 应部分 429：$r"
   check_429 GET /api/v1/meta/enums 1 refill
   r="$(burst GET /healthz 50)"; [[ "$r" == "200×50 " ]] && ok "反例：/healthz 不限流" || bad "/healthz 被限：$r"
+  sleep 6   # 全局桶回满，再测证券搜索（本段约 60 次，不超全局突发 100）
+  local hs="$work/hs"
+  r="$(burst GET '/api/v1/securities/search?q=60' 21)"; [[ "$r" == "200×21 " ]] && ok "证券搜索 21 次（burst 20 + 1）放行" || bad "搜索前 21 次应放行：$r"
+  check_429 GET '/api/v1/securities/search?q=60' 1
+  r="$(burst GET '/api/v1/securities?q=60' 3)"; [[ "$r" == "429×3 " ]] && ok "/securities?q= 与 /securities/search 同桶 → 429" || bad "/securities?q= 应同样 429：$r"
+  r="$(burst GET '/api/v1/securities?page=2&q=' 2)"; [[ "$r" == "429×2 " ]] && ok "q 在任意位置（含空值）都算搜索" || bad "?page=2&q= 应 429：$r"
+  r="$(burst GET '/api/v1/securities/600000' 30)"; [[ "$r" == "200×30 " ]] && ok "反例：不带 q 的 /securities/* 不进搜索桶" || bad "证券详情被搜索桶限：$r"
+  r="$(burst GET '/api/v1/securities?page=1' 5)"; [[ "$r" == "200×5 " ]] && ok "反例：不带 q 的 /securities 列表不进搜索桶" || bad "/securities?page= 被限：$r"
+  curl -s -o /dev/null -D "$hs" "http://127.0.0.1:$port/api/v1/securities/600000"
+  cc_only "$hs" && ok "/securities/* 200 只带 Cache-Control: private, no-store（上游的 public 被隐去）" \
+    || bad "/securities/* 200 的 Cache-Control 不对：$(grep -i '^Cache-Control' "$hs" | tr -d '\r' | tr '\n' '|')"
+  curl -s -o /dev/null -D "$hs" "http://127.0.0.1:$port/api/v1/meta/enums"
+  grep -qi '^Cache-Control: public' "$hs" && ok "反例：非证券路径保留上游 Cache-Control" || bad "非证券路径的 Cache-Control 被改"
   sleep 6
   head -c 30000000 /dev/zero > "$work/big"
   code="$(curl -s -o /dev/null -w '%{http_code}' -X POST --data-binary @"$work/big" "http://127.0.0.1:$port/api/v1/imports")"
@@ -86,6 +104,7 @@ run_dev() {
   echo "== dev（deploy/nginx/limits.dev.conf）"
   start_gw "$ROOT/deploy/nginx/limits.dev.conf"
   r="$(burst POST /api/v1/auth/login 60)"; [[ "$r" == "200×60 " ]] && ok "反例：dev 下登录 60 次不触发 429" || bad "dev 登录被限：$r"
+  r="$(burst GET '/api/v1/securities/search?q=1' 60)"; [[ "$r" == "200×60 " ]] && ok "反例：dev 下证券搜索 60 次不触发 429" || bad "dev 搜索被限：$r"
   r="$(burst GET /api/v1/meta/enums 600)"; [[ "$r" == "200×600 " ]] && ok "反例：dev 下 /api/ 600 次连发不触发 429" || bad "dev 全局被限：$r"
   docker logs "$id-gw" > "$work/gw.log" 2>&1 || true   # 先落文件再 grep：管道里 grep -q 提前退出会让 docker logs 吃 SIGPIPE，pipefail 下误判
   grep -q 'limiting requests, dry run' "$work/gw.log" && ok "dev 限流 zone 生效（dry run 只记日志）" || bad "dev 日志里没有 dry run 记录"
@@ -132,6 +151,9 @@ PY
   # （以前在给未知名字假 IP 的宿主上，这里会是出口代理的应答）。
   code="$(curl -s -o /dev/null -D "$h" -w '%{http_code}' "$base/health/live")"
   [ "$code" = 502 ] && ! grep -qi '^X-Stub' "$h" && ok "上游删除 → 502（不再连旧 IP，也没有解析到外部）" || bad "上游删除后是 $code（应为网关 502）"
+  curl -s -o /dev/null -D "$h" "$base/api/v1/securities/search?q=1"
+  grep -q '^HTTP/1.1 50[24]' "$h" && cc_only "$h" && ok "上游删除时 /securities/* 的网关 50x 也带 private, no-store" \
+    || bad "/securities/* 50x：$(head -1 "$h" | tr -d '\r')，$(grep -i '^Cache-Control' "$h" | tr -d '\r' || echo 无 Cache-Control)"
   docker exec "$id-gw" sh -c 'nslookup aia-no-such-host-o13 127.0.0.11 2>&1' > "$work/ns.txt" || true
   ! grep -q '^Address: [0-9]' <(grep -v '#53' "$work/ns.txt") && ok "网关里未知名字解析失败（外部 DNS 已断开）" \
     || bad "网关里未知名字被解析成 $(grep '^Address' "$work/ns.txt" | tail -1)"

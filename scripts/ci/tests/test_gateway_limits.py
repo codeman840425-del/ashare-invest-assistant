@@ -289,3 +289,51 @@ def test_non_compose_files_in_compose_dir_ignored(gw_repo: Path) -> None:
 
 def test_repo_compose_dir_has_no_extra_files() -> None:
     assert cgl.extra_compose_files(REPO) == []
+
+
+# ---------- T-A04 ⑤：证券搜索限流 + Cache-Control（规则 11）----------
+
+def test_search_rule_ok_on_repo(gw_repo: Path) -> None:
+    assert cgl.check_search(gw_repo) == []
+    assert cgl.check_rate_limits(gw_repo) == []
+
+
+@pytest.mark.parametrize("rel,old,new,needle", [
+    (cgl.NGINX_CONF, "limit_req zone=aia_search burst=20 nodelay;", "limit_req zone=aia_search burst=50 nodelay;", "burst=20"),
+    (cgl.NGINX_CONF, "limit_req zone=aia_search burst=20 nodelay;", "", "没有 limit_req zone=aia_search"),
+    (cgl.NGINX_CONF, "      proxy_hide_header Cache-Control;\n", "", "proxy_hide_header"),
+    (cgl.NGINX_CONF, '      add_header Cache-Control "private, no-store" always;\n    }\n\n    # 方法透传', "    }\n\n    # 方法透传",
+     "证券 location 需要 add_header"),
+    (cgl.NGINX_CONF, '"~^/api/v1/securities\\?(.*&)?q="         $binary_remote_addr;\n', "", "$aia_search_key 应只把"),
+    (cgl.NGINX_CONF, 'default                                  "";\n  }\n  include', 'default $binary_remote_addr;\n  }\n  include',
+     "$aia_search_key 应只把"),
+    (cgl.LIMITS_PROD, "zone=aia_search:10m rate=5r/s;", "zone=aia_search:10m rate=10r/s;", "aia_search 生产速率应为 5r/s"),
+    (cgl.LIMITS_PROD, "limit_req_zone $aia_search_key zone=aia_search", "limit_req_zone $binary_remote_addr zone=aia_search",
+     "zone aia_search 的键"),
+    (cgl.LIMITS_DEV, "zone=aia_search:10m rate=1000r/s;", "zone=aia_search:10m rate=1r/s;", "aia_search 速率低于生产"),
+])
+def test_search_rule_negative(gw_repo: Path, rel: str, old: str, new: str, needle: str) -> None:
+    _sub(gw_repo, rel, old, new)
+    errs = cgl.check_search(gw_repo) + cgl.check_rate_limits(gw_repo)
+    assert any(needle in e for e in errs), errs
+
+
+@pytest.mark.parametrize("loc", ["@rate_limited", "@payload_too_large", "@header_too_large", "/__aia_errors/414"])
+def test_gateway_envelopes_private_no_store(gw_repo: Path, loc: str) -> None:
+    conf = (gw_repo / cgl.NGINX_CONF).read_text(encoding="utf-8")
+    body = cgl._location_body(cgl.strip_comments(conf), loc)
+    assert body and cgl.NO_STORE in body
+    p = gw_repo / cgl.NGINX_CONF
+    head = f"location = {loc} {{" if loc.startswith("/") else f"location {loc} {{"
+    i = conf.index(head)
+    j = conf.index(cgl.NO_STORE, i)
+    p.write_text(conf[:j] + 'add_header Cache-Control "no-store" always;' + conf[j + len(cgl.NO_STORE):], encoding="utf-8")
+    assert any(f"location {loc} 缺少" in e for e in cgl.check_search(gw_repo))
+
+
+@pytest.mark.parametrize("rel,line", [(cgl.NGINX_CONF, "  proxy_cache_path /tmp/c keys_zone=c:1m;\n"),
+                                      (cgl.LIMITS_PROD, "proxy_cache_path /tmp/c keys_zone=c:1m;\n")])
+def test_proxy_cache_forbidden(gw_repo: Path, rel: str, line: str) -> None:
+    anchor = "  include /etc/nginx/aia-limits.conf;\n" if rel == cgl.NGINX_CONF else "limit_req_zone $aia_search_key"
+    _sub(gw_repo, rel, anchor, line + anchor if rel == cgl.NGINX_CONF else line + anchor)
+    assert any("不得启用 proxy_cache" in e for e in cgl.check_search(gw_repo))

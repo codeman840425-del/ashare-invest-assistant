@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 SUBDIR = "p13_fin_pit"
@@ -491,14 +491,24 @@ def v5i_applies(bdrq: str, plrq: str | None) -> bool:
     return bool(plrq) and bdrq[5:] in QUARTER_ENDS and (plrq == bdrq or plrq[5:] in QUARTER_ENDS)
 
 
-def capital_visible(r: dict) -> dict:
-    """T-R12e 第 1 条 + T-R12f 第 1–3 条：适用 V5i 的行可见 = max(next_trading_day(plrq), next_trading_day(截止日) 09:30)；
-    其余行 = next_trading_day(plrq) 09:30（与财务行一致）。pit_basis 为数组，V5i 适用时含 capital_deadline。
+def capital_visible(r: dict, incremental_first_seen_at: str | None = None) -> dict:
+    """T-R12e 第 1 条 + T-R12f 第 1–3 条 + T-R12g：适用 V5i 的行——
+      首次全量回填写入（无可信 first_seen_at，探针的全历史拉取即属此类）→ max(next_trading_day(plrq),
+        next_trading_day(bdrq 所属报告期截止日) 09:30)，pit_basis 含 capital_deadline；
+      增量采集（传 incremental_first_seen_at）→ max(next_trading_day(plrq), first_seen_at)，不套截止日。
+    其余行 = next_trading_day(plrq) 09:30（与财务行一致）。pit_basis 为数组。
     离线保守近似：next_trading_day(x) ≈ x 的下一自然日；visible_from 为“该日 09:30 起可见”。"""
     b, p = r["_bdrq"], r["_plrq"]
     nxt = lambda x: (to_date(x) + timedelta(days=1)).isoformat()
     if not p:
         return {"visible_from": None, "visible_at": None, "pit_basis": [], "deadline": None}
+    if v5i_applies(b, p) and incremental_first_seen_at:
+        cn = timezone(timedelta(hours=8))
+        fs = datetime.fromisoformat(incremental_first_seen_at.replace("Z", "+00:00")).astimezone(cn)
+        base = datetime.fromisoformat(f"{nxt(p)}T09:30:00+08:00")
+        va = max(base, fs)
+        return {"visible_from": va.date().isoformat(), "visible_at": va.isoformat(timespec="minutes"),
+                "pit_basis": [], "deadline": None, "rule": "incremental_first_seen_at"}
     if v5i_applies(b, p):
         dl = capital_deadline(b)
         vf = max(nxt(p), nxt(dl))
@@ -647,9 +657,11 @@ def pb_at(bar: dict, cap_rows: list, bal_rows: list, verify_pending: list | None
     share_class：⑦ 判定（includes_non_a / a_share_only / None）。
     T-R12f 第 4 条：lists_configured=False（名单未接入）→ share_class_check=unavailable；接入后所有行 = list，
       名单内（share_class_list="A+H"/"A+B"）另打 non_a_share_capital；将来 capital 有区分字段 → field。
-    T-R12e 第 3 条 + T-R12f 第 5–7 条：is_cdr（securities.type=cdr）→ 照常算、verify_pending 加 cdr_unit、
-      basis.exclude_from_s2_coverage=True；不另设行业分位池剔除（type=cdr 本就不在 F43/F48 池）。
-      cdr_unit="zgb≈CDR份数" → mcap = c × zgb；"zgb≈基础股数" → mcap = c × zgb × cdr_per_base_share（逐证券配置）。
+    T-R12e 第 3 条 + T-R12f 第 5–7 条 + T-R12g：is_cdr（securities.type=cdr）→ 照常算、verify_pending 加 cdr_unit
+      （只是值上的标记；S2 池、F43/F48 分位池按 §1.4 本就不含 CDR，不写剔除条款）。
+      cdr_unit="zgb≈CDR份数" → mcap = c × zgb，无需配置，T-B05 确认后即清除 cdr_unit；
+      "zgb≈基础股数" → mcap = c × zgb × cdr_per_base_share（逐证券配置），确认且配置接入后清除。
+      探针不自行清除：mock/样本结论不算 T-B05 确认。
     银行/保险的 verify_pending 只继承标记，照常参与排序（T-R12f）。
     """
     d = d10(bar.get("t") or bar.get("d") or bar.get("trade_date"))
@@ -667,7 +679,6 @@ def pb_at(bar: dict, cap_rows: list, bal_rows: list, verify_pending: list | None
         basis["share_class_probe_verdict"] = share_class
     if is_cdr:
         basis["cdr_unit_verdict"] = cdr_unit or "unverified"
-        basis["exclude_from_s2_coverage"] = True
     mult = cdr_per_base_share if (is_cdr and cdr_unit == "zgb≈基础股数" and cdr_per_base_share) else 1
     hits: set = set()
     c_ = num(bar.get("c"))
@@ -812,8 +823,9 @@ def analyze(raw: dict, plan: dict, first_seen: dict | None = None) -> dict:
           for c in plan.get("capital", [])}
     out["4_capital"]["v5i_backfill"] = {
         "by_code": bf, "verdicts": {c: v["verdict"] for c, v in bf.items()},
-        "rule": "T-R12f 第 1–3 条：bdrq 季末且（plrq=bdrq 或 plrq 季末）→ max(next_trading_day(plrq), "
-                "next_trading_day(bdrq 所属报告期截止日) 09:30)，pit_basis 含 capital_deadline；其余 → plrq"}
+        "rule": "T-R12f 第 1–3 条 + T-R12g：bdrq 季末且（plrq=bdrq 或 plrq 季末）——首次全量回填 → max(next_trading_day(plrq), "
+                "next_trading_day(bdrq 所属报告期截止日) 09:30)，pit_basis 含 capital_deadline；增量 → max(ntd(plrq), "
+                "first_seen_at)；其余 → plrq。探针为全历史拉取 = 首次回填口径"}
     lists = plan.get("share_class_lists") or {}
     lists_on = bool(lists.get("A+H") or lists.get("A+B"))
     out["7_share_class"] = {
@@ -1040,11 +1052,17 @@ def selftest_pure() -> list:
     rc = pb_at({"t": "2025-10-30", "c": 5.0}, capc, bal, is_cdr=True)
     rb = pb_at({"t": "2025-10-30", "c": 5.0}, capc, bal, is_cdr=True, cdr_unit="zgb≈基础股数", cdr_per_base_share=10)
     rk = pb_at({"t": "2025-10-30", "c": 5.0}, capc, bal, ["bank_balance"])["basis"]
-    t("V5j（T-R12f 5–7）：CDR → 照常算、verify_pending cdr_unit、只排除 S2；zgb≈基础股数 → mcap × 10；"
-      "银行只继承标记不排除",
-      rc["value"] == 0.5 and rc["basis"]["verify_pending"] == ["cdr_unit"] and rc["basis"]["exclude_from_s2_coverage"]
+    t("V5j（T-R12f 5–7 + T-R12g）：CDR → 照常算、verify_pending cdr_unit、无剔除字段；zgb≈基础股数 → mcap × 10；"
+      "银行只继承标记",
+      rc["value"] == 0.5 and rc["basis"]["verify_pending"] == ["cdr_unit"]
+      and not any(k.startswith("exclude") for k in rc["basis"])
       and rb["value"] == 5.0 and rb["basis"]["cdr_per_base_share"] == 10
-      and "exclude_from_s2_coverage" not in rk and rk["verify_pending"] == ["bank_balance"], str(rc))
+      and rk["verify_pending"] == ["bank_balance"], str(rc))
+    h1 = capital_rows([{"bdrq": "20250630", "plrq": "2025-06-30"}])[0]
+    t("V5i（T-R12g）：增量采集的季末行 → max(ntd(plrq), first_seen_at)，不套截止日；首次回填 → 截止日",
+      capital_visible(h1, "2025-07-03T01:00:00+00:00")["visible_from"] == "2025-07-03"
+      and capital_visible(h1, "2025-07-03T01:00:00+00:00")["pit_basis"] == []
+      and capital_visible(h1)["pit_basis"] == ["capital_deadline"])
     pc = industry_pct({"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0, "e": 5.0, "f": None, "g": 1.0},
                       {"a": "X", "b": "X", "c": "X", "d": "X", "e": "X", "f": "X", "g": "Y"})
     t("行业分位：null 不进分母、组内 N<5 → null", pc["a"] == 0.0 and pc["e"] == 1.0 and pc["f"] is None

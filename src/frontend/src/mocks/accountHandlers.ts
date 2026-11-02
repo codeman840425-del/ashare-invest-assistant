@@ -20,6 +20,7 @@ import { errorBody, page } from './handlerUtils';
 import { adminPause, adminResume, deleteLicence, licenceEntries, licenceEntryOf, licenceOf, licenceState, mockIngestPaused, mockLicenceSettingsEnabled, patchLicence, putLicence, rateHit, testLicence } from './licenceStore';
 import { NOW, uid } from './fixtures';
 import { ingestAlerts } from './ingestAlerts';
+import { addMockNotification, setNotificationViewer } from './notificationStore';
 
 const API = '/api/v1';
 const REGISTER_KEYS = new Set(['username', 'password', 'display_name', 'invite_code', 'apply_note', 'website', 'form_started_at']);
@@ -35,11 +36,23 @@ const noContent = (status = 204) => new HttpResponse(null, { status });
 const rateLimited = (s: number) =>
   HttpResponse.json(errorBody('RATE_LIMITED', '操作过于频繁（示例）', { retry_after_s: s }) as unknown as Record<string, unknown>, { status: 429, headers: { 'Retry-After': String(s) } });
 
-const PUBLIC = [/^\/meta\//, /^\/health/, /^\/auth\/login$/, /^\/auth\/register$/];
+/** 登录前可读的公开端点（只读） */
+const PUBLIC_READ = [/^\/meta\//, /^\/health/];
+/**
+ * 契约 v0.2.9 #30 ④、§1.3：CSRF 登录前白名单只有 POST /auth/login、POST /auth/register（不校验 X-CSRF-Token，带了也忽略），
+ * 改为 Origin 校验：带 Origin 头且不是本站源 → 403 CSRF_FAILED；不带 Origin 照常处理。
+ * 其余所有写请求（含 /auth/logout、/auth/password、multipart 上传、/admin/*）没有会话 → 401 AUTH_REQUIRED，有会话按双提交校验。
+ */
+export const CSRF_WHITELIST: readonly string[] = ['POST /auth/login', 'POST /auth/register'];
+/** 示例全局请求体上限（契约 §1.3 ①、#22：实际值为 plan 6.1 imports.max_request_bytes，这里只是示例） */
+export const MOCK_MAX_REQUEST_BYTES = 25 * 1024 * 1024;
+function foreignOrigin(request: Request): boolean {
+  const o = request.headers.get('Origin');
+  return o !== null && o !== new URL(request.url).origin;
+}
 
 /**
  * 契约 §1.3 CSRF 双提交：POST/PUT/PATCH/DELETE 须带请求头 X-CSRF-Token，且与 Cookie csrf_token、会话内令牌三者一致，否则 403 CSRF_FAILED。
- * 登录、注册是登录前的请求（还没有令牌），契约未写例外——mock 暂不校验，列为待定（reports/csrf-frontend.md）。
  */
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 function csrfFailed(request: Request): boolean {
@@ -70,17 +83,30 @@ function licenceMetrics(s: DataLicenceStatus, i: number) {
   };
 }
 
+// 示例通知按当前登录用户过滤（#26 ⑤ 的通知只发给证书所有者）
+setNotificationViewer(() => state.currentUserId);
+
 export const accountHandlers = [
   // —— 统一前置：鉴权与审核状态（契约 §1.3）。返回 undefined 时继续交给后续处理器 ——
+  // —— 统一前置（契约 v0.2.9 #30 ⑤ §1.3 判定顺序）：413 → 404/405（各处理器）→ 认证 401/403 → CSRF 403 → 503 → 400 → 端点自身。
+  // 前置在请求体解析之前返回，所以未登录发非法 JSON → 401，已登录缺 CSRF 发非法 JSON → 403。返回 undefined 时继续交给后续处理器 ——
   http.all(`${API}/*`, ({ request }) => {
     const path = new URL(request.url).pathname.slice(API.length);
+    const method = request.method.toUpperCase();
+    const len = Number(request.headers.get('Content-Length') ?? 0);
+    if (Number.isFinite(len) && len > MOCK_MAX_REQUEST_BYTES) return err(413, 'PAYLOAD_TOO_LARGE', '请求体超过上限', { max_bytes: MOCK_MAX_REQUEST_BYTES });
     const user = currentUser();
     if (path.startsWith('/admin')) {
-      // §1.3 / §7.9：不是已登录的 admin 一律 404，与不存在的路径无法区分
+      // §1.3 / §7.9：不是已登录的 admin 一律 404，与不存在的路径无法区分（含缺 CSRF 的请求）
       if (!user || user.role !== 'admin' || user.status !== 'approved') return err(404, 'NOT_FOUND', `示例数据未覆盖该端点：${new URL(request.url).pathname}`);
       return csrfFailed(request) ? err(403, 'CSRF_FAILED', 'CSRF 令牌缺失或不符') : undefined;
     }
-    if (PUBLIC.some((re) => re.test(path))) return undefined;
+    if (CSRF_WHITELIST.includes(`${method} ${path}`)) {
+      // ⑤ 注册关闭的 503 先于 Origin 校验（#16）
+      if (path === '/auth/register' && state.registrationMode === 'closed') return undefined;
+      return foreignOrigin(request) ? err(403, 'CSRF_FAILED', '请求来源不是本站') : undefined;
+    }
+    if (!WRITE_METHODS.has(method) && PUBLIC_READ.some((re) => re.test(path))) return undefined;
     if (!user) return err(401, 'AUTH_REQUIRED', '请先登录');
     if (user.status !== 'approved') return err(403, 'ACCOUNT_NOT_APPROVED', '账号未通过审核', { status: user.status });
     if (csrfFailed(request)) return err(403, 'CSRF_FAILED', 'CSRF 令牌缺失或不符');
@@ -108,6 +134,17 @@ export const accountHandlers = [
     state.currentUserId = null;
     setSessionCsrf(null);
     return noContent();
+  }),
+  // 契约 §7.1：改密 → 204 + 轮换 csrf_token（示例不存口令：旧口令不足 10 位按“旧密码错误”处理）
+  http.post(`${API}/auth/password`, async ({ request }) => {
+    const raw = (await request.json().catch(() => null)) as { old_password?: unknown; new_password?: unknown } | null;
+    if (!raw || typeof raw.old_password !== 'string' || typeof raw.new_password !== 'string') return err(400, 'VALIDATION_ERROR', '请求体格式不正确', { fields: [{ field: 'body', issue: 'invalid' }] });
+    if (raw.old_password.length < 10) return err(400, 'VALIDATION_ERROR', '旧密码错误', { field: 'old_password', fields: [{ field: 'old_password', issue: 'invalid' }] });
+    const pwd = raw.new_password;
+    if (pwd.length < 10 || pwd.length > 128 || !/[a-zA-Z]/.test(pwd) || !/\d/.test(pwd)) return err(400, 'VALIDATION_ERROR', '新密码至少 10 位，且包含字母和数字', { field: 'new_password', fields: [{ field: 'new_password', issue: 'invalid' }] });
+    const token = rotateCsrf();
+    setSessionCsrf(token);
+    return new HttpResponse(null, { status: 204, headers: { 'Set-Cookie': `csrf_token=${token}; Path=/; SameSite=Lax` } });
   }),
   http.post(`${API}/auth/register`, async ({ request }) => {
     // §7.1 判定顺序：注册模式 → IP 限速（每次尝试都计，含校验失败与蜜罐命中）→ 字段与邀请码 400 → 409 → 待审核数上限 503 → 蜜罐
@@ -302,7 +339,19 @@ export const accountHandlers = [
     // 评审 d26e1d3 m3：先去掉首尾空白再按 1–200 校验（纯空格视为未填）
     const reason = typeof b.reason === 'string' ? b.reason.trim() : '';
     if (reason.length < 1 || reason.length > ADMIN_REASON_MAX) return validationError([{ field: 'reason', issue: reason.length ? 'too_long' : 'required' }]);
+    const before = licenceState(id);
     const r = op === 'pause' ? adminPause(id, reason) : adminResume(id, reason);
+    // 契约 v0.2.9 #26 ⑤：暂停、恢复成功且状态确实变化时给证书所有者发通知（kind=data_licence、target none、正文不含管理员填写的理由）；幂等重复调用不发
+    if (r === 'ok' && licenceState(id) !== before) {
+      const paused = op === 'pause';
+      addMockNotification({
+        id: nextId(), kind: 'data_licence', severity: paused ? 'important' : 'info',
+        title: paused ? '数据证书已被管理员暂停' : '数据证书已被管理员恢复',
+        body: paused ? '暂停期间不会用你的证书取数，已有缓存照常展示（示例文案）' : '证书将重新验证，验证通过后继续取数（示例文案）',
+        created_at: new Date().toISOString(), read_at: null, security_code: null, name: null,
+        target: { type: 'none', id: null, route: null },
+      }, id);
+    }
     return r === 'ok' ? noContent() : err(409, 'DATA_LICENCE_NOT_SET', '该用户尚未设置数据证书');
   }),
   http.get(`${API}/admin/users`, ({ request }) => {

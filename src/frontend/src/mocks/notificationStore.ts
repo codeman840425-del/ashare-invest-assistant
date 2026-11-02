@@ -7,9 +7,18 @@ import { NOTIFICATIONS, NOW } from './fixtures';
  */
 const readAt = new Map<string, string>();
 let pushed: Notification[] = [];
+/** 只属于某个用户的示例通知（如管理员暂停证书后发给证书所有者）；未登记的通知对示例用户都可见 */
+const owners = new Map<string, string>();
+let viewer: () => string | null = () => null;
+/** 由会话模块注入当前登录用户（避免循环依赖） */
+export function setNotificationViewer(fn: () => string | null) {
+  viewer = fn;
+}
 
 export const allNotifications = (): Notification[] =>
-  [...pushed, ...NOTIFICATIONS].map((n) => ({ ...n, read_at: n.read_at ?? readAt.get(n.id) ?? null }));
+  [...pushed, ...NOTIFICATIONS]
+    .filter((n) => !owners.has(n.id) || owners.get(n.id) === viewer())
+    .map((n) => ({ ...n, read_at: n.read_at ?? readAt.get(n.id) ?? null }));
 
 export const findNotification = (id: string) => allNotifications().find((n) => n.id === id) ?? null;
 
@@ -23,11 +32,13 @@ export function markAllNotificationsRead(at = NOW) {
 }
 
 /** SSE mock 推送 notification 事件时同步写入列表（最新在前） */
-export function addMockNotification(n: Notification) {
+export function addMockNotification(n: Notification, ownerId?: string) {
   pushed = [n, ...pushed.filter((x) => x.id !== n.id)];
+  if (ownerId) owners.set(n.id, ownerId);
 }
 
 export function resetNotificationStore() {
   readAt.clear();
+  owners.clear();
   pushed = [];
 }

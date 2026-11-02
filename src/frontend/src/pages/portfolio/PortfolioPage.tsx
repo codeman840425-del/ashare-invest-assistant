@@ -173,6 +173,29 @@ function PositionsTab({ accountId }: { accountId: string }) {
           },
         ]}
       />
+      <SectorExposure sector={p.exposure.sector} />
+    </div>
+  );
+}
+
+/** 契约 v0.2.9 #30 ③：没有行业归属的持仓合并为“未分类”一项计入 exposure.sector；它不是行业，不参与 RC4 行业集中度 */
+export const UNCLASSIFIED_SECTOR = '未分类';
+function SectorExposure({ sector }: { sector: { name: string; pct: string }[] }) {
+  if (!sector.length) return null;
+  return (
+    <div className="sector-exposure" data-testid="sector-exposure" style={{ marginTop: 12 }}>
+      <div className="muted small" style={{ marginBottom: 4 }}>行业分布（占总资产）</div>
+      <Space wrap size={[6, 6]}>
+        {sector.map((x) => (
+          x.name === UNCLASSIFIED_SECTOR ? (
+            <Tooltip key={x.name} title="没有行业归属的持仓（如不在证券主数据中的可转债）按成本估算合并为此项；它不是行业，不参与行业集中度判断">
+              <Tag data-testid="sector-unclassified">{x.name} <span className="mono">{fmtNum(x.pct)}%</span></Tag>
+            </Tooltip>
+          ) : (
+            <Tag key={x.name} data-testid={`sector-${x.name}`}>{x.name} <span className="mono">{fmtNum(x.pct)}%</span></Tag>
+          )
+        ))}
+      </Space>
     </div>
   );
 }

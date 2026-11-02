@@ -16,12 +16,8 @@ export const PLACEHOLDERS: [string, string][] = [
   ['strategies/:id', '策略详情'],
   ['strategy-cards', '策略知识卡'],
   ['strategy-instances', '我的策略实例'],
-  ['plans', '计划'],
-  // 契约 §5 Notification.target.route 与 /today 计划条件都会跳到 /plans/{id}；计划页（T-F 后续任务）实现前先接占位页，不落 404（评审 8249d6e / 7afbc06 m4）
-  ['plans/:id', '计划详情'],
   ['risk-controls', '风控'],
   ['restrictions', '禁投 / 冷静期 / 屏蔽'],
-  ['alerts', '提醒中心'],
   ['reviews', '复盘'],
   ['discover', '发现'],
 ];
@@ -59,6 +55,11 @@ export const routes: RouteObject[] = [
       { path: 'candidates', lazy: lazyPage(() => import('../pages/research/CandidatesPage'), (m) => m.CandidatesPage) },
       { path: 'candidates/:id', lazy: lazyPage(() => import('../pages/research/CandidateDetailPage'), (m) => m.CandidateDetailPage) },
       { path: 'plan-drafts', lazy: lazyPage(() => import('../pages/plans/PlanDraftsPage'), (m) => m.PlanDraftsPage) },
+      // T-F23 裁定跟进：§7.7B 计划页与提醒页（替换原占位页；/plans/{id} 是 Notification.target 与 /today 计划条件的跳转目标）
+      { path: 'plans', lazy: lazyPage(() => import('../pages/plans/PlansPage'), (m) => m.PlansPage) },
+      { path: 'plans/:id', lazy: lazyPage(() => import('../pages/plans/PlanDetailPage'), (m) => m.PlanDetailPage) },
+      { path: 'alerts', lazy: lazyPage(() => import('../pages/alerts/AlertsPage'), (m) => m.AlertsPage) },
+      { path: 'alerts/:id', lazy: lazyPage(() => import('../pages/alerts/AlertDetailPage'), (m) => m.AlertDetailPage) },
       { path: 'plan-drafts/:id', lazy: lazyPage(() => import('../pages/plans/PlanDraftDetailPage'), (m) => m.PlanDraftDetailPage) },
       { path: 'notifications', lazy: lazyPage(() => import('../pages/NotificationsPage'), (m) => m.NotificationsPage) },
       ...PLACEHOLDERS.map(([path, title]) => ({ path, element: <PlaceholderPage title={title} /> })),

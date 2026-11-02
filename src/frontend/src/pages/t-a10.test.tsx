@@ -188,12 +188,12 @@ describe('#11 放弃草案请求体 {}', () => {
 });
 
 describe('#13 多信号生成草案', () => {
-  it('方向相反且带 STRATEGY_CONFLICT → 409 SIGNAL_NOT_EXECUTABLE{reason_ids}', async () => {
+  it('方向相反 → 400 VALIDATION_ERROR signal_ids（v0.2.9 #30 ③：400 先于 409，原 409 写法作废）', async () => {
     const r = await post('/plan-drafts', { signal_ids: [BUY, REDUCE] });
-    expect(r.status).toBe(409);
+    expect(r.status).toBe(400);
     const b = (await r.json()) as Err;
-    expect(b.error.code).toBe('SIGNAL_NOT_EXECUTABLE');
-    expect((b.error.details.reason_ids as string[]).length).toBeGreaterThan(0);
+    expect(b.error.code).toBe('VALIDATION_ERROR');
+    expect(b.error.details).toEqual({ fields: [{ field: 'signal_ids', issue: expect.any(String) }] });
   });
   it('不同证券 → 400 VALIDATION_ERROR signal_ids', async () => {
     const a = CANDIDATE_SIGNALS.find((c) => c.id === BUY)!;
@@ -218,8 +218,8 @@ describe('#14 整手规则', () => {
     const b = (await r.json()) as Err;
     expect(b.error.details).toEqual({ fields: [{ field: 'chosen_qty', issue: 'lot_rule', min_buy: '100', step: '100' }] });
     expect(lotRuleOf(new ApiError(400, b.error.code, 'x', b.error.details, null))).toEqual({ min_buy: '100', step: '100' });
-    // 契约写法 {field, issue, min_buy, step} 放在 details 顶层时同样能读出（待定项：二者哪种为准）
-    expect(lotRuleOf(new ApiError(400, 'VALIDATION_ERROR', 'x', { field: 'chosen_qty', issue: 'lot_rule', min_buy: 200, step: 1 }, null))).toEqual({ min_buy: '200', step: '1' });
+    // v0.2.9 #30 ③：min_buy、step 只放在 fields[] 元素中，details 顶层不重复——前端只从 fields[] 读
+    expect(lotRuleOf(new ApiError(400, 'VALIDATION_ERROR', 'x', { field: 'chosen_qty', issue: 'lot_rule', min_buy: 200, step: 1 }, null))).toBeNull();
   });
   it('卖出一侧：超过可卖数量提示，不提示递增', () => {
     const d = draftsNow().find((x) => x.id === SELL_DRAFT)!;

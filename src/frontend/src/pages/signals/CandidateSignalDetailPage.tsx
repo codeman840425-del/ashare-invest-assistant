@@ -17,7 +17,7 @@ import { CursorPager } from '../../components/CursorPager';
 import { DIMENSION, HORIZON, REASON_CODE, RISK_CONTROL, RISK_LEVEL, RULE_ROLE, SIGNAL_STATE } from '../../i18n/labels';
 import { causeText } from '../../i18n/signalLabels';
 import { fmtTime } from '../../lib/format';
-import { canDraft, conflictsOf, isTerminal } from '../../lib/signals';
+import { canDraft, isTerminal } from '../../lib/signals';
 import { LifecycleBadge } from './LifecycleBadge';
 import { ReasonCard } from './ReasonCard';
 import { AddToResearch } from '../../features/research/AddToResearch';
@@ -101,15 +101,20 @@ function Metrics({ cs }: { cs: CandidateSignal }) {
 }
 
 /**
- * 方向冲突并列展示（不合成结论）。v0.2.9 #7：是否冲突只看该信号是否有生效中的 STRATEGY_CONFLICT 原因；
- * 对方信号 id 写在该原因 evidence 中，但 Evidence 里用哪个字段契约未写明（待定），对方卡片暂按同证券、方向相反、未结束的信号列出。
+ * 方向冲突（契约 v0.2.9 #30 ③）：对方信号 id 取自 STRATEGY_CONFLICT 原因的 evidence，保留键 `signal.conflict_signal_id`（每个对方信号一条），
+ * 不再按方向推测；对方信号卡片从同证券的候选信号列表中按 id 取。
  */
+export const CONFLICT_EVIDENCE_KEY = 'signal.conflict_signal_id';
 function Conflicts({ cs }: { cs: CandidateSignal }) {
   const reasons = useSignalReasonsAll(cs.id);
-  const hasConflict = (reasons.data?.items ?? []).some((r) => r.code === 'STRATEGY_CONFLICT' && r.status === 'active');
-  const all = useCandidateSignals(hasConflict ? cs.security_code : undefined);
-  const others = hasConflict ? conflictsOf(cs, all.data?.items ?? []) : [];
-  if (!hasConflict || !others.length) return null;
+  const ids = [...new Set((reasons.data?.items ?? [])
+    .filter((r) => r.code === 'STRATEGY_CONFLICT' && r.status === 'active')
+    .flatMap((r) => r.evidence.filter((e) => e.key === CONFLICT_EVIDENCE_KEY && typeof e.value === 'string').map((e) => e.value as string)))];
+  const all = useCandidateSignals(ids.length ? cs.security_code : undefined);
+  const found = all.data?.items ?? [];
+  const others = ids.map((id) => found.find((o) => o.id === id)).filter((o): o is CandidateSignal => !!o);
+  const missing = all.data ? ids.filter((id) => !found.some((o) => o.id === id)) : [];
+  if (!ids.length || !all.data) return null;
   const pair = [cs, ...others];
   return (
     <section className="panel sig-panel conflict" data-testid="signal-conflicts">
@@ -129,6 +134,11 @@ function Conflicts({ cs }: { cs: CandidateSignal }) {
           </div>
         ))}
       </div>
+      {missing.length ? (
+        <div className="small muted" data-testid="conflict-missing">
+          另有 {missing.length} 个对方信号不在当前列表中：{missing.map((id) => <Link key={id} to={`/candidate-signals/${id}`} className="mono" style={{ marginRight: 6 }}>{id.slice(-8)}</Link>)}
+        </div>
+      ) : null}
     </section>
   );
 }

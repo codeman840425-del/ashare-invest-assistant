@@ -1,4 +1,4 @@
-import { Badge, Button, Dropdown, List, Popover, Tag } from 'antd';
+import { Alert, Badge, Button, Dropdown, List, Popover, Tag } from 'antd';
 import { BellOutlined, DownOutlined } from '@ant-design/icons';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useMe, useMarkNotificationRead, useNotifications, useUnreadCount } from '../api/queries';
@@ -67,7 +67,7 @@ function Shell() {
   const unread = useUnreadCount();
   const me = useMe();
   const logout = useLogout();
-  useApiErrorRedirect();
+  const { csrfExpired, dismissCsrf } = useApiErrorRedirect();
   const userMenu = [
     { key: '/settings/profile', label: '投资画像' },
     { key: '/settings/data-licence', label: '数据证书' },
@@ -118,6 +118,13 @@ function Shell() {
           </div>
         ) : null}
         <LicenceBanner status={me.data?.data_licence_status} onOpen={() => navigate('/settings/data-licence')} />
+        {csrfExpired ? (
+          <Alert
+            type="warning" banner closable={{ onClose: dismissCsrf }} data-testid="csrf-refresh"
+            title="页面已过期（安全令牌失效），刚才的操作没有提交。请刷新页面后重试。"
+            action={<Button size="small" onClick={() => window.location.reload()} data-testid="csrf-refresh-btn">刷新页面</Button>}
+          />
+        ) : null}
         <main className="content">
           <Outlet />
         </main>

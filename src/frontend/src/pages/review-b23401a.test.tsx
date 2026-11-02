@@ -132,7 +132,9 @@ describe('N1：409 文案只认自有键', () => {
 
 describe('N7：blocked 信号的 allowed 含 released', () => {
   it('对 blocked 信号拟定草案 → 409 allowed = [released, dismissed]（按枚举顺序）', async () => {
-    const blocked = CANDIDATE_SIGNALS.find((c) => c.state === 'blocked')!;
+    // v0.2.9 #30 ③：因 STRATEGY_CONFLICT 处于 blocked 的信号改为 409 SIGNAL_NOT_EXECUTABLE，这里取其他原因 blocked 的信号
+    const blocked = CANDIDATE_SIGNALS.find((c) => c.id === uid(1016))!;
+    expect(blocked.state).toBe('blocked');
     const r = await apiFetch(`${API}/plan-drafts`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ signal_ids: [blocked.id] }) });
     expect(r.status).toBe(409);
     const b = (await r.json()) as { error: { code: string; details: { from: string; allowed: string[] } } };

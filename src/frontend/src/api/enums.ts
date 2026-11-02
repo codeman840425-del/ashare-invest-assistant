@@ -91,6 +91,10 @@ export const ENUMS = {
   alert_origin: ['plan_condition', 'holding_event', 'user_custom'],
   alert_status: ['new', 'read', 'checked', 'acted', 'dismissed'],
   plan_condition_kind: ['trigger', 'invalidation'],
+  // v0.2.9 #30（§7.7B）
+  plan_status: ['active', 'triggered', 'done', 'cancelled'],
+  plan_condition_type: ['price_above', 'price_below', 'pct_change', 'indicator', 'event', 'date', 'custom'],
+  plan_origin: ['manual', 'plan_draft'],
   data_gap_scope: ['user', 'account', 'security', 'market'],
 } as const;
 
@@ -174,5 +178,8 @@ export type SectorSort = E<'sector_sort'>;
 export type AlertOrigin = E<'alert_origin'>;
 export type AlertStatus = E<'alert_status'>;
 export type PlanConditionKind = E<'plan_condition_kind'>;
+export type PlanStatus = E<'plan_status'>;
+export type PlanConditionType = E<'plan_condition_type'>;
+export type PlanOrigin = E<'plan_origin'>;
 export type DataGapScope = E<'data_gap_scope'>;
 export type ReasonCode = (typeof REASON_CODES)[number];

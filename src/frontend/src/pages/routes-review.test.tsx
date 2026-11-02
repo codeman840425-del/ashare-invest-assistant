@@ -21,10 +21,9 @@ function renderAt(path: string) {
 }
 
 describe('/plans/{id}', () => {
-  it('计划详情页未实现前接占位页（标题“计划详情”），不是 404', async () => {
+  it('计划详情页（T-F23 裁定跟进起为真实页面，§7.7B），不是 404', async () => {
     renderAt(`/plans/${uid(7301)}`);
-    expect(await screen.findByTestId('placeholder')).toBeInTheDocument();
-    expect(screen.getByText('计划详情')).toBeInTheDocument();
+    expect(await screen.findByTestId('plan-current')).toBeInTheDocument();
     expect(screen.queryByTestId('not-found')).toBeNull();
   });
   it('真正不存在的路径仍是 404', async () => {

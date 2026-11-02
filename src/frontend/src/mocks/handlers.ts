@@ -10,6 +10,7 @@ import { resetStrategies, strategyHandlers } from './strategyHandlers';
 import { reasonsNow, resetSignals, signalHandlers, signalsNow } from './signalHandlers';
 import { draftsNow, planHandlers, resetPlanDrafts } from './planHandlers';
 import { candidateHandlers, resetCandidates } from './candidateHandlers';
+import { planAlertHandlers, resetPlansAlerts } from './planAlertHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
 import { allNotifications, findNotification, markAllNotificationsRead, markNotificationRead, resetNotificationStore } from './notificationStore';
 import { resetStreamMock, streamHandlers } from './streamHandlers';
@@ -45,6 +46,7 @@ export function resetMockState() {
   resetSignals();
   resetPlanDrafts();
   resetCandidates();
+  resetPlansAlerts();
 }
 
 /** 浏览器里加一点延迟让加载态可见；测试（node）里不延迟 */
@@ -284,6 +286,8 @@ const routeHandlers = [
   ...planHandlers,
   // 研究候选（T-F23，见 candidateHandlers.ts）
   ...candidateHandlers,
+  // 操作计划与提醒（T-F23 裁定跟进，§7.7B，见 planAlertHandlers.ts）
+  ...planAlertHandlers,
   http.get(`${API}/signals`, ({ request }) => {
     const url = new URL(request.url);
     const code = url.searchParams.get('security_code');

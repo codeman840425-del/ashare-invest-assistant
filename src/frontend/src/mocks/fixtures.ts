@@ -207,7 +207,9 @@ export const PORTFOLIO: Portfolio = {
       positionsRaw.reduce<Record<string, number>>((acc, { s, mv }) => ({ ...acc, [s.sector]: (acc[s.sector] ?? 0) + mv }), {}),
     )
       .sort((a, b) => b[1] - a[1])
-      .map(([name, v]) => ({ name, pct: f2((v / TOTAL) * 100) })),
+      .map(([name, v]) => ({ name, pct: f2((v / TOTAL) * 100) }))
+      // v0.2.9 #30 ③：没有行业归属的持仓（示例可转债，按成本估算）合并为“未分类”，不参与 RC4
+      .concat([{ name: '未分类', pct: f2((CB_MV / TOTAL) * 100) }]),
   },
   // v0.2.9 #1：含无行情的估算行时顶层为 partial
   data_status: 'partial', data_as_of: NOW, gaps: [],
@@ -508,6 +510,22 @@ SPECS.forEach((s, si) => {
     gaps: [...gaps, { key: 'news', reason: 'no_source', message: '本产品不提供新闻资讯，消息维度仅基于公告类型与标题' }],
   });
 });
+
+/**
+ * 契约 v0.2.9 #30 ③：STRATEGY_CONFLICT 的 evidence 每个对方信号一条，key 为保留键 `signal.conflict_signal_id`，
+ * value 为对方信号 id（provider=system、epistemic_type=fact）。示例按同证券、方向相反、未结束的信号写入。
+ */
+const DIR = (a: string) => (a === 'buy' || a === 'add' ? 'buy' : a === 'sell' || a === 'reduce' ? 'sell' : null);
+for (const r of REASONS) {
+  if (r.code !== 'STRATEGY_CONFLICT') continue;
+  const me = CANDIDATE_SIGNALS.find((c) => c.id === r.signal_id);
+  if (!me) continue;
+  const others = CANDIDATE_SIGNALS.filter((o) => o.id !== me.id && o.security_code === me.security_code && DIR(o.proposed_action) && DIR(me.proposed_action) && DIR(o.proposed_action) !== DIR(me.proposed_action));
+  r.evidence = others.map((o, i) => ({
+    id: `EC${i + 1}`, key: 'signal.conflict_signal_id', value: o.id, unit: null, provider: 'system', endpoint: null,
+    data_as_of: r.detected_at, fetched_at: r.detected_at, epistemic_type: 'fact',
+  }));
+}
 
 /** 维度分歧（v0.2.3）：同时存在 bullish 与 bearish；neutral、unknown 不参与 */
 export function isDivergent(views: DimensionView[]): boolean {

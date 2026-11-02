@@ -105,12 +105,16 @@ export function errorText(e: unknown): string {
   return (e as Error)?.message ?? String(e);
 }
 
-export type GlobalErrorAction = 'login' | 'log' | 'none';
+export type GlobalErrorAction = 'login' | 'csrf' | 'log' | 'none';
 
-/** 全局处理（QueryCache/MutationCache.onError）：401 → 登录页；405 → 控制台（v0.2.5 起没有同意门槛） */
+/**
+ * 全局处理（QueryCache/MutationCache.onError）：401 → 登录页；405 → 控制台（v0.2.5 起没有同意门槛）；
+ * 403 CSRF_FAILED → 顶部提示刷新页面，不自动重试（契约 v0.2.9 #30 ④、§1.3）
+ */
 export function globalErrorAction(e: unknown): GlobalErrorAction {
   if (!(e instanceof ApiError)) return 'none';
   if (e.status === 401 && e.code === 'AUTH_REQUIRED') return 'login';
+  if (e.status === 403 && e.code === 'CSRF_FAILED') return 'csrf';
   if (e.status === 405 || e.code === 'METHOD_NOT_ALLOWED') return 'log';
   return 'none';
 }

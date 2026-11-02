@@ -34,7 +34,8 @@ function renderAt(path: string) {
 const PENDING = uid(1012);
 const STALE = uid(7701);
 const SIG_DRAFTED = uid(1011);
-const SIG_BLOCKED = uid(1000);
+// v0.2.9 #30 ③：STRATEGY_CONFLICT 致 blocked 的信号返回 SIGNAL_NOT_EXECUTABLE；这里用 T1_NOT_SELLABLE 致 blocked 的信号
+const SIG_BLOCKED = uid(1016);
 const draftOf = (id: string) => draftsNow().find((d) => d.id === id)!;
 const ALL_YES = CHECKLIST.filter((c) => c.required).map((c) => ({ id: c.id, answer: 'yes' }));
 const okBody = (d: PlanDraft) => ({ checklist_answers: ALL_YES, risk_ack: true, chosen_qty: d.qty_range.min, chosen_price: d.price_range.low, deviation_ack: false });
@@ -54,10 +55,12 @@ describe('纯函数', () => {
     expect(deviationFields(d(), over, '0.01')).toEqual(['chosen_qty', 'chosen_price']);
     expect(deviationFields(d(), 'abc', d().price_range.high)).toEqual([]);
   });
-  it('买入非整手提示；减仓只在超过可卖数量时提示（v0.2.9 #14）', () => {
+  it('买入非整手提示；减仓按 #30 ③ 卖出零股公式提示（v0.2.9 #14 / #30）', () => {
     expect(lotWarning(d(), '150')).toMatch(/按 100 股递增/);
     expect(lotWarning(d(), '200')).toBeNull();
-    expect(lotWarning(draftOf(uid(1022)), '150')).toBeNull();
+    // #30 ③：卖出合法 ⇔ 等于可卖余量，或 ≥ min_buy 且 (数量 − min_buy) 是 step 的整数倍；主板 150 不合法、200 合法
+    expect(lotWarning(draftOf(uid(1022)), '150')).toMatch(/不少于 100 股并按 100 股递增/);
+    expect(lotWarning(draftOf(uid(1022)), '200')).toBeNull();
   });
   it('必答未作答', () => {
     expect(missingRequired(d(), {})).toEqual(['q_counter', 'q_fit', 'q_broker']);
@@ -153,7 +156,8 @@ describe('页面', () => {
     expect(await screen.findByTestId('review-summary')).toHaveTextContent(String(max + 100));
     fireEvent.click(screen.getByTestId('review-ok'));
     await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/plans\//));
-    expect(await screen.findByTestId('placeholder')).toBeInTheDocument();
+    // T-F23 裁定跟进起 /plans/{id} 为真实计划详情页，确认生成的计划可打开
+    expect(await screen.findByTestId('plan-current')).toBeInTheDocument();
     expect(draftOf(PENDING).status).toBe('confirmed');
   });
 

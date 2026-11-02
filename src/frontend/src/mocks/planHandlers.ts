@@ -9,6 +9,7 @@ import type { ChecklistItem, PlanDraft, PlanDraftConfirm } from '../api/planType
 import type { CandidateSignalState, PlanDraftStatus } from '../api/enums';
 import { CANDIDATE_SIGNALS, NOW, PORTFOLIO, QUOTES, sectorOf, uid } from './fixtures';
 import { errorBody, notFound, page, validation } from './handlerUtils';
+import { addPlanFromDraft } from './planAlertHandlers';
 import { patchSignal, reasonsNow, signalsNow, TERMINAL_SIGNAL_STATES } from './signalHandlers';
 
 /** 契约 §4：allowed = 用户从 from 出发、经接口可到达的状态（按枚举顺序）；终态为 [] */
@@ -129,22 +130,22 @@ export const planHandlers = [
     const list = ids.map((id) => all.find((c) => c.id === id));
     if (list.some((c) => !c)) return notFound('候选信号');
     const css = list as CandidateSignal[];
-    // v0.2.9 #13：方向相反（带 STRATEGY_CONFLICT）→ 409 SIGNAL_NOT_EXECUTABLE；跨证券 / 动作不同 / t_leg 不同 → 400 signal_ids
-    const sides = new Set(css.map((c) => (SELL_SIDE.has(c.proposed_action) ? 'sell' : BUY_SIDE.has(c.proposed_action) ? 'buy' : c.proposed_action)));
-    if (sides.has('buy') && sides.has('sell') && new Set(css.map((c) => c.security_code)).size === 1) {
-      const conflict = reasonsNow().filter((r) => ids.includes(r.signal_id) && r.status === 'active' && r.code === 'STRATEGY_CONFLICT').map((r) => r.id);
-      if (conflict.length) return fail(409, 'SIGNAL_NOT_EXECUTABLE', '方向相反的候选信号不能合并拟定草案', { reason_ids: conflict });
-    }
+    // v0.2.9 #30 ③：400 先于 409——方向不同 / 跨证券 / 动作不同 / t_leg 不同 → 400 signal_ids；
+    // 同向但带 STRATEGY_CONFLICT 等未解除原因 → 后面的 409 SIGNAL_NOT_EXECUTABLE
     const same = (k: (c: CandidateSignal) => unknown) => new Set(css.map(k)).size === 1;
     if (!same((c) => c.security_code) || !same((c) => c.proposed_action) || !same((c) => c.t_leg)) {
       return validation('signal_ids', '多个信号须属于同一证券、同一动作（有 t_leg 时 t_leg 也相同）');
     }
     const sim = css.find((c) => c.lifecycle === 'simulating');
     if (sim) return fail(409, 'STRATEGY_VERSION_NOT_RUNNABLE', '模拟期策略不能拟定计划草案', { lifecycle: sim.lifecycle });
+    // v0.2.9 #30 ③ / 验收 5：同向、但其中有信号因 STRATEGY_CONFLICT（生效中）处于 blocked → 409 SIGNAL_NOT_EXECUTABLE；
+    // 其余非 drafted/released（含其他原因的 blocked）→ 409 INVALID_STATE_TRANSITION；再有生效原因 → SIGNAL_NOT_EXECUTABLE
+    const activeR = reasonsNow().filter((r) => ids.includes(r.signal_id) && r.status === 'active');
+    const conflictBlocked = css.filter((c) => c.state === 'blocked' && activeR.some((r) => r.signal_id === c.id && r.code === 'STRATEGY_CONFLICT'));
+    if (conflictBlocked.length) return fail(409, 'SIGNAL_NOT_EXECUTABLE', '信号存在未解除的不可执行原因', { reason_ids: activeR.map((r) => r.id) });
     const bad = css.find((c) => c.state !== 'drafted' && c.state !== 'released');
     if (bad) return fail(409, 'INVALID_STATE_TRANSITION', `候选信号状态为 ${bad.state}，不能拟定计划草案`, { from: bad.state, to: 'drafted', allowed: signalAllowed(bad.state) });
-    const active = reasonsNow().filter((r) => ids.includes(r.signal_id) && r.status === 'active').map((r) => r.id);
-    if (active.length) return fail(409, 'SIGNAL_NOT_EXECUTABLE', '信号存在未解除的不可执行原因', { reason_ids: active });
+    if (activeR.length) return fail(409, 'SIGNAL_NOT_EXECUTABLE', '信号存在未解除的不可执行原因', { reason_ids: activeR.map((r) => r.id) });
     const unexplained = css.find((c) => !c.rule_refs.some((r) => EXPLAINABLE_ROLES.has(r.role) && r.passed === true));
     if (unexplained) return fail(422, 'PLAN_REQUIRES_EXPLAINABLE_SIGNAL', '信号缺少可解释的规则依据');
     seq += 1;
@@ -178,7 +179,8 @@ export const planHandlers = [
     const lotBad = BUY_SIDE.has(d.action)
       ? qty < rule.min_buy || qty % rule.step !== 0 || !Number.isInteger(qty)
       : SELL_SIDE.has(d.action)
-        ? qty > sellable || (qty % sellLot(d.security_code) !== 0 && qty !== sellable)
+        // v0.2.9 #30 ③ 卖出零股公式：卖全部可卖余量，或 数量 ≥ min_buy 且 (数量 − min_buy) 是 step 的整数倍
+        ? qty > sellable || (qty !== sellable && (qty < rule.min_buy || (qty - rule.min_buy) % rule.step !== 0 || !Number.isInteger(qty)))
         : false;
     if (lotBad) {
       return fail(400, 'VALIDATION_ERROR', '数量不符合整手规则', {
@@ -189,7 +191,13 @@ export const planHandlers = [
     seq += 1;
     drafts = drafts.map((x) => (x.id === d.id ? { ...x, status: 'confirmed' } : x));
     for (const id of d.signal_ids) patchSignal(id, { state: 'confirmed' });
-    return HttpResponse.json({ plan_id: uid(7900 + seq), plan_version_no: 1 }, { status: 201 });
+    const planId = uid(7900 + seq);
+    // T-F23 裁定跟进：确认生成的计划进入 /plans 示例存储，计划详情页可打开（§7.7B origin=plan_draft）
+    addPlanFromDraft({
+      id: planId, security_code: d.security_code, name: d.name, account_id: null, action: d.action, qty: String(qty), price: String(price), plan_draft_id: d.id,
+      answers: answers.map((a) => ({ id: a.id, question: d.judgment_checklist.find((c) => c.id === a.id)?.question ?? a.id, answer: a.answer, note: a.note ?? null })),
+    });
+    return HttpResponse.json({ plan_id: planId, plan_version_no: 1 }, { status: 201 });
   }),
 
   http.post(`${API}/plan-drafts/:id/discard`, async ({ params, request }) => {

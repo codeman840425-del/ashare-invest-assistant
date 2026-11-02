@@ -1,5 +1,5 @@
 /** T-A08 前端同步（契约 v0.2.7）：策略实例状态机与游标、证券搜索、复权基准日、“查看全部”目标页接住参数 */
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
@@ -116,7 +116,6 @@ describe('“查看全部”目标页接住参数（页面未实现前用占位�
   it.each([
     // /candidate-signals?tab=released 自 T-F17 起、/plan-drafts?status=pending,stale 自 T-F18 起由真实页面接住，见 t-f17 / t-f18.test.tsx
     ['/risk-controls?tab=events&event=x1', 'tab=events'],
-    ['/plans?status=triggered', 'status=triggered'],
     ['/suggestions?status=invalidated', 'status=invalidated'],
   ])('%s', async (path, param) => {
     const router = renderAt(path);
@@ -124,5 +123,12 @@ describe('“查看全部”目标页接住参数（页面未实现前用占位�
     expect(screen.getByTestId('placeholder-params')).toHaveTextContent(param);
     expect(router.state.location.pathname + router.state.location.search).toBe(path);
     expect(ph).toBeInTheDocument();
+  });
+  it('/plans?status=triggered 由计划页接住（T-F23 裁定跟进起为真实页面）', async () => {
+    const router = renderAt('/plans?status=triggered');
+    expect(await screen.findByTestId('plans-page')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByTestId('plan-status').length).toBeGreaterThan(0));
+    for (const t of screen.getAllByTestId('plan-status')) expect(t).toHaveTextContent('条件已满足');
+    expect(router.state.location.pathname + router.state.location.search).toBe('/plans?status=triggered');
   });
 });

@@ -270,7 +270,7 @@ function ConfirmForm({ d }: { d: PlanDraft }) {
 
 /**
  * v0.2.9 #14：整手不满足 → 400 VALIDATION_ERROR{field:"chosen_qty", issue:"lot_rule", min_buy, step}，不能用偏离确认绕过。
- * min_buy / step 放在 details 顶层还是 details.fields[] 元素里，契约未写明（待定）；两处都读，以服务端为准。
+ * min_buy / step 在 details.fields[] 的 chosen_qty 元素里（v0.2.9 #30 ③ 修正 #14）。
  */
 function lotRuleText(e: unknown, d: PlanDraft): string | null {
   const info = lotRuleOf(e);

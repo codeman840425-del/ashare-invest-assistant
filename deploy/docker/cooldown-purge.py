@@ -9,6 +9,7 @@
   DATABASE_URL                       必须（compose 里是 aia_api 连接串）
   AIA_COOLDOWN_PURGE_INTERVAL_S      间隔秒数，默认 3600，最小 60
   AIA_COOLDOWN_PURGE_ONCE=1          只跑一次并以 0/1 退出（演练、手动补跑）
+  AIA_BACKEND_DIR                    后端代码目录，默认当前目录（镜像 WORKDIR /app/src/backend）
   AIA_COOLDOWN_PURGE_HEARTBEAT       心跳文件，默认 /tmp/cooldown-purge.ok；成功一次就更新 mtime，
                                      健康检查要求它不早于 2×间隔+60 秒
 日志不含连接串：异常只打印类型名。
@@ -29,7 +30,15 @@ def _log(**kw: object) -> None:
     print(json.dumps(kw, ensure_ascii=False), flush=True)
 
 
+def _backend_on_path() -> None:
+    """以脚本方式运行时 sys.path[0] 是 /aia，不含镜像 WORKDIR；与 ``python -m app.workers.*`` 一样把后端目录放进去。"""
+    d = os.environ.get("AIA_BACKEND_DIR") or os.getcwd()
+    if d not in sys.path:
+        sys.path.insert(0, d)
+
+
 def run_once(engine, heartbeat: Path) -> bool:
+    _backend_on_path()
     from app.licences.service import purge_expired_cooldowns
 
     try:

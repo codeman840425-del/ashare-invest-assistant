@@ -95,3 +95,11 @@ def test_interval_floor_is_60s(job, tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("AIA_COOLDOWN_PURGE_HEARTBEAT", str(hb))
     monkeypatch.setenv("AIA_COOLDOWN_PURGE_INTERVAL_S", "5")
     assert job.healthcheck() == 0
+
+
+def test_backend_dir_put_on_sys_path(job, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 以脚本方式运行时 sys.path[0] 是脚本目录：必须把后端目录（WORKDIR）补进去，否则 import app 失败
+    monkeypatch.setattr(sys, "path", [p for p in sys.path])
+    monkeypatch.setenv("AIA_BACKEND_DIR", str(tmp_path))
+    job._backend_on_path()
+    assert sys.path[0] == str(tmp_path)

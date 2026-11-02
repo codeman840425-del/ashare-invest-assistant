@@ -1,5 +1,5 @@
 /**
- * 契约 §4 错误码表（HTTP 错误码，61 个；v0.2.6 加 DATA_LICENCE_*）。运行时以 `/meta/enums.error_codes` 为准；
+ * 契约 §4 错误码表（HTTP 错误码，62 个；v0.2.6 加 DATA_LICENCE_*；v0.2.9 #34 加 URI_TOO_LONG）。运行时以 `/meta/enums.error_codes` 为准；
  * 本表由契约逐行抄录，`errors.test.ts` 解析 docs/api-contract.md 校验一致。
  */
 export const ERROR_CODES = {
@@ -15,6 +15,8 @@ export const ERROR_CODES = {
   NOT_FOUND: 404,
   METHOD_NOT_ALLOWED: 405,
   PAYLOAD_TOO_LARGE: 413,
+  // v0.2.9 内 #34：网关 414（nginx 在路由前返回，后端不产生）；前端按通用错误处理，显示 message
+  URI_TOO_LONG: 414,
   CONFLICT: 409,
   IDEMPOTENCY_CONFLICT: 409,
   VERSION_CONFLICT: 409,

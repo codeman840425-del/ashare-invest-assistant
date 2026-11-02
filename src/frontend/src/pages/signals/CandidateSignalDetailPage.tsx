@@ -13,6 +13,7 @@ import { ActionBadge, ConfidenceTag, DataStatusTag, ErrorBox, GapNote, Loading }
 import { EvidenceChips } from '../../components/EvidenceChips';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
 import { StatValue } from '../../components/StatValue';
+import { CursorPager } from '../../components/CursorPager';
 import { DIMENSION, HORIZON, REASON_CODE, RISK_CONTROL, RISK_LEVEL, RULE_ROLE, SIGNAL_STATE } from '../../i18n/labels';
 import { causeText } from '../../i18n/signalLabels';
 import { fmtTime } from '../../lib/format';
@@ -98,11 +99,16 @@ function Metrics({ cs }: { cs: CandidateSignal }) {
   );
 }
 
-/** 同一证券、未结束、方向相反的信号并列展示（不合成结论） */
+/**
+ * 方向冲突并列展示（不合成结论）。v0.2.9 #7：是否冲突只看该信号是否有生效中的 STRATEGY_CONFLICT 原因；
+ * 对方信号 id 写在该原因 evidence 中，但 Evidence 里用哪个字段契约未写明（待定），对方卡片暂按同证券、方向相反、未结束的信号列出。
+ */
 function Conflicts({ cs }: { cs: CandidateSignal }) {
-  const all = useCandidateSignals(cs.security_code);
-  const others = conflictsOf(cs, all.data?.items ?? []);
-  if (!others.length) return null;
+  const reasons = useSignalReasonsAll(cs.id);
+  const hasConflict = (reasons.data?.items ?? []).some((r) => r.code === 'STRATEGY_CONFLICT' && r.status === 'active');
+  const all = useCandidateSignals(hasConflict ? cs.security_code : undefined);
+  const others = hasConflict ? conflictsOf(cs, all.data?.items ?? []) : [];
+  if (!hasConflict || !others.length) return null;
   const pair = [cs, ...others];
   return (
     <section className="panel sig-panel conflict" data-testid="signal-conflicts">
@@ -285,10 +291,11 @@ function Events({ id }: { id: string }) {
   return (
     <section className="panel sig-panel" data-testid="signal-events">
       <h4>状态历史</h4>
-      {q.isPending ? <Loading /> : q.isError ? <ErrorBox error={q.error} /> : q.data.length ? (
+      {q.isPending ? <Loading /> : q.isError ? <ErrorBox error={q.error} /> : q.items.length ? (
+        <>
         <Timeline
-          items={q.data.map((e) => ({
-            key: `${e.at}-${e.to}`,
+          items={q.items.map((e) => ({
+            key: e.id,
             color: SIGNAL_STATE[e.to]?.color === 'default' ? 'gray' : 'blue',
             content: (
               <div className="small">
@@ -298,6 +305,8 @@ function Events({ id }: { id: string }) {
             ),
           }))}
         />
+        <CursorPager query={q} loaded={q.items.length} testId="signal-events-pager" />
+        </>
       ) : <span className="muted small">暂无状态记录</span>}
     </section>
   );

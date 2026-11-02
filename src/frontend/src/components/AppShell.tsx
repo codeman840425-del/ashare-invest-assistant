@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useMe, useMarkNotificationRead, useNotifications, useUnreadCount } from '../api/queries';
 import { NOTIFY_KIND, SEVERITY } from '../i18n/labels';
 import { IS_MOCK } from '../lib/env';
+import { CONTRACT_VERSION } from '../api/enums';
 import { fmtTime } from '../lib/format';
 import { RiskDisclosure } from './RiskDisclosure';
 import { DesktopGuard } from './DesktopGuard';
@@ -98,7 +99,7 @@ export function AppShell() {
         </header>
         {IS_MOCK ? (
           <div className="sample-banner" data-testid="sample-banner">
-            <b>示例数据</b>：当前由 MSW 返回虚构的证券、行情、持仓、策略与候选信号（按契约 v0.2.8 结构），仅用于开发联调；不连接真实后端、不联网取数。
+            <b>示例数据</b>：当前由 MSW 返回虚构的证券、行情、持仓、策略与候选信号（按契约 {CONTRACT_VERSION} 结构），仅用于开发联调；不连接真实后端、不联网取数。
           </div>
         ) : null}
         <LicenceBanner status={me.data?.data_licence_status} onOpen={() => navigate('/settings/data-licence')} />

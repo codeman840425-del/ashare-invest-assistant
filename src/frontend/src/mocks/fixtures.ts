@@ -11,7 +11,7 @@ import { ENUMS } from '../api/enums';
 import { minuteEnds } from '../lib/market';
 import type {
   Bar, BarsResponse, CandidateSignal, DailyReport, DailyReportListItem, DimensionCell, DimensionMatrixRow, DimensionViewEntry,
-  Evidence, Gap, HealthReady, Me, NonExecutableReason, Notification, Portfolio, QuoteItem, ReleaseCondition, RiskFlag, RuleRef,
+  Evidence, Gap, HealthReady, Me, NonExecutableReason, Notification, Portfolio, PortfolioPosition, QuoteItem, ReleaseCondition, RiskFlag, RuleRef,
   SignalEvent, StrategyConclusion, Suggestion, SuggestionListItem, SuggestionSummary, TerminalAccount, TerminalRow,
   TextWithEvidence, WatchlistItem, WatchlistResponse, Divergence, HorizonAssessment, HorizonCap, HorizonReason,
 } from '../api/types';
@@ -177,8 +177,9 @@ const positionsRaw = SPECS.filter((s) => s.holding).map((s) => {
 });
 const MV = positionsRaw.reduce((a, p) => a + p.mv, 0);
 /**
- * 示例可转债持仓（编排者 2026-11-02 裁定 Q63）：本版没有可转债行情，后端按成本估算市值、盈亏为 0。
- * 不放进 SPECS（没有行情、自选与个股页数据）；前端按代码前缀识别后显示“可转债·无行情”。
+ * 示例可转债持仓（契约 v0.2.9 #1/#2，U3 已定）：不在证券主数据中（security_type=null）、无行情（estimated=true），
+ * market_value / pnl / pnl_pct 为 null，weight_pct 与 total_assets 按成本估算，顶层 data_status=partial。
+ * 不放进 SPECS（没有行情、自选与个股页数据）。
  */
 const CB = { code: '113050.SH', name: '示例转债', qty: 100, sellable: 100, cost: 118.5 };
 const CB_MV = CB.qty * CB.cost;
@@ -191,13 +192,14 @@ export const PORTFOLIO: Portfolio = {
   cash: f2(CASH),
   total_assets: f2(TOTAL),
   positions: positionsRaw
-    .map(({ s, h, mv, pnl }) => ({
-      security_code: s.code, name: s.name, qty: String(h.qty), sellable_qty: String(h.sellable), cost_price: f2(h.cost),
-      market_value: f2(mv), pnl: f2(pnl), pnl_pct: f2(((s.price - h.cost) / h.cost) * 100), weight_pct: f2((mv / TOTAL) * 100),
+    .map(({ s, h, mv, pnl }): PortfolioPosition => ({
+      security_code: s.code, name: s.name, security_type: 'stock', qty: String(h.qty), sellable_qty: String(h.sellable), cost_price: f2(h.cost),
+      market_value: f2(mv), pnl: f2(pnl), pnl_pct: f2(((s.price - h.cost) / h.cost) * 100),
+      weight_pct: f2((mv / TOTAL) * 100), estimated: false,
     }))
     .concat([{
-      security_code: CB.code, name: CB.name, qty: String(CB.qty), sellable_qty: String(CB.sellable), cost_price: CB.cost.toFixed(3),
-      market_value: f2(CB_MV), pnl: '0.00', pnl_pct: '0.00', weight_pct: f2((CB_MV / TOTAL) * 100),
+      security_code: CB.code, name: CB.name, security_type: null, qty: String(CB.qty), sellable_qty: String(CB.sellable), cost_price: CB.cost.toFixed(3),
+      market_value: null, pnl: null, pnl_pct: null, weight_pct: f2((CB_MV / TOTAL) * 100), estimated: true,
     }])
     .sort((a, b) => Number(b.weight_pct) - Number(a.weight_pct)),
   exposure: {
@@ -207,7 +209,8 @@ export const PORTFOLIO: Portfolio = {
       .sort((a, b) => b[1] - a[1])
       .map(([name, v]) => ({ name, pct: f2((v / TOTAL) * 100) })),
   },
-  data_status: 'fresh', data_as_of: NOW, gaps: [],
+  // v0.2.9 #1：含无行情的估算行时顶层为 partial
+  data_status: 'partial', data_as_of: NOW, gaps: [],
 };
 
 // ---------------- 证据 ----------------
@@ -381,7 +384,7 @@ SPECS.forEach((s, si) => {
         reason_ids.push(rid);
         const def = REASON_DEFS[code]!;
         REASONS.push({
-          id: rid, signal_id: csId!, code, description: def.desc,
+          id: rid, signal_id: csId!, security_code: s.code, name: s.name, code, description: def.desc,
           evidence: code === 'POSITION_CAP_REACHED' || code === 'SUSPENDED' ? [ev[0]] : [],
           release_condition: def.rc, status: 'active', detected_at: s.data_as_of, released_at: null, release_evidence: null, released_by: 'system',
         });
@@ -393,7 +396,7 @@ SPECS.forEach((s, si) => {
         reason_ids.push(rid);
         const def = REASON_DEFS[code]!;
         REASONS.push({
-          id: rid, signal_id: csId!, code, description: def.desc, evidence: [], release_condition: def.rc, status: 'released',
+          id: rid, signal_id: csId!, security_code: s.code, name: s.name, code, description: def.desc, evidence: [], release_condition: def.rc, status: 'released',
           detected_at: `${TRADE_DATE}T09:15:00+08:00`, released_at: `${TRADE_DATE}T09:30:00+08:00`,
           release_evidence: { session: 'morning', checked_at: `${TRADE_DATE}T09:30:00+08:00` }, released_by: 'system',
         });
@@ -540,7 +543,7 @@ export const TERMINAL_ROWS: TerminalRow[] = (() => {
     return {
       security_code: s.code, name: s.name, in_watchlist: s.in_watchlist, focus: s.focus,
       quote: s.data_status === 'unavailable' ? null : { price: q.price, change_pct: q.change_pct, amount: q.amount, t: q.t },
-      holding: pos ? { qty: pos.qty, sellable_qty: pos.sellable_qty, cost_price: pos.cost_price, weight_pct: pos.weight_pct, pnl: pos.pnl, pnl_pct: pos.pnl_pct } : null,
+      holding: pos ? { qty: pos.qty, sellable_qty: pos.sellable_qty, cost_price: pos.cost_price, weight_pct: pos.weight_pct, pnl: pos.pnl, pnl_pct: pos.pnl_pct, security_type: pos.security_type, estimated: pos.estimated } : null,
       suggestion: summarize(sg),
       active_reason_count: REASONS.filter((r) => r.status === 'active' && sg.candidate_signal_ids.includes(r.signal_id)).length,
       max_risk_level: maxLevel, data_status: s.data_status, data_as_of: s.data_status === 'unavailable' ? null : s.data_as_of,

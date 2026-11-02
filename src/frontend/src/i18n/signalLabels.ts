@@ -8,23 +8,17 @@ export const REASON_STATUS: Record<ReasonStatus, { text: string; color: string }
 };
 export const RELEASED_BY: Record<'system' | 'user', string> = { system: '系统自动重评解除', user: '你手动解除' };
 
-/** 状态历史 cause 的中文（契约未给枚举，未知值原样显示；遗留问题） */
+/** 状态历史 cause 的中文（契约 v0.2.9 #6 枚举 candidate_signal_event_cause；未知值原样显示） */
 const CAUSE_TEXT: Record<string, string> = {
-  signal_created: '规则信号生成',
-  reason_detected: '检出不可执行原因',
+  executability_check: '可执行性检查',
   reason_released: '原因解除',
-  all_reasons_released: '全部原因解除',
-  plan_draft_created: '已拟定计划草案',
-  plan_confirmed: '已确认计划',
-  user_dismissed: '你已忽略',
-  system_expired: '超过有效期',
-  system_superseded: '被新信号取代',
-  system_invalidated: '失效条件满足',
+  user: '你的操作',
+  expiry: '超过有效期',
+  invalidation: '失效条件满足',
+  supersede: '被新信号取代',
 };
 export function causeText(cause: string): string {
-  const [head, tail] = cause.split(':', 2);
-  const t = CAUSE_TEXT[head];
-  return t ? (tail ? `${t}（${tail}）` : t) : cause;
+  return CAUSE_TEXT[cause] ?? cause;
 }
 
 /** 生命周期徽标：只对“模拟中 / 观察中”等非正式状态加醒目徽标 */

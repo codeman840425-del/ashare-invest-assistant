@@ -25,15 +25,15 @@ export function conflictsOf(sig: CandidateSignal, all: readonly CandidateSignal[
 /** 可拟定计划草案的状态（契约 §7.7：drafted / released） */
 export const canDraft = (s: CandidateSignalState) => s === 'drafted' || s === 'released';
 
-/** 禁投名单要在“限制”里移除（契约 §6.1），不走 /release */
-const VIA_RESTRICTIONS = new Set(['BLOCKLISTED']);
+/** 名单类原因（契约 v0.2.9 #9）：BLOCKLISTED、USER_MUTED 只能删除 /restrictions 解除，/release → 409 */
+export const VIA_RESTRICTIONS: ReadonlySet<string> = new Set(['BLOCKLISTED', 'USER_MUTED']);
 
 /** 自动重评状态（契约 v0.2.7 §7.6：由原因的 status / released_at / released_by 推出） */
 export function reevalText(r: NonExecutableReason): string {
   if (r.status === 'released') return `${RELEASED_BY[r.released_by]}${r.released_at ? ` · ${fmtTime(r.released_at)}` : ''}`;
   if (r.status === 'obsolete') return '所属信号已结束，该原因作废';
+  if (VIA_RESTRICTIONS.has(r.code)) return r.code === 'USER_MUTED' ? '需在限制名单中取消屏蔽后由系统解除' : '需在禁投名单中移除后由系统解除';
   if (r.release_condition.machine_checkable) return `等待系统自动重评（${r.release_condition.check_on.map((c) => CHECK_ON[c]).join('、')}）`;
-  if (VIA_RESTRICTIONS.has(r.code)) return '需在禁投名单中移除后解除';
   return '需你确认后手动解除';
 }
 export const manuallyReleasable = (r: NonExecutableReason) => r.status === 'active' && !r.release_condition.machine_checkable && !VIA_RESTRICTIONS.has(r.code);

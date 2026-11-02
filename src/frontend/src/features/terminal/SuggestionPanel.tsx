@@ -38,7 +38,7 @@ export function SuggestionPanel({ row, suggestion, loading, error }: { row: Term
       <div className="right-scroll">
         {sg.strategies.map((s) => {
           const sig = signalOf(s.candidate_signal_id);
-          const rs = (reasons.data?.items ?? []).filter((r) => r.signal_id === s.candidate_signal_id);
+          const rs = (reasons.data?.items ?? []).filter((r) => r.signal_id === s.candidate_signal_id && r.status === 'active');
           return (
             <div key={s.strategy_version_id} className="strat-mini">
               <div className="sm-head">

@@ -9,7 +9,7 @@ import type {
   Lifecycle, MarketRegime, MarketSession, NotificationKind, NotificationTargetType, ReasonCode, ReasonStatus,
   ReconciliationStatus, RegistrationMode, ReleaseKind, RiskControl, RiskLevel, Role, AccountStatus, RuleRole, Severity,
   SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus, AlertOrigin, AlertStatus, PlanConditionKind,
-  DataGapScope,
+  DataGapScope, SecurityType,
 } from './enums';
 
 export type Decimal = string;
@@ -167,8 +167,13 @@ export interface TerminalHolding {
   /** 摊薄成本 */
   cost_price: Decimal;
   weight_pct: Decimal;
-  pnl: Decimal;
-  pnl_pct: Decimal;
+  /** v0.2.9 #3：无行情时为 null */
+  pnl: Decimal | null;
+  pnl_pct: Decimal | null;
+  /** v0.2.9 #2：null = 不在证券主数据中（本版主要是可转债） */
+  security_type: SecurityType | null;
+  /** v0.2.9 #2：true = 无行情，weight_pct 按成本估算 */
+  estimated: boolean;
 }
 export interface TerminalRow {
   security_code: string;
@@ -340,6 +345,9 @@ export interface CandidateSignal extends DataStatusBlock {
 export interface NonExecutableReason {
   id: Uuid;
   signal_id: Uuid;
+  /** v0.2.9 #8：服务端按所属信号联查，只读 */
+  security_code: string;
+  name: string;
   code: ReasonCode;
   description: string;
   evidence: Evidence[];
@@ -367,13 +375,19 @@ export interface RegistrationMeta { mode: RegistrationMode }
 export interface PortfolioPosition {
   security_code: string;
   name: string;
+  /** v0.2.9 #2：null = 不在证券主数据中（本版主要是按 import_as_is 导入的可转债） */
+  security_type: SecurityType | null;
   qty: Decimal;
   sellable_qty: Decimal;
   cost_price: Decimal;
-  market_value: Decimal;
-  pnl: Decimal;
-  pnl_pct: Decimal;
+  /** v0.2.9 #1：无行情的行为 null（不是 0） */
+  market_value: Decimal | null;
+  pnl: Decimal | null;
+  pnl_pct: Decimal | null;
+  /** 无行情的行按成本 qty × cost_price 估算 */
   weight_pct: Decimal;
+  /** v0.2.9 #2：true = 无行情、weight_pct 按成本估算 */
+  estimated: boolean;
 }
 export interface Portfolio extends DataStatusBlock {
   cash: Decimal;

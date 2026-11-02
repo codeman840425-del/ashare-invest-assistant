@@ -1,6 +1,7 @@
 /** 计划草案的纯函数（T-F18）：状态、偏离、必答、输入校验 */
 import { ENUMS, type PlanDraftStatus } from '../api/enums';
 import type { ChecklistAnswer, PlanDraft } from '../api/planTypes';
+import { ApiError } from '../api/client';
 
 const ALL = ENUMS.plan_draft_status as readonly PlanDraftStatus[];
 /** URL ?status=pending,stale → 合法值数组（契约 §7.7：可多值，默认全部） */
@@ -28,11 +29,31 @@ export function deviationFields(d: PlanDraft, qty: string, price: string): ('cho
   return out;
 }
 
-/** 买入须为每手的整数倍（卖出可卖零股）；只提示，以服务端校验为准 */
+/**
+ * 整手提示（契约 v0.2.9 #14）：qty_range.lot 为买入递增单位（主板、创业板、ETF 100；科创板 1），
+ * 卖出/减仓不能超过可卖数量（草案快照）。只提示，以服务端校验为准。
+ */
 export function lotWarning(d: PlanDraft, qty: string): string | null {
+  if (qtyError(qty)) return null;
+  const q = Number(qty);
+  if (d.action === 'sell' || d.action === 'reduce') {
+    const sellable = Number(d.user_context_snapshot.sellable_qty);
+    return Number.isFinite(sellable) && q > sellable ? `卖出数量不能超过可卖数量 ${d.user_context_snapshot.sellable_qty} 股` : null;
+  }
   const lot = Number(d.qty_range.lot);
-  if (qtyError(qty) || !lot || (d.action !== 'buy' && d.action !== 'add')) return null;
-  return Number(qty) % lot === 0 ? null : `买入数量通常须为 ${d.qty_range.lot} 的整数倍`;
+  if (!lot || lot <= 1) return null;
+  return q % lot === 0 ? null : `买入数量须按 ${d.qty_range.lot} 股递增`;
+}
+
+/** 400 VALIDATION_ERROR 的 lot_rule（v0.2.9 #14）：details 顶层或 details.fields[] 里的 chosen_qty 项 */
+export function lotRuleOf(e: unknown): { min_buy: string | null; step: string | null } | null {
+  if (!(e instanceof ApiError) || e.code !== 'VALIDATION_ERROR' || !e.details) return null;
+  const det = e.details as Record<string, unknown>;
+  const fields = Array.isArray(det.fields) ? (det.fields as Record<string, unknown>[]) : [];
+  const hit = det.field === 'chosen_qty' && det.issue === 'lot_rule' ? det : fields.find((f) => f.field === 'chosen_qty' && f.issue === 'lot_rule');
+  if (!hit) return null;
+  const str = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? String(v) : null);
+  return { min_buy: str(hit.min_buy), step: str(hit.step) };
 }
 
 /** 必答但未作答的清单项 id */

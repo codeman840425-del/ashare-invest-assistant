@@ -7,7 +7,6 @@ import { routes } from '../app/routes';
 import { preloadRoutes } from '../test/preloadRoutes';
 import { ApiError } from '../api/client';
 import { errorText } from '../api/errorPolicy';
-import { normalizeEvents } from '../api/signalQueries';
 import { StatValue } from '../components/StatValue';
 import { causeText } from '../i18n/signalLabels';
 import { conflictsOf, parseTab, reevalText } from '../lib/signals';
@@ -51,14 +50,12 @@ describe('纯函数', () => {
     expect(reevalText(released)).toMatch(/^系统自动重评解除 · /);
     expect(reevalText({ ...manual, status: 'obsolete' })).toMatch(/作废/);
   });
-  it('tab 参数、事件包装、cause 文案', () => {
+  it('tab 参数、cause 文案（v0.2.9 #6 枚举 candidate_signal_event_cause）', () => {
     expect(parseTab('released')).toBe('released');
     expect(parseTab('x')).toBe('signals');
-    const e = [{ from: null, to: 'open', cause: 'signal_created', at: '2026-11-02T09:00:00+08:00' }];
-    expect(normalizeEvents(e)).toEqual(e);
-    expect(normalizeEvents({ items: e })).toEqual(e);
-    expect(normalizeEvents(null)).toEqual([]);
-    expect(causeText('reason_released:SUSPENDED')).toBe('原因解除（SUSPENDED）');
+    expect(causeText('reason_released')).toBe('原因解除');
+    expect(causeText('executability_check')).toBe('可执行性检查');
+    expect(causeText('supersede')).toBe('被新信号取代');
     expect(causeText('unknown_cause')).toBe('unknown_cause');
   });
   it('统计数字旁显示 n，样本少时加标记，n < 5 显示样本不足', () => {
@@ -128,7 +125,7 @@ describe('详情 /candidate-signals/{id}', () => {
     expect(within(reasons).getByTestId(`release-${uid(1002)}`)).toBeInTheDocument();
     expect(within(reasons).queryByTestId(`release-${uid(1001)}`)).toBeNull();
     const events = screen.getByTestId('signal-events');
-    expect(await within(events).findByText(/检出不可执行原因/)).toBeInTheDocument();
+    expect((await within(events).findAllByText(/可执行性检查/)).length).toBeGreaterThan(0);
     const track = screen.getByTestId('signal-tracking');
     expect(await within(track).findByTestId('track-5')).toHaveTextContent(/n=\d+/);
   });

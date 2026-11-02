@@ -106,7 +106,9 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
   const signals = useCandidateSignals(sg.security_code);
   const reasons = useSuggestionReasons(sg.id);
   const sig = s.candidate_signal_id ? signals.data?.items.find((c) => c.id === s.candidate_signal_id) : undefined;
-  const rs = (reasons.data?.items ?? []).filter((r) => r.signal_id === s.candidate_signal_id);
+  // v0.2.9 #12：生效中的在前，其后是已解除的；已作废（所属信号已结束）不显示
+  const rs = (reasons.data?.items ?? []).filter((r) => r.signal_id === s.candidate_signal_id && r.status !== 'obsolete')
+    .sort((a, b) => (a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1));
   return (
     <section className="panel strat-card" data-testid="strategy-card">
       <div className="sc-head">
@@ -133,13 +135,13 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
         <div className="sc-sec blocked">
           <h4>不可执行原因 · 解除条件</h4>
           {rs.map((r) => (
-            <div key={r.id} className="reason">
-              <div><Tag color="orange">{r.code}</Tag><b>{REASON_CODE[r.code]}</b>：{r.description}</div>
+            <div key={r.id} className={`reason reason-${r.status}`} data-testid={`sg-reason-${r.id}`}>
+              <div>{r.status === 'released' ? <Tag color="green">已解除</Tag> : null}<Tag color={r.status === 'active' ? 'orange' : 'default'}>{r.code}</Tag><b>{REASON_CODE[r.code]}</b>：{r.description}</div>
               <div className="rc">
                 解除条件（{RELEASE_KIND[r.release_condition.kind]}）：{r.release_condition.human_text}
                 {r.release_condition.expr ? <code>{r.release_condition.expr}</code> : null}
               </div>
-              <div className="muted small">检查时机：{r.release_condition.check_on.map((c) => CHECK_ON[c]).join('、')} · {r.release_condition.machine_checkable ? '系统自动检查' : '需您操作'} · 检出 {fmtTime(r.detected_at).slice(11)}</div>
+              <div className="muted small">检查时机：{r.release_condition.check_on.map((c) => CHECK_ON[c]).join('、')} · {r.release_condition.machine_checkable ? '系统自动检查' : '需您操作'} · 检出 {fmtTime(r.detected_at).slice(11)}{r.released_at ? ` · 解除 ${fmtTime(r.released_at).slice(11)}` : ''}</div>
             </div>
           ))}
         </div>

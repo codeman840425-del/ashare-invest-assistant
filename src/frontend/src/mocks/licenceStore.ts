@@ -229,6 +229,7 @@ export function adminResume(userId: string, reason: string): 'ok' | 'not_set' {
     e.s = { ...e.s, status: 'pending_verification', paused_until: null };
     e.pollsLeft = 1;
   }
-  adminLicenceLog.push({ userId, op: 'resume', reason, changed });
+  // 契约 v0.2.9 #26①：未被管理员暂停时 resume 幂等 204，状态不变、不写审计
+  if (changed) adminLicenceLog.push({ userId, op: 'resume', reason, changed });
   return 'ok';
 }

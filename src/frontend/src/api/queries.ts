@@ -147,11 +147,14 @@ export function useMarkNotificationRead() {
   });
 }
 
-/** 一张建议卡下全部候选信号的生效原因：一次请求、不分页（v0.2.3 #17，替代拉全量再前端过滤） */
+/**
+ * 一张建议卡下全部候选信号的原因：一次请求、不分页（v0.2.3 #17）。
+ * v0.2.9 #12：建议卡原因列表要显示已解除的原因，传 status=all（默认只有 active）；终端右栏只取 active。
+ */
 export const useSuggestionReasons = (suggestionId: string | undefined) =>
   useQuery({
     queryKey: qk.reasonsBySuggestion(suggestionId ?? ''),
-    queryFn: ({ signal }) => apiGet<{ items: NonExecutableReason[] }>('/non-executable-reasons', { status: 'active', suggestion_id: suggestionId }, signal),
+    queryFn: ({ signal }) => apiGet<{ items: NonExecutableReason[] }>('/non-executable-reasons', { status: 'all', suggestion_id: suggestionId }, signal),
     enabled: !!suggestionId,
   });
 

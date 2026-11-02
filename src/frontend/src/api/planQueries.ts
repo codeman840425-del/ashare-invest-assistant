@@ -87,7 +87,8 @@ export function useConfirmPlanDraft(id: string) {
 export function useDiscardPlanDraft(id: string) {
   const inv = useInvalidateDrafts();
   return useMutation({
-    mutationFn: (note: string | null) => apiPost<PlanDraft>(`/plan-drafts/${encodeURIComponent(id)}/discard`, { note }),
+    // v0.2.9 #11（不兼容）：请求体为 {}，不再带 note
+    mutationFn: () => apiPost<PlanDraft>(`/plan-drafts/${encodeURIComponent(id)}/discard`, {}),
     onSuccess: inv,
   });
 }

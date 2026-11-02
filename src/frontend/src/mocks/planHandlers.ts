@@ -1,5 +1,5 @@
 /**
- * T-F18：计划草案（契约 v0.2.8 §7.7）的 mock。
+ * T-F18：计划草案（契约 v0.2.9 §7.7）的 mock。
  * 示例草案由已拟定草案的候选信号推出（数量、价格区间按示例持仓与资金估算，标“示例”）；
  * 会话内新建 / 确认 / 放弃写在 drafts 里，resetPlanDrafts()（resetMockState 调用）恢复初始状态。
  */
@@ -29,6 +29,12 @@ export const CHECKLIST: ChecklistItem[] = [
 
 const f2 = (n: number) => n.toFixed(2);
 const SELL_SIDE = new Set(['sell', 'reduce']);
+const BUY_SIDE = new Set(['buy', 'add']);
+/** 示例整手规则（契约 v0.2.9 #14；实际取自草案 market_rule_version_id）：科创板起买 200、递增 1；主板、创业板、ETF 100/100 */
+export const isStar = (code: string) => /^68[89]\d{3}\.SH$/.test(code);
+export const lotRule = (code: string) => (isStar(code) ? { min_buy: 200, step: 1 } : { min_buy: 100, step: 100 });
+/** 卖出一侧的“一手”（零股判断用；科创板按 200 处理，以交易所规则为准） */
+const sellLot = (code: string) => (isStar(code) ? 200 : 100);
 
 /** 由候选信号推出一份示例草案 */
 function buildDraft(cs: CandidateSignal, id: string, status: PlanDraftStatus, created_at: string, valid_until: string | null): PlanDraft {
@@ -39,15 +45,17 @@ function buildDraft(cs: CandidateSignal, id: string, status: PlanDraftStatus, cr
   const sellable = Number(pos?.sellable_qty ?? 0);
   const cash = Number(PORTFOLIO.cash);
   const total = Number(PORTFOLIO.total_assets);
-  const lot = 100;
+  const rule = lotRule(cs.security_code);
+  const lot = rule.step;
   const sellSide = SELL_SIDE.has(cs.proposed_action) || cs.t_leg === 'sell_first';
   const low = px * 0.99;
   const high = px * 1.01;
-  let min = lot;
+  const sl = sellLot(cs.security_code);
+  let min = sellSide ? sl : rule.min_buy;
   let max: number;
-  if (!sellSide) max = Math.max(lot, Math.floor(Math.min(cash, total * 0.1) / high / lot) * lot);
-  else if (cs.proposed_action === 'sell') min = max = Math.max(sellable, lot);
-  else max = Math.max(lot, Math.floor(sellable / 2 / lot) * lot);
+  if (!sellSide) max = Math.max(rule.min_buy, Math.floor(Math.min(cash, total * 0.1) / high / lot) * lot);
+  else if (cs.proposed_action === 'sell') min = max = Math.max(sellable, sl);
+  else max = Math.max(sl, Math.floor(sellable / 2 / sl) * sl);
   if (min > max) min = max;
   const stop = cs.stops.stop_loss ? Number(cs.stops.stop_loss) : null;
   const loss = sellSide ? max * (high - low) : max * (stop !== null && stop < high ? high - stop : high * 0.08);
@@ -121,8 +129,16 @@ export const planHandlers = [
     const list = ids.map((id) => all.find((c) => c.id === id));
     if (list.some((c) => !c)) return notFound('候选信号');
     const css = list as CandidateSignal[];
-    // 示例：一次只按同一证券生成（契约未写多信号的合并规则，见 T-F18 遗留问题）
-    if (new Set(css.map((c) => c.security_code)).size > 1) return validation('signal_ids', '示例数据只支持同一证券的信号');
+    // v0.2.9 #13：方向相反（带 STRATEGY_CONFLICT）→ 409 SIGNAL_NOT_EXECUTABLE；跨证券 / 动作不同 / t_leg 不同 → 400 signal_ids
+    const sides = new Set(css.map((c) => (SELL_SIDE.has(c.proposed_action) ? 'sell' : BUY_SIDE.has(c.proposed_action) ? 'buy' : c.proposed_action)));
+    if (sides.has('buy') && sides.has('sell') && new Set(css.map((c) => c.security_code)).size === 1) {
+      const conflict = reasonsNow().filter((r) => ids.includes(r.signal_id) && r.status === 'active' && r.code === 'STRATEGY_CONFLICT').map((r) => r.id);
+      if (conflict.length) return fail(409, 'SIGNAL_NOT_EXECUTABLE', '方向相反的候选信号不能合并拟定草案', { reason_ids: conflict });
+    }
+    const same = (k: (c: CandidateSignal) => unknown) => new Set(css.map(k)).size === 1;
+    if (!same((c) => c.security_code) || !same((c) => c.proposed_action) || !same((c) => c.t_leg)) {
+      return validation('signal_ids', '多个信号须属于同一证券、同一动作（有 t_leg 时 t_leg 也相同）');
+    }
     const sim = css.find((c) => c.lifecycle === 'simulating');
     if (sim) return fail(409, 'STRATEGY_VERSION_NOT_RUNNABLE', '模拟期策略不能拟定计划草案', { lifecycle: sim.lifecycle });
     const bad = css.find((c) => c.state !== 'drafted' && c.state !== 'released');
@@ -156,6 +172,19 @@ export const planHandlers = [
     const fields: string[] = [];
     if (qty < Number(d.qty_range.min) || qty > Number(d.qty_range.max)) fields.push('chosen_qty');
     if (price < Number(d.price_range.low) || price > Number(d.price_range.high)) fields.push('chosen_price');
+    // v0.2.9 #14：整手校验，deviation_ack 不能绕过
+    const rule = lotRule(d.security_code);
+    const sellable = Number(d.user_context_snapshot.sellable_qty);
+    const lotBad = BUY_SIDE.has(d.action)
+      ? qty < rule.min_buy || qty % rule.step !== 0 || !Number.isInteger(qty)
+      : SELL_SIDE.has(d.action)
+        ? qty > sellable || (qty % sellLot(d.security_code) !== 0 && qty !== sellable)
+        : false;
+    if (lotBad) {
+      return fail(400, 'VALIDATION_ERROR', '数量不符合整手规则', {
+        fields: [{ field: 'chosen_qty', issue: 'lot_rule', min_buy: String(rule.min_buy), step: String(rule.step) }],
+      });
+    }
     if (fields.length && b.deviation_ack !== true) return fail(422, 'DEVIATION_ACK_REQUIRED', '数量或价格超出草案区间，需要确认', { fields });
     seq += 1;
     drafts = drafts.map((x) => (x.id === d.id ? { ...x, status: 'confirmed' } : x));
@@ -167,7 +196,7 @@ export const planHandlers = [
     const d = drafts.find((x) => x.id === params.id);
     if (!d) return notFound('计划草案');
     if (d.status !== 'pending') return fail(409, 'INVALID_STATE_TRANSITION', `草案状态为 ${d.status}，不能放弃`, { from: d.status, to: 'discarded', allowed: [] });
-    await request.json().catch(() => null); // {note}：示例不保存
+    await request.json().catch(() => null); // v0.2.9 #11：请求体 {}；旧客户端带来的 note 一律忽略，不报 400、不保存
     const next: PlanDraft = { ...d, status: 'discarded' };
     drafts = drafts.map((x) => (x.id === d.id ? next : x));
     return HttpResponse.json(next);

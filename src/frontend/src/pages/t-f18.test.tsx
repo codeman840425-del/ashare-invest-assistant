@@ -53,8 +53,8 @@ describe('纯函数', () => {
     expect(deviationFields(d(), over, '0.01')).toEqual(['chosen_qty', 'chosen_price']);
     expect(deviationFields(d(), 'abc', d().price_range.high)).toEqual([]);
   });
-  it('买入非整手提示；减仓不提示', () => {
-    expect(lotWarning(d(), '150')).toMatch(/整数倍/);
+  it('买入非整手提示；减仓只在超过可卖数量时提示（v0.2.9 #14）', () => {
+    expect(lotWarning(d(), '150')).toMatch(/按 100 股递增/);
     expect(lotWarning(d(), '200')).toBeNull();
     expect(lotWarning(draftOf(uid(1022)), '150')).toBeNull();
   });
@@ -178,11 +178,20 @@ describe('页面', () => {
 
   it('放弃草案', async () => {
     renderAt(`/plan-drafts/${PENDING}`);
+    const bodies: string[] = [];
+    const onStart = ({ request }: { request: Request }) => {
+      if (request.method === 'POST' && new URL(request.url).pathname.endsWith('/discard')) void request.clone().text().then((t) => bodies.push(t));
+    };
+    server.events.on('request:start', onStart);
     fireEvent.click(await screen.findByTestId('discard-btn'));
-    fireEvent.change(await screen.findByTestId('discard-note'), { target: { value: '示例：先观望' } });
+    // v0.2.9 #11：没有备注输入框，请求体为 {}
+    expect(await screen.findByTestId('discard-hint')).toBeInTheDocument();
+    expect(screen.queryByTestId('discard-note')).toBeNull();
     fireEvent.click(screen.getByTestId('discard-ok'));
     expect(await screen.findByTestId('draft-discarded')).toBeInTheDocument();
     expect(screen.getByTestId('draft-status')).toHaveTextContent('已放弃');
+    server.events.removeListener('request:start', onStart);
+    expect(bodies.map((b) => JSON.parse(b))).toEqual([{}]);
   });
 
   it('候选信号详情：可拟定状态下“拟定计划草案”可用，带 Idempotency-Key，生成后跳到草案', async () => {

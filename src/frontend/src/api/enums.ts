@@ -1,9 +1,9 @@
 /**
- * 契约 v0.2.7 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。
+ * 契约 v0.2.9 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。
  * 运行时以 `GET /meta/enums` 为准；这里的常量用于类型推导与 mock 校验。
  */
 /** 与 `/meta/enums.version` 对齐的契约版本 */
-export const CONTRACT_VERSION = 'v0.2.8';
+export const CONTRACT_VERSION = 'v0.2.9';
 
 export const ENUMS = {
   account_status: ['pending', 'approved', 'rejected', 'disabled'],
@@ -57,6 +57,12 @@ export const ENUMS = {
   lifecycle: ['draft', 'simulating', 'published', 'observing', 'retired'],
   instance_status: ['proposed', 'active', 'paused', 'archived'],
   candidate_signal_state: ['open', 'drafted', 'blocked', 'released', 'confirmed', 'dismissed', 'expired', 'invalidated', 'superseded'],
+  // v0.2.9 #6：/candidate-signals/{id}/events 的 cause（确认草案与用户忽略都用 user）
+  candidate_signal_event_cause: ['executability_check', 'reason_released', 'user', 'expiry', 'invalidation', 'supersede'],
+  // v0.2.9 T-A11（§7.7A 研究候选）
+  research_candidate_status: ['researching', 'watching', 'dropped', 'planned'],
+  research_candidate_origin: ['strategy_screen', 'suggestion', 'manual', 'from_stock'],
+  candidate_decision: ['continue', 'watch', 'drop'],
   reason_status: ['active', 'released', 'obsolete'],
   check_on: ['tick', 'daily_close', 'schedule', 'holding_change', 'cash_update', 'import', 'plan_change', 'user_action'],
   release_kind: ['expr', 'time', 'event', 'user_action'],
@@ -141,6 +147,10 @@ export type Lifecycle = E<'lifecycle'>;
 export type CardRiskLevel = E<'card_risk_level'>;
 export type InstanceStatus = E<'instance_status'>;
 export type CandidateSignalState = E<'candidate_signal_state'>;
+export type CandidateSignalEventCause = E<'candidate_signal_event_cause'>;
+export type ResearchCandidateStatus = E<'research_candidate_status'>;
+export type ResearchCandidateOrigin = E<'research_candidate_origin'>;
+export type CandidateDecision = E<'candidate_decision'>;
 export type ReasonStatus = E<'reason_status'>;
 export type CheckOn = E<'check_on'>;
 export type ReleaseKind = E<'release_kind'>;

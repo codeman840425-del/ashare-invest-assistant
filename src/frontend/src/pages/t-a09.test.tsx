@@ -33,7 +33,7 @@ function renderAt(path: string) {
 }
 
 describe('版本', () => {
-  it('CONTRACT_VERSION = v0.2.8', () => expect(CONTRACT_VERSION).toBe('v0.2.8'));
+  it('CONTRACT_VERSION = v0.2.9（v0.2.9 起）', () => expect(CONTRACT_VERSION).toBe('v0.2.9'));
 });
 
 describe('ETF（v0.2.8 #3–#8）', () => {

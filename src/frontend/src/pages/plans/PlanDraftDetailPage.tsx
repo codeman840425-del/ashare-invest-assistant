@@ -10,7 +10,7 @@ import { ActionBadge, ErrorBox, Loading } from '../../components/common';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
 import { EPISTEMIC, PLAN_DRAFT_STATUS, RISK_CONTROL, RISK_LEVEL } from '../../i18n/labels';
 import { fmtNum, fmtTime } from '../../lib/format';
-import { canAct, canRegenerate, deviationFields, lotWarning, missingRequired, priceError, qtyError } from '../../lib/planDraft';
+import { canAct, canRegenerate, deviationFields, lotRuleOf, lotWarning, missingRequired, priceError, qtyError } from '../../lib/planDraft';
 
 const ANSWERS: { value: ChecklistAnswerValue; label: string }[] = [
   { value: 'yes', label: '是' },
@@ -147,7 +147,6 @@ function ConfirmForm({ d }: { d: PlanDraft }) {
   const [devAck, setDevAck] = useState(false);
   const [review, setReview] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
-  const [discardNote, setDiscardNote] = useState('');
 
   const qErr = qtyError(qty);
   const pErr = priceError(price);
@@ -230,10 +229,10 @@ function ConfirmForm({ d }: { d: PlanDraft }) {
         我已了解：草案由规则自动生成，仅供参考；最大亏损和费用为估算；交易由我在券商端自行完成，盈亏自负。
       </Checkbox>
 
-      {confirm.isError ? <div className="error-text small" style={{ marginTop: 8 }} data-testid="confirm-error">{stateErrorText(confirm.error, 'draft')}{fieldsOf(confirm.error)}</div> : null}
+      {confirm.isError ? <div className="error-text small" style={{ marginTop: 8 }} data-testid="confirm-error">{lotRuleText(confirm.error, d) ?? <>{stateErrorText(confirm.error, 'draft')}{fieldsOf(confirm.error)}</>}</div> : null}
       <Space style={{ marginTop: 12 }} wrap>
         <Button type="primary" disabled={!ready} onClick={() => setReview(true)} data-testid="confirm-btn">确认并生成计划</Button>
-        <Button danger onClick={() => { discard.reset(); setDiscardNote(''); setDiscardOpen(true); }} data-testid="discard-btn">放弃草案</Button>
+        <Button danger onClick={() => { discard.reset(); setDiscardOpen(true); }} data-testid="discard-btn">放弃草案</Button>
       </Space>
       {!ready && blockers.length ? <div className="muted small" style={{ marginTop: 6 }} data-testid="confirm-blockers">还差：{blockers.join('；')}</div> : null}
 
@@ -258,16 +257,27 @@ function ConfirmForm({ d }: { d: PlanDraft }) {
         title="放弃计划草案"
         okText="确认放弃"
         okButtonProps={{ danger: true, loading: discard.isPending, 'data-testid': 'discard-ok' } as ButtonProps}
-        onOk={() => discard.mutate(discardNote.trim() || null, { onSuccess: () => setDiscardOpen(false) })}
+        onOk={() => discard.mutate(undefined, { onSuccess: () => setDiscardOpen(false) })}
         onCancel={() => setDiscardOpen(false)}
         destroyOnHidden
       >
-        <div className="muted small" style={{ marginBottom: 8 }}>放弃后该草案不能再确认；候选信号仍可再次拟定草案。</div>
-        <Input.TextArea rows={3} maxLength={200} showCount value={discardNote} onChange={(e) => setDiscardNote(e.target.value)} placeholder="可选：放弃原因" data-testid="discard-note" />
+        <div className="muted small" style={{ marginBottom: 8 }} data-testid="discard-hint">放弃后该草案不能再确认；候选信号仍可再次拟定草案。</div>
         {discard.isError ? <div className="error-text" style={{ marginTop: 8 }} data-testid="discard-error">{stateErrorText(discard.error, 'draft')}</div> : null}
       </Modal>
     </section>
   );
+}
+
+/**
+ * v0.2.9 #14：整手不满足 → 400 VALIDATION_ERROR{field:"chosen_qty", issue:"lot_rule", min_buy, step}，不能用偏离确认绕过。
+ * min_buy / step 放在 details 顶层还是 details.fields[] 元素里，契约未写明（待定）；两处都读，以服务端为准。
+ */
+function lotRuleText(e: unknown, d: PlanDraft): string | null {
+  const info = lotRuleOf(e);
+  if (!info) return null;
+  if (d.action === 'sell' || d.action === 'reduce') return `数量不符合卖出规则：不能超过可卖数量，不足一手的零股须连同全部余量一次卖出（以服务端校验为准）`;
+  const parts = [info.min_buy ? `不少于 ${info.min_buy} 股` : null, info.step ? `按 ${info.step} 股递增` : null].filter(Boolean);
+  return `数量不符合整手规则${parts.length ? `：买入须${parts.join('，且')}` : ''}（偏离确认不能绕过，以服务端校验为准）`;
 }
 
 /** DEVIATION_ACK_REQUIRED / CHECKLIST_INCOMPLETE 的 details 补充说明 */

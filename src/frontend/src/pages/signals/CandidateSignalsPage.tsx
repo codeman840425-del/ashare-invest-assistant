@@ -1,18 +1,16 @@
 import { useMemo } from 'react';
 import { Input, Segmented, Select, Space, Table, Tag, Tooltip } from 'antd';
-import { useQueries } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
-import { apiGet } from '../../api/client';
 import { ENUMS, type CandidateSignalState, type Horizon } from '../../api/enums';
-import { qk, useToday } from '../../api/queries';
-import { releasedSince, useReleasedReasons, useSignalList, type SignalFilter } from '../../api/signalQueries';
+import { useToday } from '../../api/queries';
+import { releasedSince, useConflictSignalIds, useReleasedReasons, useSignalList, type SignalFilter } from '../../api/signalQueries';
 import type { CandidateSignal, NonExecutableReason } from '../../api/types';
 import { CursorPager } from '../../components/CursorPager';
 import { ActionBadge, ConfidenceTag, ErrorBox } from '../../components/common';
 import { HORIZON, REASON_CODE, SIGNAL_STATE } from '../../i18n/labels';
 import { RELEASED_BY } from '../../i18n/signalLabels';
 import { fmtTime } from '../../lib/format';
-import { conflictsOf, parseTab, type SignalsTab } from '../../lib/signals';
+import { parseTab, type SignalsTab } from '../../lib/signals';
 import { LifecycleBadge } from './LifecycleBadge';
 
 const STATES = ENUMS.candidate_signal_state as readonly CandidateSignalState[];
@@ -56,8 +54,9 @@ function SignalsList({ sp, setParam }: { sp: URLSearchParams; setParam: (k: stri
   };
   const list = useSignalList(f);
   const rows = list.items;
-  // 同股方向冲突：只在已加载的行里比较（遗留问题：跨页的冲突要翻到对应页才能标出）
-  const conflictIds = useMemo(() => new Set(rows.filter((r) => conflictsOf(r, rows).length > 0).map((r) => r.id)), [rows]);
+  // 方向冲突（v0.2.9 #7）：按服务端的 STRATEGY_CONFLICT 原因判断（服务端对全部信号计算，不受分页影响）
+  const loadedIds = useMemo(() => rows.map((r) => r.id), [rows]);
+  const conflictIds = useConflictSignalIds(loadedIds);
   return (
     <>
       <Space wrap style={{ marginBottom: 12 }}>
@@ -137,15 +136,7 @@ function ReleasedTab() {
   const tradeDate = today.data?.trade_date;
   const list = useReleasedReasons(tradeDate);
   const rows = list.items;
-  // 原因里没有证券代码，按 signal_id 取信号补名称（遗留问题：建议原因带 security_code / name）
-  const ids = useMemo(() => Array.from(new Set(rows.map((r) => r.signal_id))), [rows]);
-  const sigs = useQueries({
-    queries: ids.map((id) => ({
-      queryKey: qk.candidateSignal(id),
-      queryFn: ({ signal }: { signal: AbortSignal }) => apiGet<CandidateSignal>(`/candidate-signals/${encodeURIComponent(id)}`, undefined, signal),
-    })),
-  });
-  const byId = new Map(sigs.flatMap((q) => (q.data ? [[q.data.id, q.data] as const] : [])));
+  // v0.2.9 #8：原因自带 security_code / name，不再按 signal_id 逐个取信号
   if (today.isError && !tradeDate) return <ErrorBox error={today.error} prefix="交易日加载失败" />;
   return (
     <>
@@ -164,14 +155,11 @@ function ReleasedTab() {
         columns={[
           {
             title: '候选信号', key: 'sig',
-            render: (_v, r) => {
-              const s = byId.get(r.signal_id);
-              return (
-                <Link to={`/candidate-signals/${r.signal_id}`}>
-                  {s ? <>{s.name} <span className="mono muted">{s.security_code}</span> · {s.strategy_name}</> : <span className="mono">{r.signal_id.slice(-8)}</span>}
-                </Link>
-              );
-            },
+            render: (_v, r) => (
+              <Link to={`/candidate-signals/${r.signal_id}`} data-testid={`released-sig-${r.id}`}>
+                {r.name} <span className="mono muted">{r.security_code}</span>
+              </Link>
+            ),
           },
           { title: '原因', key: 'code', render: (_v, r) => <span><Tag>{r.code}</Tag>{REASON_CODE[r.code]}</span> },
           { title: '解除条件', key: 'rc', render: (_v, r) => r.release_condition.human_text },

@@ -112,52 +112,55 @@ function PositionsTab({ accountId }: { accountId: string }) {
   if (q.isPending) return <Loading />;
   if (q.isError) return <ErrorBox error={q.error} />;
   const p = q.data;
-  // 编排者 2026-11-02 裁定 Q63：可转债本版没有行情——现价、市值、盈亏显示“—”，仓位按成本估算并标“估算”
-  const cb = (r: PortfolioPosition) => isConvertibleBondCode(r.security_code);
-  const hasCb = p.positions.some(cb);
+  // 契约 v0.2.9 #1/#2：无行情的行 estimated=true，现价、市值、盈亏为 null 显示“—”，仓位按成本估算并标“估算”。
+  // 是否无行情、能否进个股页只看 estimated / security_type；代码前缀只用来决定“可转债”这一文案
+  const est = (r: PortfolioPosition) => r.estimated;
+  const hasEst = p.positions.some(est);
+  const hasCb = p.positions.some((r) => r.estimated && isConvertibleBondCode(r.security_code));
+  const noQuoteLabel = (r: PortfolioPosition) => (r.security_type === null && isConvertibleBondCode(r.security_code) ? '可转债·无行情' : '无行情');
   const dashCell = <span className="mono muted">—</span>;
   const estTag = <Tag className="est-tag" style={{ marginInlineStart: 4, marginInlineEnd: 0 }}>估算</Tag>;
   const lastPrice = (r: PortfolioPosition) => {
     const qty = Number(r.qty);
-    return qty > 0 ? Number(r.market_value) / qty : null;
+    return qty > 0 && r.market_value !== null ? Number(r.market_value) / qty : null;
   };
   return (
     <div data-testid="positions-tab">
       <Space size={24} className="kv-line">
-        <span>总资产 <b className="mono">{fmtAmount(p.total_assets)}</b>{hasCb ? <span data-testid="total-est">{estTag}</span> : null}</span>
+        <span>总资产 <b className="mono">{fmtAmount(p.total_assets)}</b>{hasEst ? <span data-testid="total-est">{estTag}</span> : null}</span>
         <span>现金余额 <b className="mono">{fmtAmount(p.cash)}</b></span>
         <DataStatusTag status={p.data_status} asOf={p.data_as_of} gaps={p.gaps} />
         <Radio.Group size="small" value={scope} onChange={(e) => setScope(e.target.value as 'account' | 'all')} optionType="button" data-testid="portfolio-scope"
           options={[{ value: 'account', label: '当前账户' }, { value: 'all', label: '合并全部账户' }]} />
         <span className="muted">成本为摊薄成本（分红计入成本）</span>
       </Space>
-      {hasCb ? (
+      {hasEst ? (
         <div className="muted small" data-testid="cb-note" style={{ margin: '4px 0 8px' }}>
-          持仓含可转债：本版没有可转债行情，其现价、市值、盈亏显示“—”；仓位与总资产按成本估算。
+          {hasCb ? '持仓含可转债：本版没有可转债行情' : '部分持仓没有行情'}，其现价、市值、盈亏显示“—”；仓位与总资产按成本估算。
         </div>
       ) : null}
       <Table<PortfolioPosition>
         size="small" rowKey="security_code" pagination={false} dataSource={p.positions}
         locale={{ emptyText: '暂无持仓' }}
         columns={[
-          { title: '代码', dataIndex: 'security_code', render: (v: string) => (isConvertibleBondCode(v) ? <span className="mono">{v}</span> : <Link className="mono" to={`/stocks/${v}`}>{v}</Link>) },
+          { title: '代码', dataIndex: 'security_code', render: (v: string, r) => (r.security_type === null ? <span className="mono">{v}</span> : <Link className="mono" to={`/stocks/${v}`}>{v}</Link>) },
           {
             title: '名称', dataIndex: 'name',
-            render: (v: string, r) => (cb(r) ? <span>{v}<Tag color="default" style={{ marginInlineStart: 6 }} data-testid={`cb-tag-${r.security_code}`}>可转债·无行情</Tag></span> : v),
+            render: (v: string, r) => (est(r) ? <span>{v}<Tag color="default" style={{ marginInlineStart: 6 }} data-testid={`cb-tag-${r.security_code}`}>{noQuoteLabel(r)}</Tag></span> : v),
           },
           { title: '数量', dataIndex: 'qty', align: 'right', render: (v: string) => <span className="mono">{fmtNum(v, 0)}</span> },
           { title: '可卖', dataIndex: 'sellable_qty', align: 'right', render: (v: string) => <span className="mono">{fmtNum(v, 0)}</span> },
           { title: '摊薄成本', dataIndex: 'cost_price', align: 'right', render: (v: string) => <span className="mono">{fmtNum(v, 3)}</span> },
           {
             title: '现价', key: 'last', align: 'right',
-            render: (_: unknown, r) => { const lp = lastPrice(r); return cb(r) || lp === null ? dashCell : <span className="mono">{fmtNum(lp, 3)}</span>; },
+            render: (_: unknown, r) => { const lp = lastPrice(r); return lp === null ? dashCell : <span className="mono">{fmtNum(lp, 3)}</span>; },
           },
-          { title: '市值', dataIndex: 'market_value', align: 'right', render: (v: string, r) => (cb(r) ? dashCell : <span className="mono">{fmtAmount(v)}</span>) },
-          { title: '浮动盈亏', dataIndex: 'pnl', align: 'right', render: (v: string, r) => (cb(r) ? dashCell : <span className={`mono ${pctClass(v)}`}>{signed(v)}</span>) },
-          { title: '盈亏%', dataIndex: 'pnl_pct', align: 'right', render: (v: string, r) => (cb(r) ? dashCell : <span className={`mono ${pctClass(v)}`}>{signed(v)}%</span>) },
+          { title: '市值', dataIndex: 'market_value', align: 'right', render: (v: string | null) => (v === null ? dashCell : <span className="mono">{fmtAmount(v)}</span>) },
+          { title: '浮动盈亏', dataIndex: 'pnl', align: 'right', render: (v: string | null) => (v === null ? dashCell : <span className={`mono ${pctClass(v)}`}>{signed(v)}</span>) },
+          { title: '盈亏%', dataIndex: 'pnl_pct', align: 'right', render: (v: string | null) => (v === null ? dashCell : <span className={`mono ${pctClass(v)}`}>{signed(v)}%</span>) },
           {
             title: '仓位%', dataIndex: 'weight_pct', align: 'right',
-            render: (v: string, r) => <span className="mono" data-testid={cb(r) ? `cb-weight-${r.security_code}` : undefined}>{fmtNum(v)}%{cb(r) ? estTag : null}</span>,
+            render: (v: string, r) => <span className="mono" data-testid={est(r) ? `cb-weight-${r.security_code}` : undefined}>{fmtNum(v)}%{est(r) ? estTag : null}</span>,
           },
         ]}
       />

@@ -70,8 +70,11 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
       render: (r) => (r.holding ? <span className={Number(r.holding.weight_pct) > 20 ? 'warn' : ''}>{r.holding.weight_pct}%</span> : <span className="muted">—</span>),
     },
     {
-      key: 'pnl', header: '浮盈%', width: 64, numeric: true, value: (r) => (r.holding ? Number(r.holding.pnl_pct) : null),
-      render: (r) => (r.holding ? <span className={pctClass(r.holding.pnl_pct)}>{signed(r.holding.pnl_pct)}%</span> : <span className="muted">—</span>),
+      key: 'pnl', header: '浮盈%', width: 64, numeric: true, value: (r) => (r.holding?.pnl_pct != null ? Number(r.holding.pnl_pct) : null),
+      // v0.2.9 #3：无行情的持仓 pnl_pct 为 null，显示“—”并标“估算”
+      render: (r) => (r.holding?.pnl_pct == null
+        ? <span className="muted">—{r.holding?.estimated ? <span className="small"> 估算</span> : null}</span>
+        : <span className={pctClass(r.holding.pnl_pct)}>{signed(r.holding.pnl_pct)}%</span>),
     },
     {
       key: 'actions', header: '各策略候选信号', width: 170, sortable: false,

@@ -104,7 +104,10 @@ export const strategyHandlers = [
   http.get(`${API}/strategies/:id/versions/:vid/tracking`, ({ params, request }) => {
     const t = STRATEGY_TEMPLATES.find((x) => x.id === params.id);
     if (!t) return json(errorBody('NOT_FOUND', '策略模板不存在（示例数据）'), 404);
-    const scope = new URL(request.url).searchParams.get('scope') === 'site' ? 'site' : 'mine';
+    // v0.2.9 #10：scope 默认 mine，只收 mine|site，其他 → 400
+    const raw = new URL(request.url).searchParams.get('scope');
+    if (raw !== null && raw !== 'mine' && raw !== 'site') return json(errorBody('VALIDATION_ERROR', 'scope 取值 mine|site', { fields: [{ field: 'scope', issue: 'scope 取值 mine|site' }] }), 400);
+    const scope = raw === 'site' ? 'site' : 'mine';
     return json(trackingOf(t, scope));
   }),
   http.get(`${API}/strategies`, ({ request }) => {

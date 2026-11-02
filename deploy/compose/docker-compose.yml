@@ -175,12 +175,16 @@ services:
       MAIRUI_PRO_BASE_URL: ${MAIRUI_PRO_BASE_URL:-https://pro.mairuiapi.com}
       MAIRUI_EGRESS_IP_EXPECTED: ${MAIRUI_EGRESS_IP_EXPECTED:-}
       DATA_LICENCE_SEAL_KEY_VERSION: ${DATA_LICENCE_SEAL_KEY_VERSION:-1}
+      # 不得持有主密钥（plan e56462c 按服务分配）：入口包装发现 APP_MASTER_KEY / app_master_key 即拒绝启动
+      AIA_FORBID_APP_MASTER_KEY: "1"
+    entrypoint: *secret-env-entrypoint
     # 私钥只在这里出现（CI 检查）
     secrets:
       - data_licence_seal_private_keys
       - data_licence_seal_public_keys
     volumes:
       - ../../config:/app/config:ro
+      - *secret-env-mount
     depends_on: *app-depends
     healthcheck:
       <<: *worker-healthcheck

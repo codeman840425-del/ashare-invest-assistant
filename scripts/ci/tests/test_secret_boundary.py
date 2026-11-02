@@ -287,3 +287,39 @@ def test_overlay_cannot_give_cooldown_purge_secrets(repo: Path) -> None:
     errs = _overlay(repo, "services:\n  cooldown-purge:\n    secrets:\n      - app_master_key\n")
     assert any("服务 cooldown-purge 不得挂任何 secret" in e for e in errs), errs
     assert any("服务 cooldown-purge 挂了 app_master_key" in e for e in errs), errs
+
+
+# ---------- M2：APP_MASTER_KEY 按服务分配白名单（plan e56462c，CI 规则 7）----------
+
+
+def test_unregistered_service_fails(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  newsvc:\n    image: busybox\n")
+    assert any("服务 newsvc 未在 MASTER_KEY_ALLOC 白名单登记" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("svc", ["ingest", "beat", "signal-rt", "migrate", "maint-cli", "cooldown-purge"])
+def test_non_owner_cannot_mount_master_key(repo: Path, svc: str) -> None:
+    errs = _overlay(repo, f"services:\n  {svc}:\n    secrets:\n      - app_master_key\n")
+    assert any(f"服务 {svc} 挂了 app_master_key" in e for e in errs), errs
+
+
+def test_whitelist_covers_every_base_service() -> None:
+    import yaml
+    doc = yaml.safe_load((REPO / ccs.BASE_COMPOSE).read_text(encoding="utf-8"))
+    assert set(doc["services"]) <= set(ccs.MASTER_KEY_ALLOC)
+    assert {k for k, v in ccs.MASTER_KEY_ALLOC.items() if v} == {"api", "worker"}
+
+
+def test_ingest_forbid_flag_required_in_base(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, '      AIA_FORBID_APP_MASTER_KEY: "1"\n', "")
+    assert any("服务 ingest 缺少 AIA_FORBID_APP_MASTER_KEY" in e for e in ccs.check(repo))
+
+
+def test_overlay_cannot_disable_ingest_forbid(repo: Path) -> None:
+    errs = _overlay(repo, 'services:\n  ingest:\n    environment:\n      AIA_FORBID_APP_MASTER_KEY: "0"\n')
+    assert any("服务 ingest 的 AIA_FORBID_APP_MASTER_KEY 必须是" in e for e in errs), errs
+
+
+def test_overlay_cannot_bypass_ingest_wrapper(repo: Path) -> None:
+    errs = _overlay(repo, 'services:\n  ingest:\n    entrypoint: ["python"]\n')
+    assert any("服务 ingest 的 entrypoint 必须是入口包装" in e for e in errs), errs

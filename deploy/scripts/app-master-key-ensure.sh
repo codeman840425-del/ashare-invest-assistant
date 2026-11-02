@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
-# APP_MASTER_KEY 密钥文件的启动前检查（T-O11 评审 M1）：compose.sh 每次调用 docker compose 之前执行。
-# 已有部署升级时绝不悄悄生成新主密钥（换主密钥会让邀请码 HMAC、证书去重 HMAC、冷却指纹、登录 IP HMAC、
-# 分页游标、导入文件与 raw_line 的派生密钥全部失效）。按顺序判定：
-#   1. <密钥目录>/app_master_key 已存在 → 直接用（为空则拒绝，不覆盖）；
-#   2. 不存在，但旧来源里有非占位值的 APP_MASTER_KEY（调用方环境变量，或 .env 的最后一个赋值）→ 迁移进密钥文件
-#      （umask 077、600、属主 AIA_APP_UID 默认 10001；不打印值、值不进命令行参数）；只提示“已迁移”，
-#      不改 .env（是否删除 .env 里那一行由人决定）。环境变量与 .env 两处值不一致 → 拒绝（由人决定用哪把）。
-#      值短于 32 个字符（后端会拒绝）→ 拒绝，不迁移。
-#   3. 两边都没有：只有“全新空库”才调用 app-master-keygen.sh 生成新密钥。下列任一条成立都视为“已有数据”，拒绝（退出 3）：
-#      - 导入卷 <卷前缀>_imports 存在且里面有文件（加密的原始交割单）；
-#      - 数据卷 <卷前缀>_pgdata 存在，且库已初始化：有任何非系统、非扩展自带的表（含 public.alembic_version），
-#        或 app.users / app.invite_codes / app.user_data_licences / app.import_files 有行；
-#      - 数据卷存在但没有运行中的 postgres 挂着它、或查询失败 → 无法确认是空库，按“有数据”拒绝（fail-closed）；
-#      - 访问不了 docker → 无法确认，拒绝。
-#      数据卷不存在（首次部署）或库里一张业务表都没有 → 生成。
-# 占位值（与 check_real_secrets.sh 一致）：空、含 < 或 >、changeme/example 开头 → 视为没有。
-# 退出码：0 可以继续（已有 / 已迁移 / 已生成）；2 配置错误；3 拒绝启动（有数据但没有主密钥，或两处旧值冲突）。
+# APP_MASTER_KEY 密钥文件的启动前检查（T-O11 评审 M1/M2，严格按 docs/plan.md e56462c“升级约束”①–⑤）：
+# compose.sh 每次调用 docker compose 之前都执行（文件已存在时也要做 ④ 的一致性比对）。
+# 主密钥只有一份 secret 文件 app_master_key，只挂给 api / worker（plan“按服务分配”表；其余服务不挂、不要求）。
+# 换主密钥会让邀请码 HMAC、证书去重 HMAC、冷却指纹、登录 IP HMAC、分页游标、导入文件派生密钥全部失效，所以：
+#   旧来源 = 调用方环境变量 APP_MASTER_KEY，或 .env 里最后一个 APP_MASTER_KEY 赋值（只做文本解析，不 source）；
+#            占位值（空、含 < 或 >、changeme/example 开头，与 check_real_secrets.sh 一致）视为没有；
+#            环境变量与 .env 两处都有且不一致 → 拒绝（由人决定用哪把）。
+#   ④ 密钥文件已存在、旧来源也有且与文件不一致 → 拒绝启动，等人工确认（读不到文件无法比对时同样拒绝）；
+#     一致 → 用文件，并提示从 .env 删除该行；文件存在但为空 → 拒绝，不覆盖。
+#     旧来源没有 → 直接用文件。
+#   ② 文件不存在、旧来源有非占位值 → 迁移进密钥文件（umask 077、600、属主 AIA_APP_UID 默认 10001；不打印值、
+#     值不进命令行参数），提示从 .env 删除该行（脚本不自动删）；不生成新值。值短于 32 个字符（后端会拒绝）→ 拒绝。
+#   ③ 两者都没有、但数据库已有数据（app.users、app.invite_codes、app.user_data_licences 任一非空）→ 拒绝启动，
+#     提示从备份恢复主密钥；连不上数据库（docker 不可用、数据卷在但没有运行中的 postgres、查询失败）同样拒绝。
+#     另外两项保守检查（plan 未列，只会多拒绝、不会多生成）：app.import_files 有行、导入卷里有文件 → 拒绝。
+#   ① 只有全新部署（文件不存在、旧来源没有、数据库为空——数据卷不存在，或上述表都不存在/都为空）才生成。
+#   ⑤ 主密钥轮换不在 V1 范围：本脚本从不替换已有文件。
+# 退出码：0 可以继续（已有 / 已迁移 / 已生成）；2 配置错误；3 拒绝启动。
 # 用法：app-master-key-ensure.sh <密钥目录> <env 文件> <卷前缀>
 #   AIA_DOCKER   docker 命令（默认 docker；compose.sh 传 "sudo -n docker" 等）
 #   AIA_KEYCHECK_IMAGE  检查导入卷用的镜像（默认取基础 compose 里 postgres 的镜像，部署机上一定有）
@@ -39,13 +40,7 @@ refuse() {
   exit 3
 }
 
-# 1. 已有密钥文件
-if [ -e "$f" ] || [ -L "$f" ]; then
-  [ -s "$f" ] || { echo "$f 存在但为空：拒绝启动，也不覆盖（请人工处理）" >&2; exit 3; }
-  exit 0
-fi
-
-# 2. 旧来源：调用方环境变量 / .env（只做 KEY=VALUE 文本解析，不 source）
+# 旧来源：调用方环境变量 / .env（只做 KEY=VALUE 文本解析，不 source）
 is_real() {  # 非占位值
   case "$1" in ''|*'<'*|*'>'*|changeme*|example*) return 1 ;; esac
   return 0
@@ -66,6 +61,31 @@ if [ -n "$env_val" ] && [ -n "$file_val" ] && [ "$env_val" != "$file_val" ]; the
 fi
 legacy="${env_val:-$file_val}"
 src="${env_val:+环境变量 APP_MASTER_KEY}"; src="${src:-$env_file}"
+
+# ④ / 已有密钥文件
+if [ -e "$f" ] || [ -L "$f" ]; then
+  [ -s "$f" ] || { echo "$f 存在但为空：拒绝启动，也不覆盖（请人工处理）" >&2; exit 3; }
+  [ -n "$legacy" ] || exit 0
+  if [ -r "$f" ]; then cur="$(tr -d '\r\n' < "$f")"
+  else cur="$(sudo -n cat "$f" 2>/dev/null | tr -d '\r\n')" || cur=""
+  fi
+  if [ -z "$cur" ]; then
+    unset legacy env_val file_val
+    echo "拒绝启动（$tag）：$src 里有 APP_MASTER_KEY，但读不到 $f 无法比对两者是否一致（plan 升级约束④）；请人工确认。" >&2
+    exit 3
+  fi
+  if [ "$cur" != "$legacy" ]; then
+    unset cur legacy env_val file_val
+    {
+      echo "拒绝启动（$tag）：$f 与 $src 里的 APP_MASTER_KEY 不一致（plan 升级约束④），无法判断哪把是线上在用的。"
+      echo "  请人工确认：保留文件 → 从 $src 删除 APP_MASTER_KEY；改用旧值 → 先备份再替换文件（见 deploy/runbooks/database.md）。"
+    } >&2
+    exit 3
+  fi
+  unset cur legacy env_val file_val
+  echo "$tag：$f 与 $src 里的值一致，使用密钥文件；请从 $src 删除 APP_MASTER_KEY 行（compose 已不再读它，脚本不自动删除）。" >&2
+  exit 0
+fi
 if [ -n "$legacy" ]; then
   if [ "${#legacy}" -lt 32 ]; then
     echo "拒绝启动（$tag）：$src 里的 APP_MASTER_KEY 短于 32 个字符（后端会拒绝），不迁移；请人工处理。" >&2
@@ -90,7 +110,7 @@ if [ -n "$legacy" ]; then
   mv -n "$tmp" "$f"
   [ -e "$tmp" ] && { echo "$f 已被并发创建，未覆盖" >&2; exit 3; }
   echo "已从 $src 迁移 APP_MASTER_KEY 到 $f（600，属主 $(stat -c %u "$f")）。" >&2
-  [ "$src" = "$env_file" ] && echo "  ${env_file} 里的 APP_MASTER_KEY 行未删除（compose 已不再读它）；确认迁移无误后由人决定是否删除。" >&2
+  [ "$src" = "$env_file" ] && echo "  请确认迁移无误后从 ${env_file} 删除 APP_MASTER_KEY 行（compose 已不再读它；脚本不自动删除）。" >&2
   exit 0
 fi
 
@@ -108,10 +128,7 @@ fi
 if vol_exists "$pg"; then
   cid="$("${DOCKER[@]}" ps -q --filter "volume=$pg" | head -n 1)"
   [ -n "$cid" ] || refuse "数据卷 $pg 已存在、但没有运行中的 postgres 挂着它，无法确认是空库（可先 docker start 原 postgres 容器——docker ps -a --filter volume=$pg——再重试）"
-  sql="SELECT (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE c.relkind IN ('r','p') AND n.nspname NOT IN ('pg_catalog','information_schema')
-       AND n.nspname NOT LIKE 'pg\\_%' AND n.nspname NOT LIKE '\\_timescaledb%' AND n.nspname NOT LIKE 'timescaledb%'
-       AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'))"
+  sql="SELECT 0"
   for t in app.users app.invite_codes app.user_data_licences app.import_files; do
     sql="$sql || '|' || CASE WHEN to_regclass('$t') IS NULL THEN 0 ELSE
       (xpath('/row/c/text()', query_to_xml('SELECT count(*) AS c FROM $t', false, true, '')))[1]::text::bigint END"
@@ -119,11 +136,13 @@ if vol_exists "$pg"; then
   out="$(printf '%s;\n' "$sql" | "${DOCKER[@]}" exec -i "$cid" sh -c \
         'psql -X -q -At -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null)" \
     || refuse "查询 $pg 所在的库失败，无法确认是空库"
-  IFS='|' read -r tables users invites licences files <<< "$out"
-  [[ "$tables" =~ ^[0-9]+$ ]] || refuse "查询 $pg 所在的库返回了无法解析的结果，无法确认是空库"
-  if [ "$tables" != 0 ]; then
-    refuse "库已初始化（$tables 张业务表；app.users=$users，app.invite_codes=$invites，app.user_data_licences=$licences，app.import_files=$files）"
+  IFS='|' read -r _zero users invites licences files <<< "$out"
+  for v in "$users" "$invites" "$licences" "$files"; do
+    [[ "$v" =~ ^[0-9]+$ ]] || refuse "查询 $pg 所在的库返回了无法解析的结果，无法确认是空库"
+  done
+  if [ "$users" != 0 ] || [ "$invites" != 0 ] || [ "$licences" != 0 ] || [ "$files" != 0 ]; then
+    refuse "库里已有数据（app.users=$users，app.invite_codes=$invites，app.user_data_licences=$licences，app.import_files=$files）；请从备份恢复主密钥"
   fi
 fi
-echo "$tag：全新空库（数据卷 $pg 不存在或没有业务表，导入卷为空），生成新主密钥。" >&2
+echo "$tag：全新部署（数据卷 $pg 不存在，或 app.users / invite_codes / user_data_licences / import_files 都为空或不存在；导入卷为空），生成新主密钥。" >&2
 exec "$ROOT/deploy/scripts/app-master-keygen.sh" "$dir"

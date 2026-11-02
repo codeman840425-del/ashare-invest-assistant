@@ -94,16 +94,55 @@ def _assert_key_file(e: Env, expect: str | None = None) -> str:
     return val
 
 
-# ---- 1. 已有密钥文件：直接用 ----
-def test_existing_key_used_untouched(e: Env) -> None:
+# ---- 1 / ④. 已有密钥文件 ----
+@pytest.mark.parametrize("env_body", [None, "POSTGRES_DB=aia\n", f"{VAR}=changeme-local-only\n", f"{VAR}=\n"])
+def test_existing_key_used_untouched(e: Env, env_body: str | None) -> None:
     e.secrets.mkdir()
     k = _key()
     e.key.write_text(k, encoding="utf-8")
-    e.env_file.write_text(f"{VAR}={_key()}\n", encoding="utf-8")   # .env 里另一把也不影响
+    if env_body is not None:
+        e.env_file.write_text(env_body, encoding="utf-8")   # 没有旧值 / 只有占位值
     r = e.run()
     assert r.returncode == 0, r.stderr
     assert e.key.read_text(encoding="utf-8") == k
     assert e.calls() == ""   # 不碰 docker
+    _no_leak(r, e, k)
+
+
+def test_existing_key_conflicts_with_env_file_refused(e: Env) -> None:
+    # plan 升级约束④：secret 文件与旧 .env 都有且不一致 → 拒绝启动，等人工确认；两边都不改
+    e.secrets.mkdir()
+    k, old = _key(), _key()
+    e.key.write_text(k, encoding="utf-8")
+    body = f"{VAR}={old}\n"
+    e.env_file.write_text(body, encoding="utf-8")
+    r = e.run()
+    assert r.returncode == 3 and "不一致" in r.stderr and "④" in r.stderr
+    assert e.key.read_text(encoding="utf-8") == k and e.env_file.read_text(encoding="utf-8") == body
+    assert e.calls() == ""
+    _no_leak(r, e, k, old)
+
+
+def test_existing_key_conflicts_with_process_env_refused(e: Env) -> None:
+    e.secrets.mkdir()
+    k, old = _key(), _key()
+    e.key.write_text(k, encoding="utf-8")
+    r = e.run({VAR: old})
+    assert r.returncode == 3 and "不一致" in r.stderr
+    assert e.key.read_text(encoding="utf-8") == k
+    _no_leak(r, e, k, old)
+
+
+def test_existing_key_same_as_env_file_used_and_prompts_delete(e: Env) -> None:
+    e.secrets.mkdir()
+    k = _key()
+    e.key.write_text(k + "\n", encoding="utf-8")   # 文件末尾换行不算不一致（入口包装同样去掉）
+    body = f"{VAR}={k}\n"
+    e.env_file.write_text(body, encoding="utf-8")
+    r = e.run()
+    assert r.returncode == 0, r.stderr
+    assert "一致" in r.stderr and "删除" in r.stderr
+    assert e.env_file.read_text(encoding="utf-8") == body, ".env 不应被修改"
     _no_leak(r, e, k)
 
 
@@ -126,7 +165,7 @@ def test_migrate_from_env_file(e: Env, fmt: str) -> None:
     r = e.run()
     assert r.returncode == 0, r.stderr
     _assert_key_file(e, k)
-    assert "已从" in r.stderr and "迁移" in r.stderr and "未删除" in r.stderr
+    assert "已从" in r.stderr and "迁移" in r.stderr and "删除 APP_MASTER_KEY 行" in r.stderr and "不自动删除" in r.stderr
     assert e.env_file.read_bytes() == body.encode("utf-8"), ".env 不应被修改"
     assert e.calls() == ""
     _no_leak(r, e, k)
@@ -172,9 +211,9 @@ def test_placeholder_is_not_a_key_and_existing_db_refused(e: Env, placeholder: s
     e.env_file.write_text(f"{VAR}={placeholder}\n", encoding="utf-8")
     e.volume("pgdata")
     e.set(f"ps_{PREFIX}_pgdata", "cid123\n")
-    e.set("psql_out", "27|1|3|0|0\n")
+    e.set("psql_out", "0|1|3|0|0\n")
     r = e.run()
-    assert r.returncode == 3 and "库已初始化" in r.stderr and "app.users=1" in r.stderr
+    assert r.returncode == 3 and "库里已有数据" in r.stderr and "app.users=1" in r.stderr
     assert not e.key.exists() and not e.secrets.exists()
 
 
@@ -183,7 +222,7 @@ def test_fresh_deploy_no_volumes_generates(e: Env) -> None:
     r = e.run()
     assert r.returncode == 0, r.stderr
     k = _assert_key_file(e)
-    assert "全新空库" in r.stderr
+    assert "全新部署" in r.stderr
     _no_leak(r, e, k)
 
 
@@ -196,24 +235,34 @@ def test_empty_db_generates(e: Env) -> None:
     assert r.returncode == 0, r.stderr
     _assert_key_file(e)
     sql = (e.state / "sql").read_text(encoding="utf-8")
-    for t in ("app.users", "app.invite_codes", "app.user_data_licences", "app.import_files", "deptype = 'e'"):
+    for t in ("app.users", "app.invite_codes", "app.user_data_licences", "app.import_files"):
         assert t in sql
     assert "exec -i cid123" in e.calls()
 
 
+def test_migrated_but_empty_db_generates(e: Env) -> None:
+    # plan 升级约束①/③：“数据库为空”= app.users / invite_codes / user_data_licences 都为空（已迁移、无数据也算）
+    e.volume("pgdata")
+    e.set(f"ps_{PREFIX}_pgdata", "cid123\n")
+    e.set("psql_out", "0|0|0|0|0\n")
+    r = e.run()
+    assert r.returncode == 0, r.stderr
+    _assert_key_file(e)
+
+
 @pytest.mark.parametrize("out,needle", [
-    ("1|0|0|0|0", "1 张业务表"),                          # 只有 alembic_version 也算已初始化
-    ("30|0|2|0|0", "app.invite_codes=2"),
-    ("30|0|0|1|0", "app.user_data_licences=1"),
-    ("30|0|0|0|4", "app.import_files=4"),
+    ("0|1|0|0|0", "app.users=1"),
+    ("0|0|2|0|0", "app.invite_codes=2"),
+    ("0|0|0|1|0", "app.user_data_licences=1"),
+    ("0|0|0|0|4", "app.import_files=4"),                  # 保守项（plan 未列）
 ])
-def test_initialized_db_refused(e: Env, out: str, needle: str) -> None:
+def test_db_with_data_refused(e: Env, out: str, needle: str) -> None:
     e.volume("pgdata")
     e.set(f"ps_{PREFIX}_pgdata", "cid123\n")
     e.set("psql_out", out + "\n")
     r = e.run()
     assert r.returncode == 3, r.stderr
-    assert "拒绝启动" in r.stderr and needle in r.stderr and "app-master-keygen.sh" in r.stderr
+    assert "拒绝启动" in r.stderr and needle in r.stderr and "从备份恢复" in r.stderr and "app-master-keygen.sh" in r.stderr
     assert not e.key.exists()
 
 
@@ -224,7 +273,7 @@ def test_pgdata_without_running_db_refused(e: Env) -> None:
     assert not e.key.exists()
 
 
-@pytest.mark.parametrize("rc,out", [("2", ""), ("0", "garbage\n"), ("0", "")])
+@pytest.mark.parametrize("rc,out", [("2", ""), ("0", "garbage\n"), ("0", ""), ("0", "0|x|0|0|0\n")])
 def test_db_query_failure_refused(e: Env, rc: str, out: str) -> None:
     e.volume("pgdata")
     e.set(f"ps_{PREFIX}_pgdata", "cid123\n")
@@ -293,6 +342,32 @@ def test_secret_env_require_flag_with_key(tmp_path: Path) -> None:
     assert k not in r.stdout + r.stderr
 
 
+# ---- secret-env.sh：AIA_FORBID_APP_MASTER_KEY（ingest，plan e56462c）----
+def _forbid(sd: Path, extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    env = {"PATH": os.environ["PATH"], "AIA_SECRET_ENV_DIR": str(sd), "AIA_FORBID_APP_MASTER_KEY": "1", **(extra or {})}
+    return subprocess.run(["sh", str(SECRET_ENV), "sh", "-c", "echo started"], capture_output=True, text=True, env=env)
+
+
+def test_forbid_flag_clean_starts(tmp_path: Path) -> None:
+    r = _forbid(tmp_path)
+    assert r.returncode == 0 and r.stdout.strip() == "started"
+
+
+def test_forbid_flag_secret_file_refused(tmp_path: Path) -> None:
+    k = _key()
+    (tmp_path / "app_master_key").write_text(k, encoding="utf-8")
+    r = _forbid(tmp_path)
+    assert r.returncode == 2 and "started" not in r.stdout and "拒绝启动" in r.stderr
+    assert k not in r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("val", ["x" * 64, ""])
+def test_forbid_flag_env_refused(tmp_path: Path, val: str) -> None:
+    r = _forbid(tmp_path, {VAR: val})
+    assert r.returncode == 2 and "started" not in r.stdout
+    assert (val or "\0") not in r.stdout + r.stderr
+
+
 # ---- compose.sh 接线 ----
 def test_compose_sh_calls_ensure_before_docker_compose() -> None:
     text = (REPO / "deploy/scripts/compose.sh").read_text(encoding="utf-8")
@@ -301,3 +376,7 @@ def test_compose_sh_calls_ensure_before_docker_compose() -> None:
     i_ensure = code.index("app-master-key-ensure.sh")
     assert code.index("DOCKER=(") < i_ensure, "ensure 要在 docker 命令确定之后（需要查库）"
     assert re.search(r'app-master-key-ensure\.sh"[^\n]*\|\| exit \$\?', code), "ensure 失败必须中止"
+    # M2：文件已存在时也要做④的一致性比对，所以必须无条件调用（不得包在“文件不存在”判断里）
+    line = next(ln for ln in code.splitlines() if "app-master-key-ensure.sh" in ln)
+    assert line.startswith("AIA_DOCKER="), "ensure 必须在顶层无条件调用"
+    assert not re.search(r'if \[ ! -e "\$secrets_dir/app_master_key" \]', code)

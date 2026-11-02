@@ -18,7 +18,10 @@
      T-O11：db_password_aia_maint（删除用户数据 CLI 角色）只挂给 db-roles 与 maint-cli；maint-cli 没有 DATABASE_URL
      （不回落到属主）；任何服务的 environment 里都没有 AIA_MAINT_DATABASE_URL*（只由入口包装在容器内生成）。
   7. APP_MASTER_KEY 只走 secret 文件（T-O11）：任何服务的 environment 里都没有 APP_MASTER_KEY；基础 compose 顶层
-     secret app_master_key 用 file: 定义，api / worker 都挂了它，其他服务不得挂；.env.example 不得给它赋值。
+     secret app_master_key 用 file: 定义；.env.example 不得给它赋值。按服务分配用显式白名单 MASTER_KEY_ALLOC
+     （plan e56462c）：api / worker 必须挂，表中其余服务不得挂；任何 compose 文件里出现表里没有的服务 → 失败
+     （新增服务必须先登记“挂或不挂”）；ingest 必须设 AIA_FORBID_APP_MASTER_KEY: "1" 并用入口包装（发现主密钥即拒绝启动），
+     任何 compose 文件都不得改掉。
   8. 不悄悄换主密钥（T-O11 评审 M1）：deploy/scripts/compose.sh 不直接调用 app-master-keygen.sh，只经
      app-master-key-ensure.sh（已有 → 用；旧 .env 有 → 迁移；库有数据 → 拒绝；全新空库 → 生成）；基础 compose 里
      api / worker 设 AIA_REQUIRE_APP_MASTER_KEY: "1"（没挂 secret 就拒绝启动，不回落临时密钥），任何 compose 文件都不得改掉它。
@@ -60,7 +63,18 @@ DB_PW_ALLOWED = {s: {DB_PW_OWNER} for s in DB_PW_SECRETS} | {"db_password_aia_ma
 MAINT_URL_ENV_RE = re.compile(r"^AIA_MAINT_DATABASE_URL")
 MASTER_ENV = "APP_MASTER_KEY"
 MASTER_SECRET = "app_master_key"
-MASTER_OWNERS = ("api", "worker")
+# 显式白名单（plan e56462c“APP_MASTER_KEY 按服务分配”，CI 规则 7）：True = 必须挂 app_master_key，False = 不得挂。
+# 新增 compose 服务必须先登记在这里，否则 CI 失败。
+MASTER_KEY_ALLOC = {
+    "api": True, "worker": True,
+    "ingest": False, "beat": False, "signal-rt": False, "maint-cli": False, "migrate": False,
+    "timescale-apply": False, "db-roles": False, "cooldown-purge": False,
+    "nginx": False, "postgres": False, "redis": False,
+}
+MASTER_OWNERS = tuple(k for k, v in MASTER_KEY_ALLOC.items() if v)
+MASTER_FORBID_ENV = "AIA_FORBID_APP_MASTER_KEY"
+MASTER_FORBID_SVCS = ("ingest",)
+SECRET_ENV_ENTRY = ["sh", "/aia/secret-env.sh"]
 MASTER_REQUIRE_ENV = "AIA_REQUIRE_APP_MASTER_KEY"
 COMPOSE_SH = "deploy/scripts/compose.sh"
 KEY_ENSURE = "app-master-key-ensure.sh"
@@ -135,6 +149,16 @@ def check(repo: Path) -> list[str]:
             for sn in sorted(names & set(DB_PW_SECRETS)):
                 if name not in DB_PW_ALLOWED[sn]:
                     errs.append(f"{rel}: 服务 {name} 挂了 {sn}，只允许 {'/'.join(sorted(DB_PW_ALLOWED[sn]))}")
+            if name not in MASTER_KEY_ALLOC:
+                errs.append(f"{rel}: 服务 {name} 未在 MASTER_KEY_ALLOC 白名单登记（新增服务必须先登记是否挂 {MASTER_SECRET}，plan e56462c）")
+            if name in MASTER_FORBID_SVCS and MASTER_FORBID_ENV in _env_keys(svc.get("environment")):
+                fenv = svc.get("environment")
+                fv = fenv.get(MASTER_FORBID_ENV) if isinstance(fenv, dict) else next(
+                    (e.split("=", 1)[1] for e in fenv if isinstance(e, str) and e.startswith(MASTER_FORBID_ENV + "=")), None)
+                if str(fv) != "1":
+                    errs.append(f"{rel}: 服务 {name} 的 {MASTER_FORBID_ENV} 必须是 \"1\"（发现主密钥即拒绝启动）")
+            if name in MASTER_FORBID_SVCS and "entrypoint" in svc and svc["entrypoint"] != SECRET_ENV_ENTRY:
+                errs.append(f"{rel}: 服务 {name} 的 entrypoint 必须是入口包装 {SECRET_ENV_ENTRY}（主密钥检测）")
             if MASTER_SECRET in names and name not in MASTER_OWNERS:
                 errs.append(f"{rel}: 服务 {name} 挂了 {MASTER_SECRET}，只允许 {'/'.join(MASTER_OWNERS)}")
             for k in _env_keys(svc.get("environment")):
@@ -185,6 +209,13 @@ def check(repo: Path) -> list[str]:
             env = (svcs.get(svc) or {}).get("environment")
             if not (isinstance(env, dict) and str(env.get(MASTER_REQUIRE_ENV)) == "1"):
                 errs.append(f"{BASE_COMPOSE}: 服务 {svc} 缺少 {MASTER_REQUIRE_ENV}: \"1\"（没挂 app_master_key 要拒绝启动，M1）")
+        for svc in MASTER_FORBID_SVCS:
+            sd = svcs.get(svc) or {}
+            env = sd.get("environment")
+            if not (isinstance(env, dict) and str(env.get(MASTER_FORBID_ENV)) == "1"):
+                errs.append(f"{BASE_COMPOSE}: 服务 {svc} 缺少 {MASTER_FORBID_ENV}: \"1\"（plan：ingest 不得持有主密钥）")
+            if sd.get("entrypoint") != SECRET_ENV_ENTRY:
+                errs.append(f"{BASE_COMPOSE}: 服务 {svc} 没用入口包装 {SECRET_ENV_ENTRY}（主密钥检测）")
         for svc, want in need.items():
             have = set(_secret_names((svcs.get(svc) or {}).get("secrets")))
             if not want <= have:

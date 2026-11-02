@@ -1,6 +1,6 @@
 #!/bin/sh
 # 容器入口包装（T-O11）：把 docker secret 文件转成进程内环境变量后 exec 原命令。
-# compose 以只读方式挂到 /aia/secret-env.sh，作为 api / worker / maint-cli 的 entrypoint（原 command 不变）。
+# compose 以只读方式挂到 /aia/secret-env.sh，作为 api / worker / ingest / maint-cli 的 entrypoint（原 command 不变）。
 #   /run/secrets/app_master_key        → APP_MASTER_KEY（后端 Settings.app_master_key 只认环境变量，
 #                                         这里在进程内注入，compose 的 environment / docker inspect 里都没有它）
 #   /run/secrets/db_password_aia_maint → 在容器内 600 临时文件里拼出 aia_maint 的 DSN，
@@ -8,6 +8,16 @@
 # 不打印任何值；secret 存在但为空 / 读不到时直接失败（不回落到无密钥运行）。
 set -eu
 sd="${AIA_SECRET_ENV_DIR:-/run/secrets}"
+
+# AIA_FORBID_APP_MASTER_KEY=1（compose 给 ingest 设；plan e56462c“按服务分配”）：ingest 持有证书私钥，
+# 同一容器不得同时持有主密钥——环境变量里有 APP_MASTER_KEY、或挂了 app_master_key secret，都拒绝启动。
+# （后端启动检查同样要做，见 plan；这里是部署侧兜底。）
+if [ "${AIA_FORBID_APP_MASTER_KEY:-0}" = 1 ]; then
+  if [ -n "${APP_MASTER_KEY+x}" ] || [ -e "$sd/app_master_key" ]; then
+    echo "secret-env: 本服务不得持有 APP_MASTER_KEY（环境变量或 $sd/app_master_key），拒绝启动（plan：ingest 不与证书私钥同处一个容器）" >&2; exit 2
+  fi
+  exec "$@"
+fi
 
 # AIA_REQUIRE_APP_MASTER_KEY=1（compose 给 api / worker 设）：没挂 secret 就拒绝启动，
 # 不让后端在 local/test 下回落到临时随机主密钥（等于悄悄换了主密钥，T-O11 评审 M1）。

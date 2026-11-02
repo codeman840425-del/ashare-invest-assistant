@@ -1284,6 +1284,7 @@ class LLMGateway:
   - **T-R12f 补充裁定（v0.2.9 内，架构师；对应 feature_spec v1.1.5 的 8 个待定点，并更正 T-R12e 的措辞）**：
     1. **V5i 适用范围**：适用条件是 `bdrq` 为季末日，并且 `plrq = bdrq` 或 `plrq` 也是季末日。`plrq = bdrq` 但两者都不是季末日的行，照旧按 `plrq` 处理。可见时间取 `max(next_trading_day(plrq), 截止日规则)`；截止日按 `bdrq` 所属的报告期取，因为股本数属于这个期间，而且这样取更保守。
     2. **截止日的可见时刻**：取 `next_trading_day(截止日) 09:30`，与财务行的规则一致。
+       截止日规则只用于首次全量回填写入的季末行，因为这些行没有可信的 `first_seen_at`。增量采集的季末行取 `max(next_trading_day(plrq), first_seen_at)`，不套用截止日（T-R12g）。
     3. **`basis.pit_basis` 改为字符串数组**，与 `verify_pending` 一样，可以同时含 `plrq_only` 和 `capital_deadline`；没有任何特例时为空数组或不写。T-B55 按数组实现。
     4. **`share_class_check` 的取值**：
        - 名单接入前，所有行记 `unavailable`。
@@ -1293,8 +1294,8 @@ class LLMGateway:
     6. **CDR 与分位**：按 feature_spec §1.4，`type = cdr` 的证券本来就不在 F43、F48 的分位池里，所以：
        - 不需要另设池剔除规则，YAML 去掉 `pool_exclude_verify_pending`；
        - 不需要新的元数据原因；
-       - `cdr_unit` 只影响 F42、F47 的值和 S2 覆盖率的剔除。
-    7. **V5j 中 `zgb` 按基础股份计的情况**：总市值 = c（每份 CDR 的价格）× `zgb` × 每股基础股份对应的 CDR 份数。转换比例写在配置里，按证券单列，并注明来源（招股书或上市公告）。T-B05 确认单位、配置也接入后，清除 `cdr_unit`。如果 `zgb` 按 CDR 份数计，总市值 = c × `zgb`。
+       - `cdr_unit` 只是 F42、F47 值上的标记。S2 池 U 按 §1.4 本来就不含 CDR，所以不再写 S2 剔除条款（T-R12g）。
+    7. **V5j 中 `zgb` 按基础股份计的情况**：总市值 = c（每份 CDR 的价格）× `zgb` × 每股基础股份对应的 CDR 份数。转换比例写在配置里，按证券单列，并注明来源（招股书或上市公告）。T-B05 确认单位、配置也接入后，清除 `cdr_unit`。如果 `zgb` 按 CDR 份数计，总市值 = c × `zgb`，不需要配置，T-B05 确认后即清除 `cdr_unit`（T-R12g）。
     8. **银行、保险标记**：维持 T-R12a 的规定，继承标记，照常参与排序。T-R12e 原文中“规则同银行、保险的标记：不进入行业分位”这句措辞有误，已更正。
   - **补充规则（`feature_spec.md` §7A.0 / §13 A5，4 条）——【已确认 v0.2.9 内，架构师 T-R12】**，并入 T-B55：① 首次全量回填写入、`plrq` 早于回填日的行只按 `plrq` 计算，标 `basis.pit_basis=plrq_only`；② 同一 (code, report_type, jzrq) 的两行 `available_from` 相同 → 取 `first_seen_at` 较晚者，仍无法区分且数值不同 → 该分量 `null` 并告警 `data_conflict`；③ E(P−4) ≤ 0 按缺失处理（`roe_basis=single_period`）；④ 现金流比的分子、分母用同一个 P，不各自回退。说明：P 按“该键所需分量都可见且非空”逐期回退，所以同一 T 下不同键（如 `pe_ttm` 与 `ocf_to_np_ttm`）的 P 可以不同，各自记入 `basis.period`。
   - **线上切换**：条件与阈值以 `feature_spec.md` §7C（S1–S6）为准——【已确认 v0.2.9 内，架构师 T-R12】；本文不重复。保险识别（V5e）若 T-B05 确认麦蕊没有申万二级，按配置中的保险证券名单识别（名单注明来源），以此关闭 V5e，不因缺申万二级而阻塞切换。等待期的产品取舍见第 9 节问题 93。

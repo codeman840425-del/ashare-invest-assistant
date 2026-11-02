@@ -337,3 +337,62 @@ def test_proxy_cache_forbidden(gw_repo: Path, rel: str, line: str) -> None:
     anchor = "  include /etc/nginx/aia-limits.conf;\n" if rel == cgl.NGINX_CONF else "limit_req_zone $aia_search_key"
     _sub(gw_repo, rel, anchor, line + anchor if rel == cgl.NGINX_CONF else line + anchor)
     assert any("不得启用 proxy_cache" in e for e in cgl.check_search(gw_repo))
+
+
+# ---------- T-A04 ⑥⑦：proxy_connect_timeout ≤ 5s + 502/504 统一错误页（规则 9）----------
+
+def test_connect_timeout_ok_on_repo(gw_repo: Path) -> None:
+    assert cgl.check_connect_timeout(gw_repo) == []
+
+
+@pytest.mark.parametrize("v,s", [("3s", 3), ("3", 3), ("3000ms", 3), ("1m", 60), ("1m30s", 90), ("5s", 5)])
+def test_nginx_seconds(v: str, s: float) -> None:
+    assert cgl._nginx_seconds(v) == s
+
+
+@pytest.mark.parametrize("old,new,needle", [
+    ("    proxy_connect_timeout 3s;\n", "", "第 1 个 server 块需要在 server 级"),
+    ("    proxy_connect_timeout 3s;\n", "    proxy_connect_timeout 6s;\n", "proxy_connect_timeout 6s 超过"),
+    ("    proxy_connect_timeout 3s;\n", "    proxy_connect_timeout 1m;\n", "proxy_connect_timeout 1m 超过"),
+    ("    proxy_connect_timeout 3s;\n", "    proxy_connect_timeout 6000ms;\n", "超过"),
+    ("    proxy_connect_timeout 3s;\n", "    proxy_connect_timeout 3x;\n", "无法解析"),
+    # 只写在 location 里不算 server 级
+    ("    proxy_connect_timeout 3s;\n", "", "server 级"),
+    # location 里覆盖成更大的值
+    ("      limit_req zone=aia_search burst=20 nodelay;\n",
+     "      limit_req zone=aia_search burst=20 nodelay;\n      proxy_connect_timeout 30s;\n", "proxy_connect_timeout 30s 超过"),
+    # 写两条
+    ("    proxy_connect_timeout 3s;\n", "    proxy_connect_timeout 3s;\n    proxy_connect_timeout 2s;\n", "只写一条"),
+    ("    error_page 502 /__aia_errors/502;\n", "", "error_page 502"),
+    ("    error_page 504 /__aia_errors/504;\n", "    error_page 504 @gw504;\n", "error_page 504"),
+    ("return 502 '{\"error\":{\"code\":\"GATEWAY_UPSTREAM_UNAVAILABLE\"", "return 503 '{\"error\":{\"code\":\"GATEWAY_UPSTREAM_UNAVAILABLE\"",
+     "状态 502"),
+])
+def test_connect_timeout_negative(gw_repo: Path, old: str, new: str, needle: str) -> None:
+    _sub(gw_repo, cgl.NGINX_CONF, old, new)
+    errs = cgl.check_connect_timeout(gw_repo)
+    assert any(needle in e for e in errs), errs
+
+
+def test_connect_timeout_location_only_rejected(gw_repo: Path) -> None:
+    _sub(gw_repo, cgl.NGINX_CONF, "    proxy_connect_timeout 3s;\n", "")
+    _sub(gw_repo, cgl.NGINX_CONF, "    location /api/ {\n", "    location /api/ {\n      proxy_connect_timeout 3s;\n")
+    errs = cgl.check_connect_timeout(gw_repo)
+    assert any("server 级" in e for e in errs), errs
+
+
+def test_connect_timeout_every_server(gw_repo: Path) -> None:
+    _sub(gw_repo, cgl.NGINX_CONF, "  server {\n    listen 80;",
+         "  server {\n    listen 81;\n    location / { return 200 '{\"a\":{}}'; }\n  }\n\n  server {\n    listen 80;")
+    errs = cgl.check_connect_timeout(gw_repo)
+    assert any("第 1 个 server 块" in e for e in errs), errs
+    assert not any("第 2 个 server 块" in e for e in errs), errs
+
+
+def test_502_page_must_be_no_store(gw_repo: Path) -> None:
+    conf = (gw_repo / cgl.NGINX_CONF).read_text(encoding="utf-8")
+    i = conf.index("location = /__aia_errors/502 {")
+    j = conf.index(cgl.NO_STORE, i)
+    (gw_repo / cgl.NGINX_CONF).write_text(conf[:j] + conf[j + len(cgl.NO_STORE):], encoding="utf-8")
+    assert any("Cache-Control private, no-store" in e for e in cgl.check_connect_timeout(gw_repo))
+    assert any("/__aia_errors/502 缺少" in e for e in cgl.check_search(gw_repo))

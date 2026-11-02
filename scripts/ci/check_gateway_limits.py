@@ -33,6 +33,9 @@
      !reset / !override 写法明确报错（会绕过这里的合并检查）；
      deploy/compose 下除基础与 dev 外的 compose 文件（如 docker compose 会自动加载的 docker-compose.override.yml）
      一律报错，同时按叠加文件规则检查。
+     （T-A04 ⑥⑦，plan“网关上游连接超时”）nginx.conf 每个 server 块都必须在 server 级写 proxy_connect_timeout 且 ≤ 5s，
+     任何位置（http / location）的 proxy_connect_timeout 也不得 > 5s；error_page 502、504 各指向 internal 的 URI location，
+     return 对应状态码、JSON 信封含 code / request_id、X-Request-Id 头、Cache-Control private, no-store。
 请求行 / 请求头过长（T-D，T-live-0f8129b F-1；与 413 同一信封）：
   10. nginx.conf：server 级显式写且只写一条 large_client_header_buffers N SIZE；
       error_page 414 指向内部 URI location（不能是命名 location：读请求行阶段 URI 尚未解析，跳命名 location 会变 500），
@@ -465,13 +468,102 @@ def check_header_limits(repo: Path) -> list[str]:
     return errors
 
 
+CONNECT_MAX_S = 5.0
+CONNECT_RE = re.compile(r"^\s*proxy_connect_timeout\s+(\S+)\s*;", re.M)
+TIME_UNITS = {"ms": 0.001, "": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0}
+
+
+def _nginx_seconds(v: str) -> float | None:
+    """nginx 时间值（3s / 3 / 3000ms / 1m / 1m30s）→ 秒；无法解析返回 None。"""
+    parts = re.findall(r"(\d+)(ms|s|m|h|d|w|M|y)?", v)
+    if not parts or "".join(n + (u or "") for n, u in parts) != v:
+        return None
+    total = 0.0
+    for n, u in parts:
+        if (u or "") not in TIME_UNITS:
+            return None
+        total += int(n) * TIME_UNITS[u or ""]
+    return total
+
+
+def _blocks(conf: str, head_re: str) -> list[tuple[str, str]]:
+    """找所有 `<head> {` 块，返回 (块内顶层文本（嵌套块剔除）, 完整块文本)。跳过引号内的花括号（信封 JSON）。"""
+    out = []
+    for m in re.finditer(r"(?m)^\s*" + head_re + r"\s*\{", conf):
+        i, depth, quote, top, full_end = m.end(), 1, None, [], None
+        j = i
+        while j < len(conf):
+            ch = conf[j]
+            if quote:
+                if ch == "\\":
+                    j += 2
+                    continue
+                if ch == quote:
+                    quote = None
+            elif ch in "'\"":
+                quote = ch
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    full_end = j
+                    break
+            if depth == 1 and not (ch == "}" and not quote):
+                top.append(ch)
+            j += 1
+        out.append(("".join(top), conf[i:full_end if full_end is not None else len(conf)]))
+    return out
+
+
+def check_connect_timeout(repo: Path) -> list[str]:
+    errors: list[str] = []
+    nc = repo / NGINX_CONF
+    if not nc.is_file():
+        return [f"{NGINX_CONF} 不存在"]
+    conf = strip_comments(nc.read_text(encoding="utf-8"))
+    for v in CONNECT_RE.findall(conf):
+        s = _nginx_seconds(v)
+        if s is None or s > CONNECT_MAX_S:
+            errors.append(f"{NGINX_CONF}: proxy_connect_timeout {v} 超过 {CONNECT_MAX_S:g}s 或无法解析（api 停机时请求挂起过久）")
+    servers = _blocks(conf, r"server")
+    if not servers:
+        errors.append(f"{NGINX_CONF}: 没有 server 块")
+    for n, (top, _) in enumerate(servers, 1):
+        vals = CONNECT_RE.findall(top)
+        if len(vals) != 1:
+            errors.append(f"{NGINX_CONF}: 第 {n} 个 server 块需要在 server 级写且只写一条 proxy_connect_timeout ≤ {CONNECT_MAX_S:g}s"
+                          f"（实际 {len(vals)} 条；location 级或 http 级不算）")
+    for code, ecode in ((502, "GATEWAY_UPSTREAM_UNAVAILABLE"), (504, "GATEWAY_UPSTREAM_TIMEOUT")):
+        tgt = re.findall(r"^\s*error_page\s+(?:\d+\s+)*" + str(code) + r"(?:\s+\d+)*\s+(\S+)\s*;", conf, re.M)
+        if len(tgt) != 1 or not tgt[0].startswith("/"):
+            errors.append(f"{NGINX_CONF}: 需要且只能有一条 error_page {code} <internal URI>（统一错误页；实际 {tgt or '无'}）")
+            continue
+        body = _location_body(conf, tgt[0])
+        if body is None:
+            errors.append(f"{NGINX_CONF}: 没有 location = {tgt[0]}（{code} 统一错误页）")
+            continue
+        if not re.search(r"^\s*internal\s*;", body, re.M):
+            errors.append(f"{NGINX_CONF}: location = {tgt[0]} 必须 internal")
+        for needle, why in ((f"return {code} ", f"状态 {code}"), (f'"code":"{ecode}"', f"code {ecode}"),
+                            ('"request_id":"$aia_request_id"', "request_id"),
+                            ("add_header X-Request-Id $aia_request_id always", "X-Request-Id 头"),
+                            ("application/json", "JSON Content-Type"), (NO_STORE, "Cache-Control private, no-store")):
+            if needle not in body:
+                errors.append(f"{NGINX_CONF}: {code} 统一错误页 {tgt[0]} 缺少{why}（{needle}）")
+    if not errors:
+        print(f"OK   proxy_connect_timeout：{len(servers)} 个 server 均 ≤ {CONNECT_MAX_S:g}s；502/504 走统一错误页")
+    return errors
+
+
 SEARCH_LOC = "location ~ ^/api/v1/securities(/|$) {"
 SEARCH_RATE = 5.0  # r/s（架构师定）
 SEARCH_BURST = 20
 SEARCH_MAP = {r"~^/api/v1/securities/search\?": "$binary_remote_addr",
               r"~^/api/v1/securities\?(.*&)?q=": "$binary_remote_addr", "default": ""}
 NO_STORE = 'add_header Cache-Control "private, no-store" always;'
-ERROR_LOCS = ("@rate_limited", "@payload_too_large", "@header_too_large", "/__aia_errors/414")  # 网关自产信封
+ERROR_LOCS = ("@rate_limited", "@payload_too_large", "@header_too_large", "/__aia_errors/414",
+              "/__aia_errors/502", "/__aia_errors/504")  # 网关自产信封
 
 
 def check_search(repo: Path) -> list[str]:
@@ -524,7 +616,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo", type=Path, default=Path.cwd())
     args = ap.parse_args(argv)
     repo = args.repo.resolve()
-    errors = check(repo) + check_rate_limits(repo) + check_dynamic_upstream(repo) + check_header_limits(repo) + check_search(repo)
+    errors = (check(repo) + check_rate_limits(repo) + check_dynamic_upstream(repo) + check_header_limits(repo) + check_search(repo)
+              + check_connect_timeout(repo))
     for e in errors:
         print(f"::error title=gateway-limits::{e}")
     print(f"check_gateway_limits: {len(errors)} 个问题")

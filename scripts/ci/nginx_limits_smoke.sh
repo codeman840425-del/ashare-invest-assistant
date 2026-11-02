@@ -5,14 +5,15 @@
 #   不带 q 的 /securities/* 不进搜索桶；/securities/* 的 200 / 429 / 502 都只带 Cache-Control: private, no-store（桩上游故意回 public）。
 # 反例：GET /api/v1/imports（列表）不进导入桶；dev 限流文件（limit_req_dry_run）下连发不触发 429、只记日志；超大请求体仍是 413（不被 429 盖住）。
 # 上游动态解析（T-O13，upstream 模式）：路由/前缀/参数/编码原样转发、/health/live 改写带参数、X-Request-Id 透传与重生成、
-# X-Real-IP 覆盖、方法透传与 405；桩上游删掉 → 非 200（通常 502），换一个不同 IP 重建 → 不重启网关即恢复 200（静态 upstream 会一直 502）。
+# X-Real-IP 覆盖、方法透传与 405；桩上游删掉 → 502 走统一错误页、挂起 ≤ 5s（T-A04 ⑥⑦），换一个不同 IP 重建 → 不重启网关即恢复 200（静态 upstream 会一直 502）。
 # 不连真实后端、不读任何密钥；容器/网络结束即删。用法：scripts/ci/nginx_limits_smoke.sh [prod|dev|upstream|both]（默认 both = 三者）
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PY_IMG="${PY_IMG:-python:3.13-slim}"   # T-A04 ⑥⑦ 黑洞上游（不应答 SYN）用；只跑标准库 socket
 IMG="$(sed -n 's/^ *image: *\(nginx:[^ ]*\).*/\1/p' "$ROOT/deploy/compose/docker-compose.yml" | head -1)"
 [ -n "$IMG" ] || { echo "找不到 nginx 镜像" >&2; exit 2; }
 id="o10smoke-$$"; net="$id-net"; work="$(mktemp -d)"; fail=0
-cleanup() { docker rm -f "$id-gw" "$id-api" "$id-filler" >/dev/null 2>&1 || true; docker network rm "$net" >/dev/null 2>&1 || true; rm -rf "$work"; }
+cleanup() { docker rm -f "$id-gw" "$id-api" "$id-filler" "$id-bh" >/dev/null 2>&1 || true; docker network rm "$net" >/dev/null 2>&1 || true; rm -rf "$work"; }
 trap cleanup EXIT
 cat > "$work/stub.conf" <<'CONF'
 events {}
@@ -149,8 +150,18 @@ PY
   docker rm -f "$id-api" >/dev/null
   # 网关断开了外部 DNS（--dns 127.0.0.1）：名字查不到 → nginx 自己 502，不会被宿主 DNS 解析到外部地址
   # （以前在给未知名字假 IP 的宿主上，这里会是出口代理的应答）。
-  code="$(curl -s -o /dev/null -D "$h" -w '%{http_code}' "$base/health/live")"
+  # 紧接着删桩发请求：仍在 resolver valid=10s 缓存窗口内，连的是旧 IP（T-A04 ⑥⑦：proxy_connect_timeout 3s，挂起应约 ≤ 3 秒）
+  local tt
+  read -r code tt < <(curl -s -o "$work/50x.json" -D "$h" -w '%{http_code} %{time_total}\n' --max-time 30 "$base/health/live")
   [ "$code" = 502 ] && ! grep -qi '^X-Stub' "$h" && ok "上游删除 → 502（不再连旧 IP，也没有解析到外部）" || bad "上游删除后是 $code（应为网关 502）"
+  awk -v t="$tt" 'BEGIN{exit !(t <= 5)}' && ok "上游删除后请求挂起 ${tt}s（≤ 5s，proxy_connect_timeout 3s）" || bad "上游删除后请求挂起 ${tt}s（> 5s）"
+  grep -q '"code":"GATEWAY_UPSTREAM_UNAVAILABLE"' "$work/50x.json" && grep -qi '^X-Request-Id: .' "$h" && cc_only "$h" \
+    && grep -qi '^Content-Type: application/json' "$h" \
+    && ok "502 走统一错误页（JSON 信封 GATEWAY_UPSTREAM_UNAVAILABLE + X-Request-Id + private, no-store）" \
+    || bad "502 没走统一错误页：$(head -c 200 "$work/50x.json")"
+  curl -s -o "$work/50x.json" -D "$h" -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/v1/auth/login"
+  grep -q '^HTTP/1.1 502' "$h" && grep -q '"code":"GATEWAY_UPSTREAM_UNAVAILABLE"' "$work/50x.json" \
+    && ok "POST 的 502 同样走统一错误页（状态码保留）" || bad "POST 502：$(head -1 "$h" | tr -d '\r')"
   curl -s -o /dev/null -D "$h" "$base/api/v1/securities/search?q=1"
   grep -q '^HTTP/1.1 50[24]' "$h" && cc_only "$h" && ok "上游删除时 /securities/* 的网关 50x 也带 private, no-store" \
     || bad "/securities/* 50x：$(head -1 "$h" | tr -d '\r')，$(grep -i '^Cache-Control' "$h" | tr -d '\r' || echo 无 Cache-Control)"
@@ -166,6 +177,26 @@ PY
   done
   [ "$code" = 200 ] && ok "网关未重启，约 $((t / 2)) 秒内连上新 IP（200）" || bad "换 IP 后 20 秒仍是 $code（没有重新解析）"
   [ "$(docker inspect -f '{{.RestartCount}} {{.State.StartedAt}}' "$id-gw")" = "$gw_started" ] && ok "网关全程未重启" || bad "网关被重启过"
+  # 连接超时本身（T-A04 ⑥⑦）：上游 IP 在、但不应答 SYN（监听队列 backlog 0 且已占满 → 内核丢 SYN），
+  # 网关应在 proxy_connect_timeout 3s 后返回 504 统一错误页，而不是挂默认 60 秒。
+  docker rm -f "$id-api" >/dev/null
+  docker run -d --name "$id-bh" --network "$net" --network-alias api "$PY_IMG" python -c '
+import socket, time
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("0.0.0.0", 8000)); s.listen(0)
+f = []
+for _ in range(3):
+    c = socket.socket(); c.setblocking(False)
+    try: c.connect(("127.0.0.1", 8000))
+    except BlockingIOError: pass
+    f.append(c)
+time.sleep(300)' >/dev/null
+  sleep 12   # 等网关里 api 的旧解析（valid=10s）过期，改解析到黑洞容器
+  read -r code tt < <(curl -s -o "$work/50x.json" -D "$h" -w '%{http_code} %{time_total}\n' --max-time 30 "$base/health/live")
+  [ "$code" = 504 ] && grep -q '"code":"GATEWAY_UPSTREAM_TIMEOUT"' "$work/50x.json" && grep -qi '^X-Request-Id: .' "$h" && cc_only "$h" \
+    && ok "上游不应答 SYN → 504 统一错误页（GATEWAY_UPSTREAM_TIMEOUT + X-Request-Id + private, no-store）" \
+    || bad "上游不应答 SYN：$code $(head -c 200 "$work/50x.json")"
+  awk -v t="$tt" 'BEGIN{exit !(t >= 2.5 && t <= 5)}' && ok "连接超时挂起 ${tt}s（proxy_connect_timeout 3s，≤ 5s）" \
+    || bad "连接超时挂起 ${tt}s（应约 3s）"
 }
 case "${1:-both}" in
   prod) run_prod ;; dev) run_dev ;; upstream) run_upstream ;; both) run_prod; run_dev; run_upstream ;;

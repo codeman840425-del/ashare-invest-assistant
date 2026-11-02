@@ -68,9 +68,13 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
   拿到备份的人就同时拿到了解密能力。做法：主密钥按 600 拷到离线介质 / 密码管理器（与 dump 不同的位置、不同的权限），
   不打印、不入库、不进工单；dump 目录（`--out-dir`）里不放任何密钥文件。证书私钥（`data_licence_seal_*`）同理。
 - **主密钥备份 / 核对 / 恢复脚本**（T-O12）：`deploy/scripts/app-master-key-backup.sh`
-  - `backup --dest <离线目录>`：拷成 `app_master_key-<UTC>.key`（600）+ 同名 `.sha256`；目录在仓库里、是密钥目录本身、或里面有 `*.dump` 时拒绝。
+  - `backup --dest <离线目录>`：拷成 `app_master_key-<UTC>.key`（600）+ 同名 `.sha256`，新建目录为 700；目录在仓库里、
+    在密钥目录里（含子目录），或它自身 / 子目录 / 任一上级目录里有 `*.dump` 时拒绝（按 realpath 判断，符号链接绕不过）。
   - `fingerprint`：打印 sha256（与下面手工命令同一口径）；`verify <备份>`：备份与当前主密钥是否同一把。
-  - `restore <备份> --dir <密钥目录>`：目标已存在就拒绝（从不覆盖），先核对 `.sha256`，600、属主 10001。
+  - `restore <备份> --dir <密钥目录> --expect-sha256 <台账值>`：目标已存在就拒绝（从不覆盖）；先核对 `.sha256`，
+    再与台账值比对（不符 rc 4，不写目标）。备份旁没有 `.sha256` 时**必须**带 `--expect-sha256`，否则拒绝；
+    只有 `.sha256` 时只能证明“备份自洽”（备份与 `.sha256` 被一起换掉也能通过），所以正式迁移 / 灾后恢复一律带台账值。
+    结果 600、属主 10001；改不了属主（不是 root、也没有 `sudo -n`，或 chown 失败）就 rc 5 退出，不留文件（T-A04 ⑧）。
   - `drill`：用假密钥在临时目录走一遍 备份→丢失→恢复→核对。
   - V1 不轮换主密钥（T-O11 裁定 ⑤）；轮换前提与方案见 reports/T-O12.md（需要后端先给加密数据加密钥编号）。
 - **每次备份时记录主密钥的 sha256**（评审 8cf9771 n5；只记摘要，不记内容），写进备份记录（与 dump 同目录的
@@ -83,8 +87,10 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
   文件本体（用主密钥派生密钥加密）在卷里；只恢复 dump 不恢复卷，导入记录会指向不存在的文件。
   ```bash
   docker run --rm --network none -v <卷前缀>_imports:/v:ro -v /data/backup:/out alpine:3.21 \
-    tar -C /v -czf /out/imports-<UTC>.tgz .          # 产物 chmod 600；内容是密文，但仍与主密钥分开存放
+    sh -c 'umask 077 && tar -C /v -czf /out/imports-<UTC>.tgz . && chmod 600 /out/imports-<UTC>.tgz'
+  stat -c '%a %n' /data/backup/imports-<UTC>.tgz    # 应为 600（T-A04 ⑨：umask + chmod 实际执行，不只是注释）
   ```
+  内容是密文，但仍与主密钥分开存放；`/data/backup` 本身也应是 700。
 
 **恢复（db-restore.sh）的检查**
 - 校验 sha256。
@@ -99,10 +105,16 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
 6. `ANALYZE`。
 
 **迁移到新主机 / 灾后恢复：先放主密钥，再 up**（评审 1cf643e M2）
-1. 在新主机上**先**把原主机的 `$AIA_SECRETS_DIR/app_master_key` 从离线备份拷到同一路径（600、属主 10001）。
+1. 在新主机上**先**用恢复脚本把原主机的主密钥从离线备份放回 `$AIA_SECRETS_DIR/app_master_key`，
+   **以台账里记下的 sha256 为准**（T-A04 ⑨；不以备份旁的 `.sha256` 为准）：
+   ```bash
+   deploy/scripts/app-master-key-backup.sh restore <离线备份>/app_master_key-<UTC>.key \
+     --dir "$(deploy/scripts/compose.sh --get AIA_SECRETS_DIR)" --expect-sha256 <台账里的 sha256>
+   ```
+   脚本保证：目标已存在不覆盖；摘要与台账不符不恢复；结果 600、属主 10001，改不了属主就失败退出。
    主密钥只有这一份文件，api / worker 共用（plan e56462c 按服务分配：其余服务不挂）；以后若按服务拆分，就逐个拷各服务的密钥文件。
    证书私钥 / 公钥文件同理先拷（见 `data-licence-seal-keys.md`）。
-   拷完先核对摘要：`sudo -n sha256sum … | cut -d' ' -f1` 与备份时记下的 `.app_master_key.sha256` 一致（只比对摘要，不打印值）。
+   脚本成功后可再用 `deploy/scripts/app-master-key-backup.sh fingerprint` 与台账复核一次（只比对摘要，不打印值）。
 2. **然后**才起服务，而且**先不启动 ingest**（评审 8cf9771 M1；plan §1.3）：
    `deploy/scripts/compose.sh up -d --wait --scale ingest=0`。
    麦蕊同一证书 60 秒内只认 2 个来源 IP，旧主机的 ingest 还在跑时新主机再起一个，就会触发 IP 超限（429 / 码 103）。

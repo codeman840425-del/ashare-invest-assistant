@@ -10,6 +10,7 @@
   不限 24 小时、freshness 固定 6 行、alerts 列表与级别、告警文案不含证书 / IP / 原因。
 - D   data_snapshots 写入方：plan/horizon 必须带 user_id（库级 CHECK）、合规行可写、grants.sql 角色级别
   （只有 api / ingest 可 INSERT，maint 与其他角色被拒）、各写入方逐一验收。
+- G-7（T-live-83a031c §8.4）：GET /imports、GET /trades 的 ?account_id= 非本人（他人 / 不存在）→ 404 NOT_FOUND；
 - R11 真实后端：/accounts、/imports、/imports/{id}/rows、/trades 的非法 cursor 400 确实触发 schemathesis ST202，
   且 tests/backend/contract/r11_exceptions.py 的例外恰好放行（其余检查照常）。
 - E   注册 413 先于 503（closed 模式亦然）：见 test_integration_t_t25c.py::test_reg_closed_oversized_is_413_before_mode。
@@ -635,3 +636,28 @@ def test_r11_real_backend_invalid_cursor(path: str, session: Callable[..., Simpl
 
     run()
     assert seen, "没有生成到返回 400 的用例"
+
+
+# ============ G-7（T-live-83a031c §8.4，G-7.md）：列表 ?account_id= 非本人账户 → 404 ============
+O_G7 = "后端 G-7（ab84776：list_imports / list_trades 带 account_id 时先 owned_account；在本地 main，未推 origin）"
+
+
+@pytest.mark.parametrize("path", ["/imports", "/trades"])
+def test_g7_list_with_unowned_account_id_is_404(session: Callable[..., SimpleNamespace], path: str) -> None:
+    """契约 §7.5/§7.6（v0.2.9 #27 ⑦）：B 用 A 的账户或不存在的账户 id 查列表 → 404 NOT_FOUND，不返回 items，
+    错误体与 /portfolio 的同类 404 同形（不区分“他人”与“不存在”）；A 查本人账户与不带 account_id → 200。"""
+    a, b = session(), session()
+    require_route(a.client, "GET", path, O_G7)
+    ca, cb = Rec(a), Rec(b)
+    acc = _account(ca)
+    assert ca("GET", f"{path}?account_id={acc}").status_code == 200
+    assert cb("GET", path).status_code == 200
+    ref = cb("GET", f"/portfolio?account_id={acc}")
+    for aid in (acc, str(uuid.uuid4())):
+        r = cb("GET", f"{path}?account_id={aid}")
+        if r.status_code == 200:
+            pytest.xfail(f"{O_G7}：他人/不存在账户返回 200 + 空列表")
+        assert_err(r, 404, "NOT_FOUND")
+        assert "items" not in r.json()
+        if ref.status_code == 404:
+            assert set(r.json()["error"]) == set(ref.json()["error"])

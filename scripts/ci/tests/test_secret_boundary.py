@@ -323,3 +323,44 @@ def test_overlay_cannot_disable_ingest_forbid(repo: Path) -> None:
 def test_overlay_cannot_bypass_ingest_wrapper(repo: Path) -> None:
     errs = _overlay(repo, 'services:\n  ingest:\n    entrypoint: ["python"]\n')
     assert any("服务 ingest 的 entrypoint 必须是入口包装" in e for e in errs), errs
+
+
+# ---- 评审 75c233b m1：入口包装防绕过、合并标签明确报错 ----
+@pytest.mark.parametrize("env", ["environment:\n      AIA_SECRET_ENV_DIR: /nope\n",
+                                 "environment:\n      - AIA_SECRET_ENV_DIR=/nope\n",
+                                 "environment:\n      - AIA_SECRET_ENV_DIR\n"])
+@pytest.mark.parametrize("svc", ["ingest", "api"])
+def test_secret_env_dir_forbidden(repo: Path, svc: str, env: str) -> None:
+    errs = _overlay(repo, f"services:\n  {svc}:\n    {env}")
+    assert any(f"服务 {svc} 的 environment 设了 AIA_SECRET_ENV_DIR" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("vol", [
+    "- ${AIA_SECRETS_DIR}:/s:ro",
+    "- ${AIA_SECRETS_DIR:?x}/app_master_key:/k:ro",
+    "- ~/.config/aia/secrets:/s:ro",
+    "- /home/box/.config/aia/secrets/aia:/s",
+    "- type: bind\n        source: ${AIA_SECRETS_DIR}\n        target: /s",
+])
+@pytest.mark.parametrize("svc", ["ingest", "beat"])
+def test_secret_dir_volume_forbidden(repo: Path, svc: str, vol: str) -> None:
+    errs = _overlay(repo, f"services:\n  {svc}:\n    volumes:\n      {vol}\n")
+    assert any(f"服务 {svc} 把密钥目录当普通卷挂载" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("snippet,tag", [
+    ("services:\n  ingest:\n    entrypoint: !reset null\n", "!reset"),
+    ("services:\n  ingest:\n    environment: !reset {}\n", "!reset"),
+    ("services:\n  ingest:\n    secrets: !override\n      - data_licence_seal_public_keys\n", "!override"),
+])
+def test_merge_tags_reported_not_crash(repo: Path, snippet: str, tag: str) -> None:
+    errs = _overlay(repo, snippet)
+    assert any("合并标签" in e and tag in e for e in errs), errs
+    r = subprocess.run([sys.executable, str(CI_DIR / "check_secret_boundary.py"), "--repo", str(repo)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "Traceback" not in r.stderr and "::error title=secret-boundary::" in r.stdout
+
+
+def test_invalid_yaml_reported_not_crash(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  ingest:\n    environment: [\n")
+    assert any("YAML 无法解析" in e for e in errs), errs

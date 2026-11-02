@@ -171,16 +171,37 @@ def test_migrate_from_env_file(e: Env, fmt: str) -> None:
     _no_leak(r, e, k)
 
 
-# 评审 m1：行尾注释与引号（与 compose .env 语义一致）
-@pytest.mark.parametrize("line,expect", [
-    ("{v}={k}  # 线上主密钥\n", "{k}"),
-    ("{v}={k}\t#c\n", "{k}"),
+# 评审 1cf643e m1 / 75c233b B1：按 docker compose 的 .env 规则解析；做不到逐字一致的写法拒绝。
+ACCEPTED = [
+    ("{v}={k}  # 线上主密钥\n", "{k}"),           # 空格 + # 起是注释
     ("export {v}={k} # c\r\n", "{k}"),
-    ('{v}="{k}#x" # 注释\n', "{k}#x"),          # 引号里的 # 保留
-    ("{v}='{k} #x'  # c\n", "{k} #x"),
-    ('{v}="{k}"#c\n', "{k}"),                    # 引号后紧跟的内容忽略
-    ("{v}={k}#x\n", "{k}#x"),                    # 未加引号、# 前无空白：不是注释
-])
+    ('{v}="{k}#x" # 注释\n', "{k}#x"),            # 引号里的 # 保留，引号后的注释忽略
+    ("{v}='{k}#x'  # c\n", "{k}#x"),
+    ('{v}="{k}"#c\n', "{k}"),                      # 引号后紧跟的注释忽略
+    ("{v}={k}#x\n", "{k}#x"),                      # 未加引号、# 前没有空格：不是注释
+    ("{v} = {k}\n", "{k}"),
+    ("  {v}=   {k}   \n", "{k}"),
+    ("{v}='{k}'\n", "{k}"),
+    ("{v}=<填写>  # 占位\n{v}={k} # 后一行生效\n", "{k}"),  # 同名多行取最后一行
+]
+REFUSED = [
+    ("{v}={k}\t#c\n", "空白"),                     # compose 把“制表符 + #c”算进值里
+    ("{v}='{k} #x'\n", "空白"),
+    ("{v}=   # 本应是空值\n", "空白"),                # compose 读到的是“# 本应是空值”
+    ("{v}: {k}\n", "KEY: VALUE"),
+    ("{v}={k}$HOME\n", "插值"),
+    ('{v}="{k}${{X}}"\n', "插值"),
+    ('{v}="{k}\\n"\n', "反斜杠"),
+    ("{v}='{k}\\'x'\n", "反斜杠"),
+    ('{v}="{k}" x\n', "非注释内容"),
+    ("{v}='{k}'x\n", "非注释内容"),
+    ('{v}="{k}\n', "引号不配对"),
+    ("{v}='{k} # c\n", "引号不配对"),
+    ('{v}="{k}\nmore"\n', "引号不配对"),          # 跨行引号
+]
+
+
+@pytest.mark.parametrize("line,expect", ACCEPTED)
 def test_migrate_env_file_inline_comment(e: Env, line: str, expect: str) -> None:
     k = _key()
     e.env_file.write_text(line.format(v=VAR, k=k), encoding="utf-8", newline="")
@@ -190,14 +211,65 @@ def test_migrate_env_file_inline_comment(e: Env, line: str, expect: str) -> None
     _no_leak(r, e, k)
 
 
-@pytest.mark.parametrize("line", ['{v}="{k}\n', "{v}='{k} # c\n"])
-def test_unbalanced_quote_refused(e: Env, line: str) -> None:
+@pytest.mark.parametrize("line,why", REFUSED)
+def test_ambiguous_env_line_refused(e: Env, line: str, why: str) -> None:
     k = _key()
-    e.env_file.write_text(line.format(v=VAR, k=k), encoding="utf-8")
+    e.env_file.write_text(line.format(v=VAR, k=k), encoding="utf-8", newline="")
     r = e.run()
-    assert r.returncode == 3 and "引号不配对" in r.stderr
+    assert r.returncode == 3 and why in r.stderr and "无法保证与 docker compose" in r.stderr, r.stderr
     assert not e.key.exists()
     _no_leak(r, e, k)
+
+
+def test_ambiguous_env_line_refused_even_with_key_file(e: Env) -> None:
+    # 文件已存在时（④）同样拒绝：解析不确定就不能判断“一致”
+    e.secrets.mkdir()
+    k = _key()
+    e.key.write_text(k, encoding="utf-8")
+    e.env_file.write_text(f"{VAR}={k}\t# c\n", encoding="utf-8")
+    r = e.run()
+    assert r.returncode == 3 and "空白" in r.stderr
+    assert e.key.read_text(encoding="utf-8") == k
+    _no_leak(r, e, k)
+
+
+@pytest.mark.parametrize("line", ['{v}="<请填写 主密钥>"  # 占位\n', "{v}=changeme now\n"])
+def test_placeholder_not_parsed_strictly(e: Env, line: str) -> None:
+    e.secrets.mkdir()
+    k = _key()
+    e.key.write_text(k, encoding="utf-8")
+    e.env_file.write_text(line.format(v=VAR), encoding="utf-8")
+    r = e.run()
+    assert r.returncode == 0, r.stderr
+    assert e.key.read_text(encoding="utf-8") == k
+
+
+def _compose_value(tmp: Path, env_text: str) -> str | None:
+    """用真 docker compose 解析 .env，返回插值后的 APP_MASTER_KEY（假值，只在内存里比较）。"""
+    import json
+    (tmp / "c.yml").write_text("services:\n  s:\n    image: busybox\n    environment:\n      V: ${" + VAR + "-UNSET}\n", encoding="utf-8")
+    (tmp / "o.env").write_text(env_text, encoding="utf-8", newline="")
+    r = subprocess.run(["docker", "compose", "-p", "t-envparse", "--env-file", str(tmp / "o.env"), "-f", str(tmp / "c.yml"),
+                        "config", "--format", "json"], capture_output=True, text=True,
+                       env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "/tmp")})
+    if r.returncode != 0:
+        return None
+    return json.loads(r.stdout)["services"]["s"]["environment"]["V"]
+
+
+def _have_compose() -> bool:
+    try:
+        return subprocess.run(["docker", "compose", "version"], capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(not _have_compose(), reason="没有 docker compose，跳过与 compose 的逐字对照")
+@pytest.mark.parametrize("line,expect", ACCEPTED)
+def test_env_parse_matches_compose(tmp_path: Path, line: str, expect: str) -> None:
+    """对照组：脚本接受的每种写法，docker compose 读到的值必须与脚本迁移进文件的值逐字相同。"""
+    k = _key()
+    assert _compose_value(tmp_path, line.format(v=VAR, k=k)) == expect.format(k=k)
 
 
 def test_existing_key_equals_env_value_with_comment(e: Env) -> None:
@@ -251,7 +323,7 @@ def test_placeholder_is_not_a_key_and_existing_db_refused(e: Env, placeholder: s
     e.env_file.write_text(f"{VAR}={placeholder}\n", encoding="utf-8")
     e.volume("pgdata")
     e.set(f"ps_{PREFIX}_pgdata", "cid123\n")
-    e.set("psql_out", "0|1|3|0|0\n")
+    e.set("psql_out", "0|1|3|0|0|0\n")
     r = e.run()
     assert r.returncode == 3 and "库里已有数据" in r.stderr and "app.users=1" in r.stderr
     assert not e.key.exists() and not e.secrets.exists()
@@ -270,31 +342,35 @@ def test_empty_db_generates(e: Env) -> None:
     e.volume("pgdata")
     e.volume("imports")
     e.set(f"ps_{PREFIX}_pgdata", "cid123\n")
-    e.set("psql_out", "0|0|0|0|0\n")
+    e.set("psql_out", "0|0|0|0|0|0\n")
     r = e.run()
     assert r.returncode == 0, r.stderr
     _assert_key_file(e)
     sql = (e.state / "sql").read_text(encoding="utf-8")
-    for t in ("app.users", "app.invite_codes", "app.user_data_licences", "app.import_files"):
+    for t in ("app.users", "app.invite_codes", "app.user_data_licences", "app.import_files", "app.llm_providers"):
         assert t in sql
-    assert "exec -i cid123" in e.calls()
+    assert "api_key_ciphertext IS NOT NULL" in sql
+    # 评审 n2：会话强制只读（两道）
+    assert sql.startswith("BEGIN READ ONLY;") and sql.rstrip().endswith("COMMIT;")
+    assert "-e PGOPTIONS=-c default_transaction_read_only=on cid123" in e.calls()
 
 
 def test_migrated_but_empty_db_generates(e: Env) -> None:
     # plan 升级约束①/③：“数据库为空”= app.users / invite_codes / user_data_licences 都为空（已迁移、无数据也算）
     e.volume("pgdata")
     e.set(f"ps_{PREFIX}_pgdata", "cid123\n")
-    e.set("psql_out", "0|0|0|0|0\n")
+    e.set("psql_out", "0|0|0|0|0|0\n")
     r = e.run()
     assert r.returncode == 0, r.stderr
     _assert_key_file(e)
 
 
 @pytest.mark.parametrize("out,needle", [
-    ("0|1|0|0|0", "app.users=1"),
-    ("0|0|2|0|0", "app.invite_codes=2"),
-    ("0|0|0|1|0", "app.user_data_licences=1"),
-    ("0|0|0|0|4", "app.import_files=4"),                  # 保守项（plan 未列）
+    ("0|1|0|0|0|0", "app.users=1"),
+    ("0|0|2|0|0|0", "app.invite_codes=2"),
+    ("0|0|0|1|0|0", "app.user_data_licences=1"),
+    ("0|0|0|0|4|0", "app.import_files=4"),                  # 保守项（plan 未列）
+    ("0|0|0|0|0|1", "app.llm_providers 密文=1"),            # 评审 75c233b n1：系统级密文，users 为空也可能有
 ])
 def test_db_with_data_refused(e: Env, out: str, needle: str) -> None:
     e.volume("pgdata")
@@ -313,7 +389,7 @@ def test_pgdata_without_running_db_refused(e: Env) -> None:
     assert not e.key.exists()
 
 
-@pytest.mark.parametrize("rc,out", [("2", ""), ("0", "garbage\n"), ("0", ""), ("0", "0|x|0|0|0\n")])
+@pytest.mark.parametrize("rc,out", [("2", ""), ("0", "garbage\n"), ("0", ""), ("0", "0|x|0|0|0|0\n"), ("0", "0|0|0|0|0\n")])
 def test_db_query_failure_refused(e: Env, rc: str, out: str) -> None:
     e.volume("pgdata")
     e.set(f"ps_{PREFIX}_pgdata", "cid123\n")
@@ -409,14 +485,68 @@ def test_forbid_flag_env_refused(tmp_path: Path, val: str) -> None:
 
 
 # ---- compose.sh 接线 ----
+COMPOSE_SH = REPO / "deploy/scripts/compose.sh"
+
+
 def test_compose_sh_calls_ensure_before_docker_compose() -> None:
-    text = (REPO / "deploy/scripts/compose.sh").read_text(encoding="utf-8")
+    text = COMPOSE_SH.read_text(encoding="utf-8")
     code = "\n".join(ln.split("#", 1)[0] for ln in text.splitlines())
     assert "app-master-keygen.sh" not in code
     i_ensure = code.index("app-master-key-ensure.sh")
     assert code.index("DOCKER=(") < i_ensure, "ensure 要在 docker 命令确定之后（需要查库）"
-    assert re.search(r'app-master-key-ensure\.sh"[^\n]*\|\| exit \$\?', code), "ensure 失败必须中止"
-    # M2：文件已存在时也要做④的一致性比对，所以必须无条件调用（不得包在“文件不存在”判断里）
-    line = next(ln for ln in code.splitlines() if "app-master-key-ensure.sh" in ln)
-    assert line.startswith("AIA_DOCKER="), "ensure 必须在顶层无条件调用"
+    assert i_ensure < code.index("FILES=(-f"), "ensure 要在调用 docker compose 之前"
+    # 强制分支：失败即中止；告警分支：检查模式
+    assert re.search(r'^\s*AIA_DOCKER=[^\n]*app-master-key-ensure\.sh"[^\n]*\|\| exit \$\? ;;', code, re.M), \
+        "强制子命令上 ensure 失败必须中止"
+    assert re.search(r'AIA_KEYCHECK_ONLY=1 [^\n]*app-master-key-ensure\.sh"[^\n]*\|\| rc=\$\?', code)
+    # M2：文件已存在时也要做④的比对，所以不得包在“文件不存在”判断里
     assert not re.search(r'if \[ ! -e "\$secrets_dir/app_master_key" \]', code)
+    strict = re.search(r"^\s*([a-z|']+)\)\s*$", code[code.index('case "$sub" in'):], re.M).group(1).split("|")
+    assert set(strict) >= {"up", "run", "create", "start", "restart", "''"}
+
+
+def _subcmd(args: list[str]) -> str:
+    text = COMPOSE_SH.read_text(encoding="utf-8")
+    start = text.index("compose_subcmd() {")
+    fn = text[start:text.index("\n}\n", start) + 3]
+    return subprocess.run(["bash", "-c", fn + '\ncompose_subcmd "$@"', "x", *args],
+                          capture_output=True, text=True).stdout
+
+
+@pytest.mark.parametrize("args,want", [
+    (["up", "-d", "--wait"], "up"),
+    (["--profile", "maint", "run", "--rm", "maint-cli"], "run"),
+    (["-p", "x", "--env-file", "/e", "-f", "a.yml", "down"], "down"),
+    (["--ansi=never", "--dry-run", "ps"], "ps"),
+    (["--progress", "plain", "logs", "api"], "logs"),
+    ([], ""),
+])
+def test_compose_subcmd_parsing(args: list[str], want: str) -> None:
+    assert _subcmd(args) == want
+
+
+def test_keycheck_only_mode_does_not_migrate_or_generate(e: Env) -> None:
+    # 评审 m2：down/ps/logs 走检查模式——不迁移、不生成、不起容器查库
+    k = _key()
+    e.env_file.write_text(f"{VAR}={k}\n", encoding="utf-8")
+    r = e.run({"AIA_KEYCHECK_ONLY": "1"})
+    assert r.returncode == 0 and "检查模式" in r.stderr
+    assert not e.key.exists() and e.calls() == ""
+    _no_leak(r, e, k)
+    e.env_file.write_text("", encoding="utf-8")
+    e.volume("pgdata")
+    r = e.run({"AIA_KEYCHECK_ONLY": "1"})
+    assert r.returncode == 0 and not e.key.exists()
+    assert "exec" not in e.calls() and " run " not in e.calls()
+
+
+def test_keycheck_only_mode_still_reports_mismatch(e: Env) -> None:
+    e.secrets.mkdir()
+    k, other = _key(), _key()
+    e.key.write_text(k, encoding="utf-8")
+    e.env_file.write_text(f"{VAR}={other}\n", encoding="utf-8")
+    r = e.run({"AIA_KEYCHECK_ONLY": "1"})
+    assert r.returncode == 3 and "不一致" in r.stderr     # compose.sh 把它降为告警
+    assert e.key.read_text(encoding="utf-8") == k
+    _no_leak(r, e, k)
+    _no_leak(r, e, other)

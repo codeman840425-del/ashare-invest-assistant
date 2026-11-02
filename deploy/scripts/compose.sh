@@ -121,7 +121,29 @@ fi
 # compose 不再从 .env 插值它。每次调用都由 app-master-key-ensure.sh 按 plan“升级约束”①–④ 判定（M1/M2）：
 # 文件在 → 用（旧 .env / 环境里有不一致的值 → 拒绝）；文件缺、旧值在 → 迁移（不删 .env 那一行，提示人删）；
 # 都没有且库里有数据 / 无法确认 → 拒绝（退出 3）；只有全新部署才生成。绝不悄悄换主密钥。
-AIA_DOCKER="${DOCKER[*]}" "$ROOT/deploy/scripts/app-master-key-ensure.sh" "$secrets_dir" "$ENV_FILE" "$prefix" >&2 || exit $?
+# 评审 75c233b m2：只在会创建/启动容器的子命令上强制（拒绝即退出）；down/ps/logs/stop/exec/config 等只告警，
+# 并以检查模式运行（不迁移、不生成），免得 .env 与文件不一致时连 down.sh 都被挡住。
+# 子命令 = 跳过 compose 全局选项后的第一个参数；认不出来（为空）时按强制处理。watch / scale 也会起容器，一并强制。
+compose_subcmd() {
+  local a skip=0
+  for a in "$@"; do
+    if [ "$skip" = 1 ]; then skip=0; continue; fi
+    case "$a" in
+      -f|--file|-p|--project-name|--profile|--env-file|--project-directory|--ansi|--progress|--parallel) skip=1 ;;
+      -*) ;;
+      *) printf '%s' "$a"; return ;;
+    esac
+  done
+}
+sub="$(compose_subcmd "$@")"
+case "$sub" in
+  up|run|create|start|restart|watch|scale|'')
+    AIA_DOCKER="${DOCKER[*]}" "$ROOT/deploy/scripts/app-master-key-ensure.sh" "$secrets_dir" "$ENV_FILE" "$prefix" >&2 || exit $? ;;
+  *)
+    rc=0
+    AIA_KEYCHECK_ONLY=1 AIA_DOCKER="${DOCKER[*]}" "$ROOT/deploy/scripts/app-master-key-ensure.sh" "$secrets_dir" "$ENV_FILE" "$prefix" >&2 || rc=$?
+    [ "$rc" = 0 ] || echo "警告：app_master_key 检查未通过（退出码 $rc，原因见上）；“$sub” 不启动容器，继续执行；up/run/create/start/restart 会被拒绝。" >&2 ;;
+esac
 
 FILES=(-f "$ROOT/deploy/compose/docker-compose.yml")
 case "$PROFILE" in

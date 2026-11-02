@@ -25,6 +25,9 @@
   8. 不悄悄换主密钥（T-O11 评审 M1）：deploy/scripts/compose.sh 不直接调用 app-master-keygen.sh，只经
      app-master-key-ensure.sh（已有 → 用；旧 .env 有 → 迁移；库有数据 → 拒绝；全新空库 → 生成）；基础 compose 里
      api / worker 设 AIA_REQUIRE_APP_MASTER_KEY: "1"（没挂 secret 就拒绝启动，不回落临时密钥），任何 compose 文件都不得改掉它。
+  9. 入口包装防绕过（评审 75c233b m1）：任何服务的 environment 都不得设 AIA_SECRET_ENV_DIR（包装只看该目录，会看不到
+     /run/secrets）；任何服务的 volumes 都不得引用 AIA_SECRETS_DIR 或 .config/aia/secrets（主密钥文件会以普通卷进容器，
+     绕过 secret 白名单）。compose 文件里出现 !reset / !override 等 YAML 标签、或 YAML 无法解析 → 明确报错（不崩溃）。
 
 失败退出码 1，依赖缺失退出码 2。用法：check_secret_boundary.py [--repo DIR]
 """
@@ -79,7 +82,49 @@ MASTER_REQUIRE_ENV = "AIA_REQUIRE_APP_MASTER_KEY"
 COMPOSE_SH = "deploy/scripts/compose.sh"
 KEY_ENSURE = "app-master-key-ensure.sh"
 KEY_GEN = "app-master-keygen.sh"
+SECRET_DIR_ENV = "AIA_SECRET_ENV_DIR"
+SECRET_DIR_VOL_MARKERS = ("AIA_SECRETS_DIR", ".config/aia/secrets")
 DB_URL_RE = re.compile(r"^postgresql(?:\+\w+)?://([^:@/]+):(\$\{(\w+)[^}]*\})@")
+
+
+class _TagLoader(yaml.SafeLoader):
+    """SafeLoader + 记录 compose 合并标签（!reset / !override）。safe_load 遇到它们会抛 ConstructorError 直接崩溃。"""
+
+
+def _tag_constructor(loader: _TagLoader, suffix: str, node: yaml.Node):
+    loader.aia_tags.append(f"!{suffix}")
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node, deep=True)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node, deep=True)
+    return loader.construct_scalar(node)
+
+
+_TagLoader.add_multi_constructor("!", _tag_constructor)
+
+
+def _load(path: Path, rel: str, errs: list[str]) -> dict | None:
+    """解析 compose 文件；有合并标签或 YAML 错误时记一条明确的错误并返回 None（该文件其余规则不再判定）。"""
+    try:
+        loader = _TagLoader(path.read_text(encoding="utf-8"))
+        loader.aia_tags = []
+        try:
+            doc = loader.get_single_data()
+        finally:
+            loader.dispose()
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        at = f":{mark.line + 1}" if mark else ""
+        errs.append(f"{rel}{at}: YAML 无法解析（{getattr(exc, 'problem', None) or type(exc).__name__}），无法判定密钥边界")
+        return None
+    if loader.aia_tags:
+        errs.append(f"{rel}: 使用了 compose 合并标签 {'/'.join(sorted(set(loader.aia_tags)))}（可清掉 entrypoint/environment/"
+                    f"secrets 等基础设置，CI 无法可靠判定密钥边界，禁止使用；确需覆盖请直接写出完整值）")
+        return None
+    if doc is not None and not isinstance(doc, dict):
+        errs.append(f"{rel}: 顶层不是映射，无法判定密钥边界")
+        return None
+    return doc or {}
 
 
 def _texts(repo: Path):
@@ -127,10 +172,18 @@ def check(repo: Path) -> list[str]:
         errs.append(f"{BASE_COMPOSE} 不存在")
     for f in compose_files:
         rel = f.relative_to(repo).as_posix()
-        doc = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        doc = _load(f, rel, errs)
+        if doc is None:
+            continue
         for name, svc in (doc.get("services") or {}).items():
             svc = svc or {}
             where = f"{rel}: 服务 {name}"
+            if SECRET_DIR_ENV in _env_keys(svc.get("environment")):
+                errs.append(f"{where} 的 environment 设了 {SECRET_DIR_ENV}（入口包装只检查该目录，会绕过主密钥检测，评审 m1）")
+            for raw in svc.get("volumes") or []:
+                src = str(raw.get("source", "")) if isinstance(raw, dict) else str(raw)
+                if any(m in src for m in SECRET_DIR_VOL_MARKERS):
+                    errs.append(f"{where} 把密钥目录当普通卷挂载（{src.split(':/', 1)[0]}…）：密钥只能经 secrets: 按白名单分配（评审 m1）")
             if "env_file" in svc:
                 errs.append(f"{where} 使用了 env_file（禁止整体注入 .env）")
             if name == PRIVATE_OWNER:
@@ -190,7 +243,7 @@ def check(repo: Path) -> list[str]:
 
     base = repo / BASE_COMPOSE
     if base.is_file():
-        doc = yaml.safe_load(base.read_text(encoding="utf-8")) or {}
+        doc = _load(base, BASE_COMPOSE, []) or {}   # 解析错误已在上面的循环里报过
         top = doc.get("secrets") or {}
         for s in (PRIVATE_SECRET, PUBLIC_SECRET):
             if not (isinstance(top.get(s), dict) and "file" in top[s]):

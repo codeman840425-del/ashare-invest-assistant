@@ -2,8 +2,9 @@
 
 一次性库（T-T23/T-T22 的 ``authdb``：testcontainers 上的临时库，模块结束 DROP），绝不连共享库
 （be-b03a-pg / aia-t01）。``aia_maint`` 角色在测试容器里临时创建（随机口令，只存在于本进程内存与
-``tmp_path`` 下的 DSN 文件），授予 app/ops/market 三个 schema 的 DML——这是测试侧近似；正式授权由运维在
-``deploy/db/roles/grants.sql`` 落地（plan §7.3 第 5 点，尚未提交）。
+``tmp_path`` 下 0600 的 DSN 文件，经 ``AIA_MAINT_DATABASE_URL_FILE`` 交给 CLI；T-B49 起 CLI 只认 _FILE），
+非超级用户、NOINHERIT；被测树有 ``deploy/db/roles/grants.sql`` 时按其中 ``$maint$`` 段原样授权（运维 T-O11），
+没有时（origin 0cb78ad）退回授予 app/ops/market 三个 schema 的 DML 的测试侧近似。DSN / 口令从不打印。
 
 覆盖：
 - 参数：非法 uuid → 2；不存在的用户 → 1 拒绝。
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import re
 import secrets
 import uuid
 from collections.abc import Callable, Iterator
@@ -69,6 +71,47 @@ def _dsn(url: str, user: str, pw: str) -> str:
     return urlunsplit(("postgresql+psycopg", netloc, p.path, p.query, p.fragment))
 
 
+GRANTS = _t23.REPO / "deploy" / "db" / "roles" / "grants.sql"
+#: grants.sql 的 $maint$ 自检会检查 aia_api / aia_ingest 的权限与成员关系；测试库里换成 NOLOGIN 占位角色。
+_MAINT_STUBS = {"aia_api": "tt24_api_stub", "aia_ingest": "tt24_ingest_stub"}
+
+
+def _maint_grants_block() -> str | None:
+    """grants.sql 中 aia_maint 的授权段（``DO $maint$ … $maint$;``）；被测树没有则 None。"""
+    if not GRANTS.is_file():
+        return None
+    m = re.search(r"DO \$maint\$.*?\n\$maint\$;", GRANTS.read_text(encoding="utf-8"), re.S)
+    if m is None:
+        return None
+    block = m.group(0)
+    for old, new in _MAINT_STUBS.items():
+        block = block.replace(f"'{old}'", f"'{new}'")
+    return block
+
+
+def _mk_maint_role(authdb: SimpleNamespace) -> str:
+    """aia_maint：按 grants.sql 的角色属性（LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+    NOINHERIT）与 $maint$ 授权段在测试容器里创建（随机口令）；没有 grants.sql 时退回 DML 近似。返回 DSN（不打印）。"""
+    block = _maint_grants_block()
+    if block is None:
+        return _mk_role(authdb, MAINT)
+    import psycopg
+
+    pw = secrets.token_hex(16)
+    with psycopg.connect(authdb.url, autocommit=True) as c:
+        for stub in _MAINT_STUBS.values():
+            if not c.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (stub,)).fetchone():
+                c.execute(f"CREATE ROLE {stub} NOLOGIN")
+        verb = "ALTER" if c.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (MAINT,)).fetchone() else "CREATE"
+        c.execute(f"{verb} ROLE {MAINT} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS "
+                  f"NOINHERIT PASSWORD '{pw}'")
+        c.execute(block)  # type: ignore[arg-type]
+        attrs = c.execute("SELECT rolsuper, rolbypassrls, rolinherit FROM pg_roles WHERE rolname = %s",
+                          (MAINT,)).fetchone()
+        assert attrs == (False, False, False), "aia_maint 必须是非超级用户、NOBYPASSRLS、NOINHERIT"
+    return _dsn(authdb.url, MAINT, pw)
+
+
 def _mk_role(authdb: SimpleNamespace, name: str, *, dml: bool = True) -> str:
     """测试容器内临时角色（集群级，随机口令），授予本库 app/ops/market 的 DML（``dml=False`` 只授 SELECT）；返回 DSN。"""
     import psycopg
@@ -89,7 +132,7 @@ def _mk_role(authdb: SimpleNamespace, name: str, *, dml: bool = True) -> str:
 
 @pytest.fixture(scope="module")
 def roles(authdb: SimpleNamespace) -> Iterator[SimpleNamespace]:
-    yield SimpleNamespace(maint=_mk_role(authdb, MAINT), other=_mk_role(authdb, "tt24_notmaint"),
+    yield SimpleNamespace(maint=_mk_maint_role(authdb), other=_mk_role(authdb, "tt24_notmaint"),
                           ro=_mk_role(authdb, "tt24_readonly", dml=False))
 
 
@@ -207,9 +250,8 @@ def test_cli_execute_guards_change_nothing(cli: SimpleNamespace, victim: SimpleN
     assert victim.s.client.get(f"{API}/me").status_code == 200, "守卫失败时不得吊销会话"
 
 
-O_B49_DRY = "后端 T-B49（review-a8e055b m2：dry-run 只允许 aia_maint 或只读角色；在本地 main 6670b10，未推 origin）"
-
-
+#: T-B49（6670b10，review-a8e055b m2）：dry-run 只允许 aia_maint 或只读角色。本用例随 6670b10 一起推送，故严格断言
+#: （origin 0cb78ad 上预期失败，直到 6670b10 推送）。
 @pytest.mark.parametrize("who", ["superuser_database_url", "writer_file", "readonly_file"])
 def test_cli_dry_run_role_gate(cli: SimpleNamespace, victim: SimpleNamespace, roles: SimpleNamespace,
                                sql: Callable[..., Any], capsys: pytest.CaptureFixture[str], who: str) -> None:
@@ -227,14 +269,10 @@ def test_cli_dry_run_role_gate(cli: SimpleNamespace, victim: SimpleNamespace, ro
         assert r.rc == 0, r.text[-800:]
         assert "dry-run" in r.out
         return
-    if r.rc == 0:
-        pytest.xfail(O_B49_DRY + f"：{who} 的 dry-run 被放行")
     assert r.rc == 1 and "拒绝" in r.err and "app.user_data_licences" not in r.out
 
 
-O_B49_FILE = "后端 T-B49（review m1：aia_maint DSN 只认 AIA_MAINT_DATABASE_URL_FILE，明文环境变量拒绝；在本地 main 6670b10，未推 origin）"
-
-
+#: T-B49（6670b10，review m1）：aia_maint DSN 只认 AIA_MAINT_DATABASE_URL_FILE，明文环境变量拒绝。严格断言，随 6670b10 推送。
 def test_cli_refuses_plaintext_maint_dsn_env(cli: SimpleNamespace, victim: SimpleNamespace, roles: SimpleNamespace,
                                              sql: Callable[..., Any], capsys: pytest.CaptureFixture[str]) -> None:
     """T-B49：设置了明文 ``AIA_MAINT_DATABASE_URL`` → 拒绝（不回落、不连库），--execute 不删任何行；拒绝信息只点名
@@ -247,8 +285,7 @@ def test_cli_refuses_plaintext_maint_dsn_env(cli: SimpleNamespace, victim: Simpl
         refused, text = r.rc != 0, r.text
     except SystemExit as exc:
         refused, text = True, str(exc) + capsys.readouterr().err
-    if not refused:
-        pytest.xfail(O_B49_FILE + "：明文环境变量被接受并执行")
+    assert refused, "明文 AIA_MAINT_DATABASE_URL 被接受并执行（T-B49 未落地）"
     assert "AIA_MAINT_DATABASE_URL" in text
     assert roles.maint.split("@")[0].rsplit(":", 1)[-1] not in text, "拒绝信息不得回显 DSN 口令"
     assert _footprint(sql, victim.uid) == before

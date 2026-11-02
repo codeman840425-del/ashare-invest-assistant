@@ -260,8 +260,9 @@ def user_session_keys(authdb: SimpleNamespace, uid: str) -> set[str]:
 #: 0009（T-B02y，ETF/策略类型触发器）与 0010（T-B03d，user_data_licence_holds）；T-T24：本地 main 又有
 #: 0011（T-B16 删除用户数据）、0012（T-B03e 证书冷却）、0013（T-B16-core-r2 aia_maint/purging）。
 #: 精确集合：origin 0008、main 0016（T-T25 追加：0014 bbf58a0 T-B46 imports/trades、0015 a8e055b T-B03f 评审修复、
-#: 0016 83a031c T-B10 research_candidates 部分唯一索引）；中间版本在分批推送时可能成为 head。
-KNOWN_HEADS = ("0008", "0010", "0011", "0012", "0013", "0014", "0015", "0016")
+#: 0016 83a031c T-B10 research_candidates 部分唯一索引；0017 6670b10 T-B49 data_snapshots purpose=horizon + user_scoped CHECK，
+#: 须与 6670b10 一起推送）；中间版本在分批推送时可能成为 head。
+KNOWN_HEADS = ("0008", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017")
 
 
 def test_alembic_head_is_known(authdb: SimpleNamespace, sql: Callable[..., Any]) -> None:

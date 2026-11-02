@@ -36,6 +36,8 @@ _new, _ver, _list, _gate = _a11._new, _a11._ver, _a11._list, _a11._gate
 
 pytestmark = [pytest.mark.integration, pytest.mark.contract]
 
+#: T-O11 裁定 D（candidate 行 user_id 必填：库级 CHECK + 写入函数断言）由 T-B49 6670b10（迁移 0017）落地，下列两例严格断言；
+#: 须与 6670b10 一起推送（origin 0cb78ad 上预期失败）。
 O_D_CAND = "后端（T-O11 裁定 D：新迁移把 candidate 加入“user_id 必填”CHECK，并在写入函数断言 user_id 非空）"
 O_T1_GATE = "后端 T-B47-R10（T-O11 裁定 m④：fund_t_plus 须以 t0_round_trip.data_source 非空为闸门，未接入前 ETF 一律 T+1）"
 O_LOTS = "后端 T-B47-R10（app.market_rules.lots / t0_round_trip：在本地 main 07b8d74，未推 origin）"
@@ -104,7 +106,6 @@ def test_t16_candidate_snapshot_not_visible_across_users(session: Callable[..., 
     assert items_a  # A 的快照有内容（非空 JSON），上面的“不出现”断言才有意义
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_D_CAND}：purpose='candidate' 且 user_id 为 null 应被库级 CHECK 拒绝（23514）")
 def test_t16_db_rejects_candidate_snapshot_without_user(sql: Callable[..., Any]) -> None:
     with pytest.raises(Exception) as ei:
         sql("INSERT INTO app.data_snapshots (purpose, items, hash, user_id) VALUES ('candidate', CAST('{}' AS jsonb), :h, NULL)",
@@ -115,7 +116,6 @@ def test_t16_db_rejects_candidate_snapshot_without_user(sql: Callable[..., Any])
     assert getattr(diag, "constraint_name", None) != "ck_data_snapshots_purpose"
 
 
-@pytest.mark.xfail(strict=False, reason=f"{O_D_CAND}：research.content.write_snapshot(user_id=None) 应在应用层拒写")
 def test_t16_writer_asserts_user_id(authdb: SimpleNamespace, sql: Callable[..., Any]) -> None:
     try:
         rc = importlib.import_module("app.research.content")

@@ -98,6 +98,115 @@ _MOCK_FACTORS = ["pe_ttm", "pb", "roe_ttm", "profit_yoy", "momentum_20d", "north
                  "north_holding_ratio", "attention_score", "intraday_vol_20d", "mock_extra_factor"]
 
 
+# --------------------------------------------------------------------------- p13_fin_pit 用的伪造响应
+# 量纲按真实样例：元、股；jzrq/plrq/jlr 与 p11 GAP3 依赖的 _MOCK_FIN 完全一致（只追加字段）
+_BANKS, _INSURERS = ("000001.SZ", "600000.SH"), ("601318.SH",)
+
+
+def _scale(code: str) -> float:
+    return 5.8e12 if code in _BANKS else 1.3e13 if code in _INSURERS else 1.5e10 if code.startswith("689") else 3e11
+
+
+def _fin_rows(table: str, code: str) -> list:
+    fin = list(_MOCK_FIN)
+    if code == "600525.SH":   # 差错更正样例：2024Q3 原版 + 2025-04-29 更正版
+        fin += [("2024-09-30", "2024-10-30"), ("2024-09-30", "2025-04-29")]
+    out = []
+    for i, (j, p) in enumerate(fin):
+        r = {"jzrq": j, "plrq": p, "jlr": 100.0 + i}
+        k = {"03-31": 1, "06-30": 2, "09-30": 3, "12-31": 4}[j[5:]]
+        bump = 1.01 if (p or "") in ("2026-09-01", "2025-04-29") else 1.0   # 修订版数值不同
+        sc = _scale(code)
+        if table == "cashflow":
+            lr = round(sc * 0.01 * k * bump, 2)
+            lc = round(lr * 0.6, 2)
+            xj = round(lr - lc, 2)
+            if j < "2002" or code in _BANKS:      # 早期/银行样例：净额只在 je 字段
+                r.update({"jyhdxjlrxj": lr, "jyhdxjlcxj": lc, "jyhdcsdxjlxj": "-", "jyhdcsdxjlje": xj})
+            else:
+                r.update({"jyhdxjlrxj": lr, "jyhdxjlcxj": lc, "jyhdcsdxjlxj": xj, "jyhdcsdxjlje": "-"})
+        elif table == "balance":
+            za = round(sc * (1 + i * 0.01) * bump, 2)
+            eq = round(za * 0.085, 2) if (code in _BANKS or code in _INSURERS) else round(za * 0.6, 2)
+            if code == "300750.SZ" and j == "2001-12-31":
+                eq = -1000000.0
+            fz = round(za - eq - 1000.0, 2)
+            r.update({"zczj": za, "fzhj": fz, "gsmgdqsyhj": eq, "syzqyhj": round(eq + 1000.0, 2),
+                      "fzhgdqyzj": za})
+        else:
+            r.update({"yysr": round(sc * 0.02 * k * bump, 2)})
+        out.append(r)
+    return out
+
+
+_MOCK_CAPITAL = {   # (bdrq, plrq, zgb, ysltag, xsltgf)
+    "600519.SH": [("20110630", "2011-06-30", 943800000, 943800000, 0),
+                  ("20110701", "2011-07-01", 1038180000, 1038180000, 0),
+                  ("20260630", "2026-06-30", 1250081601, 1250081601, 0),
+                  ("20260930", "2026-09-30", 1250081601, 1250081601, 0)],
+    "000001.SZ": [("20160331", "2016-03-31", 14_308_676_139, 11804054528, 2504621611),
+                  ("20160616", "2016-08-12", 17_170_411_366, 14_164_865_433, 3005545933),
+                  ("20260930", "2026-09-30", 19_405_918_198, 19_405_546_950, 371248)],
+    "601318.SH": [("20250630", "2025-06-30", 18_210_234_607, 10762657695, 0),
+                  ("20250903", "2025-09-03", 18_107_641_995, 10660065083, 0),
+                  ("20260930", "2026-09-30", 18_107_641_995, 10660065083, 0)],
+    "000550.SZ": [("20260331", "2026-03-31", 863214000, 518463160, 750840)],
+}
+
+
+def _capital_rows(code: str) -> list:
+    rows = _MOCK_CAPITAL.get(code, [("20260930", "2026-09-30", 1000000000, 1000000000, 0)])
+    return [{"bdrq": b, "plrq": p, "xsltgf": x, "ysltag": a, "zgb": z} for b, p, z, a, x in reversed(rows)]
+
+
+def _jnfh_rows(code6: str) -> list:
+    blank = {"give": "0", "change": "0", "hdate": "--"}
+    if code6 == "600519":
+        return [{"sdate": "2026-06-22", "rdate": "2025-12-31", **blank, "send": "280.2423", "line": "实施",
+                 "cdate": "2026-06-26", "edate": "2026-06-25"},
+                {"sdate": "2011-06-26", "rdate": "2010-12-31", "give": "1", "change": "0", "send": "23",
+                 "line": "实施", "cdate": "2011-07-01", "edate": "2011-06-30", "hdate": "2011-07-04"}]
+    if code6 == "000001":
+        return [{"sdate": "2016-06-08", "rdate": "2015-12-31", "give": "0", "change": "2", "send": "1.53",
+                 "line": "实施", "cdate": "2016-06-16", "edate": "2016-06-15", "hdate": "2016-06-16"}]
+    return []
+
+
+_MOCK_SW = [("申万行业", "swhy", 0, "", 0), ("申万行业-银行", "sw_yx", 1, "swhy", 0),
+            ("申万行业-非银金融", "sw_fy", 1, "swhy", 0), ("申万行业-食品饮料", "sw_sp", 1, "swhy", 1),
+            ("申万二级-股份制银行Ⅱ", "sw2_480300", 2, "sw_yx", 1), ("申万二级-保险Ⅱ", "sw2_490200", 2, "sw_fy", 1)]
+
+
+def _hszg_route(segs: list):
+    if segs[1] == "list":
+        return [{"name": n, "code": cd, "type1": 0, "type2": 0, "level": lv, "pcode": pc, "pname": "",
+                 "isleaf": leaf} for n, cd, lv, pc, leaf in _MOCK_SW] + [
+                {"name": "概念-白酒", "code": "gn_bj", "type1": 1, "type2": 0, "level": 1, "pcode": "gn", "pname": "",
+                 "isleaf": 1}]
+    if segs[1] == "zg" and len(segs) > 3:
+        m = {"000001": ["sw_yx", "sw2_480300"], "601318": ["sw_fy", "sw2_490200"]}.get(segs[2])
+        if m:
+            return [{"code": cd, "name": n} for n, cd, *_ in _MOCK_SW if cd in m]
+    if segs[1] == "gg" and len(segs) > 3:
+        m = {"sw_yx": ["000001", "600000", "601398", "601939", "600036"],
+             "sw2_490200": ["601318", "601628", "601601", "601336", "601319"]}.get(segs[2])
+        if m:
+            return [{"dm": d, "mc": f"成分{d}", "jys": "sh" if d[0] == "6" else "sz"} for d in m]
+    return None
+
+
+def _daily_rows(code: str, q: dict) -> list:
+    from datetime import date, timedelta
+    px = {"600519.SH": 1450.0, "000001.SZ": 11.6, "601318.SH": 55.0}.get(code, 10.0)
+    out, d = [], date(2026, 9, 1)
+    while d <= date(2026, 10, 30):
+        if d.weekday() < 5:
+            out.append({"t": d.isoformat(), "o": px, "h": px, "l": px, "c": px, "v": 1000.0, "a": px * 1000,
+                        "pc": px, "sf": 0})
+        d += timedelta(days=1)
+    return out
+
+
 def _gap_routes(path, segs, q, js):
     from datetime import date, timedelta
     if path.startswith("/tcalendar/list/"):
@@ -112,7 +221,17 @@ def _gap_routes(path, segs, q, js):
         return js([{"t": "2026-10-30", "o": 11.53, "h": 11.67, "l": 11.4, "c": 11.64, "v": 1864245.0,
                     "a": 2152393900.0, "pc": 11.54, "sf": 0}])
     if path.startswith("/hsstock/financial/") and segs[2] in ("income", "balance", "cashflow"):
-        return js([{"jzrq": j, "plrq": p, "jlr": 100.0 + i} for i, (j, p) in enumerate(_MOCK_FIN)])
+        return js(_fin_rows(segs[2], segs[3] if len(segs) > 4 else ""))
+    if path.startswith("/hsstock/financial/capital/") and len(segs) > 4:
+        return js(_capital_rows(segs[3]))
+    if path.startswith("/hscp/jnfh/") and len(segs) > 3:
+        return js(_jnfh_rows(segs[2]))
+    if path.startswith("/hszg/"):
+        r = _hszg_route(segs)
+        if r is not None:
+            return js(r)
+    if path.startswith("/hsstock/history/") and "/d/n/" in path and q.get("st") == ["20260901"]:
+        return js(_daily_rows(segs[2], q))
     if path.startswith("/hslt/ztgc/"):
         # 涨停池：fbt 用接近 00:00 的时刻，保证取样时刻（真实当前时间）之后几乎总在其后；
         # 另含 1 只 fbt=23:59:59（取样时刻之后封板 → 不选）、1 只无 fbt、1 只原样本（排除）

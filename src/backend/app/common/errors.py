@@ -42,6 +42,7 @@ class ErrorCode(StrEnum):
     NOT_FOUND = "NOT_FOUND"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
     PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
+    URI_TOO_LONG = "URI_TOO_LONG"
     CONFLICT = "CONFLICT"
     IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
     VERSION_CONFLICT = "VERSION_CONFLICT"
@@ -121,6 +122,8 @@ ERROR_CODES: Final[dict[ErrorCode, ErrorSpec]] = {
     E.METHOD_NOT_ALLOWED: ErrorSpec(405, "该路径不支持此请求方法"),
     #: 请求体超过网关/框架上限（契约 v0.2.3 §4）；应用层文件超限仍用 422 IMPORT_FILE_ERRORS
     E.PAYLOAD_TOO_LARGE: ErrorSpec(413, "请求体过大"),
+    #: v0.2.9 #34：网关（nginx）在路由之前返回；后端从不产生，只在 /meta/enums 登记
+    E.URI_TOO_LONG: ErrorSpec(414, "请求地址过长"),
     E.CONFLICT: ErrorSpec(409, "数据冲突"),
     E.IDEMPOTENCY_CONFLICT: ErrorSpec(409, "同一幂等键对应了不同的请求内容"),
     E.VERSION_CONFLICT: ErrorSpec(409, "版本号不一致，请刷新后重试"),
@@ -194,8 +197,9 @@ class ErrorResponse(BaseModel):
 
 class UriTooLongBody(BaseModel):
     """nginx 自产的 414 信封（deploy/nginx ``/__aia_errors/414``）：形状与 413 相同，``code`` 固定为
-    ``URI_TOO_LONG``，``details.max_bytes`` = 请求行上限。后端从不产生 414，故不进 ``ErrorCode``
-    枚举（契约 §3）；只在 OpenAPI 声明（T-B49，T-live-0f8129b F-1）。"""
+    ``URI_TOO_LONG``，``details.max_bytes`` = 请求行上限。后端从不产生 414；v0.2.9 #34 起
+    ``URI_TOO_LONG`` 进 ``ErrorCode`` / ``/meta/enums.error_codes``（只登记），此处保留 OpenAPI 声明
+    （T-B49，T-live-0f8129b F-1）。"""
 
     model_config = ConfigDict(extra="forbid")
 

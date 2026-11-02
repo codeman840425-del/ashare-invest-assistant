@@ -735,6 +735,38 @@ class PlanConditionKind(StrEnum):
     INVALIDATION = "invalidation"
 
 
+class PlanStatus(StrEnum):  # v0.2.9 #30，§7.7B；done / cancelled 为终态
+    ACTIVE = "active"
+    TRIGGERED = "triggered"
+    DONE = "done"
+    CANCELLED = "cancelled"
+
+
+class PlanConditionType(StrEnum):  # v0.2.9 #30；本版写入不接受 indicator / event（问题 83）
+    PRICE_ABOVE = "price_above"
+    PRICE_BELOW = "price_below"
+    PCT_CHANGE = "pct_change"
+    INDICATOR = "indicator"
+    EVENT = "event"
+    DATE = "date"
+    CUSTOM = "custom"
+
+
+class SecurityReconciliationKind(StrEnum):  # v0.2.9 内，T-A04；plan 4.6.4
+    VENDOR_STALE_LISTED = "vendor_stale_listed"
+    VENDOR_UNKNOWN = "vendor_unknown"
+    QUOTE_MISSING = "quote_missing"
+    QUOTE_CONFLICT = "quote_conflict"
+    FIELD_MISMATCH = "field_mismatch"
+
+
+class SecurityReconciliationSource(StrEnum):  # v0.2.9 内，T-A04
+    MAIRUI_LISTS = "mairui_lists"
+    MAIRUI_REAL_ALL = "mairui_real_all"
+    CNINFO = "cninfo"
+    AKSHARE = "akshare"
+
+
 class DataGapScope(StrEnum):
     USER = "user"
     ACCOUNT = "account"
@@ -826,6 +858,9 @@ CONTRACT_ENUMS: Final[dict[str, type[StrEnum]]] = {
     "listing_status": ListingStatus,
     "security_risk_flag": SecurityRiskFlag,
     "security_match_kind": SecurityMatchKind,
+    # v0.2.9 内（T-A04）
+    "security_reconciliation_kind": SecurityReconciliationKind,
+    "security_reconciliation_source": SecurityReconciliationSource,
     "report_period": ReportPeriod,
     "factor_category": FactorCategory,
     "announcement_category": AnnouncementCategory,
@@ -838,6 +873,9 @@ CONTRACT_ENUMS: Final[dict[str, type[StrEnum]]] = {
     "alert_origin": AlertOrigin,
     "alert_status": AlertStatus,
     "plan_condition_kind": PlanConditionKind,
+    # v0.2.9 #30
+    "plan_status": PlanStatus,
+    "plan_condition_type": PlanConditionType,
     "data_gap_scope": DataGapScope,
 }
 

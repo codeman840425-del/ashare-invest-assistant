@@ -1,4 +1,5 @@
-"""管理端 ``/admin/*``（契约 §7.9）。目前只有邀请码（T-B03c，契约 v0.2.3 #27）。
+"""管理端 ``/admin/*``（契约 §7.9）：邀请码（T-B03c，契约 v0.2.3 #27）与 ``/admin/ingest/status``
+（契约 v0.2.8 #1，T-B47）。证书列表与暂停/恢复在 :mod:`app.api.v1.data_licence`。
 
 非管理员（含未登录）访问一律 ``404 NOT_FOUND``（:func:`app.auth.deps.current_admin`）。
 """
@@ -15,10 +16,19 @@ from sqlalchemy import or_, select, tuple_
 
 from app.api.v1.auth import RESERVED_USERNAMES, USERNAME_RE
 from app.auth import invites, service
-from app.auth.deps import AdminDep, EngineDep, SettingsDep, client_ip, current_admin, ip_hash
+from app.auth.deps import (
+    AdminDep,
+    EngineDep,
+    RedisDep,
+    SettingsDep,
+    client_ip,
+    current_admin,
+    ip_hash,
+)
 from app.common.errors import AppError, ErrorCode
 from app.common.pagination import Page, PageParams, build_page, decode_cursor, page_params
 from app.db.tables.users import invite_codes
+from app.licences import ingest_status
 
 # include_in_schema=False：/admin/* 不进公开 openapi.json（契约 §1.3，见 T-B04a 报告）
 router = APIRouter(
@@ -201,3 +211,20 @@ def revoke_invite(
             ip_hash=ip_hash(settings, client_ip(request, settings)),
         )
     return Response(status_code=204)
+
+
+# ------------------------------------------------------------ /admin/ingest/status（T-B47）
+
+
+@router.get("/ingest/status")
+def get_ingest_status(
+    admin: AdminDep,
+    settings: SettingsDep,
+    engine: EngineDep,
+    rds: RedisDep,
+) -> dict[str, Any]:
+    """契约 v0.2.8 §7.9：只读的采集状态；``licences[]`` 按证书一行（§5.1 ``IngestLicenceStatus``），
+    不含证书值、密文、HMAC 或其片段。"""
+    del admin
+    with engine.connect() as conn:
+        return ingest_status.build(conn, rds, settings)

@@ -2,7 +2,8 @@
 
 判定顺序（🔒 接口）：无会话或会话失效 → ``401 AUTH_REQUIRED``；用户不存在或已注销 → 吊销会话后
 ``401 AUTH_REQUIRED``；账号非 ``approved`` → ``403 ACCOUNT_NOT_APPROVED {status}``；写方法
-（POST/PUT/PATCH/DELETE）的 ``X-CSRF-Token`` 缺失或不符 → ``403 CSRF_FAILED``。
+（POST/PUT/PATCH/DELETE）的 ``X-CSRF-Token`` 头、``csrf_token`` Cookie、会话令牌三者任一缺失或不一致
+→ ``403 CSRF_FAILED``（双提交，契约 v0.2.4 #13；T-B47）。
 ``/admin/*`` 的 404 规则不在这里。
 """
 
@@ -21,7 +22,7 @@ from fastapi import Depends, Request
 from sqlalchemy import Engine, Row, select
 
 from app.auth.passwords import PasswordPolicy, policy_for
-from app.auth.sessions import CSRF_HEADER, SESSION_COOKIE, Session, SessionStore
+from app.auth.sessions import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, Session, SessionStore
 from app.common.errors import AppError, ErrorCode
 from app.config import Settings, get_settings
 from app.db.engine import engine_for
@@ -135,6 +136,12 @@ def load_user(engine: Engine, user_id: str) -> Row[Any] | None:
         ).first()
 
 
+def _csrf_ok(request: Request, session: Session) -> bool:
+    """契约 v0.2.4 #13 / §1.3 双提交（T-B47）：
+    ``X-CSRF-Token`` 头 = ``csrf_token`` Cookie = 会话令牌。"""
+    return session.csrf_ok(request.headers.get(CSRF_HEADER), request.cookies.get(CSRF_COOKIE))
+
+
 def current_auth(request: Request, engine: EngineDep, store: StoreDep) -> AuthContext:
     session = store.get(request.cookies.get(SESSION_COOKIE))
     if session is None:
@@ -147,9 +154,7 @@ def current_auth(request: Request, engine: EngineDep, store: StoreDep) -> AuthCo
         # 禁用即吊销属于 T-B03b；这里兜底：非 approved 的会话直接作废
         store.revoke_user(str(user.id))
         raise AppError(ErrorCode.ACCOUNT_NOT_APPROVED, details={"status": user.status})
-    if request.method.upper() in UNSAFE_METHODS and not session.csrf_ok(
-        request.headers.get(CSRF_HEADER)
-    ):
+    if request.method.upper() in UNSAFE_METHODS and not _csrf_ok(request, session):
         raise AppError(ErrorCode.CSRF_FAILED)
     return AuthContext(user=user, session=session)
 
@@ -167,9 +172,7 @@ def current_admin(request: Request, engine: EngineDep, store: StoreDep) -> AuthC
     user = load_user(engine, session.user_id)
     if user is None or user.status != AccountStatus.APPROVED or user.role != Role.ADMIN:
         raise AppError(ErrorCode.NOT_FOUND)
-    if request.method.upper() in UNSAFE_METHODS and not session.csrf_ok(
-        request.headers.get(CSRF_HEADER)
-    ):
+    if request.method.upper() in UNSAFE_METHODS and not _csrf_ok(request, session):
         raise AppError(ErrorCode.CSRF_FAILED)
     return AuthContext(user=user, session=session)
 

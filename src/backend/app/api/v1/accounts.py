@@ -11,7 +11,7 @@ import datetime as dt
 import uuid
 from typing import Annotated, Any, Final
 
-from fastapi import APIRouter, Depends, Header, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import Connection, Row, and_, insert, or_, select, union_all
 
@@ -177,7 +177,7 @@ def create_account(
     engine: EngineDep,
     settings: SettingsDep,
     rds: RedisDep,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    idempotency_key: idempotency.KeyHeader = None,
 ) -> object:
     RateLimiter(rds).enforce(
         f"user:{auth.user_id}", [Window("accounts:create", CREATE_PER_HOUR, 3600)]

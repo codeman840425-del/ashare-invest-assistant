@@ -9,7 +9,9 @@
   ``absolute_ttl_s`` 自登录起绝对过期（默认 30 天，不续期）。每次取会话时检查
   ``now - created_at ≥ absolute_ttl_s`` 即作废。
 - CSRF：每个会话一个随机令牌，登录时通过响应体与非 HttpOnly Cookie ``csrf_token`` 下发；
-  写请求的 ``X-CSRF-Token`` 头与会话中保存的值做常量时间比较（不信任 Cookie 本身）。
+  写请求做**双提交**校验（契约 v0.2.4 #13 / §1.3，T-B47）：``X-CSRF-Token`` 头、``csrf_token``
+  Cookie、会话中保存的值三者必须一致（常量时间比较）。只有头与 Cookie 一致不够（攻击者能写子域
+  Cookie 时可伪造二者），只有头与会话一致也不够（Cookie 缺失或不符同样拒绝）。
 """
 
 from __future__ import annotations
@@ -43,10 +45,14 @@ class Session:
     csrf_token: str
     created_at: str
 
-    def csrf_ok(self, presented: str | None) -> bool:
-        if not presented:
+    def csrf_ok(self, header: str | None, cookie: str | None) -> bool:
+        """双提交：请求头、Cookie 与会话令牌三者一致才通过（两次比较都做，避免短路时序差）。"""
+        if not header or not cookie:
             return False
-        return hmac.compare_digest(presented.encode("utf-8"), self.csrf_token.encode("utf-8"))
+        expected = self.csrf_token.encode("utf-8")
+        header_ok = hmac.compare_digest(header.encode("utf-8"), expected)
+        cookie_ok = hmac.compare_digest(cookie.encode("utf-8"), expected)
+        return header_ok and cookie_ok
 
 
 class SessionStore:

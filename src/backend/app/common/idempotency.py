@@ -18,14 +18,21 @@ import contextlib
 import hashlib
 import json
 from collections.abc import Callable
-from typing import Any, Final
+from typing import Annotated, Any, Final
 
 import redis
+from fastapi import Header
 
 from app.common.errors import AppError, ErrorCode
 
 TTL_S: Final = 24 * 3600
 KEY_MAX: Final = 255
+
+# 请求头声明与 ``run`` 的校验一致（OpenAPI 里写明长度与“含非空白字符”，空 / 纯空白 / 超长 → 400）。
+KeyHeader = Annotated[
+    str | None,
+    Header(alias="Idempotency-Key", min_length=1, max_length=KEY_MAX, pattern=r"\S"),
+]
 
 
 def _k(user_id: object, scope: str, key: str) -> str:

@@ -10,6 +10,7 @@ from app.api.v1 import (
     auth,
     data_licence,
     health,
+    horizon,
     imports,
     me,
     meta,
@@ -29,3 +30,4 @@ router.include_router(accounts.router)
 router.include_router(imports.router)
 router.include_router(trades.router)
 router.include_router(portfolio.router)
+router.include_router(horizon.router)

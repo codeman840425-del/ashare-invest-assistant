@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from decimal import Decimal
 from typing import Annotated, Any, Final, Literal
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 from sqlalchemy import Connection, Row, insert, select, tuple_, update
 
@@ -309,7 +309,7 @@ def create_trade(
     engine: EngineDep,
     settings: SettingsDep,
     rds: RedisDep,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    idempotency_key: idempotency.KeyHeader = None,
 ) -> object:
     RateLimiter(rds).enforce(
         f"user:{auth.user_id}", [Window("trades:write", WRITES_PER_HOUR, 3600)]

@@ -729,7 +729,7 @@ def confirm_import(
     engine: EngineDep,
     settings: SettingsDep,
     rds: RedisDep,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    idempotency_key: idempotency.KeyHeader = None,
 ) -> object:
     _limit(rds, auth, "imports:write", WRITES_PER_HOUR)
 

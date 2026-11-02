@@ -131,8 +131,12 @@ class PageParams:
     cursor: str | None
 
 
+#: 契约 §1.2 / T-T25 §7：OpenAPI 声明 ``limit`` 最大 200（配置 ``page_limit_max`` 只能更小）
+PAGE_LIMIT_MAX: Final = 200
+
+
 def page_params(
-    limit: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int | None, Query(ge=1, le=PAGE_LIMIT_MAX)] = None,
     cursor: Annotated[str | None, Query(max_length=2048)] = None,
     settings: Settings = Depends(get_settings),  # noqa: B008 - FastAPI 依赖注入写法
 ) -> PageParams:

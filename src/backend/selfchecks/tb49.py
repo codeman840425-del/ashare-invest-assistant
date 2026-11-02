@@ -154,7 +154,7 @@ from app.workers import jobs  # noqa: E402
 
 s_job = mk(app_env="local", cooldown_purge_interval_s=120)
 check(
-    jobs.schedule(s_job) == {jobs.PURGE_COOLDOWNS: 120},
+    jobs.schedule(s_job)[jobs.PURGE_COOLDOWNS] == 120,
     "beat 排程表：purge_expired_cooldowns 间隔取配置 120s",
 )
 check(refuses(cooldown_purge_interval_s=30), "间隔 < 60 拒绝")
@@ -183,15 +183,18 @@ q(
     p=now + dt.timedelta(hours=2),
 )
 
-check(jobs.beat_tick(s_job, rds) == [jobs.PURGE_COOLDOWNS], "beat 首轮排程 1 个任务")
+check(
+    jobs.beat_tick(s_job, rds) == list(jobs.schedule(s_job)),
+    "beat 首轮排程全部任务（含 purge_expired_cooldowns）",
+)
 check(jobs.beat_tick(s_job, rds) == [], "beat 间隔内第二轮不重复排程")
 ttl = rds.ttl(jobs.DUE_PREFIX + jobs.PURGE_COOLDOWNS)
 check(0 < ttl <= 120, f"到期键 TTL = 配置间隔（{ttl}s）")
-check(rds.llen(jobs.QUEUE_KEY) == 1, "队列里 1 条任务")
+check(rds.llen(jobs.QUEUE_KEY) == len(jobs.schedule(s_job)), "队列里每个任务 1 条")
 payload = json.loads(rds.lindex(jobs.QUEUE_KEY, 0))
 check(set(payload) == {"task", "enqueued_at"}, "队列元素只含 task / enqueued_at")
 done = jobs.worker_tick(s_job, rds)
-check(done == [(jobs.PURGE_COOLDOWNS, "ok")], f"worker 执行 purge_expired_cooldowns → ok {done}")
+check((jobs.PURGE_COOLDOWNS, "ok") in done, f"worker 执行 purge_expired_cooldowns → ok {done}")
 left = {
     r[0]
     for r in q(

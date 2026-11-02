@@ -224,11 +224,21 @@ def _same_licence(conn: Connection, row_id: uuid.UUID, digest: bytes) -> bool:
     return conn.execute(stmt).first() is not None
 
 
+def db_now(conn: Connection) -> dt.datetime:
+    """T-T25 裁定 #5（契约 #32 ①）：冷却到期一律按数据库的 UTC 时间比较。"""
+    now: dt.datetime = conn.execute(select(func.now())).scalar_one()
+    return now.astimezone(dt.UTC)
+
+
 def keeps_state(row: Row[Any], now: dt.datetime) -> bool:
     """契约 v0.2.8 §7.1 重复 PUT 同一证书：``paused_until`` 未到期，或状态为
-    ``quota_exceeded``/``ip_limited`` → 保留当前状态，不验证。"""
+    ``quota_exceeded``/``ip_limited`` → 保留当前状态，不验证。
+
+    T-T25 裁定 #5：“paused_until 未到期”按半开区间理解——仅当 ``now < paused_until``，
+    相等即已到期；``now`` 取数据库 UTC 时间（见 :func:`db_now`）。冷却状态一项按契约原文保留，
+    不受 ``paused_until`` 是否到期影响（裁定 #3）。"""
     until: dt.datetime | None = row.paused_until
-    return row.status in COOLDOWN_STATUSES or (until is not None and until > now)
+    return row.status in COOLDOWN_STATUSES or (until is not None and now < until)
 
 
 def hmac_in_use_by_other(conn: Connection, user_id: uuid.UUID, digest: bytes) -> bool:
@@ -253,13 +263,14 @@ _COOLDOWN_KEEP: Final = frozenset({S.ACTIVE.value, *COOLDOWN_STATUSES})
 COOLDOWN_NULL_UNTIL_TTL: Final = dt.timedelta(hours=24)
 
 
-def _cooldown_expired(now: dt.datetime) -> ColumnElement[bool]:
-    """到期条件（SQL 表达式）：``paused_until <= now``，或 ``paused_until`` 为空且
-    ``deleted_at <= now - 24h``。"""
+def _cooldown_expired(now: dt.datetime | None) -> ColumnElement[bool]:
+    """到期条件（SQL 表达式，T-T25 裁定 #5 半开区间）：到期时刻 = ``paused_until``（非空）或
+    ``deleted_at + 24h``（空）；``now >= 到期时刻`` 即已到期。``now`` 为空时用数据库 ``now()``。"""
     cd = user_data_licence_cooldowns
+    ref: Any = func.now() if now is None else now
     return or_(
-        cd.c.paused_until <= now,
-        and_(cd.c.paused_until.is_(None), cd.c.deleted_at <= now - COOLDOWN_NULL_UNTIL_TTL),
+        cd.c.paused_until <= ref,
+        and_(cd.c.paused_until.is_(None), cd.c.deleted_at + COOLDOWN_NULL_UNTIL_TTL <= ref),
     )
 
 
@@ -268,7 +279,7 @@ def purge_expired_cooldowns(conn: Connection, now: dt.datetime | None = None) ->
     已到期的冷却记录，返回删除行数。cleanup-on-access：每次证书 PUT/DELETE 先调用；另由 beat
     按 ``COOLDOWN_PURGE_INTERVAL_S`` 排程、worker 定时执行（T-B49，:mod:`app.workers.jobs`）。"""
     cd = user_data_licence_cooldowns
-    res = conn.execute(delete(cd).where(_cooldown_expired(now or now_utc())))
+    res = conn.execute(delete(cd).where(_cooldown_expired(now)))
     return int(res.rowcount or 0)
 
 
@@ -312,11 +323,11 @@ def _take_cooldown(
     if not hmac.compare_digest(bytes(rec.fingerprint), fp):
         return None
     until: dt.datetime | None = rec.paused_until
-    if until is not None and until <= now:
+    if until is not None and not now < until:
         return None
     if until is None and rec.status not in COOLDOWN_STATUSES:
         return None
-    if until is None and rec.deleted_at <= now - COOLDOWN_NULL_UNTIL_TTL:
+    if until is None and not now < rec.deleted_at + COOLDOWN_NULL_UNTIL_TTL:
         return None
     return rec
 
@@ -338,7 +349,7 @@ def set_licence(
     if hmac_in_use_by_other(conn, user_id, digest):
         raise AppError(ErrorCode.DATA_LICENCE_IN_USE)
     old = live_row(conn, user_id, lock=True)
-    now = now_utc()
+    now = db_now(conn)
     held = is_held(conn, user_id) or (old is not None and old.status == S.PAUSED_BY_ADMIN)
     same = old is not None and _same_licence(conn, old.id, digest)
     if old is not None and same and (held or keeps_state(old, now)):
@@ -458,7 +469,7 @@ def delete_licence(
     old = live_row(conn, user_id, lock=True)
     if old is None:
         return False
-    now = now_utc()
+    now = db_now(conn)
     if settings is not None:
         digest = conn.execute(select(udl.c.licence_hmac).where(udl.c.id == old.id)).scalar_one()
         _remember_cooldown(conn, settings, old, bytes(digest), now)

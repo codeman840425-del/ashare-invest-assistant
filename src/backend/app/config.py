@@ -488,6 +488,10 @@ class Settings(BaseSettings):
     #: ``purge_expired_cooldowns``）；环境变量 ``COOLDOWN_PURGE_INTERVAL_S``（beat 读取）。
     #: 默认 3600，最小 60（与原 cooldown-purge 服务的 ``AIA_COOLDOWN_PURGE_INTERVAL_S`` 一致）。
     cooldown_purge_interval_s: int = Field(default=3600, ge=60)
+    #: 架构师裁定（T-live-83a031c §8 / T-A04 待写入契约）：beat 排程“清理 discarded/failed 批次残留
+    #: 预览行”的间隔秒数（worker 执行 ``purge_uncommitted_import_rows``）；环境变量
+    #: ``IMPORT_ROWS_PURGE_INTERVAL_S``，默认 3600（每小时），最小 60。
+    import_rows_purge_interval_s: int = Field(default=3600, ge=60)
     #: ``IMPORT_STORAGE_PATH``（T-B46，plan §3.5A）：原始导入文件根目录（仓库外、加密存放）。
     #: 未设置时 local/test 用系统临时目录，其他环境上传返回 ``503 MAINTENANCE``。
     import_storage_path: Path | None = None
@@ -515,7 +519,7 @@ class Settings(BaseSettings):
 
     # --- 分页（契约 §1.2） ---
     page_limit_default: int = Field(default=50, ge=1)
-    page_limit_max: int = Field(default=200, ge=1)
+    page_limit_max: int = Field(default=200, ge=1, le=200)  # = pagination.PAGE_LIMIT_MAX
     cursor_ttl_s: int = Field(default=86_400, gt=0)
 
     # --- 业务配置（config/*.yaml，只读） ---

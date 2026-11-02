@@ -16,6 +16,10 @@
 - ``licences.purge_expired_cooldowns``：调用 :func:`app.licences.service.purge_expired_cooldowns`
   删除已到期的证书冷却记录（review-a8e055b M1；取代 deploy 的 cooldown-purge 服务）。间隔
   ``Settings.cooldown_purge_interval_s``（``COOLDOWN_PURGE_INTERVAL_S``，默认 3600，最小 60）。
+- ``imports.purge_uncommitted_rows``：调用
+  :func:`app.importing.pipeline.purge_uncommitted_import_rows` 删除 discarded / failed 批次残留的
+  预览行（架构师裁定，T-live-83a031c §8）。间隔 ``Settings.import_rows_purge_interval_s``
+  （``IMPORT_ROWS_PURGE_INTERVAL_S``，默认 3600，最小 60）。
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ MAX_JOBS_PER_TICK: Final = 20
 TICK_S: Final = 15
 
 PURGE_COOLDOWNS: Final = "licences.purge_expired_cooldowns"
+PURGE_IMPORT_ROWS: Final = "imports.purge_uncommitted_rows"
 
 Task = Callable[[Settings], int]
 
@@ -72,13 +77,26 @@ def purge_expired_cooldowns_task(settings: Settings) -> int:
         return purge_expired_cooldowns(conn)
 
 
+def purge_import_rows_task(settings: Settings) -> int:
+    from app.importing.pipeline import purge_uncommitted_import_rows
+
+    with _engine(settings).begin() as conn:
+        return purge_uncommitted_import_rows(conn)
+
+
 #: 任务名 → 实现
-TASKS: Final[dict[str, Task]] = {PURGE_COOLDOWNS: purge_expired_cooldowns_task}
+TASKS: Final[dict[str, Task]] = {
+    PURGE_COOLDOWNS: purge_expired_cooldowns_task,
+    PURGE_IMPORT_ROWS: purge_import_rows_task,
+}
 
 
 def schedule(settings: Settings) -> dict[str, int]:
     """任务名 → 间隔秒数（beat 排程表；间隔来自配置）。"""
-    return {PURGE_COOLDOWNS: settings.cooldown_purge_interval_s}
+    return {
+        PURGE_COOLDOWNS: settings.cooldown_purge_interval_s,
+        PURGE_IMPORT_ROWS: settings.import_rows_purge_interval_s,
+    }
 
 
 def beat_tick(settings: Settings, client: redis.Redis | None = None) -> list[str]:

@@ -10,7 +10,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
 
-from app.api.v1.trades import normalize_code
+from app.api.v1.trades import SECURITY_CODE_PATTERN, normalize_code
 from app.auth.deps import AuthDep, EngineDep, SettingsDep
 from app.strategy.horizon import classifier
 from app.strategy.horizon import inputs as hz_inputs
@@ -23,7 +23,7 @@ def get_horizon_assessment(
     auth: AuthDep,
     settings: SettingsDep,
     engine: EngineDep,
-    security_code: Annotated[str, Query(min_length=1, max_length=16)],
+    security_code: Annotated[str, Query(pattern=SECURITY_CODE_PATTERN)],
 ) -> dict[str, Any]:
     cfg = settings.business.horizon_classifier
     with engine.connect() as conn:

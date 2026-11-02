@@ -338,6 +338,31 @@ def _collect_resolutions(conn: Connection, batch: Row[Any]) -> dict[str, dict[st
     return out
 
 
+#: 架构师裁定（T-live-83a031c §8，契约随 T-A04）：批次进入这些状态时，同一事务内删除其全部预览行
+#: （``import_rows``，未提交的行级数据）；批次头保留；原始文件按保留策略处理（不在此删除）。
+ROWS_DROPPED_STATUSES: Final = ("discarded", "failed")
+
+
+def drop_uncommitted_rows(conn: Connection, batch_id: uuid.UUID) -> int:
+    """删除一个批次的预览行（调用方保证批次在同一事务内已置为 discarded / failed）。"""
+    res = conn.execute(delete(import_rows).where(import_rows.c.batch_id == batch_id))
+    return int(res.rowcount or 0)
+
+
+def purge_uncommitted_import_rows(conn: Connection) -> int:
+    """定时清理（beat 每小时排程、worker 执行）：删除 discarded / failed 批次残留的预览行。
+
+    幂等：只按批次当前状态删除，重复执行第二次删 0 行；状态判定与删除在同一条语句里，
+    并发的“重新解析”（failed → parsing）不会被误删（语句快照内批次已不是 failed）。"""
+    b = import_batches
+    res = conn.execute(
+        delete(import_rows).where(
+            import_rows.c.batch_id.in_(select(b.c.id).where(b.c.status.in_(ROWS_DROPPED_STATUSES)))
+        )
+    )
+    return int(res.rowcount or 0)
+
+
 def run_parse(engine: Engine, settings: Settings, batch_id: uuid.UUID) -> None:
     """后台任务：解析一个 ``uploaded``/``parsing`` 批次。任何异常 → ``failed``（只记批次 id）。"""
     try:
@@ -345,11 +370,13 @@ def run_parse(engine: Engine, settings: Settings, batch_id: uuid.UUID) -> None:
     except Exception:
         log.exception("import parse failed batch=%s", batch_id)
         with engine.begin() as conn:
-            conn.execute(
+            res = conn.execute(
                 update(import_batches)
                 .where(import_batches.c.id == batch_id, import_batches.c.status == "parsing")
                 .values(status="failed")
             )
+            if res.rowcount:
+                drop_uncommitted_rows(conn, batch_id)
 
 
 def _run_parse(engine: Engine, settings: Settings, batch_id: uuid.UUID) -> None:
@@ -370,6 +397,7 @@ def _run_parse(engine: Engine, settings: Settings, batch_id: uuid.UUID) -> None:
                 .where(import_batches.c.id == batch_id)
                 .values(status="failed")
             )
+            drop_uncommitted_rows(conn, batch_id)
             return
         data = storage.read_raw(settings, f.storage_path, str(batch_id))
         resolutions = _collect_resolutions(conn, batch)
@@ -395,7 +423,9 @@ def _store_preview(
     secs: dict[str, SecurityInfo] | None,
 ) -> None:
     conn.execute(delete(import_rows).where(import_rows.c.batch_id == batch.id))
-    for r in pv.rows:
+    # 架构师裁定（T-live §8）：解析结果为 failed → 不落预览行（统计仍写进批次 summary）
+    stored = [] if pv.status in ROWS_DROPPED_STATUSES else pv.rows
+    for r in stored:
         n = r.normalized
         if n and n.get("security_code"):
             n["security_code"] = full_code(n["security_code"], secs)
@@ -413,7 +443,7 @@ def _store_preview(
             "dedup_key": r.dedup_key,
             "dedup_status": r.dedup_status,
         }
-        for r in pv.rows
+        for r in stored
     ]
     for i in range(0, len(payload), 1000):
         conn.execute(insert(import_rows), payload[i : i + 1000])

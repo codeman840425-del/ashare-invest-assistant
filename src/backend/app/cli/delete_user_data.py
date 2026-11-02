@@ -54,7 +54,7 @@ import shutil
 import sys
 import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
@@ -382,6 +382,119 @@ class PurgeRefusedError(Exception):
     """前置检查不通过（用户不存在、已在 purging、存在阻断引用）。"""
 
 
+#: T-T25 裁定 #4（plan 7.3）：清单内表上允许存在的非内部触发器（表 / 触发器名 / 函数名；分区子表
+#: 按根表计）。随迁移维护：新增或改名触发器的迁移必须同步这里，否则 --execute 拒绝执行。
+_NO_TRUNCATE_TABLES: Final = (
+    "app.account_reviews",
+    "app.audit_logs",
+    "app.broker_position_snapshot_items",
+    "app.broker_position_snapshots",
+    "app.candidate_signal_events",
+    "app.candidate_signals",
+    "app.candidate_versions",
+    "app.claims",
+    "app.daily_report_items",
+    "app.daily_reports",
+    "app.data_snapshots",
+    "app.plan_conditions",
+    "app.plan_draft_confirmations",
+    "app.plan_drafts",
+    "app.plan_versions",
+    "app.reason_status_events",
+    "app.review_versions",
+    "app.risk_control_settings_history",
+    "app.risk_events",
+    "app.signal_events",
+    "app.strategy_instance_events",
+    "app.suggestion_user_actions",
+    "app.suggestions",
+    "app.symbol_horizon_assessments",
+    "app.trades",
+    "app.user_profiles",
+    "ops.pending_file_purges",
+)
+TRIGGER_ALLOWLIST: Final[frozenset[tuple[str, str, str]]] = frozenset(
+    {
+        *((t, "trg_no_truncate", "app.reject_truncate") for t in _NO_TRUNCATE_TABLES),
+        ("app.account_reviews", "trg_account_reviews_immutable", "app.reject_mutation"),
+        ("app.audit_logs", "trg_audit_logs_immutable", "app.reject_mutation"),
+        (
+            "app.broker_position_snapshot_items",
+            "trg_broker_position_snapshot_items_immutable",
+            "app.reject_mutation",
+        ),
+        (
+            "app.broker_position_snapshots",
+            "trg_broker_position_snapshots_immutable",
+            "app.reject_mutation",
+        ),
+        (
+            "app.candidate_signal_events",
+            "trg_candidate_signal_events_immutable",
+            "app.reject_mutation",
+        ),
+        (
+            "app.candidate_signals",
+            "trg_candidate_signals_eligible_security",
+            "app.reject_non_strategy_security",
+        ),
+        ("app.candidate_signals", "trg_candidate_signals_no_delete", "app.reject_mutation"),
+        ("app.candidate_signals", "trg_candidate_signals_restrict_update", "app.restrict_update"),
+        ("app.candidate_versions", "trg_candidate_versions_immutable", "app.reject_mutation"),
+        ("app.claims", "trg_claims_immutable", "app.reject_mutation"),
+        ("app.daily_report_items", "trg_daily_report_items_immutable", "app.reject_mutation"),
+        ("app.daily_reports", "trg_daily_reports_guard", "app.guard_daily_reports"),
+        ("app.data_snapshots", "trg_data_snapshots_immutable", "app.reject_mutation"),
+        ("app.plan_conditions", "trg_plan_conditions_immutable", "app.reject_mutation"),
+        (
+            "app.plan_draft_confirmations",
+            "trg_plan_draft_confirmations_immutable",
+            "app.reject_mutation",
+        ),
+        ("app.plan_drafts", "trg_plan_drafts_no_delete", "app.reject_mutation"),
+        ("app.plan_drafts", "trg_plan_drafts_restrict_update", "app.restrict_update"),
+        ("app.plan_versions", "trg_plan_versions_immutable", "app.reject_mutation"),
+        ("app.reason_status_events", "trg_reason_status_events_immutable", "app.reject_mutation"),
+        ("app.review_versions", "trg_review_versions_immutable", "app.reject_mutation"),
+        (
+            "app.risk_control_settings_history",
+            "trg_risk_control_settings_history_immutable",
+            "app.reject_mutation",
+        ),
+        ("app.risk_events", "trg_risk_events_immutable", "app.reject_mutation"),
+        ("app.signal_events", "trg_signal_events_immutable", "app.reject_mutation"),
+        (
+            "app.strategy_instance_events",
+            "trg_strategy_instance_events_immutable",
+            "app.reject_mutation",
+        ),
+        (
+            "app.strategy_instances",
+            "trg_strategy_instances_eligible_security",
+            "app.reject_non_strategy_security",
+        ),
+        (
+            "app.suggestion_user_actions",
+            "trg_suggestion_user_actions_immutable",
+            "app.reject_mutation",
+        ),
+        ("app.suggestions", "trg_suggestions_no_delete", "app.reject_mutation"),
+        ("app.suggestions", "trg_suggestions_restrict_update", "app.restrict_update"),
+        (
+            "app.symbol_horizon_assessments",
+            "trg_symbol_horizon_assessments_immutable",
+            "app.reject_mutation",
+        ),
+        ("app.trades", "trg_trades_no_delete", "app.reject_mutation"),
+        ("app.trades", "trg_trades_restrict_update", "app.restrict_update"),
+        ("app.user_profiles", "trg_user_profiles_immutable", "app.reject_mutation"),
+        ("app.users", "trg_users_purging_guard", "app.guard_users_purging"),
+        ("app.users", "trg_users_purging_not_committed", "app.reject_purging_commit"),
+        ("ops.data_licence_events", "trg_data_licence_events_immutable", "app.reject_mutation"),
+    }
+)
+
+
 @dataclass
 class Plan:
     user_id: uuid.UUID
@@ -399,6 +512,35 @@ class Plan:
     files: list[Path]
     pending: list[tuple[str, int, str | None]]
     pending_readable: bool = True
+    unknown_triggers: list[str] = field(default_factory=list)
+
+
+#: 本 CLI 会读写的表（触发器自检的范围；清单外表不检查，T-T25 裁定 #4）
+def _scope_tables(market: Iterable[str]) -> list[str]:
+    steps = (*ANONYMIZE, *STEPS, SNAPSHOTS_STEP, LLM_DELETE, LICENCES_STEP)
+    return sorted({st.table for st in steps} | {"app.users", "ops.pending_file_purges", *market})
+
+
+_TRIGGERS_SQL: Final = (
+    "SELECT DISTINCT rn.nspname || '.' || rc.relname AS tbl, tg.tgname AS trg, "
+    "pn.nspname || '.' || p.proname AS fn "
+    "FROM pg_trigger tg JOIN pg_class c ON c.oid = tg.tgrelid "
+    "JOIN pg_class rc ON rc.oid = CASE WHEN c.relispartition "
+    "THEN pg_partition_root(c.oid) ELSE c.oid END "
+    "JOIN pg_namespace rn ON rn.oid = rc.relnamespace "
+    "JOIN pg_proc p ON p.oid = tg.tgfoid JOIN pg_namespace pn ON pn.oid = p.pronamespace "
+    "WHERE NOT tg.tgisinternal AND rn.nspname || '.' || rc.relname = ANY (:tables) "
+    "ORDER BY 1, 2, 3"
+)
+
+
+def unknown_triggers(conn: Connection, tables: list[str]) -> list[str]:
+    """T-T25 裁定 #4：只读列出清单内表（含分区子表）上的非内部触发器，返回不在
+    :data:`TRIGGER_ALLOWLIST` 中的（``表 / 触发器 → 函数``）。不检查函数体。"""
+    rows = conn.execute(text(_TRIGGERS_SQL), {"tables": tables}).all()
+    return [
+        f"{r.tbl} / {r.trg} → {r.fn}" for r in rows if (r.tbl, r.trg, r.fn) not in TRIGGER_ALLOWLIST
+    ]
 
 
 def _params(plan_or_uid: Any, **extra: Any) -> dict[str, Any]:  # noqa: ANN401
@@ -667,6 +809,7 @@ def build_plan(conn: Connection, uid: uuid.UUID) -> Plan:
         )
     )
     blockers += _unhandled_fk_refs(conn, uid)
+    triggers = unknown_triggers(conn, _scope_tables(market))
     pending, pending_readable = _read_pending(conn)
     return Plan(
         user_id=uid,
@@ -684,6 +827,7 @@ def build_plan(conn: Connection, uid: uuid.UUID) -> Plan:
         files=_user_files(conn, uid),
         pending=pending,
         pending_readable=pending_readable,
+        unknown_triggers=triggers,
     )
 
 
@@ -952,6 +1096,10 @@ def print_plan(plan: Plan, out: Callable[[str], None]) -> None:
         out(f"ops.pending_file_purges：{len(plan.pending)} 条")
     for path, attempts, err in plan.pending:
         out(f"  - {path}（attempts={attempts}，last_error={err}）")
+    if plan.unknown_triggers:
+        out("白名单外的触发器（--execute 会拒绝；核实后随迁移更新白名单）：")
+        for t in plan.unknown_triggers:
+            out(f"  - {t}")
     if plan.blockers:
         out("阻断（存在本 CLI 不能处理的引用，--execute 会拒绝）：")
         for what, n in plan.blockers:
@@ -1005,6 +1153,9 @@ def main(argv: list[str] | None = None, *, confirm: Callable[[str], str] = input
     if not args.execute:
         out("dry-run：未做任何修改。加 --execute 执行。")
         return 0
+    if plan.unknown_triggers:
+        print("拒绝执行：存在白名单外的触发器（见上）。", file=sys.stderr)
+        return 1
     if plan.blockers:
         print("拒绝执行：存在阻断引用（见上），需先人工处理或裁定。", file=sys.stderr)
         return 1
@@ -1027,6 +1178,8 @@ def main(argv: list[str] | None = None, *, confirm: Callable[[str], str] = input
     try:
         with engine.begin() as conn:
             plan = build_plan(conn, uid)  # 事务内重新取（锁在 run_purge 内）
+            if plan.unknown_triggers:
+                raise PurgeRefusedError("存在白名单外的触发器")
             if plan.blockers:
                 raise PurgeRefusedError("存在阻断引用")
             if not plan.pending_readable:

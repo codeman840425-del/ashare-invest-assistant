@@ -153,6 +153,32 @@ def check_qty(
     return None
 
 
+def clamp_draft_qty(
+    seg: MarketRuleSegment | None,
+    *,
+    board: str | None,
+    security_type: str | None,
+    qty: int,
+    order_type: OrderType = "limit",
+) -> tuple[int, dict[str, Any] | None]:
+    """计划草案数量按单笔申报上限截断（T-T25 裁定 / plan 2.13，与 50 万股风险警示上限同一做法）。
+
+    ``qty`` 不超过该证券、该委托类型的单笔上限 → ``(qty, None)``；超过 → 截断到上限以内最大的
+    合规申报数量（落在 ``min_buy + k·step`` 网格上），并返回提示
+    ``{code: "qty_capped_order_limit", original_qty, max_qty}``（数量为字符串，同契约 decimal）。
+    """
+    spec = lot_spec(seg, board=board, security_type=security_type, order_type=order_type)
+    if qty <= spec.max_qty:
+        return qty, None
+    capped = spec.min_buy + (spec.max_qty - spec.min_buy) // spec.step * spec.step
+    notice = {
+        "code": "qty_capped_order_limit",
+        "original_qty": str(qty),
+        "max_qty": str(spec.max_qty),
+    }
+    return capped, notice
+
+
 # ---------------------------------------------------------------------------
 # ETF 当日回转（沪/深 3.1.5；T-R10 §3）
 # ---------------------------------------------------------------------------
@@ -178,15 +204,15 @@ def fund_t_plus(
     - 类别属于 ``t0_round_trip.fund_categories`` → 0；跨境类在
       ``cross_border_requires_t0_constituents`` 时还要求 ``constituents_t0 is True``；
     - 类别缺失 / 未知 / 跨境但成份是否 T+0 未知 → ``unknown_category_default_t_plus``（1）。
-    - **闸门**（T-O11 裁定 / 契约 #29 ②，T-B49）：``t0_round_trip.data_source`` 为 null（ETF 类别
-      数据源未接入）时，所有 ETF/LOF 一律按 T+1（``unknown_category_default_t_plus``），不论传入的
-      类别或人工覆盖。
+    - **闸门**（T-O11 裁定 / 契约 #29 ②，T-B49）：``t0_round_trip.data_source`` 为 null 或空串
+      （ETF 类别数据源未接入）时，所有 ETF/LOF 一律按 T+1
+      （``unknown_category_default_t_plus``），不论传入的类别或人工覆盖。
     """
     base = seg.t_plus if seg is not None else 1
     if security_type != "etf" and not is_lof:
         return base
     t0 = seg.t0_round_trip if seg is not None else _DEFAULT_T0
-    if t0.data_source is None:
+    if not (t0.data_source or "").strip():  # null 或空串（plan 2.13 / T-T19 要点）
         return max(base, t0.unknown_category_default_t_plus)
     if t0_override is not None:
         return 0 if t0_override else base

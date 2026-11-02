@@ -39,6 +39,19 @@ WRITES_PER_HOUR: Final = 120
 BEIJING: Final = dtr.BEIJING
 _CODE_RE: Final = re.compile(r"^(?:(SH|SZ|BJ)(\d{6})|(\d{6})(?:\.(SH|SZ|BJ))?)$")
 _Dec = Annotated[Decimal, Field(max_digits=24, decimal_places=8)]
+#: 契约 #27 ② / §7.6：security_code 格式（查询参数与请求体；大小写都接受，服务端转大写规范化）。
+#: schema 与服务端一致：不做去空白（带空白 → 400 VALIDATION_ERROR），避免 schemathesis 负例误判。
+SECURITY_CODE_PATTERN: Final = (
+    r"^(?:(?:SH|SZ|BJ|sh|sz|bj)[0-9]{6}|[0-9]{6}(?:\.(?:SH|SZ|BJ|sh|sz|bj))?)$"
+)
+#: 契约 #27 ④ / §7.6：请求体 decimal 一律是带 pattern 的字符串（JSON 数字、空串 → 400）
+QTY_PATTERN: Final = r"^(?!0+(?:\.0+)?$)\d{1,16}(?:\.\d{1,4})?$"
+PRICE_PATTERN: Final = r"^(?!0+(?:\.0+)?$)\d{1,16}(?:\.\d{1,8})?$"
+FEE_PATTERN: Final = r"^\d{1,16}(?:\.\d{1,4})?$"
+
+_QtyStr = Annotated[str, StringConstraints(strict=True, pattern=QTY_PATTERN)]
+_PriceStr = Annotated[str, StringConstraints(strict=True, pattern=PRICE_PATTERN)]
+_FeeStr = Annotated[str, StringConstraints(strict=True, pattern=FEE_PATTERN)]
 
 
 class _Body(BaseModel):
@@ -75,14 +88,30 @@ _ReasonStr = Annotated[
 
 
 class TradeCreate(_Body):
+    # 带前瞻的 decimal pattern 需要 python-re 引擎（rust regex 不支持 lookaround）
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True, regex_engine="python-re")
+
     account_id: uuid.UUID
     trade_date: dt.date
     trade_time: Annotated[str, StringConstraints(pattern=r"^\d{2}:\d{2}(:\d{2})?$")] | None = None
-    security_code: Annotated[str, StringConstraints(strip_whitespace=True, max_length=16)]
+    security_code: Annotated[str, StringConstraints(pattern=SECURITY_CODE_PATTERN)]
     side: TradeSide
-    qty: Annotated[Decimal, Field(gt=0, max_digits=20, decimal_places=4)]
-    price: Annotated[Decimal, Field(gt=0, max_digits=24, decimal_places=8)]
-    fee_total: Annotated[Decimal, Field(ge=0, max_digits=20, decimal_places=4)] | None = None
+    qty: _QtyStr
+    price: _PriceStr
+    fee_total: _FeeStr | None = None
+
+    @property
+    def qty_dec(self) -> Decimal:
+        return Decimal(self.qty)
+
+    @property
+    def price_dec(self) -> Decimal:
+        return Decimal(self.price)
+
+    @property
+    def fee_dec(self) -> Decimal | None:
+        return None if self.fee_total is None else Decimal(self.fee_total)
+
     corrects_trade_id: uuid.UUID | None = None
     reason: _ReasonStr | None = None
 
@@ -232,7 +261,7 @@ def list_trades(
     settings: SettingsDep,
     page: Annotated[PageParams, Depends(page_params)],
     account_id: uuid.UUID | None = None,
-    security_code: Annotated[str | None, Query(max_length=16)] = None,
+    security_code: Annotated[str | None, Query(pattern=SECURITY_CODE_PATTERN)] = None,
     date_from: Annotated[IsoDateQuery | None, Query(alias="from")] = None,
     date_to: Annotated[IsoDateQuery | None, Query(alias="to")] = None,
     include_voided: bool = False,
@@ -344,10 +373,10 @@ def create_trade(
                     user_id=auth.user_id,
                     security_code=code,
                     side=body.side.value,
-                    quantity=body.qty,
-                    price=body.price,
-                    amount=(body.qty * body.price).quantize(Decimal("0.0001")),
-                    other_fee=body.fee_total,
+                    quantity=body.qty_dec,
+                    price=body.price_dec,
+                    amount=(body.qty_dec * body.price_dec).quantize(Decimal("0.0001")),
+                    other_fee=body.fee_dec,
                     traded_at=traded_at,
                     trade_date=body.trade_date,
                     source="manual",

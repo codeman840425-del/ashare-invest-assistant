@@ -1008,9 +1008,11 @@ class ProfileExperience(StrEnum):
 
 
 class HorizonAssessmentTrigger(StrEnum):
-    """plan §3 ``symbol_horizon_assessments.trigger``（T-A02 新增 ``position_open_close``）。"""
+    """plan §3 ``symbol_horizon_assessments.trigger``（T-A02 新增 ``position_open_close``；
+    T-B49 新增 ``on_demand``）。"""
 
     IMPORT = "import"
     WATCHLIST_ADD = "watchlist_add"
     WEEKLY = "weekly"
     POSITION_OPEN_CLOSE = "position_open_close"
+    ON_DEMAND = "on_demand"  # T-T25 裁定 #7 / 契约 #31 ⑧：GET 同步计算落库（迁移 0018）

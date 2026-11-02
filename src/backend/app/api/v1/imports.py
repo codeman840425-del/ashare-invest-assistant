@@ -49,7 +49,6 @@ from app.config import Settings
 from app.db.tables.accounts import import_batches, import_files, import_rows
 from app.importing import findings as fnd
 from app.importing import pipeline, storage
-from app.importing.decoding import ENCODING_ALIASES
 from app.importing.parsers import resolve_parser_id
 from app.importing.resolutions import validate_resolution
 from app.schemas.enums import (
@@ -167,9 +166,15 @@ _Mapping = Annotated[
 ]
 
 
+#: 契约 §7.5 / #27 ⑤（T-B46 裁定、R11 #10）：内联取值，不进 §3；``utf8``/``gb2312``/``cp936`` 等别名
+#: 不再接受；``fmt_a_*`` 是解析器旧名别名。
+EncodingOverride = Literal["utf-8", "utf-8-sig", "gbk", "gb18030"]
+ParserIdIn = Literal["tdx_trades_v1", "tdx_positions_v1", "fmt_a_trades_v1", "fmt_a_positions_v1"]
+
+
 class OptionsIn(_Body):
-    encoding_override: Annotated[str, StringConstraints(max_length=32)] | None = None
-    parser_id: Annotated[str, StringConstraints(max_length=64)] | None = None
+    encoding_override: EncodingOverride | None = None
+    parser_id: ParserIdIn | None = None
     mapping: _Mapping | None = None
     snapshot_as_of: dt.datetime | None = None
 
@@ -589,15 +594,12 @@ def set_options(
     rds: RedisDep,
 ) -> dict[str, str]:
     _limit(rds, auth, "imports:write", WRITES_PER_HOUR)
-    enc = None
-    if body.encoding_override is not None:
-        enc = ENCODING_ALIASES.get(body.encoding_override.strip().lower())
-        if enc is None:
-            raise _field_error("encoding_override", "unsupported")
+    enc = body.encoding_override
+    if enc is not None:
         codecs.lookup(enc)
     pid = None
     if body.parser_id is not None:
-        pid = resolve_parser_id(body.parser_id.strip())
+        pid = resolve_parser_id(body.parser_id)
         if pid is None:
             raise _field_error("parser_id", "unknown")
     with engine.begin() as conn:
@@ -793,6 +795,8 @@ def discard_import(
         conn.execute(
             update(import_batches).where(import_batches.c.id == batch_id).values(status="discarded")
         )
+        # 架构师裁定（T-live §8）：同一事务内删除预览行，批次头保留
+        pipeline.drop_uncommitted_rows(conn, batch_id)
         conn.execute(
             update(import_files)
             .where(import_files.c.batch_id == batch_id)

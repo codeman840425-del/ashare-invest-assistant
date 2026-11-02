@@ -301,6 +301,72 @@ def test_whitelist_covers_every_base_service() -> None:
     assert {k for k, v in ccs.MASTER_KEY_ALLOC.items() if v} == {"api", "worker"}
 
 
+
+# ---------- T-A04 ②：规则 7 按服务的 secret 白名单 SERVICE_SECRETS ----------
+
+
+def test_service_secrets_match_base_exactly() -> None:
+    import yaml
+    doc = yaml.safe_load((REPO / ccs.BASE_COMPOSE).read_text(encoding="utf-8"))
+    for name, svc in doc["services"].items():
+        assert set(ccs._secret_names((svc or {}).get("secrets"))) == set(ccs.SERVICE_SECRETS[name]), name
+    assert set(doc.get("secrets") or {}) == set(ccs.PROTECTED_SECRETS)
+    assert ccs.MASTER_KEY_ALLOC == {k: ccs.MASTER_SECRET in v for k, v in ccs.SERVICE_SECRETS.items()}
+
+
+@pytest.mark.parametrize(("svc", "secret"), [
+    ("worker", "data_licence_seal_public_keys"),
+    ("worker", "db_password_aia_api"),
+    ("api", "db_password_aia_api"),
+    ("ingest", "db_password_aia_ingest"),
+    ("maint-cli", "data_licence_seal_public_keys"),
+    ("db-roles", "app_master_key"),
+    ("beat", "data_licence_seal_public_keys"),
+    ("signal-rt", "db_password_aia_maint"),
+    ("migrate", "data_licence_seal_public_keys"),
+    ("timescale-apply", "db_password_aia_api"),
+    ("nginx", "data_licence_seal_public_keys"),
+    ("postgres", "db_password_aia_api"),
+    ("redis", "app_master_key"),
+])
+def test_secret_outside_service_whitelist_rejected(repo: Path, svc: str, secret: str) -> None:
+    errs = _overlay(repo, f"services:\n  {svc}:\n    secrets:\n      - {secret}\n")
+    assert any(f"服务 {svc} 挂了 {secret}，不在该服务的 secret 白名单" in e for e in errs), errs
+
+
+def test_secret_long_form_outside_whitelist_rejected(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  beat:\n    secrets:\n      - source: app_master_key\n        target: k\n")
+    assert any("服务 beat 挂了 app_master_key，不在该服务的 secret 白名单" in e for e in errs), errs
+
+
+def test_unregistered_top_level_secret_rejected(repo: Path) -> None:
+    errs = _overlay(repo, "secrets:\n  extra_key:\n    file: ./extra\nservices:\n  api:\n    secrets:\n      - extra_key\n")
+    assert any("顶层 secret extra_key 未登记" in e for e in errs), errs
+    assert any("服务 api 挂了 extra_key，不在该服务的 secret 白名单" in e for e in errs), errs
+
+
+def test_unregistered_service_with_secret_rejected(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  newsvc:\n    secrets:\n      - data_licence_seal_public_keys\n")
+    assert any("服务 newsvc 未在 MASTER_KEY_ALLOC 白名单登记" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("svc", ["api", "worker", "ingest", "db-roles", "maint-cli"])
+def test_whitelisted_secret_allowed(repo: Path, svc: str) -> None:
+    lines = "".join(f"      - {s}\n" for s in sorted(ccs.SERVICE_SECRETS[svc]))
+    errs = _overlay(repo, f"services:\n  {svc}:\n    secrets:\n{lines}")
+    assert not any("不在该服务的 secret 白名单" in e for e in errs), errs
+
+
+def test_base_missing_whitelisted_secret_rejected(repo: Path) -> None:
+    import yaml
+    p = repo / ccs.BASE_COMPOSE
+    doc = yaml.safe_load(p.read_text(encoding="utf-8"))
+    doc["services"]["maint-cli"]["secrets"] = []
+    p.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    errs = ccs.check(repo)
+    assert any("服务 maint-cli 缺少 secrets ['db_password_aia_maint']" in e for e in errs), errs
+
+
 def test_ingest_forbid_flag_required_in_base(repo: Path) -> None:
     _sub(repo, ccs.BASE_COMPOSE, '      AIA_FORBID_APP_MASTER_KEY: "1"\n', "")
     assert any("服务 ingest 缺少 AIA_FORBID_APP_MASTER_KEY" in e for e in ccs.check(repo))

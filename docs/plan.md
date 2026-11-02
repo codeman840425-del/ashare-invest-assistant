@@ -1306,6 +1306,10 @@ class LLMGateway:
        - 名单更新时整版替换，`list_version` 加一，不改旧行。T-B55 重算时按新版本覆盖。
     2. **手工对应的 45 对**：先记 `verified=false` 接入，照常打 `non_a_share_capital`。V5g 的关闭条件加一项：名单内所有记录都要 `verified=true`，核对来源是巨潮或港交所披露。
     3. **211 对与 209 对的差异**：先取两个来源的并集接入，差出来的记录记 `verified=false`。宁可多标待核实，也不漏标。差异查明之前 V5g 不关闭。查明后，在名单的 `sources` 里写明结论。
+    4. **名单的时点与字段名（T-R12i）**：
+       - 名单行不加可见时间字段。A+B、A+H 的对应关系在 `effective_from`（B 股或 H 股上市日）当天就已公开，按生效区间取用不构成前视。
+       - 重算时用最新版名单，这是更正历史，不是使用未来信息；回测报告要写明所用的 `share_class_list_version`。
+       - 配对代码的字段名定为 `paired_code`，交易所代码按原样记录（例如 H 股 `00939`，B 股 `900901`），不加市场后缀。另加 `paired_market`，取值 `HK` 或 `SH`、`SZ`。
   - **补充规则（`feature_spec.md` §7A.0 / §13 A5，4 条）——【已确认 v0.2.9 内，架构师 T-R12】**，并入 T-B55：① 首次全量回填写入、`plrq` 早于回填日的行只按 `plrq` 计算，标 `basis.pit_basis=plrq_only`；② 同一 (code, report_type, jzrq) 的两行 `available_from` 相同 → 取 `first_seen_at` 较晚者，仍无法区分且数值不同 → 该分量 `null` 并告警 `data_conflict`；③ E(P−4) ≤ 0 按缺失处理（`roe_basis=single_period`）；④ 现金流比的分子、分母用同一个 P，不各自回退。说明：P 按“该键所需分量都可见且非空”逐期回退，所以同一 T 下不同键（如 `pe_ttm` 与 `ocf_to_np_ttm`）的 P 可以不同，各自记入 `basis.period`。
   - **线上切换**：条件与阈值以 `feature_spec.md` §7C（S1–S6）为准——【已确认 v0.2.9 内，架构师 T-R12】；本文不重复。保险识别（V5e）若 T-B05 确认麦蕊没有申万二级，按配置中的保险证券名单识别（名单注明来源），以此关闭 V5e，不因缺申万二级而阻塞切换。等待期的产品取舍见第 9 节问题 93。
   - 幸存者偏差：已退市证券的财报接口返回 404，历史截面缺这些证券；回测报告必须带 `survivorship_bias=true` 标记，不能当作无偏结果。

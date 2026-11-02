@@ -184,6 +184,9 @@ const CB = { code: '113050.SH', name: '示例转债', qty: 100, sellable: 100, c
 const CB_MV = CB.qty * CB.cost;
 const TOTAL = CASH + MV + CB_MV;
 
+/** 证券所属行业（示例；T-F18 计划草案的 sector_pct 用） */
+export const sectorOf = (code: string): string | null => SPECS.find((x) => x.code === code)?.sector ?? null;
+
 export const PORTFOLIO: Portfolio = {
   cash: f2(CASH),
   total_assets: f2(TOTAL),

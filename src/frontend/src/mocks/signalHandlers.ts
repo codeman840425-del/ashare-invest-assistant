@@ -19,8 +19,14 @@ export function resetSignals() {
   signalPatch.clear();
   reasonPatch.clear();
 }
+/** T-F18：生成 / 确认计划草案时改信号状态与关联草案（会话内，resetSignals 清空） */
+export function patchSignal(id: string, p: Partial<CandidateSignal>) {
+  signalPatch.set(id, { ...signalPatch.get(id), ...p });
+}
 export const signalsNow = (): CandidateSignal[] => CANDIDATE_SIGNALS.map((c) => ({ ...c, ...signalPatch.get(c.id) }));
 export const reasonsNow = (): NonExecutableReason[] => REASONS.map((r) => ({ ...r, ...reasonPatch.get(r.id) }));
+
+const CAUSE_OF: Partial<Record<CandidateSignalState, string>> = { dismissed: 'user_dismissed', drafted: 'plan_draft_created', confirmed: 'plan_confirmed' };
 
 /** 状态历史（示例）：由信号与原因推出 */
 function eventsOf(cs: CandidateSignal) {
@@ -42,7 +48,7 @@ function eventsOf(cs: CandidateSignal) {
     const at = base.state === 'expired' || base.state === 'superseded' ? (cs.valid_until ?? cs.created_at) : cs.created_at;
     push(base.state === 'blocked' && st.cur === 'released' ? 'blocked' : base.state, base.state === 'drafted' ? 'plan_draft_created' : base.state === 'blocked' ? 'reason_detected' : `system_${base.state}`, at);
   }
-  if (cs.state !== st.cur) push(cs.state, cs.state === 'dismissed' ? 'user_dismissed' : 'all_reasons_released', NOW);
+  if (cs.state !== st.cur) push(cs.state, CAUSE_OF[cs.state] ?? 'all_reasons_released', NOW);
   return out;
 }
 

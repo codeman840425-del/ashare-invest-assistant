@@ -15,6 +15,7 @@ const CAUSE_TEXT: Record<string, string> = {
   reason_released: '原因解除',
   all_reasons_released: '全部原因解除',
   plan_draft_created: '已拟定计划草案',
+  plan_confirmed: '已确认计划',
   user_dismissed: '你已忽略',
   system_expired: '超过有效期',
   system_superseded: '被新信号取代',

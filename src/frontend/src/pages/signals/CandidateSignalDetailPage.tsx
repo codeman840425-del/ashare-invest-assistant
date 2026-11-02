@@ -3,6 +3,7 @@ import { Alert, Button, Input, Modal, Space, Table, Tag, Timeline, Tooltip, type
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useCandidateSignals } from '../../api/queries';
+import { useCreatePlanDraft } from '../../api/planQueries';
 import { useDismissSignal, useReleaseReason, useSignal, useSignalEvents, useSignalReasonsAll, useStrategyTracking } from '../../api/signalQueries';
 import { useStrategyTemplates } from '../../api/strategyQueries';
 import { errorText } from '../../api/errorPolicy';
@@ -202,6 +203,8 @@ function TextBlocks({ cs }: { cs: CandidateSignal }) {
 
 function Actions({ cs }: { cs: CandidateSignal }) {
   const dismiss = useDismissSignal();
+  const create = useCreatePlanDraft();
+  const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState('');
   const terminal = isTerminal(cs.state);
@@ -209,11 +212,20 @@ function Actions({ cs }: { cs: CandidateSignal }) {
     <section className="panel sig-panel" data-testid="signal-actions">
       <h4>操作</h4>
       <Space wrap>
-        <Tooltip title={canDraft(cs.state) ? '计划草案页面在 T-F18 接入；草案需你确认，交易由你在券商端自行完成' : '仅“可拟定草案”或“原因已解除”状态可拟定计划草案'}>
-          <Button size="small" disabled data-testid="draft-btn">拟定计划草案</Button>
+        <Tooltip title={canDraft(cs.state) ? '按你的持仓与资金拟定计划草案；草案需你确认，交易由你在券商端自行完成' : '仅“可拟定草案”或“原因已解除”状态可拟定计划草案'}>
+          <Button
+            size="small"
+            disabled={!canDraft(cs.state)}
+            loading={create.isPending}
+            onClick={() => create.mutate([cs.id], { onSuccess: (d) => nav(`/plan-drafts/${d.id}`) })}
+            data-testid="draft-btn"
+          >
+            拟定计划草案
+          </Button>
         </Tooltip>
         <Button size="small" danger disabled={terminal} onClick={() => { dismiss.reset(); setNote(''); setOpen(true); }} data-testid="dismiss-btn">忽略该信号</Button>
       </Space>
+      {create.isError ? <div className="error-text small" style={{ marginTop: 6 }} data-testid="draft-error">{errorText(create.error)}</div> : null}
       {cs.plan_draft_ids.length ? (
         <div className="small" style={{ marginTop: 6 }}>
           关联计划草案：{cs.plan_draft_ids.map((d) => <Link key={d} to={`/plan-drafts/${d}`} className="mono" style={{ marginRight: 6 }}>{d.slice(-8)}</Link>)}

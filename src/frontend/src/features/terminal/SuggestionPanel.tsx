@@ -78,8 +78,9 @@ export function SuggestionPanel({ row, suggestion, loading, error }: { row: Term
       </div>
       <div className="right-actions">
         <Button size="small" onClick={() => navigate(`/suggestions/${sg.id}`)}>维度 × 策略矩阵</Button>
-        <Tooltip title="计划草案接口（POST /plan-drafts）在后续任务接入">
-          <Button size="small" type="primary" disabled>拟定计划草案</Button>
+        {/* T-F18：草案按单个候选信号拟定（各策略不合并），这里转到该证券的候选信号列表去选 */}
+        <Tooltip title="计划草案按单个候选信号拟定；到候选信号列表选择一条后点“拟定计划草案”">
+          <Button size="small" type="primary" onClick={() => navigate(`/candidate-signals?security_code=${encodeURIComponent(sg.security_code)}`)} data-testid="to-signals-for-draft">去候选信号拟定草案</Button>
         </Tooltip>
       </div>
     </>

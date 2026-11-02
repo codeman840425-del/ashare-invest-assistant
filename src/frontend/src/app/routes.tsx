@@ -16,8 +16,6 @@ export const PLACEHOLDERS: [string, string][] = [
   ['strategies/:id', '策略详情'],
   ['strategy-cards', '策略知识卡'],
   ['strategy-instances', '我的策略实例'],
-  ['plan-drafts', '计划草案'],
-  ['plan-drafts/:id', '计划草案详情'],
   ['plans', '计划'],
   // 契约 §5 Notification.target.route 与 /today 计划条件都会跳到 /plans/{id}；计划页（T-F 后续任务）实现前先接占位页，不落 404（评审 8249d6e / 7afbc06 m4）
   ['plans/:id', '计划详情'],
@@ -60,6 +58,8 @@ export const routes: RouteObject[] = [
       { path: 'strategies', lazy: lazyPage(() => import('../pages/strategies/StrategiesPage'), (m) => m.StrategiesPage) },
       { path: 'candidate-signals', lazy: lazyPage(() => import('../pages/signals/CandidateSignalsPage'), (m) => m.CandidateSignalsPage) },
       { path: 'candidate-signals/:id', lazy: lazyPage(() => import('../pages/signals/CandidateSignalDetailPage'), (m) => m.CandidateSignalDetailPage) },
+      { path: 'plan-drafts', lazy: lazyPage(() => import('../pages/plans/PlanDraftsPage'), (m) => m.PlanDraftsPage) },
+      { path: 'plan-drafts/:id', lazy: lazyPage(() => import('../pages/plans/PlanDraftDetailPage'), (m) => m.PlanDraftDetailPage) },
       ...PLACEHOLDERS.map(([path, title]) => ({ path, element: <PlaceholderPage title={title} /> })),
       { path: 'admin', element: <AdminGate><Navigate to="/admin/users" replace /></AdminGate> },
       {

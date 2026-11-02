@@ -406,3 +406,14 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 .stat-table th, .stat-table td { padding: 3px 4px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 .stat-table th { color: var(--muted); font-weight: 500; }
 .error-text { color: #ff6b6b; }
+
+/* T-F18 计划草案 */
+.plan-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.plan-grid > div { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.plan-grid .sc-metrics { grid-template-columns: repeat(3, 1fr); }
+.plan-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 4px; }
+.plan-inputs label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); }
+.check-item { padding: 6px 0; border-bottom: 1px dashed var(--line); display: flex; flex-direction: column; gap: 4px; }
+.check-item.missing { border-left: 2px solid #ff6b6b; padding-left: 6px; }
+.warn-text { color: #faad14; }
+@media (max-width: 960px) { .plan-grid { grid-template-columns: minmax(0, 1fr); } }

@@ -8,6 +8,7 @@ import type { SectorKind } from '../api/marketTypes';
 import { accountHandlers } from './accountHandlers';
 import { resetStrategies, strategyHandlers } from './strategyHandlers';
 import { reasonsNow, resetSignals, signalHandlers, signalsNow } from './signalHandlers';
+import { draftsNow, planHandlers, resetPlanDrafts } from './planHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
 import { currentUser, resetSession } from './session';
 import { licenceState } from './licenceStore';
@@ -37,6 +38,7 @@ export function resetMockState() {
   resetSession();
   resetStrategies();
   resetSignals();
+  resetPlanDrafts();
 }
 
 /** 浏览器里加一点延迟让加载态可见；测试（node）里不延迟 */
@@ -71,7 +73,6 @@ function degrade<T extends Block>(body: T, key: string, mode: 'stale' | 'unavail
 /** v0.2.3 #12：/today 首页聚合 mock（契约 §7.3；每个列表 ≤ 50，more 表示是否截断） */
 function todayBody(): TodayResponse {
   const more = <T,>(items: T[]) => ({ items: items.slice(0, 50), more: items.length > 50 });
-  const nameOf = (code: string) => TERMINAL_ROWS.find((r) => r.security_code === code)?.name ?? code;
   const report = DAILY_REPORTS[0];
   const samples = todaySamples();
   const events = riskEvents().filter((e) => e.status === 'active');
@@ -85,9 +86,10 @@ function todayBody(): TodayResponse {
     server_time: NOW, trade_date: TRADE_DATE, session: 'morning',
     market: { regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, data_status: 'fresh' },
     focus: more(TERMINAL_ROWS.filter((r) => r.focus)),
-    pending_plan_drafts: more(SUGGESTIONS.flatMap((sg) => sg.plan_draft_ids.map((id) => ({
-      id, security_code: sg.security_code, name: nameOf(sg.security_code), action: sg.strategies[0]?.action ?? 'wait', valid_until: null, status: 'pending' as const,
-    })))),
+    // T-F18：取自计划草案 mock 的当前状态（待确认 + 条件已变）
+    pending_plan_drafts: more(draftsNow().filter((d) => d.status === 'pending' || d.status === 'stale').map((d) => ({
+      id: d.id, security_code: d.security_code, name: d.name, action: d.action, valid_until: d.valid_until, status: d.status,
+    }))),
     released_reasons: more([...reasonsNow().filter((r) => r.status === 'released' && r.released_at).map((r) => {
       const cs = signalsNow().find((c) => c.id === r.signal_id);
       return { reason_id: r.id, signal_id: r.signal_id, code: r.code, security_code: cs?.security_code ?? '', name: cs?.name ?? '', released_at: r.released_at! };
@@ -275,6 +277,8 @@ const routeHandlers = [
   }),
   // 候选信号与不可执行原因（T-F17，见 signalHandlers.ts）
   ...signalHandlers,
+  // 计划草案（T-F18，见 planHandlers.ts）
+  ...planHandlers,
   http.get(`${API}/signals`, ({ request }) => {
     const url = new URL(request.url);
     const code = url.searchParams.get('security_code');

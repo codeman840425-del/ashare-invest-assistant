@@ -41,6 +41,14 @@ export const ERROR_TEXT: Partial<Record<AnyErrorCode, string>> = {
   DATA_LICENCE_IN_USE: '该证书已绑定到另一个账号；一张证书只能由一位用户使用',
   DATA_LICENCE_NOT_SET: '你还没有设置数据证书',
   DATA_LICENCE_UNAVAILABLE: '你的数据证书不可用，暂时无法拉取最新数据',
+  // 计划草案（契约 §7.7，T-F18）
+  PLAN_REQUIRES_EXPLAINABLE_SIGNAL: '该候选信号缺少可解释的规则依据，不能拟定计划草案',
+  SIGNAL_NOT_EXECUTABLE: '该候选信号还有未解除的不可执行原因，暂不能拟定计划草案',
+  STRATEGY_VERSION_NOT_RUNNABLE: '该策略版本当前不可运行（如处于模拟期）',
+  PLAN_DRAFT_STALE: '生成草案后条件已变化，草案已失效，请重新生成',
+  CHECKLIST_INCOMPLETE: '判断清单还有必答项未作答',
+  RISK_ACK_REQUIRED: '请先勾选“我已了解风险”',
+  DEVIATION_ACK_REQUIRED: '数量或价格超出草案区间，请确认偏离后再提交',
 };
 
 /** 需要附“去设置数据证书”链接的错误码 */

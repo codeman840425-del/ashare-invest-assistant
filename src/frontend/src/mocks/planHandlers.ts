@@ -1,0 +1,170 @@
+/**
+ * T-F18：计划草案（契约 v0.2.8 §7.7）的 mock。
+ * 示例草案由已拟定草案的候选信号推出（数量、价格区间按示例持仓与资金估算，标“示例”）；
+ * 会话内新建 / 确认 / 放弃写在 drafts 里，resetPlanDrafts()（resetMockState 调用）恢复初始状态。
+ */
+import { http, HttpResponse } from 'msw';
+import type { CandidateSignal } from '../api/types';
+import type { ChecklistItem, PlanDraft, PlanDraftConfirm } from '../api/planTypes';
+import type { PlanDraftStatus } from '../api/enums';
+import { CANDIDATE_SIGNALS, NOW, PORTFOLIO, QUOTES, sectorOf, uid } from './fixtures';
+import { errorBody, notFound, page, validation } from './handlerUtils';
+import { patchSignal, reasonsNow, signalsNow } from './signalHandlers';
+
+const API = '/api/v1';
+const fail = (status: number, code: string, message: string, details: Record<string, unknown> | null = null) =>
+  HttpResponse.json(errorBody(code, message, details), { status });
+
+export const CHECKLIST: ChecklistItem[] = [
+  { id: 'q_counter', question: '我已阅读该规则信号的反证与失效条件', required: true },
+  { id: 'q_fit', question: '这笔操作符合我自己的仓位与风险承受安排', required: true },
+  { id: 'q_broker', question: '下单前我会在券商端核对实时价格、可用资金或可卖数量', required: true },
+  { id: 'q_other', question: '有本工具未覆盖的信息（公告、个人资金安排等）影响我的判断', required: false },
+];
+
+const f2 = (n: number) => n.toFixed(2);
+const SELL_SIDE = new Set(['sell', 'reduce']);
+
+/** 由候选信号推出一份示例草案 */
+function buildDraft(cs: CandidateSignal, id: string, status: PlanDraftStatus, created_at: string, valid_until: string | null): PlanDraft {
+  const q = QUOTES.find((x) => x.security_code === cs.security_code);
+  const px = Number(q?.price ?? 10);
+  const pos = PORTFOLIO.positions.find((p) => p.security_code === cs.security_code);
+  const holding = Number(pos?.qty ?? 0);
+  const sellable = Number(pos?.sellable_qty ?? 0);
+  const cash = Number(PORTFOLIO.cash);
+  const total = Number(PORTFOLIO.total_assets);
+  const lot = 100;
+  const sellSide = SELL_SIDE.has(cs.proposed_action) || cs.t_leg === 'sell_first';
+  const low = px * 0.99;
+  const high = px * 1.01;
+  let min = lot;
+  let max: number;
+  if (!sellSide) max = Math.max(lot, Math.floor(Math.min(cash, total * 0.1) / high / lot) * lot);
+  else if (cs.proposed_action === 'sell') min = max = Math.max(sellable, lot);
+  else max = Math.max(lot, Math.floor(sellable / 2 / lot) * lot);
+  if (min > max) min = max;
+  const stop = cs.stops.stop_loss ? Number(cs.stops.stop_loss) : null;
+  const loss = sellSide ? max * (high - low) : max * (stop !== null && stop < high ? high - stop : high * 0.08);
+  const notional = max * high;
+  const fee = Math.max(5, notional * 0.00025) + notional * 0.00001 + (sellSide ? notional * 0.0005 : 0);
+  const sector = sectorOf(cs.security_code);
+  const sectorPct = PORTFOLIO.exposure.sector.find((x) => x.name === sector)?.pct ?? '0.00';
+  return {
+    id, status, signal_ids: [cs.id], security_code: cs.security_code, name: cs.name, action: cs.proposed_action,
+    qty_range: { min: String(min), max: String(max), lot: String(lot) },
+    price_range: { low: f2(low), high: f2(high) },
+    stops: cs.stops,
+    max_loss_amount: f2(loss), max_loss_pct: f2((loss / total) * 100),
+    fee_estimate: { amount: f2(fee), epistemic_type: 'estimate' },
+    user_context_snapshot: { holding_qty: String(holding), sellable_qty: String(sellable), cash: f2(cash), sector_pct: sectorPct },
+    risk_flags: cs.risk_flags,
+    judgment_checklist: CHECKLIST,
+    valid_until, market_rule_version_id: uid(7690), created_at,
+  };
+}
+
+const sig = (n: number) => CANDIDATE_SIGNALS.find((c) => c.id === uid(n))!;
+const VALID = '2026-11-02T15:00:00+08:00';
+function initial(): PlanDraft[] {
+  return [
+    buildDraft(sig(1011), uid(1012), 'pending', '2026-11-02T10:12:30+08:00', VALID),
+    buildDraft(sig(1021), uid(1022), 'pending', '2026-11-02T09:31:00+08:00', VALID),
+    // 早先为同一信号生成、之后行情变化而失效的草案：演示“重新生成”
+    buildDraft(sig(1011), uid(7701), 'stale', '2026-11-02T09:45:00+08:00', VALID),
+    buildDraft(sig(1011), uid(7702), 'expired', '2026-10-30T10:05:00+08:00', '2026-10-30T15:00:00+08:00'),
+    buildDraft(sig(1021), uid(7703), 'discarded', '2026-10-30T09:40:00+08:00', '2026-10-30T15:00:00+08:00'),
+  ];
+}
+
+let drafts: PlanDraft[] = initial();
+let seq = 0;
+export function resetPlanDrafts() {
+  drafts = initial();
+  seq = 0;
+}
+export const draftsNow = (): PlanDraft[] => drafts;
+/** 测试辅助：改某份草案的状态（例如把待确认改成 stale） */
+export function mockSetDraftStatus(id: string, status: PlanDraftStatus) {
+  drafts = drafts.map((d) => (d.id === id ? { ...d, status } : d));
+}
+
+const EXPLAINABLE_ROLES = new Set(['entry', 'exit', 'weakening']);
+
+export const planHandlers = [
+  http.get(`${API}/plan-drafts`, ({ request }) => {
+    const url = new URL(request.url);
+    const statuses = (url.searchParams.get('status') ?? '').split(',').filter(Boolean);
+    const code = url.searchParams.get('security_code');
+    const sid = url.searchParams.get('signal_id');
+    const items = drafts
+      .filter((d) => (!statuses.length || statuses.includes(d.status)) && (!code || d.security_code === code) && (!sid || d.signal_ids.includes(sid)))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
+    return HttpResponse.json(page(items, url));
+  }),
+
+  http.get(`${API}/plan-drafts/:id`, ({ params }) => {
+    const d = drafts.find((x) => x.id === params.id);
+    return d ? HttpResponse.json(d) : notFound('计划草案');
+  }),
+
+  http.post(`${API}/plan-drafts`, async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as { signal_ids?: unknown } | null;
+    const ids = Array.isArray(body?.signal_ids) ? (body!.signal_ids as unknown[]).filter((x): x is string => typeof x === 'string') : [];
+    if (!ids.length) return validation('signal_ids', '至少一个候选信号');
+    const all = signalsNow();
+    const list = ids.map((id) => all.find((c) => c.id === id));
+    if (list.some((c) => !c)) return notFound('候选信号');
+    const css = list as CandidateSignal[];
+    // 示例：一次只按同一证券生成（契约未写多信号的合并规则，见 T-F18 遗留问题）
+    if (new Set(css.map((c) => c.security_code)).size > 1) return validation('signal_ids', '示例数据只支持同一证券的信号');
+    const sim = css.find((c) => c.lifecycle === 'simulating');
+    if (sim) return fail(409, 'STRATEGY_VERSION_NOT_RUNNABLE', '模拟期策略不能拟定计划草案', { lifecycle: sim.lifecycle });
+    const bad = css.find((c) => c.state !== 'drafted' && c.state !== 'released');
+    if (bad) return fail(409, 'INVALID_STATE_TRANSITION', `候选信号状态为 ${bad.state}，不能拟定计划草案`, { from: bad.state, to: 'drafted' });
+    const active = reasonsNow().filter((r) => ids.includes(r.signal_id) && r.status === 'active').map((r) => r.id);
+    if (active.length) return fail(409, 'SIGNAL_NOT_EXECUTABLE', '信号存在未解除的不可执行原因', { reason_ids: active });
+    const unexplained = css.find((c) => !c.rule_refs.some((r) => EXPLAINABLE_ROLES.has(r.role) && r.passed === true));
+    if (unexplained) return fail(422, 'PLAN_REQUIRES_EXPLAINABLE_SIGNAL', '信号缺少可解释的规则依据');
+    seq += 1;
+    const d = buildDraft(css[0], uid(7800 + seq), 'pending', NOW, VALID);
+    d.signal_ids = ids;
+    drafts = [d, ...drafts];
+    for (const c of css) patchSignal(c.id, { state: 'drafted', plan_draft_ids: [...c.plan_draft_ids, d.id] });
+    return HttpResponse.json(d, { status: 201 });
+  }),
+
+  http.post(`${API}/plan-drafts/:id/confirm`, async ({ params, request }) => {
+    const d = drafts.find((x) => x.id === params.id);
+    if (!d) return notFound('计划草案');
+    if (d.status === 'stale' || d.status === 'expired') return fail(409, 'PLAN_DRAFT_STALE', '草案已失效，请重新生成', { status: d.status });
+    if (d.status !== 'pending') return fail(409, 'INVALID_STATE_TRANSITION', `草案状态为 ${d.status}，不能确认`, { from: d.status, to: 'confirmed' });
+    const b = (await request.json().catch(() => ({}))) as Partial<PlanDraftConfirm>;
+    const answers = Array.isArray(b.checklist_answers) ? b.checklist_answers : [];
+    const missing = d.judgment_checklist.filter((c) => c.required && !answers.some((a) => a.id === c.id && ['yes', 'no', 'unsure'].includes(a.answer))).map((c) => c.id);
+    if (missing.length) return fail(422, 'CHECKLIST_INCOMPLETE', '判断清单有必答项未作答', { missing });
+    if (b.risk_ack !== true) return fail(422, 'RISK_ACK_REQUIRED', '请确认已了解风险');
+    const qty = Number(b.chosen_qty);
+    const price = Number(b.chosen_price);
+    if (!Number.isFinite(qty) || qty <= 0) return validation('chosen_qty', '数量须为正数');
+    if (!Number.isFinite(price) || price <= 0) return validation('chosen_price', '价格须为正数');
+    const fields: string[] = [];
+    if (qty < Number(d.qty_range.min) || qty > Number(d.qty_range.max)) fields.push('chosen_qty');
+    if (price < Number(d.price_range.low) || price > Number(d.price_range.high)) fields.push('chosen_price');
+    if (fields.length && b.deviation_ack !== true) return fail(422, 'DEVIATION_ACK_REQUIRED', '数量或价格超出草案区间，需要确认', { fields });
+    seq += 1;
+    drafts = drafts.map((x) => (x.id === d.id ? { ...x, status: 'confirmed' } : x));
+    for (const id of d.signal_ids) patchSignal(id, { state: 'confirmed' });
+    return HttpResponse.json({ plan_id: uid(7900 + seq), plan_version_no: 1 }, { status: 201 });
+  }),
+
+  http.post(`${API}/plan-drafts/:id/discard`, async ({ params, request }) => {
+    const d = drafts.find((x) => x.id === params.id);
+    if (!d) return notFound('计划草案');
+    if (d.status !== 'pending') return fail(409, 'INVALID_STATE_TRANSITION', `草案状态为 ${d.status}，不能放弃`, { from: d.status, to: 'discarded' });
+    await request.json().catch(() => null); // {note}：示例不保存
+    const next: PlanDraft = { ...d, status: 'discarded' };
+    drafts = drafts.map((x) => (x.id === d.id ? next : x));
+    return HttpResponse.json(next);
+  }),
+];

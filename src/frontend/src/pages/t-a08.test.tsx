@@ -109,9 +109,8 @@ describe('复权基准日 adjust_as_of（§7.3 v0.2.7）', () => {
 
 describe('“查看全部”目标页接住参数（页面未实现前用占位页）', () => {
   it.each([
-    // /candidate-signals?tab=released 自 T-F17 起由真实页面接住，见 t-f17.test.tsx
+    // /candidate-signals?tab=released 自 T-F17 起、/plan-drafts?status=pending,stale 自 T-F18 起由真实页面接住，见 t-f17 / t-f18.test.tsx
     ['/risk-controls?tab=events&event=x1', 'tab=events'],
-    ['/plan-drafts?status=pending,stale', 'status=pending,stale'],
     ['/plans?status=triggered', 'status=triggered'],
     ['/suggestions?status=invalidated', 'status=invalidated'],
   ])('%s', async (path, param) => {

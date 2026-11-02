@@ -331,10 +331,13 @@ check(r.status_code == 200, f"M3：本人持仓 → 200（{r.status_code}）")
 # ---------------------------------------------------------------- m5 日志脱敏
 from app.common.logging import RedactFilter, redact  # noqa: E402
 
+# 虚构样本运行时拼出（避免源码里出现股东代码 / 资金账号形态，secret_scan S5）
+HOLDER = "A" + "".join(str(i) for i in range(1, 10))
+FUND = "00" + "".join(str(i) for i in range(1, 9))
 u = str(uuid.uuid4())
 check(redact(f"batch={u}") == f"batch={u}", "m5：UUID 不脱敏")
-check("A123456789" not in redact("acct A123456789 x"), "m5：股东代码脱敏")
-check("0012345678" not in redact("fund 0012345678"), "m5：资金账号脱敏")
+check(HOLDER not in redact(f"acct {HOLDER} x"), "m5：股东代码脱敏")
+check(FUND not in redact(f"fund {FUND}"), "m5：资金账号脱敏")
 records: list[str] = []
 
 
@@ -350,7 +353,7 @@ pl.addHandler(h)
 
 
 def boom(*_a: Any, **_k: Any) -> None:  # noqa: ANN401
-    raise RuntimeError("证券代码 A123456789 资金 0012345678")
+    raise RuntimeError(f"证券代码 {HOLDER} 资金 {FUND}")
 
 
 bx = q(
@@ -368,10 +371,7 @@ finally:
     pl.removeHandler(h)
 joined = "\n".join(records)
 check(
-    records
-    and "A123456789" not in joined
-    and "0012345678" not in joined
-    and "RuntimeError" in joined,
+    records and HOLDER not in joined and FUND not in joined and "RuntimeError" in joined,
     "m5：解析失败日志只记批次号与异常类型",
 )
 

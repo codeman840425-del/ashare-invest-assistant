@@ -135,6 +135,10 @@ expect_denied aia_maint "SELECT raw_line FROM app.import_rows LIMIT 0"
 expect_denied aia_maint "SELECT request_body FROM app.llm_calls LIMIT 0"
 expect_denied aia_maint "SELECT security_code FROM app.trades LIMIT 0"
 expect_denied aia_maint "SELECT last_attempt_at FROM ops.pending_file_purges LIMIT 0"
+# maint_deny 其余三列（T-O11 aia_deny 裁定 ⑴）
+expect_denied aia_maint "SELECT target_ciphertext FROM app.notification_channel_bindings LIMIT 0"
+expect_denied aia_maint "SELECT response_body FROM app.llm_calls LIMIT 0"
+expect_denied aia_maint "SELECT fingerprint FROM app.user_data_licence_cooldowns LIMIT 0"
 # 清单外的列：写（WHERE false 不改数据；列权限在规划时检查）
 expect_denied aia_maint "UPDATE app.users SET role = role WHERE false"
 expect_denied aia_maint "UPDATE app.users SET password_hash = password_hash WHERE false"

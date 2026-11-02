@@ -13,7 +13,8 @@
 --                （按 source_licence_id 删）。不给 CREATE/TRUNCATE/REFERENCES/TRIGGER、INSERT（audit/pending 以外）、
 --                SUPERUSER/BYPASSRLS、任何角色成员身份；NOINHERIT。
 -- 口令不在本文件：apply-roles.sh 以 psql 变量 :'api_pw' / :'ingest_pw' / :'maint_pw' 传入（来自 secret 文件，不经环境变量、不入库）。
--- 新迁移若新增“密文列”，把 schema.table.column 加进 deny 列表（下方两处 aia_deny 数组保持一致）。
+-- 新迁移若新增“密文列”，把 schema.table.column 加进 deny 列表：aia_api 的 aia_deny（$grants$ 内，只有一处）与
+-- aia_maint 的 maint_deny（$maint$ 内）都要看是否需要加。
 \set ON_ERROR_STOP on
 SET client_min_messages = notice;
 

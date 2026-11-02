@@ -18,6 +18,8 @@
 #                         证书封装密钥（seal-keygen.sh 生成）放在仓库外，按数据卷前缀区分：密钥跟着它加密的数据走，
 #                         同一份数据卷换项目名/工作树仍用同一把密钥。
 #   其余变量按 docker compose 默认：shell 导出 > .env > compose 文件里的默认值。
+# 评审 8cf9771 m3：先关掉继承来的 xtrace（bash -x / SHELLOPTS=xtrace），免得密钥或口令值被打到 stderr。
+{ set +x; } 2>/dev/null
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -121,9 +123,10 @@ fi
 # compose 不再从 .env 插值它。每次调用都由 app-master-key-ensure.sh 按 plan“升级约束”①–④ 判定（M1/M2）：
 # 文件在 → 用（旧 .env / 环境里有不一致的值 → 拒绝）；文件缺、旧值在 → 迁移（不删 .env 那一行，提示人删）；
 # 都没有且库里有数据 / 无法确认 → 拒绝（退出 3）；只有全新部署才生成。绝不悄悄换主密钥。
-# 评审 75c233b m2：只在会创建/启动容器的子命令上强制（拒绝即退出）；down/ps/logs/stop/exec/config 等只告警，
-# 并以检查模式运行（不迁移、不生成），免得 .env 与文件不一致时连 down.sh 都被挡住。
-# 子命令 = 跳过 compose 全局选项后的第一个参数；认不出来（为空）时按强制处理。watch / scale 也会起容器，一并强制。
+# 评审 75c233b m2 / 8cf9771 n1：子命令按“不启动容器”的白名单分级——白名单里的（ps/logs/config/down/stop 等）只告警，
+# 以检查模式运行（不迁移、不生成），免得 .env 与文件不一致时连 down.sh 都被挡住；白名单以外一律强制（拒绝即退出），
+# 包括 up/run/create/start/restart/watch/scale、认不出的名字、取不到子命令，以及 compose 将来新增的子命令。
+# 子命令 = 跳过 compose 全局选项（及其值）后的第一个参数。
 compose_subcmd() {
   local a skip=0
   for a in "$@"; do
@@ -137,12 +140,12 @@ compose_subcmd() {
 }
 sub="$(compose_subcmd "$@")"
 case "$sub" in
-  up|run|create|start|restart|watch|scale|'')
-    AIA_DOCKER="${DOCKER[*]}" "$ROOT/deploy/scripts/app-master-key-ensure.sh" "$secrets_dir" "$ENV_FILE" "$prefix" >&2 || exit $? ;;
-  *)
+  down|ps|logs|stop|kill|rm|exec|config|images|top|port|events|pause|unpause|ls|version|cp|wait|stats|attach)
     rc=0
     AIA_KEYCHECK_ONLY=1 AIA_DOCKER="${DOCKER[*]}" "$ROOT/deploy/scripts/app-master-key-ensure.sh" "$secrets_dir" "$ENV_FILE" "$prefix" >&2 || rc=$?
-    [ "$rc" = 0 ] || echo "警告：app_master_key 检查未通过（退出码 $rc，原因见上）；“$sub” 不启动容器，继续执行；up/run/create/start/restart 会被拒绝。" >&2 ;;
+    [ "$rc" = 0 ] || echo "警告：app_master_key 检查未通过（退出码 $rc，原因见上）；“$sub” 不启动容器，继续执行；up/run/create/start/restart 等会被拒绝。" >&2 ;;
+  *)
+    AIA_DOCKER="${DOCKER[*]}" "$ROOT/deploy/scripts/app-master-key-ensure.sh" "$secrets_dir" "$ENV_FILE" "$prefix" >&2 || exit $? ;;
 esac
 
 FILES=(-f "$ROOT/deploy/compose/docker-compose.yml")

@@ -364,3 +364,66 @@ def test_merge_tags_reported_not_crash(repo: Path, snippet: str, tag: str) -> No
 def test_invalid_yaml_reported_not_crash(repo: Path) -> None:
     errs = _overlay(repo, "services:\n  ingest:\n    environment: [\n")
     assert any("YAML 无法解析" in e for e in errs), errs
+
+
+# ---- 评审 8cf9771 m2：密钥文件的定义不可改道（规则 10）----
+S = "${AIA_SECRETS_DIR:?x}"
+
+
+@pytest.mark.parametrize("snippet,needle", [
+    # 自定义 secret 指向主密钥 / 证书私钥（起别名再挂给别的服务）
+    (f"secrets:\n  mk2:\n    file: {S}/app_master_key\n", "secret mk2 的 file: 指向受保护的 app_master_key"),
+    (f"secrets:\n  pk:\n    file: {S}/data_licence_seal_private_keys\n", "secret pk 的 file: 指向受保护的 data_licence_seal_private_keys"),
+    ("secrets:\n  mk3:\n    file: /tmp/elsewhere/app_master_key\n", "secret mk3 的 file: 指向受保护的 app_master_key"),
+    (f"secrets:\n  other:\n    file: {S}/something_new\n", "secret other 指向密钥目录里未登记的文件"),
+    # 覆盖文件改路径 / 重定义受保护 secret
+    ("secrets:\n  app_master_key:\n    file: /tmp/fake_master\n", "覆盖文件重定义了受保护的 secret app_master_key"),
+    (f"secrets:\n  app_master_key:\n    file: {S}/app_master_key\n", "覆盖文件重定义了受保护的 secret app_master_key"),
+    ("secrets:\n  data_licence_seal_private_keys:\n    file: ./pk\n", "覆盖文件重定义了受保护的 secret data_licence_seal_private_keys"),
+    ("secrets:\n  db_password_aia_maint:\n    file: ./pw\n", "覆盖文件重定义了受保护的 secret db_password_aia_maint"),
+    # configs 指向密钥
+    (f"configs:\n  c1:\n    file: {S}/app_master_key\n", "config c1 引用了"),
+    ("configs:\n  c2:\n    file: ~/.config/aia/secrets/aia/data_licence_seal_private_keys\n", "config c2 引用了"),
+    ("configs:\n  c3:\n    environment: AIA_SECRETS_DIR\n", "config c3 引用了"),
+    # 卷 driver_opts.device 指向密钥目录
+    (f"volumes:\n  kv:\n    driver: local\n    driver_opts:\n      type: none\n      o: bind\n      device: {S}\n", "卷 kv 的 driver_opts 引用了"),
+    ("volumes:\n  kv2:\n    driver_opts:\n      device: /home/box/.config/aia/secrets/aia\n", "卷 kv2 的 driver_opts 引用了"),
+    # include / extends.file
+    ("include:\n  - other.yml\n", "使用了 include:"),
+    ("include:\n  - path: ../x/compose.yml\n", "使用了 include:"),
+    ("services:\n  api:\n    extends:\n      file: ../x.yml\n      service: api\n", "服务 api 用 extends.file"),
+    # 服务卷直接挂受保护文件（不经密钥目录变量）
+    ("services:\n  beat:\n    volumes:\n      - /srv/keys/app_master_key:/k:ro\n", "服务 beat 把受保护的密钥文件当普通卷挂载"),
+])
+def test_rule10_overlay_rejected(repo: Path, snippet: str, needle: str) -> None:
+    errs = _overlay(repo, snippet)
+    assert any(needle in e for e in errs), errs
+
+
+@pytest.mark.parametrize("old,new,needle", [
+    ("file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/app_master_key",
+     "file: /tmp/app_master_key", "secret app_master_key 的 file: 必须是"),
+    ("file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/data_licence_seal_private_keys",
+     "file: ${HOME}/data_licence_seal_private_keys", "secret data_licence_seal_private_keys 的 file: 必须是"),
+    ("file: ${AIA_SECRETS_DIR:?请用 deploy/scripts/compose.sh 调用}/app_master_key",
+     "file: ${AIA_SECRETS_DIR:?x}/db_password_aia_api", "secret app_master_key 的 file: 指向受保护的 db_password_aia_api"),
+])
+def test_rule10_base_path_pinned(repo: Path, old: str, new: str, needle: str) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, old, new)
+    errs = ccs.check(repo)
+    assert any(needle in e for e in errs), errs
+
+
+@pytest.mark.parametrize("snippet", [
+    "configs:\n  nginx_conf:\n    file: ./nginx.conf\n",
+    "volumes:\n  data:\n    driver_opts:\n      type: tmpfs\n      device: tmpfs\n",
+    "services:\n  api:\n    extends:\n      service: worker\n",
+])
+def test_rule10_benign_overlay_ok(repo: Path, snippet: str) -> None:
+    assert _overlay(repo, snippet) == []
+
+
+def test_rule10_ingest_cannot_bind_mount_private_keys(repo: Path) -> None:
+    # 规则 3 放行 ingest 挂私钥路径；规则 10 要求私钥也只经 secrets:
+    errs = _overlay(repo, "services:\n  ingest:\n    volumes:\n      - /srv/data_licence_seal_private_keys:/k:ro\n")
+    assert any("服务 ingest 把受保护的密钥文件当普通卷挂载" in e for e in errs), errs

@@ -7,6 +7,8 @@
 #   新生成的 db_password_aia_maint 属主改成该 uid，供以该用户运行的 maint-cli 容器读取（db-roles 以 root 读）；
 #   不设置时（CI / 手工）保持当前用户。api / ingest 的口令文件属主不变（compose.sh 在宿主上读它们做插值）。
 # 用法：deploy/scripts/db-role-passwords.sh [目录]
+# 评审 8cf9771 m3：先关掉继承来的 xtrace（bash -x / SHELLOPTS=xtrace），免得密钥或口令值被打到 stderr。
+{ set +x; } 2>/dev/null
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dir="${1:-}"

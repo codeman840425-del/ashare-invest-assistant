@@ -7,6 +7,8 @@
 # - 不打印密钥；不写 .env；compose 以 secret app_master_key 挂给 api/worker，
 #   由 deploy/docker/secret-env.sh 在容器进程内转成 APP_MASTER_KEY（docker inspect 看不到）。
 # 用法：deploy/scripts/app-master-keygen.sh [目录]
+# 评审 8cf9771 m3：先关掉继承来的 xtrace（bash -x / SHELLOPTS=xtrace），免得密钥或口令值被打到 stderr。
+{ set +x; } 2>/dev/null
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dir="${1:-}"

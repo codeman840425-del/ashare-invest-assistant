@@ -10,6 +10,8 @@
 #   当前版本由环境变量 DATA_LICENCE_SEAL_KEY_VERSION 指定（api、ingest）。
 # 规则：两个文件任一已存在就不覆盖、直接退出（退出码 0，并说明）；密钥从不打印、不经命令行参数、不进日志。
 # 备份：私钥丢失 = 已加密的证书全部无法解密。私钥要单独备份，不能和数据库备份放在一起（见 deploy/runbooks/data-licence-seal-keys.md）。
+# 评审 8cf9771 m3：先关掉继承来的 xtrace（bash -x / SHELLOPTS=xtrace），免得密钥或口令值被打到 stderr。
+{ set +x; } 2>/dev/null
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 version=1

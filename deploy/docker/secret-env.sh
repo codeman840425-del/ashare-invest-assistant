@@ -6,6 +6,8 @@
 #   /run/secrets/db_password_aia_maint → 在容器内 600 临时文件里拼出 aia_maint 的 DSN，
 #                                         导出 AIA_MAINT_DATABASE_URL_FILE（删除用户数据 CLI 读它，只有 maint-cli 挂这份 secret）
 # 不打印任何值；secret 存在但为空 / 读不到时直接失败（不回落到无密钥运行）。
+# 评审 8cf9771 m3：先关掉继承来的 xtrace（bash -x / SHELLOPTS=xtrace），免得密钥或口令值被打到 stderr。
+{ set +x; } 2>/dev/null
 set -eu
 sd="${AIA_SECRET_ENV_DIR:-/run/secrets}"
 

@@ -17,12 +17,15 @@
 #     另外两项保守检查（plan 未列，只会多拒绝、不会多生成）：app.import_files 有行、导入卷里有文件 → 拒绝。
 #   ① 只有全新部署（文件不存在、旧来源没有、数据库为空——数据卷不存在，或上述表都不存在/都为空）才生成。
 #   ⑤ 主密钥轮换不在 V1 范围：本脚本从不替换已有文件。
+# 排错时不要用 bash -x（脚本开头会强制 set +x；值也绝不会出现在普通输出里）。
 # AIA_KEYCHECK_ONLY=1：检查模式（compose.sh 对 down/ps/logs 等不启动容器的子命令使用），只判定、不迁移不生成。
 # ③ 的查库会话强制只读；“有数据”还包括 app.llm_providers 里的 api_key_ciphertext（评审 75c233b n1/n2）。
 # 退出码：0 可以继续（已有 / 已迁移 / 已生成）；2 配置错误；3 拒绝启动。
 # 用法：app-master-key-ensure.sh <密钥目录> <env 文件> <卷前缀>
 #   AIA_DOCKER   docker 命令（默认 docker；compose.sh 传 "sudo -n docker" 等）
 #   AIA_KEYCHECK_IMAGE  检查导入卷用的镜像（默认取基础 compose 里 postgres 的镜像，部署机上一定有）
+# 评审 8cf9771 m3：继承来的 xtrace（bash -x 排错、SHELLOPTS=xtrace 导出）会把 raw / file_val 等值打到 stderr，先关掉。
+{ set +x; } 2>/dev/null
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [ $# -eq 3 ] || { echo "用法：$0 <密钥目录> <env 文件> <卷前缀>" >&2; exit 2; }
@@ -64,7 +67,8 @@ if [ -f "$env_file" ]; then
   #   引号值：取到配对的引号为止，引号后的“# 注释”和空白忽略。
   # 做不到逐字一致的写法一律拒绝（宁可停下来让人确认，也不悄悄迁移错值）：KEY: VAL 写法、含 $（插值）、
   # 引号值含 \（转义）、引号不配对或跨行、引号后还有非注释内容、最终值里有空白或控制字符。
-  # 占位值（含 < 或 >、changeme/example 开头、空）不做上述检查，视为没有。
+  # 占位判断在解析之后（评审 8cf9771 m1）：对解析出的值做 is_real，行尾注释里的 < > 不再让真实值被当成占位；
+  # 解析不了（会拒绝）的写法，先看原文第一个词像不像占位值（如 KEY=<请填写 32 位>），像就视为没有，否则拒绝。
   if grep -Eq '^[[:space:]]*(export[[:space:]]+)?APP_MASTER_KEY[[:space:]]*:' "$env_file"; then
     envfile_refuse "是 KEY: VALUE 形式"
   fi
@@ -72,28 +76,35 @@ if [ -f "$env_file" ]; then
   raw="${raw%$'\r'}"
   raw="${raw#"${raw%%[![:space:]]*}"}"
   raw="${raw%"${raw##*[![:space:]]}"}"
-  case "$raw" in ''|*'<'*|*'>'*|changeme*|example*) file_val="" ;;
-  *)
-    q="${raw:0:1}"
-    if [ "$q" = '"' ] || [ "$q" = "'" ]; then
-      rest="${raw:1}"
-      case "$rest" in *"$q"*) ;; *) envfile_refuse "引号不配对（或跨行）" ;; esac
-      file_val="${rest%%"$q"*}"
-      tail_="${rest#*"$q"}"
-      tail_="${tail_#"${tail_%%[![:space:]]*}"}"
-      case "$file_val" in *\\*) envfile_refuse "在引号里含反斜杠（compose 会按转义处理）" ;; esac
-      case "$tail_" in ''|'#'*) ;; *) envfile_refuse "在引号后还有非注释内容" ;; esac
-      if [ "$q" = '"' ]; then case "$file_val" in *'$'*) envfile_refuse "在双引号里含 \$（compose 会插值）" ;; esac; fi
-    else
-      file_val="$raw"
-      case "$file_val" in *' #'*) file_val="${file_val%%' #'*}" ;; esac
-      file_val="${file_val%"${file_val##*[![:space:]]}"}"
-      case "$file_val" in *'$'*) envfile_refuse "含 \$（compose 会插值）" ;; esac
-    fi
-    if [[ "$file_val" =~ [[:space:][:cntrl:]] ]]; then envfile_refuse "解析出的值里有空白或控制字符"; fi
-    ;;
-  esac
-  unset raw rest q tail_
+  bad=""
+  q="${raw:0:1}"
+  if [ "$q" = '"' ] || [ "$q" = "'" ]; then
+    rest="${raw:1}"
+    case "$rest" in
+      *"$q"*)
+        file_val="${rest%%"$q"*}"
+        tail_="${rest#*"$q"}"
+        tail_="${tail_#"${tail_%%[![:space:]]*}"}"
+        case "$file_val" in *\\*) bad="在引号里含反斜杠（compose 会按转义处理）" ;; esac
+        case "$tail_" in ''|'#'*) ;; *) bad="${bad:-在引号后还有非注释内容}" ;; esac
+        if [ "$q" = '"' ]; then case "$file_val" in *'$'*) bad="${bad:-在双引号里含 \$（compose 会插值）}" ;; esac; fi
+        ;;
+      *) bad="引号不配对（或跨行）"; file_val="$rest" ;;
+    esac
+  else
+    file_val="$raw"
+    case "$file_val" in *' #'*) file_val="${file_val%%' #'*}" ;; esac
+    file_val="${file_val%"${file_val##*[![:space:]]}"}"
+    case "$file_val" in *'$'*) bad="含 \$（compose 会插值）" ;; esac
+  fi
+  if [ -z "$bad" ] && [[ "$file_val" =~ [[:space:][:cntrl:]] ]]; then bad="解析出的值里有空白或控制字符"; fi
+  if [ -n "$bad" ]; then
+    # 解析失败：只有原文第一个词（到第一个空白为止，注释不算；引号不配对时已去掉开头引号）是占位值时才视为没有
+    cand="${file_val%%[[:space:]]*}"
+    if is_real "$cand"; then unset cand; envfile_refuse "$bad"; fi
+    file_val=""
+  fi
+  unset raw rest q tail_ cand bad
 fi
 is_real "$env_val" || env_val=""
 is_real "$file_val" || file_val=""

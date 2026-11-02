@@ -28,6 +28,12 @@
   9. 入口包装防绕过（评审 75c233b m1）：任何服务的 environment 都不得设 AIA_SECRET_ENV_DIR（包装只看该目录，会看不到
      /run/secrets）；任何服务的 volumes 都不得引用 AIA_SECRETS_DIR 或 .config/aia/secrets（主密钥文件会以普通卷进容器，
      绕过 secret 白名单）。compose 文件里出现 !reset / !override 等 YAML 标签、或 YAML 无法解析 → 明确报错（不崩溃）。
+ 10. 密钥文件的定义不可改道（评审 8cf9771 m2）。受保护的文件 = 主密钥、两把证书封装密钥、三份库口令（PROTECTED_SECRETS）：
+     - 顶层 secrets 里 file: 指向受保护文件（按路径里出现的文件名判断）的，secret 名必须与文件名相同（不能起别名再挂给别的服务）；
+     - 受保护的 secret 只能在基础 compose 里定义，且 file: 必须是 ${AIA_SECRETS_DIR…}/<同名>；覆盖文件不得重定义（改路径）；
+     - 顶层 configs 不得引用密钥目录（AIA_SECRETS_DIR / .config/aia/secrets）或受保护文件；顶层 volumes 的 driver_opts
+       （如 bind 的 device）同样不得引用；服务的 volumes 不得直接挂受保护文件；
+     - 禁止 include:（引入的文件不在本检查范围内）和服务级 extends.file（同理）。
 
 失败退出码 1，依赖缺失退出码 2。用法：check_secret_boundary.py [--repo DIR]
 """
@@ -84,6 +90,8 @@ KEY_ENSURE = "app-master-key-ensure.sh"
 KEY_GEN = "app-master-keygen.sh"
 SECRET_DIR_ENV = "AIA_SECRET_ENV_DIR"
 SECRET_DIR_VOL_MARKERS = ("AIA_SECRETS_DIR", ".config/aia/secrets")
+PROTECTED_SECRETS = (MASTER_SECRET, PRIVATE_SECRET, PUBLIC_SECRET, *DB_PW_SECRETS)
+BASE_SECRET_FILE_RE = re.compile(r"^\$\{AIA_SECRETS_DIR(?::?[?-][^}]*)?\}/([A-Za-z0-9_]+)$")
 DB_URL_RE = re.compile(r"^postgresql(?:\+\w+)?://([^:@/]+):(\$\{(\w+)[^}]*\})@")
 
 
@@ -160,6 +168,61 @@ def _volume_sources(vols) -> list[str]:
     return out
 
 
+def _strings(obj) -> list[str]:
+    """递归取出映射 / 列表里的所有字符串（含键），用于“是否引用了密钥目录或受保护文件”的判断。"""
+    if isinstance(obj, dict):
+        return [s for k, v in obj.items() for s in (*_strings(k), *_strings(v))]
+    if isinstance(obj, list):
+        return [s for v in obj for s in _strings(v)]
+    return [str(obj)] if obj is not None else []
+
+
+def _secret_ref(s: str) -> str | None:
+    """字符串引用了密钥目录或受保护文件时返回命中的标记。"""
+    for m in (*SECRET_DIR_VOL_MARKERS, *PROTECTED_SECRETS):
+        if m in s:
+            return m
+    return None
+
+
+def _check_rule10(rel: str, doc: dict, is_base: bool, errs: list[str]) -> None:
+    if "include" in doc:
+        errs.append(f"{rel}: 使用了 include:（引入的 compose 文件不在密钥边界检查范围内，禁止；评审 8cf9771 m2）")
+    for name, svc in (doc.get("services") or {}).items():
+        ext = (svc or {}).get("extends")
+        if isinstance(ext, dict) and "file" in ext:
+            errs.append(f"{rel}: 服务 {name} 用 extends.file 引入其他文件（不在检查范围内，禁止；m2）")
+        for src in _volume_sources((svc or {}).get("volumes")):
+            if name != PRIVATE_OWNER and "private_keys" in src:
+                continue   # 规则 3 已报（只允许 ingest）；这里不重复
+            if any(p in src for p in PROTECTED_SECRETS):
+                errs.append(f"{rel}: 服务 {name} 把受保护的密钥文件当普通卷挂载：只能经 secrets: 按白名单分配（m2）")
+    for sname, sdef in (doc.get("secrets") or {}).items():
+        sname = str(sname)
+        f = str(sdef.get("file", "")).strip() if isinstance(sdef, dict) else ""
+        hit = next((p for p in PROTECTED_SECRETS if p in f), None)
+        if hit and sname != hit:
+            errs.append(f"{rel}: secret {sname} 的 file: 指向受保护的 {hit}，secret 名必须与文件名相同（不得起别名，m2）")
+        if sname in PROTECTED_SECRETS:
+            if not is_base:
+                errs.append(f"{rel}: 覆盖文件重定义了受保护的 secret {sname}（只能在 {BASE_COMPOSE} 定义，不得改路径，m2）")
+            else:
+                m = BASE_SECRET_FILE_RE.match(f)
+                if not m or m.group(1) != sname:
+                    errs.append(f"{rel}: secret {sname} 的 file: 必须是 ${{AIA_SECRETS_DIR…}}/{sname}（m2）")
+        elif f and any(mk in f for mk in SECRET_DIR_VOL_MARKERS):
+            errs.append(f"{rel}: secret {sname} 指向密钥目录里未登记的文件（新增密钥先登记到 PROTECTED_SECRETS，m2）")
+    for cname, cdef in (doc.get("configs") or {}).items():
+        hit = next((h for h in map(_secret_ref, _strings(cdef)) if h), None)
+        if hit:
+            errs.append(f"{rel}: config {cname} 引用了 {hit}（configs 不受 secret 白名单约束，不得指向密钥，m2）")
+    for vname, vdef in (doc.get("volumes") or {}).items():
+        opts = vdef.get("driver_opts") if isinstance(vdef, dict) else None
+        hit = next((h for h in map(_secret_ref, _strings(opts)) if h), None)
+        if hit:
+            errs.append(f"{rel}: 卷 {vname} 的 driver_opts 引用了 {hit}（会把密钥目录当普通卷挂进容器，m2）")
+
+
 def check(repo: Path) -> list[str]:
     errs: list[str] = []
     for rel, text in _texts(repo):
@@ -175,6 +238,7 @@ def check(repo: Path) -> list[str]:
         doc = _load(f, rel, errs)
         if doc is None:
             continue
+        _check_rule10(rel, doc, rel == BASE_COMPOSE, errs)
         for name, svc in (doc.get("services") or {}).items():
             svc = svc or {}
             where = f"{rel}: 服务 {name}"

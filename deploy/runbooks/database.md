@@ -67,6 +67,18 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
   导入文件密文都依赖 `$AIA_SECRETS_DIR/app_master_key`，丢了主密钥 dump 就恢复不出可用数据；但两者放在一起，
   拿到备份的人就同时拿到了解密能力。做法：主密钥按 600 拷到离线介质 / 密码管理器（与 dump 不同的位置、不同的权限），
   不打印、不入库、不进工单；dump 目录（`--out-dir`）里不放任何密钥文件。证书私钥（`data_licence_seal_*`）同理。
+- **每次备份时记录主密钥的 sha256**（评审 8cf9771 n5；只记摘要，不记内容），写进备份记录（与 dump 同目录的
+  `<dump>.keyhash.txt` 或运维台账），恢复 / 迁移时用它核对拷来的是不是同一把：
+  ```bash
+  sudo -n sha256sum "$AIA_SECRETS_DIR/app_master_key" | cut -d' ' -f1 > deploy/backups/aia-<UTC>.app_master_key.sha256
+  ```
+  只输出 64 位十六进制摘要；不要 `cat` / `xxd` / `od` 文件本身，也不要把命令加 `-x` 跑。
+- **原始导入文件卷 `<卷前缀>_imports` 要和 dump 一起备份**（评审 8cf9771 n4）：`app.import_files` 只存元数据，
+  文件本体（用主密钥派生密钥加密）在卷里；只恢复 dump 不恢复卷，导入记录会指向不存在的文件。
+  ```bash
+  docker run --rm --network none -v <卷前缀>_imports:/v:ro -v /data/backup:/out alpine:3.21 \
+    tar -C /v -czf /out/imports-<UTC>.tgz .          # 产物 chmod 600；内容是密文，但仍与主密钥分开存放
+  ```
 
 **恢复（db-restore.sh）的检查**
 - 校验 sha256。
@@ -84,12 +96,30 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
 1. 在新主机上**先**把原主机的 `$AIA_SECRETS_DIR/app_master_key` 从离线备份拷到同一路径（600、属主 10001）。
    主密钥只有这一份文件，api / worker 共用（plan e56462c 按服务分配：其余服务不挂）；以后若按服务拆分，就逐个拷各服务的密钥文件。
    证书私钥 / 公钥文件同理先拷（见 `data-licence-seal-keys.md`）。
-2. **然后**才执行 `deploy/scripts/compose.sh up -d --wait`，再 `db-restore.sh` 恢复数据。
-   顺序反过来的后果：新主机 up 时库是空的，`app-master-key-ensure.sh` 会合法地按“全新部署”生成一把新主密钥，
+   拷完先核对摘要：`sudo -n sha256sum … | cut -d' ' -f1` 与备份时记下的 `.app_master_key.sha256` 一致（只比对摘要，不打印值）。
+2. **然后**才起服务，而且**先不启动 ingest**（评审 8cf9771 M1；plan §1.3）：
+   `deploy/scripts/compose.sh up -d --wait --scale ingest=0`。
+   麦蕊同一证书 60 秒内只认 2 个来源 IP，旧主机的 ingest 还在跑时新主机再起一个，就会触发 IP 超限（429 / 码 103）。
+   **之后每一次 `up`（包括恢复后重建 api 等）都要带 `--scale ingest=0`**，直到第 5 步切换：不带的话 compose 会把 ingest 拉起来
+   （ingest 的 `deploy.replicas: 1` 会生效，已实测）。
+   主密钥这一步放在第 1 步之后的原因：新主机 up 时库是空的，`app-master-key-ensure.sh` 会合法地按“全新部署”生成一把新主密钥，
    restore 之后旧数据的 HMAC 与加密文件全部失效，而且不会报错。
-3. 恢复后核对：`stat -c '%a %u'` 为 `600 10001`；`sha256sum` 与原主机记录一致（只比对摘要，不打印值）；
-   用既有邀请码 / 登录验证 HMAC 仍然一致。
-4. 已经误生成了新主密钥：停服务，用离线备份的原主密钥覆盖（先另存误生成的那份），再起服务；不要在新密钥下接受新数据。
+3. `db-restore.sh` 恢复数据；**再恢复导入文件卷**（评审 8cf9771 n4；顺序：主密钥 → 库 → 导入卷）：
+   ```bash
+   docker run --rm --network none -v <卷前缀>_imports:/v -v /data/backup:/in:ro alpine:3.21 \
+     sh -c 'tar -C /v -xzf /in/imports-<UTC>.tgz && chown -R 10001:10001 /v && chmod 700 /v'
+   ```
+   恢复前卷必须是空的（新主机上第 2 步起的空卷）；不要解压到已有文件的卷上。
+4. 恢复后核对：`stat -c '%a %u'` 为 `600 10001`；主密钥摘要与备份记录一致；用既有邀请码 / 登录验证 HMAC 仍然一致；
+   `app.import_files` 里的文件在卷里都能找到（抽查几条导入记录能打开原文件）。
+5. **切换 ingest（按 plan §1.3 的顺序，不能并行）**：修改 `PUBLIC_BASE_URL` 与 DNS → **停止旧主机的 ingest**
+   （旧主机 `compose.sh stop ingest`）→ **等待 ≥ 60 秒**（让旧 IP 滑出麦蕊的 60 秒窗口）→ 新主机 `compose.sh up -d --wait ingest`
+   → 核对出口 IP（ingest 日志 / 麦蕊后台的来源 IP 只剩新主机）→ 从旧主机 `.env` 删除 licence。
+   单台冷备切换的细节见 `deploy/runbooks/ingest-failover.md`（T-O07，尚未写好前以 plan §1.3 / §2.1A 为准）。
+   迁移期间及之后，旧主机 / 开发机不得用同一证书做真实调用。
+   **灾后恢复（旧主机已经没了、不会再有它的 ingest）**：可以跳过“停旧 ingest、等 60 秒”，第 2 步直接 `up -d --wait` 启动 ingest；
+   但要先确认旧主机确实不再运行（关机 / 断网），拿不准就按迁移顺序做。
+6. 已经误生成了新主密钥：停服务，用离线备份的原主密钥覆盖（先另存误生成的那份），再起服务；不要在新密钥下接受新数据。
 
 **恢复的保护**
 - 恢复脚本拒绝覆盖容器的 `POSTGRES_DB`（主库 aia）。
@@ -169,12 +199,13 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
 | ④ 文件已存在，旧来源有值且一致 | 用文件，提示从 `.env` 删除那一行（不自动删） |
 | ④ 文件已存在，旧来源有值但不一致（或读不到文件无法比对） | **拒绝启动**（退出 3），等人工确认用哪把；两边都不改、不打印 |
 | ② 文件不存在，旧来源有非占位值 | 迁移进密钥文件（600，属主 10001，不打印），提示从 `.env` 删除该行（不自动删）。环境与 `.env` 两处不一致、或短于 32 字符 → 拒绝 |
-| ③ 两边都没有，`app.users` / `app.invite_codes` / `app.user_data_licences` 任一有行（保守加查 `app.import_files`、导入卷里的文件） | **拒绝启动**（退出 3），提示从备份恢复主密钥 |
+| ③ 两边都没有，`app.users` / `app.invite_codes` / `app.user_data_licences` 任一有行（保守加查 `app.import_files`、`app.llm_providers` 里非空的 `api_key_ciphertext`、导入卷里的文件） | **拒绝启动**（退出 3），提示从备份恢复主密钥 |
 | ③ 两边都没有，数据卷存在但 postgres 没在跑 / 查不了 / docker 不可用 | 无法确认是空库 → 拒绝（fail-closed） |
-| ① 两边都没有，数据卷不存在，或上述表都不存在 / 都为空，导入卷为空 | 全新部署：生成新主密钥（`app-master-keygen.sh`） |
+| ① 两边都没有，数据卷不存在，或上述表都不存在 / 都为空（`llm_providers` 没有密文），导入卷为空 | 全新部署：生成新主密钥（`app-master-keygen.sh`） |
 | ⑤ 主密钥轮换 | 不在 V1 范围，脚本从不替换已有文件 |
 
-占位值（空、含 `<` `>`、`changeme` / `example` 开头）视为没有。api / worker 另设 `AIA_REQUIRE_APP_MASTER_KEY=1`：
+占位值（空、含 `<` `>`、`changeme` / `example` 开头）视为没有；判断用的是按 compose 规则**解析后的值**，
+行尾注释里的 `<` `>` 不算（评审 8cf9771 m1）。api / worker 另设 `AIA_REQUIRE_APP_MASTER_KEY=1`：
 secret 没挂上时 `secret-env.sh` 拒绝启动，后端不会回落到临时随机主密钥。
 
 升级旧部署：
@@ -183,6 +214,11 @@ secret 没挂上时 `secret-env.sh` 拒绝启动，后端不会回落到临时�
    主密钥文件已存在（如 aia-t01）：`.env` 里只有占位值时直接用；有真实值时必须与文件一致，否则拒绝；
 3. 验证：`stat -c '%a %u' $AIA_SECRETS_DIR/app_master_key` 为 `600 10001`；用既有邀请码 / 登录验证 HMAC 仍然一致；
 4. 确认无误后，从 `.env` 删除 `APP_MASTER_KEY` 行（compose 已不读它）。
+
+排错时不要用 `bash -x` 跑 `compose.sh` / `app-master-key-ensure.sh` / `app-master-keygen.sh` / `db-role-passwords.sh`：
+这些脚本开头都会强制 `set +x`（评审 8cf9771 m3），但别的包装脚本加了 `-x` 仍可能把口令打到终端；看判定过程读 stderr 的中文说明即可。
+`compose.sh` 只对只读子命令（`ps` `logs` `config` `down` `stop` `exec` 等白名单）把主密钥检查降为告警，其余子命令（含认不出的）
+检查不过即拒绝（评审 8cf9771 n1）。
 
 被拒绝时：从备份 / 原部署机找回原主密钥，写入密钥文件（600、属主 10001）后重试。只有确认要放弃旧数据
 （邀请码、证书去重、加密导入文件都将不可用）时，才由人工运行 `deploy/scripts/app-master-keygen.sh <密钥目录>`。

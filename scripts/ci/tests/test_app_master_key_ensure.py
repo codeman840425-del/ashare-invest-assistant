@@ -183,6 +183,10 @@ ACCEPTED = [
     ("  {v}=   {k}   \n", "{k}"),
     ("{v}='{k}'\n", "{k}"),
     ("{v}=<填写>  # 占位\n{v}={k} # 后一行生效\n", "{k}"),  # 同名多行取最后一行
+    # 评审 8cf9771 m1：注释里的 < > 不影响真实值（先解析、后判占位）
+    ("{v}={k}  # see <docs>\n", "{k}"),
+    ("{v}={k} # a -> b\n", "{k}"),
+    ('{v}="{k}"  # 见 <runbook>\n', "{k}"),
 ]
 REFUSED = [
     ("{v}={k}\t#c\n", "空白"),                     # compose 把“制表符 + #c”算进值里
@@ -198,6 +202,8 @@ REFUSED = [
     ('{v}="{k}\n', "引号不配对"),
     ("{v}='{k} # c\n", "引号不配对"),
     ('{v}="{k}\nmore"\n', "引号不配对"),          # 跨行引号
+    ("{v}={k}\t# see <docs>\n", "空白"),           # m1：原文含 < > 也不能让解析失败的真实值被当成占位
+    ("{v}='{k} # a -> b\n", "引号不配对"),
 ]
 
 
@@ -233,7 +239,8 @@ def test_ambiguous_env_line_refused_even_with_key_file(e: Env) -> None:
     _no_leak(r, e, k)
 
 
-@pytest.mark.parametrize("line", ['{v}="<请填写 主密钥>"  # 占位\n', "{v}=changeme now\n"])
+@pytest.mark.parametrize("line", ['{v}="<请填写 主密钥>"  # 占位\n', "{v}=changeme now\n",
+                                  "{v}=<K>  # see <docs>\n", "{v}=<请填写 32 位>\n", "{v}=  # a -> b <x>\n".replace("  #", "<x> #")])
 def test_placeholder_not_parsed_strictly(e: Env, line: str) -> None:
     e.secrets.mkdir()
     k = _key()
@@ -242,6 +249,57 @@ def test_placeholder_not_parsed_strictly(e: Env, line: str) -> None:
     r = e.run()
     assert r.returncode == 0, r.stderr
     assert e.key.read_text(encoding="utf-8") == k
+
+
+def test_comment_with_angle_brackets_mismatch_refused(e: Env) -> None:
+    # 评审 8cf9771 m1：旧实现按原始行判占位，注释里有 < > 时④的比对被跳过；现在照样比对、不一致拒绝
+    e.secrets.mkdir()
+    k, old = _key(), _key()
+    e.key.write_text(k, encoding="utf-8")
+    for body in (f"{VAR}={old}  # see <docs>\n", f"{VAR}={old} # a -> b\n"):
+        e.env_file.write_text(body, encoding="utf-8")
+        r = e.run()
+        assert r.returncode == 3 and "不一致" in r.stderr, r.stderr
+        assert e.key.read_text(encoding="utf-8") == k
+        _no_leak(r, e, k, old)
+
+
+def test_xtrace_does_not_leak(e: Env) -> None:
+    # 评审 8cf9771 m3：bash -x / SHELLOPTS=xtrace 调用时也不打印值
+    k = _key()
+    e.env_file.write_text(f"{VAR}={k}\n", encoding="utf-8")
+    env = {kk: v for kk, v in os.environ.items() if kk not in (VAR, "MAIRUI_LICENCE", "DEEPSEEK_API_KEY")}
+    env.update(AIA_DOCKER=str(e.docker), FAKE_DOCKER_STATE=str(e.state), AIA_APP_UID=str(os.getuid()), SHELLOPTS="xtrace")
+    r = subprocess.run(["bash", "-x", str(ENSURE), str(e.secrets), str(e.env_file), PREFIX], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    _assert_key_file(e, k)
+    _no_leak(r, e, k)
+
+
+@pytest.mark.parametrize("script", ["deploy/scripts/app-master-key-ensure.sh", "deploy/scripts/app-master-keygen.sh",
+                                    "deploy/docker/secret-env.sh", "deploy/scripts/compose.sh",
+                                    "deploy/scripts/db-role-passwords.sh", "deploy/scripts/seal-keygen.sh"])
+def test_secret_scripts_disable_xtrace_first(script: str) -> None:
+    code = [ln for ln in (REPO / script).read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    assert code[0] == "{ set +x; } 2>/dev/null", f"{script} 第一条语句应关掉 xtrace"
+
+
+def test_keygen_xtrace_does_not_leak(tmp_path: Path) -> None:
+    env = {"PATH": os.environ["PATH"], "AIA_APP_UID": str(os.getuid()), "SHELLOPTS": "xtrace"}
+    r = subprocess.run(["bash", "-x", str(REPO / "deploy/scripts/app-master-keygen.sh"), str(tmp_path / "sd")],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    k = (tmp_path / "sd" / "app_master_key").read_text(encoding="utf-8")
+    assert len(k) >= 32 and k not in r.stdout + r.stderr
+
+
+def test_secret_env_xtrace_does_not_leak(tmp_path: Path) -> None:
+    k = _key()
+    (tmp_path / "app_master_key").write_text(k, encoding="utf-8")
+    env = {"PATH": os.environ["PATH"], "AIA_SECRET_ENV_DIR": str(tmp_path), "AIA_REQUIRE_APP_MASTER_KEY": "1"}
+    r = subprocess.run(["sh", "-x", str(SECRET_ENV), "true"], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert k not in r.stdout + r.stderr
 
 
 def _compose_value(tmp: Path, env_text: str) -> str | None:
@@ -501,8 +559,47 @@ def test_compose_sh_calls_ensure_before_docker_compose() -> None:
     assert re.search(r'AIA_KEYCHECK_ONLY=1 [^\n]*app-master-key-ensure\.sh"[^\n]*\|\| rc=\$\?', code)
     # M2：文件已存在时也要做④的比对，所以不得包在“文件不存在”判断里
     assert not re.search(r'if \[ ! -e "\$secrets_dir/app_master_key" \]', code)
-    strict = re.search(r"^\s*([a-z|']+)\)\s*$", code[code.index('case "$sub" in'):], re.M).group(1).split("|")
-    assert set(strict) >= {"up", "run", "create", "start", "restart", "''"}
+    # 评审 8cf9771 n1：只读白名单只告警，其余（含认不出的、空）一律强制
+    block = code[code.index('case "$sub" in'):]
+    warn = re.search(r"^\s*([a-z|]+)\)\s*$", block, re.M).group(1).split("|")
+    assert set(warn) == WARN_ONLY
+    assert re.search(r"^\s*\*\)\s*$", block, re.M)
+
+
+WARN_ONLY = {"down", "ps", "logs", "stop", "kill", "rm", "exec", "config", "images", "top", "port", "events", "pause",
+             "unpause", "ls", "version", "cp", "wait", "stats", "attach"}
+
+
+def _dispatch(tmp: Path, args: list[str], rc: int) -> tuple[subprocess.CompletedProcess[str], str]:
+    """只跑 compose.sh 的“子命令 → ensure 模式”分派段：ensure 换成记录 AIA_KEYCHECK_ONLY 并按 rc 退出的桩。"""
+    text = COMPOSE_SH.read_text(encoding="utf-8")
+    seg = text[text.index("compose_subcmd() {"):text.index("FILES=(-f")]
+    root = tmp / "root"
+    (root / "deploy/scripts").mkdir(parents=True, exist_ok=True)
+    stub = root / "deploy/scripts/app-master-key-ensure.sh"
+    stub.write_text(f'#!/bin/sh\necho "mode=${{AIA_KEYCHECK_ONLY:-enforce}}" > "{tmp}/mode"\nexit {rc}\n', encoding="utf-8")
+    stub.chmod(0o755)
+    script = f'ROOT="{root}"; DOCKER=(docker); secrets_dir=/x; ENV_FILE=/x; prefix=p\n{seg}\necho CONTINUED\n'
+    r = subprocess.run(["bash", "-c", script, "x", *args], capture_output=True, text=True)
+    mode = (tmp / "mode").read_text(encoding="utf-8").strip()
+    (tmp / "mode").unlink()
+    return r, mode
+
+
+@pytest.mark.parametrize("args", [[s] for s in sorted(WARN_ONLY)] + [["-p", "x", "logs", "api"]])
+def test_compose_dispatch_warn_only(tmp_path: Path, args: list[str]) -> None:
+    r, mode = _dispatch(tmp_path, args, 3)
+    assert mode == "mode=1" and r.returncode == 0 and "CONTINUED" in r.stdout and "警告" in r.stderr
+
+
+@pytest.mark.parametrize("args", [["up", "-d"], ["run", "--rm", "x"], ["create"], ["start"], ["restart"], ["watch"],
+                                  ["scale", "api=2"], ["build"], ["pull"], ["push"], ["frobnicate"], [],
+                                  ["--profile", "maint"], ["ps logs"], ["PS"], ["-f", "ps", "up"]])
+def test_compose_dispatch_enforced(tmp_path: Path, args: list[str]) -> None:
+    r, mode = _dispatch(tmp_path, args, 3)
+    assert mode == "mode=enforce" and r.returncode == 3 and "CONTINUED" not in r.stdout
+    r, mode = _dispatch(tmp_path, args, 0)
+    assert mode == "mode=enforce" and r.returncode == 0 and "CONTINUED" in r.stdout
 
 
 def _subcmd(args: list[str]) -> str:

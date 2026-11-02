@@ -123,14 +123,14 @@ def test_worker_registered_as_aia_api() -> None:
 
 
 def test_worker_on_owner_role_rejected(repo: Path) -> None:
-    _sub(repo, ccs.BASE_COMPOSE, "      DATABASE_URL: *db-api-url\n      SMTP_HOST",
-         "      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aia}:${POSTGRES_PASSWORD:?x}@postgres:5432/aia\n      SMTP_HOST")
+    _sub(repo, ccs.BASE_COMPOSE, "      DATABASE_URL: *db-api-url\n      # 到期原始文件清理",
+         "      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aia}:${POSTGRES_PASSWORD:?x}@postgres:5432/aia\n      # 到期原始文件清理")
     errs = ccs.check(repo)
     assert any("服务 worker 的 DATABASE_URL 应为 aia_api" in e for e in errs), errs
 
 
 def test_worker_without_explicit_url_rejected(repo: Path) -> None:
-    _sub(repo, ccs.BASE_COMPOSE, "      DATABASE_URL: *db-api-url\n      SMTP_HOST", "      SMTP_HOST")
+    _sub(repo, ccs.BASE_COMPOSE, "      DATABASE_URL: *db-api-url\n      # 到期原始文件清理", "      # 到期原始文件清理")
     errs = ccs.check(repo)
     # 不显式覆盖时 <<: *app-env 带进属主 DATABASE_URL，必须被拒
     assert any("服务 worker 的 DATABASE_URL 应为 aia_api" in e or "服务 worker 没有显式 DATABASE_URL" in e for e in errs), errs
@@ -218,8 +218,8 @@ def test_master_key_secret_must_be_file_and_mounted(repo: Path) -> None:
 
 
 def test_worker_must_mount_master_key(repo: Path) -> None:
-    _sub(repo, ccs.BASE_COMPOSE, "    secrets:\n      - app_master_key\n    volumes:\n      - ../../config:/app/config:ro",
-         "    volumes:\n      - ../../config:/app/config:ro")
+    _sub(repo, ccs.BASE_COMPOSE, "    secrets:\n      - app_master_key\n    volumes:\n      # 读写（删除到期文件）",
+         "    volumes:\n      # 读写（删除到期文件）")
     assert any("服务 worker 缺少 secrets ['app_master_key']" in e for e in ccs.check(repo))
 
 
@@ -507,3 +507,48 @@ def test_rule10_ingest_cannot_bind_mount_private_keys(repo: Path) -> None:
     # 规则 3 放行 ingest 挂私钥路径；规则 10 要求私钥也只经 secrets:
     errs = _overlay(repo, "services:\n  ingest:\n    volumes:\n      - /srv/data_licence_seal_private_keys:/k:ro\n")
     assert any("服务 ingest 把受保护的密钥文件当普通卷挂载" in e for e in errs), errs
+
+
+# ---------- T-A04 ⑪：imports 卷（review-028c077 M2）----------
+
+IMPORTS_MOUNT = "      - imports:${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}\n"
+
+
+def test_worker_mounts_imports_rw_in_base() -> None:
+    import yaml
+    doc = yaml.safe_load((REPO / ccs.BASE_COMPOSE).read_text(encoding="utf-8"))
+    w = doc["services"]["worker"]
+    mounts = ccs._volume_mounts(w["volumes"])
+    assert ("imports", "${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}", False) in mounts
+    assert w["environment"]["IMPORT_STORAGE_PATH"] == "${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}"
+
+
+def test_worker_without_imports_rejected(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "      # 读写（删除到期文件）；卷根目录属主 10001、700，与 api 共用同一卷\n" + IMPORTS_MOUNT, "")
+    errs = ccs.check(repo)
+    assert any("服务 worker 没有挂数据卷 imports" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("svc", ["ingest", "beat", "signal-rt", "migrate", "nginx"])
+def test_imports_on_other_service_rejected(repo: Path, svc: str) -> None:
+    errs = _overlay(repo, f"services:\n  {svc}:\n    volumes:\n      - imports:/data\n")
+    assert any(f"服务 {svc} 挂了数据卷 imports" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("vol", ["      - imports:/var/lib/aia-dev/imports:ro\n",
+                                 "      - type: volume\n        source: imports\n        target: /x\n        read_only: true\n"])
+def test_imports_read_only_rejected(repo: Path, vol: str) -> None:
+    errs = _overlay(repo, "services:\n  worker:\n    volumes:\n" + vol)
+    assert any("服务 worker 只读挂载了数据卷 imports" in e for e in errs), errs
+
+
+def test_imports_target_must_match_env(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "      # 读写（删除到期文件）；卷根目录属主 10001、700，与 api 共用同一卷\n" + IMPORTS_MOUNT,
+         "      - imports:/srv/elsewhere\n")
+    errs = ccs.check(repo)
+    assert any("服务 worker 的数据卷 imports 挂载点 /srv/elsewhere ≠ 其 IMPORT_STORAGE_PATH" in e for e in errs), errs
+
+
+def test_volume_mounts_parses_colon_in_target() -> None:
+    assert ccs._volume_mounts(["imports:${P:-/a/b}:ro", "x:/y", {"source": "s", "target": "/t"}]) == [
+        ("imports", "${P:-/a/b}", True), ("x", "/y", False), ("s", "/t", False)]

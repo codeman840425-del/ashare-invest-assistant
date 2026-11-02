@@ -38,6 +38,8 @@
      - 顶层 configs 不得引用密钥目录（AIA_SECRETS_DIR / .config/aia/secrets）或受保护文件；顶层 volumes 的 driver_opts
        （如 bind 的 device）同样不得引用；服务的 volumes 不得直接挂受保护文件；
      - 禁止 include:（引入的文件不在本检查范围内）和服务级 extends.file（同理）。
+  11. 数据卷白名单（T-A04 ⑪/⑫，DATA_VOLUMES）：imports 只允许 api / worker / maint-cli 挂，base 里三者都必须读写挂、
+     挂载点 = 各自的 IMPORT_STORAGE_PATH；其它服务挂、或任何只读挂载都拒绝。
 
 失败退出码 1，依赖缺失退出码 2。用法：check_secret_boundary.py [--repo DIR]
 """
@@ -234,6 +236,59 @@ def _check_rule10(rel: str, doc: dict, is_base: bool, errs: list[str]) -> None:
             errs.append(f"{rel}: 卷 {vname} 的 driver_opts 引用了 {hit}（会把密钥目录当普通卷挂进容器，m2）")
 
 
+# 数据卷白名单（T-A04 ⑪ / ⑫）：卷名 → 允许挂的服务、base 里必须挂的服务、挂载点须等于的环境变量（None = 不查）。
+# 任何挂载都必须读写（这些卷都要在容器里删 / 写文件）；未列出的服务挂了就拒绝。
+DATA_VOLUMES: dict[str, dict] = {
+    "imports": {"allowed": frozenset({"api", "worker", "maint-cli"}),
+                "required": frozenset({"api", "worker", "maint-cli"}),
+                "path_env": "IMPORT_STORAGE_PATH"},
+}
+
+
+def _volume_mounts(vols) -> list[tuple[str, str, bool]]:
+    """(source, target, read_only)；短语法 src:dst[:mode]，长语法 dict。"""
+    out = []
+    for v in vols or []:
+        if isinstance(v, dict):
+            out.append((str(v.get("source", "")), str(v.get("target", "")), bool(v.get("read_only"))))
+            continue
+        s = str(v)
+        # 目标路径里可能有 ${VAR:-/x} 这样的冒号：先取 source，再从末尾剥 mode
+        src, _, rest = s.partition(":")
+        mode = ""
+        for m in (":ro", ":rw", ":z", ":Z", ":ro,z", ":ro,Z"):
+            if rest.endswith(m):
+                rest, mode = rest[: -len(m)], m[1:]
+                break
+        out.append((src, rest, "ro" in mode.split(",")))
+    return out
+
+
+def _check_data_volumes(rel: str, doc: dict, is_base: bool, errs: list[str]) -> None:
+    svcs = doc.get("services") or {}
+    for name, svc in svcs.items():
+        svc = svc or {}
+        for src, target, ro in _volume_mounts(svc.get("volumes")):
+            spec = DATA_VOLUMES.get(src)
+            if spec is None:
+                continue
+            if name not in spec["allowed"]:
+                errs.append(f"{rel}: 服务 {name} 挂了数据卷 {src}，只允许 {'/'.join(sorted(spec['allowed']))}")
+                continue
+            if ro:
+                errs.append(f"{rel}: 服务 {name} 只读挂载了数据卷 {src}（必须读写：要在容器里写 / 删文件）")
+            env = svc.get("environment")
+            if is_base and spec.get("path_env") and isinstance(env, dict) and str(env.get(spec["path_env"])) != target:
+                errs.append(f"{rel}: 服务 {name} 的数据卷 {src} 挂载点 {target} ≠ 其 {spec['path_env']}")
+    if is_base:
+        for vname, spec in DATA_VOLUMES.items():
+            for name in sorted(spec["required"]):
+                if name in svcs and not any(s == vname for s, _, _ in _volume_mounts((svcs[name] or {}).get("volumes"))):
+                    errs.append(f"{rel}: 服务 {name} 没有挂数据卷 {vname}（T-A04 ⑪/⑫）")
+                if name in svcs and spec.get("path_env") and spec["path_env"] not in _env_keys((svcs[name] or {}).get("environment")):
+                    errs.append(f"{rel}: 服务 {name} 缺少 {spec['path_env']}（数据卷 {vname} 的挂载点）")
+
+
 def check(repo: Path) -> list[str]:
     errs: list[str] = []
     for rel, text in _texts(repo):
@@ -250,6 +305,7 @@ def check(repo: Path) -> list[str]:
         if doc is None:
             continue
         _check_rule10(rel, doc, rel == BASE_COMPOSE, errs)
+        _check_data_volumes(rel, doc, rel == BASE_COMPOSE, errs)
         for name, svc in (doc.get("services") or {}).items():
             svc = svc or {}
             where = f"{rel}: 服务 {name}"

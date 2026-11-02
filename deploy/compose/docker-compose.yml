@@ -57,8 +57,10 @@ x-app-env: &app-env
 x-secret-env-entrypoint: &secret-env-entrypoint ["sh", "/aia/secret-env.sh"]
 x-secret-env-mount: &secret-env-mount ../docker/secret-env.sh:/aia/secret-env.sh:ro
 
-# 原始导入文件卷（T-B46 / T-O11，plan §3.5A）：挂载点跟随 IMPORT_STORAGE_PATH；只挂给写入/读取的 api，
-# 以及删除用户数据时清文件的 maint-cli（按需 run）。worker / ingest / beat / signal-rt 不挂。
+# 原始导入文件卷（T-B46 / T-O11，plan §3.5A）：挂载点跟随 IMPORT_STORAGE_PATH；读写挂给写入/读取的 api、
+# 执行 imports.purge_expired_raw_files 到期删文件的 worker（T-A04 ⑪，review-028c077 M2：不挂则根目录不存在、报错保留行），
+# 以及删除用户数据时清文件的 maint-cli（按需 run）。ingest / beat / signal-rt 不挂。
+# CI（check_secret_boundary.py DATA_VOLUMES）：只允许这三个服务挂、三者都必须读写挂、挂载点 = 各自的 IMPORT_STORAGE_PATH。
 # 卷根目录属主 10001、权限 700（镜像内预建目录决定新卷的初始属主；已有卷由运维 chmod 一次）。
 
 x-app-depends: &app-depends
@@ -160,6 +162,9 @@ services:
       SERVICE_NAME: worker
       # T-A04 ④（review-028c077 M1）：worker 以 aia_api 连库（不用属主）；所需 DML 见 deploy/db/roles/grants.sql $worker$
       DATABASE_URL: *db-api-url
+      # 到期原始文件清理（imports.purge_expired_raw_files）的存储根目录，与 api 相同
+      IMPORT_STORAGE_BACKEND: ${IMPORT_STORAGE_BACKEND:-local}
+      IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -170,6 +175,8 @@ services:
     secrets:
       - app_master_key
     volumes:
+      # 读写（删除到期文件）；卷根目录属主 10001、700，与 api 共用同一卷
+      - imports:${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
       - ../../config:/app/config:ro
       - *secret-env-mount
     depends_on: *app-depends

@@ -231,9 +231,11 @@ export function SuggestionDetailPage() {
             onClick={() => {
               setRefreshMsg(null);
               refresh.mutate(sg.security_code, {
-                onSuccess: (newId) => {
-                  if (newId && newId !== sg.id) navigate(`/suggestions/${newId}`);
-                  else setRefreshMsg('已重算，当前卡没有变化');
+                // 契约 #36：以响应体为准
+                onSuccess: (res) => {
+                  if (!res.suggestion) setRefreshMsg(`已重算，本证券当前没有候选信号卡（数据截至 ${fmtTime(res.data_as_of)}）`);
+                  else if (res.suggestion.id !== sg.id) navigate(`/suggestions/${res.suggestion.id}`);
+                  else setRefreshMsg(res.changed ? '已重算，本卡已更新' : `已重算，当前卡没有变化（数据截至 ${fmtTime(res.data_as_of)}）`);
                 },
               });
             }}
@@ -352,7 +354,7 @@ function FollowUp({ sg }: { sg: Suggestion }) {
         {tr.isLoading ? <div className="muted small">加载中…</div> : tr.isError || !tr.data ? <div className="muted small">跟踪统计暂不可用</div> : (
           <div className="sg-track-grid">
             {(['t1', 't5', 't20'] as const).map((k) => (
-              <div key={k}><label>{k === 't1' ? '1 日后' : k === 't5' ? '5 日后' : '20 日后'}</label><StatValue s={tr.data[k]} kind="ratio" testId={`sg-track-${k}`} /></div>
+              <div key={k}><label>{k === 't1' ? '1 日后' : k === 't5' ? '5 日后' : '20 日后'}</label><StatValue s={tr.data[k]} kind="raw" testId={`sg-track-${k}`} /></div>
             ))}
           </div>
         )}

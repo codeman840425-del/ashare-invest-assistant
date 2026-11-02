@@ -1,7 +1,9 @@
 /**
  * 候选信号卡（建议）补全的 mock（T-F12，契约 §5.2、§7 /suggestions*）：
  * - 列表 / 详情改为读会话内状态：手动刷新会生成新卡，旧卡变为 superseded（取代链）
- * - POST /suggestions/refresh：同一证券 30 秒内再次刷新 → 409 SUGGESTION_REFRESH_TOO_FREQUENT{retry_after_s}（间隔为示例值）
+ * - POST /suggestions/refresh（契约 #36）：同步返回 200 {suggestion, changed, superseded_id, data_as_of}；
+ *   有当前卡 → 生成新卡并取代旧卡（changed=true、superseded_id=旧卡 id）；该证券没有任何卡 → {suggestion: null, changed: false}；
+ *   同一证券 30 秒内再次刷新 → 409 SUGGESTION_REFRESH_TOO_FREQUENT{retry_after_s}（间隔为示例值）
  * - POST /suggestions/{id}/actions：只收 viewed / dismissed / acted_trade_linked，记录到 actionLog，204（响应体契约未定）
  * - GET /suggestions/{id}/tracking：{t1, t5, t20: Stat}；“价格依据”契约未给结构，mock 不返回
  * - GET /suggestions/{id}/chain：契约未给响应结构，mock 不实现（前端也不请求）
@@ -66,8 +68,7 @@ export const suggestionHandlers = [
   http.post(`${API}/suggestions/refresh`, async ({ request }) => {
     const body = (await request.json().catch(() => null)) as { security_code?: unknown } | null;
     const code = typeof body?.security_code === 'string' ? body.security_code : '';
-    const cur = cards.find((s) => s.security_code === code && s.status === 'active');
-    if (!cur) return validation('security_code', '该证券没有当前候选信号卡（示例数据）');
+    if (!code) return validation('security_code', 'security_code 必填');
     const now = Date.now();
     const last = lastRefresh.get(code);
     if (last !== undefined && now - last < REFRESH_MIN_INTERVAL_S * 1000) {
@@ -75,6 +76,9 @@ export const suggestionHandlers = [
       return HttpResponse.json(errorBody('SUGGESTION_REFRESH_TOO_FREQUENT', '刷新过于频繁', { retry_after_s }), { status: 409 });
     }
     lastRefresh.set(code, now);
+    const cur = cards.find((s) => s.security_code === code && s.status === 'active');
+    // #36：当前没有任何建议 → suggestion=null、changed=false（示例数据不新建）
+    if (!cur) return HttpResponse.json({ suggestion: null, changed: false, superseded_id: null, data_as_of: new Date(now).toISOString() });
     seq += 1;
     const next: Suggestion = {
       ...cur, id: uid(1200 + seq), status: 'active', origin: 'manual_refresh', supersedes_id: cur.id, superseded_by_id: null,
@@ -84,7 +88,7 @@ export const suggestionHandlers = [
     cards = cards.map((s) => (s.id === cur.id ? { ...s, status: 'superseded', superseded_by_id: next.id } : s));
     cards.push(next);
     pushStreamEvent('suggestion', { id: next.id, security_code: next.security_code, name: next.name, supersedes_id: cur.id, summary: summarize(next) });
-    return HttpResponse.json(next);
+    return HttpResponse.json({ suggestion: next, changed: true, superseded_id: cur.id, data_as_of: next.data_as_of });
   }),
   http.get(`${API}/suggestions/:id/tracking`, ({ params }) => {
     const sg = cards.find((s) => s.id === params.id);

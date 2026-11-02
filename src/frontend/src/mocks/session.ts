@@ -207,12 +207,15 @@ export interface MockBatch extends ImportBatch {
   parse_polls_left: number;
   parse_target: 'previewed' | 'failed';
   idem: Map<string, unknown>;
+  /** #35：放弃时预览行被删除，批次头 stats 按删除前的计数保留 */
+  stats_frozen?: ImportBatch['stats'];
 }
 
 export const emptyStats = (): ImportBatch['stats'] => ({
   rows: 0, ok: 0, warning: 0, error: 0, skipped: 0, new: 0, duplicate_in_db: 0, duplicate_in_file: 0, possible_duplicate_of_manual: 0, needs_action_open: 0,
 });
 export function computeStats(b: MockBatch): ImportBatch['stats'] {
+  if (b.stats_frozen) return b.stats_frozen;
   const s = emptyStats();
   if (b.status === 'uploaded' || b.status === 'parsing') return s;
   for (const r of b.rows_data) {
@@ -227,7 +230,7 @@ export function computeStats(b: MockBatch): ImportBatch['stats'] {
 
 export function publicBatch(b: MockBatch): ImportBatch {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { filename, rows_data, parse_polls_left, parse_target, idem, ...rest } = b;
+  const { filename, rows_data, parse_polls_left, parse_target, idem, stats_frozen, ...rest } = b;
   return { ...rest, stats: computeStats(b) };
 }
 

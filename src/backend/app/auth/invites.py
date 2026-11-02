@@ -21,7 +21,7 @@ from typing import Any, Final, Literal
 from sqlalchemy import Connection, Row, and_, insert, or_, update
 
 from app.common.errors import AppError, ErrorCode
-from app.config import Settings
+from app.config import Settings, master_key_bytes
 from app.db.tables.users import invite_codes
 
 CROCKFORD: Final = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -58,9 +58,9 @@ def normalize(text: str, code_bytes: int) -> str | None:
 
 
 def _key(settings: Settings) -> bytes:
-    if settings.app_master_key is None:
-        return _EPHEMERAL_KEY
-    return settings.app_master_key.get_secret_value().encode("utf-8")
+    # T-B49：非 local/test 无主密钥 → MasterKeyMissingError（不回退到临时密钥）
+    master = master_key_bytes(settings)
+    return _EPHEMERAL_KEY if master is None else master
 
 
 def code_hash(settings: Settings, normalized: str) -> str:

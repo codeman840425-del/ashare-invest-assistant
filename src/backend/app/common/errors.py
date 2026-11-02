@@ -192,6 +192,25 @@ class ErrorResponse(BaseModel):
     error: ErrorBody
 
 
+class UriTooLongBody(BaseModel):
+    """nginx 自产的 414 信封（deploy/nginx ``/__aia_errors/414``）：形状与 413 相同，``code`` 固定为
+    ``URI_TOO_LONG``，``details.max_bytes`` = 请求行上限。后端从不产生 414，故不进 ``ErrorCode``
+    枚举（契约 §3）；只在 OpenAPI 声明（T-B49，T-live-0f8129b F-1）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["URI_TOO_LONG"]
+    message: str
+    details: dict[str, Any] | None
+    request_id: str
+
+
+class UriTooLongResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    error: UriTooLongBody
+
+
 # ---------------------------------------------------------------------------
 # 异常与渲染
 # ---------------------------------------------------------------------------

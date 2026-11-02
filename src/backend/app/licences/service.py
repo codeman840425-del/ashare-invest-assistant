@@ -265,8 +265,8 @@ def _cooldown_expired(now: dt.datetime) -> ColumnElement[bool]:
 
 def purge_expired_cooldowns(conn: Connection, now: dt.datetime | None = None) -> int:
     """T-B03f（review-be607b3 M1，契约第 776 行“指纹只保留到 paused_until 为止”）：删除全部
-    已到期的冷却记录，返回删除行数。项目里没有周期任务框架（beat 仍是占位），采用
-    cleanup-on-access：每次证书 PUT/DELETE 先调用；beat 落地后也可直接定时调用本函数。"""
+    已到期的冷却记录，返回删除行数。cleanup-on-access：每次证书 PUT/DELETE 先调用；另由 beat
+    按 ``COOLDOWN_PURGE_INTERVAL_S`` 排程、worker 定时执行（T-B49，:mod:`app.workers.jobs`）。"""
     cd = user_data_licence_cooldowns
     res = conn.execute(delete(cd).where(_cooldown_expired(now or now_utc())))
     return int(res.rowcount or 0)

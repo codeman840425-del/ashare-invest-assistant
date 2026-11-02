@@ -56,6 +56,33 @@ AppEnv = Literal["local", "test", "staging", "production"]
 
 #: 允许在缺少 APP_MASTER_KEY 时用进程内临时密钥的环境（游标签名重启即失效）
 _DEV_ENVS: frozenset[str] = frozenset({"local", "test"})
+#: T-B49 / T-O11 裁定：``SERVICE_NAME`` 白名单（与 deploy/compose 一致）；非 local/test 环境出现
+#: 白名单外的值拒绝启动（防止拼错名字绕过下面的主密钥要求）。
+SERVICE_NAMES: Final = frozenset(
+    {"api", "worker", "ingest", "signal-rt", "beat", "cooldown-purge", "migrate", "maint-cli"}
+)
+#: 只有这些服务持有并要求 ``APP_MASTER_KEY``（非 local/test）
+MASTER_KEY_SERVICES: Final = frozenset({"api", "worker"})
+#: 这些服务**不得**持有主密钥：发现即拒绝启动（ingest 只持有证书解封私钥，T-O11）
+MASTER_KEY_FORBIDDEN_SERVICES: Final = frozenset({"ingest"})
+
+
+class MasterKeyMissingError(RuntimeError):
+    """非 local/test 环境需要派生密钥但没有 ``APP_MASTER_KEY``（不回退到进程内临时密钥）。"""
+
+
+def master_key_bytes(settings: Settings) -> bytes | None:
+    """派生密钥的唯一入口：返回主密钥字节；只有 local/test 且未配置时返回 ``None``（调用方
+    才可以用进程内临时密钥），其他环境未配置 → :class:`MasterKeyMissingError`。"""
+    if settings.app_master_key is not None:
+        return settings.app_master_key.get_secret_value().encode("utf-8")
+    if settings.app_env in _DEV_ENVS:
+        return None
+    raise MasterKeyMissingError(
+        f"APP_MASTER_KEY 未配置（APP_ENV={settings.app_env}，SERVICE_NAME={settings.service_name}）"
+    )
+
+
 #: ``TRUSTED_PROXIES`` 默认：回环 + RFC1918（compose 内的 nginx）
 _DEFAULT_TRUSTED_PROXIES: Final = (
     "127.0.0.0/8",
@@ -457,6 +484,10 @@ class Settings(BaseSettings):
 
     # --- 密钥 ---
     app_master_key: SecretStr | None = None
+    #: T-B49：beat 排程“清理到期证书冷却记录”的间隔秒数（worker 执行
+    #: ``purge_expired_cooldowns``）；环境变量 ``COOLDOWN_PURGE_INTERVAL_S``（beat 读取）。
+    #: 默认 3600，最小 60（与原 cooldown-purge 服务的 ``AIA_COOLDOWN_PURGE_INTERVAL_S`` 一致）。
+    cooldown_purge_interval_s: int = Field(default=3600, ge=60)
     #: ``IMPORT_STORAGE_PATH``（T-B46，plan §3.5A）：原始导入文件根目录（仓库外、加密存放）。
     #: 未设置时 local/test 用系统临时目录，其他环境上传返回 ``503 MAINTENANCE``。
     import_storage_path: Path | None = None
@@ -532,8 +563,22 @@ class Settings(BaseSettings):
     def _check(self) -> Settings:
         if self.page_limit_default > self.page_limit_max:
             raise ValueError("page_limit_default 不能大于 page_limit_max")
-        if self.app_env not in _DEV_ENVS and self.app_master_key is None:
-            raise ValueError("APP_MASTER_KEY 在非 local/test 环境必须设置")
+        # T-B49：主密钥只对 api / worker 强制；白名单外的 SERVICE_NAME 在非 local/test 拒绝启动；
+        # ingest 持有主密钥 → 任何环境都拒绝启动（ingest 不应能派生任何 HMAC / 签名密钥）
+        if self.app_env not in _DEV_ENVS and self.service_name not in SERVICE_NAMES:
+            raise ValueError(
+                f"SERVICE_NAME={self.service_name!r} 不在白名单 {sorted(SERVICE_NAMES)} 内"
+            )
+        if (
+            self.app_env not in _DEV_ENVS
+            and self.service_name in MASTER_KEY_SERVICES
+            and self.app_master_key is None
+        ):
+            raise ValueError(
+                f"APP_MASTER_KEY 在非 local/test 环境必须设置（SERVICE_NAME={self.service_name}）"
+            )
+        if self.service_name in MASTER_KEY_FORBIDDEN_SERVICES and self.app_master_key is not None:
+            raise ValueError(f"SERVICE_NAME={self.service_name} 不得持有 APP_MASTER_KEY，拒绝启动")
         if self.app_master_key is not None and len(self.app_master_key.get_secret_value()) < 32:
             raise ValueError("APP_MASTER_KEY 至少 32 个字符")
         if self.data_licence_seal_public_keys:

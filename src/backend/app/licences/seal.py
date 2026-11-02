@@ -29,7 +29,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from app.config import Settings
+from app.config import Settings, master_key_bytes
 from app.licences import hpke
 
 HPKE_INFO: Final = b"aia/data-licence/v1"
@@ -74,14 +74,15 @@ def open_licence(
 
 
 def _derive(settings: Settings, info: bytes) -> bytes:
-    if settings.app_master_key is None:
+    # T-B49：非 local/test 无主密钥 → MasterKeyMissingError（不回退到临时密钥）
+    master = master_key_bytes(settings)
+    if master is None:
         return hmac.new(_EPHEMERAL_DEDUP_KEY, info, hashlib.sha256).digest()
-    master = settings.app_master_key.get_secret_value().encode("utf-8")
     return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=info).derive(master)
 
 
 def dedup_key(settings: Settings) -> bytes:
-    if settings.app_master_key is None:
+    if master_key_bytes(settings) is None:
         return _EPHEMERAL_DEDUP_KEY
     return _derive(settings, DEDUP_INFO)
 

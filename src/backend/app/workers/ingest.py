@@ -39,6 +39,20 @@ LEGACY_LICENCE_MESSAGE = (
 )
 
 
+#: T-B49（T-O11 裁定）：ingest 不得持有 APP_MASTER_KEY；发现即拒绝启动（同样退出码 78）
+MASTER_KEY_ENV = "APP_MASTER_KEY"
+MASTER_KEY_MESSAGE = (
+    "ingest 拒绝启动：发现 APP_MASTER_KEY。主密钥只给 api / worker，ingest 不得派生任何 HMAC / "
+    "签名密钥；请从 ingest 的 environment / secrets 中删除它"
+)
+
+
+def master_key_present(environ: Mapping[str, str] | None = None) -> bool:
+    """环境里是否有非空 ``APP_MASTER_KEY``。只返回布尔值。"""
+    env = os.environ if environ is None else environ
+    return bool(env.get(MASTER_KEY_ENV, "").strip())
+
+
 def legacy_licence_present(environ: Mapping[str, str] | None = None) -> bool:
     """``MAIRUI_LICENCE`` 是否非空（去首尾空白后）。只返回布尔值。"""
     env = os.environ if environ is None else environ
@@ -78,9 +92,13 @@ def main() -> int:
         # 在读取配置、建立任何连接之前退出；消息不含变量值
         print(LEGACY_LICENCE_MESSAGE, file=sys.stderr)
         return EXIT_LEGACY_LICENCE
+    if master_key_present():
+        print(MASTER_KEY_MESSAGE, file=sys.stderr)
+        return EXIT_LEGACY_LICENCE
 
     from app.config import get_settings
 
+    # 主密钥若来自其他配置来源（secret 文件等），Settings 校验同样拒绝（SERVICE_NAME=ingest）
     interval = get_settings().business.ingest.heartbeat.interval_s
     return run("ingest", tick=write_heartbeat, interval_s=interval)
 

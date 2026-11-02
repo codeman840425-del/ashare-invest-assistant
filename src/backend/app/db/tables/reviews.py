@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Index, Table, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Index, Table, UniqueConstraint, text
 
 from app.db.base import (
     APP,
@@ -35,7 +35,22 @@ data_snapshots = Table(
     uuid_col("licence_id", fk="app.user_data_licences.id"),
     one_of(
         "purpose",
-        ["candidate", "plan", "alert", "review", "screen", "suggestion", "signal", "report"],
+        [
+            "candidate",
+            "plan",
+            "alert",
+            "review",
+            "screen",
+            "suggestion",
+            "signal",
+            "report",
+            "horizon",  # 0017（T-B49，R8）：周期评估输入快照
+        ],
+    ),
+    # 0017（T-B49）：本人画像 / 持仓 / 计划派生的快照必须带 user_id
+    CheckConstraint(
+        "purpose NOT IN ('candidate', 'plan', 'horizon') OR user_id IS NOT NULL",
+        name="user_scoped",
     ),
     schema=APP,
     comment="不可变（触发器）",

@@ -178,11 +178,16 @@ def fund_t_plus(
     - 类别属于 ``t0_round_trip.fund_categories`` → 0；跨境类在
       ``cross_border_requires_t0_constituents`` 时还要求 ``constituents_t0 is True``；
     - 类别缺失 / 未知 / 跨境但成份是否 T+0 未知 → ``unknown_category_default_t_plus``（1）。
+    - **闸门**（T-O11 裁定 / 契约 #29 ②，T-B49）：``t0_round_trip.data_source`` 为 null（ETF 类别
+      数据源未接入）时，所有 ETF/LOF 一律按 T+1（``unknown_category_default_t_plus``），不论传入的
+      类别或人工覆盖。
     """
     base = seg.t_plus if seg is not None else 1
     if security_type != "etf" and not is_lof:
         return base
     t0 = seg.t0_round_trip if seg is not None else _DEFAULT_T0
+    if t0.data_source is None:
+        return max(base, t0.unknown_category_default_t_plus)
     if t0_override is not None:
         return 0 if t0_override else base
     cross = bool(is_cross_border) or etf_category == "cross_border"

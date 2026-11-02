@@ -7,7 +7,12 @@ import logging
 from fastapi import FastAPI
 
 from app.api.v1 import router as v1_router
-from app.common.errors import ErrorResponse, Utf8JSONResponse, install_exception_handlers
+from app.common.errors import (
+    ErrorResponse,
+    UriTooLongResponse,
+    Utf8JSONResponse,
+    install_exception_handlers,
+)
 from app.common.logging import configure_logging
 from app.common.middleware import BodySizeLimitMiddleware, RequestIdMiddleware
 from app.config import ConfigError, Settings, get_settings
@@ -20,6 +25,8 @@ logger = logging.getLogger("app")
 #: 写进 OpenAPI 的统一错误响应（所有路由都可能返回）
 _ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     "4XX": {"model": ErrorResponse, "description": "统一错误格式（契约 §2）"},
+    # T-B49：请求行过长由 nginx 直接返回 414（JSON 信封，形状同 413，code=URI_TOO_LONG）
+    414: {"model": UriTooLongResponse, "description": "请求地址过长（nginx 产生，信封同 413）"},
     "5XX": {"model": ErrorResponse, "description": "统一错误格式（契约 §2）"},
 }
 

@@ -13,7 +13,8 @@
 - ``fit_assessment``：只读本人画像、本人持仓、本人风控上限。
   ``hints`` 与 ``/horizon-assessments`` 同规则（画像已填写才求值）；
   ``warnings``：本人已持有该证券时对照 RC2 ``position_cap`` 上限的提示。
-  RC4 同行业：证券主数据没有行业字段 → 本版不出同行业提示（报告 T-B10 已列）。
+  RC4 同行业：行业数据未接入 → 不判定、不静默：RC4 启用时 ``gaps`` 列
+  ``{key:"fit_assessment.sector", reason:"no_source"}``（plan 4.2 T-O11 裁定，T-B49）。
 - 数据状态：本版内容只用“证券公开主数据 + 本人记录（建议、画像、持仓）”，不用任何证书数据
   （行情、因子未接入研究候选）。按 §1.1 混合来源规则，证书部分从未取到 → ``data_status=partial``，
   ``gaps`` 给出 ``data_licence_unavailable``（本人证书不可用）或 ``not_yet_published``（证书可用，
@@ -50,7 +51,8 @@ EV_PREFIX: Final = "rc-e"
 _RISK_TEXT: Final = {
     "st": "该证券被实施其他风险警示（ST）",
     "star_st": "该证券被实施退市风险警示（*ST）",
-    "delisting": "该证券处于退市风险警示状态",
+    # T-O11 裁定 / 契约 #29 ①：delisting 是退市整理标记（不是 *ST），最终文案（T-B49）
+    "delisting": "该证券处于退市整理期（简称带“退”）",
 }
 
 
@@ -291,6 +293,15 @@ def generate(
             "message": "停牌状态尚未接入，反证未列停牌",
         },
     ]
+    # T-B49（plan 4.2「研究候选 RC4 的行业与停牌数据来源」）：行业数据接入前 RC4 照常出 gap
+    if settings.business.risk_controls.rc4_sector_concentration.enabled:
+        c.gaps.append(
+            {
+                "key": "fit_assessment.sector",
+                "reason": "no_source",
+                "message": "行业分类数据尚未接入，未做同行业集中度（RC4）提示",
+            }
+        )
     return c
 
 

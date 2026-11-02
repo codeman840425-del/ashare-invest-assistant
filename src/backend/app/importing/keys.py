@@ -11,7 +11,7 @@ import hmac
 import secrets
 from typing import Final
 
-from app.config import Settings
+from app.config import Settings, master_key_bytes
 
 KEK_LABEL: Final = b"aia/imports/kek/v1"
 RAWLINE_LABEL: Final = b"aia/imports/rawline/v1"
@@ -21,8 +21,6 @@ _EPHEMERAL_MASTER: Final = secrets.token_bytes(32)
 
 
 def derive(settings: Settings, label: bytes) -> bytes:
-    if settings.app_master_key is None:
-        master = _EPHEMERAL_MASTER
-    else:
-        master = settings.app_master_key.get_secret_value().encode("utf-8")
+    # T-B49：非 local/test 无主密钥 → MasterKeyMissingError（不回退到临时密钥）
+    master = master_key_bytes(settings) or _EPHEMERAL_MASTER
     return hmac.new(master, label, hashlib.sha256).digest()

@@ -9,8 +9,11 @@
 规则（不设维护会话旁路：不用会话变量、不用 ``session_replication_role``）：
 
 - **连接角色**（迁移 0013，plan §7.3 8a760d1）：以数据库角色 ``aia_maint`` 连接，DSN 来自密钥
-  ``AIA_MAINT_DATABASE_URL_FILE``（文件内容为 DSN；``*_file`` 约定）或 ``AIA_MAINT_DATABASE_URL``。
+  ``AIA_MAINT_DATABASE_URL_FILE``（文件内容为 DSN；``*_file`` 约定）。**只认这个文件**
+  （review-a8e055b m1，T-B49）：不回落到 ``AIA_MAINT_DATABASE_URL`` 环境变量——设置了它即拒绝。
   ``--execute`` 时 ``current_user`` 不是 aia_maint → 拒绝。api / ingest 进程不持有这份凭据。
+  dry-run（review-a8e055b m2）只允许 aia_maint 或**只读**连接：超级用户、库/表属主、服务账号
+  （aia_api / aia_ingest）以及对 app/ops/market 任一表有写权限的角色一律拒绝。
   aia_maint 只多一项能力：把 ``users.status`` UPDATE 成 purging（触发器按 ``current_user`` 判断）；
   在其他不可变表上它和普通角色一样，只靠下面的数据状态门放行。
 - **数据状态门**（迁移 0011/0013）：同一事务内「``users.status='purging'`` → 处理全部子表
@@ -849,16 +852,58 @@ def purge_redis(client: redis.Redis, plan: Plan) -> int:
 
 
 def _maint_url() -> str | None:
-    """aia_maint 的 DSN：``AIA_MAINT_DATABASE_URL_FILE``（密钥文件，优先）
-    或 ``AIA_MAINT_DATABASE_URL``。"""
+    """aia_maint 的 DSN：只认 ``AIA_MAINT_DATABASE_URL_FILE``（密钥文件；T-B49，review m1）。
+
+    设置了 ``AIA_MAINT_DATABASE_URL`` 环境变量（DSN 明文进环境）→ 拒绝，不回落使用。"""
+    if os.environ.get(MAINT_URL_ENV):
+        raise SystemExit(
+            f"拒绝：不接受环境变量 {MAINT_URL_ENV}（DSN 不得以明文进环境），"
+            f"请改用 {MAINT_URL_ENV}_FILE 指向密钥文件。"
+        )
     path = os.environ.get(MAINT_URL_ENV + "_FILE")
-    if path:
-        try:
-            v = Path(path).read_text(encoding="utf-8").strip()
-        except OSError as exc:
-            raise SystemExit(f"读取 {MAINT_URL_ENV}_FILE 失败：{type(exc).__name__}") from None
-        return v or None
-    return os.environ.get(MAINT_URL_ENV) or None
+    if not path:
+        return None
+    try:
+        v = Path(path).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise SystemExit(f"读取 {MAINT_URL_ENV}_FILE 失败：{type(exc).__name__}") from None
+    return v or None
+
+
+#: dry-run 连接角色判定（T-B49，review-a8e055b m2）：返回拒绝原因，``None`` = 允许。
+#: 允许：aia_maint；或非超级用户、不拥有本库及 app/ops/market 中任何对象、对这些 schema 中任何表
+#: 都没有 INSERT/UPDATE/DELETE/TRUNCATE 权限、也不是服务账号的“只读角色”。
+_DRY_RUN_ROLE_SQL = """
+SELECT r.rolsuper,
+       (SELECT d.datdba = r.oid FROM pg_database d WHERE d.datname = current_database())
+         AS owns_db,
+       EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname IN ('app', 'ops', 'market') AND c.relowner = r.oid)
+         OR EXISTS (SELECT 1 FROM pg_namespace n
+                    WHERE n.nspname IN ('app', 'ops', 'market') AND n.nspowner = r.oid)
+         AS owns_objects,
+       EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname IN ('app', 'ops', 'market') AND c.relkind IN ('r', 'p')
+                 AND has_table_privilege(c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE'))
+         AS can_write
+FROM pg_roles r WHERE r.rolname = current_user
+"""
+
+
+def dry_run_refusal(conn: Connection) -> str | None:
+    who = conn.execute(text("SELECT current_user")).scalar_one()
+    if who == MAINT_ROLE:
+        return None
+    if who in SERVICE_ROLES:
+        return f"当前数据库角色是 {who}（服务账号）"
+    row = conn.execute(text(_DRY_RUN_ROLE_SQL)).one()
+    if row.rolsuper:
+        return f"当前数据库角色 {who} 是超级用户"
+    if row.owns_db or row.owns_objects:
+        return f"当前数据库角色 {who} 是库或表的属主"
+    if row.can_write:
+        return f"当前数据库角色 {who} 对业务表有写权限，不是只读角色"
+    return None
 
 
 def _urls() -> tuple[str, str | None, bool]:
@@ -941,12 +986,13 @@ def main(argv: list[str] | None = None, *, confirm: Callable[[str], str] = input
             # T-B03f（review-8fd9502 m2）：dry-run / 预检查在只读事务里执行（首条语句），
             # 不论连接是 aia_maint 还是 api DSN，都不可能写库
             conn.execute(text("SET TRANSACTION READ ONLY"))
-            # plan 7.3 aia_maint 细则 ⑤：dry-run 不得用服务账号（aia_api / aia_ingest）的连接
-            who = conn.execute(text("SELECT current_user")).scalar_one()
-            if who in SERVICE_ROLES:
+            # plan 7.3 aia_maint 细则 ⑤ + review-a8e055b m2（T-B49）：dry-run 只用 aia_maint 或
+            # 只读角色；服务账号、属主、超级用户、有写权限的角色一律拒绝
+            why = dry_run_refusal(conn)
+            if why is not None:
                 print(
-                    f"拒绝：当前数据库角色是 {who}（服务账号），dry-run 请用 {MAINT_URL_ENV}_FILE"
-                    " 的 aia_maint DSN 或一个只读角色的 DSN。",
+                    f"拒绝：{why}；dry-run 请用 {MAINT_URL_ENV}_FILE 的 aia_maint DSN"
+                    " 或一个只读角色的 DSN。",
                     file=sys.stderr,
                 )
                 return 1

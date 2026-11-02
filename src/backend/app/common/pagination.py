@@ -26,7 +26,7 @@ from fastapi import Depends, Query
 from pydantic import BaseModel, ConfigDict
 
 from app.common.errors import AppError, ErrorCode
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, master_key_bytes
 
 CURSOR_VERSION: Final = 1
 _SIG_BYTES: Final = 16  # 截断到 128 bit，游标更短，仍足以防篡改
@@ -39,9 +39,10 @@ _EPHEMERAL_KEY: Final = secrets.token_bytes(32)
 
 
 def _signing_key(settings: Settings) -> bytes:
-    if settings.app_master_key is None:
+    # T-B49：非 local/test 无主密钥 → MasterKeyMissingError（不回退到临时密钥）
+    master = master_key_bytes(settings)
+    if master is None:
         return _EPHEMERAL_KEY
-    master = settings.app_master_key.get_secret_value().encode("utf-8")
     return hmac.new(master, b"aia/cursor/v1", hashlib.sha256).digest()
 
 

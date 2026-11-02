@@ -1,13 +1,22 @@
-"""持仓汇总（契约 v0.2.9 §7.2 ``GET /portfolio?account_id=``；T-B46，v0.2.9 #1–#3 由 T-B48 同步）。
+"""持仓汇总（契约 v0.2.9 §7.2 ``GET /portfolio?account_id=``；T-B46，T-B46-47 裁定 R6 与
+契约 #31 由 T-B49 / T-B46-x 落实）。
 
 口径：
 - 账户有流水（期初持仓 / 未作废成交）→ 用重放得到的 ``holdings``；没有流水 → 用最新有效持仓快照。
-- 现价只取持仓快照的 ``last_price_ref``（本接口不读日线，不触发取数），``data_status=stale``。
-- 可转债（问题 63 / U3 已定，v0.2.9 #1–#3）：``security_type=null``（不在证券主数据中），
-  ``market_value``、``pnl``、``pnl_pct`` 为 ``null``（不是 0），按成本计入总资产与仓位并标
-  ``estimated=true``，顶层 ``data_status=partial``。
-  其他缺现价的持仓（未导入持仓快照）同样按成本估算、
-  ``estimated=true``，但 ``security_type`` 仍为主数据类型。
+- 现价来源依次为（R6 ②）：① 库内该证券最近一个交易日的日线收盘价（``market.daily_bars``，
+  ``adj_type=none``；只读已有数据，不触发取数）；② 最近一次持仓快照的 ``last_price_ref``；
+  ③ 都没有 → 该行按成本估算，``estimated=true``，``market_value``、``pnl``、``pnl_pct`` 为 null。
+- 不在证券主数据中（``security_type=null``，主要是可转债）：无行情，同样按成本估算、
+  ``estimated=true``（问题 63 / U3、v0.2.9 #1–#3）。
+- 不为 null（R6 ③）：``cash``、``total_assets``、``qty``、``sellable_qty``、``cost_price``、
+  ``weight_pct``。没有现金记录 → ``cash="0.00"``，并列
+  ``{key:"cash", reason:"user_input_missing"}``。
+- 顶层没有 ``estimated``（#31 ①）。``data_status``（#31 ②）：任一行 ``estimated=true``，或除
+  ``exposure.sector`` 以外的任一缺口（含 ``cash``）→ ``partial``；否则有现价 → ``stale``，
+  一行现价都没有（含无持仓）→ ``fresh``。行业数据未接入时 ``exposure.sector=[]``，
+  ``gaps`` 列 ``exposure.sector``（``no_source``），这一项不单独降为 ``partial``（R6 ④）。
+- 估算行的缺口按原因各列一项（#31 ③）：``positions.convertible_bond`` /
+  ``positions.unknown_security`` / ``positions.price``，``reason`` 均为 ``no_source``。
 - ETF 正常列入持仓；本接口不跑策略、不出信号、不做风控止损计算。
 - ``sellable_qty``：一律 T+1 = 持仓 − 当日（北京时间）买入；快照为当日的取快照可卖数。
 - 不传 ``account_id`` 时合并本人全部未归档账户（同代码合并数量与成本）。
@@ -36,10 +45,10 @@ from app.db.tables.accounts import (
     opening_positions,
     trades,
 )
-from app.db.tables.market import securities
+from app.db.tables.market import daily_bars, securities
 from app.domain.portfolio import MONEY_DP, instrument_kind
 from app.importing.pipeline import last_cash_balance, live_snapshots
-from app.schemas.enums import DataStatus, GapReason, SecurityType
+from app.schemas.enums import BarAdjust, DataStatus, GapReason, SecurityType
 
 router = APIRouter(tags=["portfolio"])
 
@@ -47,6 +56,8 @@ BEIJING: Final = dt.timezone(dt.timedelta(hours=8))
 PCT_DP: Final = Decimal("0.01")
 PRICE_DP: Final = Decimal("0.0001")
 ZERO: Final = Decimal(0)
+#: 日线收盘价的时点（北京时间收盘）
+CLOSE_TIME: Final = dt.time(15, 0)
 
 
 class Gap(BaseModel):
@@ -69,18 +80,18 @@ class Position(BaseModel):
     name: str
     qty: str
     sellable_qty: str
-    cost_price: str | None
+    cost_price: str
     market_value: str | None
     pnl: str | None
     pnl_pct: str | None
-    weight_pct: str | None
+    weight_pct: str
     security_type: SecurityType | None
     estimated: bool
 
 
 class Portfolio(BaseModel):
-    cash: str | None
-    total_assets: str | None
+    cash: str
+    total_assets: str
     positions: list[Position]
     exposure: Exposure
     data_status: DataStatus
@@ -107,6 +118,36 @@ class _Acc:
 
 def _s(v: Decimal | None, q: Decimal = MONEY_DP) -> str | None:
     return None if v is None else format(v.quantize(q), "f")
+
+
+def _n(v: Decimal, q: Decimal = MONEY_DP) -> str:
+    return format(v.quantize(q), "f")
+
+
+def latest_daily_close(
+    conn: Connection, codes: set[str], today: dt.date
+) -> dict[str, tuple[Decimal, dt.datetime]]:
+    """库内各证券最近一个交易日（≤ 今天，北京时间）的不复权日线收盘价与其时点（当日 15:00）。
+
+    只读 ``market.daily_bars`` 已有数据，不触发任何取数（R6 ②-1）。
+    """
+    if not codes:
+        return {}
+    rows = conn.execute(
+        select(daily_bars.c.code, daily_bars.c.trade_date, daily_bars.c.close)
+        .where(
+            daily_bars.c.code.in_(sorted(codes)),
+            daily_bars.c.adj_type == BarAdjust.NONE.value,
+            daily_bars.c.close.is_not(None),
+            daily_bars.c.trade_date <= today,
+        )
+        .order_by(daily_bars.c.code, daily_bars.c.trade_date.desc())
+        .distinct(daily_bars.c.code)
+    ).all()
+    return {
+        code: (Decimal(close), dt.datetime.combine(d, CLOSE_TIME, BEIJING))
+        for code, d, close in rows
+    }
 
 
 def _has_ledger(conn: Connection, account_id: uuid.UUID) -> bool:
@@ -236,13 +277,14 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
     now = dt.datetime.now(BEIJING)
     today = now.date()
     merged: dict[str, _Pos] = {}
-    cash: Decimal | None = ZERO if account_ids else None
-    cash_missing = False
+    cash = ZERO
+    # R6 ③：没有现金记录（无账户，或任一账户既无快照现金也无流水现金）→ 按 0 计并列缺口
+    cash_missing = not account_ids
     for aid in account_ids:
         acc = _account(conn, aid, today)
         if acc.cash is None:
             cash_missing = True
-        elif cash is not None:
+        else:
             cash += acc.cash
         for code, p in acc.positions.items():
             m = merged.setdefault(code, _Pos())
@@ -254,8 +296,6 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
                 m.price_at is None or (p.price_at and p.price_at > m.price_at)
             ):
                 m.price, m.price_at = p.price, p.price_at
-    if cash_missing:
-        cash = None
     codes = set(merged)
     types: dict[str, str] = {}
     names: dict[str, str] = {}
@@ -270,6 +310,9 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
                 names[code] = name
         for code, name in names_from_imports(conn, account_ids, codes - names.keys()).items():
             names.setdefault(code, name)
+    # R6 ②-1：日线收盘价优先于快照参考价（只对主数据中的证券；不在主数据中的行不取行情）
+    for code, (close, at) in latest_daily_close(conn, set(types) & codes, today).items():
+        merged[code].price, merged[code].price_at = close, at
 
     gaps: list[dict[str, str]] = []
     rows: list[dict[str, Any]] = []
@@ -279,7 +322,10 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
     for code in sorted(merged):
         p = merged[code]
         kind = instrument_kind(code, types.get(code))
-        cost_price = (p.cost_total / p.qty) if p.cost_known and p.qty else None
+        # R6 ③ cost_price 不为 null；成本缺失（防御：导入要求成本价必填）按 0 输出并列缺口
+        cost_price = (p.cost_total / p.qty) if p.cost_known and p.qty else ZERO
+        if not p.cost_known:
+            no_cost = True
         # v0.2.9 #1：不在证券主数据中（可转债或其他）→ 无行情、按成本估算
         stype = types.get(code)
         price = None if stype is None else p.price
@@ -287,10 +333,10 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
         estimated = False
         if price is not None:
             mv = price * p.qty
-            value: Decimal | None = mv
+            value = mv
             if p.price_at is not None:
                 price_times.append(p.price_at)
-            if cost_price is not None:
+            if p.cost_known:
                 pnl = mv - p.cost_total
                 pnl_pct = (pnl / p.cost_total * 100) if p.cost_total else None
         else:
@@ -301,38 +347,35 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
                 unknown = True
             else:
                 no_price = True
-            value = p.cost_total if p.cost_known else None
-        if value is None:
-            no_cost = True
-        else:
-            total_value += value
+            value = p.cost_total
+        total_value += value
         rows.append(
             {
                 "security_code": code,
                 "name": names.get(code, code),
                 "qty": format(p.qty.normalize(), "f"),
                 "sellable_qty": format(p.sellable.normalize(), "f"),
-                "cost_price": _s(cost_price, PRICE_DP),
+                "cost_price": _n(cost_price, PRICE_DP),
                 "market_value": _s(mv),
                 "pnl": _s(pnl),
                 "pnl_pct": _s(pnl_pct, PCT_DP),
-                "weight_pct": None,
+                "weight_pct": "0.00",
                 "security_type": stype,
                 "estimated": estimated,
                 "_value": value,
             }
         )
-    total = None if cash is None or no_cost else cash + total_value
+    total = cash + total_value
     for r in rows:
         v = r.pop("_value")
-        if total is not None and total > 0 and v is not None:
-            r["weight_pct"] = _s(v / total * 100, PCT_DP)
-    if cash is None:
+        if total > 0:
+            r["weight_pct"] = _n(v / total * 100, PCT_DP)
+    if cash_missing:
         gaps.append(
             {
                 "key": "cash",
                 "reason": GapReason.USER_INPUT_MISSING.value,
-                "message": "未导入现金余额，无法计算总资产与仓位比例",
+                "message": "未导入现金余额，现金按 0 计，总资产与仓位比例偏差",
             }
         )
     if cb:
@@ -355,8 +398,8 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
         gaps.append(
             {
                 "key": "positions.price",
-                "reason": GapReason.USER_INPUT_MISSING.value,
-                "message": "部分持仓没有现价（未导入持仓快照），仓位按成本估算",
+                "reason": GapReason.NO_SOURCE.value,
+                "message": "部分持仓既无日线收盘价也无持仓快照参考价，仓位按成本估算",
             }
         )
     if no_cost:
@@ -364,7 +407,7 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
             {
                 "key": "positions.cost",
                 "reason": GapReason.USER_INPUT_MISSING.value,
-                "message": "部分持仓缺少成本，无法估算总资产",
+                "message": "部分持仓缺少成本，成本价按 0 输出",
             }
         )
     if rows:
@@ -375,7 +418,8 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
                 "message": "暂无行业分类数据，行业暴露不展示",
             }
         )
-    if gaps:
+    # #31 ②：exposure.sector 缺口不单独降级；估算行（cb / unknown / no_price）都已列缺口
+    if any(g["key"] != "exposure.sector" for g in gaps) or any(r["estimated"] for r in rows):
         status = DataStatus.PARTIAL
     elif price_times:
         status = DataStatus.STALE
@@ -387,8 +431,8 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
         else _ledger_as_of(conn, account_ids) or dt.datetime.combine(today, dt.time(), BEIJING)
     )
     return {
-        "cash": _s(cash),
-        "total_assets": _s(total),
+        "cash": _n(cash),
+        "total_assets": _n(total),
         "positions": rows,
         "exposure": {"sector": []},
         "data_status": status.value,

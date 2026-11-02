@@ -24,7 +24,7 @@ from sqlalchemy import Engine, Row, select
 from app.auth.passwords import PasswordPolicy, policy_for
 from app.auth.sessions import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, Session, SessionStore
 from app.common.errors import AppError, ErrorCode
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, master_key_bytes
 from app.db.engine import engine_for
 from app.db.tables.users import users
 from app.schemas.enums import AccountStatus, Role
@@ -108,10 +108,13 @@ def client_ip(request: Request, settings: Settings) -> str | None:
 
 
 def ip_hash(settings: Settings, ip: str | None) -> str | None:
-    """``HMAC-SHA256(APP_MASTER_KEY, ip)``；未配置主密钥（仅 local/test 允许）时不记录。"""
-    if ip is None or settings.app_master_key is None:
+    """``HMAC-SHA256(APP_MASTER_KEY, ip)``；未配置主密钥时只有 local/test 不记录，
+    其他环境 → :class:`MasterKeyMissingError`（T-B49）。"""
+    if ip is None:
         return None
-    key = settings.app_master_key.get_secret_value().encode("utf-8")
+    key = master_key_bytes(settings)
+    if key is None:
+        return None
     return hmac.new(key, b"ip:" + ip.encode("utf-8"), hashlib.sha256).hexdigest()
 
 

@@ -10,24 +10,31 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
     Date,
     ForeignKeyConstraint,
+    Identity,
     Index,
     PrimaryKeyConstraint,
+    SmallInteger,
     Table,
     UniqueConstraint,
+    column,
     text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY, ExcludeConstraint
 
 from app.db.base import (
     MARKET,
+    boolean,
     day,
+    integer,
     jsonb,
     metadata,
     money,
@@ -39,7 +46,15 @@ from app.db.base import (
     txt,
     uuid_col,
 )
-from app.schemas.enums import BarAdjust, Board, ListingStatus, SecurityRiskFlag, SecurityType
+from app.schemas.enums import (
+    BarAdjust,
+    Board,
+    ListingStatus,
+    SecurityReconciliationKind,
+    SecurityReconciliationSource,
+    SecurityRiskFlag,
+    SecurityType,
+)
 
 
 def _now(name: str) -> Column[Any]:
@@ -65,6 +80,9 @@ securities = Table(
     text_array("name_initials"),
     txt("master_source"),  # 来源待 plan 第 9 节问题 52 / T-A04
     ts("master_as_of"),
+    day("missing_since"),  # T-B51：进入 missing_from_list 的快照日期
+    day("last_seen_on"),  # T-B51：最近一次出现在交易所当前名单的快照日期
+    jsonb("field_sources"),  # T-B51：字段 → exchange / cninfo
     one_of("exchange", ["SH", "SZ", "BJ"]),
     one_of("type", SecurityType),
     one_of("board", Board),
@@ -73,63 +91,257 @@ securities = Table(
     one_of("risk_flag", SecurityRiskFlag),
     schema=MARKET,
 )
-Index(
-    "ix_securities_name_norm_trgm",
-    securities.c.name_norm,
-    postgresql_using="gin",
-    postgresql_ops={"name_norm": "gin_trgm_ops"},
+Index("ix_securities_exchange_listing_status", securities.c.exchange, securities.c.listing_status)
+# T-B51（plan 4.6.2）：原 name_norm / name_initials 上的 gin 索引已删除，
+# 检索改走 security_search_terms
+
+
+def _period_exclusion(table: str) -> ExcludeConstraint:
+    """同一代码的有效期（半开区间 ``[valid_from, valid_until)``，null 表示至今）不得重叠。"""
+    return ExcludeConstraint(
+        (column("code"), "="),
+        (text("daterange(valid_from, valid_until, '[)')"), "&&"),
+        using="gist",
+        name=f"ex_{table}_period",
+    )
+
+
+def _period_order(table: str) -> CheckConstraint:
+    return CheckConstraint("valid_until IS NULL OR valid_until > valid_from", name="period_order")
+
+
+MASTER_SNAPSHOT_SOURCES: Final = (
+    "sse_list",
+    "sse_delist",
+    "szse_list",
+    "szse_delist",
+    "szse_rename",
+    "bse_list",
+    "bse_delist",
+    "bse_code_map",
+    "cninfo",
+    "akshare",
 )
-Index("ix_securities_name_initials", securities.c.name_initials, postgresql_using="gin")
+MASTER_REJECT_REASONS: Final = ("empty", "drop_pct", "key_missing", "parse_error")
+MASTER_RUN_TRIGGERS: Final = ("beat_1800", "beat_0730", "manual", "bootstrap")
+SEARCH_TERM_KINDS: Final = (
+    "name",
+    "name_initials",
+    "former_name",
+    "former_initials",
+    "former_code",
+)
+LISTING_STATUS_REASONS: Final = ("exchange_list", "exchange_delist_list", "missing_from_list")
+RECONCILIATION_FIELDS: Final = ("name", "list_date", "delist_date", "exchange", "board")
+
+master_snapshots = Table(
+    "master_snapshots",
+    metadata,
+    Column("id", BigInteger, Identity(always=False), primary_key=True),
+    txt("source", nullable=False),
+    txt("url", nullable=False),
+    ts("fetched_at", nullable=False),
+    day("trade_date", nullable=False),
+    integer("row_count"),
+    txt("sha256", nullable=False),
+    txt("parse_status", nullable=False),
+    txt("reject_reason"),
+    txt("raw_path"),
+    one_of("source", MASTER_SNAPSHOT_SOURCES),
+    one_of("parse_status", ["ok", "rejected", "failed"]),
+    one_of("reject_reason", MASTER_REJECT_REASONS),
+    CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="sha256_hex"),
+    CheckConstraint("parse_status <> 'ok' OR reject_reason IS NULL", name="ok_no_reason"),
+    UniqueConstraint("source", "sha256"),
+    schema=MARKET,
+    comment="交易所 / 巨潮 / AKShare 公开列表快照（plan 4.6.2；不含证书值）",
+)
+Index(
+    "ix_master_snapshots_source_fetched_at",
+    master_snapshots.c.source,
+    master_snapshots.c.fetched_at.desc(),
+)
+
+master_runs = Table(
+    "master_runs",
+    metadata,
+    Column("id", BigInteger, Identity(always=False), primary_key=True),
+    ts("started_at", nullable=False, default_now=True),
+    ts("finished_at"),
+    txt("trigger", nullable=False),
+    txt("status"),  # 运行中为 null
+    Column(
+        "snapshot_ids", ARRAY(BigInteger), nullable=False, server_default=text("'{}'::bigint[]")
+    ),
+    jsonb("stats", nullable=False, server_default=text("'{}'::jsonb")),
+    one_of("trigger", MASTER_RUN_TRIGGERS),
+    one_of("status", ["ok", "partial", "failed"]),
+    schema=MARKET,
+    comment="主数据同步运行记录（plan 4.6.2 / 4.6.5）",
+)
+Index("ix_master_runs_started_at", master_runs.c.started_at.desc())
 
 security_name_history = Table(
     "security_name_history",
     metadata,
-    txt("code", nullable=False, primary_key=True),
-    txt("name", nullable=False, primary_key=True),
-    txt("name_norm"),
-    day("valid_from"),
+    txt("code", nullable=False),
+    txt("name", nullable=False),
+    day("valid_from", nullable=False),
     day("valid_until"),
-    txt("master_source"),
+    txt("source", nullable=False),
+    Column("snapshot_id", BigInteger),
     _now("recorded_at"),
+    PrimaryKeyConstraint("code", "valid_from"),
+    one_of("source", ["szse_ssgsgmxx", "exchange_diff"]),
+    _period_order("security_name_history"),
+    _period_exclusion("security_name_history"),
     ForeignKeyConstraint(["code"], ["market.securities.code"]),
+    ForeignKeyConstraint(["snapshot_id"], ["market.master_snapshots.id"]),
     schema=MARKET,
-    comment="曾用名（契约 SecurityProfile.former_names；T007 §5）",
+    comment="简称历史 / 曾用名（契约 SecurityProfile.former_names；plan 4.6.2）",
 )
-Index(
-    "ix_security_name_history_name_norm_trgm",
-    security_name_history.c.name_norm,
-    postgresql_using="gin",
-    postgresql_ops={"name_norm": "gin_trgm_ops"},
-)
+Index("ix_security_name_history_name", security_name_history.c.name)
 
 security_code_history = Table(
     "security_code_history",
     metadata,
-    txt("old_code", nullable=False, primary_key=True),
     txt("code", nullable=False),
+    txt("old_code", nullable=False),
+    day("valid_from", nullable=False),
     day("valid_until"),
-    txt("master_source"),
+    txt("source", nullable=False),
     _now("recorded_at"),
+    PrimaryKeyConstraint("code", "valid_from"),
+    UniqueConstraint("old_code"),
     CheckConstraint("old_code <> code", name="differs"),
+    one_of("source", ["bse_code_map"]),
+    _period_order("security_code_history"),
+    _period_exclusion("security_code_history"),
     ForeignKeyConstraint(["code"], ["market.securities.code"]),
     schema=MARKET,
-    comment="旧代码 → 新代码（北交所代码切换等；SecurityProfile.code_history、former_code）",
+    comment="旧代码 → 当前代码（北交所代码对照；SecurityProfile.code_history、former_code）",
 )
-Index("ix_security_code_history_code", security_code_history.c.code)
 
 security_risk_flag_history = Table(
     "security_risk_flag_history",
     metadata,
-    txt("code", nullable=False, primary_key=True),
+    txt("code", nullable=False),
     txt("risk_flag"),
-    day("valid_from", nullable=False, primary_key=True),
+    day("valid_from", nullable=False),
     day("valid_until"),
-    txt("master_source"),
+    Column("snapshot_id", BigInteger),
     _now("recorded_at"),
+    PrimaryKeyConstraint("code", "valid_from"),
     one_of("risk_flag", SecurityRiskFlag),
+    _period_order("security_risk_flag_history"),
+    _period_exclusion("security_risk_flag_history"),
     ForeignKeyConstraint(["code"], ["market.securities.code"]),
+    ForeignKeyConstraint(["snapshot_id"], ["market.master_snapshots.id"]),
     schema=MARKET,
     comment="风险警示变化历史（risk_flag 为 null 表示摘帽）",
+)
+
+security_listing_status_history = Table(
+    "security_listing_status_history",
+    metadata,
+    txt("code", nullable=False),
+    txt("listing_status", nullable=False),
+    day("valid_from", nullable=False),
+    day("valid_until"),
+    Column("snapshot_id", BigInteger),
+    txt("reason", nullable=False),
+    _now("recorded_at"),
+    PrimaryKeyConstraint("code", "valid_from"),
+    one_of("listing_status", ListingStatus),
+    one_of("reason", LISTING_STATUS_REASONS),
+    _period_order("security_listing_status_history"),
+    _period_exclusion("security_listing_status_history"),
+    ForeignKeyConstraint(["code"], ["market.securities.code"]),
+    ForeignKeyConstraint(["snapshot_id"], ["market.master_snapshots.id"]),
+    schema=MARKET,
+    comment="上市状态历史（plan 4.6.1 / 4.6.2）",
+)
+
+security_search_terms = Table(
+    "security_search_terms",
+    metadata,
+    Column("id", BigInteger, Identity(always=False), primary_key=True),
+    txt("code", nullable=False),
+    txt("term_kind", nullable=False),
+    txt("term", nullable=False),
+    txt("source_name", nullable=False),
+    boolean("is_st_stripped", nullable=False, server_default=text("false")),
+    Column("variant_rank", SmallInteger, nullable=False, server_default=text("0")),
+    Column("generator_version", SmallInteger, nullable=False),
+    one_of("term_kind", SEARCH_TERM_KINDS),
+    CheckConstraint("variant_rank >= 0", name="variant_rank"),
+    UniqueConstraint("code", "term_kind", "term", "source_name"),
+    ForeignKeyConstraint(["code"], ["market.securities.code"], ondelete="CASCADE"),
+    schema=MARKET,
+    comment="搜索词条（plan 4.6.3；契约 §7.3 /securities/search）",
+)
+Index(
+    "ix_security_search_terms_term_pattern",
+    security_search_terms.c.term,
+    postgresql_ops={"term": "text_pattern_ops"},
+)
+Index(
+    "ix_security_search_terms_term_trgm",
+    security_search_terms.c.term,
+    postgresql_using="gin",
+    postgresql_ops={"term": "gin_trgm_ops"},
+    postgresql_where=text("term_kind IN ('name', 'former_name')"),
+)
+Index("ix_security_search_terms_code", security_search_terms.c.code)
+
+security_reconciliation_diffs = Table(
+    "security_reconciliation_diffs",
+    metadata,
+    Column("id", BigInteger, Identity(always=False), primary_key=True),
+    txt("kind", nullable=False),
+    txt("source", nullable=False),
+    txt("security_code", nullable=False),  # vendor_unknown 的代码不在 securities，不设外键
+    txt("source_name"),
+    txt("field"),
+    txt("master_value"),
+    txt("source_value"),
+    # 只有 mairui_* 有；不设外键（证书删除后差异行仍可读，licence_owner 给 null）
+    uuid_col("source_licence_id"),
+    day("first_seen_on", nullable=False),
+    day("last_seen_on", nullable=False),
+    integer("seen_days", nullable=False, server_default=text("1")),
+    txt("status", nullable=False, server_default=text("'open'")),
+    day("resolved_on"),
+    one_of("kind", SecurityReconciliationKind),
+    one_of("source", SecurityReconciliationSource),
+    one_of("field", RECONCILIATION_FIELDS),
+    one_of("status", ["open", "resolved"]),
+    CheckConstraint(
+        "(source IN ('mairui_lists', 'mairui_real_all')) = (source_licence_id IS NOT NULL)",
+        name="licence_only_mairui",
+    ),
+    CheckConstraint("(kind = 'field_mismatch') = (field IS NOT NULL)", name="field_only_mismatch"),
+    CheckConstraint("(status = 'resolved') = (resolved_on IS NOT NULL)", name="resolved_on"),
+    CheckConstraint("last_seen_on >= first_seen_on AND seen_days >= 1", name="seen"),
+    schema=MARKET,
+    comment="证券主数据对账差异（plan 4.6.4；契约 §7.9）；kind=vendor_unknown 且 open = 隔离区",
+)
+Index(
+    "uq_security_reconciliation_diffs_open",
+    security_reconciliation_diffs.c.kind,
+    security_reconciliation_diffs.c.source,
+    security_reconciliation_diffs.c.security_code,
+    security_reconciliation_diffs.c.field,
+    security_reconciliation_diffs.c.source_licence_id,
+    unique=True,
+    postgresql_nulls_not_distinct=True,
+    postgresql_where=text("status = 'open'"),
+)
+Index(
+    "ix_security_reconciliation_diffs_status_last_seen",
+    security_reconciliation_diffs.c.status,
+    security_reconciliation_diffs.c.last_seen_on.desc(),
+    security_reconciliation_diffs.c.id.desc(),
 )
 
 trading_calendar = Table(

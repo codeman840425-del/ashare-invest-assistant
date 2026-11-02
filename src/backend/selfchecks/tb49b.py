@@ -83,12 +83,12 @@ cdef = q(
     "select pg_get_constraintdef(oid) from pg_constraint where conname = 'ck_symbol_horizon_assessments_trigger'"
 ).scalar_one()
 check("on_demand" in cdef, "B1：ck_symbol_horizon_assessments_trigger 含 on_demand")
-check(
-    q("select version_num from app.alembic_version").scalar_one() == "0018"
+_ver = (
+    q("select version_num from app.alembic_version").scalar_one()
     if q("select to_regclass('app.alembic_version')").scalar_one()
-    else q("select version_num from public.alembic_version").scalar_one() == "0018",
-    "B1：隔离库 alembic 版本 = 0018",
+    else q("select version_num from public.alembic_version").scalar_one()
 )
+check(int(_ver) >= 18, f"B1：隔离库 alembic 版本 ≥ 0018（得 {_ver}；T-B51 起 head 为 0019）")
 from app.schemas.enums import HorizonAssessmentTrigger  # noqa: E402
 
 check(HorizonAssessmentTrigger("on_demand").value == "on_demand", "B1：枚举含 on_demand")

@@ -64,14 +64,6 @@ services:
       - ../../src/backend:/app/src/backend:ro
       - ../../config:/app/config:ro
 
-  # 冷却记录定时清理（T-B10 部署项）：同样挂源码，调用的是当前检出的 purge_expired_cooldowns。
-  cooldown-purge:
-    environment:
-      APP_ENV: local
-      PYTHONDONTWRITEBYTECODE: "1"
-    volumes:
-      - ../../src/backend:/app/src/backend:ro
-
   # 网关限流（T-O10）：dev 改挂宽松取值（同一容器路径覆盖基础文件的 limits.conf），避免测试方 live 契约套件/e2e 被网关 429。
   nginx:
     volumes:

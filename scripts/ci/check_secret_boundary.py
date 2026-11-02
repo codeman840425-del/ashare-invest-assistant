@@ -60,11 +60,9 @@ PRIVATE_SECRET = "data_licence_seal_private_keys"
 PUBLIC_SECRET = "data_licence_seal_public_keys"
 PRIVATE_ENV_RE = re.compile(r"_PRIVATE_KEYS?$")
 PRIVATE_OWNER = "ingest"
-DB_ROLE_OF = {"api": ("aia_api", "AIA_DB_API_PASSWORD"), "ingest": ("aia_ingest", "AIA_DB_INGEST_PASSWORD"),
-              # 冷却记录定时清理（T-B10 部署项）：与 api 同角色调用同一函数，不得用属主
-              "cooldown-purge": ("aia_api", "AIA_DB_API_PASSWORD")}
-# 不挂任何 secret 的服务（只需 DATABASE_URL）
-NO_SECRET_SVCS = ("cooldown-purge",)
+DB_ROLE_OF = {"api": ("aia_api", "AIA_DB_API_PASSWORD"), "ingest": ("aia_ingest", "AIA_DB_INGEST_PASSWORD")}
+# 不挂任何 secret 的服务（只需 DATABASE_URL）。原 cooldown-purge 服务已删除（冷却清理改由 beat 调度、worker 执行，后端 6670b10）
+NO_SECRET_SVCS: tuple[str, ...] = ()
 DB_PW_SECRETS = ("db_password_aia_api", "db_password_aia_ingest", "db_password_aia_maint")
 DB_PW_OWNER = "db-roles"
 MAINT_SVC = "maint-cli"
@@ -77,7 +75,7 @@ MASTER_SECRET = "app_master_key"
 MASTER_KEY_ALLOC = {
     "api": True, "worker": True,
     "ingest": False, "beat": False, "signal-rt": False, "maint-cli": False, "migrate": False,
-    "timescale-apply": False, "db-roles": False, "cooldown-purge": False,
+    "timescale-apply": False, "db-roles": False,
     "nginx": False, "postgres": False, "redis": False,
 }
 MASTER_OWNERS = tuple(k for k, v in MASTER_KEY_ALLOC.items() if v)

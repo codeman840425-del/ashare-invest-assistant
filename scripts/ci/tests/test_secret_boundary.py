@@ -262,31 +262,22 @@ def test_overlay_cannot_disable_require_flag(repo: Path, value: str) -> None:
     assert any("服务 worker 的 AIA_REQUIRE_APP_MASTER_KEY 必须是" in e for e in errs), errs
 
 
-# ---------- 冷却记录定时清理（T-B10 部署项）----------
+# ---------- 冷却记录定时清理：deploy 的 cooldown-purge 服务已删除（review-6670b10 m5）----------
 
 
-def test_cooldown_purge_must_use_api_role(repo: Path) -> None:
-    p = repo / ccs.BASE_COMPOSE
-    text = p.read_text(encoding="utf-8")
-    start = text.index("  cooldown-purge:")
-    old = "      DATABASE_URL: *db-api-url"
-    i = text.index(old, start)
-    p.write_text(text[:i] + "      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/aia"
-                 + text[i + len(old):], encoding="utf-8")
-    assert any("服务 cooldown-purge 的 DATABASE_URL 应为 aia_api" in e for e in ccs.check(repo))
+def test_cooldown_purge_service_removed() -> None:
+    import yaml
+
+    for name in ("docker-compose.yml", "docker-compose.dev.yml"):
+        data = yaml.safe_load((REPO / "deploy/compose" / name).read_text(encoding="utf-8")) or {}
+        assert "cooldown-purge" not in (data.get("services") or {}), name
+    assert not (REPO / "deploy/docker/cooldown-purge.py").exists()
+    assert "cooldown-purge" not in ccs.MASTER_KEY_ALLOC and "cooldown-purge" not in ccs.DB_ROLE_OF
 
 
-def test_cooldown_purge_must_exist_with_url(repo: Path) -> None:
-    p = repo / ccs.BASE_COMPOSE
-    text = p.read_text(encoding="utf-8")
-    p.write_text(text.replace("  cooldown-purge:", "  cooldown-purge-renamed:", 1), encoding="utf-8")
-    assert any("服务 cooldown-purge 没有显式 DATABASE_URL" in e for e in ccs.check(repo))
-
-
-def test_overlay_cannot_give_cooldown_purge_secrets(repo: Path) -> None:
-    errs = _overlay(repo, "services:\n  cooldown-purge:\n    secrets:\n      - app_master_key\n")
-    assert any("服务 cooldown-purge 不得挂任何 secret" in e for e in errs), errs
-    assert any("服务 cooldown-purge 挂了 app_master_key" in e for e in errs), errs
+def test_cooldown_purge_reintroduced_is_unregistered(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  cooldown-purge:\n    image: busybox\n")
+    assert any("服务 cooldown-purge 未在 MASTER_KEY_ALLOC 白名单登记" in e for e in errs), errs
 
 
 # ---------- M2：APP_MASTER_KEY 按服务分配白名单（plan e56462c，CI 规则 7）----------
@@ -297,7 +288,7 @@ def test_unregistered_service_fails(repo: Path) -> None:
     assert any("服务 newsvc 未在 MASTER_KEY_ALLOC 白名单登记" in e for e in errs), errs
 
 
-@pytest.mark.parametrize("svc", ["ingest", "beat", "signal-rt", "migrate", "maint-cli", "cooldown-purge"])
+@pytest.mark.parametrize("svc", ["ingest", "beat", "signal-rt", "migrate", "maint-cli"])
 def test_non_owner_cannot_mount_master_key(repo: Path, svc: str) -> None:
     errs = _overlay(repo, f"services:\n  {svc}:\n    secrets:\n      - app_master_key\n")
     assert any(f"服务 {svc} 挂了 app_master_key" in e for e in errs), errs

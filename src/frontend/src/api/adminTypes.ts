@@ -2,7 +2,7 @@
  * 管理端类型（契约 v0.2.8 §5.1、§7.9）。/admin/* 不进 openapi.json（v0.2.8 #15，架构师裁定），
  * 因此按契约手写，不从 openapi 生成。只含状态元数据，不含证书值或其任何片段。
  */
-import type { DataLicenceState, DataLicenceTier, DataStatus } from './enums';
+import type { DataLicenceState, DataLicenceTier, DataStatus, IngestHealth } from './enums';
 import type { DataLicenceErrorCode, DataLicenceStatus } from './licenceTypes';
 
 /** §5.1 IngestLicenceStatus：/admin/ingest/status 的 licences[] 元素，每张证书一行 */
@@ -36,6 +36,9 @@ export interface IngestAlert { level: 'warning' | 'critical'; key: string; messa
 
 /** §7.9 GET /admin/ingest/status（v0.2.8：删除全站 licence，改为按证书的 licences[]；v0.2.9 内 T-B47：leader 可为 null、freshness 6 行、加 alerts） */
 export interface AdminIngestStatus {
+  /** v0.2.9 #38：ingest 心跳状态（ingest_health，契约不为 null；判定同 /health/ready.ingest；不返回心跳时间）。
+   *  前端对缺失或不认识的取值按 unknown 显示，不据此自行生成告警 */
+  heartbeat: IngestHealth;
   /** 没有未过期的租约时为 null（不返回各字段为 null 的对象） */
   leader: { instance_id: string; egress_ip_masked: string | null; lease_expires_at: string } | null;
   budget: { per_minute_limit: number; used_last_minute: number };

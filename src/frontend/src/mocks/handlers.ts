@@ -3,6 +3,7 @@
  * 未实现的端点统一返回 404 + 契约错误信封（code=NOT_FOUND），便于发现漏接。
  */
 import { http, HttpResponse, delay, matchRequestUrl } from 'msw';
+import { resetIngestAlertsMock } from './ingestAlerts';
 import type { TerminalScope, TodayResponse } from '../api/types';
 import type { SectorKind } from '../api/marketTypes';
 import { accountHandlers } from './accountHandlers';
@@ -47,6 +48,7 @@ export function resetMockState() {
   resetPlanDrafts();
   resetCandidates();
   resetPlansAlerts();
+  resetIngestAlertsMock();
 }
 
 /** 浏览器里加一点延迟让加载态可见；测试（node）里不延迟 */

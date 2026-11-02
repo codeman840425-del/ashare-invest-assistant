@@ -2,15 +2,22 @@ import { Link } from 'react-router';
 import { Alert, Card, Descriptions, Space, Table, Tag } from 'antd';
 import { useAdminIngestStatus } from '../../api/adminQueries';
 import type { IngestAlert, IngestLicenceStatus } from '../../api/adminTypes';
+import type { IngestHealth } from '../../api/enums';
 import { ErrorBox } from '../../components/common';
 import { DATA_STATUS } from '../../i18n/labels';
 import { INGEST_DATASET_NAME } from '../../i18n/ingestLabels';
-import { LICENCE_ERROR, LICENCE_STATUS, LICENCE_TIER, expiryLeftText } from '../../i18n/licenceLabels';
+import { LICENCE_ERROR, LICENCE_STATUS, LICENCE_TIER, expiryCellText } from '../../i18n/licenceLabels';
 import { fmtTime } from '../../lib/format';
 
 const PRIORITY: Record<string, string> = { p0_intraday: 'P0 盘中', p1_daily: 'P1 日频', p2_backfill: 'P2 回补' };
 /** T-B47 裁定③、#31 ④：告警只有两级（严重/警告）；顺序按服务端返回，message 原样显示 */
 const ALERT_LEVEL: Record<IngestAlert['level'], { text: string; color: string }> = { critical: { text: '严重', color: 'red' }, warning: { text: '警告', color: 'orange' } };
+const levelView = (lv: string) => ALERT_LEVEL[lv as IngestAlert['level']] ?? { text: lv, color: 'default' };
+/** v0.2.9 #38：heartbeat 显示；缺失或不认识的取值按 unknown 显示“无法判断”；不据此生成告警（告警只由服务端给） */
+const HEARTBEAT: Record<IngestHealth, { text: string; color: string }> = {
+  ok: { text: '正常', color: 'green' }, stale: { text: '心跳超时', color: 'red' }, paused: { text: '已暂停', color: 'orange' }, unknown: { text: '无法判断', color: 'default' },
+};
+const heartbeatView = (v: unknown) => (typeof v === 'string' && Object.hasOwn(HEARTBEAT, v) ? HEARTBEAT[v as IngestHealth] : HEARTBEAT.unknown);
 const dash = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : String(v));
 
 /**
@@ -29,7 +36,7 @@ export function AdminIngestPage() {
       render: (s: IngestLicenceStatus['status']) => <Tag color={LICENCE_STATUS[s].color} data-testid={`ingest-status-${s}`}>{LICENCE_STATUS[s].text}</Tag>,
     },
     { title: '档位', key: 'tier', render: (_: unknown, r: IngestLicenceStatus) => <span>{r.tier ? LICENCE_TIER[r.tier] : '—'}{r.has_quant_pro ? <Tag style={{ marginLeft: 4 }}>量化Pro</Tag> : null}</span> },
-    { title: '到期', key: 'exp', render: (_: unknown, r: IngestLicenceStatus) => (r.expires_on ? (r.days_left != null ? `${r.expires_on}（${expiryLeftText(r.days_left)}）` : r.expires_on) : '未填') },
+    { title: '到期', key: 'exp', render: (_: unknown, r: IngestLicenceStatus) => <span data-testid={`ingest-exp-${r.licence_id}`}>{expiryCellText(r.expires_on, r.days_left)}</span> },
     { title: '今日调用', key: 'today', align: 'right' as const, render: (_: unknown, r: IngestLicenceStatus) => `${r.calls_today}${r.daily_limit !== null ? ` / ${r.daily_limit}` : ''}` },
     { title: '近 1 分钟 / 上限', key: 'min', align: 'right' as const, render: (_: unknown, r: IngestLicenceStatus) => `${r.calls_last_minute} / ${r.per_minute_limit}` },
     { title: '队列 P0/P1/P2', key: 'queue', align: 'right' as const, render: (_: unknown, r: IngestLicenceStatus) => `${r.queue_depth.p0} / ${r.queue_depth.p1} / ${r.queue_depth.p2}` },
@@ -47,9 +54,10 @@ export function AdminIngestPage() {
           {d.alerts.length ? (
             <ul className="ingest-alerts">
               {/* #31 每个 key 最多一条；key 加序号作防御（评审 5969886 nit1） */}
+              {/* #39 ⑧：message 一律原样显示，不按 key 映射；不认识的 key / level 也照样显示 */}
               {d.alerts.map((a, i) => (
                 <li key={`${a.key}-${i}`} data-testid={`ingest-alert-${a.key}`} data-level={a.level}>
-                  <Tag color={ALERT_LEVEL[a.level].color}>{ALERT_LEVEL[a.level].text}</Tag>
+                  <Tag color={levelView(a.level).color}>{levelView(a.level).text}</Tag>
                   <span>{a.message}</span>
                   <span className="mono muted small" style={{ marginInlineStart: 8 }}>{a.key}</span>
                 </li>
@@ -59,6 +67,7 @@ export function AdminIngestPage() {
         </Card>
         <Card size="small" title="全部证书合计">
           <Descriptions size="small" column={3}>
+            <Descriptions.Item label="采集心跳"><Tag color={heartbeatView(d.heartbeat).color} data-testid="ingest-heartbeat">{heartbeatView(d.heartbeat).text}</Tag></Descriptions.Item>
             <Descriptions.Item label="采集主实例">{d.leader ? `${d.leader.instance_id}（出口 ${dash(d.leader.egress_ip_masked)}，租约到 ${fmtTime(d.leader.lease_expires_at)}）` : '无（没有未过期的租约）'}</Descriptions.Item>
             <Descriptions.Item label="近 1 分钟调用 / 上限">{d.budget.used_last_minute} / {d.budget.per_minute_limit}</Descriptions.Item>
             <Descriptions.Item label="24 小时 IP 受限告警">{d.ip_limit_alerts_24h}</Descriptions.Item>

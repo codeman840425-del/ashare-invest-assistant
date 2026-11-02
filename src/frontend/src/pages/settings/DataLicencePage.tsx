@@ -117,8 +117,10 @@ export function DataLicencePage() {
         <Descriptions.Item label="状态"><LicenceBadge s={s.status} /></Descriptions.Item>
         <Descriptions.Item label="档位（自报）">{s.tier ? LICENCE_TIER[s.tier] : '—'}{s.has_quant_pro ? <Tag style={{ marginLeft: 6 }}>Quant Pro</Tag> : null}</Descriptions.Item>
         <Descriptions.Item label="到期日（自填）">
-          {s.expires_on ?? '—'}
-          {s.days_to_expiry != null ? <span className={s.days_to_expiry <= 7 ? 'down' : 'muted'}>（{expiryLeftText(s.days_to_expiry)}）</span> : null}
+          {/* #40：已设置证书时 null 显示“未填写到期日”（不告警）；未设置证书显示 — */}
+          <span data-testid="licence-expiry">
+            {s.status === 'not_set' ? '—' : s.expires_on ? <>{s.expires_on}<span className={s.days_to_expiry != null && s.days_to_expiry <= 7 ? 'down' : 'muted'}>（{expiryLeftText(s.days_to_expiry)}）</span></> : <span className="muted">{expiryLeftText(null)}</span>}
+          </span>
         </Descriptions.Item>
         <Descriptions.Item label="设置时间">{s.set_at ? fmtTime(s.set_at) : '—'}</Descriptions.Item>
         <Descriptions.Item label="最近验证">{s.last_verified_at ? fmtTime(s.last_verified_at) : '—'}</Descriptions.Item>

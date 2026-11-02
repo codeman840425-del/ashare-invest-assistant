@@ -230,7 +230,7 @@ function Actions({ cs }: { cs: CandidateSignal }) {
     <section className="panel sig-panel" data-testid="signal-actions">
       <h4>操作</h4>
       <Space wrap>
-        <Tooltip title={canDraft(cs.state) ? '按你的持仓与资金拟定计划草案；草案需你确认，交易由你在券商端自行完成' : '仅“可拟定草案”或“原因已解除”状态可拟定计划草案'}>
+        <Tooltip title={canDraft(cs.state) ? '按你的持仓与资金拟定计划草案；草案需你确认，交易由你在券商端自行完成' : '仅“待检查”“可拟定草案”“原因已解除”状态可拟定计划草案'}>
           <Button
             size="small"
             disabled={!canDraft(cs.state)}

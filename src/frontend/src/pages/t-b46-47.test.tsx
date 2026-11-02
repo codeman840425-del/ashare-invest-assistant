@@ -124,7 +124,7 @@ describe('R10 采集状态：leader 可为 null、freshness 固定 6 行、alert
   it('示例告警口径：无 leader / 盘中 P0 超 300 秒 / quotes 不可用 → critical；P0 超 60 秒、预算 ≥ 90% → warning', () => {
     const base = { leader: null, budget: { per_minute_limit: 100, used_last_minute: 90 }, queues: [{ priority: 'p0_intraday' as const, depth: 1, oldest_age_s: 301 }],
       errors_24h: [{ upstream_code: 'http_5xx', count: 20 }], ip_limit_alerts_24h: 0,
-      freshness: INGEST_DATASETS.map((dataset) => ({ dataset, data_as_of: null, data_status: 'unavailable' as const })), licences: [], licences_truncated: false };
+      freshness: INGEST_DATASETS.map((dataset) => ({ dataset, data_as_of: null, data_status: 'unavailable' as const })), licences: [], licences_truncated: false, heartbeat: 'ok' as const };
     const by = Object.fromEntries(ingestAlerts(base).map((a) => [a.key, a.level]));
     expect(by).toEqual({ leader: 'critical', 'queue.p0_intraday': 'critical', budget: 'warning', 'errors.http_5xx': 'warning', 'freshness.quotes': 'critical' });
     expect(ingestAlerts({ ...base, queues: [{ priority: 'p0_intraday', depth: 1, oldest_age_s: 61 }] }).find((a) => a.key === 'queue.p0_intraday')?.level).toBe('warning');

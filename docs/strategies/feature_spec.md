@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | **v1.0.1（T-R11a/b 修订；v1.0 为 T-R11 首版，2026-11-01）**。本目录此前没有同类文件（已检索 `docs/strategies/`），本文为新建，不是更新 |
+| 版本 | **v1.0.2（按 T003 探针 run-20261101-190106 p11 更新 §11 V1/V4/V7 状态与 §13 C7；v1.0.1 为 T-R11a/b 修订；v1.0 为 T-R11 首版，2026-11-01）**。本目录此前没有同类文件（已检索 `docs/strategies/`），本文为新建，不是更新 |
 | 作者/维护 | 策略研究员（`docs/strategies/` 由研究员维护，架构师不改该目录，plan T-R11 行） |
 | 覆盖范围 | 仓库 `docs/`、`config/` 中出现的全部正式特征键 `f.*`，共 **41 个**：分类器 15 个（T-B30a）+ P0 策略卡 25 个（T-B43 / `_template.md` / `catalog.md`）+ P1 1 个（`validation.md`）。另列前端 mock 中出现的 11 个**非正式**键（§8），不计入 41 |
 | 消费方 | T-B30a（分类器 15 键数据层）、T-B43（P0 策略特征）、T-B35（特征底座 `feature_catalog` / `market.feature_bars_daily`）、T-B42（DSL 求值器） |
@@ -562,13 +562,13 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 
 | # | 项 | 涉及特征 | 需要谁 | 怎么核 |
 |---|---|---|---|---|
-| V1 | 日线 `a` 单位（元/万元）；快照 `v` 单位（手/股） | F01、F19、F28 | 后端 T-B05 | 同一股票同日：日线 `a` vs 快照 `cje`；`cje / v` 与价格同量级则 v 为股 |
+| V1 | 日线 `a` 单位（元/万元）；快照 `v` 单位（手/股） | F01、F19、F28 | 后端 T-B05 | **已实测（run-20261101-190106/p11 GAP2_cje_v_units）**：日线 `latest`：`a`=元、`v`=手；券商源 `/hsstock/real/time`：`cje`=元、`v`=手、`pv`=股（`pv/v`=100），F28 应为 `cje/(v×100)`；网络源 `/hsrl/ssjy`：`v`=万手（文档写"手"，不符）、`cje`=元。方法：VWAP 须落在当日高低价内；"股+元"与"万股+万元"同比例，按成交额量级取"元" |
 | V2 | 日线 `pc` / 快照 `yc` 在除权日是否为除权参考价 | F24、F35–F40、F11 | T-B05 | 取一只近期除权股，对比除权日 `pc` 与前一日 `c` |
 | V3 | 麦蕊因子公式与单位：`turnover_20d_avg`、`amihud_20d`、`volatility_20d`、`intraday_amplitude_20d`、`ma_trend`、`momentum_60d`、`roe_ttm`（12 还是 0.12）、`profit_cagr_3y`、`dividend_continuous_years`（从未分红返回 0 还是空）、`limit_up_count_20d`、`pe_ttm`（亏损返回负数还是空）、`boll_squeeze`、`rsi_14` | F02–F11、F20、F31、F33 | T-B05 + 研究员 | 全市场同日截面对照 §2 主口径，Spearman ≥ 0.95（建议） |
-| V4 | 因子历史值是否“当时口径”（as-of） | F02、F03、F08–F10、F33 | T-B05 | catalog L-01 ④；在披露日前后各取一天对比 |
+| V4 | 因子历史值是否“当时口径”（as-of） | F02、F03、F08–F10、F33 | T-B05 | **部分实测（run-20261101-190106/p11 GAP6_factor_nulls_pit）**：600519 `profit_yoy`、`roe_ttm` 历史（2025-05-06～2026-10-30，369 点）5 次真实跳变均在 `plrq` 当日或其后首个交易日；探针标的 2 处"披露前跳变"为 6 位小数截断差异，非前视。未覆盖：其他股票/因子（含 F02、F03、F09、F10、F33）、2025-05-06 前是否回填。仍待：间隔 ≥1 周重取比对；用 `plrq ≤ T` 报表自算逐点比对 |
 | V5 | 财务报表除 `jzrq`、`plrq` 外的字段名（净利润、归母净资产） | F08 备选、F12、F22 | T-B05 | 拉一份 income/balance 原始响应入探针结果 |
 | V6 | 资金流大单字段名与单位 | F21 | T-B05 | `/hsstock/history/transaction` 原始响应 |
-| V7 | 公告接口路径与字段 | F23 | T-B05 | catalog N-01 |
+| V7 | 公告接口路径与字段 | F23 | T-B05 | **已实测（run-20261101-190106/p11 GAP5_announcement_time_precision）**：`/hsstock/announcement/{code}` 返回 `t`、`zt`、`gs`、`nr`、`jb`、`lx`；`t` 只到日（1,000 条全为纯日期），F23 的 `available_from` 一律按"只有日期 → 次一交易日开盘"；样本历史起点 2021-03 |
 | V8 | 指数代码写法（沪深300、中证全指）、申万指数是否可取 | F25、F27 | T-B05 | `/hsindex/history` |
 | V9 | 申万一级代码格式 | F26、F27、F34 | T-B05 | `/hszg/list` |
 | V10 | `/hsstock/lup/limit` 字段含义 | F35–F36 对照 | T-B05 | — |
@@ -630,7 +630,7 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 机器可读草案（供 T-B30a/T-B43 写 `feature_catalog`；`status` 一律从 `declared` 起步，T-B05 核实后再升级；字段名与表 `app.feature_catalog` 列一致）：
 
 ```yaml
-feature_spec_version: "1.0.1"
+feature_spec_version: "1.0.2"
 rank_pct_universe: "T−1 日盘后落库截面：沪深 A 股股票，剔除北交所、停牌、上市 < 20 个交易日；平均秩 / N，取值 [0, 1]"
 window_rule: {calendar: exchange_trading_days, min_valid_ratio: 0.75, null_fill: forbidden}   # 0.75 待架构师确认
 all_null_when: {listing_status: [delisted, missing_from_list]}   # T-R11b：这两类证券全部 f.* 为 null
@@ -696,7 +696,7 @@ features:
 | C4 | 裁定 R9：T-R11 依赖 T-B35；T-B30a 依赖 T-R11 | 本文已完成；但若干来源依赖 T-B05 实测，未核实项均标【待核实】（§11 V1–V12），主口径尽量用已实测的日线 | 依赖补充 | T-B05 核实后，T-B30a 才能把对应键从 `declared` 升级 |
 | C5 | `horizon_classifier.md`：导入器拒收与 catalog 单位不一致的规则；SH5/SW2/SW3 写 `unit: sign` | 本文给 `f.ma_trend`、`f.momentum_60d` 定 `unit: pct` | **已解决（T-R11a）** | 规则改为 `unit: pct`、阈值 0；`unit: sign` 取消 |
 | C6 | 分类器“20 日窗口”（交易日）vs DSL `ma(x,n)`（有效 K 线） | §1.2 明确两者不同 | 澄清 | T-B30a / T-B42 实现时区分 |
-| C7 | 因子数 77（任务描述）/ 82（因子页）/ 85（plan 第 962 行） | 本文只引用在 T003 因子表中出现的 ID | 文档不一致（不影响本文） | T-B05 实测因子总数 |
+| C7 | 因子数 77（任务描述）/ 82（因子页）/ 85（plan 第 962 行） | 本文只引用在 T003 因子表中出现的 ID | **已实测：85 个**（run-20261101-190106/p11 GAP7：`factor/all` 3 只样本各 85 个，与 `factor/list` 一致；文档 `ev_ebitda` 实为 `ev_ebit`；p11 自动摘要"实返 2 个"为解析层级错误）。本文引用的因子 ID 均在其中 | 已解决 | 无（`ev_ebit` 名称差异如被引用需更正） |
 | C8 | R9 未写统计维度；SH8/SW7/LG7 文本为“该股” | §10.1-1 建议按（用户, 证券） | 歧义 | 用户/架构师确认 |
 
 ---
@@ -705,5 +705,6 @@ features:
 
 | 版本 | 日期 | 作者 | 说明 |
 |---|---|---|---|
+| 1.0.2 | 2026-11-01 | 研究员（T003 GAP） | 依据 run-20261101-190106/p11：V1 已实测（GAP2）、V4 部分实测（GAP6）、V7 已实测（GAP5）；§13 C7 因子数定为 85（GAP7）。其余 V 项未动 |
 | 1.0.1 | 2026-11-01 | 研究员（T-R11a/b） | C5：SH5/SW2/SW3 改 `unit: pct`；§10.2 第 4 条已定：`delisted`/`missing_from_list` 全部 `f.*` 为 null（F15 边界与 §1 同步）；V1–V12 待 T-B05 实测后补 |
 | 1.0 | 2026-11-01 | 研究员（T-R11） | 首版：41 个正式键（P0 40、P1 1）口径、3 组手算样例、问题 76/77 复核、与 T-B46-47 裁定对照；`horizon_classifier.md` 末尾加附录指针 |

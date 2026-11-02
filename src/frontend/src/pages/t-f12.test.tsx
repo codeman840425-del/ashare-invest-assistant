@@ -1,5 +1,5 @@
 /** T-F12 候选信号卡补全（契约 §5.2、§7 /suggestions*）。示例数据，不发外网请求。 */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
@@ -12,6 +12,8 @@ import { actionLog, REFRESH_MIN_INTERVAL_S } from '../mocks/suggestionHandlers';
 import { apiFetch } from '../test/apiFetch';
 import { preloadRoutes } from '../test/preloadRoutes';
 
+// 整套并行跑时页面懒加载较慢：本文件的 findBy / waitFor 默认等待 5 秒
+configure({ asyncUtilTimeout: 5000 });
 beforeAll(() => preloadRoutes(routes), 30_000);
 beforeEach(() => resetViewedOnce());
 
@@ -131,12 +133,14 @@ describe('候选信号卡详情页补全', () => {
   });
 
   it('手动刷新：跳到新卡；再次刷新给出 409 等待时间', async () => {
+    const W = { timeout: 5000 };
     const router = renderAt(`/suggestions/${sgBank.id}`);
-    fireEvent.click(await screen.findByTestId('sg-refresh'));
-    await waitFor(() => expect(router.state.location.pathname).not.toBe(`/suggestions/${sgBank.id}`));
-    await waitFor(() => expect(screen.getByTestId('sg-supersedes')).toHaveAttribute('href', `/suggestions/${sgBank.id}`));
+    fireEvent.click(await screen.findByTestId('sg-refresh', undefined, W));
+    await waitFor(() => expect(router.state.location.pathname).not.toBe(`/suggestions/${sgBank.id}`), W);
+    await waitFor(() => expect(screen.getByTestId('sg-supersedes')).toHaveAttribute('href', `/suggestions/${sgBank.id}`), W);
+    await waitFor(() => expect(screen.getByTestId('sg-refresh')).not.toBeDisabled(), W);
     fireEvent.click(screen.getByTestId('sg-refresh'));
-    expect(await screen.findByTestId('sg-refresh-error')).toHaveTextContent(/刷新过于频繁，请 \d+ 秒后再试/);
+    expect(await screen.findByTestId('sg-refresh-error', undefined, W)).toHaveTextContent(/刷新过于频繁，请 \d+ 秒后再试/);
   });
 
   it('LLM 说明：显示 llm_call_id', async () => {

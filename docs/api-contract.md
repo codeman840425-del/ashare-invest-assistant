@@ -1,6 +1,6 @@
 # A股个人投资研究与决策助手 · REST 接口契约（MVP v1）
 
-- 作者：架构师；日期：2026-11-02；版本：**v0.2.9**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b；v0.2.4 为 T-A05 合入研究员 T-B15 合规文书与问卷、前端 T-F02 评审 D1–D7；v0.2.5 为 T-A06 按用户 2026-11-02 决定删除同意流程与风险测评；v0.2.6 为 T-A07 每用户自用麦蕊证书并入 T006e 裁定；v0.2.7 为 T-A08 补齐个股数据接口、策略实例列表与状态机、周 K 口径与 `/today` 三块；v0.2.8 为 T-A09 按证书拆分 `/admin/ingest/status`、ETF 纳入、注册蜜罐字段、管理员暂停期间的证书 PUT 规则、`/admin/*` 不进 openapi；v0.2.9 为 T-A10 处理前端 T-A09/T-F17/T-F18 遗留待定项与测试 T-T23 的三项裁定）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
+- 作者：架构师；日期：2026-11-02；版本：**v0.2.9**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b；v0.2.4 为 T-A05 合入研究员 T-B15 合规文书与问卷、前端 T-F02 评审 D1–D7；v0.2.5 为 T-A06 按用户 2026-11-02 决定删除同意流程与风险测评；v0.2.6 为 T-A07 每用户自用麦蕊证书并入 T006e 裁定；v0.2.7 为 T-A08 补齐个股数据接口、策略实例列表与状态机、周 K 口径与 `/today` 三块；v0.2.8 为 T-A09 按证书拆分 `/admin/ingest/status`、ETF 纳入、注册蜜罐字段、管理员暂停期间的证书 PUT 规则、`/admin/*` 不进 openapi；v0.2.9 为 T-A10 处理前端 T-A09/T-F17/T-F18 遗留待定项与测试 T-T23 的三项裁定，同版并入 T-A11 研究候选接口与 T-F22 管理端证书遗留裁定）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
 - 配套：[`plan.md`](./plan.md)（架构方案）。本契约优先于代码：FastAPI 生成的 `openapi.json` 与本文不一致时**改代码**。例外：`/admin/*` 不进 `openapi.json`（v0.2.8，§1.3），其结构以本文为准、由契约测试验证。
 - **示例值全部虚构**：代码用 `600000.SH / 000001.SZ`，ID 用 `00000000-0000-4000-8000-0000000000xx`，金额为随意整数；不含任何真实账户、股东代码、姓名、金额或委托/成交编号。证券简称一律用“示例银行”“演示电子”这类虚构名称。
 
@@ -8,8 +8,9 @@
 
 ## 0. 变更记录
 
-### v0.2.9（2026-11-02，T-A10：处理前端 T-A09、T-F17、T-F18 与 review-fixes 遗留的待定项（报告 `T-A10-pending.md` P01–P21，按建议裁定采纳），并入测试 T-T23 的三项裁定；**含不兼容变更**：#6（候选信号事件改为分页包装）、#11（放弃草案的请求体）、#12（`/non-executable-reasons` 默认只返回 `active`）；其余为新增字段、可空性放宽或规则写明）
+### v0.2.9（2026-11-02，T-A10：处理前端 T-A09、T-F17、T-F18 与 review-fixes 遗留的待定项（报告 `T-A10-pending.md` P01–P21，按建议裁定采纳），并入测试 T-T23 的三项裁定；同版并入 T-A11（研究候选接口，#19–#25，版本号不升）与管理端证书遗留裁定（T-F22 遗留 1–5，#26）；**含不兼容变更**：#6（候选信号事件改为分页包装）、#11（放弃草案的请求体）、#12（`/non-executable-reasons` 默认只返回 `active`）；其余为新增字段、可空性放宽或规则写明）
 > 本版不新增产品功能：只同步已定的裁定、补齐字段语义与校验顺序。不写入任何证书值。
+> T-A11 只把 plan 已有的“研究候选卡”（plan 2.4 能力 2、3.1、3.3）写成接口，不加 plan 之外的功能；需要产品决定的按最保守的默认值执行，登记为 plan 第 9 节问题 66–71；T-F22 遗留的通知为默认执行（问题 74）。逐项裁定见 `reports/T-A11.md`。
 
 | # | 项 | 决定 | 后端改动 | 前端改动 |
 |---|---|---|---|---|
@@ -31,7 +32,15 @@
 | 16 | 关闭注册时的判定（T-T23 裁定 1） | `registration_mode=closed` 时，**不论请求体格式是否正确**（非法 JSON、缺字段、类型错误、未知字段都算），一律先返回 `503 REGISTRATION_CLOSED`，与“注册模式最先”的判定顺序一致；实现上不能让框架的请求体校验先于模式判断 | 模式判断前置于请求体解析 | 无 |
 | 17 | 导入码同步（T-T23 裁定 2） | 确认：plan 3.5A-1 第 46 行 `IMPORT_LOT_SIZE_IRREGULAR` 已由 67d123a 与 §4.1 同步，逐行一致，不改 | 无 | 无 |
 | 18 | 证书设置开关的判定顺序（T-T23 裁定 3） | 维持 67d123a：`DATA_LICENCE_SETTINGS_ENABLED=false` 时 `PUT`/`PATCH /me/data-licence` 与 `POST /me/data-licence/test` → `503 MAINTENANCE`，`GET`、`DELETE` 照常。写明顺序：`PUT`/`PATCH` 的请求体格式校验（`400 VALIDATION_ERROR`）**先于** 503；`/test` 无请求体，503 先于其他判断。与注册接口顺序不同的原因：注册是公开端点，关闭时整体不可用；证书设置是登录后的局部开关，用户已登录、请求体格式错误照常提示 | 已如此实现，补测试 | 无 |
-| — | `/meta/enums.version` | `"v0.2.8"` → `"v0.2.9"`；`enums` 新增 1 个键 `candidate_signal_event_cause` | 同步 | `CONTRACT_VERSION` |
+| 19 | 研究候选接口（v0.2.9 内，T-A11；T-F23 缺口 1、2、13、16） | 新增 §7.7A：`GET/POST /candidates`、`GET /candidates/{id}`、`GET /candidates/{id}/versions`（§1.2 分页，`version_no desc`）、`GET /candidates/{id}/versions/{version_no}`、`POST /candidates/{id}/versions`（`base_version_no` 乐观锁）；做决定 = 新建带 `decision` 的版本，不单设端点；没有删除，PUT/PATCH/DELETE → `405`；列表 `?status=`（多值，默认不含 `dropped`）`&security_code=&origin=&suggestion_id=`，排序 `created_at desc, id desc`；全部标 ⚖（§1.3 列表加 `/candidates*`） | T-B10 实现 | T-F23 列表、详情、版本、决定 |
+| 20 | 研究候选对象（v0.2.9 内，T-A11；缺口 3、6、8、9） | `ResearchCandidate`、`ResearchCandidateSummary`、`CandidateVersion`、`CandidateCondition(Input)`、`CandidateFact`、`FitAssessment`（§7.7A）；用户填 `thesis` 与 `conditions_to_hold`（固定 `hypothesis`，须有验证日期或验证方式）；系统在每次新建版本时生成 `reasons`、`counter_evidence`（与 `CandidateSignal.counter_evidence` 同构）、`fit_assessment`，写入快照后不刷新 | 生成逻辑与快照 | 类型与展示 |
+| 21 | 状态机与决定（v0.2.9 内，T-A11；缺口 4、5、11） | §6.0 加一行：continue→`researching`、watch→`watching`、drop→`dropped`；`planned` 只由系统写入（本人创建 `candidate_id` 指向该候选的计划时；本版无入口）；`dropped`、`planned` 为终态，再建版本 → `409 INVALID_STATE_TRANSITION{allowed:[]}`；`decision_reason` 自由文本 1–200 字，`decision` 非 null 时必填；候选不能直接生成计划草案 | 同上 | 决定表单 |
+| 22 | 来源、重复与证券范围（v0.2.9 内，T-A11；缺口 2、12、15） | `POST` 只收 `manual`、`from_stock`、`suggestion`；`strategy_screen` → `400 VALIDATION_ERROR{issue:"not_supported"}`（`/factor/screen` 本版不定义）；引用他人或不存在的建议 → 同一个 `400{field:"suggestion_id", issue:"not_found"}`；同一证券已有 `researching`/`watching` 候选 → `409 CONFLICT{field:"security_code", existing_id}`；ETF、指数 → `400{issue:"security_type_not_supported"}`；候选信号入口按 `from_stock` | 部分唯一索引 `(user_id, security_code) WHERE status IN ('researching','watching')` | 三种入口 |
+| 23 | 隐私与删除（v0.2.9 内，T-A11；缺口 7、17） | 只返回本人数据，他人 id 一律 404；系统内容只用本人证书数据与证券公开主数据，不用他人证书补齐；版本快照写本人 `user_id`、`licence_id`；为候选生成的 claims 写本人 `user_id`（不用 `user_id=null`）；本版不开放 `/claims`；plan 7.3 删除清单补 `research_candidates`、`candidate_versions`、`claim_links`（后端 T-B16 已删） | 快照与 claims 写 `user_id` | 无 |
+| 24 | 通知与 SSE（v0.2.9 内，T-A11；缺口 14） | 研究候选没有通知与 SSE 事件，`notification_target_type` 不变；前端写后自行刷新 | 无 | 写后刷新 |
+| 25 | 错误码与未决（v0.2.9 内，T-A11；缺口 10） | 不新增错误码；§4 `CONFLICT` 说明补研究候选的 `existing_id`；默认执行的产品问题登记为 plan 第 9 节问题 66–71 | 同上 | 文案 |
+| 26 | 管理端证书遗留（v0.2.9 内，T-F22 遗留 1–5） | ① resume 幂等：已设置证书但未被管理员暂停 → `204`，状态不变，不写审计、不写事件、不发通知（与重复暂停一致）；② `GET /admin/data-licences` 排序为用户 `created_at desc, id desc`，V1 无服务端筛选参数（`?status=`、`?q=` 留待后续版本，问题 72）；③ 暂停理由与操作人不加字段，管理员在 `GET /admin/audit-logs` 查看（该接口结构未定义，问题 73）；④ 冷却不加字段：`AdminDataLicence`（经 `DataLicenceStatus`）与 `IngestLicenceStatus` 都已有 `status` 与 `paused_until`，冷却状态从这两个字段看出；⑤ 暂停、恢复成功且状态确实变化时给该用户发 `notification_kind=data_licence` 通知，正文不含理由，幂等重复调用不发（默认执行，问题 74）。见 §7.9 | resume 不再写审计（改 be607b3）；发通知 | 无（可选：通知文案） |
+| — | `/meta/enums.version` | `"v0.2.8"` → `"v0.2.9"`；`enums` 新增 4 个键：`candidate_signal_event_cause`（T-A10）与 `research_candidate_status`、`research_candidate_origin`、`candidate_decision`（T-A11） | 同步 | `CONTRACT_VERSION` |
 
 ### v0.2.8（2026-11-02，T-A09：`/admin/ingest/status` 按证书拆分、ETF 纳入（plan 第 9 节问题 53 已定）、注册蜜罐字段、管理员暂停期间的证书 PUT 规则、`/admin/*` 不进 openapi（架构师裁定）、首页为 `/today`；**含不兼容变更**：#1（管理端响应结构）、#12–#14（证书接口在暂停期与重复 PUT 时的行为）、#15（`openapi.json` 不再含 `/admin/*`）；#4 为默认搜索结果的行为变化，结构兼容）
 
@@ -314,7 +323,7 @@
 - **会话 Cookie** `sid`：`HttpOnly; Secure; SameSite=Lax; Path=/`；服务端会话存 Redis，空闲 7 天滑动过期、自登录起 30 天绝对过期（均可配置，plan 6.1 `config/auth.yaml` `session.*`）；V1 不提供“记住我”。登录与修改密码时轮换会话（新 `sid` 与新 `csrf_token`，旧会话作废）；改角色、禁用、驳回、管理员重置密码时吊销该用户全部会话。
 - **CSRF**：登录成功后响应体与 Cookie `csrf_token`（非 HttpOnly）给出令牌；所有 `POST/PUT/PATCH/DELETE` 必须带头 `X-CSRF-Token`，缺失或不符 → `403 CSRF_FAILED`。响应体 `csrf_token` 与 Cookie 值相同，以 Cookie 为准（双提交：服务端用常数时间比较请求头、Cookie 与会话内令牌，三者须一致）；响应体值只供读不到 Cookie 的客户端兜底（v0.2.4 #13）。
 - **权限**：未登录 → `401 AUTH_REQUIRED`；账号非 `approved` → `403 ACCOUNT_NOT_APPROVED`（以上两条均不适用于 `/admin/*`）；`/admin/*`：不是已登录的 `role=admin` 时（含未登录）一律 `404 NOT_FOUND`，与不存在的路径无法区分（不泄露管理端存在性；先于本节其他校验，v0.2.1）。用户只能访问自己的资源，访问他人资源一律 `404 NOT_FOUND`（不泄露存在性）。
-- **合规门槛**：**无**（v0.2.5 作废原有的测评与同意门槛，`CONSENT_REQUIRED` 不再存在）。标 ⚖ 的建议类接口（`/today`、`/suggestions*`、`/daily-reports*`、`/signals*`、`/candidate-signals*`、`/plan-drafts*`、`/stream` 中标 ⚖ 的事件）只表示“输出是规则信号”：前端须在其旁固定展示免责提示（`docs/strategies/compliance/disclaimer.md`：“本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。”），服务端不拦截。`POST /imports`、`POST /trades` 也不需要单独同意。
+- **合规门槛**：**无**（v0.2.5 作废原有的测评与同意门槛，`CONSENT_REQUIRED` 不再存在）。标 ⚖ 的建议类接口（`/today`、`/suggestions*`、`/daily-reports*`、`/signals*`、`/candidate-signals*`、`/plan-drafts*`、`/candidates*`（v0.2.9 T-A11）、`/stream` 中标 ⚖ 的事件）只表示“输出是规则信号”：前端须在其旁固定展示免责提示（`docs/strategies/compliance/disclaimer.md`：“本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。”），服务端不拦截。`POST /imports`、`POST /trades` 也不需要单独同意。
 - **限速**：超限 `429 RATE_LIMITED`，头 `Retry-After`（秒）。
 - **`/admin/*` 不进 openapi（v0.2.8，架构师裁定）**：所有 `/admin/*` 路由以 `include_in_schema=False` 注册，公开的 `openapi.json` 与 `/docs` 中没有它们（与上面的 404 规则一致，不向非管理员暴露管理端路径）。管理端的请求和响应结构**以本契约为准**（§5.1 `AdminDataLicence`、`IngestLicenceStatus` 等，§7.9），由契约测试逐接口校验（§9），不得依赖 `openapi.json` 生成管理端类型；前端管理页类型按本契约手写。“`openapi.json` 与本文不一致时改代码”只适用于非 `/admin/*` 路径。
 - 敏感字段一律掩码输出（如 `shareholder_code_masked: "A00****000"` 为格式示意），任何接口都不返回原始股东代码、资金账号或原始上传文件内容。
@@ -382,6 +391,9 @@
 | `instance_status` | `proposed` `active` `paused` `archived` |
 | `candidate_signal_state` | `open` `drafted` `blocked` `released` `confirmed` `dismissed` `expired` `invalidated` `superseded` |
 | `candidate_signal_event_cause` | `executability_check` `reason_released` `user` `expiry` `invalidation` `supersede`（v0.2.9；`/candidate-signals/{id}/events` 的 `cause`；确认草案与用户忽略都为 `user`） |
+| `research_candidate_status` | `researching` `watching` `dropped` `planned`（v0.2.9 T-A11；研究候选状态，§6.0；`planned` 只由系统写入） |
+| `research_candidate_origin` | `strategy_screen` `suggestion` `manual` `from_stock`（v0.2.9 T-A11；与库表 CHECK 一致；本版 `POST /candidates` 不接受 `strategy_screen`，§7.7A） |
+| `candidate_decision` | `continue` `watch` `drop`（v0.2.9 T-A11；分别把研究候选状态置为 `researching`、`watching`、`dropped`） |
 | `reason_code` | 见 6.1（22 个；v0.2.5 删 `PROFILE_OR_CONSENT_MISSING`） |
 | `reason_status` | `active` `released` `obsolete` |
 | `check_on` | `tick` `daily_close` `schedule` `holding_change` `cash_update` `import` `plan_change` `user_action` |
@@ -434,7 +446,7 @@
 | 404 | `NOT_FOUND` | 资源不存在或不属于当前用户；v0.2.7 起，用北交所旧代码访问 `/securities/{code}*` 时也返回此码并带 `superseded_by`（新代码），其余情况无 `details` | `{superseded_by: string}`（只在北交所旧代码时） |
 | 405 | `METHOD_NOT_ALLOWED` | 路径存在但方法不支持；响应头 `Allow`。非管理员（含未登录）访问 `/admin/*` 一律按 `404 NOT_FOUND` 返回，不带 `Allow` 头 | `{allowed: string[]}` |
 | 413 | `PAYLOAD_TOO_LARGE` | 请求体超过网关/框架上限（v0.2.3 补充）；应用层文件超限仍用 `422 IMPORT_FILE_ERRORS` | `{max_bytes}`（= plan 6.1 `imports.max_request_bytes`；nginx 返回时可省略） |
-| 409 | `CONFLICT` | 唯一约束冲突（如用户名已存在） | `{field}` |
+| 409 | `CONFLICT` | 唯一约束冲突（如用户名已存在；v0.2.9 T-A11：同一证券已有进行中的研究候选） | `{field}`；研究候选重复时另带 `existing_id: uuid`（本人已有的那条候选） |
 | 409 | `IDEMPOTENCY_CONFLICT` | 同一幂等键、不同请求体 | — |
 | 409 | `VERSION_CONFLICT` | 乐观锁版本号不符（`If-Match`/`base_version_no`） | `{current_version_no}`；测评时为 `{current_version: string}` |
 | 409 | `IMMUTABLE_RESOURCE` | 试图修改不可变对象（建议、已发布策略版本、日报、成交原记录、已归档的策略实例（v0.2.7）） | — |
@@ -686,6 +698,7 @@
 | 候选信号 `candidate_signal_state` | `open` `drafted` `blocked` `released` `confirmed` `dismissed` `expired` `invalidated` `superseded` | open→drafted/blocked（系统）；blocked→released（系统或手动解除）→drafted/blocked；drafted→confirmed（确认草案）；非终止态→dismissed（用户）/expired/invalidated/superseded（系统） |
 | 原因 `reason_status` | `active` `released` `obsolete` | active→released（系统，或 `machine_checkable=false` 时由用户手动）；active→obsolete（所属信号终止） |
 | 计划草案 `plan_draft_status` | `pending` `confirmed` `discarded` `expired` `stale` | pending→confirmed/discarded（用户）；pending→expired/stale（系统） |
+| 研究候选 `research_candidate_status`（v0.2.9 T-A11） | `researching` `watching` `dropped` `planned` | 新建为 researching；researching⇄watching（用户，新版本 `decision=continue/watch`）；researching/watching→dropped（用户，`decision=drop`）；researching/watching→planned（系统：本人创建了 `candidate_id` 指向该候选的操作计划；本版没有入口，§7.7A）；`dropped`、`planned` 为终态，不再接受新版本（`allowed: []`）；不带 `decision` 或决定与当前状态相同的新版本不改变状态 |
 | 导入批次 `import_status` | `uploaded` `parsing` `previewed` `committed` `failed` `discarded` `reverted` | uploaded→parsing（系统）；parsing→previewed/failed（系统）；previewed/failed→parsing（`PUT options`）；previewed→committed（确认）；previewed/failed→discarded（用户）；committed→reverted（用户） |
 | 健康度 `health_state` | `published` `observing` | 见 2.8.2；`proposed_action: none \| review \| retire` 只用于提示 |
 
@@ -924,6 +937,43 @@ evidence: Evidence[]
 | POST | `/plans/{id}/versions` 🔒 | 修改计划，生成新版本（`base_version_no` 乐观锁） |
 | POST | `/plans/{id}/close` 🔒 | `{status: "done"\|"cancelled", note}`；会触发 `SAME_DIRECTION_PLAN_EXISTS` 的解除检查 |
 
+### 7.7A 研究候选（v0.2.9 内，T-A11；plan 2.4 能力 2“研究候选卡”、3.1、3.3）
+约定：只返回本人的候选（他人的或不存在的 id 一律 `404 NOT_FOUND`）；头表只有 `status` 与当前版本会变，版本（`CandidateVersion`）不可变，修改即新建版本；**没有删除接口**（放弃用 `decision=drop`，物理删除只随账号数据删除，plan 7.3），也没有 `PUT`/`PATCH`/`DELETE`（→ `405 METHOD_NOT_ALLOWED`）；本版不开放独立的 `/claims` 接口；研究候选没有通知与 SSE 事件（前端在本人写操作后自行刷新）；所有端点标 ⚖（输出含系统规则结果，§1.3）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/candidates` 🔒 ⚖ | `?status=`（可多值，逗号分隔；默认 `researching,watching,planned`，即不含 `dropped`；`status=all` 不按状态过滤）`&security_code=&origin=&suggestion_id=`；§1.2 分页，排序 `created_at desc, id desc`；元素 `ResearchCandidateSummary`；枚举值非法 → `400 VALIDATION_ERROR` |
+| POST | `/candidates` 🔒 ⚖ | 新建候选并生成第 1 版（支持 `Idempotency-Key`）：`{origin: "manual" \| "from_stock" \| "suggestion", security_code: string \| null, suggestion_id: uuid \| null, thesis: string \| null, conditions_to_hold: CandidateConditionInput[]}`（可为 `[]`）→ `201 ResearchCandidate`，`status="researching"`，第 1 版 `decision=null`。校验见下 |
+| GET | `/candidates/{id}` 🔒 ⚖ | `ResearchCandidate`（含完整的当前版本） |
+| GET | `/candidates/{id}/versions` 🔒 ⚖ | 版本历史：§1.2 分页，排序 `version_no desc`，元素为完整的 `CandidateVersion` |
+| GET | `/candidates/{id}/versions/{version_no}` 🔒 ⚖ | 单个版本，内容是该版本创建时的快照（回看不读最新数据）；`version_no` 不存在 → `404 NOT_FOUND` |
+| POST | `/candidates/{id}/versions` 🔒 ⚖ | 新建版本（修改研究内容、做决定，或二者同时）：`{base_version_no: int, thesis: string \| null, conditions_to_hold: CandidateConditionInput[], decision: candidate_decision \| null, decision_reason: string \| null}` → `201 ResearchCandidate`。整体替换：未改的内容也要带上；支持 `Idempotency-Key` |
+
+**`POST /candidates` 的校验（按顺序）**：
+1. 请求体 → `400 VALIDATION_ERROR{fields:[{field, issue}]}`：`origin="strategy_screen"` → `issue:"not_supported"`（`/factor/screen` 本版未定义，plan 第 9 节问题 69）；`manual`、`from_stock` 时 `security_code` 必填、`suggestion_id` 必须为 `null`；`suggestion` 时 `suggestion_id` 必填，`security_code` 可为 `null`（取建议的证券），非 `null` 时须与建议一致，否则 `issue:"mismatch"`；`thesis` 去首尾空白后 1–2000 字（空串按 `null`）；`conditions_to_hold` 至多 10 条，每条规则见 `CandidateConditionInput`。
+2. 证券：代码不在证券主数据中 → `400{field:"security_code", issue:"unknown_security"}`；`security_type` 为 `etf` 或 `index` → `400{field:"security_code", issue:"security_type_not_supported"}`（plan 第 9 节问题 70）。
+3. 来源建议不存在或不属于本人 → `400{field:"suggestion_id", issue:"not_found"}`（两种情况响应相同，不泄露他人数据）；任何状态的本人建议都可引用。
+4. 重复：本人同一证券已有 `researching` 或 `watching` 的候选 → `409 CONFLICT{field:"security_code", existing_id}`（库中部分唯一索引保证并发时只有一个成功；`dropped`、`planned` 的不算；plan 第 9 节问题 66）。
+
+**`POST /candidates/{id}/versions` 的校验（按顺序）**：① 请求体 → `400`：`decision` 非 `null` 时 `decision_reason` 必填（去首尾空白后 1–200 字，自由文本，plan 第 9 节问题 68），`decision` 为 `null` 时 `decision_reason` 必须为 `null`（否则 `issue:"not_allowed"`）；② 候选不属于本人 → `404`；③ 状态为 `dropped` 或 `planned` → `409 INVALID_STATE_TRANSITION{from, to, allowed: []}`（`to` 为 `decision` 对应的状态，`decision=null` 时等于 `from`）；④ `base_version_no` 不是当前版本号 → `409 VERSION_CONFLICT{current_version_no}`。决定与当前状态相同（如 `watching` 时 `decision=watch`）→ `201`，只新增版本、状态不变。
+
+**结构**：
+- `CandidateConditionInput`：`{text: string（1–200 字）, verify_by: string(date) \| null, verify_method: string（1–200 字） \| null, confidence: confidence_level \| null}`；`verify_by` 与 `verify_method` 至少填一个（plan 3.1：假设须有验证方式或验证日期），否则 `400{field:"conditions_to_hold[i]", issue:"verification_required"}`。
+- `CandidateCondition` = `CandidateConditionInput & {epistemic_type: "hypothesis"}`（固定为 `hypothesis`，用户不能选）。
+- `CandidateFact` = `TextWithEvidence & {epistemic_type: "fact" \| "estimate", source_kind: source_kind}`。
+- `FitAssessment`：`{profile_filled: boolean, holdings_available: boolean, hints: HorizonHint[], warnings: TextWithEvidence[]}`。只读**本人**画像、本人持仓与本人风控设置：`hints` 与 `/horizon-assessments` 同规则（画像已填写且不满足才出）；`warnings` 是本人已持有该证券或同行业证券时，对照本人风控上限（RC2 `position_cap`、RC4 `sector_concentration`）的提示。画像未填写 → `profile_filled=false`、`hints=[]`；未导入持仓 → `holdings_available=false`，不出持仓类提示。只作提示，不阻止任何操作、不影响状态。
+- `CandidateVersion`：`{id: uuid, candidate_id: uuid, version_no: int（从 1 起）, security_code, name（生成时的简称）, thesis: string \| null（用户填写）, reasons: CandidateFact[]（系统生成：满足了哪些规则）, conditions_to_hold: CandidateCondition[]（用户填写）, counter_evidence: CandidateFact[]（系统生成：不满足的规则与风险因子）, fit_assessment: FitAssessment, decision: candidate_decision \| null, decision_reason: string \| null, snapshot_id: string, evidence: Evidence[], data_status, data_as_of, gaps（DataStatusBlock）, created_at}`。`reasons`、`counter_evidence` 的 `evidence_ids` 都能在本版本的 `evidence[]` 中找到。
+- `ResearchCandidate`：`{id: uuid, security_code, name（当前简称）, security_type: security_type, origin: research_candidate_origin, strategy_run_id: uuid \| null（本版恒为 null）, suggestion_id: uuid \| null, status: research_candidate_status, plan_ids: uuid[]（本人 `candidate_id` 指向本候选的操作计划；本版恒为 []）, version_count: int, current_version: CandidateVersion, created_at}`。
+- `ResearchCandidateSummary`：`{id, security_code, name, origin: research_candidate_origin, status: research_candidate_status, suggestion_id: uuid \| null, current_version_no: int, decision: candidate_decision \| null（当前版本的决定）, last_version_at: string(datetime)（当前版本的创建时间；头表没有 updated_at）, created_at}`。
+
+**系统生成的内容**（`reasons`、`counter_evidence`、`fit_assessment`）：
+- 每次新建版本时由服务端按当时数据生成一次，写入该版本的快照（`data_snapshots.purpose='candidate'`，带本人 `user_id` 和所用证书的 `licence_id`），之后不刷新；要看最新情况就新建版本。
+- `origin=suggestion`：`reasons` 取来源建议各策略结论（`strategies[]`）的 `reasons`，`counter_evidence` 取各策略结论的 `counter_evidence` 与建议的 `risk_flags`，原文与证据照抄（与 `CandidateSignal.counter_evidence` 同构）。`manual`、`from_stock`：`reasons=[]`，`counter_evidence` 只列证券风险因子（`risk_flag`、停牌、退市整理）。两者都可以为 `[]`，为空时前端显示固定文字“系统未列出反证，不代表没有风险”。
+- 只用本人证书取得的数据和证券公开主数据；本人证书不可用时按 §1.1 降级（`data_status`），**不用他人证书的数据补齐**。
+- 这些内容若以 `claims` + `claim_links`（`target_type=candidate_version`，`role` 为 `reason`/`counter`/`risk`）存储，`claims.user_id` 一律为本人（不用 `user_id=null` 的“系统 claim”），是否系统生成看 `source_kind`；随账号数据删除（plan 3.3、7.3）。
+
+**关联**：入口——建议详情 → `origin=suggestion`；个股页 → `from_stock`；候选信号详情 → `from_stock`（不记录来源信号，plan 第 9 节问题 69）；研究候选页手工新建 → `manual`；本版没有策略筛选入口。反查——建议详情用 `GET /candidates?suggestion_id=`，个股页与候选信号详情用 `?security_code=`；`Suggestion`、`CandidateSignal` 不加字段。计划——研究候选**不能**直接生成计划草案（`POST /plan-drafts` 仍只收 `signal_ids`）；`planned` 由系统在本人创建 `candidate_id` 指向该候选的操作计划时写入，`/plans` 结构未定（plan 第 9 节问题 59），本版实际不会出现 `planned`，前端仍要能显示。
+
 ### 7.8 建议卡、日报、提醒、复盘、通知
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -943,8 +993,8 @@ evidence: Evidence[]
 |---|---|---|
 | GET | `/admin/ingest/status` 🛡 | 只读：`{leader: {instance_id, egress_ip_masked: "203.0.113.x", lease_expires_at}, budget: {per_minute_limit: int, used_last_minute: int}（v0.2.6：全进程合计；按证书的明细见 `/admin/data-licences`）, queues: [{priority: "p0_intraday"\|"p1_daily"\|"p2_backfill", depth: int, oldest_age_s: int}], errors_24h: [{upstream_code: string, count: int}], ip_limit_alerts_24h: int, freshness: [{dataset, data_as_of, data_status}], licences: IngestLicenceStatus[], licences_truncated: boolean}`。**v0.2.8 不兼容变更**：删除原全站 `licence: {expires_on, days_left}`（它来自已停用的全站证书），改为按证书的 `licences[]`（§5.1 `IngestLicenceStatus`，与 `/admin/data-licences` 同名字段同义）：每张已设置的证书一行，`not_set` 的用户不列出；不分页，最多 500 行，超出时 `licences_truncated=true`，完整列表看 `/admin/data-licences`；排序：`status` 依次为 `invalid`、`ip_limited`、`quota_exceeded`、`expired`、`paused_by_admin`、`pending_verification`、`active`，同状态按 `days_left` 升序（null 在后），再按 `username`。顶层 `budget`、`queues`、`errors_24h` 仍是全部证书的合计。**不返回任何证书值、密文、HMAC 或其片段**；`per_minute_limit` 等数值 **待 T003 验证** |
 | POST | `/admin/ingest/pause` · `/admin/ingest/resume` 🛡 | 暂停或恢复外呼（迁移和冷备切换时使用，写审计） |
-| GET | `/admin/data-licences` 🛡 | 全部用户的数据证书状态（v0.2.6，分页）→ `AdminDataLicence[]`；**不返回证书值或任何片段** |
-| POST | `/admin/data-licences/{user_id}/pause` · `/admin/data-licences/{user_id}/resume` 🛡 | `{reason: string(1–200)}` → `204`；暂停后状态为 `paused_by_admin`，恢复后为 `pending_verification` 并重新验证；写审计；未设置 → `409 DATA_LICENCE_NOT_SET`。v0.2.8：暂停**按用户记录**，暂停期间用户 PUT 或 DELETE 证书都不解除（§7.1）；resume 时证书已在暂停期间被删除 → `204`，状态为 `not_set`。**重复暂停幂等（v0.2.8 补充，架构师裁定）**：用户已处于管理员暂停时再次 pause，不论证书是否已删除，都返回 `204`，暂停记录与状态不变，不返回 409；未暂停且未设置证书时 pause 仍为 `409 DATA_LICENCE_NOT_SET` |
+| GET | `/admin/data-licences` 🛡 | 全部用户的数据证书状态（v0.2.6，分页）→ `AdminDataLicence[]`；**不返回证书值或任何片段**。**排序与筛选（v0.2.9，T-F22 遗留 2）**：按用户 `created_at desc, id desc`；V1 没有服务端筛选参数，未定义的查询参数忽略，前端只在已加载的行上筛选（`?status=`、`?q=` 留待后续版本，plan 第 9 节问题 72）。**冷却（T-F22 遗留 4）**：不另设字段，冷却状态从 `status`（`quota_exceeded`/`ip_limited`）与 `paused_until` 看出；这两个字段 `AdminDataLicence`（经 `DataLicenceStatus`）与 `IngestLicenceStatus` 都已包含 |
+| POST | `/admin/data-licences/{user_id}/pause` · `/admin/data-licences/{user_id}/resume` 🛡 | `{reason: string(1–200)}` → `204`；暂停后状态为 `paused_by_admin`，恢复后为 `pending_verification` 并重新验证；写审计；未设置 → `409 DATA_LICENCE_NOT_SET`。v0.2.8：暂停**按用户记录**，暂停期间用户 PUT 或 DELETE 证书都不解除（§7.1）；resume 时证书已在暂停期间被删除 → `204`，状态为 `not_set`。**重复暂停幂等（v0.2.8 补充，架构师裁定）**：用户已处于管理员暂停时再次 pause，不论证书是否已删除，都返回 `204`，暂停记录与状态不变，不返回 409；未暂停且未设置证书时 pause 仍为 `409 DATA_LICENCE_NOT_SET`。**resume 幂等（v0.2.9，T-F22 遗留 1）**：已设置证书但未被管理员暂停时 resume → `204`，状态不变，不写审计、不写证书事件、不发通知（与重复暂停一致，重复暂停同样不写审计）；未暂停且未设置证书时 resume 仍为 `409 DATA_LICENCE_NOT_SET`。**理由与操作人（T-F22 遗留 3）**：本版不在任何接口返回暂停理由、操作人；管理员在 `GET /admin/audit-logs` 查看（审计 `action` 为 `data_licence.paused`/`data_licence.resumed`，`actor_id` 为操作人，`detail.reason` 为理由）；该接口的查询参数与元素结构尚未定义（plan 第 9 节问题 73）。**通知（T-F22 遗留 5，默认执行，plan 第 9 节问题 74）**：pause 或 resume 成功且该用户证书状态确实变化时（含暂停期间证书已删除、resume 后为 `not_set`），给该用户发一条站内通知：`kind="data_licence"`，`target.type="none"`，`severity` 暂停为 `attention`、恢复为 `info`，标题固定为“数据证书已被管理员暂停”或“数据证书已被管理员恢复”，正文为固定说明，**不含管理员填写的理由和管理员身份**；幂等的重复调用不发 |
 | GET/POST | `/admin/invites` 🛡 | 邀请码（v0.2.3 #27，T-B03c）：POST `{ttl_h: int \| null（默认 168，≤ 720）, bound_username: string \| null, note: string(≤200) \| null}` → `201 {id, code, expires_at, bound_username, note}`，**`code` 明文只在此响应出现一次**；GET 列表（分页）`{id, status: "active"\|"used"\|"expired"\|"revoked", created_by, created_at, expires_at, used_at, used_by, bound_username, note}`，不含明文或摘要；均写审计 |
 | DELETE | `/admin/invites/{id}` 🛡 | 吊销邀请码 → `204`；已用或已吊销 → `409 INVALID_STATE_TRANSITION`；只改状态，不物理删除 |
 | GET/PUT | `/admin/realtime-settings` 🛡 | 刷新间隔、分层上限（默认值 **待 T003 验证**） |
@@ -996,6 +1046,8 @@ evidence: Evidence[]
 | `report` | `{date}` | 日报已生成 |
 | `data_status` | `{dataset, data_status, data_as_of}` | 数据变旧或恢复（例如采集暂停） |
 | `data_licence` | `{status: data_licence_status, verification_id: uuid \| null, last_error_code: string \| null, at: datetime}` | 本人证书状态变化或验证完成（v0.2.6；不含证书值） |
+
+研究候选（v0.2.9 T-A11，§7.7A）没有 SSE 事件。
 
 ---
 
@@ -1079,7 +1131,7 @@ evidence: Evidence[]
   13. 前端路由：访问 `/` 重定向到 `/today`。
   14. 证书设置开关（v0.2.8 补充）：`DATA_LICENCE_SETTINGS_ENABLED=false` 时，`PUT`、`PATCH /me/data-licence` 和 `POST /me/data-licence/test` → `503 MAINTENANCE`，库中没有写入、没有验证任务入队；`GET` → `200`，`DELETE` → `204`；`APP_ENV=production` 且未设置该变量时同样为关闭；前端收到该 503 时显示“设置暂未开放”。
 - **v0.2.9 验收**（T-A10）：
-  1. `/meta/enums.version == "v0.2.9"`；`enums` 的键集合等于 §3 表名集合（比 v0.2.8 多 1 个 `candidate_signal_event_cause`，取值与顺序为 `executability_check` `reason_released` `user` `expiry` `invalidation` `supersede`）；前端 `CONTRACT_VERSION` 同步。
+  1. `/meta/enums.version == "v0.2.9"`；`enums` 的键集合等于 §3 表名集合（比 v0.2.8 多 4 个：T-A11 的 3 个见下方“v0.2.9 验收（T-A11）”第 1 条；`candidate_signal_event_cause` 取值与顺序为 `executability_check` `reason_released` `user` `expiry` `invalidation` `supersede`）；前端 `CONTRACT_VERSION` 同步。
   2. 可转债持仓：导入含可转债行的交割单（`import_as_is`）后，`/portfolio` 中该行 `security_type=null`、`estimated=true`、`market_value`/`pnl`/`pnl_pct` 为 `null`、`weight_pct` 等于成本估算值，顶层 `data_status="partial"`；股票与 ETF 行 `estimated=false` 且 `security_type` 非空；`/terminal` 同一持仓的 `holding` 字段一致；该行不产生候选信号、建议与风控止损事件。
   3. 候选信号事件：`/candidate-signals/{id}/events` 返回 `{items, next_cursor}`，按 `at desc, id desc`，翻页不重不漏；每个 `cause` 都在 `candidate_signal_event_cause` 内；确认草案后最新一条为 `{from:"drafted", to:"confirmed", cause:"user"}`；元素没有 `detail` 键。
   4. `NonExecutableReason` 列表与详情都有 `security_code`、`name`，与所属信号一致；不带 `status` 时只返回 `active`；`status=released` 只返回已解除；`status=all` 含 `active`、`released`、`obsolete`；带 `signal_ids=` 不带 `status` 时同样只返回 `active`。
@@ -1090,3 +1142,21 @@ evidence: Evidence[]
   9. 放弃草案：`POST /plan-drafts/{id}/discard` 请求体 `{}` → `200`、`status="discarded"`；请求体 `{"note": "示例"}` 同样成功，库中、审计和响应中都没有该备注；非 `pending` 草案 → `409 INVALID_STATE_TRANSITION`。
   10. 关闭注册（T-T23）：`registration_mode=closed` 时，正常请求体、非法 JSON、缺 `username`、`password` 为数字、带未知字段、命中蜜罐的请求体，一律 `503 REGISTRATION_CLOSED`，响应体相同，都不返回 400；`users` 无新增，不写蜜罐审计。
   11. 证书设置开关（T-T23）：`DATA_LICENCE_SETTINGS_ENABLED=false` 时，`PUT /me/data-licence` 格式错误（如 `licence` 含空白）→ `400 VALIDATION_ERROR`，格式正确 → `503 MAINTENANCE`；`PATCH` 带错误类型的 `tier` → `400`，格式正确 → `503`（未设置证书时也是 503，不是 409）；`POST /me/data-licence/test` → `503`；`GET` → `200`，`DELETE` → `204`。
+- **v0.2.9 验收**（T-A11 研究候选，§7.7A）：
+  1. 枚举：`/meta/enums` 含 `research_candidate_status`（`researching` `watching` `dropped` `planned`）、`research_candidate_origin`（`strategy_screen` `suggestion` `manual` `from_stock`）、`candidate_decision`（`continue` `watch` `drop`），取值与顺序同 §3，且与库表 CHECK 一致。
+  2. 只看本人：用户 A 的候选，用户 B 调 `GET /candidates/{id}`、`/versions`、`/versions/1`、`POST /candidates/{id}/versions` 都是 `404`；B 的 `GET /candidates`（含 `status=all`）不含 A 的候选；B 用 A 的建议 id 查 `?suggestion_id=` 得空列表；B 以 `origin=suggestion` 引用 A 的建议 → `400{field:"suggestion_id", issue:"not_found"}`，响应与引用不存在的 id 完全相同。
+  3. 新建：`manual` → `201`，`status="researching"`，`current_version.version_no=1`、`decision=null`，`conditions_to_hold` 每条 `epistemic_type="hypothesis"`；同一 `Idempotency-Key` 同体重放返回同一候选、不新增行；`origin=strategy_screen` → `400{issue:"not_supported"}`；ETF、指数 → `400{issue:"security_type_not_supported"}`；未知代码 → `400{issue:"unknown_security"}`；条件既无 `verify_by` 也无 `verify_method` → `400{issue:"verification_required"}`；`origin=suggestion` 带不一致的 `security_code` → `400{issue:"mismatch"}`。
+  4. 重复：同一用户同一证券已有 `researching` 或 `watching` 的候选 → `409 CONFLICT{field:"security_code", existing_id}`，`existing_id` 为该候选；并发两个 `POST` 只有一个 `201`；该候选 `drop` 后再建 → `201`；不同用户的同一证券互不影响。
+  5. 版本与决定：正确的 `base_version_no` + `decision=watch` + 理由 → `201`，`status="watching"`、`version_no` 加 1，旧版本内容逐字不变；过期的 `base_version_no` → `409 VERSION_CONFLICT{current_version_no}`；`decision` 非 null 而无理由、或 `decision=null` 带理由 → `400`；不带 `decision` 的新版本状态不变；`drop` 后再建版本 → `409 INVALID_STATE_TRANSITION`，`from="dropped"`、`allowed=[]`。
+  6. 不可变：对 `/candidates/{id}`、`/candidates/{id}/versions/{n}` 调 `PUT`、`PATCH`、`DELETE` → `405` 且带 `Allow` 头；直接在库中 `UPDATE`/`DELETE` `candidate_versions` 被触发器拒绝。
+  7. 回看：建第 1 版后改变数据（如证券 `risk_flag`、本人持仓变化），`GET /versions/1` 的 `reasons`、`counter_evidence`、`fit_assessment`、`evidence` 与创建时逐字相同；新建第 2 版才反映新数据。
+  8. 系统内容：`origin=suggestion` 的 `reasons`、`counter_evidence` 每条都能在来源建议的 `strategies[].reasons`、`strategies[].counter_evidence` 或 `risk_flags` 中找到同文，`evidence_ids` 都能在本版本 `evidence[]` 中解析；`manual` 的 `reasons=[]`；画像未填写 → `profile_filled=false`、`hints=[]`；未导入持仓 → `holdings_available=false`，`warnings` 中没有持仓类提示。
+  9. 隐私与删除：候选版本对应的 `data_snapshots` 行 `user_id` 为本人；关联的 `claims` 行 `user_id` 为本人（不为 null）；本人证书不可用时 `data_status` 降级，内容中没有任何来自他人证书的数据；对该用户运行账号数据删除后，`research_candidates`、`candidate_versions`、对应的 `claim_links` 与 `claims` 都为 0 行。
+  10. 列表：不带 `status` 时不含 `dropped`；`status=dropped` 只含 `dropped`；`status=all` 全部；非法值 → `400`；§1.2 分页按 `created_at desc, id desc` 翻页不重不漏；`origin=`、`security_code=`、`suggestion_id=` 过滤生效。
+  11. 无通知、无草案：新建候选、新建版本、`drop` 都不产生 `notifications` 行，也没有 SSE 事件；研究候选的状态在本版不会变为 `planned`，`plan_ids=[]`、`strategy_run_id=null`。
+- **v0.2.9 验收**（T-F22 管理端证书遗留，§7.9）：
+  1. resume 幂等：用户已设置证书且未被管理员暂停（如 `active`）时 resume → `204`，`status`、`paused_until` 不变，`audit_logs`、证书事件表、`notifications` 都没有新增行；未暂停且未设置证书时 resume → `409 DATA_LICENCE_NOT_SET`。
+  2. 列表排序：多个用户 `created_at` 不同时按 `created_at desc`，相同时按 `id desc`；带 `?status=paused_by_admin&q=示例` 的结果与不带参数时相同。
+  3. 理由不外露：以虚构理由“示例理由”pause 后，`/admin/data-licences`、`/admin/ingest/status`、`/me/data-licence`、该用户的通知与 SSE 的响应全文都不含该理由与管理员用户名；`audit_logs` 中有一条 `action="data_licence.paused"`、`detail.reason` 为该理由的记录。
+  4. 冷却：回放上游 101 后，同一证书在 `/admin/data-licences` 与 `/admin/ingest/status` 中都是 `status="quota_exceeded"`，`paused_until` 非 null 且两处相等。
+  5. 通知：`active` 时 pause → 该用户新增 1 条通知，`kind="data_licence"`、标题“数据证书已被管理员暂停”、`target.type="none"`，正文不含理由；再次 pause → 不新增；resume → 新增 1 条“数据证书已被管理员恢复”；再次 resume → 不新增；暂停期间删除证书后 resume → 状态为 `not_set`，新增 1 条恢复通知；其他用户没有任何新增通知。

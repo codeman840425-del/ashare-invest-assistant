@@ -1323,7 +1323,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 **证据**
 | 表 | 关键字段 |
 |---|---|
-| `claims` | id, user_id(null=系统生成), security_code, statement(text), epistemic_type, source_kind, source_ref(jsonb: {provider, endpoint, params, fetched_at, url}), value(jsonb, 可选: {metric, number, unit, as_of}), method_note(估算方法), verify_by(date, 假设的验证日期), confidence, created_at — **不可变**（更正=新 claim + `supersedes_claim_id`） |
+| `claims` | id, user_id(null=系统生成；T-A11 / 契约 v0.2.9：为某用户研究候选生成的、或用到某用户证书数据的 claim 一律写该用户 user_id，是否系统生成看 source_kind), security_code, statement(text), epistemic_type, source_kind, source_ref(jsonb: {provider, endpoint, params, fetched_at, url}), value(jsonb, 可选: {metric, number, unit, as_of}), method_note(估算方法), verify_by(date, 假设的验证日期), confidence, created_at — **不可变**（更正=新 claim + `supersedes_claim_id`） |
 | `claim_links` | claim_id, target_type(candidate_version/plan_version/review_version/alert), target_id, role(reason/counter/risk/invalidation/outcome) |
 
 **行动计划**
@@ -2840,7 +2840,7 @@ admin:
     3. 延迟约束触发器按行检查：某行只要在本事务中被置为过 `purging`，提交时这个 `id` 就必须已不存在于 `app.users`，否则拒绝提交（不再依赖“全表是否还有 `purging` 行”的检查）。
     4. “不得用维护会话或专用角色绕过触发器”不变；`aia_maint` 只是能写入 `purging`，不影响触发器对它的判定。
     5. 运维更新 `deploy/db/roles/grants.sql` 与 `verify-roles.sh`：`aia_maint` 只授予 CLI 必需的权限；`aia_api`、`aia_ingest` 对 `ops.pending_file_purges` 没有任何权限；`verify-roles.sh` 断言 `aia_api` 在一个事务里执行“置 `purging` → 删除 → 改回 → 提交”会失败。
-  - **物理删除**（个人财务数据和由它派生的数据）：持仓、成交（`app.trades`）、导入批次与解析行、证书（`ops.data_licences`，含密文）、画像（`app.user_profiles`）、自选、策略实例、候选信号（含各分区）、`signal_events`、`suggestions`、`suggestion_user_actions`、`plan_drafts`、`plan_draft_confirmations`、`risk_events`、风控设置及其历史、`claims`、`symbol_horizon_assessments`、`daily_reports`、通知、会话。另外删除用该用户证书取到的 `market.*` 行（按 `source_licence_id`）以及对应的 Redis 键。
+  - **物理删除**（个人财务数据和由它派生的数据）：持仓、成交（`app.trades`）、导入批次与解析行、证书（`ops.data_licences`，含密文）、画像（`app.user_profiles`）、自选、策略实例、候选信号（含各分区）、`signal_events`、`suggestions`、`suggestion_user_actions`、`plan_drafts`、`plan_draft_confirmations`、`risk_events`、风控设置及其历史、`claims` 与 `claim_links`、研究候选（`research_candidates`、`candidate_versions`；T-A11 同步，后端已删）、`symbol_horizon_assessments`、`daily_reports`、通知、会话。另外删除用该用户证书取到的 `market.*` 行（按 `source_licence_id`）以及对应的 Redis 键。
   - **匿名化保留**（有不可变要求的审计和日志表）：`app.audit_logs`、`app.account_reviews`、`ops.data_licence_events`、`ops.ingest_request_log`。
     - 断开关联：`user_id`、`actor_id`、`target_id` 中指向该用户的值置为 NULL，相关列由迁移改为可空。
     - 清空：用户名、显示名、申请说明、`user_agent`；IP 截断到 IPv4 /24、IPv6 /48。
@@ -3043,7 +3043,7 @@ admin:
 ### Phase 3：其他能力（约 3 周）
 | ID | 任务 | 角色 | 依赖 |
 |---|---|---|---|
-| T-B10 | 研究候选（版本化）+ 用户决定；从策略筛选结果创建候选 | 后端 | T-B20 |
+| T-B10 | 研究候选（版本化）+ 用户决定；从策略筛选结果创建候选（契约 v0.2.9 T-A11：接口见契约 §7.7A；本版只开放 manual/from_stock/suggestion 三种来源，策略筛选来源待 `/factor/screen` 定义，问题 69） | 后端 | T-B20 |
 | T-B11 | 行动计划（版本化、条件、完整性检查、仓位计算器）；计划只能由计划草案确认生成（T-B34）或手动新建；计划条件 → RC6 检查 | 后端 | T-B21 |
 | T-B12 | 用户自定义提醒规则（价格/事件），接入信号引擎与通知 | 后端 | T-B23, T-B26 |
 | T-B13 | 今日关注 `/today` 聚合（含契约 v0.2.7 的 alerts、plan_triggers、data_gaps、evidence 与 `risk_event_id`） | 后端 | T-B24 |
@@ -3220,6 +3220,15 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 63. **【编排者已定 2026-11-02】交割单中的可转债按 `import_as_is` 导入后，持仓如何展示**：导入时保留原代码；展示标注“可转债·无行情”，现价、市值显示“—”；总仓位与集中度按成本估算并标注“估算”；不跑策略、不出信号、不进入风控止损计算。契约 v0.2.9 已同步（U3 已定）：持仓行 `security_type=null`、`estimated=true`，`market_value`/`pnl`/`pnl_pct` 为 `null`，`weight_pct` 按成本估算。
 64. **【暂按默认，补测后复核；U4】只有钻石版过期后有值，其余为 null】各档位麦蕊日额度（`/admin/ingest/status` 的 `daily_limit`）**。需要谁定：T003 补测。
 65. **【暂按默认；U5】不改，保持 `no_source`】指数的财务、资金流是否也改用 `not_applicable`**。需要谁定：架构师。
+66. **【默认执行，T-A11 新增，用户可改】同一证券同时只能有一个进行中的研究候选**：本人同一证券已有 `researching`/`watching` 的候选时再建 → `409 CONFLICT`，响应带已有候选的 id；放弃或已转计划的不算。需要谁定：用户（产品）。
+67. **【默认执行，T-A11 新增，用户可改】“放弃”与“已转计划”的研究候选不能恢复，也不能删除**：要重新研究就新建候选，旧候选及其版本历史保留；物理删除只随账号数据删除。需要谁定：用户（产品）。
+68. **【默认执行，T-A11 新增，用户可改】研究候选的决定理由为自由文本（1–200 字），没有预设选项**（2.4 写“必须选理由”，但未定义选项）。需要谁定：用户（产品）。
+69. **【默认执行，T-A11 新增，用户可改】研究候选本版只开放手工、个股页、建议三种来源**：候选信号页的入口按“个股页”处理，不记录来源信号；策略筛选来源等 `/factor/screen` 接口定义后再开放；不开放独立的 claims 接口。需要谁定：用户（产品）；`/factor/screen` 由架构师另立任务。
+70. **【默认执行，T-A11 新增，用户可改】ETF 与指数不能加入研究候选**（与 ETF 不进入策略的口径一致）。需要谁定：用户（产品）。
+71. **【默认执行，T-A11 新增，用户可改】研究候选列表默认不显示已放弃的候选；研究候选没有通知与 SSE 事件**。需要谁定：用户（产品）。
+72. **【后续版本，T-F22 遗留 2】管理端证书列表的服务端筛选**：V1 不加，前端只在已加载的行上筛选；用户多时再加 `?status=`（可多值）与 `?q=`（用户名）。需要谁定：架构师（后续版本）。
+73. **【未决，T-F22 遗留 3】`GET /admin/audit-logs` 的查询参数与元素结构未定义**：本版管理员通过审计查看证书暂停的理由与操作人（`data_licence.paused`/`data_licence.resumed`），不在证书接口中返回。需要谁定：架构师。
+74. **【默认执行，T-F22 遗留 5，用户可改】管理员暂停或恢复数据证书时通知用户**：状态确实变化时发一条 `data_licence` 站内通知（标题“数据证书已被管理员暂停”或“…已恢复”），正文不含管理员填写的理由；幂等的重复调用不发。需要谁定：用户（产品）。
 
 **I. 编排者默认（2026-11-01 12:32）——【编排者默认，用户可否决】**
 - **C(1) 首批 P0 策略**：G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01（研究员 `docs/strategies/catalog.md` 第 2 节总表；取代早期方案中 2.5.10 的 ①–⑨ MVP 模板清单）。引擎接口覆盖核对与缺口见 2.5.11A。
@@ -3242,4 +3251,4 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 - `config/*.yaml` 的文件清单、键与默认值以 6.1 为准；文件由后端创建。（T-A09 更正：原文“五个文件”是 T-A01 时的数目——`realtime`、`ingest`、`market_rules`、`risk_controls`、`horizon_classifier`；之后 6.1 又加了 `llm`、`imports`、`auth`、`securities`（契约 v0.2.7），现共 9 个。）
 - 仍需运维决定（不属于契约）：nginx `proxy_pass` 尾斜杠导致 `/api` 前缀被去掉（T-B01 §4.1），建议去掉尾斜杠，保持 `/api/v1`。
 
-**仍待定的问题汇总**：T-A08 问题 51–60 中，51、53 已定（53 已在契约 v0.2.8 同步）；54–57、59 按默认执行（59 的 `/alerts`、`/plans` 完整结构仍待架构师定义）；52、58、60 暂按默认，补测后复核；T-A09 新增问题 61–65（契约 v0.2.8 未决 U1–U5，均有默认，62、64 补测后复核；63 已定并于契约 v0.2.9 同步）；T-A10 的前端遗留待定项 P01–P21 与测试 T-T23 的三项裁定已在契约 v0.2.9 同步，无新增待定问题；77/82/85 个因子的口径【待 T003 补测核实】、交易规则 2023-04-10 之前未建模及深交所条款逐字核对（问题 36）；【风险提示，未决】朋友属于第三方：朋友的敏感个人信息、咨询资质、律师书面意见（问题 48；麦蕊再分发改由每人自用证书解决，问题 49）；**麦蕊证书归属、代运营、同 IP 多证书与共享缓存【待麦蕊书面确认】（问题 50）**；（问题 38–42 已于 2026-11-02 作废，见问题 43–47）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法（问题 19，待脱敏范本；分红计入摊薄成本已定）；另见 2.5.14 H（续）末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning，以及 ST 10%、T+1 hold 阈值 1.0%、分红计入摊薄成本已于 2026-11-01 拍板。）
+**仍待定的问题汇总**：T-A08 问题 51–60 中，51、53 已定（53 已在契约 v0.2.8 同步）；54–57、59 按默认执行（59 的 `/alerts`、`/plans` 完整结构仍待架构师定义）；52、58、60 暂按默认，补测后复核；T-A09 新增问题 61–65（契约 v0.2.8 未决 U1–U5，均有默认，62、64 补测后复核；63 已定并于契约 v0.2.9 同步）；T-A10 的前端遗留待定项 P01–P21 与测试 T-T23 的三项裁定已在契约 v0.2.9 同步，无新增待定问题；T-A11（研究候选接口）新增问题 66–71、T-F22 管理端证书遗留新增问题 72–74（66–71、74 默认执行，72 留待后续版本，73 未决；契约 v0.2.9 #19–#26）；77/82/85 个因子的口径【待 T003 补测核实】、交易规则 2023-04-10 之前未建模及深交所条款逐字核对（问题 36）；【风险提示，未决】朋友属于第三方：朋友的敏感个人信息、咨询资质、律师书面意见（问题 48；麦蕊再分发改由每人自用证书解决，问题 49）；**麦蕊证书归属、代运营、同 IP 多证书与共享缓存【待麦蕊书面确认】（问题 50）**；（问题 38–42 已于 2026-11-02 作废，见问题 43–47）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法（问题 19，待脱敏范本；分红计入摊薄成本已定）；另见 2.5.14 H（续）末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning，以及 ST 10%、T+1 hold 阈值 1.0%、分红计入摊薄成本已于 2026-11-01 拍板。）

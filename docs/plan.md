@@ -709,8 +709,9 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 **候选信号 `candidate_signals`**（不可变正文 + 头表状态）
 - 正文包括：实例与模板版本、证券、`state`、`proposed_action`、`t_leg`、分数、置信度、`stops`、`rule_refs[]`、`evidence[]`、`counter_evidence[]`、`invalidation[]`、`model_refs[]`（`role=auxiliary`）、`gate_results`、`risk_flags`、`snapshot_id`、`valid_until`（计划有效期，按周期默认：做T 为当日 14:50，短线为下一交易日收盘，波段为 5 个交易日，中长线为 20 个交易日，可在模板中配置）。
 - 状态：
-  - 初始 `open`，经可执行性检查后进入 `drafted` 或 `blocked`；
-  - `blocked` 在原因解除后进入 `released`，重新检查后回到 `drafted` 或 `blocked`；
+  - 初始 `open`；可执行性检查发现生效原因时进入 `blocked`，不会自动进入 `drafted`；
+  - `blocked` 在原因解除后进入 `released`，重新检查后可能再次进入 `blocked`；
+  - `open`、`released`、`drafted` 只有在用户拟草案（POST /plan-drafts，cause=user）时才进入或保持 `drafted`；判定顺序见契约 §7.7（v0.2.9 #30、#37）；
   - `drafted` 经用户确认后为 `confirmed`；
   - 终止状态：`dismissed`（用户）、`expired`、`invalidated`（失效条件触发）、`superseded`（同实例、同证券出现更新的信号）。
 - 状态变化写入 `candidate_signal_events`（只追加）。

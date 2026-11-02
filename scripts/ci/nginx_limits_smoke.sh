@@ -26,7 +26,8 @@ ok()  { echo "OK   $*"; }
 bad() { echo "FAIL $*"; fail=1; }
 start_gw() {  # $1 = limits 文件
   docker rm -f "$id-gw" >/dev/null 2>&1 || true
-  docker run -d --name "$id-gw" --network "$net" -p 127.0.0.1::80 \
+  # --dns 127.0.0.1 与 compose 的 nginx dns 一致（断开外部 DNS）
+  docker run -d --name "$id-gw" --network "$net" --dns 127.0.0.1 -p 127.0.0.1::80 \
     -v "$ROOT/deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$1:/etc/nginx/aia-limits.conf:ro" "$IMG" >/dev/null
   for _ in $(seq 1 30); do
     port="$(docker port "$id-gw" 80/tcp 2>/dev/null | head -1 | sed 's/.*://')"
@@ -127,10 +128,13 @@ PY
   local old new code t
   old="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$id-api")"
   docker rm -f "$id-api" >/dev/null
-  # 一般主机上名字查不到 → nginx 502；若宿主 DNS 对未知名字给假 IP（如沙箱的 198.18.0.0/15），会是出口代理的错误码。
-  # 两种都只要求：不是 200、也不是桩应答。
+  # 网关断开了外部 DNS（--dns 127.0.0.1）：名字查不到 → nginx 自己 502，不会被宿主 DNS 解析到外部地址
+  # （以前在给未知名字假 IP 的宿主上，这里会是出口代理的应答）。
   code="$(curl -s -o /dev/null -D "$h" -w '%{http_code}' "$base/health/live")"
-  [ "$code" != 200 ] && ! grep -qi '^X-Stub' "$h" && ok "上游删除 → $code（不再连旧 IP）" || bad "上游删除后仍 $code"
+  [ "$code" = 502 ] && ! grep -qi '^X-Stub' "$h" && ok "上游删除 → 502（不再连旧 IP，也没有解析到外部）" || bad "上游删除后是 $code（应为网关 502）"
+  docker exec "$id-gw" sh -c 'nslookup aia-no-such-host-o13 127.0.0.11 2>&1' > "$work/ns.txt" || true
+  ! grep -q '^Address: [0-9]' <(grep -v '#53' "$work/ns.txt") && ok "网关里未知名字解析失败（外部 DNS 已断开）" \
+    || bad "网关里未知名字被解析成 $(grep '^Address' "$work/ns.txt" | tail -1)"
   docker run -d --name "$id-filler" --network "$net" --entrypoint sleep "$IMG" 300 >/dev/null
   start_stub
   new="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$id-api")"

@@ -25,6 +25,8 @@
      map $host $aia_api_upstream 的 default 为 "api:8000"；每一处 proxy_pass 都是 http://$aia_api_upstream，
      不带 URI（原样转发）或带 URI 时以 $is_args$args 结尾（变量形式不会自动追加参数）。
   9. compose：基础文件 nginx 健康检查经 nginx 探上游 /health/live（不是自答的 /healthz）；dev 叠加文件不得覆盖 healthcheck。
+     基础文件 nginx 的 dns 必须且只能是 127.0.0.1（断开外部 DNS：上游停机时未知名字不会被宿主 DNS 解析到外部地址）；
+     dev 叠加文件不得覆盖 dns。
 请求行 / 请求头过长（T-D，T-live-0f8129b F-1；与 413 同一信封）：
   10. nginx.conf：server 级显式写且只写一条 large_client_header_buffers N SIZE；
       error_page 414 指向内部 URI location（不能是命名 location：读请求行阶段 URI 尚未解析，跳命名 location 会变 500），
@@ -237,6 +239,7 @@ RESOLVER_RE = re.compile(r"^\s*resolver\s+([^;]*);", re.M)
 PROXY_PASS_RE = re.compile(r"^\s*proxy_pass\s+(\S+)\s*;", re.M)
 UPSTREAM_VAR = "$aia_api_upstream"
 UPSTREAM_HOST = "api:8000"
+NGINX_DNS = "127.0.0.1"
 
 
 def check_dynamic_upstream(repo: Path) -> list[str]:
@@ -278,15 +281,22 @@ def check_dynamic_upstream(repo: Path) -> list[str]:
             continue
         nginx = ((yaml.safe_load(cf.read_text(encoding="utf-8")) or {}).get("services") or {}).get("nginx") or {}
         hc = nginx.get("healthcheck")
+        dns = nginx.get("dns")
         if rel == COMPOSE_DEV:
             if hc is not None:
                 errors.append(f"{rel}: dev 叠加文件不得覆盖 nginx healthcheck（应与基础文件一致探上游 /health/live）")
+            if dns is not None:
+                errors.append(f"{rel}: dev 叠加文件不得覆盖 nginx dns（基础文件断开外部 DNS）")
             continue
+        dns_list = [dns] if isinstance(dns, str) else dns
+        if dns_list != [NGINX_DNS]:
+            errors.append(f"{rel}: nginx 必须设 dns: [{NGINX_DNS}]（断开外部 DNS；否则上游停机时未知名字会被宿主 DNS 解析到外部地址，"
+                          f"请求带着 Cookie 出本机）（实际：{dns!r}）")
         test = " ".join(hc.get("test") or []) if isinstance(hc, dict) and isinstance(hc.get("test"), list) else str((hc or {}).get("test", ""))
         if "http://127.0.0.1/health/live" not in test:
             errors.append(f"{rel}: nginx healthcheck 必须经 nginx 探上游 http://127.0.0.1/health/live（实际：{test or '无'}）")
     if not errors:
-        print(f"OK   上游动态解析：resolver 127.0.0.11，{len(targets)} 处 proxy_pass 全部经 {UPSTREAM_VAR}；nginx 健康检查探上游 /health/live")
+        print(f"OK   上游动态解析：resolver 127.0.0.11，{len(targets)} 处 proxy_pass 全部经 {UPSTREAM_VAR}；nginx 健康检查探上游 /health/live；外部 DNS 已断开")
     return errors
 
 

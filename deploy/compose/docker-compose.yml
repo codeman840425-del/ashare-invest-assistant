@@ -84,6 +84,12 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    # 外部 DNS 断开（T-O13 补）：nginx 只需解析同网络的服务名（api），由 Docker 内置 DNS 127.0.0.11 直接回答；
+    # 查不到的名字（例如 api 停机/重建的那几秒）内置 DNS 会转发给容器的上游 DNS。默认上游是宿主 DNS，
+    # 宿主若对未知名字给假 IP（沙箱的 198.18.0.0/15、某些运营商的劫持页），nginx 会把带 Cookie 的请求发到外部。
+    # 上游设成容器内无人监听的 127.0.0.1 → 外部名字一律 SERVFAIL → nginx 502，请求不出本机；服务名解析不受影响。
+    dns:
+      - 127.0.0.1
     # 健康检查（T-O13）：经 nginx 探上游 /health/live（= 后端 /api/v1/health/live），而不是 nginx 自答的 /healthz。
     # 上游挂了或 nginx 连不上上游（502/504）→ unhealthy；上游恢复后（resolver 每 10s 重新解析）自动回到 healthy。
     # 不加 restart/autoheal：unhealthy 只用于告警与 compose --wait，nginx 本身不需要重启。

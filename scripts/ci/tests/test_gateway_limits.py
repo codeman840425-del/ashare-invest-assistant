@@ -151,6 +151,12 @@ def test_repo_dynamic_upstream_ok(gw_repo: Path) -> None:
     (cgl.COMPOSE_DEV, "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n",
      "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n    healthcheck:\n      test: [\"CMD\", \"true\"]\n",
      "不得覆盖 nginx healthcheck"),
+    # 外部 DNS 断开（T-O13 补）
+    (cgl.COMPOSE_BASE, "    dns:\n      - 127.0.0.1\n", "", "dns: [127.0.0.1]"),
+    (cgl.COMPOSE_BASE, "    dns:\n      - 127.0.0.1\n", "    dns:\n      - 8.8.8.8\n", "dns: [127.0.0.1]"),
+    (cgl.COMPOSE_BASE, "    dns:\n      - 127.0.0.1\n", "    dns:\n      - 127.0.0.1\n      - 1.1.1.1\n", "dns: [127.0.0.1]"),
+    (cgl.COMPOSE_DEV, "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n",
+     "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n    dns: 1.1.1.1\n", "不得覆盖 nginx dns"),
 ])
 def test_dynamic_upstream_negative(gw_repo: Path, rel: str, old: str, new: str, needle: str) -> None:
     _sub(gw_repo, rel, old, new)
@@ -204,3 +210,8 @@ def test_header_limits_in_cli(gw_repo: Path) -> None:
     r = subprocess.run([sys.executable, str(CI_DIR / "check_gateway_limits.py"), "--repo", str(gw_repo)],
                        capture_output=True, text=True)
     assert r.returncode == 1 and "命名 location" in r.stdout, r.stdout
+
+
+def test_dynamic_upstream_dns_string_form_ok(gw_repo: Path) -> None:
+    _sub(gw_repo, cgl.COMPOSE_BASE, "    dns:\n      - 127.0.0.1\n", "    dns: 127.0.0.1\n")
+    assert cgl.check_dynamic_upstream(gw_repo) == []

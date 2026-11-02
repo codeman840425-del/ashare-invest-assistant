@@ -2,7 +2,7 @@
 # 验收分库角色（T-O10）：aia_api 读密文列必须 permission denied，读其余列/状态视图正常；aia_ingest 可读密文列。
 # T-O11（评审 45589c2 m3、plan §7.3）：aia_api / aia_ingest 对 ops.pending_file_purges 无任何权限；
 #   “置 purging → 删不可变行 → 改回 → 提交”的攻击序列必须失败（只有失败才算通过）；aia_maint 只有 CLI 所需权限，
-#   且它自己也不能把 purging 改回、不能不删行就提交。
+#   且它自己也不能把 purging 改回、不能不删行就提交；aia_maint 必须 LOGIN，aia_api/aia_ingest 不得是其成员。
 # T-O10 部分只读（SELECT … LIMIT 0）。T-O11 的事务用例会插入名为 t_o11_<随机> 的探针用户：失败的序列整体回滚；
 #   需要落库的探针最后用正规删除路径（aia_maint：purging → 删 → 提交）清掉，并用属主连接确认无残留。
 #   属主连接 = 调用方的 PGUSER/PGPASSWORD（compose db-roles / CI 都是库属主）。连接参数同 apply-roles.sh（PGHOST/PGPORT/PGDATABASE；口令目录 AIA_DB_ROLE_PASSWORD_DIR）。
@@ -66,7 +66,7 @@ fi
 # 1) api / ingest 对待清文件队列无任何权限
 for r in aia_api aia_ingest; do
   expect_denied "$r" "SELECT * FROM ops.pending_file_purges LIMIT 0"
-  expect_denied "$r" "INSERT INTO ops.pending_file_purges (path) VALUES ('/t_o11_probe')"
+  expect_denied "$r" "BEGIN; INSERT INTO ops.pending_file_purges (path) VALUES ('/t_o11_probe'); ROLLBACK;"   # 万一有权也不落库
   expect_denied "$r" "UPDATE ops.pending_file_purges SET attempts = attempts WHERE false"
   expect_denied "$r" "DELETE FROM ops.pending_file_purges WHERE false"
 done
@@ -114,7 +114,8 @@ COMMIT;
 SQL
 )"
 expect_tx_ok aia_maint "正规删除：purging→删画像→删用户→提交" "$(purge_sql "$u")"
-[ "$(probe_left "$u")" = 0 ] || { echo "FAIL 探针用户 $u 未被正规删除路径清掉"; fail=1; }
+[ "$(probe_left "$u")" = 0 ] || { echo "FAIL 探针用户 $u 未被正规删除路径清掉（已用属主连接清理）"; fail=1
+  own -c "BEGIN; SET LOCAL ROLE aia_maint; $(purge_sql "$u" | sed '1d;$d') COMMIT;" >/dev/null || true; }
 
 # 4) aia_maint 最小权限
 expect_ok     aia_maint "SELECT * FROM ops.pending_file_purges LIMIT 0"
@@ -124,6 +125,24 @@ expect_denied aia_maint "INSERT INTO app.trades DEFAULT VALUES"
 expect_denied aia_maint "TRUNCATE ops.pending_file_purges"
 expect_denied aia_maint "SELECT * FROM ops.ingest_leases LIMIT 0"
 expect_denied aia_maint "CREATE TABLE app.t_o11_probe (x int)"
+# 5) 角色关系（架构师 T-O11 细化裁定）：aia_maint 有 LOGIN；aia_api / aia_ingest 不是它的成员（含间接），
+#    也不能 SET ROLE 过去；aia_maint 自己不属于任何角色、也没有任何成员
+expect_attr() {   # $1 说明  $2 属主连接执行的布尔 SQL，必须为 t
+  local v; v="$(own -c "$2")"
+  if [ "$v" = t ]; then echo "OK   $1"; else echo "FAIL $1（断言不成立：SQL 结果 $v，应为 t）"; fail=1; fi
+}
+expect_attr "aia_maint rolcanlogin = true" \
+  "SELECT coalesce((SELECT rolcanlogin FROM pg_roles WHERE rolname = 'aia_maint'), false)"
+for r in aia_api aia_ingest; do
+  expect_attr "pg_has_role('$r','aia_maint','MEMBER') = false" \
+    "SELECT NOT pg_has_role('$r', 'aia_maint', 'MEMBER')"
+  if out="$(as "$r" -c "SET ROLE aia_maint")"; then echo "FAIL $r 不应能 SET ROLE aia_maint"; fail=1
+  elif grep -q 'permission denied' <<<"$out"; then echo "OK   $r permission denied: SET ROLE aia_maint"
+  else echo "FAIL $r SET ROLE aia_maint 预期 permission denied，实际: $out"; fail=1; fi
+done
+expect_attr "aia_maint 没有成员、也不属于任何角色（pg_auth_members）" \
+  "SELECT NOT EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.rolname = 'aia_maint' WHERE m.roleid = r.oid OR m.member = r.oid)"
+
 [ "$(own -c "SELECT count(*) FROM app.users WHERE username LIKE 't\_o11\_%'")" = 0 ] \
   || { echo "FAIL 仍有 t_o11_ 探针用户残留"; fail=1; }
 exit "$fail"

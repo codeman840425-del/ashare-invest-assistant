@@ -44,6 +44,41 @@ ALTER ROLE aia_maint  PASSWORD :'maint_pw';
 RESET log_min_duration_statement;
 RESET log_statement;
 
+-- T-O11（架构师细化裁定）：aia_maint 的成员关系必须在任何授权和自检之前撤清——若 aia_api / aia_ingest
+-- 是 aia_maint 的成员，它们就能经 aia_maint 读到密文列、动待清队列，后面 $grants$ 的自检也会先报错。
+DO $maint_members$
+DECLARE
+  r record;
+BEGIN
+  -- 不允许任何角色成员身份（NOINHERIT 之外再收一道）。PG16 起成员关系按授予者分别记录，
+  -- 所以逐条带 GRANTED BY 撤销（apply-roles 以库超级用户身份执行，可代任何授予者撤销）。
+  -- (1) aia_maint 自己不属于任何角色
+  FOR r IN SELECT g.rolname AS grp, gr.rolname AS grantor
+             FROM pg_auth_members m
+             JOIN pg_roles g  ON g.oid  = m.roleid
+             JOIN pg_roles gr ON gr.oid = m.grantor
+            WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'aia_maint') LOOP
+    EXECUTE format('REVOKE %I FROM aia_maint GRANTED BY %I CASCADE', r.grp, r.grantor);
+  END LOOP;
+  -- (2) 任何角色（至少 aia_api、aia_ingest）都不得是 aia_maint 的成员：否则 api/ingest 进程
+  --     可 SET ROLE aia_maint 拿到删除权限。撤掉 aia_maint 的全部直接成员，间接链也随之断开。
+  FOR r IN SELECT mb.rolname AS member, gr.rolname AS grantor
+             FROM pg_auth_members m
+             JOIN pg_roles mb ON mb.oid = m.member
+             JOIN pg_roles gr ON gr.oid = m.grantor
+            WHERE m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'aia_maint') LOOP
+    -- 前面某条 CASCADE 可能已连带撤掉这一条
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_auth_members m2
+                               WHERE m2.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'aia_maint')
+                                 AND m2.member = (SELECT oid FROM pg_roles WHERE rolname = r.member)
+                                 AND m2.grantor = (SELECT oid FROM pg_roles WHERE rolname = r.grantor));
+    -- CASCADE：连同经其 ADMIN OPTION 转授出去的成员关系一起撤
+    EXECUTE format('REVOKE aia_maint FROM %I GRANTED BY %I CASCADE', r.member, r.grantor);
+    RAISE NOTICE 'db-roles: 已撤销 % 的 aia_maint 成员身份', r.member;
+  END LOOP;
+END
+$maint_members$;
+
 DO $grants$
 DECLARE
   owner_role text := current_user;
@@ -135,11 +170,7 @@ DECLARE
   p          text;
 BEGIN
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO aia_maint', current_database());
-  -- 不允许任何角色成员身份（NOINHERIT 之外再收一道）
-  FOR r IN SELECT g.rolname FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
-            WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'aia_maint') LOOP
-    EXECUTE format('REVOKE %I FROM aia_maint', r.rolname);
-  END LOOP;
+  -- 成员关系已在授权之前由 $maint_members$ 撤清（见文件前部），这里只在末尾自检。
 
   FOR t IN SELECT unnest(ARRAY['app', 'ops', 'market']) LOOP
     IF to_regnamespace(t) IS NULL THEN CONTINUE; END IF;
@@ -207,6 +238,19 @@ BEGIN
         END IF;
       END LOOP;
     END LOOP;
+  END IF;
+  -- 成员关系自检：aia_maint 没有成员、也不属于任何角色；api/ingest 不能经任何链条取得 aia_maint
+  IF EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles r2 ON r2.rolname = 'aia_maint'
+              WHERE m.roleid = r2.oid OR m.member = r2.oid) THEN
+    RAISE EXCEPTION 'db-roles: aia_maint 仍有角色成员关系';
+  END IF;
+  FOREACH t IN ARRAY ARRAY['aia_api', 'aia_ingest'] LOOP
+    IF pg_has_role(t, 'aia_maint', 'MEMBER') THEN
+      RAISE EXCEPTION 'db-roles: % 仍是 aia_maint 的成员', t;
+    END IF;
+  END LOOP;
+  IF NOT (SELECT rolcanlogin FROM pg_roles WHERE rolname = 'aia_maint') THEN
+    RAISE EXCEPTION 'db-roles: aia_maint 必须有 LOGIN';
   END IF;
   IF (SELECT rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolinherit FROM pg_roles WHERE rolname = 'aia_maint') THEN
     RAISE EXCEPTION 'db-roles: aia_maint 角色属性不是最小（SUPERUSER/BYPASSRLS/CREATEROLE/CREATEDB/INHERIT）';

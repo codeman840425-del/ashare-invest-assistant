@@ -160,12 +160,21 @@ const MATCH_ORDER: SecurityHit['match_kind'][] = ['code_exact', 'name_exact', 'i
 
 /**
  * 契约 §7.3 GET /securities/search?q&types&include_delisted&limit（v0.2.7）：按 security_match_kind 层级排序。
- * 示例数据没有拼音与曾用名，只演示代码/名称的精确、前缀、包含三类命中。
+ * 示例数据没有当前简称的拼音，只演示代码/名称的精确、前缀、包含三类命中，以及曾用名（T-F26）。
  */
+/**
+ * T-F26（契约 v0.2.9 内 #33 ②，§9 v0.2.9 验收 3）：曾用名示例。虚构夹具“示例银行”的曾用名“示例发展”，首字母 SLFZ。
+ * 曾用名原文或其首字母完全相同 → match_kind=former_name，matched_text=曾用名原文。
+ */
+export const FORMER_NAMES: Record<string, { name: string; initials: string; until: string }[]> = {
+  '600000.SH': [{ name: '示例发展', initials: 'SLFZ', until: '2019-06-30' }],
+};
+/** quote_missing 的取值由调用方按本人证书给（ETF、指数恒为 null，在这里统一处理） */
+export type QuoteMissingOf = (code: string) => boolean | null;
 /** 风险标记示例（契约 #29）：演示材料带 *ST（退市风险警示），仅为示例数据 */
 export const DEMO_RISK_FLAG: Record<string, SecurityRiskFlag> = { '002001.SZ': 'star_st' };
 
-export function searchSecurities(q: string, opts: { types?: string[]; limit?: number } = {}): SecuritySearchResponse {
+export function searchSecurities(q: string, opts: { types?: string[]; limit?: number; quoteMissing?: QuoteMissingOf } = {}): SecuritySearchResponse {
   // 归一化：NFKC、去空白、转大写；600000.SH / SH600000 / 600000 都按代码处理
   const raw = q.normalize('NFKC').replace(/\s+/g, '');
   const up = raw.toUpperCase();
@@ -176,27 +185,30 @@ export function searchSecurities(q: string, opts: { types?: string[]; limit?: nu
   const pool: SecurityHit[] = [
     ...SECURITY_CODES.map((c): SecurityHit => ({
       security_code: c, name: specBrief(c)!.name, type: 'stock', exchange: exchangeOf(c), board: boardOf(c), listing_status: 'listed',
-      risk_flag: DEMO_RISK_FLAG[c] ?? null, match_kind: 'fuzzy', matched_text: null, quote_missing: false,
+      risk_flag: DEMO_RISK_FLAG[c] ?? null, match_kind: 'fuzzy', matched_text: null, quote_missing: opts.quoteMissing ? opts.quoteMissing(c) : null,
     })),
     ...ETF_SPECS.map((s): SecurityHit => ({
       security_code: s.code, name: s.name, type: 'etf', exchange: exchangeOf(s.code), board: null, listing_status: 'listed',
-      risk_flag: null, match_kind: 'fuzzy', matched_text: null, quote_missing: false,
+      risk_flag: null, match_kind: 'fuzzy', matched_text: null, quote_missing: null,
     })),
     ...INDEX_SPECS.map((s): SecurityHit => ({
       security_code: s.code, name: s.name, type: 'index', exchange: exchangeOf(s.code), board: null, listing_status: null,
-      risk_flag: null, match_kind: 'fuzzy', matched_text: null, quote_missing: false,
+      risk_flag: null, match_kind: 'fuzzy', matched_text: null, quote_missing: null,
     })),
   ].filter((h) => types.includes(h.type));
-  const kindOf = (h: SecurityHit): SecurityHit['match_kind'] | null => {
-    if (h.security_code.slice(0, 6) === k) return 'code_exact';
-    if (h.name === raw) return 'name_exact';
-    if (h.security_code.startsWith(k)) return 'code_prefix';
-    if (h.name.startsWith(raw)) return 'name_prefix';
-    if (h.name.includes(raw)) return 'name_contains';
+  const kindOf = (h: SecurityHit): { match_kind: SecurityHit['match_kind']; matched_text: string | null } | null => {
+    const hit = (match_kind: SecurityHit['match_kind'], matched_text: string | null = null) => ({ match_kind, matched_text });
+    if (h.security_code.slice(0, 6) === k) return hit('code_exact');
+    if (h.name === raw) return hit('name_exact');
+    if (h.security_code.startsWith(k)) return hit('code_prefix');
+    if (h.name.startsWith(raw)) return hit('name_prefix');
+    if (h.name.includes(raw)) return hit('name_contains');
+    const former = (FORMER_NAMES[h.security_code] ?? []).find((f) => f.name === raw || f.initials === up);
+    if (former) return hit('former_name', former.name);
     return null;
   };
   const items = pool
-    .map((h) => ({ ...h, match_kind: kindOf(h) }))
+    .map((h) => { const m = kindOf(h); return m ? { ...h, ...m } : { ...h, match_kind: null }; })
     .filter((h): h is SecurityHit => h.match_kind !== null)
     .sort((a, b) => MATCH_ORDER.indexOf(a.match_kind) - MATCH_ORDER.indexOf(b.match_kind) || TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || a.security_code.localeCompare(b.security_code))
     .slice(0, Math.min(Math.max(opts.limit ?? 20, 1), 50));
@@ -237,7 +249,8 @@ export function securityProfile(code: string): SecurityProfile | null {
     list_date: `${listYear}-${String(1 + Math.floor(r() * 12)).padStart(2, '0')}-${String(1 + Math.floor(r() * 27)).padStart(2, '0')}`,
     list_date_basis: bj ? 'neeq_select' : 'listing', delist_date: null, listing_status: 'listed', risk_flag: DEMO_RISK_FLAG[s.code] ?? null,
     // 北交所示例演示代码切换历史（示例）
-    former_names: [], code_history: bj ? [{ security_code: `43${s.code.slice(2, 6)}.BJ`, until: '2024-10-08' }] : [],
+    former_names: (FORMER_NAMES[s.code] ?? []).map(({ name, until }) => ({ name, until })),
+    code_history: bj ? [{ security_code: `43${s.code.slice(2, 6)}.BJ`, until: '2024-10-08' }] : [],
     master_as_of: MASTER_AS_OF, attribution: ATTRIBUTION,
     industry: { taxonomy: 'sw_l1', code: `SW${String(s.seed).padStart(4, '0')}`, name: `${s.sector}（示例）` },
     concepts: [CONCEPTS[s.seed % CONCEPTS.length], CONCEPTS[(s.seed + 3) % CONCEPTS.length]].map((name, i) => ({ code: `GN${s.seed}${i}`, name })),

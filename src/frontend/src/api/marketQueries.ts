@@ -207,14 +207,23 @@ export const useSectorFlows = (kind: SectorKind, sort: SectorSort = 'main_net_de
     staleTime: 10 * 60_000,
   });
 
-/** 契约 §7.3 GET /securities/search（v0.2.7；不分页，默认 stock,cdr，最多 20 条；/securities?q= 只是旧别名） */
-export const useSecuritySearch = (raw: string) => {
+/** 契约 §7.3：q 归一化（NFKC、去空白）后长度 1–20，超出服务端返回 400；前端先拦下，不发请求 */
+export const SEARCH_Q_MAX = 20;
+export const searchQLength = (raw: string) => raw.normalize('NFKC').replace(/\s+/g, '').length;
+
+/**
+ * 契约 §7.3 GET /securities/search（v0.2.7；不分页，默认 stock,cdr,etf，最多 20 条；/securities?q= 只是旧别名）。
+ * v0.2.9 #41：响应 `Cache-Control: private, no-store` → staleTime 0（不当作新鲜缓存复用），不写本地存储；
+ * 429 不自动重试（shouldRetry 不重试 4xx），由调用方按 retry_after_s 暂停（paused）。
+ */
+export const useSecuritySearch = (raw: string, opts: { paused?: boolean } = {}) => {
   // 评审 T-F22a m13：queryKey 与请求参数都用去空格后的 q
   const q = raw.trim();
   return useQuery({
     queryKey: mk.search(q),
     queryFn: ({ signal }) => apiGet<SecuritySearchResponse>('/securities/search', { q, limit: 20 }, signal),
-    enabled: q.length > 0,
-    staleTime: 60_000,
+    enabled: q.length > 0 && searchQLength(q) <= SEARCH_Q_MAX && !opts.paused,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
   });
 };

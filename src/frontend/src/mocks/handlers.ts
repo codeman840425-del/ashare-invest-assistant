@@ -7,7 +7,7 @@ import { resetIngestAlertsMock } from './ingestAlerts';
 import type { TerminalScope, TodayResponse } from '../api/types';
 import type { SectorKind } from '../api/marketTypes';
 import { accountHandlers } from './accountHandlers';
-import { reconHandlers } from './reconMock';
+import { openQuoteMissingFor, quarantinedCodes, reconHandlers } from './reconMock';
 import { resetStrategies, strategyHandlers } from './strategyHandlers';
 import { reasonsNow, resetSignals, signalHandlers, signalsNow } from './signalHandlers';
 import { draftsNow, planHandlers, resetPlanDrafts } from './planHandlers';
@@ -32,6 +32,19 @@ import {
 } from './marketFixtures';
 import { ENUMS } from '../api/enums';
 import { TODAY_EVIDENCE, riskEvents, todayAlerts, todayDataGaps, todayPlanTriggers, todaySamples } from './todayFixtures';
+
+/**
+ * T-F26（契约 v0.2.9 内 #33 ②，SecurityHit.quote_missing）：按当前用户本人证书给值。
+ * 证书可用（示例里只把 active 当作可用，且视为已完成过对账）→ 有未关闭 quote_missing 差异为 true，否则 false；
+ * 未设置或不可用 → null。ETF、指数在 searchSecurities 里恒为 null。示例数据中隔离区代码本来就不在证券池里。
+ */
+function quoteMissingForViewer(): (code: string) => boolean | null {
+  const u = currentUser();
+  if (!u || licenceState(u.id) !== 'active') return () => null;
+  const missing = openQuoteMissingFor(u.id);
+  const quarantined = quarantinedCodes();
+  return (code) => (quarantined.has(code) ? null : missing.has(code));
+}
 
 export { errorBody };
 
@@ -219,7 +232,10 @@ const routeHandlers = [
     if (!Number.isInteger(limit) || limit < 1 || limit > 50) return validation('limit', 'limit 取值 1–50');
     const types = (url.searchParams.get('types') ?? '').split(',').filter(Boolean);
     if (types.some((t) => !['stock', 'cdr', 'etf', 'index'].includes(t))) return validation('types', 'types 取值 stock|cdr|etf|index');
-    return HttpResponse.json(searchSecurities(q, { types, limit }));
+    // v0.2.9 内 #33 ② ⑥：include_delisted 只收 true|false（示例数据没有 delisted 证券，取值只做校验）
+    const inc = url.searchParams.get('include_delisted');
+    if (inc !== null && inc !== 'true' && inc !== 'false') return validation('include_delisted', 'include_delisted 取值 true|false');
+    return HttpResponse.json(searchSecurities(q, { types, limit, quoteMissing: quoteMissingForViewer() }));
   }),
   http.get(`${API}/securities`, async ({ request }) => {
     await lag();
@@ -229,6 +245,8 @@ const routeHandlers = [
   }),
   http.get(`${API}/securities/:code`, async ({ params }) => {
     await lag();
+    // v0.2.9 内 #33 ②：隔离区（未关闭的 vendor_unknown）的代码不在主数据里 → 404
+    if (quarantinedCodes().has(String(params.code))) return notFound('证券');
     const p = securityProfile(String(params.code));
     return p ? HttpResponse.json(degrade(p, `profile.${p.security_code}`)) : notFound('证券');
   }),

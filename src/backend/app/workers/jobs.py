@@ -16,10 +16,16 @@
 - ``licences.purge_expired_cooldowns``：调用 :func:`app.licences.service.purge_expired_cooldowns`
   删除已到期的证书冷却记录（review-a8e055b M1；取代 deploy 的 cooldown-purge 服务）。间隔
   ``Settings.cooldown_purge_interval_s``（``COOLDOWN_PURGE_INTERVAL_S``，默认 3600，最小 60）。
-- ``imports.purge_uncommitted_rows``：调用
+- ``imports.purge_preview_rows``（T-B56；9e693b2 时名为 ``imports.purge_uncommitted_rows``）：调用
   :func:`app.importing.pipeline.purge_uncommitted_import_rows` 删除 discarded / failed 批次残留的
   预览行（架构师裁定，T-live-83a031c §8）。间隔 ``Settings.import_rows_purge_interval_s``
   （``IMPORT_ROWS_PURGE_INTERVAL_S``，默认 3600，最小 60）。
+- ``imports.purge_expired_raw_files``：调用 :func:`app.importing.pipeline.purge_expired_raw_files`
+  删除 ``retained_until`` 已到期的加密原始导入文件（评审 bbf58a0 m6，plan §3.5A）。间隔
+  ``Settings.import_raw_purge_interval_s``（``IMPORT_RAW_PURGE_INTERVAL_S``，默认 86400，最小 60）。
+  删除失败的行保留（``deleted_at`` 仍为空）下一轮重试；worker 以 aia_api 运行，无
+  ``ops.pending_file_purges`` 权限（T-B03f m2），故不写该表。
+  worker 须挂载与 api 相同的 ``IMPORT_STORAGE_PATH`` 卷。
 """
 
 from __future__ import annotations
@@ -45,7 +51,9 @@ MAX_JOBS_PER_TICK: Final = 20
 TICK_S: Final = 15
 
 PURGE_COOLDOWNS: Final = "licences.purge_expired_cooldowns"
-PURGE_IMPORT_ROWS: Final = "imports.purge_uncommitted_rows"
+#: 任务名按 plan T-B56（契约 #35）；9e693b2 时名为 imports.purge_uncommitted_rows
+PURGE_IMPORT_ROWS: Final = "imports.purge_preview_rows"
+PURGE_RAW_FILES: Final = "imports.purge_expired_raw_files"
 
 Task = Callable[[Settings], int]
 
@@ -84,10 +92,18 @@ def purge_import_rows_task(settings: Settings) -> int:
         return purge_uncommitted_import_rows(conn)
 
 
+def purge_raw_files_task(settings: Settings) -> int:
+    from app.importing.pipeline import purge_expired_raw_files
+
+    with _engine(settings).begin() as conn:
+        return purge_expired_raw_files(conn, settings)
+
+
 #: 任务名 → 实现
 TASKS: Final[dict[str, Task]] = {
     PURGE_COOLDOWNS: purge_expired_cooldowns_task,
     PURGE_IMPORT_ROWS: purge_import_rows_task,
+    PURGE_RAW_FILES: purge_raw_files_task,
 }
 
 
@@ -96,6 +112,7 @@ def schedule(settings: Settings) -> dict[str, int]:
     return {
         PURGE_COOLDOWNS: settings.cooldown_purge_interval_s,
         PURGE_IMPORT_ROWS: settings.import_rows_purge_interval_s,
+        PURGE_RAW_FILES: settings.import_raw_purge_interval_s,
     }
 
 

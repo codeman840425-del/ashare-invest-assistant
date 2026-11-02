@@ -466,7 +466,7 @@ from app.workers import jobs  # noqa: E402
 s_job = mk(import_rows_purge_interval_s=600)
 check(
     jobs.schedule(s_job).get(jobs.PURGE_IMPORT_ROWS) == 600,
-    "清理任务：beat 排程表含 imports.purge_uncommitted_rows，间隔取配置",
+    "清理任务：beat 排程表含 imports.purge_preview_rows（T-B56），间隔取配置",
 )
 check(mk().import_rows_purge_interval_s == 3600, "清理任务：默认间隔 3600s（每小时）")
 check(refuses(import_rows_purge_interval_s=30), "清理任务：间隔 < 60 拒绝")

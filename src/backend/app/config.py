@@ -492,6 +492,10 @@ class Settings(BaseSettings):
     #: 预览行”的间隔秒数（worker 执行 ``purge_uncommitted_import_rows``）；环境变量
     #: ``IMPORT_ROWS_PURGE_INTERVAL_S``，默认 3600（每小时），最小 60。
     import_rows_purge_interval_s: int = Field(default=3600, ge=60)
+    #: 评审 bbf58a0 m6 / plan 7.3：beat 排程“删除 retained_until 已到期的原始导入文件”的间隔秒数
+    #: （worker 执行 ``purge_expired_raw_files``）；环境变量 ``IMPORT_RAW_PURGE_INTERVAL_S``，
+    #: 默认 86400（plan 7.3 每日清理），最小 60。
+    import_raw_purge_interval_s: int = Field(default=86400, ge=60)
     #: ``IMPORT_STORAGE_PATH``（T-B46，plan §3.5A）：原始导入文件根目录（仓库外、加密存放）。
     #: 未设置时 local/test 用系统临时目录，其他环境上传返回 ``503 MAINTENANCE``。
     import_storage_path: Path | None = None

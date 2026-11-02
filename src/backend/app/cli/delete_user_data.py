@@ -594,13 +594,20 @@ def _unhandled_fk_refs(conn: Connection, uid: uuid.UUID) -> list[tuple[str, int]
 def imports_root() -> Path:
     """原始导入文件根目录。
 
-    优先级：``AIA_IMPORTS_DIR`` > ``IMPORT_STORAGE_PATH``（API 写入用，T-B46）> 默认。
+    优先级：``AIA_IMPORTS_DIR``（CLI 专用覆盖）> 与 API 共用的
+    :func:`app.importing.storage.resolve_imports_root`（``IMPORT_STORAGE_PATH``；未配置时
+    local/test 为 ``<tmp>/aia-imports``，与 API 写入位置一致；评审 bbf58a0 m7）> 默认
+    :data:`DEFAULT_IMPORTS_DIR`。``APP_ENV`` 未设置按 ``local``（与 ``Settings`` 默认一致）。
     """
-    return Path(
-        os.environ.get("AIA_IMPORTS_DIR")
-        or os.environ.get("IMPORT_STORAGE_PATH")
-        or DEFAULT_IMPORTS_DIR
+    from app.importing.storage import resolve_imports_root
+
+    override = os.environ.get("AIA_IMPORTS_DIR")
+    if override:
+        return Path(override)
+    root = resolve_imports_root(
+        os.environ.get("IMPORT_STORAGE_PATH"), os.environ.get("APP_ENV", "local")
     )
+    return root if root is not None else Path(DEFAULT_IMPORTS_DIR)
 
 
 def _inside(root: Path, p: Path) -> bool:

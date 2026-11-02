@@ -385,3 +385,13 @@ plan §2.5.3 还提到 ATR% 和“交易频率”。v1 规则未使用：ATR% �
 - 需要同步：`classifier_version` 升版；用例表增加一行 novice 对照；理由文案见上表。
 
 **状态：【已被取代】short、intraday_t 均为“只提示、不封顶”（用户 2026-11-02 决定，plan 问题 44，T-A06，契约 v0.2.5）。** 历史：2026-11-01 short 定方案 A、intraday_t 编排者默认同样封顶，落地为 SH0C/IT0C `else_cap: 59`（`version_no: 2`，`classifier_version: "1.1.0"`，T006d）；该版本不可变、保留。现行：第 4 节 rules 块中 `SH0`、`SH0B`、`SH0C`、`IT0B`、`IT0C` 均为 `mode: hint`、去掉 `else_cap` 与“或未填写”（`version_no: 3`，`classifier_version: "1.2.0"`，T006e）；`fit_ack` 作废。用例 E 新期望：short 85、`suitable = [short]`，`hints` 含 SH0C（及 intraday_t 的 IT0C）。
+
+## 附录：15 个 `f.*` 特征口径与手算样例（T-R11，2026-11-01）
+
+裁定 R9 要求本附录写明分类器 15 个特征键的口径与 3 组手算样例。为避免两处维护，正文统一放在 [`feature_spec.md`](feature_spec.md) v1.0：
+- 总则（可得时点、窗口、复权、`rank_pct_universe` 计算细节、单位、精度）：§1；
+- 15 个键逐项口径（F01–F15）：§2；
+- 3 组手算样例（合成数据）：§9；
+- 问题 76/77 复核：§10；与裁定的冲突（含本附录位置、`unit: sign`、因子池口径）：§13。
+
+本节只是指针，不改变第 4 节规则，`classifier_version` 不变。

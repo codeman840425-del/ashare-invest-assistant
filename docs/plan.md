@@ -1250,7 +1250,7 @@ class LLMGateway:
        | `non_positive_equity` | E(P) ≤ 0 | `pb`、`roe_ttm` |
        | `no_capital_row` | 没有 `bdrq ≤ d` 且已可见的 capital 行，或 `zgb` 为空、≤ 0 | `pe_ttm`、`pb` |
        | `ocf_missing` | 经营现金流两个字段都为空 | `ocf_to_np_ttm` |
-       | `component_missing` | 回退选出的 P 中某个必需分量仍为空，且不属于上述任何一种（例如 `zczj` 为空） | 全部 |
+       | `component_missing` | 回退选出的 P 中某个必需分量仍为空或无效，且不属于上述任何一种（例如 `zczj` 为空或 ≤ 0，T-R12c 裁定 1） | 全部 |
        | `data_conflict` | 补充规则 ②：两个版本不可区分且数值不同（既是告警名，也是原因码） | 全部 |
        | `financial_sector_na` | 银行、保险的资产负债率 | `debt_ratio` |
 
@@ -1269,6 +1269,10 @@ class LLMGateway:
        - 无法识别时，记 `basis.share_class_check=unavailable`，不打 `non_a_share_capital`，也不按代码段或名称推断。
        - 只要还有 `unavailable` 的行，V5g 就没有关闭，S1 不通过，所以不会因此提前切换。
        - 研究和回测报告要单列 `share_class_check=unavailable` 的证券数。
+  - **T-R12c 补充裁定（v0.2.9 内，架构师；对应 feature_spec v1.1.3 的 3 个待定点）**：
+    1. **`debt_ratio` 的 `zczj ≤ 0`**：并入 `component_missing`，不新增原因码。资产合计 ≤ 0 只能是源数据错误，和“分量取不到可用值”处理方式相同，单独设码没有下游用途；“`value` 为 null ⇔ 有 `null_reason`”继续成立。T-B55 同时写一条 `data_quality` 告警（不打断计算），便于 T-B05 回查。
+    2. **`single_period_reason` 多命中时的优先级**：确认 `p4_pre_listing` → `p4_missing` → `p4_non_positive`，只写第一个。理由：P−4 早于上市日时，即使有值也不能用，先于“缺失”；缺失时无法判断正负。
+    3. **退市证券**：T-B55 不为退市证券补写 null 行，所以不需要新增原因码。规则：只为有可见报告期的证券计算；`pe_ttm`、`pb` 只为有日线的交易日写行，退市后没有日线就没有行，不写 null 行。退市前的历史行照常计算，按上表写码。`listing_status ∈ {delisted, missing_from_list}` 时 f.* 全为 null，这是特征层规则（feature_spec §1.7、T-B35），与 `financial_derived` 无关。
   - **补充规则（`feature_spec.md` §7A.0 / §13 A5，4 条）——【已确认 v0.2.9 内，架构师 T-R12】**，并入 T-B55：① 首次全量回填写入、`plrq` 早于回填日的行只按 `plrq` 计算，标 `basis.pit_basis=plrq_only`；② 同一 (code, report_type, jzrq) 的两行 `available_from` 相同 → 取 `first_seen_at` 较晚者，仍无法区分且数值不同 → 该分量 `null` 并告警 `data_conflict`；③ E(P−4) ≤ 0 按缺失处理（`roe_basis=single_period`）；④ 现金流比的分子、分母用同一个 P，不各自回退。说明：P 按“该键所需分量都可见且非空”逐期回退，所以同一 T 下不同键（如 `pe_ttm` 与 `ocf_to_np_ttm`）的 P 可以不同，各自记入 `basis.period`。
   - **线上切换**：条件与阈值以 `feature_spec.md` §7C（S1–S6）为准——【已确认 v0.2.9 内，架构师 T-R12】；本文不重复。保险识别（V5e）若 T-B05 确认麦蕊没有申万二级，按配置中的保险证券名单识别（名单注明来源），以此关闭 V5e，不因缺申万二级而阻塞切换。等待期的产品取舍见第 9 节问题 93。
   - 幸存者偏差：已退市证券的财报接口返回 404，历史截面缺这些证券；回测报告必须带 `survivorship_bias=true` 标记，不能当作无偏结果。

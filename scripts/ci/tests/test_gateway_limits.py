@@ -396,3 +396,42 @@ def test_502_page_must_be_no_store(gw_repo: Path) -> None:
     (gw_repo / cgl.NGINX_CONF).write_text(conf[:j] + conf[j + len(cgl.NO_STORE):], encoding="utf-8")
     assert any("Cache-Control private, no-store" in e for e in cgl.check_connect_timeout(gw_repo))
     assert any("/__aia_errors/502 缺少" in e for e in cgl.check_search(gw_repo))
+
+
+# ---------- T-A04 ⑩：评审 666cd6e m1 —— 与其他指令同一行的 proxy_pass ----------
+
+@pytest.mark.parametrize("text,want", [
+    ("proxy_pass http://a;", ["http://a"]),
+    ("  location / { proxy_pass http://a; }", ["http://a"]),
+    ("location / {proxy_pass http://a;}", ["http://a"]),
+    ("proxy_set_header Host $host; proxy_pass http://a; proxy_pass http://b;", ["http://a", "http://b"]),
+    ("proxy_pass\n      http://a;", ["http://a"]),
+    ("x_proxy_pass http://a;\nset $proxy_pass 1;", []),
+])
+def test_proxy_pass_re_same_line(text: str, want: list[str]) -> None:
+    assert cgl.PROXY_PASS_RE.findall(text) == want
+
+
+@pytest.mark.parametrize("new", [
+    "    location /x/ { proxy_pass http://api:8000; }\n",
+    "    location /x/ { limit_req zone=aia_api burst=100 nodelay; proxy_pass http://api:8000; }\n",
+    "    location /x/ {\n      proxy_set_header Host $host; proxy_pass http://api:8000;\n    }\n",
+])
+def test_static_proxy_pass_on_same_line_rejected(gw_repo: Path, new: str) -> None:
+    _sub(gw_repo, cgl.NGINX_CONF, "    location /api/ {\n", new + "\n    location /api/ {\n")
+    errs = cgl.check_dynamic_upstream(gw_repo)
+    assert any("静态主机名不会重新解析" in e for e in errs), errs
+
+
+def test_connect_timeout_override_on_same_line_rejected(gw_repo: Path) -> None:
+    _sub(gw_repo, cgl.NGINX_CONF, "    location /api/ {\n",
+         "    location /x/ { proxy_connect_timeout 30s; proxy_pass http://$aia_api_upstream; }\n\n    location /api/ {\n")
+    errs = cgl.check_connect_timeout(gw_repo)
+    assert any("proxy_connect_timeout 30s 超过" in e for e in errs), errs
+
+
+def test_server_level_connect_timeout_on_same_line_counts(gw_repo: Path) -> None:
+    _sub(gw_repo, cgl.NGINX_CONF, "    proxy_connect_timeout 3s;\n", "")
+    _sub(gw_repo, cgl.NGINX_CONF, "    large_client_header_buffers 4 8k;\n",
+         "    large_client_header_buffers 4 8k; proxy_connect_timeout 3s;\n")
+    assert cgl.check_connect_timeout(gw_repo) == []

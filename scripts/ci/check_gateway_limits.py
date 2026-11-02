@@ -257,7 +257,13 @@ def check_rate_limits(repo: Path) -> list[str]:
 
 
 RESOLVER_RE = re.compile(r"^\s*resolver\s+([^;]*);", re.M)
-PROXY_PASS_RE = re.compile(r"^\s*proxy_pass\s+(\S+)\s*;", re.M)
+def directive_re(name: str) -> re.Pattern[str]:
+    """匹配一条 nginx 指令的参数：指令可以在行首，也可以和别的指令写在同一行（`;`、`{`、`}` 之后），
+    参数可以换行（T-A04 ⑩，评审 666cd6e m1：原来只认行首，`location / { proxy_pass http://api:8000; }` 会漏）。"""
+    return re.compile(r"(?:^|(?<=[;{}]))\s*" + re.escape(name) + r"\s+([^;\s]+)\s*;", re.M)
+
+
+PROXY_PASS_RE = directive_re("proxy_pass")
 UPSTREAM_VAR = "$aia_api_upstream"
 UPSTREAM_HOST = "api:8000"
 NGINX_DNS = "127.0.0.1"
@@ -469,7 +475,7 @@ def check_header_limits(repo: Path) -> list[str]:
 
 
 CONNECT_MAX_S = 5.0
-CONNECT_RE = re.compile(r"^\s*proxy_connect_timeout\s+(\S+)\s*;", re.M)
+CONNECT_RE = directive_re("proxy_connect_timeout")
 TIME_UNITS = {"ms": 0.001, "": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0}
 
 

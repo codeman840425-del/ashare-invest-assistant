@@ -21,7 +21,7 @@ import r11_exceptions as r11
 pytestmark = [pytest.mark.contract, pytest.mark.unit]
 
 fastapi = pytest.importorskip("fastapi")
-from fastapi import FastAPI, File, Form, UploadFile  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
@@ -39,6 +39,10 @@ class Page(BaseModel):
 def _err(status: int, code: str) -> JSONResponse:
     return JSONResponse({"error": {"code": code, "message": "示例"}}, status_code=status)
 
+
+UPLOAD_BODY = {"required": True, "content": {"multipart/form-data": {"schema": {
+    "type": "object", "required": ["file", "kind"],
+    "properties": {"file": {"type": "string", "format": "binary"}, "kind": {"type": "string"}}}}}}
 
 LISTINGS = ("/api/v1/accounts", "/api/v1/imports", "/api/v1/trades", "/api/v1/alerts")
 
@@ -60,7 +64,9 @@ def make_app(*, cursor_code: str = "INVALID_CURSOR", cursor_status: int = 400,
     def rows(batch_id: str, cursor: str | None = None) -> Any:
         return page(cursor)
 
-    def upload(file: UploadFile = File(...), kind: str = Form(...)) -> Any:
+    def upload() -> Any:
+        # 不用 File/Form 参数：那会要求 python-multipart（origin 0cb78ad 的后端依赖里没有）；
+        # 请求体 schema 由 UPLOAD_BODY 直接写进 OpenAPI，处理函数不读请求体
         return _err(422, import_code)
 
     for p in LISTINGS:
@@ -68,7 +74,8 @@ def make_app(*, cursor_code: str = "INVALID_CURSOR", cursor_status: int = 400,
     app.add_api_route("/api/v1/imports/{batch_id}/rows", rows, methods=["GET"], response_model=Page,
                       responses={400: ERR, 422: ERR})
     for p in ("/api/v1/imports", "/api/v1/other-upload"):
-        app.add_api_route(p, upload, methods=["POST"], status_code=202, responses={400: ERR, 422: ERR})
+        app.add_api_route(p, upload, methods=["POST"], status_code=202, responses={400: ERR, 422: ERR},
+                          openapi_extra={"requestBody": UPLOAD_BODY})
     return app
 
 

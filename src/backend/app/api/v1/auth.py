@@ -12,6 +12,7 @@ import re
 import uuid
 from collections.abc import Callable, Coroutine
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.routing import APIRoute
@@ -50,6 +51,46 @@ def require_registration_open(settings: SettingsDep) -> None:
         raise AppError(ErrorCode.REGISTRATION_CLOSED)
 
 
+def origin_allowed(request: Request, settings: Settings) -> bool:
+    """契约 §1.3 #30 ④（登录 CSRF）：不带 ``Origin`` 头的非浏览器客户端照常处理；带了则必须是
+    本站源（:attr:`Settings.site_origins`；未配置时与请求的 ``Host`` 同源）。
+    ``Origin: null`` 一律不是本站。"""
+    origin = request.headers.get("origin")
+    if origin is None:
+        return True
+    o = origin.strip().rstrip("/").lower()
+    if settings.site_origins:
+        return o in settings.site_origins
+    parts = urlsplit(o)
+    host = (request.headers.get("host") or "").strip().lower()
+    return parts.scheme in {"http", "https"} and bool(host) and parts.netloc == host
+
+
+def require_site_origin(request: Request, settings: Settings) -> None:
+    if not origin_allowed(request, settings):
+        raise AppError(ErrorCode.CSRF_FAILED)
+
+
+def _app_settings(request: Request) -> Settings:
+    # T-B03f（review-f72b8c7 m1）：读 create_app 写入的 app.state.settings，不直接调用
+    # get_settings 的 override（带依赖参数的 override 会 TypeError → 500）
+    settings = getattr(request.app.state, "settings", None)
+    return settings if settings is not None else get_settings()
+
+
+class _OriginGateRoute(APIRoute):
+    """CSRF 白名单端点（login）：``Origin`` 校验（判定顺序 ④）在解析请求体（⑥）之前。"""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def gated(request: Request) -> Response:
+            require_site_origin(request, _app_settings(request))
+            return await handler(request)
+
+        return gated
+
+
 class _RegistrationGateRoute(APIRoute):
     """FastAPI 在求值依赖之前就解析 JSON：无法解析的请求体会先得到 400。本路由类在解析请求体
     之前调用同一个判定，保证 ``closed`` 时畸形 JSON 也是 503。"""
@@ -58,10 +99,10 @@ class _RegistrationGateRoute(APIRoute):
         handler = super().get_route_handler()
 
         async def gated(request: Request) -> Response:
-            # T-B03f（review-f72b8c7 m1）：读 create_app 写入的 app.state.settings，不直接调用
-            # get_settings 的 override（带依赖参数的 override 会 TypeError → 500）
-            settings = getattr(request.app.state, "settings", None)
-            require_registration_open(settings if settings is not None else get_settings())
+            settings = _app_settings(request)
+            # 判定顺序（契约 §1.3 #30）：⑤ closed → 503 先于该端点的 Origin 校验与请求体解析
+            require_registration_open(settings)
+            require_site_origin(request, settings)
             return await handler(request)
 
         return gated
@@ -69,6 +110,8 @@ class _RegistrationGateRoute(APIRoute):
 
 #: 只放 ``POST /auth/register``（见 :class:`_RegistrationGateRoute`）
 register_router = APIRouter(tags=["auth"], route_class=_RegistrationGateRoute)
+#: 只放 ``POST /auth/login``（见 :class:`_OriginGateRoute`）
+login_router = APIRouter(tags=["auth"], route_class=_OriginGateRoute)
 
 #: plan §3.6 / users.username CHECK：4–32 位小写字母、数字、下划线（契约写 3–32，取更严的库约束）
 USERNAME_RE = re.compile(r"^[a-z0-9_]{4,32}$")
@@ -294,7 +337,7 @@ def register(
     return RegisterOut(id=str(row.id), username=row.username, status=AccountStatus(row.status))
 
 
-@router.post("/auth/login")
+@login_router.post("/auth/login")
 def login(
     body: LoginIn,
     request: Request,

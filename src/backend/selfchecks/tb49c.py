@@ -17,6 +17,7 @@ import sys
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -234,6 +235,56 @@ check(
     r.status_code == 400 and err_code(r) == "VALIDATION_ERROR",
     f"#30：无需登录的端点非法 JSON 照旧 400（得 {r.status_code}）",
 )
+
+
+# #30 ④ 白名单端点的 Origin 校验（登录 CSRF；架构师评审跟进）：先于请求体解析
+def _post(c: TestClient, path: str, origin: str | None, body: bytes = b"{bad") -> Any:  # noqa: ANN401
+    h = {"Content-Type": "application/json"}
+    if origin is not None:
+        h["Origin"] = origin
+    return c.post(path, content=body, headers=h)
+
+
+r = _post(anon, "/api/v1/auth/login", "https://evil.example")
+check(
+    r.status_code == 403 and err_code(r) == "CSRF_FAILED",
+    f"#30④：login 带外站 Origin → 403 CSRF_FAILED，先于非法 JSON（得 {r.status_code} {err_code(r)}）",
+)
+r = _post(anon, "/api/v1/auth/login", "null")
+check(r.status_code == 403 and err_code(r) == "CSRF_FAILED", "#30④：Origin: null → 403")
+r = _post(anon, "/api/v1/auth/login", "http://testserver")
+check(
+    r.status_code == 400, f"#30④：同源 Origin（未配置 SITE_ORIGINS）照常处理（得 {r.status_code}）"
+)
+r = _post(anon, "/api/v1/auth/login", "http://testserver.evil.example")
+check(r.status_code == 403, "#30④：主机名前缀相同的外站 → 403")
+r = _post(
+    anon, "/api/v1/auth/login", "https://evil.example", b'{"username":"nouser","password":"x"}'
+)
+check(r.status_code == 403 and err_code(r) == "CSRF_FAILED", "#30④：合法请求体 + 外站 Origin → 403")
+r = _post(anon, "/api/v1/auth/register", "https://evil.example")
+check(
+    r.status_code == 403 and err_code(r) == "CSRF_FAILED",
+    f"#30④：open 时 register 带外站 Origin → 403（得 {r.status_code}）",
+)
+closed_app = create_app(st.model_copy(update={"registration_mode": "closed"}))
+r = _post(TestClient(closed_app), "/api/v1/auth/register", "https://evil.example")
+check(
+    r.status_code == 503 and err_code(r) == "REGISTRATION_CLOSED",
+    f"#30④⑤：closed 时带外站 Origin 的注册 → 503 REGISTRATION_CLOSED（得 {r.status_code}）",
+)
+site_app = create_app(st.model_copy(update={"site_origins": ("https://aia.example",)}))
+sc = TestClient(site_app)
+r = _post(sc, "/api/v1/auth/login", "https://AIA.example/")
+check(r.status_code == 400, f"#30④：配置的 SITE_ORIGINS 照常处理（得 {r.status_code}）")
+r = _post(sc, "/api/v1/auth/login", "http://testserver")
+check(r.status_code == 403, "#30④：配置 SITE_ORIGINS 后不再按 Host 同源放行")
+try:
+    Settings(app_env="local", site_origins=("https://aia.example/app",))
+    bad_ok = False
+except ValueError:
+    bad_ok = True
+check(bad_ok, "#30④：SITE_ORIGINS 带路径 → 启动失败")
 
 name = "tb49c_" + secrets.token_hex(4)
 pw = "Tb49" + secrets.token_urlsafe(12) + "5a"

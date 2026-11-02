@@ -349,17 +349,29 @@ def drop_uncommitted_rows(conn: Connection, batch_id: uuid.UUID) -> int:
     return int(res.rowcount or 0)
 
 
-def purge_uncommitted_import_rows(conn: Connection) -> int:
-    """定时清理（beat 每小时排程、worker 执行）：删除 discarded / failed 批次残留的预览行。
+#: 预览行清理每条 DELETE 最多删除的行数（架构师评审：分块、避免长事务与大锁）
+PREVIEW_PURGE_CHUNK: Final = 10_000
 
-    幂等：只按批次当前状态删除，重复执行第二次删 0 行；状态判定与删除在同一条语句里，
-    并发的“重新解析”（failed → parsing）不会被误删（语句快照内批次已不是 failed）。"""
+
+def purge_uncommitted_import_rows(conn: Connection, *, chunk: int = PREVIEW_PURGE_CHUNK) -> int:
+    """定时清理（beat 每小时排程、worker 执行）：删除 discarded / failed 批次残留的预览行，
+    **一次最多 ``chunk`` 行**（默认 10 000）。返回本次删除的行数；等于 ``chunk`` 表示可能还有剩余，
+    调用方（:func:`app.workers.jobs.purge_import_rows_task`）每块单独提交并继续。
+
+    幂等：只按批次当前状态删除，重复执行删 0 行；状态判定与删除在同一条语句里，并发的
+    “重新解析”（failed → parsing）不会被误删（语句快照内批次已不是 failed）。"""
+    if chunk < 1:
+        raise ValueError("chunk 必须 ≥ 1")
     b = import_batches
-    res = conn.execute(
-        delete(import_rows).where(
+    ids = (
+        select(import_rows.c.id)
+        .where(
             import_rows.c.batch_id.in_(select(b.c.id).where(b.c.status.in_(ROWS_DROPPED_STATUSES)))
         )
+        .limit(chunk)
+        .scalar_subquery()
     )
+    res = conn.execute(delete(import_rows).where(import_rows.c.id.in_(ids)))
     return int(res.rowcount or 0)
 
 

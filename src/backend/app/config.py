@@ -30,6 +30,7 @@ from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Final, Literal
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import (
@@ -520,6 +521,11 @@ class Settings(BaseSettings):
     #: ``TRUSTED_PROXIES``：只有直连对端落在这些网段（我方 nginx）时才采信转发头，且只取
     #: ``X-Forwarded-For`` 最右一跳（nginx 追加的 ``$remote_addr``）。JSON 数组；空 = 不采信。
     trusted_proxies: tuple[str, ...] = _DEFAULT_TRUSTED_PROXIES
+    #: ``SITE_ORIGINS``（契约 §1.3 #30 ④，plan 第 9 节问题 84）：本站源
+    #: （``scheme://host[:port]``），JSON 数组。``/auth/login``、``/auth/register`` 带 ``Origin``
+    #: 头且不在其中 → ``403 CSRF_FAILED``。为空时退回同源判定：``Origin`` 的 host[:port]
+    #: 必须等于请求的 ``Host`` 头（nginx 透传 ``$host``）。
+    site_origins: tuple[str, ...] = ()
 
     # --- 分页（契约 §1.2） ---
     page_limit_default: int = Field(default=50, ge=1)
@@ -566,6 +572,18 @@ class Settings(BaseSettings):
         for net in value:
             ipaddress.ip_network(net, strict=False)  # 非法网段 → ValueError → 启动失败
         return value
+
+    @field_validator("site_origins")
+    @classmethod
+    def _check_origins(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        out: list[str] = []
+        for raw in value:
+            o = raw.strip().rstrip("/").lower()
+            parts = urlsplit(o)
+            if parts.scheme not in {"http", "https"} or not parts.netloc or parts.path:
+                raise ValueError("SITE_ORIGINS 每项须为 scheme://host[:port]（不带路径）")
+            out.append(o)
+        return tuple(out)
 
     @model_validator(mode="after")
     def _check(self) -> Settings:

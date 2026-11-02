@@ -18,7 +18,8 @@
   ``Settings.cooldown_purge_interval_s``（``COOLDOWN_PURGE_INTERVAL_S``，默认 3600，最小 60）。
 - ``imports.purge_preview_rows``（T-B56；9e693b2 时名为 ``imports.purge_uncommitted_rows``）：调用
   :func:`app.importing.pipeline.purge_uncommitted_import_rows` 删除 discarded / failed 批次残留的
-  预览行（架构师裁定，T-live-83a031c §8）。间隔 ``Settings.import_rows_purge_interval_s``
+  预览行（架构师裁定，T-live-83a031c §8）；每条 DELETE ≤ 10 000 行、每块单独提交，每轮最多
+  100 块。间隔 ``Settings.import_rows_purge_interval_s``
   （``IMPORT_ROWS_PURGE_INTERVAL_S``，默认 3600，最小 60）。
 - ``imports.purge_expired_raw_files``：调用 :func:`app.importing.pipeline.purge_expired_raw_files`
   删除 ``retained_until`` 已到期的加密原始导入文件（评审 bbf58a0 m6，plan §3.5A）。间隔
@@ -85,11 +86,21 @@ def purge_expired_cooldowns_task(settings: Settings) -> int:
         return purge_expired_cooldowns(conn)
 
 
-def purge_import_rows_task(settings: Settings) -> int:
-    from app.importing.pipeline import purge_uncommitted_import_rows
+#: 预览行清理每轮最多处理的块数（每块 ≤ 10 000 行、单独提交；剩余的下一轮继续）
+PURGE_IMPORT_ROWS_MAX_CHUNKS: Final = 100
 
-    with _engine(settings).begin() as conn:
-        return purge_uncommitted_import_rows(conn)
+
+def purge_import_rows_task(settings: Settings) -> int:
+    from app.importing.pipeline import PREVIEW_PURGE_CHUNK, purge_uncommitted_import_rows
+
+    total = 0
+    for _ in range(PURGE_IMPORT_ROWS_MAX_CHUNKS):
+        with _engine(settings).begin() as conn:
+            n = purge_uncommitted_import_rows(conn, chunk=PREVIEW_PURGE_CHUNK)
+        total += n
+        if n < PREVIEW_PURGE_CHUNK:
+            break
+    return total
 
 
 def purge_raw_files_task(settings: Settings) -> int:

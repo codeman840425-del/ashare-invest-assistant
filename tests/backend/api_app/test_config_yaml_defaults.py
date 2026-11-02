@@ -52,7 +52,7 @@ V027_DOCS_PENDING = "plan §6.1 仍为 v0.2.6：架构师 T-A08 fa6d55d（v0.2.7
 #: nginx client_max_body_size 26m（deploy/nginx/nginx.conf；契约 #22 413 details.max_bytes）
 NGINX_MAX_BODY = 26 * 1024 * 1024
 REPO_ROOT = HERE.parents[2]
-CONFIG_DIR = Path(os.environ.get("AIA_CONFIG_DIR", REPO_ROOT / "config")).resolve()
+CONFIG_DIR = Path(os.environ.get("AIA_CONFIG_DIR") or REPO_ROOT / "config").resolve()  # 同 conftest.resolve_config_dir
 
 #: T-A02 改动的文件 → 负责同步仓库文件与后端模型的任务
 OWNER = {

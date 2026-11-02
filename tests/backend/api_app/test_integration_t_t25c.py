@@ -127,13 +127,14 @@ def test_reg_closed_every_body_is_503(app_client: Callable[..., Any], sql: Calla
     assert _users(sql) == n0 and _honeypot(sql, t0) == 0
 
 
-def test_reg_closed_oversized_is_413_before_mode(app_client: Callable[..., Any], sql: Callable[..., Any]) -> None:
+def test_reg_closed_oversized_is_413_before_mode(app_client: Callable[..., Any], sql: Callable[..., Any],
+                                                 config_dir: Path) -> None:
     """超过框架层上限（config/imports.yaml max_request_bytes）→ 413 PAYLOAD_TOO_LARGE {max_bytes}，先于注册模式判定。
     裁定 E（T-B46-47-rulings.md）：closed 模式下超大请求体期望 413，先于 503 REGISTRATION_CLOSED（原待决问题已解决）；
     用户数不变（未进入注册路由）。"""
     import yaml
 
-    limit = int(yaml.safe_load((Path(__file__).resolve().parents[3] / "config" / "imports.yaml")
+    limit = int(yaml.safe_load((config_dir / "imports.yaml")
                                .read_text(encoding="utf-8"))["max_request_bytes"])
     n0 = _users(sql)
     body = b'{"username": "' + b"a" * (limit + 1) + b'"}'

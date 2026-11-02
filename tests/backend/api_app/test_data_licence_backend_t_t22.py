@@ -26,7 +26,7 @@ pytestmark = [pytest.mark.unit]
 B04A_CFG = "后端 T-B04a 扩展（plan §6.1 v0.2.6：config/ingest.yaml 加 licences / data_sharing 段）"
 FAKE_ALPHABET = "BCDFGJKMNQRVWXZ"  # 无元音、无 H/T/L/P/S/Y、无数字与十六进制字母：不会与 HTTP、错误码、uuid、时间戳偶然重合
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONFIG_DIR = Path(os.environ.get("AIA_CONFIG_DIR", REPO_ROOT / "config")).resolve()
+CONFIG_DIR = Path(os.environ.get("AIA_CONFIG_DIR") or REPO_ROOT / "config").resolve()  # 同 conftest.resolve_config_dir
 
 
 def fake_licence(n: int = 32) -> str:

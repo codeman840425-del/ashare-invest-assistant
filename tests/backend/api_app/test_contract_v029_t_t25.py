@@ -439,13 +439,13 @@ def test_07_multi_signal_draft_rules(session: Callable[..., SimpleNamespace]) ->
 
 
 @pytest.mark.unit
-def test_08_market_rules_lot_config() -> None:
+def test_08_market_rules_lot_config(config_dir: Path) -> None:
     """第 8 条（配置，严格）：config/market_rules.yaml 每段 lot：主板/创业板/ETF 递增 100；科创板起买 200、递增 1。"""
     import yaml  # noqa: PLC0415
 
-    p = REPO / "config" / "market_rules.yaml"
+    p = config_dir / "market_rules.yaml"
     if not p.is_file():
-        pytest.skip("工作树没有 config/market_rules.yaml")
+        pytest.skip(f"{config_dir} 下没有 market_rules.yaml")
     lots = []
 
     def walk(x: Any) -> None:

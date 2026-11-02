@@ -36,7 +36,6 @@ _new, _ver, _list, _gate = _a11._new, _a11._ver, _a11._list, _a11._gate
 
 pytestmark = [pytest.mark.integration, pytest.mark.contract]
 
-REPO = Path(__file__).resolve().parents[3]
 O_D_CAND = "后端（T-O11 裁定 D：新迁移把 candidate 加入“user_id 必填”CHECK，并在写入函数断言 user_id 非空）"
 O_T1_GATE = "后端 T-B47-R10（T-O11 裁定 m④：fund_t_plus 须以 t0_round_trip.data_source 非空为闸门，未接入前 ETF 一律 T+1）"
 O_LOTS = "后端 T-B47-R10（app.market_rules.lots / t0_round_trip：在本地 main 07b8d74，未推 origin）"
@@ -142,12 +141,12 @@ def _lots() -> Any:
         pytest.xfail(O_LOTS)
 
 
-def _repo_segments(data_source: Any) -> list[Any]:
-    """仓库 config/market_rules.yaml 的全部段（经后端 pydantic 模型校验），把 t0_round_trip.data_source 换成给定值。"""
+def _repo_segments(config_dir: Path, data_source: Any) -> list[Any]:
+    """配置目录（AIA_CONFIG_DIR 优先，否则仓库 config/）中 market_rules.yaml 的全部段（经后端 pydantic 模型校验），把 t0_round_trip.data_source 换成给定值。"""
     import yaml  # noqa: PLC0415
 
     cf = importlib.import_module("app.config_files")
-    raw = yaml.safe_load((REPO / "config" / "market_rules.yaml").read_text(encoding="utf-8"))
+    raw = yaml.safe_load((config_dir / "market_rules.yaml").read_text(encoding="utf-8"))
     for seg in raw["segments"]:
         if "t0_round_trip" not in seg:
             pytest.xfail(O_LOTS + "：config/market_rules.yaml 无 t0_round_trip")
@@ -176,19 +175,19 @@ T1_ANYWAY = [
 
 @pytest.mark.parametrize("data_source", [None, ""], ids=["null", "empty_string"])
 @pytest.mark.parametrize("kw", T1_ANYWAY)
-def test_etf_without_data_source_t_plus_1_baseline(data_source: Any, kw: dict[str, Any]) -> None:
+def test_etf_without_data_source_t_plus_1_baseline(config_dir: Path, data_source: Any, kw: dict[str, Any]) -> None:
     lots = _lots()
-    for seg in _repo_segments(data_source):
+    for seg in _repo_segments(config_dir, data_source):
         assert lots.fund_t_plus(seg, security_type="etf", **kw) == 1, (str(seg.effective_from), kw)
 
 
 @pytest.mark.xfail(strict=False, reason=O_T1_GATE)
 @pytest.mark.parametrize("data_source", [None, ""], ids=["null", "empty_string"])
 @pytest.mark.parametrize("kw", T0_CANDIDATES)
-def test_etf_without_data_source_always_t_plus_1(data_source: Any, kw: dict[str, Any]) -> None:
+def test_etf_without_data_source_always_t_plus_1(config_dir: Path, data_source: Any, kw: dict[str, Any]) -> None:
     """data_source 为 null / 空串：即使调用方传入 T+0 类别（债券/货币/黄金/商品期货/跨境 ETF、跨境 LOF），也必须返回 1。"""
     lots = _lots()
-    for seg in _repo_segments(data_source):
+    for seg in _repo_segments(config_dir, data_source):
         assert seg.t0_round_trip.data_source in (None, "")
         assert lots.fund_t_plus(seg, security_type="etf", **kw) == 1, (str(seg.effective_from), kw)
 
@@ -200,10 +199,10 @@ def test_etf_default_segment_none_is_t_plus_1() -> None:
     assert lots._DEFAULT_T0.data_source in (None, "")
 
 
-def test_repo_config_data_source_not_connected() -> None:
+def test_repo_config_data_source_not_connected(config_dir: Path) -> None:
     """仓库配置当前 data_source 未接入（null）：③ 的前提成立；接入后本用例提醒复核 ③ 的断言范围。"""
     _lots()
     import yaml  # noqa: PLC0415
 
-    raw = yaml.safe_load((REPO / "config" / "market_rules.yaml").read_text(encoding="utf-8"))
+    raw = yaml.safe_load((config_dir / "market_rules.yaml").read_text(encoding="utf-8"))
     assert [s.get("t0_round_trip", {}).get("data_source") for s in raw["segments"]] == [None] * len(raw["segments"])

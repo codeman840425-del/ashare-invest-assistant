@@ -37,7 +37,16 @@ BACKEND_DIR = Path(os.environ.get("AIA_BACKEND_DIR", REPO_ROOT / "src" / "backen
 if (BACKEND_DIR / "app").is_dir() and str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 DOCS_DIR = Path(os.environ.get("AIA_DOCS_DIR", REPO_ROOT / "docs")).resolve()
-CONFIG_SRC_DIR = Path(os.environ.get("AIA_CONFIG_DIR", REPO_ROOT / "config")).resolve()
+
+
+def resolve_config_dir() -> Path:
+    """业务配置目录：设置了 ``AIA_CONFIG_DIR`` 就用它（live 复测指向部署的配置），否则回落到仓库 ``config/``。
+    调用时读环境变量（不在导入时固化）。"""
+    env = os.environ.get("AIA_CONFIG_DIR")
+    return Path(env).resolve() if env else (REPO_ROOT / "config").resolve()
+
+
+CONFIG_SRC_DIR = resolve_config_dir()
 SNAPSHOT_DIR = Path(__file__).resolve().parent / "config_defaults"
 
 #: 本组测试对齐的契约版本（T-T01b）
@@ -149,6 +158,12 @@ def backend() -> SimpleNamespace:
     except ImportError as exc:  # pragma: no cover - 环境问题
         pytest.skip(f"后端模块导入失败（T-B01）：{type(exc).__name__}: {exc.name}")
     return SimpleNamespace(**mods)
+
+
+@pytest.fixture(scope="session")
+def config_dir() -> Path:
+    """共享夹具：读 ``config/*.yaml`` 的用例一律经此取目录（``AIA_CONFIG_DIR`` 优先，否则仓库 ``config/``）。"""
+    return resolve_config_dir()
 
 
 @pytest.fixture(scope="session")

@@ -266,6 +266,21 @@ check(
     "m6：越界路径不删、行保留待重试",
 )
 q("delete from app.import_files where id = :i", i=esc)
+# 契约 v0.2.9 #41 ②（review-028c077 M2）：存储根目录不存在 → 报错、行保留，不当作已删
+no_root = q(
+    "insert into app.import_files(batch_id, storage_path, retained_until) "
+    "values (:b, :p, now() - interval '1 day') returning id",
+    b=bx_files,
+    p=f"{uuid.uuid4()}/x.bin",
+).scalar_one()
+st_noroot = mk(import_storage_path=STORE / f"absent-{uuid.uuid4().hex[:8]}")
+with engine().begin() as c:
+    pipeline.purge_expired_raw_files(c, st_noroot)
+check(
+    q("select deleted_at from app.import_files where id = :i", i=no_root).scalar_one() is None,
+    "#41②：存储根目录不存在 → 不标记已删、行保留待重试",
+)
+q("delete from app.import_files where id = :i", i=no_root)
 
 # ---------------------------------------------------------------- m2 / m9 / M3
 spec = cu.get("/openapi.json")

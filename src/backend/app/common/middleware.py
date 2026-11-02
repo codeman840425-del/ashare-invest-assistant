@@ -135,3 +135,32 @@ class BodySizeLimitMiddleware:
             headers={"Connection": "close"},
         )
         await response(scope, receive, send)
+
+
+class PathCacheControlMiddleware:
+    """按路径前缀统一覆盖 ``Cache-Control``（契约 v0.2.9 #41，plan 1.3）。
+
+    ``/securities`` 及其下全部路径的**所有**响应（含 ``304``、错误、413、兜底 500）一律
+    ``private, no-store``；路由里写的值（如 search 原来的 ``private, max-age=60``）被覆盖。
+    放在最外层，只在这里设置一次。
+    """
+
+    def __init__(self, app: ASGIApp, *, prefixes: tuple[str, ...], value: str) -> None:
+        self.app = app
+        self.prefixes = prefixes
+        self.value = value
+
+    def _match(self, path: str) -> bool:
+        return any(path == p or path.startswith(p + "/") for p in self.prefixes)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not self._match(str(scope.get("path", ""))):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)["Cache-Control"] = self.value
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)

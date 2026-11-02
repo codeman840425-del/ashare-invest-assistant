@@ -372,9 +372,10 @@ def purge_expired_raw_files(
 ) -> int:
     """定时清理（评审 bbf58a0 m6，plan §3.5A）：删除 ``retained_until`` 已到期的加密原始文件。
 
-    逐条：先删磁盘文件（不存在视为已删），再把 ``import_files`` 置 ``deleted_at=now,
+    逐条：先删磁盘文件（根目录存在而文件不存在视为已删；根目录不存在报错、行保留，
+    契约 v0.2.9 #41 ②），再把 ``import_files`` 置 ``deleted_at=now,
     storage_path=NULL``。``FOR UPDATE SKIP LOCKED`` 避免与并发的放弃 / 注销争用。幂等：
-    事务回滚后下一轮重删（``unlink(missing_ok)``）。删除失败（路径越界、权限）只记批次号与
+    事务回滚后下一轮重删（``unlink(missing_ok)``）。删除失败（路径越界、权限、存储根目录不存在）只记批次号与
     异常类型，该行保留，下一轮重试。返回本轮成功清理的文件数。"""
     now = now or dt.datetime.now(dt.UTC)
     f = import_files

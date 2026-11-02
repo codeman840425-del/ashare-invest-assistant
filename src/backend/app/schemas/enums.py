@@ -15,6 +15,8 @@ v0.2.9（T-A10 687159f，T-B48）：新增 ``candidate_signal_event_cause``
 （与 ``candidate_signal_events.cause`` 的 CHECK 同值同序）；§6.1 ``BLOCKLISTED`` / ``USER_MUTED``
 只能经 ``/restrictions`` 解除（对其
 ``/release`` → ``409 REASON_NOT_MANUALLY_RELEASABLE``），表中“可手动解除”仍为“是”，未改取值。
+v0.2.9 内（T-A11，T-B10）：新增 ``research_candidate_status``、``research_candidate_origin``、
+``candidate_decision``（与 ``research_candidates`` / ``candidate_versions`` 的 CHECK 同值同序）。
 
 ``CONTRACT_ENUMS`` 只登记契约 §3 的命名枚举；契约里以内联字面量出现的取值（如 ``/me/profile`` 的
 ``effort``、``experience``）在本模块文末“非 §3 取值”一节集中定义，供 DB CHECK 与请求模型复用，
@@ -418,6 +420,26 @@ class CandidateSignalEventCause(StrEnum):  # v0.2.9 #6；与 candidate_signal_ev
     SUPERSEDE = "supersede"
 
 
+class ResearchCandidateStatus(StrEnum):  # v0.2.9 T-A11；与 research_candidates.status CHECK 一致
+    RESEARCHING = "researching"
+    WATCHING = "watching"
+    DROPPED = "dropped"
+    PLANNED = "planned"  # 只由系统写入（本人建计划时）；本版不会出现
+
+
+class ResearchCandidateOrigin(StrEnum):  # v0.2.9 T-A11；与 research_candidates.origin CHECK 一致
+    STRATEGY_SCREEN = "strategy_screen"  # POST /candidates 本版不接受（问题 69）
+    SUGGESTION = "suggestion"
+    MANUAL = "manual"
+    FROM_STOCK = "from_stock"
+
+
+class CandidateDecision(StrEnum):  # v0.2.9 T-A11；与 candidate_versions.decision CHECK 一致
+    CONTINUE = "continue"  # → researching
+    WATCH = "watch"  # → watching
+    DROP = "drop"  # → dropped
+
+
 class ReasonCode(StrEnum):  # 契约 §6.1；码类取值用大写（契约 §1 大小写规则）
     DATA_STALE = "DATA_STALE"
     KEY_DATA_MISSING = "KEY_DATA_MISSING"
@@ -780,6 +802,9 @@ CONTRACT_ENUMS: Final[dict[str, type[StrEnum]]] = {
     "instance_status": InstanceStatus,
     "candidate_signal_state": CandidateSignalState,
     "candidate_signal_event_cause": CandidateSignalEventCause,  # v0.2.9 #6
+    "research_candidate_status": ResearchCandidateStatus,  # v0.2.9 T-A11
+    "research_candidate_origin": ResearchCandidateOrigin,  # v0.2.9 T-A11
+    "candidate_decision": CandidateDecision,  # v0.2.9 T-A11
     "reason_status": ReasonStatus,
     "check_on": CheckOn,
     "release_kind": ReleaseKind,

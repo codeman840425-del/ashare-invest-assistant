@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, Table, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Index, Table, UniqueConstraint, text
 
 from app.db.base import (
     APP,
@@ -26,7 +26,16 @@ from app.db.base import (
     uuid_array,
     uuid_col,
 )
-from app.schemas.enums import Action, EpistemicType, PlanOrigin, Severity, SourceKind
+from app.schemas.enums import (
+    Action,
+    CandidateDecision,
+    EpistemicType,
+    PlanOrigin,
+    ResearchCandidateOrigin,
+    ResearchCandidateStatus,
+    Severity,
+    SourceKind,
+)
 
 watchlist_items = Table(
     "watchlist_items",
@@ -76,9 +85,18 @@ research_candidates = Table(
     txt("status", nullable=False),
     uuid_col("current_version_id", fk="app.candidate_versions.id", use_alter=True),
     created_at(),
-    one_of("origin", ["strategy_screen", "suggestion", "manual", "from_stock"]),
-    one_of("status", ["researching", "watching", "dropped", "planned"]),
+    one_of("origin", ResearchCandidateOrigin),  # 契约 §3 research_candidate_origin（同值同序）
+    one_of("status", ResearchCandidateStatus),  # 契约 §3 research_candidate_status
     schema=APP,
+)
+# 契约 v0.2.9 §7.7A（T-A11 验收 4，plan 第 9 节问题 66）：本人同一证券至多一条进行中的候选；
+# dropped / planned 不算。并发 POST 时由它保证只有一个成功（迁移 0016）。
+Index(
+    "uq_research_candidates_user_security_open",
+    research_candidates.c.user_id,
+    research_candidates.c.security_code,
+    unique=True,
+    postgresql_where=text("status IN ('researching', 'watching')"),
 )
 
 candidate_versions = Table(
@@ -96,7 +114,7 @@ candidate_versions = Table(
     uuid_col("snapshot_id", fk="app.data_snapshots.id"),
     created_at(),
     uuid_col("created_by", fk="app.users.id"),
-    one_of("decision", ["continue", "watch", "drop"]),
+    one_of("decision", CandidateDecision),  # 契约 §3 candidate_decision
     UniqueConstraint("candidate_id", "version_no"),
     schema=APP,
     comment="不可变（触发器）",

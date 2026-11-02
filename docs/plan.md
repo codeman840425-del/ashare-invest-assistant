@@ -1476,7 +1476,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | 表 | 关键字段 |
 |---|---|
 | `data_snapshots` | id, created_at, purpose(candidate/plan/alert/review/screen/horizon；`horizon` 为 v0.2.9 内 T-B47 裁定新增，周期评估快照，`user_id` 必填), items(jsonb: [{key（如 quote.{symbol}.close）, value, unit, data_as_of, fetched_at, provider, endpoint, raw_payload_id}]), known_events(jsonb: 当时已知的公告/事件 id 列表), hash；**user_id**(FK→users，可空；含持仓、成交、账户或其派生内容时必填), **licence_id**(可空；用某用户证书取到的数据时填)（T-B16 裁定：带 user_id 的快照在删除用户时物理删除；user_id 为空的快照只允许存市场级内容，见 7.3）。**写入方验收（v0.2.9 内，评审 be607b3/f72b8c7/8fd9502 裁定）**：每个写 `data_snapshots` 的模块（候选、计划、提醒、复盘、筛选、周期评估及以后新增的写入方）上线前都要有一条验收用例：快照含个人内容（持仓、成交、账户、画像、`user.*`）或由其派生的内容时必须写 `user_id`；用到某用户证书取到的数据时还必须写 `licence_id`；两条任一不满足即拒写（应用层断言 + 表 CHECK：`purpose IN ('candidate','plan','horizon')` 时 `user_id IS NOT NULL`；v0.2.9 内，T-O11 评审裁定：`candidate` 也必填，因为研究候选快照含本人持仓派生的适配评估；后端用新迁移把 `horizon` 加进 `purpose` 的 CHECK 并加这条 CHECK，迁移前先查已有违规行）。测试员在 T-T16 中按写入方逐个覆盖 |
-| `market.securities` | ~~code, name, exchange, board, list_date, status, industry_codes, updated_at~~ → v0.2.7：security_id, code("600000.SH"), type(stock/cdr/etf/index；契约 v0.2.8 加 etf), name, exchange(SH/SZ/BJ), board, list_date, list_date_basis, delist_date, listing_status, risk_flag, name_norm, name_initials(text[]), master_source, master_as_of, updated_at。**证券公开主数据，全站一份**（第 9 节问题 51：只含代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示；不存公司全称）；`master_source` 来源【待问题 52 / T-A04 补测】，确认前只用交易所公开列表。行业、概念、股本移到按证书的表（带 `source_licence_id`，2.1B）。另建 `security_name_history`、`security_code_history`、`security_risk_flag_history`（T007 §5）；索引 `gin (name_norm gin_trgm_ops)`、`gin (name_initials)`（迁移中 `CREATE EXTENSION IF NOT EXISTS pg_trgm`） |
+| `market.securities` | ~~code, name, exchange, board, list_date, status, industry_codes, updated_at~~ → v0.2.7：security_id, code("600000.SH"), type(stock/cdr/etf/index；契约 v0.2.8 加 etf), name, exchange(SH/SZ/BJ), board, list_date, list_date_basis, delist_date, listing_status, risk_flag, name_norm, name_initials(text[]), master_source, master_as_of, updated_at。**证券公开主数据，全站一份**（第 9 节问题 51：只含代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示；不存公司全称）；`master_source` 来源（v0.2.9 内，T-A04 定）：交易所公开列表（4.6.1；能否展示与再分发仍待问题 52）。行业、概念、股本移到按证书的表（带 `source_licence_id`，2.1B）。另建 `security_name_history`、`security_code_history`、`security_risk_flag_history`（T007 §5）；索引 `gin (name_norm gin_trgm_ops)`、`gin (name_initials)`（迁移中 `CREATE EXTENSION IF NOT EXISTS pg_trgm`）。**v0.2.9 内，T-A04**：列、约束与索引以 4.6.2 为准；V1 以 `code` 为主键（与已实现的迁移一致），**不另建代理键**，本表之外各表字段表中的 `security_id` 都指 `code`；搜索索引移到 `security_search_terms`（4.6.3） |
 | `market.trading_calendar` | date, is_open |
 | `market.daily_bars` | code, trade_date, open, high, low, close, volume, amount, adj_type, fetched_at（按年分区） |
 | `market.quotes_snapshot` | code, ts, price, pct_change, … （只保留当日+近 5 日，热数据在 Redis） |
@@ -1509,13 +1509,19 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 上传文件 ──> ① 留存原始文件(sha256) ──> ② 编码识别 ──> ③ 识别格式(选择解析器)
         ──> ④ 解析为标准行 + 列映射 ──> ⑤ 校验 & 去重判定 ──> 预览(状态 previewed)
 用户确认 ──> ⑥ 事务内写入 trades/account_events ──> ⑦ 重建受影响账户 holdings ──> 状态 committed
-用户放弃 ──> 状态 discarded（原始文件按留存策略保留）
+用户放弃 ──> 状态 discarded（同一事务删除预览行；批次头保留；原始文件按留存策略保留）
 ```
 
 **① 文件接收与留存**
 - 允许 `.txt`/`.csv`（MVP），单文件 ≤ 5 MB，单次 ≤ 5 个文件；保存到本机加密卷或境内对象存储（私有桶），路径 `imports/{user_id}/{batch_id}/{sha256}`；记录原文件名、大小、sha256。
 - 同一账户上传**同 sha256 文件**→ 文件级警告 `IMPORT_DUPLICATE_FILE`（不是 HTTP 错误；仍可预览，去重会挡住重复行）。
 - 原始文件默认保留 **365 天**或至用户删除账户（已定，第 9 节问题 21），用于追溯与解析器升级后重新解析；用户可在导入记录中手动删除原始文件。
+- **放弃或失败批次的预览行（v0.2.9 内，T-live-83a031c §8 裁定；契约 v0.2.9 #35）**：
+  - 批次转为 `discarded` 时，在同一事务里删除它的全部预览行（`import_rows`）以及其他按 `batch_id` 暂存、尚未提交的行级数据（如持仓快照的预览明细）；批次头（`import_batches` 的 `stats`/`summary`、`file_findings`、状态与时间）保留，用于审计和计数。
+  - 批次转为 `failed` 时同样处理；之后 `PUT options` 重新解析时从原始文件重新生成预览行。
+  - 原始文件不因放弃或失败而提前删除，按上一条的留存规则（`retained_until`）与 7.3“交割单原始文件”的每日清理、`ops.pending_file_purges` 重试处理，规则不变。（T-live-83a031c §8.3 观察到当前实现在 discard 时删除了原始文件、保留了预览行，两点都要按本条改）
+  - 已经处于 `discarded` 或 `failed`、仍有残留预览行的批次，由 beat 每小时调度、worker 执行的清理任务 `imports.purge_preview_rows` 删除（幂等，按批次分段提交，每次最多处理 10,000 行，剩余的下一小时继续）。
+  - 预览过期：本方案没有定义预览的过期时限，本裁定**不新增**；以后若定义，过期批次按本条同样处理。
 
 **② 编码识别**
 - 依次尝试：BOM 检测 → 严格 `utf-8` 解码 → `gb18030`（GBK 超集）→ `charset-normalizer` 检测兜底；记录 `detected_encoding` 与置信度；用户可在预览页手动改选编码重新解析。
@@ -1572,7 +1578,7 @@ class BrokerStatementParser(Protocol):
 |---|---|
 | `import_batches` | id, user_id, account_id, status(uploaded/parsing/previewed/committed/discarded/failed/reverted；契约 `import_status`), parser_id, parser_version, detected_encoding, encoding_override, mapping(jsonb), snapshot_as_of, file_findings(jsonb), summary(jsonb), created_at, committed_at, reverted_at |
 | `import_files` | id, batch_id, original_filename, size_bytes, sha256, storage_path, retained_until, deleted_at |
-| `import_rows` | id, batch_id, file_id, row_no, raw_line(text，加密；对外只给掩码后的行), kind(trade/event/ignored), status(ok/warning/error/skipped), normalized(jsonb), findings(jsonb：`ImportFinding[]`，3.5A-1), dedup_key, dedup_status, committed_trade_id / committed_event_id |
+| `import_rows` | id, batch_id, file_id, row_no, raw_line(text，加密；对外只给掩码后的行), kind(trade/event/ignored), status(ok/warning/error/skipped), normalized(jsonb), findings(jsonb：`ImportFinding[]`，3.5A-1), dedup_key, dedup_status, committed_trade_id / committed_event_id。批次转为 `discarded`/`failed` 时同一事务删除该批次的行（v0.2.9 内，T-live-83a031c §8 裁定，3.5） |
 | `import_mappings` | id, user_id, name, parser_id, mapping(jsonb), created_at |
 
 **错误行报告**：预览与结果页逐行展示错误/警告（行号、掩码后的原始行、提示码、原因、建议修改）；可下载 `errors.csv`；错误行不阻止其他行确认（确认时 `mode=valid_rows_only`，见 3.5A-1）。
@@ -1905,6 +1911,7 @@ class BrokerStatementParser(Protocol):
 | 建议或信号详情（含证据，约 50 条） | ≤ 200 ms | 证据按主键批量取 |
 | 复盘统计（策略 × 周期，附 n） | ≤ 500 ms | `strategy_stats_daily` 预聚合 |
 | SSE：数据写入到推送到达 | ≤ 2 s | pub/sub 直推 |
+| 证券搜索 `/securities/search`（`limit` 20；v0.2.9 内，T-A04） | ≤ 100 ms ◇ | `security_search_terms` 的 `text_pattern_ops` 前缀索引 + trgm 索引（4.6.2）；结果缓存 60 s |
 
 ### 3A.6 索引与分区
 - **行情**：
@@ -2089,6 +2096,77 @@ class BrokerStatementParser(Protocol):
 MVP 明确写入产品：**"本产品不提供新闻资讯；公告信息为盘后更新，可能存在延迟与遗漏，请以交易所/巨潮原文为准。"**
 
 ---
+
+### 4.6 证券主数据、对账与搜索（v0.2.9 内，T-A04）
+
+依据 `docs/data-sources/security_master.md`（T007）与 2.1B。契约同步见 api-contract v0.2.9 #33。本节只定设计，不含任何证书值；交易所列表的拉取不用证书，也不经过 `ingest`。
+
+#### 4.6.1 来源与优先级
+
+| 优先级 | 来源 | 用途 | 能做什么 |
+|---|---|---|---|
+| 1（权威） | 上交所、深交所、北交所公开列表：当前上市名单、终止上市名单、暂停/退市整理期名单、深交所简称变更（SSGSGMXX）、北交所新旧代码对照 | 建档、简称、上市/退市日期、板块、状态、曾用名、旧代码 | 唯一可以新建证券、改状态、写 `delisted` 的来源 |
+| 2（补缺） | 巨潮资讯 | 交易所列表缺上市日期等字段时补上 | 只填空值，`field_sources` 记 `cninfo`；与交易所值不同 → 只记 `field_mismatch`，不覆盖 |
+| 3（核对） | AKShare | 每周交叉核对 | 只记差异，不写主数据 |
+| 对账方 | 麦蕊 `/hslt/list`、`/bj/list/all`、`/kc/list/all`（代码集 = 三者并集）；`/hsrl/real/all`（只用于 `quote_conflict`）；`ssjy` 只做统计、不对账 | 按证书对账（2.1B） | 不新建、不删除、不改状态；结果只进 `security_reconciliation_diffs` |
+
+- **退市判定只认交易所**：`delisted` 只来自交易所终止上市名单（带终止上市日期）；简称带“退”且仍在当前上市名单 → `delisting_period`；从当前上市名单消失、又不在终止上市名单 → 连续 `master.missing_after_snapshots`（默认 2）份成功快照都没有才置 `missing_from_list`，不推断退市；重新出现即恢复原状态。
+- **风险警示**：`risk_flag` 由交易所简称前缀推出（`*ST`、`ST`、`退` 等，T007 §5），变化写入 `security_risk_flag_history`。
+- **曾用名**：深交所用 SSGSGMXX 回填全部历史；上交所、北交所从上线日起按每日快照比对积累（上线前的曾用名不回填，问题 90）；北交所旧代码来自代码对照表（每月拉一次）。
+
+#### 4.6.2 表（schema `market`；全站一份，不按证书）
+
+| 表 | 列 | 主键、唯一约束与索引 |
+|---|---|---|
+| `securities` | 3.3 字段表 `market.securities` 已列的列，另加 `missing_since date null`（进入 `missing_from_list` 的快照日期）、`last_seen_on date`（最近一次出现在交易所当前名单的快照日期）、`field_sources jsonb`（字段 → `exchange`/`cninfo`，如 `{"list_date":"cninfo"}`） | PK `code`；`check (listing_status in 契约 §3 listing_status)`；btree `(exchange, listing_status)`；原 `name_norm`/`name_initials` 上的 gin 索引在迁移中删除（检索改走词条表） |
+| `security_name_history` | `code`、`name`、`valid_from date`、`valid_until date null`（半开区间，null 表示至今）、`source`（`szse_ssgsgmxx`/`exchange_diff`）、`snapshot_id` | PK `(code, valid_from)`；排除约束 `exclude using gist (code with =, daterange(valid_from, valid_until, '[)') with &&)`（迁移中 `CREATE EXTENSION IF NOT EXISTS btree_gist`）；btree `(name)` |
+| `security_code_history` | `code`（当前代码）、`old_code`、`valid_from`、`valid_until`、`source`（`bse_code_map`） | PK `(code, valid_from)`；唯一 `(old_code)`；排除约束同上 |
+| `security_risk_flag_history` | `code`、`risk_flag`、`valid_from`、`valid_until`、`snapshot_id` | PK `(code, valid_from)`；排除约束同上 |
+| `security_listing_status_history` | `code`、`listing_status`、`valid_from`、`valid_until`、`snapshot_id`、`reason`（`exchange_list`/`exchange_delist_list`/`missing_from_list`） | PK `(code, valid_from)`；排除约束同上 |
+| `security_search_terms` | `id bigserial`、`code`、`term_kind`（`name`/`name_initials`/`former_name`/`former_initials`/`former_code`）、`term text`（已归一化：全角转半角、去空格；首字母为大写字母与数字）、`source_name text`（生成该词条的简称原文，用于 `matched_text`）、`is_st_stripped bool`、`variant_rank smallint`（0 = 词组词典的默认读音）、`generator_version smallint` | PK `id`；唯一 `(code, term_kind, term, source_name)`；btree `(term text_pattern_ops)`（精确与前缀）；gin `(term gin_trgm_ops)`（只用于 `name`/`former_name`，查询至少 2 个汉字才走）；btree `(code)` |
+| `master_snapshots` | `id`、`source`（`sse_list`/`sse_delist`/`szse_list`/`szse_delist`/`szse_rename`/`bse_list`/`bse_delist`/`bse_code_map`/`cninfo`/`akshare`）、`url`、`fetched_at timestamptz`（UTC）、`trade_date date`（北京时间快照日）、`row_count`、`sha256`、`parse_status`（`ok`/`rejected`/`failed`）、`reject_reason`（`empty`/`drop_pct`/`key_missing`/`parse_error`）、`raw_path`（原始文件，保留 90 天） | PK `id`；唯一 `(source, sha256)`；btree `(source, fetched_at desc)` |
+| `master_runs` | `id`、`started_at`、`finished_at`、`trigger`（`beat_1800`/`beat_0730`/`manual`/`bootstrap`）、`status`（`ok`/`partial`/`failed`）、`snapshot_ids bigint[]`、`stats jsonb`（新增、改名、改状态、拒收的计数） | PK `id`；btree `(started_at desc)` |
+| `security_reconciliation_diffs` | `id`、`kind`（契约 §3 `security_reconciliation_kind`）、`source`（`security_reconciliation_source`）、`security_code`、`source_name`、`field`、`master_value`、`source_value`、`source_licence_id uuid null`（只有 `mairui_*` 有）、`first_seen_on`、`last_seen_on`、`seen_days`、`status`（`open`/`resolved`）、`resolved_on` | PK `id`；部分唯一 `(kind, source, security_code, field, source_licence_id) NULLS NOT DISTINCT where status='open'`；btree `(status, last_seen_on desc, id desc)`；**隔离区 = `kind='vendor_unknown' and status='open'` 的行**，这些代码不进 `securities`、不生成词条 |
+
+- 本节各表只存公开主数据，不存证书值、行情数值或用户数据；`master_snapshots.raw_path` 指向 `data/master/` 下的原始文件（与导入文件目录分开），每日清理过期文件。
+- 迁移只建表与扩展（`pg_trgm`、`btree_gist`），不灌数据；数据由 4.6.6 的首次导入写入。
+
+#### 4.6.3 词条与拼音
+
+- 词条生成用 `pypinyin`：先用词组词典得到默认读音（`variant_rank=0`），再用 `heteronym=True` 展开多音字组合，按组合数截到 `search.initials_max_variants`（16）个；超过时默认读音那一组一定保留。
+- 带 `*ST`、`ST`、`S`、`退` 等前缀的简称，另生成一组去掉前缀后的词条（`is_st_stripped=true`），例如 `*ST示例` 可用 `SL` 与 `STSL` 搜到。
+- 简称或曾用名改变时，该证券的词条在同一事务中整体重建；`generator_version` 升级时全量重建（worker 批任务）。
+- 排序沿用契约 §7.3：`code_exact` > `code_prefix` > `name_exact` > `initials_exact` > `name_prefix` > `former_name` > `former_code` > `fuzzy`；同层内 `listed` 在前，再按 `code` 升序；曾用名的首字母命中归入 `former_name`。
+
+#### 4.6.4 对账与阈值
+
+- **快照校验**（每份交易所列表单独判定，失败则整份拒收、沿用上一份成功快照）：0 行；行数比该所上一份成功快照少 `master.reject_drop_pct`（2%）以上；代码、简称、上市日期任一缺失率超过 `master.reject_key_missing_pct`（0.5%）；解析失败。拒收写 `master_snapshots.parse_status='rejected'` 并出告警（契约 §7.9 `master.snapshot_rejected`）。
+- **合并冲突**：同一字段，交易所值一律优先；交易所为空、巨潮有值 → 用巨潮值并在 `field_sources` 记来源；两者不同 → 保留交易所值，记 `field_mismatch`；同一代码在两个交易所名单同时出现 → 本次不合并该代码，记 `field_mismatch(field=exchange)` 并告警。
+- **按证书对账（麦蕊，2.1B）**：每个可用证书各比一次，结果带 `source_licence_id`：
+  - 麦蕊有、交易所列为终止上市 → `vendor_stale_listed`（T007 实测 4 个）；
+  - 麦蕊有、交易所三类名单都没有 → `vendor_unknown`，进隔离区（T007 实测 1 个）；
+  - 交易所有（`listed`/`delisting_period`）、该证书代码集没有 → `quote_missing`，契约 `SecurityHit.quote_missing` 据此给值；
+  - `/hsrl/real/all` 中同一代码多行且数值冲突 → `quote_conflict`，只记录、不告警（实测 304 组，过于频繁）。
+- **交叉核对**：巨潮、AKShare 每周六（`master.crosscheck_weekday`）各比一次简称、上市日期、退市日期、交易所、板块，不同即 `field_mismatch`。
+- **关闭**：差异在下一次同类对账中消失即置 `resolved`；`seen_days` 按工作日累计。
+- **告警阈值**：`vendor_stale_listed` 连续超过 `master.vendor_stale_alert_days`（5 个工作日）；`vendor_unknown`、`quote_missing` 出现即告警；`field_mismatch` 未关闭行 ≥ `master.field_mismatch_alert_rows`（10）；`snapshot_rejected` 一次 warning、18:00 与次日 07:30 都拒收 critical。只在管理端显示（问题 92）。
+
+#### 4.6.5 调度与分工
+
+| 任务 | 触发 | 执行 | 说明 |
+|---|---|---|---|
+| `master.sync_exchange_lists` | beat：周一至周五 18:00、次日 07:30（北京时间） | worker `batch` 队列 | 拉三所当前、终止上市、整理期名单与深交所改名表 → 校验 → 合并 → 历史表 → 词条；07:30 只补拉 18:00 未成功的来源 |
+| `master.sync_bse_code_map` | beat：每月第一个工作日 18:30 | worker `batch` | 北交所新旧代码对照 |
+| `master.reconcile_vendor` | `master.sync_exchange_lists` 成功后链式触发 | worker 生成对账请求 → `ingest` 以 P1 优先级按证书拉麦蕊三份列表 → worker 比对 | 只有 `ingest` 调麦蕊（2.1B）；证书不可用则跳过该证书，不跨证书回退 |
+| `master.crosscheck` | beat：每周六 10:00 | worker `batch` | 巨潮、AKShare |
+| `master.purge_snapshots` | beat：每日 03:30 | worker `batch` | 删除超过 90 天的原始快照文件 |
+
+- 交易日门槛一律按工作日计（周一至周五，2.1B）。同一任务用 Redis 锁防重入；任务失败重试 3 次（间隔 10 分钟），仍失败即记 `master_runs.status='failed'`。
+
+#### 4.6.6 首次导入（上线前）
+
+- 部署时由运维执行 `python -m app.cli.master_bootstrap`：拉三所全部名单与深交所改名表、北交所代码对照，写主数据、历史表与词条；完成前不开放服务（因此搜索接口不返回 503）。
+- 首次导入不做“行数下降 2%”检查（没有上一份快照），其余校验照常；成功后写 `master_runs.trigger='bootstrap'`。
 
 ## 5. REST 接口契约摘要（验收项 5）
 
@@ -2380,6 +2458,14 @@ search:
   initials_max_variants: 16     # ◇ 多音字拼音首字母组合上限
   limit_default: 20             # ◇
   limit_max: 50                 # ◇
+master:                         # v0.2.9 内，T-A04（4.6）；由 worker 读取；时间均为北京时间
+  fetch_times: ["18:00", "07:30"]   # ◇ 周一至周五拉三所列表；07:30 是次日补拉
+  reject_drop_pct: 2.0          # ◇ 行数比该所上一份成功快照少 2% 以上 → 整份拒收
+  reject_key_missing_pct: 0.5   # ◇ 代码、简称、上市日期任一缺失率超过 0.5% → 整份拒收
+  missing_after_snapshots: 2    # ◇ 连续 2 份成功快照都没有该代码（且不在终止上市名单）才置 missing_from_list
+  vendor_stale_alert_days: 5    # ◇ vendor_stale_listed 连续超过 5 个工作日才告警
+  field_mismatch_alert_rows: 10 # ◇ 未关闭的 field_mismatch ≥ 10 条才告警
+  crosscheck_weekday: 6         # ◇ 巨潮/AKShare 交叉核对：每周六（1=周一）
 announcements:
   url_host_allowlist:           # ◇ 只有 https 且主机在此列表内的原文链接才返回给前端
     - www.sse.com.cn
@@ -3045,6 +3131,8 @@ admin:
 
 **质量门禁（CI 必过，PR 才能合并）**：ruff + mypy --strict（后端）、eslint + tsc --noEmit（前端）、上述单元/黄金/集成/契约测试、覆盖率阈值、禁用词扫描（前端文案、后端模板、prompt 模板）、敏感数据样式扫描（股东代码样式、licence 样式、真实范本文件名）、Alembic 迁移可升可降、Docker 镜像构建；**main 分支保护 + 至少 1 名评审**。CI 永不访问真实麦蕊与真实 LLM（全部 fixtures/mock）；真实接口的冒烟测试单独手动触发。
 
+**测试代码归属（v0.2.9 内，架构师裁定）**：与组件放在一起的前端测试（`src/frontend/src` 下的 `*.test.ts(x)`）归**前端**编写与维护；仓库根目录 `tests/` 下的测试归**测试角色**。
+
 **发布门禁（每个里程碑）**：测试角色签字的验收清单、回放一整天行情无异常、备份恢复演练、合规文案人工复核。
 
 ### Phase 0：本地优先的基础设施与骨架（约 1–1.5 周）
@@ -3191,6 +3279,14 @@ admin:
 | T-T21 | 2.5.14 契约测试：用测试目录中的虚构卡片验证导入器的通过、拒绝和幂等行为（缺必填字段、DSL 越权、参数 default 越界、fixtures 不足 6 个），不读取 `docs/strategies/` 的真实内容作为测试数据 | 测试 | 2 | T-B20d |
 | T-T08（扩展） | 性能：3A.5 的 P95 目标、3 年规模合成数据、locust + pgbench、SSE 延迟、`ingest` 队列等待；回退超过 20% 时告警 | 测试 | 4（第 2 阶段起每阶段跑一次） | T-B41, T-O08 |
 
+| T-B51 | **证券主数据表与迁移（v0.2.9 内，T-A04；plan 4.6.2）**：`securities` 加列、4 张历史表（含 `security_listing_status_history`，`btree_gist` 排除约束）、`security_search_terms`、`master_snapshots`、`master_runs`、`security_reconciliation_diffs`，删除旧 gin 索引；补测交易所 ETF 基金列表端点（只记录端点与字段，不灌数据）。交付：Alembic 迁移、表定义、补测记录。验收：迁移可升可降；重叠区间写入被拒；`/meta/enums` 加 `security_reconciliation_kind`、`security_reconciliation_source`（共 86 个）且 `check_contract` 通过 | 后端 | 1 | T-B04a |
+| T-B52 | **交易所列表同步与首次导入（4.6.1、4.6.4、4.6.5、4.6.6）**：`master.sync_exchange_lists`、`master.sync_bse_code_map`、`master.purge_snapshots`（beat 调度、worker `batch` 执行）；快照校验与整份拒收、合并规则、`missing_from_list` 判定、历史表维护；`app.cli.master_bootstrap`；`config/securities.yaml` 的 `master:` 段。交付：任务、CLI、单元测试（用虚构夹具，不复制 `/workspace/team/samples/`）。验收：拒收四种情形各有测试；不在终止上市名单的消失代码只会变 `missing_from_list`；不调用麦蕊 | 后端 | 1 | T-B51 |
+| T-B53 | **对账、交叉核对与告警（4.6.4、契约 §7.9）**：`master.reconcile_vendor`（`ingest` P1 按证书拉麦蕊 `/hslt/list`、`/bj/list/all`、`/kc/list/all`、`/hsrl/real/all`，worker 比对）、`master.crosscheck`（巨潮、AKShare）、差异开关闭、5 个 `master.*` 告警键、`GET /admin/securities/reconciliation`。交付：任务、接口、测试。验收：契约 §9 v0.2.9 验收 5–8；响应与日志不含证书值；证书不可用时跳过该证书且不跨证书回退 | 后端 | 1 | T-B52, T-B45 |
+| T-B54 | **搜索词条与搜索接口（4.6.3、契约 §7.3）**：词条生成（多音字展开上限 16、默认读音保留、去 ST 变体、曾用名与曾用名首字母、北交所旧代码）、改名时同事务重建、`generator_version` 全量重建任务；`/securities/search` 改走词条表，`SecurityHit.quote_missing`、`master_as_of` 按契约 #33 给值。交付：词条模块、接口、测试。验收：契约 §9 v0.2.9 验收 3–4、7；P95 ≤ 100 ms（3A.5） | 后端 | 1 | T-B52, T-B53 |
+| T-B56 | **放弃或失败批次的预览行清理（3.5，契约 #35）**：`discarded`/`failed` 状态变更同一事务删除预览行与未提交行级数据；discard 不再删除原始文件（改按留存策略）；`/rows` 返回空、`errors.csv` 只有表头、resolve 返回 409；beat 每小时调度的 `imports.purge_preview_rows`。交付：代码与测试。验收：契约 §9 v0.2.9 验收 9 | 后端 | 1 | T-B18 |
+| T-F25 | **管理端证券主数据对账页（契约 §7.9）**：`/admin/securities/reconciliation` 列表（状态、类型、来源筛选，游标翻页）；`ingest` 状态页显示 5 个 `master.*` 告警文案。交付：页面、组件测试（`src/frontend/src`）。验收：不显示证书值；非管理员不可见入口；告警按 `critical` 在前 | 前端 | 1 | T-B53 |
+| T-F26 | **搜索结果展示补充（契约 §7.3、§5.1）**：曾用名、旧代码命中时显示“曾用名：…”“旧代码：…”；`quote_missing=true` 显示“本人行情源暂无此证券”；`missing_from_list`、`delisting_period`、`delisted` 徽标；ETF 未建档时无结果的空态文案。交付：组件与组件测试。验收：`match_kind`、`listing_status` 的取值只从 `/meta/enums` 读，不写死 | 前端 | 1 | T-B54 |
+
 ### 关键路径
 T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → **T-B05（真实证书实测，与 T003 对账）** → T-B06 → T-B07 → T-B35 特征底座 → T-B09 → **T-B20a → T-B20b → T-B20c → T-B32 → T-B33 → T-B34**（与 T-B21 建议引擎、T-B31 风控、T-B36 交易规则并行汇合） → T-B24 盘后日报 →（T-B22 → T-B23 盘中）→ T-B26 通知 → T-B27 跟踪 → M2。T-B08/T-B18/T-B19 导入与 T-B30 分类并行（T-B30 完成前须先完成 T-R11 → T-B30a 分类器特征，挂在 T-B35 之后，v0.2.9 内裁定）；T-B25 LLM 网关独立并行（主线不依赖它，模板兜底）。前端全程按契约 mock 并行。
 
@@ -3323,6 +3419,9 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 87. **【默认执行，T-B46-47 前端待定新增，用户可改】持仓估算行的标注与数据状态**：在证券主数据中、但既没有日线收盘价也没有快照参考价的持仓（问题 79），行上只标“估算”（不在主数据中的标“不在主数据·估算”），不细分原因标签，原因写在页面说明里；只要有一行估算，持仓页整体数据状态就显示为“部分缺失”（契约 §7.2 `/portfolio`，v0.2.9 #31）。需要谁定：用户（产品）。
 88. **【默认执行，T-B46-47 前端待定新增，补测后复核】管理端采集告警的展示**：同类告警只出一条（不按证书逐张列出，逐张情况看证书列表）；文案固定、不带数值与证书数量；严重在前、警告在后；14 天内到期单列为“有证书即将到期”；不新增心跳时间字段（契约 §7.9，v0.2.9 #31）。需要谁定：运维、用户；T003 实测后与问题 78 一并复核。
 89. **【默认执行，T-B46-47 前端待定新增，用户可改】周期评估“数据不足”的显示口径**：某周期因数据缺失被封顶、且没有被硬门槛排除时显示“数据不足”；没有适合周期且至少一个周期“数据不足”时整体显示“数据不足”，否则显示“—”；界面不说“都不适合”（契约 §7.3 `/horizon-assessments`，v0.2.9 #31）。需要谁定：用户（产品）。
+90. **【默认执行，T-A04 新增，用户可改】上交所、北交所上线前的曾用名是否从巨潮或 AKShare 回填**：默认**不回填**——这两所的曾用名从上线日起按交易所每日快照比对积累，深交所用官方改名表回填全部历史；巨潮、AKShare 只核对、不写曾用名（4.6.1）。影响：上线前改过名的沪、北交所证券，按旧名搜不到。若改为回填，需标明来源并接受非交易所数据。
+91. **【默认执行，T-A04 新增，用户可改】麦蕊有、交易所没有的代码（`vendor_unknown`）能否搜到**：默认**搜不到**——进隔离区，不建档、不生成词条，`/securities/{code}` 返回 404，只在管理端对账页可见（契约 #33）。若改为可搜，需在结果上标“交易所未收录”。
+92. **【默认执行，T-A04 新增，用户可改】证券主数据告警发给谁**：默认**只在管理端显示**（`/admin/ingest/status.alerts` 的 `master.*` 键与对账页），不发站内通知、不发邮件，也不告知普通用户。若需要通知，另定渠道与频率上限。
 
 **I. 编排者默认（2026-11-01 12:32）——【编排者默认，用户可否决】**
 - **C(1) 首批 P0 策略**：G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01（研究员 `docs/strategies/catalog.md` 第 2 节总表；取代早期方案中 2.5.10 的 ①–⑨ MVP 模板清单）。引擎接口覆盖核对与缺口见 2.5.11A。
@@ -3345,4 +3444,4 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 - `config/*.yaml` 的文件清单、键与默认值以 6.1 为准；文件由后端创建。（T-A09 更正：原文“五个文件”是 T-A01 时的数目——`realtime`、`ingest`、`market_rules`、`risk_controls`、`horizon_classifier`；之后 6.1 又加了 `llm`、`imports`、`auth`、`securities`（契约 v0.2.7），现共 9 个。）
 - 仍需运维决定（不属于契约）：nginx `proxy_pass` 尾斜杠导致 `/api` 前缀被去掉（T-B01 §4.1），建议去掉尾斜杠，保持 `/api/v1`。
 
-**仍待定的问题汇总**：T-A08 问题 51–60 中，51、53 已定（53 已在契约 v0.2.8 同步）；54–57 按默认执行，59 已定（契约 v0.2.9 #30、§7.7B）；52、58、60 暂按默认，补测后复核；T-A09 新增问题 61–65（契约 v0.2.8 未决 U1–U5，均有默认，62、64 补测后复核；63 已定并于契约 v0.2.9 同步）；T-A10 的前端遗留待定项 P01–P21 与测试 T-T23 的三项裁定已在契约 v0.2.9 同步，无新增待定问题；T-A11（研究候选接口）新增问题 66–71、T-F22 管理端证书遗留新增问题 72–74（66–71、74 默认执行，72 已定为 V1 不加（契约 v0.2.9 #30），73 未决；契约 v0.2.9 #19–#26）；T-B46/T-B47 裁定新增问题 75–79（均默认执行，78 补测后复核；契约 v0.2.9 #27）；前端待定裁定新增问题 80–86（均默认执行，86 待研究员核对；契约 v0.2.9 #30）；77/82/85 个因子的口径【待 T003 补测核实】、交易规则 2023-04-10 之前未建模及深交所条款逐字核对（问题 36）；【风险提示，未决】朋友属于第三方：朋友的敏感个人信息、咨询资质、律师书面意见（问题 48；麦蕊再分发改由每人自用证书解决，问题 49）；**麦蕊证书归属、代运营、同 IP 多证书与共享缓存【待麦蕊书面确认】（问题 50）**；（问题 38–42 已于 2026-11-02 作废，见问题 43–47）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法（问题 19，待脱敏范本；分红计入摊薄成本已定）；另见 2.5.14 H（续）末尾列出的研究员侧未决项。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning，以及 ST 10%、T+1 hold 阈值 1.0%、分红计入摊薄成本已于 2026-11-01 拍板。）
+**仍待定的问题汇总**：T-A08 问题 51–60 中，51、53 已定（53 已在契约 v0.2.8 同步）；54–57 按默认执行，59 已定（契约 v0.2.9 #30、§7.7B）；52、58、60 暂按默认，补测后复核；T-A09 新增问题 61–65（契约 v0.2.8 未决 U1–U5，均有默认，62、64 补测后复核；63 已定并于契约 v0.2.9 同步）；T-A10 的前端遗留待定项 P01–P21 与测试 T-T23 的三项裁定已在契约 v0.2.9 同步，无新增待定问题；T-A11（研究候选接口）新增问题 66–71、T-F22 管理端证书遗留新增问题 72–74（66–71、74 默认执行，72 已定为 V1 不加（契约 v0.2.9 #30），73 未决；契约 v0.2.9 #19–#26）；T-B46/T-B47 裁定新增问题 75–79（均默认执行，78 补测后复核；契约 v0.2.9 #27）；前端待定裁定新增问题 80–86（均默认执行，86 待研究员核对；契约 v0.2.9 #30）；77/82/85 个因子的口径【待 T003 补测核实】、交易规则 2023-04-10 之前未建模及深交所条款逐字核对（问题 36）；【风险提示，未决】朋友属于第三方：朋友的敏感个人信息、咨询资质、律师书面意见（问题 48；麦蕊再分发改由每人自用证书解决，问题 49）；**麦蕊证书归属、代运营、同 IP 多证书与共享缓存【待麦蕊书面确认】（问题 50）**；（问题 38–42 已于 2026-11-02 作废，见问题 43–47）；DeepSeek：API 数据是否用于训练、保留期限、DPA、实际单价与账单对账【待核实】（问题 16、2.7.1；key 格式官方未公布，已定只校验非空）；麦蕊 licence 的长度与字符集【待核实】（7.4A S1）；到期后是否续费（问题 5，到期前 60 天再定）；交割单撤单/红利/新股行的真实写法（问题 19，待脱敏范本；分红计入摊薄成本已定）；另见 2.5.14 H（续）末尾列出的研究员侧未决项；T-A04（证券主数据与搜索）新增问题 90–92（均默认执行，契约 v0.2.9 #33）。（问题 1 子问题、5、19、33、前端版本、Sentry、GitHub secret scanning，以及 ST 10%、T+1 hold 阈值 1.0%、分红计入摊薄成本已于 2026-11-01 拍板。）

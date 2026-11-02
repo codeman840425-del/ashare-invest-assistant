@@ -215,3 +215,77 @@ def test_header_limits_in_cli(gw_repo: Path) -> None:
 def test_dynamic_upstream_dns_string_form_ok(gw_repo: Path) -> None:
     _sub(gw_repo, cgl.COMPOSE_BASE, "    dns:\n      - 127.0.0.1\n", "    dns: 127.0.0.1\n")
     assert cgl.check_dynamic_upstream(gw_repo) == []
+
+
+# ---- 评审 d1a148f：m1 resolver 只能一个地址 / map 分支只能内部短名；m2 network_mode；n !reset、叠加文件 ----
+
+NGINX_SVC = "  nginx:\n"
+
+
+@pytest.mark.parametrize("rel,old,new,needle", [
+    # m1：多个 resolver 地址（nginx 轮询，会直接查外部 DNS）
+    (cgl.NGINX_CONF, "resolver 127.0.0.11 valid=10s", "resolver 127.0.0.11 1.1.1.1 valid=10s", "只能写 Docker DNS 127.0.0.11 一个地址"),
+    (cgl.NGINX_CONF, "resolver 127.0.0.11 valid=10s", "resolver 1.1.1.1 127.0.0.11 valid=10s", "只能写 Docker DNS 127.0.0.11 一个地址"),
+    (cgl.NGINX_CONF, "resolver 127.0.0.11 valid=10s", "resolver 127.0.0.11 127.0.0.11:5353 valid=10s", "一个地址"),
+    (cgl.NGINX_CONF, "resolver 127.0.0.11 valid=10s", "resolver [2606:4700::1111] 127.0.0.11 valid=10s", "一个地址"),
+    # m1：map 新增分支指向外部主机 / IP
+    (cgl.NGINX_CONF, '    default "api:8000";\n', '    default "api:8000";\n    ~^x evil.example.com:443;\n', "内部短名"),
+    (cgl.NGINX_CONF, '    default "api:8000";\n', '    default "api:8000";\n    "~^y" "203.0.113.5:80";\n', "内部短名"),
+    (cgl.NGINX_CONF, '    default "api:8000";\n', '    default "api:8000";\n    ~^z api.svc.cluster.local:8000;\n', "内部短名"),
+    # m2：network_mode（任何文件、任何取值）
+    (cgl.COMPOSE_DEV, "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n",
+     "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n    network_mode: host\n", "不得设 network_mode"),
+    (cgl.COMPOSE_BASE, "    dns:\n      - 127.0.0.1\n", "    dns:\n      - 127.0.0.1\n    network_mode: host\n", "不得设 network_mode"),
+    (cgl.COMPOSE_BASE, "    dns:\n      - 127.0.0.1\n", "    dns:\n      - 127.0.0.1\n    network_mode: \"service:api\"\n", "不得设 network_mode"),
+    # n：!reset / !override 给明确报错
+    (cgl.COMPOSE_DEV, "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n",
+     "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n    dns: !reset []\n", "!reset"),
+    (cgl.COMPOSE_DEV, "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n",
+     "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n    dns: !override [1.1.1.1]\n", "!override"),
+    (cgl.COMPOSE_BASE, "    dns:\n      - 127.0.0.1\n", "    dns: !reset null\n", "!reset"),
+    # extends
+    (cgl.COMPOSE_DEV, "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n",
+     "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n    extends:\n      file: other.yml\n      service: gw\n", "extends"),
+])
+def test_d1a148f_followups_negative(gw_repo: Path, rel: str, old: str, new: str, needle: str) -> None:
+    _sub(gw_repo, rel, old, new)
+    errs = cgl.check_dynamic_upstream(gw_repo)
+    assert any(needle in e for e in errs), errs
+
+
+def test_reset_tag_does_not_crash_cli(gw_repo: Path) -> None:
+    _sub(gw_repo, cgl.COMPOSE_DEV, "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n",
+         "      - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro\n    dns: !reset []\n")
+    r = subprocess.run([sys.executable, str(CI_DIR / "check_gateway_limits.py"), "--repo", str(gw_repo)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "Traceback" not in r.stderr, r.stderr
+    assert "::error" in r.stdout and "!reset" in r.stdout and "不允许" in r.stdout, r.stdout
+
+
+def test_map_internal_short_name_branch_ok(gw_repo: Path) -> None:
+    _sub(gw_repo, cgl.NGINX_CONF, '    default "api:8000";\n', '    default "api:8000";\n    ~^canary api-canary:8000;\n')
+    assert cgl.check_dynamic_upstream(gw_repo) == []
+
+
+@pytest.mark.parametrize("name,body,needles", [
+    # docker compose 在 deploy/compose 里会自动加载这个文件
+    ("docker-compose.override.yml", "services:\n  nginx:\n    dns: [1.1.1.1]\n", ("只允许", "不得覆盖 nginx dns")),
+    ("docker-compose.override.yml", "services:\n  nginx:\n    network_mode: host\n", ("只允许", "network_mode")),
+    ("compose.override.yaml", "services:\n  nginx:\n    healthcheck:\n      test: [\"CMD\", \"true\"]\n", ("只允许", "healthcheck")),
+    ("docker-compose.override.yml", "services:\n  nginx:\n    dns: !reset []\n", ("只允许", "!reset")),
+    ("docker-compose.extra.yml", "services: {}\n", ("只允许",)),
+])
+def test_override_files_checked(gw_repo: Path, name: str, body: str, needles: tuple[str, ...]) -> None:
+    write(gw_repo, f"{cgl.COMPOSE_DIR}/{name}", body)
+    errs = cgl.check_dynamic_upstream(gw_repo)
+    for n in needles:
+        assert any(n in e and name in e for e in errs), (n, errs)
+
+
+def test_non_compose_files_in_compose_dir_ignored(gw_repo: Path) -> None:
+    write(gw_repo, f"{cgl.COMPOSE_DIR}/README.md", "x\n")
+    assert cgl.check_dynamic_upstream(gw_repo) == []
+
+
+def test_repo_compose_dir_has_no_extra_files() -> None:
+    assert cgl.extra_compose_files(REPO) == []

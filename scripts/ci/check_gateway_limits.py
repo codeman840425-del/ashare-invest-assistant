@@ -27,6 +27,12 @@
   9. compose：基础文件 nginx 健康检查经 nginx 探上游 /health/live（不是自答的 /healthz）；dev 叠加文件不得覆盖 healthcheck。
      基础文件 nginx 的 dns 必须且只能是 127.0.0.1（断开外部 DNS：上游停机时未知名字不会被宿主 DNS 解析到外部地址）；
      dev 叠加文件不得覆盖 dns。
+     （评审 d1a148f）resolver 只能写 127.0.0.11 一个地址（多个地址 nginx 会轮询，直接查外部 DNS，绕过 dns:）；
+     map $host $aia_api_upstream 每个分支都必须是内部短名 name:port（不带点、不是 IP）；
+     任何 compose 文件都不得给 nginx 设 network_mode（host 网络不经内嵌 DNS，改用宿主解析）或 extends；
+     !reset / !override 写法明确报错（会绕过这里的合并检查）；
+     deploy/compose 下除基础与 dev 外的 compose 文件（如 docker compose 会自动加载的 docker-compose.override.yml）
+     一律报错，同时按叠加文件规则检查。
 请求行 / 请求头过长（T-D，T-live-0f8129b F-1；与 413 同一信封）：
   10. nginx.conf：server 级显式写且只写一条 large_client_header_buffers N SIZE；
       error_page 414 指向内部 URI location（不能是命名 location：读请求行阶段 URI 尚未解析，跳命名 location 会变 500），
@@ -225,7 +231,10 @@ def check_rate_limits(repo: Path) -> list[str]:
         if not f.is_file():
             errors.append(f"{rel} 不存在")
             continue
-        doc = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        doc, err = load_compose(repo, rel)
+        if err:
+            errors.append(err)
+            continue
         vols = (((doc.get("services") or {}).get("nginx") or {}).get("volumes")) or []
         if f"{src}:{LIMITS_TARGET}:ro" not in vols:
             errors.append(f"{rel}: nginx 没有挂载 {src}:{LIMITS_TARGET}:ro")
@@ -242,6 +251,52 @@ UPSTREAM_HOST = "api:8000"
 NGINX_DNS = "127.0.0.1"
 
 
+COMPOSE_DIR = "deploy/compose"
+SHORT_UPSTREAM_RE = re.compile(r"^[a-z][a-z0-9_-]*:\d+$")
+
+
+class _ComposeLoader(yaml.SafeLoader):
+    """safe_load + 把 compose 的 !reset / !override 标签变成明确的报错（而不是 ConstructorError 崩溃）。"""
+
+
+def _tag_refused(loader: yaml.SafeLoader, suffix: str, node: yaml.Node):  # noqa: ARG001
+    raise _TagRefused(f"!{suffix}", node.start_mark.line + 1)
+
+
+class _TagRefused(Exception):
+    def __init__(self, tag: str, line: int) -> None:
+        super().__init__(tag, line)
+        self.tag, self.line = tag, line
+
+
+_ComposeLoader.add_multi_constructor("!", _tag_refused)
+
+
+def load_compose(repo: Path, rel: str) -> tuple[dict | None, str | None]:
+    """读 compose 文件：返回 (文档, None) 或 (None, 明确的错误)。"""
+    try:
+        doc = yaml.load((repo / rel).read_text(encoding="utf-8"), Loader=_ComposeLoader)  # noqa: S506（SafeLoader 子类）
+    except _TagRefused as e:
+        return None, (f"{rel}: 第 {e.line} 行用了 {e.tag}——compose 的 !reset/!override 会整体替换合并结果、"
+                      f"绕过本检查（如清空 nginx 的 dns），不允许；请直接改基础文件")
+    except yaml.YAMLError as e:
+        return None, f"{rel}: YAML 解析失败：{e}"
+    if doc is None:
+        doc = {}
+    if not isinstance(doc, dict):
+        return None, f"{rel}: 顶层不是映射"
+    return doc, None
+
+
+def extra_compose_files(repo: Path) -> list[str]:
+    d = repo / COMPOSE_DIR
+    if not d.is_dir():
+        return []
+    known = {Path(COMPOSE_BASE).name, Path(COMPOSE_DEV).name}
+    return sorted(f"{COMPOSE_DIR}/{f.name}" for f in d.iterdir()
+                  if f.is_file() and f.suffix in (".yml", ".yaml") and f.name not in known)
+
+
 def check_dynamic_upstream(repo: Path) -> list[str]:
     errors: list[str] = []
     f = repo / NGINX_CONF
@@ -253,8 +308,10 @@ def check_dynamic_upstream(repo: Path) -> list[str]:
         errors.append(f"{NGINX_CONF}: 需要且只能有一条 resolver（Docker DNS 127.0.0.11），实际 {len(rs)} 条")
     else:
         parts = rs[0].split()
-        if "127.0.0.11" not in parts:
-            errors.append(f"{NGINX_CONF}: resolver 必须指向 Docker DNS 127.0.0.11（实际：{rs[0].strip()}）")
+        addrs = [p for p in parts if "=" not in p]
+        if addrs != ["127.0.0.11"]:
+            errors.append(f"{NGINX_CONF}: resolver 只能写 Docker DNS 127.0.0.11 一个地址（多个地址 nginx 会轮询，"
+                          f"直接查外部 DNS、绕过 dns:；实际：{rs[0].strip()}）")
         valid = [p for p in parts if p.startswith("valid=")]
         m = re.fullmatch(r"valid=(\d+)(s?)", valid[0]) if valid else None
         if not m or int(m.group(1)) > 30:
@@ -264,6 +321,14 @@ def check_dynamic_upstream(repo: Path) -> list[str]:
     m = re.search(r"map\s+\$host\s+" + re.escape(UPSTREAM_VAR) + r"\s*\{(.*?)\}", conf, re.S)
     if not m or not re.search(r'^\s*default\s+"?' + re.escape(UPSTREAM_HOST) + r'"?\s*;', m.group(1), re.M):
         errors.append(f'{NGINX_CONF}: 缺少 map $host {UPSTREAM_VAR} {{ default "{UPSTREAM_HOST}"; }}（不能用 set：@nginx_405 里会是空值）')
+    for line in (m.group(1).splitlines() if m else []):
+        mm = re.match(r'\s*("[^"]*"|\S+)\s+("[^"]*"|\S+?)\s*;\s*$', line)
+        if not line.strip():
+            continue
+        val = mm.group(2).strip('"') if mm else None
+        if val is None or not SHORT_UPSTREAM_RE.match(val):
+            errors.append(f"{NGINX_CONF}: map {UPSTREAM_VAR} 的分支只能指向内部短名 name:port（不带点、不是 IP；"
+                          f"否则会经外部 DNS 解析或直连外部；实际：{line.strip()}）")
     targets = PROXY_PASS_RE.findall(conf)
     if not targets:
         errors.append(f"{NGINX_CONF}: 没有 proxy_pass")
@@ -274,19 +339,35 @@ def check_dynamic_upstream(repo: Path) -> list[str]:
         elif t != prefix and not t.endswith("$is_args$args"):
             errors.append(f"{NGINX_CONF}: proxy_pass {t} 带 URI 但没有 $is_args$args（变量形式不会自动追加查询参数）")
 
-    for rel in (COMPOSE_BASE, COMPOSE_DEV):
+    extras = extra_compose_files(repo)
+    for rel in extras:
+        errors.append(f"{rel}: {COMPOSE_DIR} 下只允许 {Path(COMPOSE_BASE).name} 和 {Path(COMPOSE_DEV).name}"
+                      f"（在该目录直接跑 docker compose 会自动加载 docker-compose.override.yml 等文件，绕过 compose.sh）")
+    for rel in (COMPOSE_BASE, COMPOSE_DEV, *extras):
         cf = repo / rel
         if not cf.is_file():
             errors.append(f"{rel} 不存在")
             continue
-        nginx = ((yaml.safe_load(cf.read_text(encoding="utf-8")) or {}).get("services") or {}).get("nginx") or {}
+        doc, err = load_compose(repo, rel)
+        if err:
+            errors.append(err)
+            continue
+        nginx = (doc.get("services") or {}).get("nginx") or {}
+        if not isinstance(nginx, dict):
+            nginx = {}
         hc = nginx.get("healthcheck")
         dns = nginx.get("dns")
-        if rel == COMPOSE_DEV:
+        if "network_mode" in nginx:
+            errors.append(f"{rel}: nginx 不得设 network_mode（实际：{nginx['network_mode']!r}；host 等模式不经 Docker 内嵌 DNS，"
+                          f"改用宿主解析，dns: 断开外部 DNS 失效）")
+        if "extends" in nginx:
+            errors.append(f"{rel}: nginx 不得用 extends（继承来的 dns/network_mode/healthcheck 绕过本检查）")
+        if rel != COMPOSE_BASE:
+            what = "dev 叠加文件" if rel == COMPOSE_DEV else "叠加文件"
             if hc is not None:
-                errors.append(f"{rel}: dev 叠加文件不得覆盖 nginx healthcheck（应与基础文件一致探上游 /health/live）")
+                errors.append(f"{rel}: {what}不得覆盖 nginx healthcheck（应与基础文件一致探上游 /health/live）")
             if dns is not None:
-                errors.append(f"{rel}: dev 叠加文件不得覆盖 nginx dns（基础文件断开外部 DNS）")
+                errors.append(f"{rel}: {what}不得覆盖 nginx dns（基础文件断开外部 DNS）")
             continue
         dns_list = [dns] if isinstance(dns, str) else dns
         if dns_list != [NGINX_DNS]:

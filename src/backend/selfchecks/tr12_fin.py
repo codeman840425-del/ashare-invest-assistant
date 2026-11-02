@@ -141,8 +141,13 @@ def switch_checks() -> None:
         str(r),
     )
     check(
-        "p13 只点名运行：缺省全量不含、p13 前缀选中",
-        "p13_fin_pit" not in ra.select([]) and ra.select(["p13"]) == ["p13_fin_pit"],
+        "p13 只点名运行：缺省全量不含；p13 / p13_fin_pit 选中；p1、p 前缀不带上 p13（review-af589c0 m1）",
+        "p13_fin_pit" not in ra.select([])
+        and ra.select(["p13"]) == ["p13_fin_pit"]
+        and ra.select(["p13_fin_pit"]) == ["p13_fin_pit"]
+        and "p13_fin_pit" not in ra.select(["p1"])
+        and "p13_fin_pit" not in ra.select(["p"])
+        and "p13_fin_pit" in ra.select(["p1", "p13"]),
     )
 
 
@@ -154,7 +159,7 @@ def replay(run_dir: Path) -> None:
         return
     again = json.loads(
         json.dumps(
-            an.analyze(an.load_raw(run_dir), json.loads(meta.read_text(encoding="utf-8"))),
+            an.analyze(an.load_raw(run_dir), json.loads(meta.read_text(encoding="utf-8")), an.load_first_seen(run_dir)),
             ensure_ascii=False,
             default=str,
         )

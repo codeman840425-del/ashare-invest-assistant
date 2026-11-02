@@ -45,7 +45,8 @@ OPT_IN = ["p13_fin_pit"]
 
 def select(want: list) -> list:
     base = [m for m in ORDER if not want or any(m.startswith(w) for w in want)]
-    return base + [m for m in OPT_IN if want and any(m.startswith(w) for w in want)]
+    # review-af589c0 m1：opt-in 项只按完整名或编号（如 p13）精确点名，p1 / p 前缀不带上
+    return base + [m for m in OPT_IN if want and any(w in (m, m.split("_")[0]) for w in want)]
 
 
 def run_probes(mods: list) -> bool:
@@ -465,7 +466,8 @@ def _p13_phase(check, args, st_api, st_pro, base_api, base_pro, echo_url):
         except (OSError, ValueError):
             a = {}
         meta = json.loads((sub / "plan_meta.json").read_text(encoding="utf-8")) if (sub / "plan_meta.json").exists() else {}
-        again = json.loads(json.dumps(an.analyze(an.load_raw(ctx.run_dir), meta), ensure_ascii=False, default=str))
+        again = json.loads(json.dumps(an.analyze(an.load_raw(ctx.run_dir), meta, an.load_first_seen(ctx.run_dir)),
+                                      ensure_ascii=False, default=str))
         check(f"{label}：p13_analysis.json 存在且与离线脚本对原始文件重算结果一致", bool(a) and a == again)
         if label == "p13":
             cf = a.get("1_cashflow", {})
@@ -500,6 +502,21 @@ def _p13_phase(check, args, st_api, st_pro, base_api, base_pro, echo_url):
                   and a.get("10_cdr", {}).get("689009", {}).get("rows", 0) > 0, str(a.get("v5j_cdr_unit")))
             check("p13 mock：② balance 不含 600000（M1 腾出 1 次）、600000 cashflow 保留",
                   "600000" not in a.get("2_balance", {}) and "600000" in a.get("1_cashflow", {}))
+            bf = a.get("4_capital", {}).get("v5i_backfill", {})
+            b6 = bf.get("by_code", {}).get("600519", {})
+            check("p13 mock：V5i 回填分析——600519 季末行对照同期报告 → backfilled、每行带 first_seen_at（= manifest fetched_at）",
+                  bf.get("verdicts", {}).get("600519") == "backfilled" and b6.get("rows_detail_tail")
+                  and all(x["first_seen_at"] for x in b6["rows_detail_tail"]), str(bf.get("verdicts")))
+            check("p13 mock：V5i 000550 无报告 → 只给内部统计（inconclusive）",
+                  bf.get("by_code", {}).get("000550", {}).get("verdict") == "inconclusive"
+                  and bf["by_code"]["000550"]["plrq_is_quarter_end"]["n"] >= 1)
+            pb6 = a.get("6_pb", {})
+            pb_ok = all(isinstance(x.get("basis", {}).get("pit_basis", []), list) for v in pb6.values() for x in v)
+            b318 = [x["basis"] for x in pb6.get("601318", [])]
+            check("p13 mock：PB pit_basis 为数组；share_class_check=list；601318 non_a_share_capital 来自名单（m3）",
+                  pb_ok and b318 and all(b["share_class_check"] == "list" and b.get("share_class_list") == "A+H"
+                                         and "non_a_share_capital" in b["verify_pending"] for b in b318)
+                  and "non_a_share_capital" not in a.get("plan", {}).get("verify_pending", {}).get("601318", []))
             sw = a.get("5_sw", {})
             check("p13 mock：⑤ 识别出银行/保险节点与申万二级", sw.get("has_sw_l2") and sw.get("bank_nodes")
                   and sw.get("insurance_nodes"))

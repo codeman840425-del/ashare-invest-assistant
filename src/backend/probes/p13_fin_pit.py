@@ -44,7 +44,8 @@ JNFH_CODES = ["600519", "000001"]
 ZG_CODES = ["000001", "601318"]
 CDR_CODE = "689009.SH"
 DAILY_RANGE = ("20260901", "20261031")
-VERIFY_PENDING = {"000001": ["bank_balance"], "601318": ["insurance_balance", "non_a_share_capital"]}
+# non_a_share_capital 不再写死：pb_at 按 plan_meta.share_class_lists（探针样本名单）打（review-af589c0 m3）
+VERIFY_PENDING = {"000001": ["bank_balance"], "601318": ["insurance_balance"]}
 
 
 def c6(code: str) -> str:
@@ -94,7 +95,8 @@ def plan_meta(restated: str | None = None) -> dict:
             "balance": [c6(x) for x in CASHFLOW_CODES if x not in BALANCE_SKIP] + [rs, c6(CDR_CODE)],
             "capital": [c6(x) for x in CAPITAL_CODES], "pb": [c6(x) for x in PB_CODES], "jnfh": JNFH_CODES,
             "restated": {**RESTATED, "code": rs}, "verify_pending": VERIFY_PENDING, "expect": an.EXPECT,
-            "insurers_sw_l2_web": an.INSURERS_SW}
+            "insurers_sw_l2_web": an.INSURERS_SW, "share_class_lists": an.SHARE_CLASS_LISTS_SAMPLE,
+            "cdr_ratio": an.CDR_RATIO_SAMPLE}
 
 
 def _save(res: list, manifest: list, raw: dict, key: str, item: str, name: str, tpl: str, params: dict):
@@ -126,7 +128,7 @@ def main(res):
     meta = plan_meta(rs)
     c.write_raw(f"{SUBDIR}/manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1))
     c.write_raw(f"{SUBDIR}/plan_meta.json", json.dumps(meta, ensure_ascii=False, indent=1))
-    a = an.analyze(raw, meta)
+    a = an.analyze(raw, meta, {m["key"]: m["fetched_at"] for m in manifest})
     text = json.dumps(a, ensure_ascii=False, indent=1, default=str)
     c.write_raw("p13_analysis.json", text)
     lines = an.summary_lines(a)

@@ -826,7 +826,7 @@ H-01 是"周期分类只推荐、不自动启用"（问题 15）的**唯一例�
 | S-01 `st_pullback_ma` | 日线盘后 | 基本覆盖（`ma`、`pct_change`、`rank_pct`） | 行业内排名分支需要分组截面函数 `rank_pct_in(x, group_key)` 和行业归属特征 `f.sw_l1`（申万一级，来源【待 T003】）→ T-B42、T-B43 |
 | W-01 `sw_ma_trend_pullback` | 日线盘后 | 部分 | ① `ctx.highest_close_since_entry`（跟踪止盈）；② `max2(a,b)`；③ `for p.x days`（N 取参数）；④ 特征请求 `f.ind_rs20`、`f.main_net_20d`、`f.np_yoy_latest`、`f.ann_risk_count_10d`【待 T003】→ T-B42、T-B43 |
 | W-02 `sw_breakout` | 日线盘后 | 部分 | 布林带宽及其自身 120 日分位：新增 `std(x,n)`、`ts_pct_rank(x,n)`，或登记派生特征 `f.boll_bw20`、`f.boll_bw20_pct120`（两种都支持，常用的登记为派生特征以便缓存）→ T-B42 |
-| L-01 `lt_value` | 筛选型，**每月**首个交易日盘后 | 部分 | ① 调度 `scan.schedule=monthly_first_trading_day`；② 行业内分位 `rank_pct_in` 或派生特征（如 `f.pe_ttm_ind_pct`）；③ 筛选的单行业上限 `screen.per_group_cap`；④ 因子历史值是否按时点计算【待 T003】 → T-B42、T-B43 |
+| L-01 `lt_value` | 筛选型，**每月**首个交易日盘后 | 部分 | ① 调度 `scan.schedule=monthly_first_trading_day`；② 行业内分位 `rank_pct_in` 或派生特征（如 `f.pe_ttm_ind_pct`）；③ 筛选的单行业上限 `screen.per_group_cap`；④ 因子历史值是否按时点计算【待 T003】；⑤ **v0.2.9 内，架构师裁定（L-01 研究口径）**：研究与回测的 `pe_ttm`、`roe_ttm`、经营现金流/净利润、资产负债率改为**按披露日（`plrq`）自算**（2.12.1“财务按时点自算”），不用麦蕊回溯拉取的历史因子值（只作对照）；**P0 不受影响**——清单、规则逻辑与数据源都不变，只改研究与回测的计算口径；派生值落 `market.financial_derived`，由 T-B35 特征底座读取；研究员在 `feature_spec.md` 登记对应特征键并决定线上切换时点 → T-B42、T-B43、T-B55 |
 
 - **S-03**（`st_strong_momo`，高风险）：随附为模板，`risk_level: high`，默认不启用、不被分类器推荐（C(2)）；手动启用无需确认，开关旁固定展示风险说明（T006e）。
 - **北交所**：V1 不扫描（`boards.bse=false`），持仓仍可导入和展示（C(8)）。
@@ -1175,6 +1175,14 @@ class LLMGateway:
   - 财务数据**以披露日为准**，不以报告期为准。麦蕊财报接口带 `jzrq`（截止日期）和 `plrq`（披露日期）【文档已列·待 T003 验证】。入库时保存 `report_period`、`announce_date` 和 `available_from`：盘后披露的从下一交易日开盘可用，盘中披露的从披露时刻的下一根 1 分钟 bar 可用；时刻不详时按盘后处理。
   - 行情与因子保存 `first_seen_at`。
   - 因子接口返回 `trade_date`、`update_time`、`report_period`、`calc_version`【文档已列·待 T003 验证】。**历史截面是否按当时已知信息计算（是否回填、是否随 `calc_version` 重算）【待 T003 验证：T-B05】**。在核实之前，内部评估一律用我们自己按时点落库的截面，不用回溯拉取的历史因子。
+- **财务按时点自算（v0.2.9 内，架构师裁定，L-01 研究口径；T-B55）**：
+  - 可用时点：每个报告期取 `available_from ≤ T` 中最新的版本；`available_from` = `plrq` 的下一交易日（时刻不详，按盘后处理）；`plrq ≤ jzrq` 的占位行丢弃；重述作为新版本保存（`market.financial_reports` 已按数据变化新增行）；从上线起记录 `first_seen_at`，与 `plrq` 不一致时以较晚者为准。
+  - TTM：`TTM(y,q) = YTD(y,q) + FY(y−1) − YTD(y−1,q)`（年报直接取 FY）；三个分量在 T 时都必须可见，否则退到上一个可计算的报告期，但不早于 T 前 15 个月，再不行为 `null`。字段是否为累计值及单位以 T-B05 实测为准。
+  - `pe_ttm` = 当日不复权收盘价 × 总股本 `zgb`（取 `bdrq ≤ T` 且已披露的最新值）÷ TTM 归母净利润（`gsmgsyzzdjlr`）；净利润 ≤ 0 → `null`（不给负 PE）。
+  - `roe_ttm` = TTM 归母净利润 ÷ 归母权益（`gsmgdqsyhj`）在 P 期与 P−4 期的平均；P−4 缺失时只用 P 期，并标 `roe_basis=single_period`。
+  - 经营现金流/净利润 = TTM `jyhdcsdxjlje` ÷ TTM 归母净利润（净利润 ≤ 0 → `null`）；资产负债率 = `fzhj` ÷ `zczj`，银行、保险不计算（`null`）。
+  - 幸存者偏差：已退市证券的财报接口返回 404，历史截面缺这些证券；回测报告必须带 `survivorship_bias=true` 标记，不能当作无偏结果。
+  - 麦蕊历史因子值只作对照：按截面报告与自算值的 Spearman ρ，不作为门禁。
 - **因子池排除**：停牌、ST/*ST、退市整理、上市不满 60 个交易日的次新股（阈值可配置）不进入截面排名和分位计算。**例外**（v0.2.9 内，T-O11 评审裁定）：分类器特征的 `rank_pct_universe`（如 `f.volatility_20d` 的全市场分位）不排除 ST、*ST、退市整理股，只要求上市满 20 个交易日（并排除北交所与当日停牌）；定义以 `docs/strategies/feature_spec.md` §1.4 为准。
 - **统一复权口径**：价格类特征统一用**前复权**（`qfq`，用于趋势和指标）。收益计算用**后复权或总收益口径**（`hfq`，避免除权缺口），并在 `feature_catalog.adjust` 中标明；1 分钟数据麦蕊只有不复权（`n`）【文档已列·待 T003 验证】，跨除权日的日内计算要截断。
 - **单因子检验**（内部评估模块，2.12.4）：IC 和 RankIC（均值、IR、t 值）、分组单调性（5 组）、换手率、衰减（1/5/20 日 IC 曲线）。
@@ -1480,7 +1488,8 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `market.trading_calendar` | date, is_open |
 | `market.daily_bars` | code, trade_date, open, high, low, close, volume, amount, adj_type, fetched_at（按年分区） |
 | `market.quotes_snapshot` | code, ts, price, pct_change, … （只保留当日+近 5 日，热数据在 Redis） |
-| `market.financial_reports` | code, report_type(balance/income/cashflow/pershareindex), period_end, payload(jsonb), first_seen_at, last_seen_at, payload_hash — **数据变化时新增行**，保留"重述"历史，支持 as-of；增加 announce_date(公告日 plrq【待 T003 验证】), available_from（按时点可用时间，2.12.1） |
+| `market.financial_derived` | v0.2.9 内（L-01 裁定，T-B55）：`code`、`period_end`、`version_available_from`、`metric`（`pe_ttm`/`roe_ttm`/`ocf_to_np_ttm`/`debt_ratio`；`pe_ttm` 按交易日存）、`trade_date null`、`value numeric null`、`basis jsonb`（所用报告期、各分量版本、`roe_basis`、回退标记）、`calc_version`、`computed_at`。PK `(code, metric, period_end, version_available_from, coalesce(trade_date))` 以唯一索引实现；btree `(metric, trade_date)`。按证书数据计算时带 `source_licence_id`（2.1B） |
+| `market.financial_reports` | code, report_type(balance/income/cashflow/pershareindex), period_end, payload(jsonb), first_seen_at, last_seen_at, payload_hash — **数据变化时新增行**，保留"重述"历史，支持 as-of；增加 announce_date(公告日 plrq【待 T003 验证】), available_from（按时点可用时间，2.12.1）。v0.2.9 内（L-01 裁定）：`plrq` 已由 T003 缺口目录第 3 项核实（空值率 0，三表都有）；同一报告期多行的含义待研究员对照巨潮原文；派生值另存 `market.financial_derived`（T-B55） |
 | `market.fund_flows` | code, trade_date, payload(jsonb), fetched_at |
 | `market.factor_values` | code, trade_date, factor_id, value, calc_version, fetched_at, available_from, first_seen_at — hypertable（chunk 1 个月） |
 | `market.announcements` | id, code, published_at, title, summary, url, category(lx), level(jb), source('mairui'), first_seen_at |
@@ -3284,6 +3293,7 @@ admin:
 | T-B53 | **对账、交叉核对与告警（4.6.4、契约 §7.9）**：`master.reconcile_vendor`（`ingest` P1 按证书拉麦蕊 `/hslt/list`、`/bj/list/all`、`/kc/list/all`、`/hsrl/real/all`，worker 比对）、`master.crosscheck`（巨潮、AKShare）、差异开关闭、5 个 `master.*` 告警键、`GET /admin/securities/reconciliation`。交付：任务、接口、测试。验收：契约 §9 v0.2.9 验收 5–8；响应与日志不含证书值；证书不可用时跳过该证书且不跨证书回退 | 后端 | 1 | T-B52, T-B45 |
 | T-B54 | **搜索词条与搜索接口（4.6.3、契约 §7.3）**：词条生成（多音字展开上限 16、默认读音保留、去 ST 变体、曾用名与曾用名首字母、北交所旧代码）、改名时同事务重建、`generator_version` 全量重建任务；`/securities/search` 改走词条表，`SecurityHit.quote_missing`、`master_as_of` 按契约 #33 给值。交付：词条模块、接口、测试。验收：契约 §9 v0.2.9 验收 3–4、7；P95 ≤ 100 ms（3A.5） | 后端 | 1 | T-B52, T-B53 |
 | T-B56 | **放弃或失败批次的预览行清理（3.5，契约 #35）**：`discarded`/`failed` 状态变更同一事务删除预览行与未提交行级数据；discard 不再删除原始文件（改按留存策略）；`/rows` 返回空、`errors.csv` 只有表头、resolve 返回 409；beat 每小时调度的 `imports.purge_preview_rows`。交付：代码与测试。验收：契约 §9 v0.2.9 验收 9 | 后端 | 1 | T-B18 |
+| T-B55 | **财务按时点自算（L-01 研究口径，2.12.1；v0.2.9 内，架构师裁定）**：从 `market.financial_reports` 按 `plrq` 选版本，计算 TTM、`pe_ttm`、`roe_ttm`、经营现金流/净利润、资产负债率，写 `market.financial_derived`；占位行丢弃、重述新版本、15 个月回退、`survivorship_bias` 标记；与麦蕊历史因子的截面 Spearman 对照报告。交付：模块、表迁移、虚构夹具单元测试、对照报告。验收：任一 T 的计算只用 `available_from ≤ T` 的数据（属性测试）；净利润 ≤ 0 时 PE 为 null；银行、保险负债率为 null；T-B35 能读取 | 后端 | 2 | T-B05, T-B35 |
 | T-F25 | **管理端证券主数据对账页（契约 §7.9）**：`/admin/securities/reconciliation` 列表（状态、类型、来源筛选，游标翻页）；`ingest` 状态页显示 5 个 `master.*` 告警文案。交付：页面、组件测试（`src/frontend/src`）。验收：不显示证书值；非管理员不可见入口；告警按 `critical` 在前 | 前端 | 1 | T-B53 |
 | T-F26 | **搜索结果展示补充（契约 §7.3、§5.1）**：曾用名、旧代码命中时显示“曾用名：…”“旧代码：…”；`quote_missing=true` 显示“本人行情源暂无此证券”；`missing_from_list`、`delisting_period`、`delisted` 徽标；ETF 未建档时无结果的空态文案。交付：组件与组件测试。验收：`match_kind`、`listing_status` 的取值只从 `/meta/enums` 读，不写死 | 前端 | 1 | T-B54 |
 

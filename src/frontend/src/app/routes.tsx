@@ -16,8 +16,6 @@ export const PLACEHOLDERS: [string, string][] = [
   ['strategies/:id', '策略详情'],
   ['strategy-cards', '策略知识卡'],
   ['strategy-instances', '我的策略实例'],
-  ['candidate-signals', '候选信号列表'],
-  ['candidate-signals/:id', '候选信号详情'],
   ['plan-drafts', '计划草案'],
   ['plan-drafts/:id', '计划草案详情'],
   ['plans', '计划'],
@@ -60,6 +58,8 @@ export const routes: RouteObject[] = [
       { path: 'settings/profile', lazy: lazyPage(() => import('../pages/settings/ProfilePage'), (m) => m.ProfilePage) },
       { path: 'settings/data-licence', lazy: lazyPage(() => import('../pages/settings/DataLicencePage'), (m) => m.DataLicencePage) },
       { path: 'strategies', lazy: lazyPage(() => import('../pages/strategies/StrategiesPage'), (m) => m.StrategiesPage) },
+      { path: 'candidate-signals', lazy: lazyPage(() => import('../pages/signals/CandidateSignalsPage'), (m) => m.CandidateSignalsPage) },
+      { path: 'candidate-signals/:id', lazy: lazyPage(() => import('../pages/signals/CandidateSignalDetailPage'), (m) => m.CandidateSignalDetailPage) },
       ...PLACEHOLDERS.map(([path, title]) => ({ path, element: <PlaceholderPage title={title} /> })),
       { path: 'admin', element: <AdminGate><Navigate to="/admin/users" replace /></AdminGate> },
       {

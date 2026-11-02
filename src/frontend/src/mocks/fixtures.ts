@@ -45,7 +45,8 @@ export const STRATEGIES: Record<string, StrategyMeta> = Object.fromEntries(
 );
 
 // ---------------- 证券规格 ----------------
-interface StratSpec { key: string; action: Action; score: number; conf: number; state?: CandidateSignalState; reasons?: ReasonCode[]; t_leg?: TLeg }
+/** released：已由系统解除的原因（T-F17 示例“自动重评状态”；不计入 executability） */
+interface StratSpec { key: string; action: Action; score: number; conf: number; state?: CandidateSignalState; reasons?: ReasonCode[]; released?: ReasonCode[]; t_leg?: TLeg }
 interface SecSpec {
   code: string; name: string; sector: string; prev_close: number; price: number; volume_lots: number;
   holding?: { qty: number; sellable: number; cost: number }; in_watchlist: boolean; focus: boolean;
@@ -87,7 +88,7 @@ const SPECS: SecSpec[] = [
     code: '002001.SZ', name: '演示材料', sector: '基础化工', prev_close: 12.85, price: 13.04, volume_lots: 187500, in_watchlist: true, focus: true,
     holding: { qty: 5000, sellable: 5000, cost: 12.2 }, data_status: 'fresh', data_as_of: NOW, seed: 53,
     strategies: [
-      { key: 'demo_t', action: 'reduce', t_leg: 'sell_first', score: 69, conf: 0.58, state: 'drafted' },
+      { key: 'demo_t', action: 'reduce', t_leg: 'sell_first', score: 69, conf: 0.58, state: 'drafted', released: ['NON_TRADING_TIME'] },
       { key: 'demo_trend', action: 'hold', score: 61, conf: 0.63 },
     ],
   },
@@ -288,6 +289,10 @@ const REASON_DEFS: Partial<Record<ReasonCode, { desc: string; rc: ReleaseConditi
     desc: '该股 10-28 触发止损卖出，处于冷静期（默认 3 个交易日）',
     rc: { kind: 'time', expr: null, at: '2026-11-03T09:30:00+08:00', event: null, action: null, check_on: ['schedule'], human_text: '冷静期于 2026-11-03 09:30 到期后自动重评', machine_checkable: true },
   },
+  NON_TRADING_TIME: {
+    desc: '盘前集合竞价阶段，日内做T 策略不在可执行时段（示例）',
+    rc: { kind: 'time', expr: null, at: '2026-11-02T09:30:00+08:00', event: null, action: null, check_on: ['schedule'], human_text: '到达连续竞价时段（09:30）后自动重评', machine_checkable: true },
+  },
   SUSPENDED: {
     desc: '该证券停牌，无实时成交',
     rc: { kind: 'event', expr: null, at: null, event: 'security.resumed', action: null, check_on: ['tick', 'daily_close'], human_text: '复牌且行情恢复成交后自动重评', machine_checkable: true },
@@ -379,6 +384,17 @@ SPECS.forEach((s, si) => {
         });
       });
       (reason_ids.length ? blockedIds : executableIds).push(csId);
+      // 已解除的原因：系统按 release_condition 自动重评后解除（独立 id 段，不影响其他示例 id）
+      (st.released ?? []).forEach((code) => {
+        const rid = uid(7600 + REASONS.length);
+        reason_ids.push(rid);
+        const def = REASON_DEFS[code]!;
+        REASONS.push({
+          id: rid, signal_id: csId!, code, description: def.desc, evidence: [], release_condition: def.rc, status: 'released',
+          detected_at: `${TRADE_DATE}T09:15:00+08:00`, released_at: `${TRADE_DATE}T09:30:00+08:00`,
+          release_evidence: { session: 'morning', checked_at: `${TRADE_DATE}T09:30:00+08:00` }, released_by: 'system',
+        });
+      });
       allReasonIds.push(...reason_ids);
       const plan_draft_ids = st.state === 'drafted' ? [uid(seq++)] : [];
       allDraftIds.push(...plan_draft_ids);

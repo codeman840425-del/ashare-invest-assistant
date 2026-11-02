@@ -1,7 +1,7 @@
 import { CAP_KIND_TEXT, capExplanation } from '../i18n/horizonCaps';
 import { Alert, Button, Select, Tag, Tooltip } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
-import { useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useCandidateSignals, useSuggestionReasons, useHorizonAssessment, useSuggestion, useSuggestions } from '../api/queries';
 import { ENUMS } from '../api/enums';
 import type { DimensionMatrixRow, Evidence, StrategyConclusion, Suggestion } from '../api/types';
@@ -116,7 +116,7 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
           <div className="muted small">{HORIZON[s.horizon]} · v{s.version_no} · {LIFECYCLE[s.lifecycle]} · {EVAL_STATE[s.state]}{s.priority_downweighted ? ` · 优先级权重 ${s.priority_weight}` : ''}</div>
         </div>
         <span className="spacer" />
-        {sig ? <Tag color={SIGNAL_STATE[sig.state].color}>{SIGNAL_STATE[sig.state].text}</Tag> : <Tag>不生成候选信号</Tag>}
+        {sig ? <Link to={`/candidate-signals/${sig.id}`} data-testid="to-signal"><Tag color={SIGNAL_STATE[sig.state].color}>{SIGNAL_STATE[sig.state].text}</Tag>候选信号详情</Link> : <Tag>不生成候选信号</Tag>}
       </div>
       <div className="sc-metrics">
         <div><label>规则满足度</label><b className="mono">{s.score ?? '—'}</b></div>

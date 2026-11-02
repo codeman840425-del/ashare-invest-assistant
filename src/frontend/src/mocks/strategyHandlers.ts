@@ -80,7 +80,33 @@ const SORTS: Record<string, (a: StrategyInstance, b: StrategyInstance) => number
 };
 const multi = (url: URL, k: string) => (url.searchParams.get(k) ?? '').split(',').filter(Boolean);
 
+/** 跟踪统计（示例）：按模板给不同样本量，覆盖 n ≥ 30、5 ≤ n < 30（样本少）、n < 5（value=null）三档 */
+const TRACK_N: Record<string, number> = { demo_trend: 64, demo_value: 26, demo_t: 4, demo_reversal: 12 };
+function stat(v: number, n: number, window: string) {
+  return { value: n < 5 ? null : v.toFixed(4), n, window, small_sample: n < 30 };
+}
+export function trackingOf(t: StrategyTemplate, scope: 'mine' | 'site') {
+  const base = (TRACK_N[t.key] ?? t.health.n) * (scope === 'site' ? 3 : 1);
+  return {
+    scope,
+    by_horizon: ([1, 5, 20] as const).map((d, i) => {
+      const n = Math.max(0, Math.round(base / (1 + i * 0.6)));
+      const w = `${d}d`;
+      return {
+        horizon_days: d, win_rate: stat(0.52 + i * 0.02, n, w), avg_return_pct: stat(0.004 * (i + 1), n, w),
+        avg_excess_pct: stat(0.001 * (i + 1), n, w), profit_loss_ratio: stat(1.2 + i * 0.1, n, w), max_loss_streak: 2 + i,
+      };
+    }),
+  };
+}
+
 export const strategyHandlers = [
+  http.get(`${API}/strategies/:id/versions/:vid/tracking`, ({ params, request }) => {
+    const t = STRATEGY_TEMPLATES.find((x) => x.id === params.id);
+    if (!t) return json(errorBody('NOT_FOUND', '策略模板不存在（示例数据）'), 404);
+    const scope = new URL(request.url).searchParams.get('scope') === 'site' ? 'site' : 'mine';
+    return json(trackingOf(t, scope));
+  }),
   http.get(`${API}/strategies`, ({ request }) => {
     const url = new URL(request.url);
     const h = url.searchParams.get('horizon');

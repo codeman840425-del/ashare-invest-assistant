@@ -389,3 +389,20 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 
 /* T-F21 通用游标分页条 */
 .cursor-pager { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 8px 0; }
+
+/* T-F17 候选信号 */
+.sig-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.sig-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 10px; }
+.sig-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.sig-panel { padding: 8px 10px; }
+.sig-panel h4 { margin: 0 0 6px; font-size: 12px; color: #9aa4b0; font-weight: 600; }
+.sig-detail .sc-metrics { grid-template-columns: repeat(4, 1fr); }
+.conflict-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.conflict-card { border: 1px solid var(--line); border-radius: 3px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.conflict-card.current { border-color: rgba(214, 51, 132, 0.6); }
+.reason-released .rc, .reason-obsolete .rc { color: var(--muted); }
+.stat-wrap { overflow-x: auto; }
+.stat-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 4px 0; }
+.stat-table th, .stat-table td { padding: 3px 4px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.stat-table th { color: var(--muted); font-weight: 500; }
+.error-text { color: #ff6b6b; }

@@ -7,6 +7,7 @@ import type { Notification, TerminalScope, TodayResponse } from '../api/types';
 import type { SectorKind } from '../api/marketTypes';
 import { accountHandlers } from './accountHandlers';
 import { resetStrategies, strategyHandlers } from './strategyHandlers';
+import { reasonsNow, resetSignals, signalHandlers, signalsNow } from './signalHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
 import { currentUser, resetSession } from './session';
 import { licenceState } from './licenceStore';
@@ -14,7 +15,7 @@ import { LICENCE_UNAVAILABLE } from '../i18n/licenceLabels';
 import type { DataStatus } from '../api/enums';
 import type { Gap } from '../api/types';
 import {
-  ACCOUNT_ID, CANDIDATE_SIGNALS, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOTIFICATIONS, NOW, PORTFOLIO, QUOTES, REASONS,
+  ACCOUNT_ID, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOTIFICATIONS, NOW, PORTFOLIO, QUOTES,
   SIGNAL_EVENTS, SUGGESTIONS, SUGGESTION_LIST, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, WATCHLIST, dailyBars, intradayBars,
 } from './fixtures';
 import {
@@ -35,6 +36,7 @@ export function resetMockState() {
   readAt.clear();
   resetSession();
   resetStrategies();
+  resetSignals();
 }
 
 /** 浏览器里加一点延迟让加载态可见；测试（node）里不延迟 */
@@ -86,8 +88,8 @@ function todayBody(): TodayResponse {
     pending_plan_drafts: more(SUGGESTIONS.flatMap((sg) => sg.plan_draft_ids.map((id) => ({
       id, security_code: sg.security_code, name: nameOf(sg.security_code), action: sg.strategies[0]?.action ?? 'wait', valid_until: null, status: 'pending' as const,
     })))),
-    released_reasons: more([...REASONS.filter((r) => r.status === 'released' && r.released_at).map((r) => {
-      const cs = CANDIDATE_SIGNALS.find((c) => c.id === r.signal_id);
+    released_reasons: more([...reasonsNow().filter((r) => r.status === 'released' && r.released_at).map((r) => {
+      const cs = signalsNow().find((c) => c.id === r.signal_id);
       return { reason_id: r.id, signal_id: r.signal_id, code: r.code, security_code: cs?.security_code ?? '', name: cs?.name ?? '', released_at: r.released_at! };
     }), ...samples.released]),
     // v0.2.7：risk_event_id 指向 /risk-controls/events 中 status=active 的事件
@@ -271,45 +273,8 @@ const routeHandlers = [
     const sg = SUGGESTIONS.find((s) => s.id === params.id);
     return sg ? HttpResponse.json(sg) : notFound('建议');
   }),
-  http.get(`${API}/candidate-signals`, ({ request }) => {
-    const url = new URL(request.url);
-    const code = url.searchParams.get('security_code');
-    const state = url.searchParams.get('state');
-    const items = CANDIDATE_SIGNALS.filter((c) => (!code || c.security_code === code) && (!state || c.state === state))
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
-    return HttpResponse.json(page(items, url));
-  }),
-  http.get(`${API}/candidate-signals/:id`, ({ params }) => {
-    const cs = CANDIDATE_SIGNALS.find((c) => c.id === params.id);
-    return cs ? HttpResponse.json(cs) : notFound('候选信号');
-  }),
-  http.get(`${API}/non-executable-reasons`, ({ request }) => {
-    const url = new URL(request.url);
-    const status = url.searchParams.get('status');
-    const signalId = url.searchParams.get('signal_id');
-    const code = url.searchParams.get('code');
-    const base = REASONS.filter((r) => (!status || r.status === status) && (!signalId || r.signal_id === signalId) && (!code || r.code === code));
-    // v0.2.3 #17：signal_ids（≤ 100）或 suggestion_id 时不分页，返回 {items}
-    const idsParam = url.searchParams.get('signal_ids');
-    const suggestionId = url.searchParams.get('suggestion_id');
-    if (idsParam !== null || suggestionId !== null) {
-      let ids: string[];
-      if (idsParam !== null) {
-        ids = idsParam.split(',').map((x) => x.trim()).filter(Boolean);
-        if (ids.length > 100) return validation('signal_ids', 'signal_ids 最多 100 个');
-      } else {
-        const sg = SUGGESTIONS.find((x) => x.id === suggestionId);
-        if (!sg) return notFound('建议');
-        ids = sg.candidate_signal_ids;
-      }
-      return HttpResponse.json({ items: base.filter((r) => ids.includes(r.signal_id)) });
-    }
-    return HttpResponse.json(page(base, url));
-  }),
-  http.get(`${API}/non-executable-reasons/:id`, ({ params }) => {
-    const r = REASONS.find((x) => x.id === params.id);
-    return r ? HttpResponse.json(r) : notFound('不可执行原因');
-  }),
+  // 候选信号与不可执行原因（T-F17，见 signalHandlers.ts）
+  ...signalHandlers,
   http.get(`${API}/signals`, ({ request }) => {
     const url = new URL(request.url);
     const code = url.searchParams.get('security_code');

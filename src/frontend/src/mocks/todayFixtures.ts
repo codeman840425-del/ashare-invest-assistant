@@ -103,14 +103,12 @@ export function riskEvents(): MockRiskEvent[] {
   return [...active, cleared].sort((a, b) => b.triggered_at.localeCompare(a.triggered_at) || b.id.localeCompare(a.id));
 }
 
-/** m7：一条示例“限制已解除”和一条示例“今日失效”，让首页这两块在示例数据下也有内容 */
+/** m7：一条示例“今日失效”（“限制已解除”见 fixtures 的 released 原因），让首页这两块在示例数据下也有内容 */
 export function todaySamples() {
   const sg = SUGGESTIONS.find((s) => s.security_code === '000001.SZ') ?? SUGGESTIONS[0];
   return {
-    released: sg ? [{
-      reason_id: uid(7501), signal_id: uid(7502), code: 'DATA_STALE' as const, security_code: sg.security_code, name: nameOf(sg.security_code),
-      released_at: `${TRADE_DATE}T10:15:00+08:00`,
-    }] : [],
+    // T-F17：“限制已解除”改由 fixtures 中真实的 released 原因（002001.SZ 日内做T）提供，不再放悬空 signal_id 的样本
+    released: [] as { reason_id: string; signal_id: string; code: 'DATA_STALE'; security_code: string; name: string; released_at: string }[],
     invalidations: sg ? [{
       suggestion_id: sg.id, security_code: sg.security_code, name: nameOf(sg.security_code), strategy_key: sg.strategies[0]?.strategy_key ?? 'demo_trend',
       text: '价格跌破 20 日均线，该条规则信号失效（示例）', at: `${TRADE_DATE}T10:20:00+08:00`,

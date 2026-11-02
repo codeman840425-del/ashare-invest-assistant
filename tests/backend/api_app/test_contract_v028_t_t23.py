@@ -58,6 +58,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.contract]
 REPO = Path(__file__).resolve().parents[3]
 TESTS_DIR = REPO / "tests"
 V028 = "v0.2.8"
+#: v0.2.8 规则在之后的版本仍然成立（T-T25：契约 v0.2.9 687159f 无回退）
+V028_OR_LATER = (V028, "v0.2.9")
 INGEST_STREAM = "ingest:requests"
 #: 契约 v0.2.8 §5.1 IngestLicenceStatus 键集合
 INGEST_LICENCE_KEYS = {"licence_id", "user_id", "username", "display_name", "status", "tier", "has_quant_pro", "expires_on",
@@ -91,7 +93,7 @@ def backend_version(c: Any) -> str:
 def require_v028(c: Any, owner: str) -> None:
     """后端声明的契约版本低于 v0.2.8 → imperative xfail（行为属 v0.2.8 新规则）。"""
     v = backend_version(c)
-    if v != V028:
+    if v not in V028_OR_LATER:
         pytest.xfail(f"{owner}；后端 /meta/enums.version = {v}")
 
 
@@ -212,7 +214,7 @@ def test_01_frontend_contract_version_and_enums() -> None:
     src = FRONT_ENUMS.read_text(encoding="utf-8")
     m = re.search(r"CONTRACT_VERSION\s*=\s*'(v[0-9.]+)'", src)
     assert m, "enums.ts 没有 CONTRACT_VERSION"
-    if m.group(1) != V028:
+    if m.group(1) not in V028_OR_LATER:
         pytest.xfail(f"{O_FRONT_ENUMS}；当前 {m.group(1)}")
     st = re.search(r"security_type:\s*\[([^\]]*)\]", src)
     gr = re.search(r"gap_reason:\s*\[([^\]]*)\]", src)

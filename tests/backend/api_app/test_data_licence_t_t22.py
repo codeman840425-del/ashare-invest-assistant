@@ -250,7 +250,7 @@ def test_full_lifecycle_never_echoes_licence(session: Callable[..., SimpleNamesp
     items = lst.json()["items"] if isinstance(lst.json(), dict) else lst.json()
     mine = [x for x in items if str(x["user_id"]) == str(s.user.id)]
     # 契约 v0.2.8 #2（T-T23）：AdminDataLicence 加 licence_id；按后端声明的契约版本取期望键集合（各版本都是全等）
-    v028 = acall("GET", "/meta/enums").json().get("version") == "v0.2.8"
+    v028 = acall("GET", "/meta/enums").json().get("version") in ("v0.2.8", "v0.2.9")
     assert len(mine) == 1 and set(mine[0]) == STATUS_KEYS | ADMIN_EXTRA | (ADMIN_EXTRA_V028 if v028 else set())
     assert not [k for k in walk_keys(lst.json()) if FORBIDDEN_KEY.search(k)]
     assert acall("POST", f"/admin/data-licences/{s.user.id}/pause", json={"reason": "测试暂停"}).status_code == 204

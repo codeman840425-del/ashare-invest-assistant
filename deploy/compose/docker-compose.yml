@@ -61,6 +61,7 @@ x-secret-env-mount: &secret-env-mount ../docker/secret-env.sh:/aia/secret-env.sh
 # 执行 imports.purge_expired_raw_files 到期删文件的 worker（T-A04 ⑪，review-028c077 M2：不挂则根目录不存在、报错保留行），
 # 以及删除用户数据时清文件的 maint-cli（按需 run）。ingest / beat / signal-rt 不挂。
 # CI（check_secret_boundary.py DATA_VOLUMES）：只允许这三个服务挂、三者都必须读写挂、挂载点 = 各自的 IMPORT_STORAGE_PATH。
+# 主数据快照卷 master 只允许且必须由 worker 读写挂，挂载点 = MASTER_SNAPSHOT_PATH（review-baa4539 M1）。
 # 卷根目录属主 10001、权限 700（镜像内预建目录决定新卷的初始属主；已有卷由运维 chmod 一次）。
 
 x-app-depends: &app-depends
@@ -165,6 +166,8 @@ services:
       # 到期原始文件清理（imports.purge_expired_raw_files）的存储根目录，与 api 相同
       IMPORT_STORAGE_BACKEND: ${IMPORT_STORAGE_BACKEND:-local}
       IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
+      # 非 local/test 未设置则主数据同步直接失败（review-baa4539 M1）
+      MASTER_SNAPSHOT_PATH: ${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -177,6 +180,10 @@ services:
     volumes:
       # 读写（删除到期文件）；卷根目录属主 10001、700，与 api 共用同一卷
       - imports:${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
+      # 主数据原始快照（plan 4.6.2，review-baa4539 M1）：只挂 worker，读写。
+      # 卷名 <前缀>_master，与已有 pgdata/redisdata/imports 同一前缀，改项目名时沿用原卷。
+      # 新卷初始属主由镜像内 /var/lib/aia-dev/master（uid 10001、700）决定；已有卷不在这里改权限。
+      - master:${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}
       - ../../config:/app/config:ro
       - *secret-env-mount
     depends_on: *app-depends
@@ -410,6 +417,8 @@ volumes:
     name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_redisdata
   imports:
     name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_imports
+  master:
+    name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_master
 
 # 证书封装密钥（T-O09）：由 deploy/scripts/seal-keygen.sh 生成在仓库外的 AIA_SECRETS_DIR（compose.sh 解析，
 # 默认 ~/.config/aia/secrets/<卷前缀>）。私钥 600、属主为容器用户；不入库、不进镜像、不进 .env。

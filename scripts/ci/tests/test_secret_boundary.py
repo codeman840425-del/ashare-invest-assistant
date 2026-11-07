@@ -552,3 +552,48 @@ def test_imports_target_must_match_env(repo: Path) -> None:
 def test_volume_mounts_parses_colon_in_target() -> None:
     assert ccs._volume_mounts(["imports:${P:-/a/b}:ro", "x:/y", {"source": "s", "target": "/t"}]) == [
         ("imports", "${P:-/a/b}", True), ("x", "/y", False), ("s", "/t", False)]
+
+
+# ---------- review-baa4539 M1：master 快照卷只给 worker ----------
+
+MASTER_MOUNT = "      - master:${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}\n"
+
+
+def test_worker_mounts_master_rw_in_base() -> None:
+    import yaml
+    doc = yaml.safe_load((REPO / ccs.BASE_COMPOSE).read_text(encoding="utf-8"))
+    w = doc["services"]["worker"]
+    mounts = ccs._volume_mounts(w["volumes"])
+    assert ("master", "${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}", False) in mounts
+    assert w["environment"]["MASTER_SNAPSHOT_PATH"] == "${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}"
+    assert "app_master_key" in ccs._secret_names(w.get("secrets"))
+    assert "data_licence_seal_private_keys" not in ccs._secret_names(w.get("secrets"))
+
+
+def test_worker_without_master_rejected(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, MASTER_MOUNT, "")
+    errs = ccs.check(repo)
+    assert any("服务 worker 没有挂数据卷 master" in e for e in errs), errs
+
+
+def test_worker_without_master_env_rejected(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "      MASTER_SNAPSHOT_PATH: ${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}\n", "")
+    errs = ccs.check(repo)
+    assert any("服务 worker 缺少 MASTER_SNAPSHOT_PATH" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("svc", ["api", "ingest", "beat", "signal-rt", "nginx"])
+def test_master_on_other_service_rejected(repo: Path, svc: str) -> None:
+    errs = _overlay(repo, f"services:\n  {svc}:\n    volumes:\n      - master:/data\n")
+    assert any(f"服务 {svc} 挂了数据卷 master" in e for e in errs), errs
+
+
+def test_master_read_only_rejected(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  worker:\n    volumes:\n      - master:/var/lib/aia-dev/master:ro\n")
+    assert any("服务 worker 只读挂载了数据卷 master" in e for e in errs), errs
+
+
+def test_master_target_must_match_env(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, MASTER_MOUNT, "      - master:/srv/elsewhere\n")
+    errs = ccs.check(repo)
+    assert any("服务 worker 的数据卷 master 挂载点 /srv/elsewhere ≠ 其 MASTER_SNAPSHOT_PATH" in e for e in errs), errs

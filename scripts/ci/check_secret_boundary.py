@@ -39,7 +39,8 @@
        （如 bind 的 device）同样不得引用；服务的 volumes 不得直接挂受保护文件；
      - 禁止 include:（引入的文件不在本检查范围内）和服务级 extends.file（同理）。
   11. 数据卷白名单（T-A04 ⑪/⑫，DATA_VOLUMES）：imports 只允许 api / worker / maint-cli 挂，base 里三者都必须读写挂、
-     挂载点 = 各自的 IMPORT_STORAGE_PATH；其它服务挂、或任何只读挂载都拒绝。
+     挂载点 = 各自的 IMPORT_STORAGE_PATH；master（主数据快照，review-baa4539 M1）只允许且必须由 worker 读写挂、
+     挂载点 = MASTER_SNAPSHOT_PATH。其它服务挂、或任何只读挂载都拒绝。
 
 失败退出码 1，依赖缺失退出码 2。用法：check_secret_boundary.py [--repo DIR]
 """
@@ -242,6 +243,10 @@ DATA_VOLUMES: dict[str, dict] = {
     "imports": {"allowed": frozenset({"api", "worker", "maint-cli"}),
                 "required": frozenset({"api", "worker", "maint-cli"}),
                 "path_env": "IMPORT_STORAGE_PATH"},
+    # 主数据原始快照只给执行同步/清理的 worker（review-baa4539 M1）。不挂给 api/ingest，避免扩大写入面。
+    "master": {"allowed": frozenset({"worker"}),
+               "required": frozenset({"worker"}),
+               "path_env": "MASTER_SNAPSHOT_PATH"},
 }
 
 

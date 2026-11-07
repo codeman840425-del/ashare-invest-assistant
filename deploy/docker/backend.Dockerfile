@@ -41,9 +41,9 @@ FROM ${PYTHON_IMAGE} AS runtime
 ARG APP_UID=10001
 RUN groupadd --gid ${APP_UID} aia \
  && useradd --uid ${APP_UID} --gid aia --home-dir /app --no-create-home --shell /usr/sbin/nologin aia \
- && mkdir -p /app/config /var/lib/aia-dev/imports \
- && chown aia:aia /var/lib/aia-dev/imports \
- && chmod 700 /var/lib/aia-dev/imports
+ && mkdir -p /app/config /var/lib/aia-dev/imports /var/lib/aia-dev/master \
+ && chown aia:aia /var/lib/aia-dev/imports /var/lib/aia-dev/master \
+ && chmod 700 /var/lib/aia-dev/imports /var/lib/aia-dev/master
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /app/src/backend /app/src/backend
 ENV PATH=/opt/venv/bin:$PATH \

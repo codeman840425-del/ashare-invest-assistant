@@ -326,6 +326,7 @@ def test_all_six_controls_boundaries_and_disabled() -> None:
         "total_value": "95000",
         "limit_down_price": "32",
         "limit_up_price": "48",
+        "sector_memberships": json.dumps(["sw_l1.synthetic", "concept.synthetic"]),
         "sw_l1.synthetic": "41",
         "sw_l1.未分类": "99",
         "concept.synthetic": "51",
@@ -349,6 +350,7 @@ def test_all_six_controls_boundaries_and_disabled() -> None:
         {
             "observations": {k: observation(k, v) for k, v in metrics.items()},
             "regime": "uptrend",
+            "sector_memberships": ["sw_l1.synthetic", "concept.synthetic"],
             "trade_action": "buy",
             "plan_action": "wait",
             "invalidated": True,
@@ -376,7 +378,8 @@ def test_all_six_controls_boundaries_and_disabled() -> None:
     }
     assert len([f for f in result.flags if f.control == "sector_concentration"]) == 2
     assert context.trade_action == "buy"
-    assert set(result.gaps) == {"risk_policy.rc3_gate_scope", "risk_policy.rc4_gate_scope"}
+    assert result.gaps == []
+    assert len(result.gate_details) == 3
     disabled = config.model_dump()
     for key, value in disabled.items():
         if key.startswith("rc"):

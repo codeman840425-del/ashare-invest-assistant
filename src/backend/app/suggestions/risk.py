@@ -11,12 +11,15 @@ from sqlalchemy import Connection, or_, select
 
 from app.config_files import RiskControlsConfig
 from app.db.tables.strategy import risk_control_settings
-from app.schemas.enums import Action, Horizon, MarketRegime, RiskControl, RiskLevel
-from app.signals.models import Evidence, Gap, Model, RiskFlag, SignalInput, Stops
+from app.market_rules.lots import LotSpec
+from app.schemas.enums import Action, Horizon, MarketRegime, RiskControl, RiskLevel, TLeg
+from app.signals.models import Evidence, Gap, Model, RiskFlag, RiskGateDetail, SignalInput, Stops
 
 
 class RiskContext(Model):
     observations: dict[str, Evidence]
+    t_leg: TLeg | None = None
+    sector_memberships: list[str] | None = None
     regime: MarketRegime | None
     # RC6 checks are derived here from explicit plan and trade facts, not LLM labels.
     trade_action: Action | None
@@ -29,6 +32,14 @@ class RiskContext(Model):
         ids = [e.id for e in self.observations.values()]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate_risk_evidence_id")
+        if self.sector_memberships is not None:
+            membership = self.observations.get("sector_memberships")
+            if any(not key.startswith(("sw_l1.", "concept.")) for key in self.sector_memberships):
+                raise ValueError("invalid_sector_membership_key")
+            if len(set(self.sector_memberships)) != len(self.sector_memberships):
+                raise ValueError("duplicate_sector_membership")
+            if membership is None or json.loads(str(membership.value)) != self.sector_memberships:
+                raise ValueError("sector_membership_evidence_mismatch")
         regime = self.observations.get("market_regime")
         if regime is not None and regime.value != self.regime:
             raise ValueError("risk_regime_evidence_mismatch")
@@ -53,6 +64,8 @@ class RiskResult(Model):
     evidence: list[Evidence]
     gaps: list[str]
     quantity_cap: Decimal | None
+    gate_details: list[RiskGateDetail] = Field(default_factory=list)
+    t_leg: TLeg | None = None
     pause_required: bool
     pause_days: int | None = Field(ge=0)
 
@@ -64,11 +77,15 @@ def evaluate_risk(
     action: Action,
     horizon: Horizon,
     stops: Stops,
+    lot: LotSpec | None = None,
 ) -> RiskResult:
+    if lot is not None and (lot.min_buy <= 0 or lot.step <= 0 or lot.max_qty < lot.min_buy):
+        raise ValueError("invalid_risk_lot_spec")
     gaps: set[str] = set()
     used: dict[str, Evidence] = {}
     flags: list[RiskFlag] = []
     quantity_cap = None
+    gate_details: list[RiskGateDetail] = []
     pause = False
 
     def number(key: str) -> Decimal | None:
@@ -161,6 +178,81 @@ def evaluate_risk(
                         cap=quantity_cap,
                         gated=[Action.BUY, Action.ADD],
                     )
+    increasing = action in {Action.BUY, Action.ADD} and context.t_leg is None
+
+    def exposure_limit(
+        control: RiskControl,
+        current: Decimal,
+        upper: Decimal,
+        keys: list[str],
+        *,
+        sector: str | None = None,
+        relevant: bool = True,
+    ) -> None:
+        nonlocal quantity_cap
+        code = (
+            "REGIME_MISMATCH"
+            if control == RiskControl.TOTAL_EXPOSURE
+            else "SECTOR_EXPOSURE_EXCEEDED"
+        )
+        over = current >= upper
+        cap: Decimal | None = None
+        gated: list[Action] = []
+        cause = (
+            "total_exposure_at_cap"
+            if control == RiskControl.TOTAL_EXPOSURE
+            else "sector_exposure_at_cap"
+        )
+        if increasing and relevant:
+            if over:
+                cap = Decimal(0)
+                gated = [Action.BUY, Action.ADD]
+            else:
+                price, proposed = number("price"), number("proposed_quantity")
+                if price is not None and price <= 0:
+                    gaps.add("price")
+                elif (
+                    price is not None
+                    and proposed is not None
+                    and current + price * proposed > upper
+                ):
+                    if lot is None:
+                        gaps.add("market_lot_rules")
+                    else:
+                        raw = min((upper - current) / price, Decimal(lot.max_qty))
+                        cap = (
+                            Decimal(0)
+                            if raw < lot.min_buy
+                            else Decimal(lot.min_buy)
+                            + ((raw - lot.min_buy) / lot.step).to_integral_value(
+                                rounding=ROUND_FLOOR
+                            )
+                            * lot.step
+                        )
+                        if cap < lot.min_buy:
+                            gated = [Action.BUY, Action.ADD]
+                            cause = "quantity_cap_below_min_buy"
+                if cap is not None:
+                    keys = [*keys, "price", "proposed_quantity"]
+            if cap is not None:
+                quantity_cap = cap if quantity_cap is None else min(quantity_cap, cap)
+        if over or cap is not None:
+            refs = ids(*keys)
+            flag(control, "总仓位/板块暴露上限检查；不改写候选动作", refs, cap=cap, gated=gated)
+            if gated:
+                detail = {"cause": cause, "current_value": str(current), "upper_value": str(upper)}
+                if sector is not None:
+                    detail.update(
+                        sector=sector,
+                        current_pct=str(current / assets * 100) if assets else "",
+                        upper_pct=str(limit),
+                    )
+                gate_details.append(
+                    RiskGateDetail.model_validate(
+                        {"control": control, "code": code, "detail": detail, "evidence_ids": refs}
+                    )
+                )
+
     if config.rc3_total_exposure.enabled:
         assets, total = number("total_assets"), number("total_value")
         if context.regime is None or "market_regime" not in context.observations:
@@ -168,34 +260,54 @@ def evaluate_risk(
         elif assets is not None and assets > 0 and total is not None:
             used[context.observations["market_regime"].id] = context.observations["market_regime"]
             lower, upper = getattr(config.rc3_total_exposure.regime_ranges, context.regime)
-            pct = total / assets * 100
-            if pct >= upper:
-                # §2.5.6 says advisory, §2.5.9 lists a blocker without action scope.
-                # Do not invent which strategy actions the missing policy blocks.
-                gaps.add("risk_policy.rc3_gate_scope")
-            if pct < lower or pct > upper:
+            exposure_limit(
+                RiskControl.TOTAL_EXPOSURE,
+                total,
+                assets * upper / 100,
+                ["total_assets", "total_value", "market_regime"],
+            )
+            if total / assets * 100 < lower:
                 flag(
                     RiskControl.TOTAL_EXPOSURE,
-                    "总仓位不在当前环境参考区间；不是交易指令",
+                    "总仓位低于环境参考下限；仅提示，不产生买入",
                     ids("total_assets", "total_value", "market_regime"),
                 )
         elif assets is not None and assets <= 0:
             gaps.add("total_assets")
     if config.rc4_sector_concentration.enabled:
+        assets = number("total_assets")
+        memberships = context.sector_memberships
+        if memberships is None:
+            gaps.add("sector_memberships")
+        else:
+            used[context.observations["sector_memberships"].id] = context.observations[
+                "sector_memberships"
+            ]
         for prefix, limit in [
             ("sw_l1.", config.rc4_sector_concentration.sw_l1_max_pct),
             ("concept.", config.rc4_sector_concentration.concept_max_pct),
         ]:
-            keys = [key for key in context.observations if key.startswith(prefix)]
-            if not keys:
+            keys = sorted(
+                {key for key in context.observations if key.startswith(prefix)}
+                | {key for key in memberships or [] if key.startswith(prefix)}
+            )
+            if not keys and memberships is None:
                 gaps.add(prefix + "exposure")
             for key in keys:
                 if key == "sw_l1.未分类":
-                    continue  # Contract §9: unknown sector is never an RC4 trigger.
+                    continue
                 value = number(key)
-                if value is not None and value > limit:
-                    gaps.add("risk_policy.rc4_gate_scope")
-                    flag(RiskControl.SECTOR_CONCENTRATION, "板块集中度超过本人上限", ids(key))
+                if assets is not None and assets <= 0:
+                    gaps.add("total_assets")
+                elif assets is not None and value is not None:
+                    exposure_limit(
+                        RiskControl.SECTOR_CONCENTRATION,
+                        assets * value / 100,
+                        assets * limit / 100,
+                        ["total_assets", key, "sector_memberships"],
+                        sector=key,
+                        relevant=memberships is not None and key in memberships,
+                    )
     if config.rc5_loss_streak_drawdown.enabled:
         cfg = config.rc5_loss_streak_drawdown
         keys = ["closed_loss_streak", "drawdown_from_peak_pct", "strategy_sim_fail_streak"]
@@ -261,6 +373,8 @@ def evaluate_risk(
         evidence=list(used.values()),
         gaps=sorted(gaps),
         quantity_cap=quantity_cap,
+        gate_details=gate_details,
+        t_leg=context.t_leg,
         pause_required=pause,
         pause_days=config.rc5_loss_streak_drawdown.pause_days if pause else None,
     )
@@ -301,6 +415,8 @@ def effective_config(
 
 def apply_risk(signal: SignalInput, result: RiskResult, *, gaps: list[Gap]) -> SignalInput:
     """Apply before candidate creation; caller must classify gaps from actual source metadata."""
+    if signal.t_leg != result.t_leg:
+        raise ValueError("risk_t_leg_context_mismatch")
     if {g.key for g in gaps} != set(result.gaps):
         raise ValueError("risk_gap_classification_incomplete")
     evidence = {e.id: e for e in signal.evidence}
@@ -313,6 +429,7 @@ def apply_risk(signal: SignalInput, result: RiskResult, *, gaps: list[Gap]) -> S
             **signal.model_dump(),
             "stops": result.stops,
             "risk_flags": [*signal.risk_flags, *result.flags],
+            "risk_details": [*signal.risk_details, *result.gate_details],
             "evidence": list(evidence.values()),
             "gaps": [*signal.gaps, *gaps],
             "data_status": "partial"

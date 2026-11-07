@@ -375,6 +375,11 @@ def write_candidate(
         for flag in content.risk_flags:
             if content.proposed_action not in flag.gated_actions:
                 continue
+            if (
+                flag.control in {"total_exposure", "sector_concentration"}
+                and content.t_leg is not None
+            ):
+                continue
             code = {
                 "position_cap": "POSITION_CAP_REACHED",
                 "total_exposure": "REGIME_MISMATCH",
@@ -383,7 +388,16 @@ def write_candidate(
             }.get(flag.control)
             if code is None:
                 return {"id": None, "diagnostic": "risk_hook_mapping_not_defined"}
-            blockers.append({"code": code, "release_condition": condition(code)})
+            details = [
+                d for d in content.risk_details if d.control == flag.control and d.code == code
+            ]
+            blockers.append(
+                {
+                    "code": code,
+                    "release_condition": condition(code),
+                    "risk_details": [d.model_dump(mode="json") for d in details],
+                }
+            )
         for restriction in locked.execute(
             select(user_restrictions).where(
                 user_restrictions.c.user_id == user_id,
@@ -440,6 +454,7 @@ def write_candidate(
             )
         identifier = uuid.uuid5(uuid.NAMESPACE_URL, "tb74:" + identity)
         body = content.model_dump(mode="json")
+        body.pop("risk_details", None)
         for name in ["data_status", "data_as_of", "gaps", "snapshot_id", "created_at"]:
             body.pop(name)
         body["confidence_level"] = body["confidence"]["level"]
@@ -505,6 +520,17 @@ def write_candidate(
                             for b in blockers
                         ),
                     }
+                ]
+                + [
+                    {
+                        "gate": "gate_risk_" + detail["control"],
+                        "passed": False,
+                        "code": detail["code"],
+                        "detail": detail["detail"],
+                        "evidence_ids": detail["evidence_ids"],
+                    }
+                    for blocker in blockers
+                    for detail in blocker.get("risk_details", [])
                 ],
             )
         )

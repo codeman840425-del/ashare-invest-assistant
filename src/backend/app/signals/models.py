@@ -92,6 +92,19 @@ class RiskFlag(Model):
     evidence_ids: list[str]
 
 
+class RiskGateDetail(Model):
+    control: Literal["total_exposure", "sector_concentration"]
+    code: Literal["REGIME_MISMATCH", "SECTOR_EXPOSURE_EXCEEDED"]
+    detail: dict[str, str]
+    evidence_ids: list[str]
+
+    @model_validator(mode="after")
+    def coherent(self) -> RiskGateDetail:
+        if (self.control == "total_exposure") != (self.code == "REGIME_MISMATCH"):
+            raise ValueError("risk_detail_code_mismatch")
+        return self
+
+
 class SignalInput(Model):
     security_code: str = Field(pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$")
     proposed_action: Action
@@ -106,6 +119,7 @@ class SignalInput(Model):
     # Auxiliary model metadata is retained, never treated as a rule.
     model_refs: list[ModelRef]
     risk_flags: list[RiskFlag]
+    risk_details: list[RiskGateDetail] = Field(default_factory=list, exclude_if=lambda v: not v)
     valid_until: dt.datetime | None
     snapshot_id: uuid.UUID
     feature_set_version: str = Field(min_length=1)
@@ -119,9 +133,11 @@ class SignalInput(Model):
         ids = {item.id for item in self.evidence}
         if len(ids) != len(self.evidence):
             raise ValueError("duplicate_evidence_id")
-        references = [item.evidence_ids for item in self.rule_refs] + [
-            item.evidence_ids for item in [*self.counter_evidence, *self.invalidation]
-        ]
+        references = (
+            [item.evidence_ids for item in self.rule_refs]
+            + [item.evidence_ids for item in self.risk_details]
+            + [item.evidence_ids for item in [*self.counter_evidence, *self.invalidation]]
+        )
         for references_ids in references:
             if not set(references_ids) <= ids:
                 raise ValueError("unresolved_evidence")

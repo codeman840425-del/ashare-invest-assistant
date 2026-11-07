@@ -665,7 +665,50 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 - 候选信号的 `hold` / `wait` 不进入可执行性检查，也不生成草案，只在卡片上展示。
 - **原因解除**：解除监控发现某条原因的解除条件成立 → 该原因 `released` → 若该信号所有原因都已解除且仍在有效期内（未失效、未被取代）→ 回到 ⑦ 重新检查 → 生成草案并通知（`notification_kind = reason_released`）。
 - **信号矛盾不合并**：建议卡呈现 **"维度 × 策略" 矩阵**（行：六个维度；列：启用的策略；格：观点 + 分数 + 关键依据），下方并列各策略的动作与止损止盈；顶部只有在所有启用策略动作一致时才显示"各策略一致：持有"，否则显示"**存在分歧（3 个策略：买入 / 等待 / 减仓）**"并列出分歧点。系统**不输出合成后的单一结论**。
-- **置信度**：每个策略单独计算 = 0.5×数据完整度 + 0.3×维度一致度（该策略内部各维度观点是否同向）+ 0.2×条件余量（离阈值的标准化距离），映射 high ≥ 0.7 / medium ≥ 0.4 / low；公式随 `engine_policy` 版本记录。
+- **置信度**：每个策略单独计算 = 0.5×数据完整度 + 0.3×维度一致度（该策略内部各维度观点是否同向）+ 0.2×条件余量（离阈值的标准化距离），映射 high ≥ 0.7 / medium ≥ 0.4 / low；公式随 `engine_policy` 版本记录。各分项、缺失处理和版本存放的精确定义见下方 T-A16 裁定。
+
+#### T-A16 裁定（架构师 2026-11-07）
+候选→建议装配口径，并收口 T-B77、T-B78 会碰到的未定义口径。原则：MVP 取最小方案；缺数据返回 null 并记 gap，不填伪值，不抬高置信度；不推翻 T-R15、T-A11–T-A15。
+1. **engine_policy 版本**：
+   - 唯一来源是 `config/engine_policy.yaml`，登记进 `REFERENCE_FILES`。顶层 `version_no` 为正整数，初始 `1`；其余是内容：`confidence`（第 2 条的权重、分级阈值、余量参数）和 `system_components`（2.5.11A 默认 4 项及各自版本）。
+   - `content_sha256` = 去掉 `version_no` 后，按键排序、UTF-8 的 canonical JSON 的 SHA-256。
+   - 幂等种子命令写已有表 `engine_policies`，不新增迁移：`version_no` 不存在就插入，`config` = 内容 + `content_sha256`；已存在且哈希相同就不动；哈希不同就拒绝启动并报错，改内容必须先递增 `version_no`。
+   - 运行时只读库中 `version_no` 最大的一行；同一次盘后作业全程用同一版本。
+   - 落点：引擎产出的建议必填 `suggestions.engine_policy_id`（已有列）；候选信号不加列，把 `{engine_policy_version_no, content_sha256}` 写进它 `snapshot_id` 指向的数据快照。这就是 2.5.11A“系统组件版本随 engine_policy 记录在每条信号上”的实现。
+   - 契约 `Suggestion.engine_policy` 为 `{version_no, content_sha256} | null`，只有非引擎产物（如 T-B76 手工合成建议）为 null。
+2. **置信度**（每个策略结论单独算）：
+   - 数据完整度 D = 本结论 `rule_refs` 中 `passed` 非 null 的条数 ÷ `rule_refs` 总条数（P1 保证分母 > 0）。
+   - 维度一致度 A：只看 `dimension_views` 中 `view` 为 bullish 或 bearish 的维度，A = max(看多数, 看空数) ÷ (看多数 + 看空数)。这类维度少于 2 个时 A = null，一个维度谈不上一致。
+   - 条件余量 M 先逐条算：
+     - 只计 role ∈ {entry, filter, hold, weakening, exit}、`passed` 非 null、`value` 与 `threshold` 都能解析成十进制数的单一比较规则。
+     - 尺度 s 依次取：规则声明的 `margin_scale` 参数；左值在 `feature_catalog` 中单位为价格（元）且 ATR14 可得时取 ATR14；阈值非 0 时取 |阈值|。都没有就不计这一条。
+     - m = min(1, |value − threshold| ÷ s)，只看离阈值多远，不论通过与否。
+     - 布尔、枚举、交叉、复合 and/or 等没有单一数值阈值的规则不计入，既不记 1 也不记 0。
+   - M = Σ(w·m) ÷ Σw，w 取卡片 `rule.weight`，没有就为 1；没有可计入的规则时 M = null。
+   - 合成 value = 0.5·D + 0.3·A + 0.2·M。A 或 M 为 null 时这一项按 0 计入，不重新归一化：缺项只会压低置信度，不会抬高。value 保留两位小数，再按 high ≥ 0.70、medium ≥ 0.40、其余 low 分级。
+   - 透明：契约 `confidence.components` 给出 D、A、M（A、M 可为 null）和逐条余量 `margin_rules[]`，权重写在里面。`LOW_CONFIDENCE` 仍用 value 与用户阈值（默认 0.4）比较。
+3. **important_count**：
+   - `important` 由差异类型固定决定：`quantity_mismatch`、`missing_in_broker`、`missing_in_ours` 为 true；`cost_differs`、`cash_gap`、`cash_chain_break` 为 false（3.5A 对账表）。`/reconciliation` 的 `items[].important` 同一口径。
+   - 取该账户最新一次对账（`created_at` 降序、`id` 降序；日报只取生成时刻之前的那次）。`diff_count` = 其中未被用户忽略（`resolution` 为空）的条目数，`important_count` = 其中 important 的条数。
+   - 没有账户或从未对账：`status="not_imported"`、`as_of=null`、两个计数为 0（沿用 §5.3）。
+   - 日报与 `/today` 同一口径；非空对账不再返回 503。
+4. **change_from_previous**：
+   - 基准：同一用户在 `market.trading_calendar` 中严格早于本报告日期的最近开市日的最新完成版（ready/partial）日报。同日新 revision 也和这份比，不和同日旧 revision 比。
+   - 比较四项：各策略 `(strategy_key, action, t_leg)` 集合（`actions`）；各策略置信度等级（`confidence_level`，从两边建议读取）；`executability_status`（`executability`）；`max_risk_level`。价格、涨跌幅、证据、文字、`suggestion_id` 不比。
+   - 今有昨无为 `new`。两边都有时，任一项不同为 `changed`，并在 `change_fields` 列出变化项，一边有建议另一边没有算 `actions` 变化；都相同为 `unchanged`。
+   - 昨有今无时追加一行 `removed`：`suggestion_id`、`suggestion`、`max_risk_level` 为 null，`close`、`change_pct` 取当日值或 null，三组文字为空数组。`removed` 行不计入列表的 `stock_count`。
+   - 没有基准（首份日报、前一开市日没有完成版、前一开市日不在日历覆盖范围内）：所有行 `change_from_previous=null`、`change_fields=[]`，不出 `removed` 行，日报 `gaps` 记 `{key:"stocks.change_from_previous", reason:"no_source"}`。不返回 503，也不把全部标成 `new`。
+5. **扫出并一并定掉的口径**（T-B76、T-B77、T-B78）：
+   - 日报范围：`account_id` 按 T-A12 默认账户规则；`stocks` = 该账户持仓 ∪ 本人自选，持仓按权重降序在前，其余按代码升序。
+   - 日报证据：`evidence[]` 汇集各行引用的建议证据，id 改写为 `{security_code}:{原 id}`，行内 `evidence_ids` 同步改写，保证文档内唯一。
+   - 日报行文字：`highlights` = 当前建议各策略 `reasons` 去重后前 3 条；`invalidation` = 各策略 `invalidation` 去重；`next_watch` 在 MVP 恒为 `[]`，列入 T-B79。没有建议的行三项都是 `[]`，不写模板套话。
+   - `SuggestionSummary`：`actions[]` 增加 `lifecycle`，`simulating` 时前端标“模拟中”（T-A14 第 4 条）；`top_score` = 各策略 `score` 的最大非 null 值，全为 null 时为 null。
+   - `/today.focus`：从本人全部行中取（不受 `/terminal` 300 行截断影响）持仓 ∪ 重点关注，持仓按 `weight_pct` 降序在前，重点关注按加入时间；最多 50 条，超出时 `more=true`。终端被截断时不再 503。
+   - `/terminal`、`/today` 不再用 503 表示“未接线”：没有记录就是空集合，有记录按契约 §7.3 既有定义聚合。保留的 503 只有 T-A12 的 `CALENDAR_NOT_COVERED`。
+   - 日历覆盖起点之前没有前一开市日：`change_from_previous` 按第 4 条处理；补 2025 年末前序开市日由研究员按 T-R16 同一受审流程补，不阻塞 MVP。
+   - T-B78 增加断言：置信度可由 `components` 按本条公式重算；`engine_policy` 非空且与库中版本一致；`important_count` 与 `/reconciliation` 重算一致；跨日 `change_from_previous` 的 new/changed/unchanged/removed 与无基准 null 各一例；“模拟中”标记可见。
+6. **需用户决定的产品问题**：无。权重 0.5/0.3/0.2 与分级阈值沿用本节已定公式，本裁定只补定义。
+7. **后端**：T-B76 续接 P1 结论装配（置信度、`engine_policy`）与跨日比较；T-B77 去掉上述 503，按第 3 条与第 5 条聚合；T-B78 加第 5 条断言。全部不需要迁移。
 
 #### 2.5.5 输出结构（`suggestions` 的 JSON 视图；**字段定义以 api-contract §5.2 `Suggestion` 为准**，本节只是示例，取值均为**虚构**）
 ```json
@@ -857,7 +900,7 @@ P0 = **G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01**（9 项，
 | `ctx_market_regime`（G-02） | 不挂规则，产出 `f.market_regime` 供 RC3 与模板引用 | 上下文 | — |
 | `hold_risk_monitor`（H-01） | **每只持仓**一个系统实例：`strategy_instances.origin=system`、`status=active`，用户可暂停单只或全部 | exit / weakening | 只产生 reduce/sell 候选，从不产生 buy/add |
 
-H-01 是"周期分类只推荐、不自动启用"（问题 15）的**唯一例外**，因为它只做风险提示方向。系统组件的版本随 `engine_policy` 版本记录在每条信号上。
+H-01 是"周期分类只推荐、不自动启用"（问题 15）的**唯一例外**，因为它只做风险提示方向。系统组件的版本随 `engine_policy` 版本记录在每条信号上（版本编号、存放与落点见 2.5.4 后的 T-A16 第 1 条）。
 
 **逐项覆盖与缺口**
 

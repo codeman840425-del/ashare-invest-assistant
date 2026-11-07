@@ -13,6 +13,7 @@ from app.api.v1 import (
     health,
     horizon,
     imports,
+    instances,
     me,
     meta,
     portfolio,
@@ -34,3 +35,5 @@ router.include_router(trades.router)
 router.include_router(portfolio.router)
 router.include_router(horizon.router)
 router.include_router(candidates.router)
+
+router.include_router(instances.router)

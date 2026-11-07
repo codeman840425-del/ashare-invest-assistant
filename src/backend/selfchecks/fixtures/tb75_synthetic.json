@@ -1,0 +1,34 @@
+[
+  {
+    "code": "688018.SH",
+    "price": "12.34",
+    "assets": "500000.00",
+    "security_value": "120000.00",
+    "proposed_quantity": "3000",
+    "total_value": "37020.00"
+  },
+  {
+    "code": "688073.SH",
+    "price": "8.76",
+    "assets": "250000.00",
+    "security_value": "45000.00",
+    "proposed_quantity": "1500",
+    "total_value": "13140.00"
+  },
+  {
+    "code": "300364.SZ",
+    "price": "21.05",
+    "assets": "800000.00",
+    "security_value": "200000.00",
+    "proposed_quantity": "5000",
+    "total_value": "105250.00"
+  },
+  {
+    "code": "301218.SZ",
+    "price": "5.67",
+    "assets": "120000.00",
+    "security_value": "30000.00",
+    "proposed_quantity": "2000",
+    "total_value": "11340.00"
+  }
+]

@@ -20,6 +20,7 @@ from app.api.v1 import (
     meta,
     portfolio,
     strategy_cards,
+    suggestions,
     trades,
 )
 
@@ -46,3 +47,5 @@ router.include_router(aggregates.router)
 router.include_router(strategy_cards.router)
 
 router.include_router(candidate_signals.router)
+
+router.include_router(suggestions.router)

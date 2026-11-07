@@ -507,6 +507,7 @@
 | 409 | `REASON_NOT_MANUALLY_RELEASABLE` | 该原因可由系统判断，不能手动解除 | `{code}` |
 | 503 | `REGISTRATION_CLOSED` | 注册已关闭（`registration_mode=closed`，V1 默认） | — |
 | 503 | `FRESH_DATA_REQUIRED` | （v0.1 名为 `DATA_STALE`）只用于**明确要求最新数据**的操作（例如手动刷新建议 `manual_refresh`），而行情已陈旧；读接口一律返回 200 加 `data_status`，不报此错。与原因码 `DATA_STALE` 的区别：原因码挂在候选信号上、表示“这个信号因数据陈旧暂不可执行”，随数据恢复自动解除；本错误码表示“这次请求没有执行” | `{data_as_of}` |
+| 503 | `CALENDAR_NOT_COVERED` | 请求日期不在受审交易日历的覆盖范围内（T-A12），不按工作日猜测 | `{date, coverage_start, coverage_end}` |
 | 503 | `INGEST_PAUSED` | 采集服务被管理员暂停或冷备切换中（只用于需要触发拉取的操作） | — |
 | 503 | `LLM_UNAVAILABLE` | 所有 LLM 路由失败（只在显式请求 LLM 时返回；建议本身回落模板，不报错） | `{task}` |
 | 429 | `LLM_BUDGET_EXCEEDED` | LLM 日预算用尽 | `{task, budget}` |
@@ -838,6 +839,20 @@
 | GET | `/snapshots` 🔒 | 持仓快照 |
 | GET | `/reconciliation?account_id=` 🔒 | 对账结果：`{status: reconciliation_status, as_of: string(datetime) \| null, items: [{kind: reconciliation_item_kind, security_code: string \| null, name: string \| null, ours: string(decimal) \| null, broker: string(decimal) \| null, diff: string(decimal) \| null, important: boolean, note: string}]}`。成本按**摊薄成本**比较（我方重建值计入分红：现金红利冲减、股息红利税补缴计入，与通达信一致，v0.2.2），容差 `max(0.01 元, 0.1%)`（plan 3.5A）；每次导入确认后重算 |
 | GET | `/portfolio?account_id=` 🔒 | 持仓汇总（`account_id` 可选，不传时合并全部账户；v0.2.4 #14）：`{cash, total_assets, positions: [{security_code, name, security_type: security_type \| null, qty, sellable_qty, cost_price, market_value: string(decimal) \| null, pnl: string(decimal) \| null, pnl_pct: string(decimal) \| null, weight_pct, estimated: boolean}], exposure: {sector: [{name, pct}]}, DataStatusBlock}`。v0.2.8：持仓可含 ETF，`sellable_qty` 一律按 T+1 计算【待研究员核对：T+0 的 ETF 品种，v0.2.8 未决 U1】。**无行情的持仓行（v0.2.9，U3 已定）**：`security_type` 为 `null` 表示不在证券主数据中（本版主要是按 `import_as_is` 导入的可转债）；这类行 `estimated=true`，`market_value`、`pnl`、`pnl_pct` 为 `null`（不是 0），`weight_pct` 按成本 `qty × cost_price` 估算，`total_assets` 与 `exposure` 同样计入成本估算值，顶层 `data_status` 为 `partial`；不跑策略、不出信号、不进入风控止损计算。有现价（来源见下文 ②）的行 `estimated=false`；在证券主数据中但缺现价的行同样 `estimated=true`（v0.2.9 #31：本句原写“其他行 `estimated=false`”，与 T-B46 裁定 ② 矛盾，以裁定 ② 为准）。**v0.2.9 内 T-B46 裁定**：① 字段名以本行为准（`security_type`，不是 `instrument_kind`；顶层没有 `estimated`）；② 现价来源依次为（只适用于 `security_type` 非 null、即在证券主数据中的行；v0.2.9 内 T-T25 裁定：`security_type=null` 的行即使最近一次持仓快照中有参考价也**不**采用，一律按成本估算，`estimated=true`、`market_value`/`pnl`/`pnl_pct` 为 null，因为无法对照主数据核实其价格口径与单位，如可转债每张面值 100 元）：该证券最近一个交易日的日线收盘价（只读库内已有数据，不触发拉取）→ 最近一次持仓快照中的参考价 → 都没有时该行按成本估算，`estimated=true`，`market_value`、`pnl`、`pnl_pct` 为 null（与可转债行相同，问题 79）；③ `cash`、`total_assets`、`qty`、`sellable_qty`、`cost_price`、`weight_pct` 不为 null（没有现金记录时 `cash="0.00"`，并在 `gaps` 中列 `{key:"cash", reason:"user_input_missing"}`）；④ 行业数据未接入时 `exposure.sector=[]`、`gaps` 含 `{key:"exposure.sector", reason:"no_source"}`，这一项不单独把 `data_status` 降为 `partial`。**v0.2.9 #30**：行业数据已接入时，没有行业归属的持仓行（可转债等 `security_type=null` 的行，以及主数据中没有行业的证券）按成本估算值合并为一项 `{name:"未分类", pct}` 计入 `exposure.sector`，使各项合计等于全部持仓；`未分类` 不是行业，不参与 RC4 行业集中度判断（plan 第 9 节问题 85）。**v0.2.9 #31（T-B46-47 前端待定）**：① 顶层**没有** `estimated`，是否估算只看持仓行上的 `estimated`；② 任一行 `estimated=true`（不论 `security_type` 是否为 `null`）时顶层 `data_status` 为 `partial`；除 `exposure.sector` 外的任一缺口（含 `cash`）同样使其为 `partial`；没有这些缺口时按现价时点取 `fresh`/`stale`；③ 估算行在 `gaps` 中按原因各列一项（同一原因只列一项）：不在主数据中且代码属可转债段 `{key:"positions.convertible_bond", reason:"no_source"}`；其他不在主数据中的 `{key:"positions.unknown_security", reason:"no_source"}`；在主数据中但既无日线收盘价也无快照参考价 `{key:"positions.price", reason:"no_source"}`；④ 估算行不加原因字段：前端对 `security_type=null` 的行标“不在主数据·估算”，其余估算行只标“估算”，原因在页面说明中按 `gaps`/`security_type` 分开写（plan 第 9 节问题 87） |
+
+**T-A12 裁定（架构师 2026-11-07，T-B77 MVP 最小方案）**：
+1. **多账户时默认用哪个账户**：`/terminal` 和 `/today` 用同一规则。
+   - 传了 `account_id` 时：本人账户直接用；他人账户或不存在的账户返回 `404`。
+   - 没传时：取本人未归档账户中 `created_at` 最早的一个，相同时按 `id` 升序，结果在响应的 `account_id` 字段里回显。
+   - 没有账户时返回 `200`：`account_id=null`，持仓相关列表为空，不返回 `503`。
+   - 本 MVP 不加“默认账户”字段，也不做跨账户合并；用户可设的默认账户，以及多账户合并，都列入 T-B79。
+2. **受审交易日历**：唯一读取来源是表 `market.trading_calendar`，导入流水线已经在用这张表，求交易日和 `market_session` 的时钟也读它。
+   - 数据靠种子文件写入：后端新增 `config/trading_calendar.json`，格式沿用 `financial_basis.TradingCalendar`，即 `{coverage_start, coverage_end, open_days[], source}`。
+   - 种子文件登记进 `REFERENCE_FILES`，并提供一个幂等的种子命令，把覆盖范围内每一天按 `is_open` 写入表。
+   - 内容由研究员按交易所官方发布的年度休市安排整理，写明来源公告的 URL 和发布日期，并逐日核对；A 股周末调休日不开市。只覆盖已经公布的年份，不外推。
+   - 本 MVP 不调麦蕊 `/tcalendar`。以后接入时用来对账，结果不一致只告警，不覆盖种子数据。
+   - 日期不在覆盖范围内时返回 `503 CALENDAR_NOT_COVERED{date, coverage_start, coverage_end}`，继续不猜工作日。
+
 
 ### 7.3 自选、行情与证券
 | 方法 | 路径 | 说明 |

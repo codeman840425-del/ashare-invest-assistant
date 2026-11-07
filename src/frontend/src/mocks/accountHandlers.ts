@@ -515,6 +515,8 @@ export const accountHandlers = [
     if (!b) return notFound('导入批次');
     if (b.status !== 'previewed' && b.status !== 'failed') return badTransition(b.status, 'parsing');
     const o = (await request.json()) as Partial<ImportOptions>;
+    // T-B66：后端拒绝与批次 kind 不同的解析器
+    if (o.parser_id && !o.parser_id.startsWith(`tdx_${b.kind}`)) return err(400, 'VALIDATION_ERROR', '解析器与文件类型不一致', { fields: [{ field: 'parser_id', issue: 'kind_mismatch' }] });
     b.encoding_override = o.encoding_override ?? null;
     b.parser_id = o.parser_id ?? b.parser_id;
     b.mapping = o.mapping ?? b.mapping;

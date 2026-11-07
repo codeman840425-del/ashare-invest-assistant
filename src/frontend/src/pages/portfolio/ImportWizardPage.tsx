@@ -13,11 +13,13 @@ import { ApiError, newIdempotencyKey } from '../../api/client';
 import { ENUMS } from '../../api/enums';
 import { IMPORT_422_TEXT, IMPORT_CODES, IMPORT_TONE, rowTone } from '../../api/importCodes';
 import { ErrorBox, Loading } from '../../components/common';
-import { DEDUP_STATUS, ENCODINGS, IMPORT_FIELDS, IMPORT_ROW_STATUS, IMPORT_STATUS, PARSERS, RECON_STATUS, TRADE_SIDE } from '../../i18n/importLabels';
+import { DEDUP_STATUS, ENCODINGS, IMPORT_FIELDS, IMPORT_ROW_STATUS, IMPORT_STATUS, RECON_STATUS, TRADE_SIDE } from '../../i18n/importLabels';
 import { fmtAmount, fmtNum, fmtTime } from '../../lib/format';
+import { otherKindHint, parsersFor } from '../../lib/importKind';
 import { FindingItem, FindingTag, ToneLegend } from './importParts';
 
 const KIND_TEXT: Record<ImportKind, string> = { trades: '交割单 / 成交明细', positions: '持仓快照' };
+const KIND_SHORT: Record<ImportKind, string> = { trades: '交割单', positions: '持仓' };
 const toIso = (d: Dayjs) => d.format('YYYY-MM-DDTHH:mm:ss+08:00');
 
 /** 交割单导入向导（T-F04）：上传 → 解析 → 预览着色与逐项处理 → 确认写入 → 结果（可撤销 / 下载问题清单）。 */
@@ -69,17 +71,18 @@ function UploadStep() {
 
   return (
     <div className="page-scroll page narrow" data-testid="import-upload">
-      <h2 className="page-title">交割单导入</h2>
+      <h2 className="page-title">交割单 / 持仓导入</h2>
       <StepsBar current={0} failed={fileErrors.length > 0} />
       {!list.length ? (
         <Alert type="warning" showIcon title={<span>还没有券商账户，请先到 <Link to="/portfolio">持仓与账户</Link> 新建。</span>} />
       ) : (
         <Form<UploadForm> form={form} layout="vertical" requiredMark={false} onFinish={submit}
-          initialValues={{ account_id: sp.get('account_id') ?? sp.get('account') ?? list[0].id, kind: sp.get('kind') === 'positions' ? 'positions' : 'trades' }}>
+          initialValues={{ account_id: sp.get('account_id') ?? sp.get('account') ?? list[0].id, kind: sp.get('kind') === 'positions' || sp.get('kind') === 'trades' ? (sp.get('kind') as ImportKind) : undefined }}>
           <Form.Item name="account_id" label="导入到账户" rules={[{ required: true }]}>
             <Select options={list.map((a) => ({ value: a.id, label: `${a.alias} · ${a.broker_name}` }))} style={{ maxWidth: 320 }} />
           </Form.Item>
-          <Form.Item name="kind" label="文件类型">
+          {/* T-F20（T-B66）：混合入口不再默认交割单，必须明确选择文件类型 */}
+          <Form.Item name="kind" label="文件类型" rules={[{ required: true, message: '请选择文件类型：交割单或持仓快照' }]} data-testid="upload-kind">
             <Radio.Group optionType="button" options={(['trades', 'positions'] as const).map((k) => ({ value: k, label: KIND_TEXT[k] }))} />
           </Form.Item>
           {kind === 'positions' ? (
@@ -113,12 +116,26 @@ function UploadStep() {
             </div>
           ) : upload.isError ? <ErrorBox error={upload.error} prefix="上传失败" /> : null}
           <Space>
-            <Button type="primary" htmlType="submit" disabled={!file} loading={upload.isPending} data-testid="upload-submit">上传并解析</Button>
+            <Button type="primary" htmlType="submit" disabled={!file || !kind} loading={upload.isPending} data-testid="upload-submit">上传并解析</Button>
             <Link to="/portfolio?tab=imports">查看导入记录</Link>
           </Space>
         </Form>
       )}
     </div>
+  );
+}
+
+/** T-F20：候选解析器是另一种类型 → 提示按正确类型重新上传，并给一键入口（带 account_id 与 kind） */
+function KindMismatch({ b }: { b: ImportBatch }) {
+  const navigate = useNavigate();
+  const other = otherKindHint(b);
+  if (!other) return null;
+  return (
+    <Alert type="warning" showIcon style={{ marginBottom: 8 }} data-testid="kind-mismatch"
+      title={`这是${KIND_SHORT[other]}文件，请按${KIND_SHORT[other]}重新上传`}
+      description={`本批次按“${KIND_TEXT[b.kind]}”上传，解析器只能在同类型内调整；编码仍会自动识别。`}
+      action={<Button size="small" type="primary" data-testid="kind-reupload"
+        onClick={() => navigate(`/portfolio/import?account_id=${encodeURIComponent(b.account_id)}&kind=${other}`)}>按{KIND_SHORT[other]}重新上传</Button>} />
   );
 }
 
@@ -177,7 +194,7 @@ function DetectPanel({ b }: { b: ImportBatch }) {
                 <span>编码</span>
                 <Select allowClear placeholder="自动识别" value={encoding ?? undefined} onChange={(v) => setEncoding(v ?? null)} style={{ width: 140 }} options={ENCODINGS.map((e) => ({ value: e, label: e }))} />
                 <span>解析器</span>
-                <Select allowClear placeholder="自动识别" value={parser ?? undefined} onChange={(v) => setParser(v ?? null)} style={{ width: 300 }} options={PARSERS.map((p) => ({ value: p.id, label: p.text }))} />
+                <Select allowClear placeholder="自动识别" value={parser ?? undefined} onChange={(v) => setParser(v ?? null)} style={{ width: 300 }} options={parsersFor(b.kind).map((p) => ({ value: p.id, label: p.text }))} data-testid="parser-select" />
                 {b.kind === 'positions' ? (
                   <>
                     <span>快照时间</span>
@@ -232,6 +249,7 @@ function PreviewStep({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Impo
 
   return (
     <>
+      <KindMismatch b={b} />
       <DetectPanel key={`${b.parser_id}-${b.encoding_override}-${JSON.stringify(b.mapping)}`} b={b} />
       {b.file_findings.length ? (
         <section className="imp-section" data-testid="file-findings">

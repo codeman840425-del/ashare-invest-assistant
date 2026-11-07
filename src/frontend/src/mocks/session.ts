@@ -249,6 +249,18 @@ export function applyParse(b: MockBatch) {
     b.parse_target = 'failed';
     return;
   }
+  // T-F20（T-B66）：文件类型与批次 kind 不符 → 按后端 preview.py 给出另一类候选（params.candidates 文本 + candidate_ids）
+  const otherKind = b.kind === 'trades' && name.includes('positions') ? 'tdx_positions_v1' : b.kind === 'positions' && name.includes('trades') ? 'tdx_trades_v1' : null;
+  if (otherKind) {
+    b.detected_columns = [];
+    b.mapping = null;
+    b.parser_id = null;
+    b.format_score = null;
+    b.file_findings = [finding('IMPORT_UNRECOGNIZED_FORMAT', { params: { candidates: otherKind, candidate_ids: [otherKind] } })];
+    b.rows_data = [];
+    b.parse_target = 'failed';
+    return;
+  }
   if (name.includes('unknown') && !b.parser_id) {
     b.detected_columns = ['col1', 'col2', 'col3', 'col4'];
     b.mapping = null;

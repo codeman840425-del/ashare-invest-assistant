@@ -108,7 +108,7 @@ describe('导入向导：上传 → 预览着色 → 确认 422 → 写入 → �
   afterEach(() => vi.unstubAllGlobals());
   const mkFile = (parts: string[], name: string) => new NodeFile(parts, name, { type: 'text/plain' }) as unknown as File;
   it('完整流程', async () => {
-    const router = renderAt('/portfolio/import');
+    const router = renderAt('/portfolio/import?kind=trades');
     await screen.findByTestId('import-upload');
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     const file = mkFile(['示例列A\t示例列B\n20261026\t09:35:12\n'], 'trades_20261031.txt');
@@ -145,7 +145,7 @@ describe('导入向导：上传 → 预览着色 → 确认 422 → 写入 → �
   }, 20000);
 
   it('上传非 .txt/.csv → 422 文件级错误列表，不创建批次', async () => {
-    const router = renderAt('/portfolio/import');
+    const router = renderAt('/portfolio/import?kind=trades');
     await screen.findByTestId('import-upload');
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [mkFile(['x'], 'a.xlsx')] } });
@@ -153,5 +153,54 @@ describe('导入向导：上传 → 预览着色 → 确认 422 → 写入 → �
     fireEvent.click(screen.getByTestId('upload-submit'));
     expect(await screen.findByTestId('upload-file-errors')).toHaveTextContent('文件类型不支持');
     expect(router.state.location.pathname).toBe('/portfolio/import');
+  });
+});
+
+describe('T-F20（T-B66）导入文件类型', () => {
+  beforeEach(async () => {
+    const nodeForm = await new Response('a=1', { headers: { 'content-type': 'application/x-www-form-urlencoded' } }).formData();
+    vi.stubGlobal('FormData', nodeForm.constructor);
+    vi.stubGlobal('File', NodeFile);
+    vi.stubGlobal('Blob', NodeBlob);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+  const pick = (name: string) => fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement,
+    { target: { files: [new NodeFile(['示例列A\t示例列B\n'], name, { type: 'text/plain' }) as unknown as File] } });
+
+  it('混合入口不默认类型：未选文件类型时不能上传', async () => {
+    renderAt('/portfolio/import');
+    await screen.findByTestId('import-upload');
+    pick('trades_20261031.txt');
+    expect(screen.getByTestId('upload-submit')).toBeDisabled();
+    fireEvent.click(screen.getByText('交割单 / 成交明细'));
+    await waitFor(() => expect(screen.getByTestId('upload-submit')).toBeEnabled());
+  });
+
+  it('持仓文件按交割单上传 → 提示按持仓重新上传，一键入口带 kind=positions；解析器下拉只有同类型', async () => {
+    const router = renderAt('/portfolio/import?kind=trades');
+    await screen.findByTestId('import-upload');
+    pick('tdx_positions_示例.txt');
+    await waitFor(() => expect(screen.getByTestId('upload-submit')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('upload-submit'));
+    const hint = await screen.findByTestId('kind-mismatch', {}, { timeout: 5000 });
+    expect(hint).toHaveTextContent('这是持仓文件，请按持仓重新上传');
+    const sel = within(screen.getByTestId('options-form')).getByTestId('parser-select');
+    fireEvent.mouseDown(sel.querySelector('.ant-select-selector') ?? sel);
+    await waitFor(() => expect(document.querySelectorAll('.ant-select-item-option').length).toBeGreaterThan(0));
+    const opts = [...document.querySelectorAll('.ant-select-item-option')].map((o) => o.textContent ?? '');
+    expect(opts.some((t) => t.includes('tdx_trades_v1'))).toBe(true);
+    expect(opts.some((t) => t.includes('tdx_positions_v1'))).toBe(false);
+    fireEvent.click(screen.getByTestId('kind-reupload'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/portfolio/import'));
+    expect(new URLSearchParams(router.state.location.search).get('kind')).toBe('positions');
+  });
+
+  it('otherKindHint：只认另一类候选；同类或混合候选不提示', async () => {
+    const { otherKindHint } = await import('../lib/importKind');
+    const f = (params: Record<string, unknown>) => [{ code: 'IMPORT_UNRECOGNIZED_FORMAT', params }] as never;
+    expect(otherKindHint({ kind: 'positions', file_findings: f({ candidates: 'tdx_trades_v1', candidate_ids: ['tdx_trades_v1'] }) })).toBe('trades');
+    expect(otherKindHint({ kind: 'trades', file_findings: f({ candidates: 'tdx_positions_v1' }) })).toBe('positions');
+    expect(otherKindHint({ kind: 'trades', file_findings: f({ candidates: 'tdx_trades_v1、tdx_positions_v1' }) })).toBeNull();
+    expect(otherKindHint({ kind: 'trades', file_findings: f({ candidates: '无', candidate_ids: [] }) })).toBeNull();
   });
 });

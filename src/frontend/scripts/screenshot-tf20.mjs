@@ -26,6 +26,16 @@ try {
   await page.waitForTimeout(400);
   await page.screenshot({ path: resolve(OUT, '01-today-route-pending.png') });
   console.log('ok', resolve(OUT, '01-today-route-pending.png'));
+  // 导入文件类型：持仓文件按交割单上传 → 提示按持仓重新上传（示例数据）
+  const p2 = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark', locale: 'zh-CN', timezoneId: 'Asia/Shanghai' })).newPage();
+  await p2.goto(`${BASE}/portfolio/import?kind=trades`);
+  await p2.waitForSelector('[data-testid=import-upload]', { timeout: 15000 });
+  await p2.setInputFiles('input[type=file]', { name: 'tdx_positions_示例.txt', mimeType: 'text/plain', buffer: Buffer.from('示例列A\t示例列B\n') });
+  await p2.click('[data-testid=upload-submit]');
+  await p2.waitForSelector('[data-testid=kind-mismatch]', { timeout: 15000 });
+  await p2.waitForTimeout(400);
+  await p2.screenshot({ path: resolve(OUT, '02-import-kind-mismatch.png') });
+  console.log('ok', resolve(OUT, '02-import-kind-mismatch.png'));
 } finally {
   await browser.close();
   server.kill();

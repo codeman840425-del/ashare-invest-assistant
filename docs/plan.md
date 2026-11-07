@@ -971,7 +971,7 @@ class RuleTemplateStrategy(ScreenerStrategy, TimingStrategy):
    - G1：W-01 不能有 `to_quantify`（X5 已改用 `_qfq`）。H-01 按 `mount_policy=system_only` 和纯离场规则享受 G1 豁免（T-R15 第 2 条）。
    - G2：所需字段至少 `verified_doc`，不能是 gap。feature 元数据里的 null 不影响 G2（T-A13）。
    - G3、G4、G5：按现有规则自动检查。
-   - G6：fixtures 必须全部通过（26 例 golden）。120 日历史体检只做统计，原本就只出警告：数据不足 120 日时如实记“未体检/覆盖不足”的警告，并显示在 G7 报告里，不编造统计结果。
+   - G6：fixtures 必须全部通过（26 例 golden）。120 日历史体检只做统计，原本就只出警告：数据不足 120 日时如实记“未体检/覆盖不足”的警告，并显示在 G7 报告里，不编造统计结果。**T-A17**：重合度 `max_jaccard` 无值（历史不足，或没有可比较的命中集合）时报 `null` 加原因码 `no_history` / `no_comparable_set`（契约 §7.4），G6 记 `warn` 不记 `fail`；fixtures 失败仍是 `fail`。
    - G7：由用户本人以管理员身份逐条核对卡片原文与规则的对应关系后批准。代理只准备报告，不代为批准。
 4. **simulating 在 MVP 中的效果**：
    - 产生候选信号和操作建议，显示“模拟中”标记，不生成计划草案。

@@ -78,15 +78,21 @@ if [ -z "${AIA_BACKEND_IMAGE-}" ]; then
   else image_src="项目名派生"; AIA_BACKEND_IMAGE="aia-backend:$project"; fi
   export AIA_BACKEND_IMAGE
 fi
+fe_src="shell"
+if [ -z "${AIA_FRONTEND_IMAGE-}" ]; then
+  if [ -n "$(env_get AIA_FRONTEND_IMAGE)" ]; then fe_src="deploy/env/.env"; AIA_FRONTEND_IMAGE="$(env_get AIA_FRONTEND_IMAGE)"
+  else fe_src="项目名派生"; AIA_FRONTEND_IMAGE="aia-frontend:$project"; fi
+  export AIA_FRONTEND_IMAGE
+fi
 
 if [ "${1-}" = "--resolve" ]; then
-  echo "compose 项目：$project（$project_src）；数据卷前缀：$prefix（$prefix_src）；后端镜像：$AIA_BACKEND_IMAGE（$image_src）；密钥目录：$secrets_dir（$secrets_src）；profile：$PROFILE"
+  echo "compose 项目：$project（$project_src）；数据卷前缀：$prefix（$prefix_src）；后端镜像：$AIA_BACKEND_IMAGE（$image_src）；前端镜像：$AIA_FRONTEND_IMAGE（$fe_src）；密钥目录：$secrets_dir（$secrets_src）；profile：$PROFILE"
   exit 0
 fi
 if [ "${1-}" = "--get" ]; then
   case "${2-}" in
-    COMPOSE_PROJECT_NAME|AIA_VOLUME_PREFIX|AIA_BACKEND_IMAGE|AIA_SECRETS_DIR) printf '%s\n' "${!2}" ;;
-    *) echo "--get 只支持 COMPOSE_PROJECT_NAME|AIA_VOLUME_PREFIX|AIA_BACKEND_IMAGE|AIA_SECRETS_DIR" >&2; exit 2 ;;
+    COMPOSE_PROJECT_NAME|AIA_VOLUME_PREFIX|AIA_BACKEND_IMAGE|AIA_FRONTEND_IMAGE|AIA_SECRETS_DIR) printf '%s\n' "${!2}" ;;
+    *) echo "--get 只支持 COMPOSE_PROJECT_NAME|AIA_VOLUME_PREFIX|AIA_BACKEND_IMAGE|AIA_FRONTEND_IMAGE|AIA_SECRETS_DIR" >&2; exit 2 ;;
   esac
   exit 0
 fi

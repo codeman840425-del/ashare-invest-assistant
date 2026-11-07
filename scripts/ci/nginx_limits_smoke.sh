@@ -10,7 +10,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PY_IMG="${PY_IMG:-python:3.13-slim}"   # T-A04 ⑥⑦ 黑洞上游（不应答 SYN）用；只跑标准库 socket
-IMG="$(sed -n 's/^ *image: *\(nginx:[^ ]*\).*/\1/p' "$ROOT/deploy/compose/docker-compose.yml" | head -1)"
+# 网关服务镜像已是带 dist 的前端镜像；冒烟仍用 frontend.Dockerfile 最终 FROM 的官方 nginx，
+# 测的是 nginx.conf 本身（限流、反代、错误页），不依赖前端构建产物。
+IMG="$(sed -n 's/^FROM nginx:\([^ ]*\).*/nginx:\1/p' "$ROOT/deploy/docker/frontend.Dockerfile" | head -1)"
+[ -n "$IMG" ] || IMG="$(sed -n 's/^ *image: *\(nginx:[^ ]*\).*/\1/p' "$ROOT/deploy/compose/docker-compose.yml" | head -1)"
 [ -n "$IMG" ] || { echo "找不到 nginx 镜像" >&2; exit 2; }
 id="o10smoke-$$"; net="$id-net"; work="$(mktemp -d)"; fail=0
 cleanup() { docker rm -f "$id-gw" "$id-api" "$id-filler" "$id-bh" >/dev/null 2>&1 || true; docker network rm "$net" >/dev/null 2>&1 || true; rm -rf "$work"; }

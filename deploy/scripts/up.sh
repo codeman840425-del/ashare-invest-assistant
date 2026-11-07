@@ -3,7 +3,7 @@
 # - 没有 deploy/env/.env 时自动从 .env.example 生成
 # - 非 systemd 主机上 Docker daemon 未运行时，自动调用 start-dockerd.sh
 # - 默认叠加 docker-compose.dev.yml（麦蕊回放模式），等待全部服务 healthy 后返回
-# - 默认带 --build：后端镜像（deploy/docker/backend.Dockerfile）有缓存时只需数秒，避免 live 模式跑旧镜像；
+# - 默认带 --build：后端镜像与前端网关镜像都重建（有缓存时很快），避免 live 模式跑旧镜像；
 #   AIA_UP_BUILD=0 可跳过构建
 # - 启动顺序：postgres/redis → migrate（alembic upgrade head）→ timescale-apply（策略）→ 应用服务 → nginx；
 #   一次性服务失败时 --wait 返回非 0，用 `compose.sh logs migrate timescale-apply` 看原因

@@ -1,3 +1,7 @@
 # 交割单/麦蕊夹具保持字节原样（另见 tests/fixtures/.gitattributes）
 tests/fixtures/** -text
 *.sh text eol=lf
+# 部署/CI 文本保持 LF（T-O19；不改全库换行）
+deploy/docker/frontend.Dockerfile text eol=lf
+scripts/ci/frontend_gateway_smoke.sh text eol=lf
+scripts/ci/check_frontend_deploy.py text eol=lf

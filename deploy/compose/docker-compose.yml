@@ -6,7 +6,9 @@
 #   挂给 api 与 ingest（ingest 轮换时要重新封装）。secret 是只读挂载，容器内路径 /run/secrets/<名>，
 #   后端按同名设置项加载（pydantic-settings secrets_dir=/run/secrets：DATA_LICENCE_SEAL_PRIVATE_KEYS / _PUBLIC_KEYS）。
 #   任何服务都不使用 env_file（避免把 .env 整体注入）。CI（scripts/ci/check_secret_boundary.py，CI job secret-boundary）检查这几条。
-# 全部应用服务共用后端镜像（deploy/docker/backend.Dockerfile，上下文 src/backend）：
+# 全部应用服务共用后端镜像（deploy/docker/backend.Dockerfile，上下文 src/backend）。
+# nginx 使用前端镜像（deploy/docker/frontend.Dockerfile，上下文 src/frontend）：只加入构建好的 dist，
+# 网关配置仍挂 deploy/nginx/nginx.conf，不把密钥或 .env 放进构建。
 #   api（uvicorn app.main:app）、migrate（一次性：alembic upgrade head）、
 #   worker/beat/ingest/signal-rt（python -m app.workers.<名>，T-B02 入口；目前为后端的常驻占位实现，
 #   不连外部服务、ingest 只写 Redis 心跳、不读 licence）。
@@ -86,7 +88,12 @@ x-db-ingest-url: &db-ingest-url postgresql+psycopg://aia_ingest:${AIA_DB_INGEST_
 services:
   nginx:
     logging: *default-logging
-    image: nginx:1.31.2-alpine3.23@sha256:54f2a904c251d5a34adf545a72d32515a15e08418dae0266e23be2e18c66fefa
+    # 与网关冒烟使用同一 nginx 基础镜像（见 frontend.Dockerfile 的最终 FROM）。这里的标签是构建结果，
+    # 里面只有前端 dist；nginx.conf / limits 仍由下面的只读挂载提供，不把配置烘焙进镜像。
+    image: ${AIA_FRONTEND_IMAGE:-aia-frontend:local}
+    build:
+      context: ../../src/frontend
+      dockerfile: ../../deploy/docker/frontend.Dockerfile
     restart: unless-stopped
     ports:
       - "127.0.0.1:${NGINX_HTTP_PORT:-8080}:80"

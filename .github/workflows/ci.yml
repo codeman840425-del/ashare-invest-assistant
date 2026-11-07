@@ -326,6 +326,31 @@ jobs:
         if: always()
         run: docker rm -f aia-api-smoke || true
 
+  # ------------------------------------------------------------------ 前端镜像（只构建不推送；dist 在镜像内，网关配置仍用仓库 nginx.conf）
+  frontend-image:
+    name: frontend-image (frontend.Dockerfile, no push)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: docker build（push=false）
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: src/frontend
+          file: deploy/docker/frontend.Dockerfile
+          push: false
+          load: true
+          tags: aia-frontend:ci
+          provenance: false
+      - name: SPA / 深链 / 静态资源 / /api 未登录
+        shell: bash
+        run: AIA_FRONTEND_IMAGE=aia-frontend:ci bash scripts/ci/frontend_gateway_smoke.sh image
+      - name: 静态规则
+        run: python3 scripts/ci/check_frontend_deploy.py
+
   # ------------------------------------------------------------------ 依赖审计
   pip-audit:
     name: pip-audit

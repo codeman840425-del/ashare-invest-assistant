@@ -97,12 +97,20 @@ def chain(integration: Any) -> Any:
 
 
 def mount(
-    chain: Any, *, version_no: int, lifecycle: str = "published", exit_expr: str | None = None
+    chain: Any,
+    *,
+    version_no: int,
+    lifecycle: str = "published",
+    exit_expr: str | None = None,
+    source_gate_key: str | None = None,
 ) -> str:
     fixture, source = chain
     engine, client, _, owner, _, account = fixture
     identifier = uuid.uuid4()
     spec = copy.deepcopy(source.config)
+    if source_gate_key:
+        for rule in spec["rules"]:
+            rule["required_features"] = [source_gate_key]
     if exit_expr:
         next(r for r in spec["rules"] if r["id"] == "X")["expr"] = exit_expr
     with engine.begin() as conn:
@@ -112,7 +120,11 @@ def mount(
                 strategy_id=source.strategy_id,
                 card_version_id=source.card_version_id,
                 version_no=version_no,
-                config={"spec": spec, "horizons": ["swing"]},
+                config={
+                    "spec": spec,
+                    "horizons": ["swing"],
+                    **({"source_hash": identifier.hex} if source_gate_key else {}),
+                },
                 config_hash=identifier.hex,
                 param_hash=identifier.hex,
                 lifecycle=lifecycle,

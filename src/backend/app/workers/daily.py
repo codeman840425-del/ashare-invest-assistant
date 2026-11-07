@@ -123,9 +123,29 @@ def analyze(
             issues.append("owned_source_or_card_missing")
             continue
         registry = {
-            row.feature_key: {"unit": row.unit}
-            for row in conn.execute(select(feature_catalog.c.feature_key, feature_catalog.c.unit))
+            row.feature_key: {"unit": row.unit, "status": row.status, "source": row.source}
+            for row in conn.execute(
+                select(
+                    feature_catalog.c.feature_key,
+                    feature_catalog.c.unit,
+                    feature_catalog.c.status,
+                    feature_catalog.c.source,
+                )
+            )
         }
+        if version.config.get("source_hash"):
+            from app.strategy.cards.source_reviews import required_features, source_issues
+
+            source_gaps = source_issues(
+                registry,
+                required_features(version.config.get("spec", version.config), card),
+                version.lifecycle,
+            )
+            if source_gaps:
+                issues.extend(
+                    "runtime_source_gate:" + g["path"] + ":" + g["issue"] for g in source_gaps
+                )
+                continue
         codes = (
             sorted(set(positions) | watches)
             if instance.scope == "account" and instance.account_id == account_id

@@ -142,7 +142,13 @@ def test_real_add_columns_import_idempotence_and_queries(
                 .values(status="verified_live")
             )
         with engine.begin() as conn:
-            import_batch(conn, docs, REGISTRY, metadata_rows=rows)
+            import_batch(
+                conn,
+                docs,
+                REGISTRY,
+                metadata_rows=rows,
+                source_matrix=(ROOT / "docs/strategies/T-R18_source_matrix.yaml").read_text(),
+            )
         second = state()
         assert all(first[k]["updated_at"] == second[k]["updated_at"] for k in keys)
         assert second["f.rsi14"]["status"] == "verified_live"

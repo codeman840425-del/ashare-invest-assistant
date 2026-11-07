@@ -23,11 +23,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--market-rules", type=Path, required=True)
     parser.add_argument("--feature-meta", type=Path)
+    parser.add_argument("--source-matrix", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
     documents = [path.read_text(encoding="utf-8") for path in args.card]
     registry = feature_registry(args.catalog.read_text(encoding="utf-8"))
+    matrix_path = args.source_matrix or args.catalog.parent / "T-R18_source_matrix.yaml"
+    source_matrix = matrix_path.read_text(encoding="utf-8") if matrix_path.exists() else None
+    from app.strategy.cards.source_reviews import load_reviews
+
+    load_reviews(registry, source_matrix)
     metadata_path = args.feature_meta or args.catalog.parent / "feature_catalog_meta.yaml"
     metadata_rows = load_metadata(
         metadata_path.read_text(encoding="utf-8"),
@@ -56,7 +62,13 @@ def main(argv: list[str] | None = None) -> int:
         engine = create_engine(dsn)
         try:
             with engine.begin() as conn:
-                import_batch(conn, documents, registry, metadata_rows=metadata_rows)
+                import_batch(
+                    conn,
+                    documents,
+                    registry,
+                    metadata_rows=metadata_rows,
+                    source_matrix=source_matrix,
+                )
         finally:
             engine.dispose()
     if args.output_dir:

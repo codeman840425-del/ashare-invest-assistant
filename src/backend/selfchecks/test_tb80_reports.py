@@ -29,7 +29,12 @@ def test_formal_26_real_gate_reports_remain_draft_with_explicit_unknown_g6(
     reports = []
     with engine.connect() as conn:
         transaction = conn.begin()
-        import_batch(conn, documents, registry)
+        import_batch(
+            conn,
+            documents,
+            registry,
+            source_matrix=(ROOT / "docs/strategies/T-R18_source_matrix.yaml").read_text(),
+        )
         for key in keys:
             card = conn.execute(select(strategy_cards).where(strategy_cards.c.key == key)).one()
             rid = prepare(conn, owner, card.id, settings())

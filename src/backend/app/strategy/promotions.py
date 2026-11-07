@@ -25,6 +25,7 @@ from app.schemas.enums import Action, Horizon
 from app.signals.models import Evidence, Stops
 from app.strategy.cards.fixtures import run_fixtures
 from app.strategy.cards.preflight import preflight
+from app.strategy.cards.source_reviews import required_features, source_issues
 from app.strategy.g6 import Overlap, compare, missing_history_gate
 from app.suggestions.risk import RiskContext, evaluate_risk
 
@@ -71,13 +72,14 @@ def prepare(
     fields = {k: v for k, v in cv.fields.items() if k not in {"narrative", "source_hash"}}
     validation = config.get("validation") or {}
     registry = {
-        r.feature_key: {"unit": r.unit, "adjust": r.adjust, "status": r.status}
+        r.feature_key: {"unit": r.unit, "adjust": r.adjust, "status": r.status, "source": r.source}
         for r in conn.execute(
             select(
                 feature_catalog.c.feature_key,
                 feature_catalog.c.unit,
                 feature_catalog.c.adjust,
                 feature_catalog.c.status,
+                feature_catalog.c.source,
             )
         )
     }
@@ -105,10 +107,8 @@ def prepare(
             )
         )
         categories[gate].append(error)
-    needed = {key for r in spec.get("rules", []) for key in r.get("required_features", [])}
-    for key in sorted(needed):
-        if registry.get(key, {}).get("status") not in {"verified_doc", "verified_live"}:
-            categories["G2"].append({"path": key, "issue": "feature_not_verified_doc_or_live"})
+    needed = required_features(spec, fields)
+    categories["G2"].extend(source_issues(registry, needed, "simulating"))
     fixtures = validation.get("fixtures", [])
     runs = (
         run_fixtures(fields, spec, fixtures, settings.business.market_rules, set(registry))

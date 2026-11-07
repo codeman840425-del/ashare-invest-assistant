@@ -27,6 +27,7 @@ from app.db.tables.strategy import (
 from app.strategy.cards.feature_meta import FeatureMeta, import_metadata, validate_keys
 from app.strategy.cards.models import PendingImport
 from app.strategy.cards.preflight import preflight
+from app.strategy.cards.source_reviews import load_reviews, persist_reviews
 
 
 def digest(value: Any) -> str:  # noqa: ANN401
@@ -79,14 +80,17 @@ def import_batch(
     documents: list[str],
     registry: dict[str, dict[str, Any]],
     metadata_rows: list[FeatureMeta] | None = None,
+    source_matrix: str | None = None,
 ) -> list[dict[str, str]]:
     staged = validate_batch(documents, registry)
+    reviews = load_reviews(registry, source_matrix)
     if metadata_rows is not None:
         validate_keys(metadata_rows, registry)
     # A transaction-scoped lock serializes formal global-key imports, not user activity.
     from sqlalchemy import text
 
     conn.execute(text("select pg_advisory_xact_lock(714071)"))
+    persist_reviews(conn, registry, reviews)
     if metadata_rows is not None:
         import_metadata(conn, metadata_rows, registry)
     result = []

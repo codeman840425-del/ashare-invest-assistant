@@ -32,9 +32,19 @@ def test_formal_import_idempotence_generation_queries(
     assert generate_files(staged, tmp_path) == files
     hashes = [path.read_bytes() for path in files]
     with engine.begin() as conn:
-        first = import_batch(conn, docs, registry)
+        first = import_batch(
+            conn,
+            docs,
+            registry,
+            source_matrix=(ROOT / "docs/strategies/T-R18_source_matrix.yaml").read_text(),
+        )
     with engine.begin() as conn:
-        second = import_batch(conn, docs, registry)
+        second = import_batch(
+            conn,
+            docs,
+            registry,
+            source_matrix=(ROOT / "docs/strategies/T-R18_source_matrix.yaml").read_text(),
+        )
         assert first == second
         for row in first:
             version = conn.execute(
@@ -46,7 +56,12 @@ def test_formal_import_idempotence_generation_queries(
             assert len(version.config["gates_missing"]) == 7
     assert [path.read_bytes() for path in files] == hashes
     with pytest.raises(ValueError, match="immutable"), engine.begin() as conn:
-        import_batch(conn, [docs[0].replace("持仓风险体检", "持仓风险校验"), docs[1]], registry)
+        import_batch(
+            conn,
+            [docs[0].replace("持仓风险体检", "持仓风险校验"), docs[1]],
+            registry,
+            source_matrix=(ROOT / "docs/strategies/T-R18_source_matrix.yaml").read_text(),
+        )
     with engine.connect() as conn:
         assert (
             conn.execute(

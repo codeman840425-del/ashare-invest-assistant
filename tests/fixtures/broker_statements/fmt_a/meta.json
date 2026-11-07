@@ -3,12 +3,314 @@
   "synthetic": true,
   "format": "fmt_a",
   "generator": "generate.py",
-  "note": "全部为虚构/脱敏数据；主夹具为人工脱敏结果，其余由 generate.py 自主夹具派生。期望解析结果见 README.md。",
+  "note": "全部为虚构/脱敏数据；主夹具为人工脱敏结果，其余由 generate.py 自主夹具派生。期望解析结果见 expected.json（唯一期望来源）。",
+  "fake_identifiers": [
+    "0000000001",
+    "900002",
+    "90001",
+    "A000000001"
+  ],
+  "fake_identifiers_detail": {
+    "description": "S5/S6（plan 7.4A）在本目录 .txt 中允许出现的全部虚构标识；值来自 generate.py 常量，不从文件内容推导。CI 豁免条件：每个 .txt 的 S5/S6 命中都在本集合内。",
+    "rules": {
+      "S5": "\\b[A-Z]\\d{9}\\b",
+      "S6": "\\b0\\d{9}\\b（同一行或文件表头含“股东”时）"
+    },
+    "shareholder_codes": [
+      {
+        "value": "A000000001",
+        "market": "SH",
+        "format": "^A0{8}[0-9]$",
+        "note": "沪市虚构股东代码；同时落在全局白名单 A00000000[0-9] 内"
+      },
+      {
+        "value": "0000000001",
+        "market": "SZ",
+        "format": "^0{9}[1-9]$",
+        "note": "深市虚构股东代码"
+      }
+    ],
+    "seat_codes": [
+      {
+        "value": "90001",
+        "market": "SH",
+        "format": "^9000[0-9]$",
+        "note": "虚构席位代码"
+      },
+      {
+        "value": "900002",
+        "market": "SZ",
+        "format": "^90000[0-9]$",
+        "note": "虚构席位代码"
+      }
+    ],
+    "by_file": {
+      "positions_multi_currency.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 1
+        },
+        "S6": {
+          "values": [
+            "0000000001"
+          ],
+          "count": 1
+        }
+      },
+      "positions_sample.txt": {
+        "S5": {
+          "values": [],
+          "count": 0
+        },
+        "S6": {
+          "values": [
+            "0000000001"
+          ],
+          "count": 1
+        }
+      },
+      "trades_bad_formats.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 5
+        },
+        "S6": {
+          "values": [],
+          "count": 0
+        }
+      },
+      "trades_blank_lines.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 4
+        },
+        "S6": {
+          "values": [],
+          "count": 0
+        }
+      },
+      "trades_cancelled.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 3
+        },
+        "S6": {
+          "values": [
+            "0000000001"
+          ],
+          "count": 2
+        }
+      },
+      "trades_column_mismatch.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 4
+        },
+        "S6": {
+          "values": [],
+          "count": 0
+        }
+      },
+      "trades_cr.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 4
+        },
+        "S6": {
+          "values": [
+            "0000000001"
+          ],
+          "count": 1
+        }
+      },
+      "trades_duplicates_in_file.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 5
+        },
+        "S6": {
+          "values": [],
+          "count": 0
+        }
+      },
+      "trades_extra_column.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 3
+        },
+        "S6": {
+          "values": [],
+          "count": 0
+        }
+      },
+      "trades_gb18030_ext_char.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 2
+        },
+        "S6": {
+          "values": [],
+          "count": 0
+        }
+      },
+      "trades_lf.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 4
+        },
+        "S6": {
+          "values": [
+            "0000000001"
+          ],
+          "count": 1
+        }
+      },
+      "trades_missing_column.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 3
+        },
+        "S6": {
+          "values": [],
+          "count": 0
+        }
+      },
+      "trades_non_trade_events.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 1
+        },
+        "S6": {
+          "values": [
+            "0000000001"
+          ],
+          "count": 3
+        }
+      },
+      "trades_reimport_overlap.txt": {
+        "S5": {
+          "values": [],
+          "count": 0
+        },
+        "S6": {
+          "values": [
+            "0000000001"
+          ],
+          "count": 5
+        }
+      },
+      "trades_sample.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 17
+        },
+        "S6": {
+          "values": [
+            "0000000001"
+          ],
+          "count": 49
+        }
+      },
+      "trades_sign_and_value_errors.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 4
+        },
+        "S6": {
+          "values": [
+            "0000000001"
+          ],
+          "count": 3
+        }
+      },
+      "trades_truncated_last_line.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 3
+        },
+        "S6": {
+          "values": [],
+          "count": 0
+        }
+      },
+      "trades_truncated_mid_char.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 1
+        },
+        "S6": {
+          "values": [],
+          "count": 0
+        }
+      },
+      "trades_utf8.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 4
+        },
+        "S6": {
+          "values": [
+            "0000000001"
+          ],
+          "count": 1
+        }
+      },
+      "trades_utf8_bom.txt": {
+        "S5": {
+          "values": [
+            "A000000001"
+          ],
+          "count": 4
+        },
+        "S6": {
+          "values": [
+            "0000000001"
+          ],
+          "count": 1
+        }
+      }
+    }
+  },
   "files": [
     {
       "file": "empty.txt",
       "kind": "unknown",
       "parser_hint": null,
+      "parser_alias": null,
       "encoding": null,
       "line_ending": null,
       "bytes": 0,
@@ -22,7 +324,8 @@
     {
       "file": "positions_multi_currency.txt",
       "kind": "positions",
-      "parser_hint": "fmt_a_positions_v1",
+      "parser_hint": "tdx_positions_v1",
+      "parser_alias": "fmt_a_positions_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 861,
@@ -36,7 +339,8 @@
     {
       "file": "positions_sample.txt",
       "kind": "positions",
-      "parser_hint": "fmt_a_positions_v1",
+      "parser_hint": "tdx_positions_v1",
+      "parser_alias": "fmt_a_positions_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 589,
@@ -50,7 +354,8 @@
     {
       "file": "trades_bad_formats.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 2318,
@@ -64,7 +369,8 @@
     {
       "file": "trades_blank_lines.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 1968,
@@ -78,7 +384,8 @@
     {
       "file": "trades_cancelled.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 2318,
@@ -92,7 +399,8 @@
     {
       "file": "trades_column_mismatch.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 1951,
@@ -104,9 +412,25 @@
       "description": "列错位、席位代码为空、名称含单个空格"
     },
     {
+      "file": "trades_cr.txt",
+      "kind": "trades",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
+      "encoding": "gbk",
+      "line_ending": "CR",
+      "bytes": 2309,
+      "physical_lines": 9,
+      "data_lines": 5,
+      "sha256": "fd2d940878538bd3ec3674d6ddca6985e4614c6f39894e32eb1381b61b85355f",
+      "synthetic": true,
+      "origin": "generate.py",
+      "description": "换行只有 CR（\\r）的成交明细（主夹具前 5 笔，内容同 trades_lf.txt）"
+    },
+    {
       "file": "trades_duplicates_in_file.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 2318,
@@ -120,7 +444,8 @@
     {
       "file": "trades_extra_column.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 1648,
@@ -134,13 +459,14 @@
     {
       "file": "trades_gb18030_ext_char.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gb18030",
       "line_ending": "CRLF",
       "bytes": 1217,
       "physical_lines": 6,
       "data_lines": 2,
-      "sha256": "52d25cacd73666b2b96476d77e49cff60101b9e2065eed3d1f4ddecc7a65d8db",
+      "sha256": "364bdf08d9b9298e02ff97412394392c140dc02ac3caaa885c402c1d89370e66",
       "synthetic": true,
       "origin": "generate.py",
       "description": "证券名称含 GB18030 四字节字符"
@@ -148,7 +474,8 @@
     {
       "file": "trades_header_only.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 483,
@@ -162,7 +489,8 @@
     {
       "file": "trades_lf.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "LF",
       "bytes": 2309,
@@ -176,7 +504,8 @@
     {
       "file": "trades_missing_column.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 1504,
@@ -190,7 +519,8 @@
     {
       "file": "trades_non_trade_events.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 1951,
@@ -204,7 +534,8 @@
     {
       "file": "trades_reimport_overlap.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 2323,
@@ -218,7 +549,8 @@
     {
       "file": "trades_sample.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 24736,
@@ -232,7 +564,8 @@
     {
       "file": "trades_sign_and_value_errors.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF",
       "bytes": 3052,
@@ -246,7 +579,8 @@
     {
       "file": "trades_truncated_last_line.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF（末行无换行）",
       "bytes": 1741,
@@ -260,7 +594,8 @@
     {
       "file": "trades_truncated_mid_char.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "gbk",
       "line_ending": "CRLF（末行无换行）",
       "bytes": 898,
@@ -274,7 +609,8 @@
     {
       "file": "trades_utf8.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "utf-8",
       "line_ending": "CRLF",
       "bytes": 2441,
@@ -288,7 +624,8 @@
     {
       "file": "trades_utf8_bom.txt",
       "kind": "trades",
-      "parser_hint": "fmt_a_trades_v1",
+      "parser_hint": "tdx_trades_v1",
+      "parser_alias": "fmt_a_trades_v1",
       "encoding": "utf-8-sig",
       "line_ending": "CRLF",
       "bytes": 2444,

@@ -1,0 +1,283 @@
+{
+  "_comment": "api-contract v0.2.2 §4.1 导入提示码快照（46 个：21 error + 25 warning；v0.2 → v0.2.2 码表未变，T-T01b 复核）。测试维护；契约文档可用时由 test_expected_json.py 逐行比对 §4.1 与 plan 3.5A-1。",
+  "contract": "api-contract v0.2.2 §4.1",
+  "count": 46,
+  "codes": [
+    {
+      "no": 1,
+      "code": "IMPORT_EMPTY_FILE",
+      "severity": "error",
+      "scope": "file"
+    },
+    {
+      "no": 2,
+      "code": "IMPORT_FILE_TOO_LARGE",
+      "severity": "error",
+      "scope": "file"
+    },
+    {
+      "no": 3,
+      "code": "IMPORT_UNSUPPORTED_FILE_TYPE",
+      "severity": "error",
+      "scope": "file"
+    },
+    {
+      "no": 4,
+      "code": "IMPORT_TOO_MANY_ROWS",
+      "severity": "error",
+      "scope": "file"
+    },
+    {
+      "no": 5,
+      "code": "IMPORT_ENCODING_UNDETECTED",
+      "severity": "error",
+      "scope": "file"
+    },
+    {
+      "no": 6,
+      "code": "IMPORT_UNRECOGNIZED_FORMAT",
+      "severity": "error",
+      "scope": "file"
+    },
+    {
+      "no": 7,
+      "code": "IMPORT_REQUIRED_COLUMN_MISSING",
+      "severity": "error",
+      "scope": "file"
+    },
+    {
+      "no": 8,
+      "code": "IMPORT_ACCOUNT_MISMATCH",
+      "severity": "error",
+      "scope": "file"
+    },
+    {
+      "no": 9,
+      "code": "IMPORT_ROW_DECODE_ERROR",
+      "severity": "error",
+      "scope": "row"
+    },
+    {
+      "no": 10,
+      "code": "IMPORT_ROW_TRUNCATED",
+      "severity": "error",
+      "scope": "row"
+    },
+    {
+      "no": 11,
+      "code": "IMPORT_ROW_COLUMN_MISMATCH",
+      "severity": "error",
+      "scope": "row"
+    },
+    {
+      "no": 12,
+      "code": "IMPORT_REQUIRED_FIELD_EMPTY",
+      "severity": "error",
+      "scope": "field"
+    },
+    {
+      "no": 13,
+      "code": "IMPORT_INVALID_DATE",
+      "severity": "error",
+      "scope": "field"
+    },
+    {
+      "no": 14,
+      "code": "IMPORT_FUTURE_DATE",
+      "severity": "error",
+      "scope": "field"
+    },
+    {
+      "no": 15,
+      "code": "IMPORT_INVALID_TIME",
+      "severity": "error",
+      "scope": "field"
+    },
+    {
+      "no": 16,
+      "code": "IMPORT_INVALID_NUMBER",
+      "severity": "error",
+      "scope": "field"
+    },
+    {
+      "no": 17,
+      "code": "IMPORT_INVALID_SECURITY_CODE",
+      "severity": "error",
+      "scope": "field"
+    },
+    {
+      "no": 18,
+      "code": "IMPORT_INVALID_QUANTITY",
+      "severity": "error",
+      "scope": "field"
+    },
+    {
+      "no": 19,
+      "code": "IMPORT_INVALID_PRICE",
+      "severity": "error",
+      "scope": "field"
+    },
+    {
+      "no": 20,
+      "code": "IMPORT_SIDE_QTY_SIGN_MISMATCH",
+      "severity": "error",
+      "scope": "row"
+    },
+    {
+      "no": 21,
+      "code": "IMPORT_AMOUNT_MISMATCH",
+      "severity": "error",
+      "scope": "row"
+    },
+    {
+      "no": 22,
+      "code": "IMPORT_DUPLICATE_FILE",
+      "severity": "warning",
+      "scope": "file"
+    },
+    {
+      "no": 23,
+      "code": "IMPORT_NO_DATA_ROWS",
+      "severity": "warning",
+      "scope": "file"
+    },
+    {
+      "no": 24,
+      "code": "IMPORT_UNKNOWN_COLUMN",
+      "severity": "warning",
+      "scope": "file"
+    },
+    {
+      "no": 25,
+      "code": "IMPORT_FILE_POSSIBLY_TRUNCATED",
+      "severity": "warning",
+      "scope": "file"
+    },
+    {
+      "no": 26,
+      "code": "IMPORT_ENCODING_LOW_CONFIDENCE",
+      "severity": "warning",
+      "scope": "file"
+    },
+    {
+      "no": 27,
+      "code": "IMPORT_FORMAT_LOW_CONFIDENCE",
+      "severity": "warning",
+      "scope": "file"
+    },
+    {
+      "no": 28,
+      "code": "IMPORT_SNAPSHOT_AS_OF_ASSUMED",
+      "severity": "warning",
+      "scope": "file"
+    },
+    {
+      "no": 29,
+      "code": "IMPORT_SNAPSHOT_TOTALS_MISMATCH",
+      "severity": "warning",
+      "scope": "file"
+    },
+    {
+      "no": 30,
+      "code": "IMPORT_SNAPSHOT_SUPERSEDES",
+      "severity": "warning",
+      "scope": "file"
+    },
+    {
+      "no": 31,
+      "code": "IMPORT_UNSUPPORTED_CURRENCY",
+      "severity": "warning",
+      "scope": "file"
+    },
+    {
+      "no": 32,
+      "code": "IMPORT_NET_AMOUNT_MISMATCH",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 33,
+      "code": "IMPORT_UNKNOWN_SECURITY",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 34,
+      "code": "IMPORT_MARKET_INFERRED_CONFLICT",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 35,
+      "code": "IMPORT_NAME_MISMATCH",
+      "severity": "warning",
+      "scope": "field"
+    },
+    {
+      "no": 36,
+      "code": "IMPORT_UNKNOWN_BIZ_TYPE",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 37,
+      "code": "IMPORT_ROW_CANCELLED",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 38,
+      "code": "IMPORT_ROW_REJECTED",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 39,
+      "code": "IMPORT_DUPLICATE_IN_DB",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 40,
+      "code": "IMPORT_DUPLICATE_IN_FILE",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 41,
+      "code": "IMPORT_POSSIBLE_DUPLICATE_OF_MANUAL",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 42,
+      "code": "IMPORT_MISSING_OPENING_POSITION",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 43,
+      "code": "IMPORT_CASH_CHAIN_BREAK",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 44,
+      "code": "IMPORT_NON_TRADING_DAY",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 45,
+      "code": "IMPORT_TIME_OUTSIDE_SESSION",
+      "severity": "warning",
+      "scope": "row"
+    },
+    {
+      "no": 46,
+      "code": "IMPORT_LOT_SIZE_IRREGULAR",
+      "severity": "warning",
+      "scope": "row"
+    }
+  ]
+}

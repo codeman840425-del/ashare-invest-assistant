@@ -6,7 +6,10 @@
 # - 仅依赖 Python 标准库。
 # - 输入：同目录下已脱敏的主夹具 trades_sample.txt、positions_sample.txt
 #   （本脚本不生成、也不修改这两个主夹具）。
-# - 输出：19 个异常/边界夹具 + meta.json。
+# - 输出：20 个异常/边界夹具 + meta.json（含 fake_identifiers 扁平列表与 fake_identifiers_detail 明细）。
+# - 期望解析结果不在本脚本中，见同目录 expected.json（测试维护，唯一期望来源）；本脚本只校验其中
+#   normalized 的 security_code 与 scenario_with_trades.quantity_match 的键为契约口径“6 位代码 + .SH/.SZ/.BJ”
+#   （check_expected，不改写 expected.json）。
 # - 脚本内出现的代码、名称、编号、金额全部是虚构值，或取自已脱敏主夹具；
 #   不含任何真实账户数据。
 #
@@ -19,6 +22,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -37,6 +41,24 @@ RATE_OTHER = D("0.0000541")
 # 虚构账户标识（与主夹具一致的虚构值）
 SH_HOLDER, SH_SEAT = "A000000001", "90001"
 SZ_HOLDER, SZ_SEAT = "0000000001", "900002"
+
+# 密钥扫描（plan 7.4A）S5/S6 在夹具中允许命中的虚构值 = 上面 4 个常量，不从文件内容推导。
+# generate.py 生成时检查：每个 .txt 中 S5/S6 的全部命中都必须在此集合内，否则拒绝生成。
+FAKE_IDENTIFIERS = {
+    "shareholder_codes": [
+        {"value": SH_HOLDER, "market": "SH", "format": "^A0{8}[0-9]$",
+         "note": "沪市虚构股东代码；同时落在全局白名单 A00000000[0-9] 内"},
+        {"value": SZ_HOLDER, "market": "SZ", "format": "^0{9}[1-9]$",
+         "note": "深市虚构股东代码"},
+    ],
+    "seat_codes": [
+        {"value": SH_SEAT, "market": "SH", "format": "^9000[0-9]$", "note": "虚构席位代码"},
+        {"value": SZ_SEAT, "market": "SZ", "format": "^90000[0-9]$", "note": "虚构席位代码"},
+    ],
+}
+# 与 plan 7.4A 一致的两条规则（ASCII 语义的 \b，与 gitleaks/RE2 相同）
+RULE_S5 = re.compile(r"\b[A-Z]\d{9}\b", re.ASCII)
+RULE_S6 = re.compile(r"\b0\d{9}\b", re.ASCII)
 
 
 def q2(x):
@@ -104,6 +126,62 @@ for r in ROWS:
     NAME[f[2]] = f[3]
 
 
+def infer_market(code):
+    """6 位代码 → 交易所后缀（与后端 app.importing.preview.infer_market 同口径）：920/4/8 → BJ；
+    6/9/5、11 → SH；0/3/1（及 2）→ SZ。"""
+    if code.startswith("920") or code[:1] in {"4", "8"}:
+        return "BJ"
+    if code[:1] in {"6", "9", "5"} or code.startswith("11"):
+        return "SH"
+    if code[:1] in {"0", "3", "1", "2"}:
+        return "SZ"
+    return None
+
+
+def normalized_code(code):
+    """券商文件里的 6 位证券代码 → 契约 security_code（如 600001 → 600001.SH、002001 → 002001.SZ）。"""
+    return "%s.%s" % (code, infer_market(code))
+
+
+NORMALIZED_CODE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
+
+
+def check_expected(files):
+    """expected.json 中 field=security_code 的 normalized 断言：值须为 normalized_code(该行原始 6 位代码)，
+    且原始代码确实出现在夹具该物理行（row_no，从 1 计）；quantity_match 的键同口径且原码出现在该夹具中。
+    返回不符条数（只报文件名与行号，不打印内容）。"""
+    with open(os.path.join(HERE, "expected.json"), encoding="utf-8") as fh:
+        exp = json.load(fh)
+    bad = 0
+    for name, spec in sorted(exp["files"].items()):
+        for n in spec.get("normalized") or []:
+            if n.get("field") != "security_code":
+                continue
+            v = n["equals"]
+            ok = isinstance(v, str) and bool(NORMALIZED_CODE.match(v)) and normalized_code(v[:6]) == v
+            data = files.get(name)
+            if ok and data is not None:
+                enc = FILE_INFO.get(name, (None, "gbk"))[1] or "gbk"
+                lines = norm_eol(data).decode(enc, errors="replace").split("\n")
+                ok = 0 < n["row_no"] <= len(lines) and v[:6] in lines[n["row_no"] - 1]
+            if not ok:
+                print("BAD  expected.json %s row %s: security_code 不是 6 位代码 + .SH/.SZ/.BJ 或与夹具行不符"
+                      % (name, n.get("row_no")))
+                bad += 1
+        # scenario_with_trades.quantity_match 的键同为契约 security_code（6 位代码 + 交易所后缀），且原码出现在该夹具中
+        qm = (spec.get("scenario_with_trades") or {}).get("quantity_match") or {}
+        data = files.get(name)
+        for k in sorted(qm):
+            ok = bool(NORMALIZED_CODE.match(k)) and normalized_code(k[:6]) == k
+            if ok and data is not None:
+                enc = FILE_INFO.get(name, (None, "gbk"))[1] or "gbk"
+                ok = k[:6] in norm_eol(data).decode(enc, errors="replace")
+            if not ok:
+                print(f"BAD  expected.json {name} quantity_match: 键不是 6 位代码 + .SH/.SZ/.BJ 或不在夹具中")
+                bad += 1
+    return bad
+
+
 def holder_seat(code):
     return (SH_HOLDER, SH_SEAT) if code.startswith("6") else (SZ_HOLDER, SZ_SEAT)
 
@@ -169,6 +247,8 @@ def gen():
     # 编码 / 换行
     first5 = ROWS[:5]
     out["trades_lf.txt"] = file_bytes([SEP, BLANK, HDR] + first5 + [TAIL], eol=b"\n")
+    # 仅 CR（老式 Mac 换行）：与 trades_lf.txt 同内容，换行符改为单个 \r
+    out["trades_cr.txt"] = file_bytes([SEP, BLANK, HDR] + first5 + [TAIL], eol=b"\r")
     utf8 = std(first5).decode("gbk").encode("utf-8")
     out["trades_utf8.txt"] = utf8
     out["trades_utf8_bom.txt"] = b"\xef\xbb\xbf" + utf8
@@ -212,7 +292,11 @@ def gen():
     out["trades_duplicates_in_file.txt"] = std(ROWS[:3] + [ROWS[1], mk(d8)])
 
     # GB18030 四字节字符
+    # 裁定 R7（T-B46-47-rulings.md）：原先沿用主夹具第 1 行的代码 600001，名称却改成含四字节字符的“示例䶮业”，
+    # 与其他夹具中 600001 = “示例甲业”冲突（同一代码两个名称，证券主数据 all_fixture_codes 无法同时满足）。
+    # 改用任何夹具都未出现的虚构代码 600004（同为沪市主板 6 位，字节宽度不变），名称保持唯一。
     g = row_fields(1)
+    g[2] = "600004"
     g[3] = g[3][:2] + "\u4dae" + g[3][3:]
     out["trades_gb18030_ext_char.txt"] = std(
         [build_fixed(g, ST, ROW_LEN, enc="gb18030"), ROWS[1]])
@@ -307,6 +391,7 @@ FILE_INFO = {
     "trades_sample.txt": ("trades", "gbk", "CRLF", "脱敏后的成交明细（66 笔，与原导出逐行逐字节等长）；非本脚本生成"),
     "positions_sample.txt": ("positions", "gbk", "CRLF", "脱敏后的资金持仓快照（与原导出逐行逐字节等长）；非本脚本生成"),
     "trades_lf.txt": ("trades", "gbk", "LF", "换行为 LF 的成交明细（主夹具前 5 笔）"),
+    "trades_cr.txt": ("trades", "gbk", "CR", "换行只有 CR（\\r）的成交明细（主夹具前 5 笔，内容同 trades_lf.txt）"),
     "trades_utf8.txt": ("trades", "utf-8", "CRLF", "UTF-8 无 BOM，按显示宽度对齐（主夹具前 5 笔）"),
     "trades_utf8_bom.txt": ("trades", "utf-8-sig", "CRLF", "UTF-8 带 BOM（主夹具前 5 笔）"),
     "trades_blank_lines.txt": ("trades", "gbk", "CRLF", "数据行之间夹空行、纯空格行、纯 Tab 行（主夹具前 4 笔）"),
@@ -328,14 +413,46 @@ FILE_INFO = {
 }
 
 
+def norm_eol(data):
+    """CRLF / LF / 单独 CR 统一为 LF（只用于统计，不改夹具字节）。"""
+    return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
 def data_rows(name, data):
     if not data:
         return 0
+    lines = norm_eol(data).split(b"\n")
     if name.startswith("positions"):
-        lines = data.replace(b"\r\n", b"\n").split(b"\n")
         return sum(1 for l in lines if l[:1].isdigit())
-    lines = data.replace(b"\r\n", b"\n").split(b"\n")
     return sum(1 for l in lines if l.lstrip(b"\xef\xbb\xbf")[:2] == b"20")
+
+
+def physical_lines(data):
+    n = norm_eol(data)
+    return n.count(b"\n") + (0 if (not n or n.endswith(b"\n")) else 1)
+
+
+def scan_fake_ids(name, data, enc):
+    """返回本文件 S5/S6 命中的虚构值（只会是 FAKE_IDENTIFIERS 中的值）与命中次数。
+
+    命中集合外的值 → 抛 SystemExit，且只报文件名与个数，不打印命中内容。
+    S6 只在“同一行或文件表头含‘股东’”时计入（plan 7.4A）。
+    """
+    allowed = {e["value"] for v in FAKE_IDENTIFIERS.values() for e in v}
+    text = data.decode(enc or "gbk", errors="replace") if data else ""
+    lines = norm_eol(text.encode("utf-8")).decode("utf-8").split("\n")
+    header_has = any("股东" in l for l in lines[:6])
+    hits = {"S5": {}, "S6": {}}
+    for line in lines:
+        for m in RULE_S5.findall(line):
+            hits["S5"][m] = hits["S5"].get(m, 0) + 1
+        if header_has or "股东" in line:
+            for m in RULE_S6.findall(line):
+                hits["S6"][m] = hits["S6"].get(m, 0) + 1
+    bad = sum(1 for r in hits.values() for v in r if v not in allowed)
+    if bad:
+        raise SystemExit("%s: %d 个 S5/S6 命中不在 FAKE_IDENTIFIERS 中，拒绝生成" % (name, bad))
+    return {rule: {"values": sorted(r), "count": sum(r.values())} for rule, r in hits.items()}
 
 
 def build_meta(files):
@@ -346,23 +463,39 @@ def build_meta(files):
         entries.append({
             "file": name,
             "kind": kind,
-            "parser_hint": {"trades": "fmt_a_trades_v1", "positions": "fmt_a_positions_v1"}.get(kind),
+            "parser_hint": {"trades": "tdx_trades_v1", "positions": "tdx_positions_v1"}.get(kind),
+            "parser_alias": {"trades": "fmt_a_trades_v1", "positions": "fmt_a_positions_v1"}.get(kind),
             "encoding": enc,
             "line_ending": eol,
             "bytes": len(data),
-            "physical_lines": data.count(b"\n") + (0 if (not data or data.endswith(b"\n")) else 1),
+            "physical_lines": physical_lines(data),
             "data_lines": data_rows(name, data),
             "sha256": hashlib.sha256(data).hexdigest(),
             "synthetic": True,
             "origin": "desensitized_main" if name in ("trades_sample.txt", "positions_sample.txt") else "generate.py",
             "description": desc,
         })
+    by_file = {}
+    for name in sorted(FILE_INFO):
+        hits = scan_fake_ids(name, files[name], FILE_INFO[name][1])
+        if hits["S5"]["count"] or hits["S6"]["count"]:
+            by_file[name] = hits
+    fake = {
+        "description": "S5/S6（plan 7.4A）在本目录 .txt 中允许出现的全部虚构标识；值来自 generate.py 常量，"
+                       "不从文件内容推导。CI 豁免条件：每个 .txt 的 S5/S6 命中都在本集合内。",
+        "rules": {"S5": RULE_S5.pattern, "S6": RULE_S6.pattern + "（同一行或文件表头含“股东”时）"},
+        **FAKE_IDENTIFIERS,
+        "by_file": by_file,
+    }
     meta = {
         "marker": "# SYNTHETIC",
         "synthetic": True,
         "format": "fmt_a",
         "generator": "generate.py",
-        "note": "全部为虚构/脱敏数据；主夹具为人工脱敏结果，其余由 generate.py 自主夹具派生。期望解析结果见 README.md。",
+        "note": "全部为虚构/脱敏数据；主夹具为人工脱敏结果，其余由 generate.py 自主夹具派生。期望解析结果见 expected.json（唯一期望来源）。",
+        # plan 7.4A 条件 5 / scripts/ci（check_fixtures.py、secret_scan.py）：顶层 fake_identifiers 是虚构值的扁平列表
+        "fake_identifiers": sorted(e["value"] for k in ("shareholder_codes", "seat_codes") for e in FAKE_IDENTIFIERS[k]),
+        "fake_identifiers_detail": fake,
         "files": entries,
     }
     return (json.dumps(meta, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
@@ -379,7 +512,9 @@ def main():
         with open(os.path.join(HERE, n), "rb") as fh:
             all_files[n] = fh.read()
     gen_files["meta.json"] = build_meta(all_files)
-    bad = 0
+    bad = check_expected(all_files)
+    if not args.check and bad:
+        raise SystemExit("expected.json: %d 条 normalized security_code 不符，拒绝生成" % bad)
     for name, data in sorted(gen_files.items()):
         path = os.path.join(args.out, name)
         if args.check:
@@ -396,7 +531,7 @@ def main():
                 fh.write(data)
             print("wrote " + name)
     if args.check:
-        print("%d file(s) differ" % bad)
+        print("%d file(s) differ (含 expected.json normalized security_code 校验)" % bad)
         sys.exit(1 if bad else 0)
 
 

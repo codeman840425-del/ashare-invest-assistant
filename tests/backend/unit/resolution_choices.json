@@ -1,0 +1,89 @@
+{
+  "source": "契约 v0.2.4 §4.1 处理选项表（#11，T-F02 D3；T-A05 35f4880）",
+  "note": "表中没有的提示码 resolution_choices = []、default_resolution = null；choices 第一个为 default_resolution；override 为须填理由（1–200 字）的覆盖类选项",
+  "codes": {
+    "IMPORT_ACCOUNT_MISMATCH": {
+      "no": 8,
+      "choices": [
+        "confirm_new_holder_code"
+      ],
+      "override": [
+        "confirm_new_holder_code"
+      ]
+    },
+    "IMPORT_ENCODING_LOW_CONFIDENCE": {
+      "no": 26,
+      "choices": [
+        "confirm"
+      ],
+      "override": []
+    },
+    "IMPORT_FORMAT_LOW_CONFIDENCE": {
+      "no": 27,
+      "choices": [
+        "confirm"
+      ],
+      "override": []
+    },
+    "IMPORT_SNAPSHOT_AS_OF_ASSUMED": {
+      "no": 28,
+      "choices": [
+        "confirm"
+      ],
+      "override": []
+    },
+    "IMPORT_UNKNOWN_SECURITY": {
+      "no": 33,
+      "choices": [
+        "import_as_is",
+        "skip_row"
+      ],
+      "override": []
+    },
+    "IMPORT_MARKET_INFERRED_CONFLICT": {
+      "no": 34,
+      "choices": [
+        "use_master_data"
+      ],
+      "override": []
+    },
+    "IMPORT_UNKNOWN_BIZ_TYPE": {
+      "no": 36,
+      "choices": [
+        "keep_skipped",
+        "manual_entry"
+      ],
+      "override": []
+    },
+    "IMPORT_DUPLICATE_IN_DB": {
+      "no": 39,
+      "choices": [
+        "keep_skipped",
+        "force_import"
+      ],
+      "override": [
+        "force_import"
+      ]
+    },
+    "IMPORT_DUPLICATE_IN_FILE": {
+      "no": 40,
+      "choices": [
+        "keep_skipped",
+        "force_import"
+      ],
+      "override": [
+        "force_import"
+      ]
+    },
+    "IMPORT_POSSIBLE_DUPLICATE_OF_MANUAL": {
+      "no": 41,
+      "choices": [
+        "skip_import_row",
+        "keep_import_void_manual"
+      ],
+      "override": [
+        "keep_import_void_manual"
+      ]
+    }
+  }
+}

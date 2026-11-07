@@ -57,7 +57,8 @@ class Stock(Model):
     max_risk_level: RiskLevel | None
     suggestion_id: uuid.UUID | None
     suggestion: dict[str, JsonValue] | None
-    change_from_previous: Literal["new", "changed", "unchanged", "removed"]
+    change_from_previous: Literal["new", "changed", "unchanged", "removed"] | None
+    change_fields: list[Literal["actions", "confidence_level", "executability", "max_risk_level"]]
     highlights: list[TextEvidence]
     invalidation: list[TextEvidence]
     next_watch: list[TextEvidence]

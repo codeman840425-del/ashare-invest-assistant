@@ -9,6 +9,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, StrictStr, model_validator
 
+from app.engine_policies import EnginePolicyReference
 from app.financial_basis import TradingCalendar
 
 
@@ -29,9 +30,17 @@ class CalendarReference(BaseModel):
         return self
 
 
-REFERENCE_FILES: dict[str, type[BaseModel]] = {"trading_calendar.json": CalendarReference}
+REFERENCE_FILES: dict[str, type[BaseModel]] = {
+    "trading_calendar.json": CalendarReference,
+    "engine_policy.yaml": EnginePolicyReference,
+}
 
 
 def load_reference_file(directory: Path, name: str) -> BaseModel:
     model = REFERENCE_FILES[name]
-    return model.model_validate(json.loads((directory / name).read_text(encoding="utf-8")))
+    raw = (directory / name).read_text(encoding="utf-8")
+    if name.endswith(".yaml"):
+        import yaml
+
+        return model.model_validate(yaml.safe_load(raw))
+    return model.model_validate(json.loads(raw))

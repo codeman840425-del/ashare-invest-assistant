@@ -63,7 +63,9 @@ def listing(
                 "generated_at": row.generated_at,
                 "regime": row.body["market"]["regime"],
                 "reconciliation_status": row.body["reconciliation"]["status"],
-                "stock_count": len(row.body["stocks"]),
+                "stock_count": sum(
+                    s.get("change_from_previous") != "removed" for s in row.body["stocks"]
+                ),
             }
             for row in rows[: page.limit]
         ],

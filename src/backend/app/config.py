@@ -223,7 +223,12 @@ def load_yaml_dir(config_dir: Path) -> dict[str, Any]:
         return {}
     result: dict[str, Any] = {}
     files = sorted(p for p in config_dir.iterdir() if p.is_file() and p.suffix in {".yaml", ".yml"})
+    from app.reference_files import REFERENCE_FILES, load_reference_file
+
     for path in files:
+        if path.name in REFERENCE_FILES:
+            load_reference_file(config_dir, path.name)
+            continue
         if path.stem in result:
             raise ConfigError(f"配置文件重名：{path.stem}（.yaml 与 .yml 同时存在）")
         try:

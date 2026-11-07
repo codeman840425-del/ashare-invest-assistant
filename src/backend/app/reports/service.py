@@ -20,6 +20,7 @@ from app.db.tables.realtime import daily_report_items, daily_reports, pipeline_r
 from app.db.tables.research import watchlist_items
 from app.db.tables.signals import non_executable_reasons, plan_drafts
 from app.db.tables.strategy import strategy_instances
+from app.reports.comparison import apply as apply_comparison
 from app.reports.models import DailyReport
 from app.suggestions.service import summary
 
@@ -217,7 +218,8 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
                 else None,
                 "suggestion_id": str(suggestion.id) if suggestion else None,
                 "suggestion": summary(suggestion) if suggestion else None,
-                "change_from_previous": "new",
+                "change_from_previous": None,
+                "change_fields": [],
                 "highlights": [],
                 "invalidation": [],
                 "next_watch": [],
@@ -261,6 +263,10 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
         "data_as_of": None,
         "gaps": gaps,
     }
+    if not apply_comparison(conn, user_id, date, stocks):
+        gaps.append(
+            _gap("stocks.change_from_previous", "最近开市日没有完成版日报，不推断全部为新增。")
+        )
     # Include owned holdings even when the public report cannot estimate their value.
     fingerprint = {
         "analysis": own_analysis,
@@ -279,25 +285,6 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
     previous = latest(conn, user_id, date)
     if previous and (previous.summary or {}).get("input_hash") == digest:
         return uuid.UUID(str(previous.id))
-    before = (
-        {s["security_code"]: s for s in (previous.body or {}).get("stocks", [])} if previous else {}
-    )
-    for stock in stocks:
-        old = before.get(stock["security_code"])
-        stock["change_from_previous"] = (
-            "new"
-            if old is None
-            else "unchanged"
-            if {k: v for k, v in old.items() if k != "change_from_previous"}
-            == {k: v for k, v in stock.items() if k != "change_from_previous"}
-            else "changed"
-        )
-    for code in sorted(set(before) - set(codes)):
-        removed = dict(before[code])
-        removed.update(
-            change_from_previous="removed", suggestion_id=None, suggestion=None, max_risk_level=None
-        )
-        stocks.append(removed)
     body = DailyReport.model_validate_json(canonical(body)).model_dump(mode="json")
     revision = (
         int(

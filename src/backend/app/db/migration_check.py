@@ -68,6 +68,9 @@ def check_startup(settings: Settings) -> None:
     try:
         with engine.connect() as conn:
             require_database_mainline(conn, script)
+            from app.engine_policies import check, load
+
+            check(conn, load(settings.config_dir))
     except SQLAlchemyError as exc:
         raise MigrationLineageError(
             "DATABASE_REVISION_CHECK_FAILED: " + type(exc).__name__

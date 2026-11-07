@@ -138,6 +138,12 @@ def main() -> int:
             )
             with Operations.context(MigrationContext.configure(conn)):
                 migration["upgrade"]()
+                runpy.run_path(
+                    str(
+                        Path(__file__).resolve().parents[1]
+                        / "migrations/versions/0021_t_b61b_not_set.py"
+                    )
+                )["upgrade"]()
             view = runpy.run_path(
                 str(
                     Path(__file__).resolve().parents[1]

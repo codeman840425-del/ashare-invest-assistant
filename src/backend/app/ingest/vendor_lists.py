@@ -128,22 +128,14 @@ def process_vendor_intent(
             )
             return "expired"
         usable = licence_available(conn, intent.licence_id, clock())
-    try:
-        results = fetch_results(intent) if usable else []
-        summaries, rows, failed = _normalize(results)
-    except Exception:  # noqa: BLE001  不把异常原文/上游 URL/证书回显带入批次或队列
-        summaries, rows, failed = _normalize([])
-    if not usable:
-        failed = True
-    status = "failed" if failed else "fetched"
-    with engine.begin() as conn:
-        batch = (
-            conn.execute(select(batches).where(batches.c.id == intent.batch_id).with_for_update())
-            .mappings()
-            .one()
-        )
-        if batch["status"] != "requested":
-            return "noop"
+        try:
+            results = fetch_results(intent) if usable else []
+            summaries, rows, failed = _normalize(results)
+        except Exception:  # noqa: BLE001  不把异常原文/上游 URL/证书回显带入批次或队列
+            summaries, rows, failed = _normalize([])
+        if not usable:
+            failed = True
+        status = "failed" if failed else "fetched"
         if rows:
             conn.execute(insert(rows_table), [{"batch_id": intent.batch_id, **row} for row in rows])
         conn.execute(

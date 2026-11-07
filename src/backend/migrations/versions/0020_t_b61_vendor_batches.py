@@ -1,14 +1,77 @@
-"""T-B61 对账批次交接（plan §4.6.5A），不灌数据、不授予运行角色DDL。"""
+"""T-B61 原始0020定义快照；后续NULL作用域由0021升级，不引用活动模型。"""
 
 from alembic import op
-from sqlalchemy import select
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Column,
+    ForeignKeyConstraint,
+    MetaData,
+    Table,
+    UniqueConstraint,
+    select,
+    text,
+)
 
-from app.db.tables.vendor import master_vendor_batches, master_vendor_list_rows
+from app.db.base import (
+    MARKET,
+    NAMING_CONVENTION,
+    boolean,
+    integer,
+    jsonb,
+    one_of,
+    pk_uuid,
+    ts,
+    txt,
+    uuid_col,
+)
+
+metadata = MetaData(naming_convention=NAMING_CONVENTION)
+Table("master_runs", metadata, Column("id", BigInteger, primary_key=True), schema=MARKET)
 
 revision = "0020"
 down_revision = "0019"
 branch_labels = None
 depends_on = None
+
+DATASETS = ("hslt_list", "bj_list", "kc_list", "hsrl_real")
+STATUSES = ("requested", "fetched", "failed", "skipped", "reconciled", "expired", "superseded")
+
+master_vendor_batches = Table(
+    "master_vendor_batches",
+    metadata,
+    pk_uuid(),
+    Column("master_run_id", BigInteger, nullable=False),
+    uuid_col("source_licence_id", nullable=False),
+    txt("status", nullable=False),
+    integer("attempt", nullable=False),
+    ts("requested_at", nullable=False),
+    ts("deadline_at", nullable=False),
+    ts("fetched_at"),
+    ts("reconciled_at"),
+    jsonb("datasets", nullable=False, server_default=text("'[]'::jsonb")),
+    txt("error_code"),
+    ForeignKeyConstraint(["master_run_id"], ["market.master_runs.id"]),
+    UniqueConstraint("master_run_id", "source_licence_id", "attempt"),
+    one_of("status", STATUSES),
+    CheckConstraint("attempt BETWEEN 1 AND 3", name="attempt"),
+    CheckConstraint("jsonb_typeof(datasets) = 'array'", name="datasets_array"),
+    schema=MARKET,
+)
+master_vendor_list_rows = Table(
+    "master_vendor_list_rows",
+    metadata,
+    uuid_col("batch_id", nullable=False, primary_key=True),
+    txt("dataset", nullable=False, primary_key=True),
+    txt("security_code", nullable=False, primary_key=True),
+    txt("vendor_name"),
+    boolean("dup_conflict", nullable=False, server_default=text("false")),
+    ForeignKeyConstraint(["batch_id"], ["market.master_vendor_batches.id"], ondelete="CASCADE"),
+    one_of("dataset", DATASETS),
+    CheckConstraint("security_code ~ '^[0-9]{6}[.](SH|SZ|BJ)$'", name="code"),
+    CheckConstraint("NOT dup_conflict OR dataset = 'hsrl_real'", name="conflict_only_real"),
+    schema=MARKET,
+)
 
 
 def upgrade() -> None:

@@ -11,6 +11,7 @@ from sqlalchemy import Connection, delete, func, insert, select, text, update
 
 from app.db.tables.licences import user_data_licence_holds, user_data_licence_status
 from app.db.tables.market import master_runs, security_reconciliation_diffs
+from app.db.tables.users import users
 from app.db.tables.vendor import DATASETS
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows_table
@@ -80,6 +81,39 @@ def request_batches(
         .mappings()
         .one()
     )
+    has_current = (
+        select(user_data_licence_status.c.id)
+        .where(
+            user_data_licence_status.c.user_id == users.c.id,
+            user_data_licence_status.c.deleted_at.is_(None),
+        )
+        .exists()
+    )
+    not_set = conn.execute(select(select(users.c.id).where(~has_current).exists())).scalar_one()
+    if (
+        not_set
+        and conn.execute(
+            select(batches.c.id).where(
+                batches.c.master_run_id == master_run_id, batches.c.source_licence_id.is_(None)
+            )
+        ).first()
+        is None
+    ):
+        conn.execute(
+            insert(batches).values(
+                id=uuid4(),
+                master_run_id=master_run_id,
+                source_licence_id=None,
+                status="skipped",
+                attempt=1,
+                requested_at=now,
+                deadline_at=deadline_for(
+                    now if trigger == "manual" else parent["started_at"], trigger
+                ),
+                datasets=[],
+                error_code="licence_unavailable",
+            )
+        )
     intents: list[dict[str, str]] = []
     pending = False
     stats = dict(parent["stats"])
@@ -97,7 +131,11 @@ def request_batches(
         set(scopes)
         | set(
             conn.execute(
-                select(batches.c.source_licence_id).where(batches.c.master_run_id == master_run_id)
+                select(batches.c.source_licence_id).where(
+                    batches.c.master_run_id == master_run_id,
+                    batches.c.source_licence_id.is_not(None),
+                    batches.c.status == "requested",
+                )
             ).scalars()
         ),
         key=str,

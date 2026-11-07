@@ -5,6 +5,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     ForeignKeyConstraint,
+    Index,
     Table,
     UniqueConstraint,
     text,
@@ -31,7 +32,7 @@ master_vendor_batches = Table(
     metadata,
     pk_uuid(),
     Column("master_run_id", BigInteger, nullable=False),
-    uuid_col("source_licence_id", nullable=False),
+    uuid_col("source_licence_id"),
     txt("status", nullable=False),
     integer("attempt", nullable=False),
     ts("requested_at", nullable=False),
@@ -45,7 +46,20 @@ master_vendor_batches = Table(
     one_of("status", STATUSES),
     CheckConstraint("attempt BETWEEN 1 AND 3", name="attempt"),
     CheckConstraint("jsonb_typeof(datasets) = 'array'", name="datasets_array"),
+    CheckConstraint(
+        "source_licence_id IS NOT NULL OR "
+        "(status = 'skipped' AND attempt = 1 AND error_code IS NOT NULL "
+        "AND error_code = 'licence_unavailable')",
+        name="not_set_scope",
+    ),
     schema=MARKET,
+)
+Index(
+    "ux_master_vendor_batches_not_set",
+    master_vendor_batches.c.master_run_id,
+    master_vendor_batches.c.attempt,
+    unique=True,
+    postgresql_where=text("source_licence_id IS NULL"),
 )
 master_vendor_list_rows = Table(
     "master_vendor_list_rows",

@@ -1,3 +1,4 @@
+import { isUuid } from '../../lib/uuid';
 import { useState } from 'react';
 import { Alert, Button, Input, Modal, Space, Table, Tag, Timeline, Tooltip, type ButtonProps } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
@@ -136,7 +137,9 @@ function Conflicts({ cs }: { cs: CandidateSignal }) {
       </div>
       {missing.length ? (
         <div className="small muted" data-testid="conflict-missing">
-          另有 {missing.length} 个对方信号不在当前列表中：{missing.map((id) => <Link key={id} to={`/candidate-signals/${id}`} className="mono" style={{ marginRight: 6 }}>{id.slice(-8)}</Link>)}
+          另有 {missing.length} 个对方信号不在当前列表中：{missing.map((id, i) => isUuid(id)
+            ? <Link key={`${id}-${i}`} to={`/candidate-signals/${id}`} className="mono" style={{ marginRight: 6 }}>{id.slice(-8)}</Link>
+            : <span key={`${id}-${i}`} className="mono" data-testid="conflict-id-invalid" style={{ marginRight: 6 }}>{id.slice(-8)}</span>)}
         </div>
       ) : null}
     </section>

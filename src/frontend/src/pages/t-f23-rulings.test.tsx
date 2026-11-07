@@ -107,17 +107,21 @@ describe('#30 ③ POST /plan-drafts 400 先于 409；lot_rule 在 fields[]；卖
     expect(b.error.details).not.toHaveProperty('min_buy');
     expect(lotRuleOf(new ApiError(400, b.error.code, 'x', b.error.details, null))).toEqual({ min_buy: '100', step: '100' });
   });
-  it('科创板可卖 350 股：卖 150 提示，卖 250、350 不提示；卖 400 超过可卖', () => {
+  it('科创板可卖 350 股（lot_rule 由服务端下发 200/1）：卖 150 提示，卖 250、350 不提示；卖 400 超过可卖', () => {
     const base = draftsNow()[0];
+    const rule = { min_buy: '200', step: '1' };
     const star: PlanDraft = { ...base, security_code: '688001.SH', action: 'sell', qty_range: { ...base.qty_range, lot: '1' }, user_context_snapshot: { ...base.user_context_snapshot, sellable_qty: '350' } };
-    expect(lotWarning(star, '150')).toMatch(/科创板卖出数量须不少于 200 股/);
-    expect(lotWarning(star, '250')).toBeNull();
-    expect(lotWarning(star, '350')).toBeNull();
-    expect(lotWarning(star, '400')).toMatch(/不能超过可卖数量 350/);
+    expect(lotWarning(star, '150', rule)).toMatch(/卖出数量须不少于 200 股/);
+    expect(lotWarning(star, '250', rule)).toBeNull();
+    expect(lotWarning(star, '350', rule)).toBeNull();
+    expect(lotWarning(star, '400', rule)).toMatch(/不能超过可卖数量 350/);
     // 可卖余量不足 200 股时只能一次全部卖出
     const tail: PlanDraft = { ...star, user_context_snapshot: { ...star.user_context_snapshot, sellable_qty: '120' } };
-    expect(lotWarning(tail, '120')).toBeNull();
-    expect(lotWarning(tail, '100')).toMatch(/一次卖出全部可卖 120 股/);
+    expect(lotWarning(tail, '120', rule)).toBeNull();
+    expect(lotWarning(tail, '100', rule)).toMatch(/一次卖出全部可卖 120 股/);
+    // 未收到服务端 lot_rule 时不按代码推断整手参数，只校验可卖数量
+    expect(lotWarning(star, '150')).toBeNull();
+    expect(lotWarning({ ...star, action: 'buy' }, '150')).toBeNull();
   });
 });
 

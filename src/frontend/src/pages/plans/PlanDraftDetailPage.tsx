@@ -151,6 +151,8 @@ function ConfirmForm({ d }: { d: PlanDraft }) {
   const qErr = qtyError(qty);
   const pErr = priceError(price);
   const dev = deviationFields(d, qty, price);
+  // 整手参数只取服务端下发的 lot_rule（review-787e453 m1），未收到前只用草案 qty_range.lot
+  const lotHint = lotWarning(d, qty, lotRuleOf(confirm.error));
   const missing = missingRequired(d, answers);
   const doubtful = d.judgment_checklist.filter((c) => c.required && (answers[c.id] === 'no' || answers[c.id] === 'unsure'));
   const serverMissing = confirm.error instanceof ApiError && confirm.error.code === 'CHECKLIST_INCOMPLETE' ? ((confirm.error.details?.missing as string[] | undefined) ?? []) : [];
@@ -191,7 +193,7 @@ function ConfirmForm({ d }: { d: PlanDraft }) {
         </label>
       </div>
       {qErr || pErr ? <div className="error-text small">{qErr ?? pErr}</div> : null}
-      {lotWarning(d, qty) ? <div className="muted small" data-testid="lot-warning">{lotWarning(d, qty)}</div> : null}
+      {lotHint ? <div className="muted small" data-testid="lot-warning">{lotHint}</div> : null}
       {dev.length ? (
         <Alert
           type="warning"

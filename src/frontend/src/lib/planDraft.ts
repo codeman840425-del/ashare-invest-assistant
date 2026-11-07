@@ -29,33 +29,37 @@ export function deviationFields(d: PlanDraft, qty: string, price: string): ('cho
   return out;
 }
 
-/** 示例整手参数（契约 v0.2.9 #30 ③ 卖出零股公式；主板、创业板、ETF 100/100，科创板 200/1；以交易所规则为准，问题 86 待研究员核对） */
-export const isStarCode = (code: string) => /^68[89]\d{3}\.SH$/.test(code);
-export const lotParams = (code: string) => (isStarCode(code) ? { min_buy: 200, step: 1 } : { min_buy: 100, step: 100 });
+/** 服务端下发的整手参数（400 VALIDATION_ERROR fields[] 中 chosen_qty/lot_rule 元素的 min_buy、step） */
+export type LotRule = { min_buy: string | null; step: string | null };
 
 /**
- * 整手提示（契约 v0.2.9 #14、#30 ③）：买入数量 ≥ min_buy 且按 step 递增；卖出须为全部可卖余量，
- * 或数量 ≥ min_buy 且 (数量 − min_buy) 是 step 的整数倍；不能超过可卖数量（草案快照）。只提示，以服务端校验为准。
+ * 整手提示（契约 v0.2.9 #14、#30 ③）。前端不写死任何板块的整手参数（review-787e453 m1），只用服务端字段：
+ * - 买入/加仓：草案 qty_range.lot（递增单位）；收到服务端 lot_rule 后再用其 min_buy、step；
+ * - 卖出/减仓：不能超过可卖数量（草案快照）；收到 lot_rule 后按 #30 ③ 公式（等于全部可卖，或 ≥ min_buy 且 (数量 − min_buy) 是 step 的整数倍）。
+ * 只提示，以服务端校验为准。
  */
-export function lotWarning(d: PlanDraft, qty: string): string | null {
+export function lotWarning(d: PlanDraft, qty: string, rule: LotRule | null = null): string | null {
   if (qtyError(qty)) return null;
   const q = Number(qty);
-  const { min_buy, step } = lotParams(d.security_code);
+  const num = (v: string | null | undefined) => (v != null && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
+  const minBuy = num(rule?.min_buy);
+  const step = num(rule?.step);
   if (d.action === 'sell' || d.action === 'reduce') {
     const sellable = Number(d.user_context_snapshot.sellable_qty);
     if (Number.isFinite(sellable) && q > sellable) return `卖出数量不能超过可卖数量 ${d.user_context_snapshot.sellable_qty} 股`;
     if (Number.isFinite(sellable) && q === sellable) return null;
-    if (q >= min_buy && (q - min_buy) % step === 0) return null;
-    const star = isStarCode(d.security_code);
-    return `${star ? '科创板' : ''}卖出数量须不少于 ${min_buy} 股${step > 1 ? `并按 ${step} 股递增` : ''}，或一次卖出全部可卖 ${d.user_context_snapshot.sellable_qty} 股（以交易所规则为准）`;
+    if (minBuy === null || step === null) return null;
+    if (q >= minBuy && (q - minBuy) % step === 0) return null;
+    return `卖出数量须不少于 ${minBuy} 股${step > 1 ? `并按 ${step} 股递增` : ''}，或一次卖出全部可卖 ${d.user_context_snapshot.sellable_qty} 股（以交易所规则为准）`;
   }
-  const lot = Number(d.qty_range.lot);
-  if (!lot || lot <= 1) return q < min_buy && isStarCode(d.security_code) ? `科创板买入数量须不少于 ${min_buy} 股` : null;
-  return q % lot === 0 ? null : `买入数量须按 ${d.qty_range.lot} 股递增`;
+  if (minBuy !== null && q < minBuy) return `买入数量须不少于 ${minBuy} 股`;
+  const lot = step ?? num(d.qty_range.lot);
+  if (!lot || lot <= 1) return null;
+  return q % lot === 0 ? null : `买入数量须按 ${lot} 股递增`;
 }
 
 /** 400 VALIDATION_ERROR 的 lot_rule（契约 v0.2.9 #30 ③ 修正 #14）：min_buy、step 在 details.fields[] 的 chosen_qty 元素里 */
-export function lotRuleOf(e: unknown): { min_buy: string | null; step: string | null } | null {
+export function lotRuleOf(e: unknown): LotRule | null {
   if (!(e instanceof ApiError) || e.code !== 'VALIDATION_ERROR' || !e.details) return null;
   const det = e.details as Record<string, unknown>;
   const fields = Array.isArray(det.fields) ? (det.fields as Record<string, unknown>[]) : [];

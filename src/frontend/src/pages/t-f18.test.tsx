@@ -59,8 +59,8 @@ describe('纯函数', () => {
     expect(lotWarning(d(), '150')).toMatch(/按 100 股递增/);
     expect(lotWarning(d(), '200')).toBeNull();
     // #30 ③：卖出合法 ⇔ 等于可卖余量，或 ≥ min_buy 且 (数量 − min_buy) 是 step 的整数倍；主板 150 不合法、200 合法
-    expect(lotWarning(draftOf(uid(1022)), '150')).toMatch(/不少于 100 股并按 100 股递增/);
-    expect(lotWarning(draftOf(uid(1022)), '200')).toBeNull();
+    expect(lotWarning(draftOf(uid(1022)), '150', { min_buy: '100', step: '100' })).toMatch(/不少于 100 股并按 100 股递增/);
+    expect(lotWarning(draftOf(uid(1022)), '200', { min_buy: '100', step: '100' })).toBeNull();
   });
   it('必答未作答', () => {
     expect(missingRequired(d(), {})).toEqual(['q_counter', 'q_fit', 'q_broker']);

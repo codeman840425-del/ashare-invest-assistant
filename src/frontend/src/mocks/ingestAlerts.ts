@@ -72,7 +72,9 @@ function rank(a: IngestAlert): [number, number, string | number] {
   const tail = rest.join('.');
   const group = head === 'errors' || head === 'freshness' ? head : a.key;
   const sub = head === 'freshness' ? INGEST_DATASETS.indexOf(tail as IngestDataset) : head === 'errors' ? tail : 0;
-  return [a.level === 'critical' ? 0 : 1, KEY_ORDER.indexOf(group), sub];
+  const idx = KEY_ORDER.indexOf(group);
+  // 不在固定表里的 key 排到同级最后（review-7f46681 m3）；页面按后端下发顺序显示，不重排
+  return [a.level === 'critical' ? 0 : 1, idx < 0 ? KEY_ORDER.length : idx, sub];
 }
 
 export function ingestAlerts(d: Omit<AdminIngestStatus, 'alerts'>, master: MockMasterAlerts = masterAlerts): IngestAlert[] {
@@ -115,6 +117,6 @@ export function ingestAlerts(d: Omit<AdminIngestStatus, 'alerts'>, master: MockM
   }
   return [...byKey.values()].sort((a, b) => {
     const [x, y] = [rank(a), rank(b)];
-    return x[0] - y[0] || x[1] - y[1] || (typeof x[2] === 'number' && typeof y[2] === 'number' ? x[2] - y[2] : String(x[2]).localeCompare(String(y[2])));
+    return x[0] - y[0] || x[1] - y[1] || (typeof x[2] === 'number' && typeof y[2] === 'number' ? x[2] - y[2] : (String(x[2]) < String(y[2]) ? -1 : String(x[2]) > String(y[2]) ? 1 : 0));
   });
 }

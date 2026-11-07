@@ -67,7 +67,8 @@ export const useCandidateVersion = (id: string, n: number | null) =>
 
 /**
  * 创建类 POST 带 Idempotency-Key：同一次操作的网络重试复用同一个键；
- * 请求体变了或服务端已给出明确结果就换键（避免同键异体 409 IDEMPOTENCY_CONFLICT）。
+ * 请求体变了或服务端已给出明确结果（4xx）就换键（避免同键异体 409 IDEMPOTENCY_CONFLICT）；
+ * 网络错误与 5xx（含网关 502/504，服务端可能已处理完）保留原键，重试时复用（review-787e453 m3）。
  */
 function useIdemMutation<B, R>(post: (body: B, key: string) => Promise<R>) {
   const qc = useQueryClient();
@@ -86,7 +87,7 @@ function useIdemMutation<B, R>(post: (body: B, key: string) => Promise<R>) {
       await qc.invalidateQueries({ queryKey: rck.all });
     },
     onError: (e) => {
-      if (e instanceof ApiError && e.code !== 'NETWORK_ERROR') {
+      if (e instanceof ApiError && e.code !== 'NETWORK_ERROR' && e.status >= 400 && e.status < 500) {
         key.current = newIdempotencyKey();
         lastBody.current = null;
       }

@@ -1,0 +1,9 @@
+methods: [fixture, trigger_stats, tracking_sim]
+window: {lookback_trading_days: 120, universe: 全A（不含北交所）}
+horizon_days: [1, 5, 20]
+metrics: [trigger_rate, coverage, win_rate, avg_excess]
+min_n: 30
+pass_criteria:
+  - {metric: trigger_rate, op: "<=", value: 0.30}
+  - {metric: trigger_rate, op: ">", value: 0}
+feature_requests: []

@@ -1,0 +1,8 @@
+methods: [fixture, trigger_stats, tracking_sim]
+window: {lookback_trading_days: 120, universe: 持仓（回放虚构持仓）}
+horizon_days: [1, 5, 20]
+metrics: [trigger_rate, coverage]
+min_n: 30
+pass_criteria:
+  - {metric: trigger_rate, op: "<=", value: 0.30}
+feature_requests: []

@@ -1,4 +1,4 @@
-"""T-B77 contract routes; the reviewed market-clock adapter is intentionally not faked."""
+"""T-B77 contract routes; T-A12 DB-only clock and earliest-owned-account selection."""
 
 from __future__ import annotations
 
@@ -8,22 +8,13 @@ import json
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Header, Request, Response
+from fastapi import APIRouter, Header, Response
 
 from app.aggregates import models, service
-from app.auth.deps import AuthDep, EngineDep
+from app.aggregates.calendar import market_clock
+from app.auth.deps import AuthDep, EngineDep, SettingsDep
 
 router = APIRouter(tags=["aggregates"])
-
-
-def clock(request: Request) -> models.MarketClock:
-    provider = getattr(request.app.state, "aggregate_clock", None)
-    if provider is None:
-        raise service.unavailable("reviewed_market_clock_adapter_pending")
-    value = provider()
-    if not isinstance(value, models.MarketClock):
-        raise service.unavailable("invalid_market_clock_adapter")
-    return value
 
 
 def response(model: models.Model, match: str | None) -> Response:
@@ -41,38 +32,57 @@ def response(model: models.Model, match: str | None) -> Response:
 
 @router.get("/terminal", response_model=models.Terminal)
 def terminal(
-    request: Request,
     auth: AuthDep,
     engine: EngineDep,
+    settings: SettingsDep,
     scope: Literal["all", "watchlist", "holdings"] = "all",
     account_id: uuid.UUID | None = None,
     if_none_match: str | None = Header(default=None),
 ) -> Response:
+    now = dt.datetime.now(dt.UTC)
     with engine.connect() as conn:
         identifier = service.select_account(conn, auth.user_id, account_id)
         value = service.terminal(
-            conn, auth.user_id, identifier, clock(request), dt.datetime.now(dt.UTC), scope
+            conn,
+            auth.user_id,
+            identifier,
+            market_clock(conn, now, settings.business.market_rules),
+            now,
+            scope,
         )
     return response(value, if_none_match)
 
 
 @router.get("/today", response_model=models.Today)
 def today(
-    request: Request,
     auth: AuthDep,
     engine: EngineDep,
+    settings: SettingsDep,
+    account_id: uuid.UUID | None = None,
     if_none_match: str | None = Header(default=None),
 ) -> Response:
+    now = dt.datetime.now(dt.UTC)
     with engine.connect() as conn:
-        identifier = service.select_account(conn, auth.user_id, None)
+        identifier = service.select_account(conn, auth.user_id, account_id)
         value = service.today(
-            conn, auth.user_id, identifier, clock(request), dt.datetime.now(dt.UTC)
+            conn,
+            auth.user_id,
+            identifier,
+            market_clock(conn, now, settings.business.market_rules),
+            now,
         )
     return response(value, if_none_match)
 
 
 @router.get("/market/overview", response_model=models.MarketOverview)
 def overview(
-    request: Request, auth: AuthDep, if_none_match: str | None = Header(default=None)
+    auth: AuthDep,
+    engine: EngineDep,
+    settings: SettingsDep,
+    if_none_match: str | None = Header(default=None),
 ) -> Response:
-    return response(service.market(clock(request)), if_none_match)
+    with engine.connect() as conn:
+        value = service.market(
+            market_clock(conn, dt.datetime.now(dt.UTC), settings.business.market_rules)
+        )
+    return response(value, if_none_match)

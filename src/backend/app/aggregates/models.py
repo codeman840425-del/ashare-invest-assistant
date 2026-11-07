@@ -123,6 +123,7 @@ class Account(Model):
 
 
 class Terminal(DataBlock):
+    account_id: uuid.UUID | None
     server_time: dt.datetime
     trade_date: dt.date
     session: MarketSession
@@ -183,6 +184,7 @@ class GapBlock(Model):
 
 
 class Today(DataBlock):
+    account_id: uuid.UUID | None
     server_time: dt.datetime
     trade_date: dt.date
     session: MarketSession

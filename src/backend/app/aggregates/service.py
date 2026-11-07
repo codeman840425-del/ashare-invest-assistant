@@ -45,17 +45,17 @@ def unavailable(issue: str) -> AppError:
 def select_account(
     conn: Connection, user_id: uuid.UUID, identifier: uuid.UUID | None
 ) -> uuid.UUID | None:
-    query = select(accounts.c.id).where(
-        accounts.c.user_id == user_id, accounts.c.archived_at.is_(None)
-    )
+    query = select(accounts.c.id).where(accounts.c.user_id == user_id)
     if identifier is not None:
         if conn.execute(query.where(accounts.c.id == identifier)).first() is None:
             raise AppError(ErrorCode.NOT_FOUND)
         return identifier
-    identifiers = list(conn.execute(query.limit(2)).scalars())
-    if len(identifiers) > 1:
-        raise unavailable("default_account_not_defined")
-    return uuid.UUID(str(identifiers[0])) if identifiers else None
+    selected = conn.execute(
+        query.where(accounts.c.archived_at.is_(None))
+        .order_by(accounts.c.created_at.asc(), accounts.c.id.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return uuid.UUID(str(selected)) if selected is not None else None
 
 
 def ensure_empty_products(conn: Connection, user_id: uuid.UUID) -> None:
@@ -251,6 +251,7 @@ def terminal(
         server_time=now,
         trade_date=clock.trade_date,
         session=clock.session,
+        account_id=account_id,
         account=account_out,
         rows=result_rows[:300],
         truncated=len(result_rows) > 300,
@@ -334,6 +335,7 @@ def today(
         server_time=now,
         trade_date=clock.trade_date,
         session=clock.session,
+        account_id=account_id,
         market=m.TodayMarket(
             regime=None, regime_position_range=None, data_status=DataStatus.UNAVAILABLE
         ),

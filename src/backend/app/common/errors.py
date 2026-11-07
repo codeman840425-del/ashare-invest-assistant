@@ -89,6 +89,7 @@ class ErrorCode(StrEnum):
     UPSTREAM_UNAVAILABLE = "UPSTREAM_UNAVAILABLE"
     RATE_LIMITED = "RATE_LIMITED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+    CALENDAR_NOT_COVERED = "CALENDAR_NOT_COVERED"
     MAINTENANCE = "MAINTENANCE"
 
 
@@ -171,6 +172,7 @@ ERROR_CODES: Final[dict[ErrorCode, ErrorSpec]] = {
     E.UPSTREAM_UNAVAILABLE: ErrorSpec(503, "上游数据源暂不可用"),
     E.RATE_LIMITED: ErrorSpec(429, "请求过于频繁，请稍后再试"),
     E.INTERNAL_ERROR: ErrorSpec(500, "服务器内部错误"),
+    E.CALENDAR_NOT_COVERED: ErrorSpec(503, "受审交易日历未覆盖请求日期"),
     E.MAINTENANCE: ErrorSpec(503, "系统维护中"),
 }
 

@@ -5,12 +5,14 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 
+from app.cli.calendar_seed import main as calendar_seed_main
 from app.cli.delete_user_data import main as delete_user_data_main
 from app.cli.master_bootstrap import main as master_bootstrap_main
 
 COMMANDS: dict[str, Callable[[list[str]], int]] = {
     "delete-user-data": delete_user_data_main,
     "master-bootstrap": master_bootstrap_main,
+    "calendar-seed": calendar_seed_main,
 }
 
 
@@ -19,7 +21,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args or args[0] not in COMMANDS:
         print(
             "用法：python -m app.cli delete-user-data --user-id <uuid> [--execute]\n"
-            "      python -m app.cli master-bootstrap [--sources a,b]",
+            "      python -m app.cli master-bootstrap [--sources a,b]\n"
+            "      python -m app.cli calendar-seed [--apply]",
             file=sys.stderr,
         )
         return 2

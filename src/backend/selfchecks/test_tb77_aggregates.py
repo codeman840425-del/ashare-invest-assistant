@@ -5,15 +5,18 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import insert
 
+from app.aggregates.calendar import seed_calendar
 from app.aggregates.models import EmptyBlock, MarketClock, Terminal, TerminalRow
 from app.db.tables.notify import notifications
 from app.db.tables.research import alerts
+from app.reference_files import CalendarReference, load_reference_file
 from app.replay.baseline import positions_file
 from app.schemas.enums import DataStatus, MarketSession, NotificationKind, Severity
 from selfchecks.test_tb70_replay import integration, no_network  # noqa: F401
@@ -44,6 +47,7 @@ def test_strict_empty_and_row_limit() -> None:
             trade_date=dt.date(2026, 11, 6),
             session=MarketSession.CLOSED,
             account=None,
+            account_id=None,
             rows=[row] * 301,
             truncated=True,
             unread_notifications=0,
@@ -61,10 +65,12 @@ def test_routes_real_ownership_unread_and_imported_holdings(
     assert account.status_code == 201
     account_id = account.json()["id"]
     assert stranger.get("/api/v1/terminal", params={"account_id": account_id}).status_code == 404
-    assert client.get("/api/v1/terminal").status_code == 503  # no guessed trade date/session
-    client.app.state.aggregate_clock = lambda: MarketClock(
-        trade_date=dt.date(2026, 11, 6), session=MarketSession.CLOSED
-    )
+    with engine.begin() as conn:
+        seed = load_reference_file(
+            Path(__file__).resolve().parents[3] / "config", "trading_calendar.json"
+        )
+        assert isinstance(seed, CalendarReference)
+        seed_calendar(conn, seed)
     with engine.begin() as conn:
         for owner in (user_id, other_id):
             conn.execute(
@@ -134,9 +140,12 @@ def test_routes_real_ownership_unread_and_imported_holdings(
         "/api/v1/accounts", json={"broker_name": "合成券商", "alias": "另一个合成"}
     )
     assert second.status_code == 201
-    missing_default = client.get("/api/v1/terminal")
-    assert missing_default.status_code == 503
-    assert missing_default.json()["error"]["details"]["issue"] == "default_account_not_defined"
+    chosen = client.get("/api/v1/terminal")
+    assert chosen.status_code == 200
+    assert chosen.json()["account_id"] == account_id
+    assert (
+        client.get("/api/v1/today", params={"account_id": second.json()["id"]}).status_code == 200
+    )
     assert client.get("/api/v1/terminal", params={"account_id": account_id}).status_code == 200
     with engine.begin() as conn:
         conn.execute(

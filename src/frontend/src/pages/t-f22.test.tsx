@@ -16,6 +16,7 @@ import { setMockLicence } from '../mocks/licenceStore';
 import { STRATEGY_TEMPLATES } from '../mocks/strategyHandlers';
 import { uid } from '../mocks/fixtures';
 import { apiFetch } from '../test/apiFetch';
+import { advance, fakeClock } from '../test/timing';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -94,20 +95,22 @@ describe('T-F22 设置 → 数据证书', () => {
     expect(input).toHaveAttribute('data-1p-ignore', 'true');
     expect(input).toHaveAttribute('data-lpignore', 'true');
     expect(screen.getByTestId('licence-no-save')).toBeInTheDocument();
+    fakeClock();
     typeLicence(licence);
     fireEvent.click(screen.getByTestId('licence-save'));
     expect(await screen.findByTestId('licence-msg')).toHaveTextContent('正在验证');
     expect(input.value).toBe('');
-    // 下一次读取时验证落定为可用，横幅消失
-    await waitFor(() => expect(within(screen.getByTestId('licence-status')).getByText('可用')).toBeInTheDocument(), { timeout: 8000 });
-    await waitFor(() => expect(screen.queryByTestId('licence-banner')).toBeNull(), { timeout: 4000 });
+    // 下一次读取（3 秒轮询，假时钟推进）时验证落定为可用，横幅消失
+    await advance(3000);
+    await waitFor(() => expect(within(screen.getByTestId('licence-status')).getByText('可用')).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId('licence-banner')).toBeNull());
     const put = reqs.find((r) => r.method === 'PUT')!;
     expect(Object.keys(put.body as object).sort()).toEqual(['expires_on', 'has_quant_pro', 'licence', 'tier']);
     expect(leaks(document.documentElement.outerHTML, licence)).toBeNull();
     expect(leaks(await done(), licence)).toBeNull();
     expect(leaks(JSON.stringify(client.getQueryCache().getAll().map((q) => q.state.data)), licence)).toBeNull();
     expect(leaks(JSON.stringify(client.getMutationCache().getAll().map((m) => m.state.variables)), licence)).toBeNull();
-  }, 20000);
+  });
 
   it('格式不符：客户端与服务端提示都不含输入值', async () => {
     mockLoginAs('new_user');
@@ -191,11 +194,14 @@ describe('T-F22 设置 → 数据证书', () => {
     const licence = fakeLicence('X-INVALID-');
     renderAt('/settings/data-licence');
     await screen.findByTestId('licence-page');
+    fakeClock();
     typeLicence(licence);
     fireEvent.click(screen.getByTestId('licence-save'));
-    await waitFor(() => expect(within(screen.getByTestId('licence-status')).getByText('无效')).toBeInTheDocument(), { timeout: 8000 });
+    await screen.findByTestId('licence-msg');
+    await advance(3000);
+    await waitFor(() => expect(within(screen.getByTestId('licence-status')).getByText('无效')).toBeInTheDocument());
     expect(leaks(document.documentElement.outerHTML, licence.slice(10))).toBeNull();
-  }, 15000);
+  });
 });
 
 describe('T-F22 高风险模板的启用开关', () => {

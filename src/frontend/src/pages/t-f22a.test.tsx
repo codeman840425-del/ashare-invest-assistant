@@ -23,6 +23,7 @@ import { LICENCE_RATE, setMockIngestPaused, setMockLicence } from '../mocks/lice
 import { server } from '../mocks/server';
 import { mockLoginAs } from '../mocks/session';
 import { STRATEGY_TEMPLATES, mockAddInstance } from '../mocks/strategyHandlers';
+import { advance, fakeClock } from '../test/timing';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -80,11 +81,13 @@ describe('M1 证书状态横幅自动刷新', () => {
     renderAt('/settings/data-licence');
     await screen.findByTestId('licence-page');
     expect(screen.queryByTestId('licence-banner')).toBeNull();
+    fakeClock();
     typeLicence(fakeLicence('X-INVALID-'));
     fireEvent.click(screen.getByTestId('licence-save'));
-    const banner = await screen.findByTestId('licence-banner', {}, { timeout: 8000 });
-    await waitFor(() => expect(banner).toHaveAttribute('data-status', 'invalid'), { timeout: 8000 });
-  }, 15000);
+    await advance(3000);
+    const banner = await screen.findByTestId('licence-banner');
+    await waitFor(() => expect(banner).toHaveAttribute('data-status', 'invalid'));
+  });
 });
 
 describe('M2 缺数 / 过期原因：可见、可键盘查看、证书不可用的示例', () => {

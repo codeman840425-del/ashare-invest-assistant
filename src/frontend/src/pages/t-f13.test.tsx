@@ -10,6 +10,7 @@ import { DISCLAIMER_TEXT } from '../components/RiskDisclosure';
 import { DAILY_REPORT_LIST, DAILY_REPORTS, PREV_REPORT_DATE, REPORT_DATE } from '../mocks/fixtures';
 import { server } from '../mocks/server';
 import { PENDING_ROUTE } from './dailyReportRoutes';
+import { settled } from '../test/timing';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -19,11 +20,12 @@ vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div
 
 const API = '/api/v1';
 
+let lastClient: ReturnType<typeof makeQueryClient>;
 function renderAt(path: string) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   render(
-    <AppProviders client={makeQueryClient(true)}>
+    <AppProviders client={(lastClient = makeQueryClient(true))}>
       <RouterProvider router={router} />
     </AppProviders>,
   );
@@ -152,7 +154,7 @@ describe('T-F13 盘后日报', () => {
     await waitFor(() => expect(document.querySelector('.report-dates')?.textContent).toContain('2026-10-20'));
     // “更早”那一页此时才返回：等待期间地址已变，不应再跳到 10-29
     release();
-    await new Promise((r) => setTimeout(r, 200));
+    await settled(lastClient);
     expect(router.state.location.pathname).toBe('/daily-reports/2026-10-20');
   });
 

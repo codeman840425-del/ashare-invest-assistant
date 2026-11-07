@@ -2,7 +2,7 @@
  * T-F26：证券搜索显示曾用名命中与 quote_missing（契约 v0.2.9 内 T-A04 #33 ②，SecurityHit；§9 v0.2.9 验收 3、5、7），
  * 以及 #41：搜索不缓存（staleTime 0、不写本地存储）、429 按 retry_after_s 暂停、输入防抖 250 ms；网关 414。
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
@@ -19,6 +19,7 @@ import { searchErrorText, QUOTE_MISSING_TEXT } from '../lib/searchText';
 import { ApiError } from '../api/client';
 import { searchQLength } from '../api/marketQueries';
 import { apiFetch } from '../test/apiFetch';
+import { advance, fakeClock } from '../test/timing';
 
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
@@ -158,19 +159,22 @@ describe('顶栏搜索 UI', { timeout: 15_000 }, () => {
     server.use(http.get(`${API}/securities/search`, () => {
       calls += 1;
       if (calls === 1) {
-        return HttpResponse.json({ error: { code: 'RATE_LIMITED', message: '请求过于频繁', details: { retry_after_s: 1 }, request_id: null } },
-          { status: 429, headers: { 'Retry-After': '1' } });
+        return HttpResponse.json({ error: { code: 'RATE_LIMITED', message: '请求过于频繁', details: { retry_after_s: 30 }, request_id: null } },
+          { status: 429, headers: { 'Retry-After': '30' } });
       }
       return HttpResponse.json({ items: [{ security_code: '600000.SH', name: '示例银行', type: 'stock', exchange: 'SH', board: 'main', listing_status: 'listed',
         risk_flag: null, match_kind: 'code_exact', matched_text: null, quote_missing: false }], master_as_of: '2026-10-30' });
     }));
+    // 暂停 30 秒由假时钟显式推进，真实耗时不会让暂停提前结束
+    fakeClock(false);
     renderAt('/terminal');
     await type('600000');
-    expect(await screen.findByTestId('search-status', {}, { timeout: 3000 })).toHaveTextContent('请 1 秒后再试');
+    expect(await screen.findByTestId('search-status', {}, { timeout: 3000 })).toHaveTextContent('请 30 秒后再试');
     fireEvent.change(screen.getByLabelText('证券搜索'), { target: { value: '60000' } });
-    await act(() => new Promise((r) => setTimeout(r, 400)));
+    await advance(400);
     expect(calls).toBe(1);
     expect(screen.getByTestId('search-status')).toHaveTextContent('搜索过于频繁');
+    await advance(30_000);
     await screen.findByTestId('search-hit-600000.SH', {}, { timeout: 3000 });
     expect(calls).toBe(2);
   });

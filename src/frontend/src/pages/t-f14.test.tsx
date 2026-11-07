@@ -19,6 +19,7 @@ import { server } from '../mocks/server';
 import { dropStreamConnections, pushStreamEvent, streamConnectionCount, streamRequests } from '../mocks/streamHandlers';
 import { apiFetch } from '../test/apiFetch';
 import { preloadRoutes } from '../test/preloadRoutes';
+import { advance, fakeClock } from '../test/timing';
 
 beforeAll(() => preloadRoutes(routes), 30_000);
 
@@ -273,10 +274,12 @@ describe('SSE /stream 客户端（§8）', () => {
   it('401：停止重连，状态为已停止', async () => {
     const states: StreamState[] = [];
     let calls = 0;
+    fakeClock();
     server.use(http.get(`*${API}/stream`, () => { calls += 1; return HttpResponse.json({ error: { code: 'AUTH_REQUIRED', message: '请先登录', details: null, request_id: 'x' } }, { status: 401 }); }));
     const h = startEventStream({ onMessage: () => undefined, onState: (s) => states.push(s), retryMs: 10 });
     await waitFor(() => expect(h.state()).toBe('closed'));
-    await new Promise((r) => setTimeout(r, 60));
+    // 推进远超 retryMs 的时间，确认没有再次连接
+    await advance(1000);
     expect(calls).toBe(1);
     expect(states).toEqual(['connecting', 'closed']);
   });

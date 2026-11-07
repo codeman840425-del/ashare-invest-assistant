@@ -29,6 +29,7 @@ window.getComputedStyle = (el: Element, pseudo?: string | null) => gcs(el, pseud
 // 测试中所有 /api/v1 请求都由 msw/node 拦截；未处理的请求直接报错，确保不出网
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   server.resetHandlers();
   resetMockState();

@@ -15,6 +15,7 @@ import { server } from '../mocks/server';
 import { emptyStats, state, type MockBatch } from '../mocks/session';
 import { apiFetch } from '../test/apiFetch';
 import { preloadRoutes } from '../test/preloadRoutes';
+import { settled } from '../test/timing';
 
 configure({ asyncUtilTimeout: 5000 });
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -26,11 +27,12 @@ vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div
 const API = '/api/v1';
 const post = (path: string, body: unknown) => apiFetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
+let lastClient: ReturnType<typeof makeQueryClient>;
 function renderAt(path: string) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
   Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
   const router = createMemoryRouter(routes, { initialEntries: [path] });
-  render(<AppProviders client={makeQueryClient(true)}><RouterProvider router={router} /></AppProviders>);
+  render(<AppProviders client={(lastClient = makeQueryClient(true))}><RouterProvider router={router} /></AppProviders>);
   return router;
 }
 
@@ -86,7 +88,7 @@ describe('#36：refresh 以响应体为准', () => {
     const after = rec.seen.slice(rec.seen.findIndex((x) => x.startsWith('POST /api/v1/suggestions/refresh')));
     // 旧实现刷新后另发 GET /suggestions?security_code=&status=active&limit=1 取当前卡；现在以响应体为准
     expect(after.some((x) => x.startsWith('GET /api/v1/suggestions?') && x.includes('security_code=') && x.includes('limit=1'))).toBe(false);
-  }, 20_000);
+  });
 
   it('无变化：changed=false 且 suggestion 是当前卡 → 留在本页并提示没有变化', async () => {
     server.use(http.post(`${API}/suggestions/refresh`, () => HttpResponse.json({ suggestion: sgBank, changed: false, superseded_id: null, data_as_of: sgBank.data_as_of })));
@@ -147,7 +149,7 @@ describe('#35：放弃或失败的导入批次不再请求逐行预览', () => {
     const stats = await screen.findByTestId('import-stats');
     expect(stats).toHaveTextContent('共 7 行');
     expect(within(stats).getByText(/错误 1/)).toBeInTheDocument();
-    await new Promise((r) => setTimeout(r, 300));
+    await settled(lastClient);
     rec.stop();
     expect(rec.seen.filter((x) => x.includes('/rows'))).toEqual([]);
     expect(screen.queryByRole('button', { name: /下载问题清单/ })).toBeNull();
@@ -159,7 +161,7 @@ describe('#35：放弃或失败的导入批次不再请求逐行预览', () => {
     renderAt(`/portfolio/import/${id}`);
     expect(await screen.findByTestId('import-discarded')).toHaveTextContent('本批次已放弃');
     expect(screen.getByTestId('import-stats')).toHaveTextContent('共 7 行');
-    await new Promise((r) => setTimeout(r, 300));
+    await settled(lastClient);
     rec.stop();
     expect(rec.seen.filter((x) => x.includes('/rows'))).toEqual([]);
     expect(screen.queryByRole('button', { name: /下载问题清单/ })).toBeNull();
@@ -174,7 +176,7 @@ describe('#35：放弃或失败的导入批次不再请求逐行预览', () => {
     fireEvent.click(screen.getByRole('button', { name: /放弃本批次/ }));
     fireEvent.click(await screen.findByRole('button', { name: /^放\s*弃$/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/portfolio'));
-    await new Promise((r) => setTimeout(r, 300));
+    await settled(lastClient);
     rec.stop();
     const i = rec.seen.findIndex((x) => x.startsWith(`POST /api/v1/imports/${id}/discard`));
     expect(i).toBeGreaterThanOrEqual(0);

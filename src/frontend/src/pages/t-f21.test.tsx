@@ -1,6 +1,6 @@
 /** T-F21 性能：AG Grid 虚拟化 + 批量事务、K 线窗口加载（bars before+limit）、通用游标分页（契约 §1.2） */
 import { onTestFinished } from 'vitest';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
@@ -17,6 +17,7 @@ import { flattenPages, clampLimit } from '../lib/cursorPaging';
 import { HISTORY_DAYS, dailyBars } from '../mocks/fixtures';
 import { page } from '../mocks/handlerUtils';
 import { server } from '../mocks/server';
+import { settled } from '../test/timing';
 
 // 页面模块的冷加载放在等待窗口之外（评审 b23401a N8）
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -35,12 +36,13 @@ vi.mock('../components/charts/FundFlowChart', () => ({ FundFlowChart: () => <div
 const API = '/api/v1';
 const CODE = '600000.SH';
 
+let lastClient: ReturnType<typeof makeQueryClient>;
 function renderAt(path: string) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
   Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   render(
-    <AppProviders client={makeQueryClient(true)}>
+    <AppProviders client={(lastClient = makeQueryClient(true))}>
       <RouterProvider router={router} />
     </AppProviders>,
   );
@@ -182,7 +184,7 @@ describe('T-F21 K 线窗口加载', () => {
     expect(daily.filter((c) => c.before !== null).map((c) => c.limit)).toEqual(['250', '250']);
     const n = daily.length;
     fireEvent.click(screen.getByText('模拟拖到左边缘'));
-    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    await settled(lastClient);
     expect(rec.calls.filter((c) => c.freq === 'd').length).toBe(n);
   });
 
@@ -205,7 +207,7 @@ describe('T-F21 K 线窗口加载', () => {
     expect(screen.getByTestId('kline').getAttribute('data-n')).toBe('250');
     const after = olderCalls;
     fireEvent.click(screen.getByText('模拟拖到左边缘'));
-    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    await settled(lastClient);
     expect(olderCalls).toBe(after);
     fail = false;
     fireEvent.click(screen.getByTestId('kline-older'));

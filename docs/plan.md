@@ -977,6 +977,14 @@ screen: null               # 选股模板写 {universe, filters[], rank_by, top_
      - `feature_catalog` 增加 `f.is_suspended`（日频布尔值，来源是停牌标记 `sf`，P0），停牌场景用它表达。
      - `expect` 可以写 `lot_rule`（可选），写了就要逐项比对。
   5. **`LIMIT_LOCKED` 卖出方向也记这个码**（plan 2.5.9 已经包括“一字跌停卖不出”），`detail.direction` 取 `sell`。H01-FX7 要改成记 `LIMIT_LOCKED`。
+  0a. **（T-R16 补）第 0 条推广到所有价格字段**：`plan.*` 和 `ctx.*` 里每个持久化的不复权价格字段，都按第 0 条的公式由求值器派生出 `<键>_qfq`，例如 `plan.stop_loss_qfq`、`plan.breakout_level_qfq`、`ctx.last_price_qfq`，不必逐个申请。
+     - 规则里只能使用 `_qfq` 版本。
+     - 实现随用到这些字段的卡片一起排期，本 MVP 只实现 H-01 和 W-01 用到的字段。
+     - T-R16 的其余待裁定项不属于主线，按预算规则暂缓到 MVP 里程碑之后，期间这些卡一律不可导入：
+       - 做T 的 t_leg 配对、ctx 在入场条件中的使用、时刻类参数的类型；
+       - DSL 的 null 放行语义；
+       - 组合层约束；
+       - 新特征 `f.open_qfq`、布林带位置、股息率、封单量。
   6. **（T-R15 第二轮）跟踪止盈**：增加派生键 `ctx.highest_close_since_entry_qfq`，等于 e 日到 T 日之间 `close(d) × A(d) / A(T)` 的最大值，e 是建仓日。W-01 的 X5 改用这个键，恢复成可量化的 golden，至少 1 例跨越除权日。
      - 原来的不复权 `ctx.highest_close_since_entry` 只用于展示，不能出现在规则里，否则按第 0 条报 `adjust_mismatch`。
   7. **`f.is_suspended` 登记**：研究员在 `docs/strategies/feature_spec.md` 新增一个 F 条目，写明：

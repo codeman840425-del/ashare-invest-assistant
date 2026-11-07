@@ -44,7 +44,7 @@ class Conclusion(Model):
 
     @model_validator(mode="after")
     def coherent(self) -> Conclusion:
-        if self.lifecycle not in {"published", "observing"}:
+        if self.lifecycle not in {"published", "observing", "simulating"}:
             raise ValueError("version_not_runnable")
         signal = self.signal
         if (signal.proposed_action in {"hold", "wait"}) != (self.candidate_signal_id is None):

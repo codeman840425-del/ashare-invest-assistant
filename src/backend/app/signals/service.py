@@ -241,7 +241,10 @@ def write_candidate(
     ).scalar_one()
     if template_owner is not None and template_owner != user_id:
         raise AppError(ErrorCode.NOT_FOUND)
-    if version.lifecycle not in {"published", "observing"}:
+    from app.strategy.runtime import runnable
+
+    role = conn.execute(select(users.c.role).where(users.c.id == user_id)).scalar_one()
+    if not runnable(version.lifecycle, role):
         return {"id": None, "diagnostic": "version_not_runnable"}
     declared_rules = {
         rule["id"]: rule for rule in version.config.get("spec", version.config).get("rules", [])

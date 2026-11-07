@@ -58,6 +58,16 @@ from sqlalchemy import Engine
 
 from app.config import Settings
 from app.db.engine import engine_for
+from app.workers.daily import (
+    ANALYZE,
+    RECOVER,
+    REPORT,
+    analysis_task,
+    final_failure,
+    record_intent,
+    recover_task,
+    report_task,
+)
 
 log = logging.getLogger("app.workers.jobs")
 
@@ -296,6 +306,9 @@ def vendor_sweep_task(settings: Settings) -> int:
 
 #: 任务名 → 实现
 TASKS: Final[dict[str, Task]] = {
+    ANALYZE: analysis_task,
+    REPORT: report_task,
+    RECOVER: recover_task,
     PURGE_COOLDOWNS: purge_expired_cooldowns_task,
     PURGE_IMPORT_ROWS: purge_import_rows_task,
     PURGE_RAW_FILES: purge_raw_files_task,
@@ -308,6 +321,8 @@ TASKS: Final[dict[str, Task]] = {
 }
 #: 失败重试（10 分钟后，共 3 次）且执行时持锁的任务 → 重试用尽时的处理
 RETRY_TASKS: Final[dict[str, Callable[[Settings, dict[str, Any], BaseException], None]]] = {
+    ANALYZE: final_failure,
+    REPORT: final_failure,
     SYNC_LISTS: _record_master_failure,
     SYNC_CODE_MAP: _record_master_failure,
     RECONCILE_VENDOR: _record_master_failure,
@@ -315,7 +330,16 @@ RETRY_TASKS: Final[dict[str, Callable[[Settings, dict[str, Any], BaseException],
     VENDOR_SWEEP: _record_master_failure,
 }
 LOCKED_TASKS: Final = frozenset(
-    {SYNC_LISTS, SYNC_CODE_MAP, PURGE_SNAPSHOTS, RECONCILE_VENDOR, VENDOR_SWEEP}
+    {
+        ANALYZE,
+        REPORT,
+        RECOVER,
+        SYNC_LISTS,
+        SYNC_CODE_MAP,
+        PURGE_SNAPSHOTS,
+        RECONCILE_VENDOR,
+        VENDOR_SWEEP,
+    }
 )
 
 
@@ -326,6 +350,7 @@ def schedule(settings: Settings) -> dict[str, int]:
         PURGE_IMPORT_ROWS: settings.import_rows_purge_interval_s,
         PURGE_RAW_FILES: settings.import_raw_purge_interval_s,
         VENDOR_SWEEP: 900,
+        RECOVER: 300,
     }
 
 
@@ -376,6 +401,22 @@ def slot_jobs(settings: Settings, now: dt.datetime) -> list[tuple[str, str, dict
         ),
         (PURGE_SNAPSHOTS, PURGE_SNAPSHOTS_TIME, {}, True),
     ]
+    if any(
+        dt.datetime.combine(bj.date(), _hhmm(h), BEIJING)
+        <= bj
+        < dt.datetime.combine(bj.date(), _hhmm(h), BEIJING) + dt.timedelta(seconds=SLOT_WINDOW_S)
+        for h in ("17:30", "18:30")
+    ):
+        from app.reports.service import covered
+
+        with _engine(settings).connect() as conn:
+            is_open = covered(conn, bj.date())
+        plan.extend(
+            [
+                (ANALYZE, "17:30", {"trade_date": str(bj.date())}, is_open),
+                (REPORT, "18:30", {"trade_date": str(bj.date())}, is_open),
+            ]
+        )
     out = []
     for task, hhmm, args, on_day in plan:
         start = dt.datetime.combine(bj.date(), _hhmm(hhmm), BEIJING)
@@ -402,6 +443,8 @@ def beat_slots(
     queued: list[str] = []
     try:
         for task, slot, args in slot_jobs(settings, now):
+            if task in {ANALYZE, REPORT}:
+                record_intent(settings, task, str(args["trade_date"]))
             if r.set(f"{SLOT_PREFIX}{task}:{slot}", 1, nx=True, ex=SLOT_TTL_S):
                 _push(r, task, args)
                 queued.append(task)

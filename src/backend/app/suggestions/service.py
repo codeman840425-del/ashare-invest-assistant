@@ -156,7 +156,9 @@ def archive(
         strategy = conn.execute(
             select(strategies).where(strategies.c.id == version.strategy_id)
         ).one()
-        if version.lifecycle not in {"published", "observing"}:
+        from app.strategy.runtime import runnable
+
+        if not runnable(version.lifecycle, user.role):
             raise AppError(
                 ErrorCode.STRATEGY_VERSION_NOT_RUNNABLE, details={"lifecycle": version.lifecycle}
             )
@@ -255,6 +257,8 @@ def archive(
                 "reason_ids": active,
             }
     body = assemble(content, candidates)
+    if any(c.lifecycle == "simulating" for c in content.conclusions):
+        body["explanation"]["text"] = "模拟中；不生成计划草案。" + body["explanation"]["text"]
     fingerprint = hashlib.sha256(
         json.dumps(
             {k: v for k, v in body.items() if k != "snapshot_id"},

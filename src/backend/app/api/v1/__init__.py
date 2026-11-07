@@ -11,6 +11,7 @@ from app.api.v1 import (
     auth,
     candidate_signals,
     candidates,
+    daily_reports,
     data_licence,
     health,
     horizon,
@@ -49,3 +50,6 @@ router.include_router(strategy_cards.router)
 router.include_router(candidate_signals.router)
 
 router.include_router(suggestions.router)
+
+
+router.include_router(daily_reports.router)

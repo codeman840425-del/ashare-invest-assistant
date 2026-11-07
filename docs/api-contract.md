@@ -752,6 +752,14 @@
 6. 暂停期间该实例不生成新的候选信号；已存在的候选信号状态不变。归档时如何处理仍开放的候选信号，见 v0.2.7 未决 Q5。
 7. 对 archived 实例 `PATCH` → `409 IMMUTABLE_RESOURCE`。
 8. `POST /strategy-instances` 创建的实例 `origin="user"`、直接为 `active`（与 v0.2.6 一致）；`proposed` 只由周期分类器产生（`origin="classifier"`）；`origin="system"` 只由系统挂载（如 H-01）。v0.2.8：**ETF 不能创建实例**——`scope="security"` 且证券为 ETF → `422 INSTANCE_SCOPE_INVALID{scope, security_code, security_type:"etf", issue:"security_type_not_supported"}`；`scope="account"`/`"watch_group"` 的实例运行时跳过其中的 ETF（不报错，不产生候选信号和建议）；周期分类器对 ETF 各周期判 0 分（HG1，规则不变），不产生 `proposed` 实例；H-01 不挂到 ETF 持仓。v0.2.8 补充（架构师裁定）：`scope="security"` 且 `security_code` 不在证券主数据中 → `422 INSTANCE_SCOPE_INVALID{scope, security_code, issue:"unknown_security"}`（不带 `security_type`）。
+9. **自愿模拟授权（T-B73 裁定，架构师 2026-11-07）**：本 MVP 不开放用户自愿参与模拟。
+   - 实际运行版本为 `simulating` 时：普通用户创建或 confirm/resume → `409 STRATEGY_VERSION_NOT_RUNNABLE{lifecycle:"simulating"}`；管理员可以创建，实例只做模拟跟踪，不生成计划草案。
+   - 系统挂载（`origin="system"`）只挂 `published`/`observing` 版本，不挂 `simulating` 版本。
+   - 以后开放自愿参与时，授权放在用户设置的 `simulation_opt_in`（布尔值，带 `opted_in_at`，用户本人开关，并写审计），列为 T-B79 后续项；本版不加字段，不加接口。
+10. **`watch_group` 选择器（T-B73 裁定）**：
+   - 选择器字段是 `watch_group_name: string | null`，对应 `watchlist_items.group_name`，按原样精确匹配。`scope="watch_group"` 时必填，其他 scope 必须为 `null`。
+   - 成员在每次求值时动态解析为本人 `removed_at is null` 的条目，ETF 自动跳过。组为空时允许创建，只是不产生候选。
+   - 本 MVP 不交付 watch_group 实例：`POST` 时 `scope="watch_group"` → `422 INSTANCE_SCOPE_INVALID{scope, issue:"scope_deferred"}`。实现、`StrategyInstance` 加 `watch_group_name`，以及迁移，都列入 T-B79。
 
 ### 6.1 不可执行原因码（`reason_code`，与 plan.md 2.5.9 一致；`GET /meta/enums` 下发，含默认解除条件）
 | code | 默认 `release_condition.kind` | `check_on` | 可手动解除 |

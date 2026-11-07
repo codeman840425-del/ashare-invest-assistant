@@ -586,7 +586,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 #### 2.5.0C 实例化要求 L2 → L3
 | 要求 | 内容 | 不满足时 |
 |---|---|---|
-| I1 | 模板版本状态为 `published` 或 `observing`（`simulating` 只允许管理员和自愿参与模拟的用户实例化，且不生成计划草案） | `STRATEGY_VERSION_NOT_RUNNABLE` |
+| I1 | 模板版本状态为 `published` 或 `observing`（`simulating` 只允许管理员和自愿参与模拟的用户实例化，且不生成计划草案；**MVP 只允许管理员实例化，自愿参与列入 T-B79，见契约 §6.0A 第 9 条**） | `STRATEGY_VERSION_NOT_RUNNABLE` |
 | I2 | 用户已批准（T-A06：不再要求风险测评或同意） | HTTP 层 `403 ACCOUNT_NOT_APPROVED` |
 | I3 | 所选周期在模板 `horizons` 内。周期分类判定“不适合”、或画像低于卡片适配下限（`fit`）时**只在响应 `warnings[]` 中提示，不需要确认、不阻止**（T-A06：`fit_ack` 作废，用户可自由选择 short 与 intraday_t）；画像相关字段未填写时不提示；画像不匹配**不降低置信度**（T006e） | `STRATEGY_HORIZON_MISMATCH` |
 | I4 | 参数覆盖都在 `min..max` 内；有覆盖时自动生成派生版本 | `STRATEGY_PARAM_OUT_OF_RANGE` |

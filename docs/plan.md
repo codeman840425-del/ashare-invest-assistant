@@ -116,6 +116,30 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 - **陈旧数据处理**：quote 的更新时间落后当前 > `stale_threshold_s` → `stale`；`stale` 时**不生成新建议、不触发翻转**，页面显示"行情延迟 N 秒"；连续 5 分钟失败 → 全站横幅 + 运维告警；停牌股标注"停牌"并跳过；午间休市与收盘后不刷新；15:00 后取一次收盘快照定版。
 - **分钟线衍生指标**：MA、区间高低、量比等由日 K（盘后）+ 当日 1 分钟 K 增量计算；Pro 1 分钟技术指标接口 `/hsstock/pro/history/{macd|ma|boll|kdj}/{code}/1/{fq}` 【文档已列·待 T003 验证】可用于盘后校验，盘中不依赖。
 - **幂等**：每轮有 `tick_id`（交易日+时间戳），唯一键 `user_id+code+trigger_kind+tick_id` 防重复生成建议/提醒。
+- **T-B60 补充裁定：事件与状态交接、遗留数据的证书归属（v0.2.9 内，架构师；对应 reports/T-B60.md 第 15–16 行；与本节、3.3 表定义冲突时以此为准）**：
+  1. **`market.updated` 报文**（Redis pub/sub 频道 `market.updated`，由 `ingest` 在写库提交后发布）：
+     - 格式：`{v: 1, licence_id, tick_id, dataset: "quotes"|"minute_bars"|"daily_bars"|"financials"|"announcements"|"security_master", codes: [...], quote_ts_max, published_at}`。
+     - `codes` 每条最多 500 个，超过就拆成多条，`tick_id` 相同。报文不带行情数值、证书值或用户信息，订阅方一律回库或缓存读数。
+     - `tick_id` = 本轮采集开始的北京时间，格式 `YYYYMMDD'T'HHMMSS`，可按字典序比较先后；同一证书同一轮的所有报文共用一个 `tick_id`。
+     - pub/sub 会丢消息：盘中超过 2 × `quote_interval_s` 没收到某证书的报文时，`signal-rt` 按该证书主动读一次最新的 `realtime_quotes`，`tick_id` 取库里最新行的那一轮。
+  2. **状态与事件写入**：
+     - 共享层按 `(source_licence_id, security_code, strategy_version_id, params_hash)` 维护 `signal_states`。`rule_states` 按规则记 `{rule_id: {value: true|false|unknown, pending_value, pending_count}}`；去抖“连续 2 轮成立才确认”就用 `pending_*` 实现，失效价类可配置为立即确认。
+     - 规则确认翻转时，在**同一事务**里：先 `UPDATE signal_states … WHERE last_tick_id IS NULL OR last_tick_id < :tick_id`，影响 0 行就视为过期或重复轮次，整轮放弃；影响 1 行再 `INSERT signal_events`。两步一起提交，不允许只写其中一个。
+     - `signal_events` 共享层唯一键 `(source_licence_id, security_code, strategy_version_id, params_hash, rule_id, tick_id)`，用户层唯一键沿用上一条的 `user_id+code+trigger_kind+tick_id`。为此 `signal_events` 新增列 `source_licence_id`（必填）、`strategy_version_id`、`params_hash`、`rule_id`（用户层可空）。
+  3. **存储与契约的对应**：表里的 `trigger_kind` 仍只取 4 个值；契约 `SignalEvent.kind`（`signal_kind`）存在 `detail.kind`，必填，取值必须属于 `signal_kind`。
+     - `flip`：取该规则在策略版本里声明的 `event_kind`（`breakout`、`breakdown`、`vwap_deviation`、`volume_spike`、`limit_up_touch`、`limit_down_touch`、`limit_open` 之一），没有声明的取 `rule_flip`。
+     - `invalidation`：`invalidation_near` 或 `stop_hit`。
+     - `stale`：行情变旧时取 `data_stale`；停牌时取 `suspended`，`detail.direction` 为 `suspended`。
+     - `resume`：从变旧恢复时取 `data_stale`，`detail.direction` 为 `recovered`；复牌时取 `suspended`，`detail.direction` 为 `resumed`。
+     - `detail` 的其他字段固定为 `{rule_id, strategy_key, price (decimal 字符串 | null), direction, candidate_signal_id | null}`。共享层的 `detail` 不得含用户 id、实例 id 或持仓信息。
+     - `/signals` 和 SSE `signal` 在读取时拼装：`instance_id` 按当前用户的 `strategy_instances`（相同 `strategy_version_id` 和 `params_hash`）补上；`message` 由服务端按 `kind` 的固定模板生成，并过禁用词校验。用户只能看到 `source_licence_id` 是本人证书的共享事件，加上自己的用户层事件。
+  4. **到候选信号的交接**：共享事件提交之后，另起事务按实例展开。对每个使用该 `(strategy_version_id, params_hash)`、且所属用户的证书就是 `source_licence_id` 的 `strategy_instance`，经过 T-B60 的主表保护（`run_with_master_guard`）和可执行性闸门后，写 `candidate_signals` 和 `candidate_signal_events`（`cause=executability_check`，`detail.signal_event_id` 指回事件）。`candidate_signals` 新增 `origin_signal_event_id`，唯一键 `(instance_id, origin_signal_event_id)`，保证重放幂等。单个实例失败只回滚这个实例，不回滚已提交的共享事件。
+  5. **遗留数据的证书归属**：
+     - `signal_states`、`signal_events`、`intraday_universe` 都加 `source_licence_id`（必填，FK → `ops.data_licences`）。唯一键改为：`signal_states` 用 `(source_licence_id, security_code, strategy_version_id, params_hash)`；`intraday_universe` 主键用 `(trade_date, source_licence_id, security_code)`。
+     - 遗留行不猜测归属，也不复制给每张证书：`signal_states`、`intraday_universe` 是可以重算的派生数据，迁移时记下行数后清空，下一个盘中时段按证书重建。
+     - `signal_events` 是只追加的历史：迁移先统计没有归属的行，为 0 时才加 NOT NULL 列；不为 0 时迁移报错停止（报出行数），交架构师裁定，不能在迁移里删除或编造归属。目前 `signal-rt` 是占位实现，预期为 0。
+     - `shared_cache` 模式（未获批，禁止启用）下同样写实际取数所用的证书，不写空值。
+  6. **T-B60 的验收顺序**：上面第 1–5 条落地，并且 T-B20、T-B22、T-B23 的实际组件（特征增量、规则求值、`intraday_universe`）接上之后，才签收 T-B60 的验收 ①–④。主表保护（9059bfb）可以先合入，但不算 T-B60 验收通过。
 
 ### 0A.4 建议生成：确定性规则 + 因子；LLM 只写解释（可选）
 1. **输入**：策略库中用户为该股票（或账户默认）启用的策略版本（见 2.5）+ 当时数据快照 + 用户画像版本 + 持仓状态 + 用户已有计划。

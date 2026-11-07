@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import uuid
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -37,6 +38,19 @@ def prepare(setup: Any) -> uuid.UUID:
     ids = [uuid.uuid4() for _ in range(5)]
     card, cv, template, version, instance = ids
     source = payload()
+    # Shift only generated dates to this synthetic replay day; never reuse an old close as current.
+    delta = dt.date(2026, 10, 30) - dt.date.fromisoformat(source["sessions"][-1])
+
+    def shift(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: shift(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [shift(item) for item in value]
+        if isinstance(value, str) and re.match(r"^\d{4}-\d{2}-\d{2}(?:T|$)", value):
+            return (dt.date.fromisoformat(value[:10]) + delta).isoformat() + value[10:]
+        return value
+
+    source = shift(source)
     factors = {
         r["security_code"]: r["factor"]
         for r in json.loads(
@@ -163,6 +177,7 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: An
         ).one()
         assert snapshot.items["engine_policy_version_no"] == 1
         assert snapshot.items["content_sha256"]
+        assert Decimal(snapshot.items["market_facts"]["price"]) > 0
         sid, cid = str(row.id), str(candidate.id)
     response = client.get("/api/v1/suggestions/" + sid)
     assert response.status_code == 200

@@ -302,4 +302,5 @@ def prepare(
         "gaps": sorted(set(missing)),
         "visible_dates": selected,
         "data_as_of": max(observations, default=None),
+        "raw_close": Decimal(str(bars[day]["close"])) if day in bars and not inactive else None,
     }

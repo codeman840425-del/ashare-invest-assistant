@@ -237,7 +237,7 @@ def conclusion(
     identifier = uuid.uuid5(uuid.NAMESPACE_URL, canonical(signature))
     signal = signal.model_copy(update={"snapshot_id": identifier})
     features = frame["features"]
-    price = frame["series"].get("f.close", [None])[-1] if frame["series"].get("f.close") else None
+    price = frame.get("raw_close")
     facts = MarketFacts(
         price=price,
         is_suspended=features.get("f.is_suspended"),

@@ -1,0 +1,137 @@
+# feature_catalog_meta.yaml — T-R17（依据：api-contract §7.4 T-A13 裁定，d67d2a9）
+# 覆盖范围：H-01、W-01 正式卡，以及 G-01、G-02、N-01 用到的全部 f.*（共 19 个键）；null 表示研究员暂未确定（契约允许）。
+# warmup_bars 指特征本身需要的历史根数，不包含卡内 ma(x,n) 等窗口。
+features:
+  - feature_key: f.amount
+    description: "当日成交额（元）"
+    dimension: "technical"
+    warmup_bars: 0
+    available_at: "d 盘后"
+    epistemic_type: "fact"
+    spec_ref: F19
+  - feature_key: f.ann_risk_count_10d
+    description: "近 10 个交易日命中风险关键词表的公告条数"
+    dimension: "news"
+    warmup_bars: 10
+    available_at: "次一交易日 09:30（D−1 晚间拉取后确定，D 日 09:30 生效）"
+    epistemic_type: null
+    spec_ref: F23
+  - feature_key: f.close_qfq
+    description: "前复权收盘价"
+    dimension: "technical"
+    warmup_bars: 0
+    available_at: "d 盘后"
+    epistemic_type: "fact"
+    spec_ref: F16
+  - feature_key: f.high_qfq
+    description: "前复权最高价"
+    dimension: "technical"
+    warmup_bars: 0
+    available_at: "d 盘后"
+    epistemic_type: "fact"
+    spec_ref: F17
+  - feature_key: f.ind_rs20
+    description: "所属行业 20 日相对强度"
+    dimension: "sector_market"
+    warmup_bars: 20
+    available_at: "d 盘后"
+    epistemic_type: "fact"
+    spec_ref: F27
+  - feature_key: f.is_delisting_period
+    description: "是否处于退市整理期"
+    dimension: null
+    warmup_bars: 0
+    available_at: "d 日 18:00 主数据拉取后，用于 d+1"
+    epistemic_type: "fact"
+    spec_ref: F15
+  - feature_key: f.is_st
+    description: "是否为 ST、*ST 或退市标记股票"
+    dimension: null
+    warmup_bars: 0
+    available_at: "d 日 18:00 主数据拉取后，用于 d+1"
+    epistemic_type: "fact"
+    spec_ref: F14
+  - feature_key: f.is_suspended
+    description: "当日是否停牌"
+    dimension: null
+    warmup_bars: 0
+    available_at: "d 盘后"
+    epistemic_type: "fact"
+    spec_ref: F49
+  - feature_key: f.limit_down_price
+    description: "当日跌停价（按 market_rules 生效段计算）"
+    dimension: null
+    warmup_bars: null
+    available_at: "d 日开盘前（基准价为前一交易日收盘后确定）"
+    epistemic_type: "fact"
+    spec_ref: F36
+  - feature_key: f.limit_locked_down
+    description: "当日是否一字跌停（收盘状态）"
+    dimension: null
+    warmup_bars: null
+    available_at: "d 日收盘后（15:05 快照定版）；盘中临时值不落本键"
+    epistemic_type: "fact"
+    spec_ref: F40
+  - feature_key: f.limit_locked_up
+    description: "当日是否一字涨停（收盘状态）"
+    dimension: null
+    warmup_bars: null
+    available_at: "d 日收盘后（15:05 快照定版）；盘中临时值不落本键"
+    epistemic_type: "fact"
+    spec_ref: F39
+  - feature_key: f.limit_up_price
+    description: "当日涨停价（按 market_rules 生效段计算）"
+    dimension: null
+    warmup_bars: null
+    available_at: "d 日开盘前（基准价为前一交易日收盘后确定）"
+    epistemic_type: "fact"
+    spec_ref: F35
+  - feature_key: f.list_days
+    description: "上市以来的交易日数"
+    dimension: "technical"
+    warmup_bars: 0
+    available_at: "d 日 18:00 主数据拉取后"
+    epistemic_type: "fact"
+    spec_ref: F13
+  - feature_key: f.low_qfq
+    description: "前复权最低价"
+    dimension: "technical"
+    warmup_bars: 0
+    available_at: "d 盘后"
+    epistemic_type: "fact"
+    spec_ref: F18
+  - feature_key: f.main_net_20d
+    description: "近 20 日主力资金净流入额（元）"
+    dimension: "capital"
+    warmup_bars: 20
+    available_at: "d 15:40 后"
+    epistemic_type: "fact"
+    spec_ref: F21
+  - feature_key: f.market_breadth
+    description: "全市场上涨家数占比"
+    dimension: null
+    warmup_bars: 0
+    available_at: "d 15:05 后"
+    epistemic_type: "fact"
+    spec_ref: F24
+  - feature_key: f.market_regime
+    description: "大盘状态（uptrend、range 或 downtrend）"
+    dimension: "sector_market"
+    warmup_bars: null
+    available_at: "d 盘后（指数日线与宽度到齐后）"
+    epistemic_type: null
+    spec_ref: F25
+  - feature_key: f.np_yoy_latest
+    description: "最新一期归母净利润同比增速"
+    dimension: "fundamental"
+    warmup_bars: null
+    available_at: "披露日（plrq）次一交易日 09:30"
+    epistemic_type: "fact"
+    spec_ref: F22
+  - feature_key: f.rsi14
+    description: "14 日相对强弱指标 RSI"
+    dimension: "sentiment"
+    warmup_bars: 28
+    available_at: "d 盘后"
+    epistemic_type: "fact"
+    spec_ref: F20

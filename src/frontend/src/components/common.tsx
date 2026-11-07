@@ -1,8 +1,8 @@
 import { useId, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
-import { Tag, Tooltip } from 'antd';
+import { Empty, Tag, Tooltip } from 'antd';
 import { Link } from 'react-router';
 import { ApiError } from '../api/client';
-import { LICENCE_ERROR_CODES, errorText } from '../api/errorPolicy';
+import { LICENCE_ERROR_CODES, ROUTE_PENDING_TEXT, errorText, isRoutePending } from '../api/errorPolicy';
 import type { Action, ConsensusStatus, DataStatus, TLeg } from '../api/enums';
 import type { Confidence, Gap } from '../api/types';
 import { ACTION_COLOR, ACTION_FULL, ACTION_SHORT, CONF_LEVEL, DATA_STATUS, GAP_REASON } from '../i18n/labels';
@@ -135,6 +135,8 @@ export function Loading({ text = '加载中…' }: { text?: string }) {
 
 /** 按错误码显示中文文案（评审 M2）；附错误码与 request_id 便于排查 */
 export function ErrorBox({ error, prefix = '加载失败' }: { error: unknown; prefix?: string }) {
+  // T-F20：后端还没注册的路由显示“开发中”空状态，不当作错误
+  if (isRoutePending(error)) return <Empty className="route-pending" data-testid="route-pending" image={Empty.PRESENTED_IMAGE_SIMPLE} description={ROUTE_PENDING_TEXT} style={{ margin: '48px auto' }} />;
   const e = error instanceof ApiError ? error : null;
   const fresh = e?.code === 'FRESH_DATA_REQUIRED';
   return (

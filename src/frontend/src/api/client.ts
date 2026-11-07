@@ -10,14 +10,17 @@ export class ApiError extends Error {
   readonly code: AnyErrorCode;
   readonly details: Record<string, unknown> | null;
   readonly requestId: string | null;
+  /** 发出请求的相对地址（含 /api/v1 与查询串），用于区分“路由未实现”的 404（T-F20）；测试里手工构造时可为 null */
+  readonly url: string | null;
 
-  constructor(status: number, code: string, message: string, details: Record<string, unknown> | null, requestId: string | null) {
+  constructor(status: number, code: string, message: string, details: Record<string, unknown> | null, requestId: string | null, url: string | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code as AnyErrorCode;
     this.details = details;
     this.requestId = requestId;
+    this.url = url;
   }
   /** 契约里登记过的码（未登记的码多半是前后端版本不一致） */
   get known(): boolean {
@@ -122,9 +125,9 @@ export async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DEL
   if (!res.ok) {
     if (isErrorBody(data)) {
       const e = data.error;
-      throw new ApiError(res.status, e.code, e.message, e.details, e.request_id ?? res.headers.get('X-Request-Id'));
+      throw new ApiError(res.status, e.code, e.message, e.details, e.request_id ?? res.headers.get('X-Request-Id'), rel);
     }
-    throw new ApiError(res.status, 'HTTP_ERROR', `HTTP ${res.status}`, null, res.headers.get('X-Request-Id'));
+    throw new ApiError(res.status, 'HTTP_ERROR', `HTTP ${res.status}`, null, res.headers.get('X-Request-Id'), rel);
   }
   const etag = method === 'GET' ? res.headers.get('ETag') : null;
   if (etag) etagCache.set(rel, { etag, data });

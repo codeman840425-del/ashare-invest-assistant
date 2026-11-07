@@ -17,7 +17,9 @@ async function enableMocks() {
   // 仅开发/示例构建：MSW Service Worker 拦截 /api/v1/*，返回按契约 v0.2.8 构造的示例数据
   const { network } = await import('virtual:msw');
   const { handlers } = await import('./mocks/handlers');
-  network.configure({ handlers });
+  // 示例场景（T-F20）：localStorage mock:route-pending=1 时模拟后端还没注册这些路由（404）
+  const pending = localStorage.getItem('mock:route-pending') === '1' ? (await import('./mocks/routePending')).routePendingHandlers() : [];
+  network.configure({ handlers: [...pending, ...handlers] });
   await network.enable();
 }
 

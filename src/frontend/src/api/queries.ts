@@ -1,6 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useStreamLive } from '../app/streamContext';
 import { apiGet, apiPost } from './client';
+import { isRoutePending } from './errorPolicy';
 import type {
   BarsResponse, CandidateSignal, DailyReport, DailyReportListItem, HorizonAssessment, Me, NonExecutableReason, Notification, Paged, Portfolio,
   SignalEvent, Suggestion, SuggestionListItem, TerminalResponse, TerminalScope, TodayResponse, UnreadCount,
@@ -117,10 +118,12 @@ export const useNotifications = () =>
 export const UNREAD_POLL_MS = 30_000;
 export const useUnreadCount = () => {
   const live = useStreamLive();
+  const pending = isRoutePending(useQueryClient().getQueryState(qk.unread)?.error);
   return useQuery({
     queryKey: qk.unread,
     queryFn: ({ signal }) => apiGet<UnreadCount>('/notifications/unread-count', undefined, signal),
-    refetchInterval: live ? false : UNREAD_POLL_MS,
+    // T-F20：路由未实现的 404 不再轮询（出错后本组件会重渲染，读到最新的 error）
+    refetchInterval: live || pending ? false : UNREAD_POLL_MS,
   });
 };
 

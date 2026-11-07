@@ -105,6 +105,27 @@ export function errorText(e: unknown): string {
   return (e as Error)?.message ?? String(e);
 }
 
+/**
+ * T-F20：后端尚未注册的路由。实测后端（src/backend/app/common/errors.py _http_exception_handler）把未注册路由的
+ * Starlette 404 转成与资源不存在完全相同的 `404 NOT_FOUND` 信封（message “资源不存在”），响应体无法区分。
+ * 因此只按“契约里不会返回资源 404 的集合 / 聚合端点”判断：这些路径（不带 id 段）上的 404 只可能是路由不存在。
+ * 带 account_id / security_code 的请求可能因归属或证券不存在而 404（契约 §7.2、#27），一律按原文案处理（保守）。
+ * 非信封的 404（如 FastAPI 默认 {"detail":"Not Found"} → HTTP_ERROR）在这些路径上同样算路由不存在。
+ */
+export const ROUTE_PENDING_PATHS: readonly string[] = [
+  '/today', '/daily-reports', '/notifications', '/notifications/unread-count', '/stream', '/suggestions', '/signals',
+  '/candidate-signals', '/terminal', '/strategies', '/strategy-instances', '/plans', '/market/overview',
+];
+export const ROUTE_PENDING_TEXT = '功能开发中，即将上线';
+export function isRoutePending(e: unknown): boolean {
+  if (!(e instanceof ApiError) || e.status !== 404 || !e.url) return false;
+  if (e.code !== 'NOT_FOUND' && e.code !== 'HTTP_ERROR') return false;
+  const u = new URL(e.url, 'http://x');
+  const path = u.pathname.replace(/^\/api\/v1/, '');
+  if (!ROUTE_PENDING_PATHS.includes(path)) return false;
+  return !u.searchParams.has('account_id') && !u.searchParams.has('security_code');
+}
+
 export type GlobalErrorAction = 'login' | 'csrf' | 'log' | 'none';
 
 /**

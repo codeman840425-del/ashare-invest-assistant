@@ -12,7 +12,7 @@
  * - 收到的每个事件记住 id，重连时以 `Last-Event-ID` 头带上（服务端保留最近 10 分钟，§8）；
  * - 心跳 15 秒一次（§8），超过 idleTimeoutMs（默认 45 秒，即 3 个心跳周期）没有任何字节视为断线，主动断开重连；
  * - 断线后按退避重连：首次 retryMs（服务端 `retry:` 字段优先），之后每次乘 2，封顶 maxRetryMs；连上后退避归零；
- * - 401/403 视为会话失效，停止重连（状态 closed）；其余失败都重连；
+ * - 401/403 视为会话失效，停止重连（状态 closed）；404 视为后端还没注册 /stream（T-F20，该端点没有资源 404），同样停止；其余失败都重连；
  * - 断线期间（connecting / retrying / closed）由调用方退回到轮询（§8：未读数、终端、首页 ≥ 15 秒）。
  */
 import { buildUrl, fetchUrl } from '../api/client';
@@ -98,7 +98,7 @@ export function startEventStream(opts: EventStreamOptions): EventStreamHandle {
     try {
       armIdle();
       const res = await (opts.fetchImpl ?? fetch)(url, { headers, credentials: 'same-origin', cache: 'no-store', signal: ctrl.signal });
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
         clearIdle();
         stopped = true;
         setState('closed');

@@ -931,14 +931,34 @@ evidence: Evidence[]
 | POST | `/strategy-cards/{id}/promotion-requests` 🔒 | 申请晋级，后台跑 G1–G6 → `202 {review_id}` |
 | GET | `/promotion-requests/{review_id}` 🔒 | `{decision: "pending"\|"approved"\|"rejected"\|"changes_requested", gate_results: [{gate: "G1".."G7", result: "pass"\|"fail"\|"warn"\|"skipped", detail}], fixture_runs: [{fixture_id, passed, diff}], g6_report: {trigger_rate: Stat, coverage: Stat, max_jaccard: string(decimal), quota_delta_per_min: int}}` |
 | GET | `/admin/promotions` 🛡 · POST `/admin/promotions/{review_id}/decision` 🛡 | 审核决定 `{decision, comment}`；G7 文案需通过禁用词校验，否则返回 `422 COMPLIANCE_LINT_FAILED{terms}` |
-| GET | `/feature-catalog` 🔒 | 只读，不分页：`[{feature_key, description, dimension, frequency, adjust, unit, warmup_bars, available_at, status: "declared"\|"verified_doc"\|"verified_live"\|"gap"\|"deprecated", epistemic_type}]` |
-| GET | `/strategies` 🔒 | L2 模板：`?horizon=&lifecycle=&security_code=`（反查适用的模板）`&risk_level=`（v0.2.7），§1.2 分页；元素 `{id, key, name（即其他对象中的 strategy_name）, horizons, risk_level: card_risk_level, current_version: {id, version_no, lifecycle}, health: {state, weight: string(decimal), n: int}}`。`risk_level` 取当前版本关联的 L1 卡片版本的值；未关联卡片时为 `normal`；派生版本继承母版本的值（v0.2.7） |
+| GET | `/feature-catalog` 🔒 | 只读，不分页：`[{feature_key, description, dimension, frequency, adjust, unit, warmup_bars, available_at, status: "declared"\|"verified_doc"\|"verified_live"\|"gap"\|"deprecated", epistemic_type}]`；T-A13：`description`、`dimension`、`warmup_bars`、`available_at`、`epistemic_type` 都可以为 `null`（研究员未提供时） |
+| GET | `/strategies` 🔒 | L2 模板：`?horizon=&lifecycle=&security_code=`（反查适用的模板）`&risk_level=`（v0.2.7），§1.2 分页；元素 `{id, key, name（即其他对象中的 strategy_name）, horizons, risk_level: card_risk_level, current_version: {id, version_no, lifecycle}, health: {state, weight: string(decimal), n: int} | null（T-A13：无健康记录时为 null）}`。`risk_level` 取当前版本关联的 L1 卡片版本的值；未关联卡片时为 `normal`；派生版本继承母版本的值（v0.2.7） |
 | GET | `/strategies/{id}/versions/{vid}` 🔒 | 不可变配置（2.5.14 C 节），加 `lifecycle`、`card_version_id`、`risk_level: card_risk_level`（v0.2.7，取该版本自身关联的卡片版本；未关联为 `normal`）、`param_hash`、`parent_version_id`、`internal_check: {done: boolean, method_types: ("factor_ic" \| "event_study" \| "param_robustness")[], checked_on: string(date) \| null}`（方案 A：用户只看到是否做过内部检验、方法类型和日期，**不含任何数值或通过与否**） |
 | POST | `/strategies/{id}/versions/{vid}/derive` 🔒 | 改参派生私有版本 `{param_overrides: object}` → `201 {version_id}`；可能返回 `422 STRATEGY_PARAM_OUT_OF_RANGE{param, min, max}` |
 | GET | `/strategies/{id}/versions/{vid}/tracking` 🔒 | `?scope=mine\|site`（默认 `mine`，v0.2.9）。`site` 为全站匿名汇总：只含策略级聚合数字，不含任何用户或个股持仓信息，只对登录用户在策略页展示（plan 第 9 节问题 14）。跟踪统计：`{scope: "mine"\|"site", by_horizon: [{horizon_days: 1\|5\|20, win_rate: Stat, avg_return_pct: Stat, avg_excess_pct: Stat, profit_loss_ratio: Stat, max_loss_streak: int}]}` |
 | GET | `/strategies/{id}/versions/{vid}/lifecycle-events` 🔒 | 生命周期历史 |
 | POST | `/admin/strategies/{id}/versions/{vid}/lifecycle` 🛡 | `{to: lifecycle, reason: string}` → `200 {from, to}`；可能返回 `409 INVALID_STATE_TRANSITION` 或 `422 PROMOTION_GATES_NOT_MET{gates}` |
 | GET | `/horizon-assessments?security_code=` 🔒 | 周期分类结果（版本化）：`{suitable: horizon[], scores: {intraday_t: int, short: int, swing: int, long: int}（四个都有，0–100，不为 null）, reasons: [TextWithEvidence & {horizon: horizon, polarity: "for" \| "against"}]（每个周期 2–4 条，`reasons_per_horizon`）, inputs_missing: string[], caps: HorizonCap[], hints: HorizonHint[], classifier_version: string, snapshot_id: string, evidence: Evidence[]}`（v0.2.2；v0.2.3 加 `caps`、`snapshot_id`、`evidence`；规则见 plan 6.1 `horizon_classifier.yaml`）。`reasons[].evidence_ids` 只在本响应的 `evidence[]` 中解析。`classifier_version` 匹配 `^(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$`（如 `"1.2.0"`）。`inputs_missing`：所有周期合计缺失的 feature_catalog 键（`f.*`），去重、升序，永不为 `null`，无缺失为 `[]`；画像未填（`profile.*`）不进此数组，也不封顶、不提示；画像已填写且不满足画像类规则时只进 `hints[]`（v0.2.5，永不为 null）。用户可自由为任何周期创建实例，不需要确认（plan 2.5.3）。**v0.2.9 内 T-B47 裁定**：`security_code` pattern `^(?:(?:SH\|SZ\|BJ\|sh\|sz\|bj)[0-9]{6}\|[0-9]{6}(?:\.(?:SH\|SZ\|BJ\|sh\|sz\|bj))?)$`（不符 → `400 VALIDATION_ERROR`）；格式合法但推断不出市场或不在证券主数据中 → `404 NOT_FOUND`。结果**落库**：读本人、该证券、当前 `classifier_version` 的最新一条 `symbol_horizon_assessments`（plan 3.3），若没有，或其输入快照的 `data_as_of` 早于库中该证券最新一根日线的日期，则同步计算一次并写入（`trigger=on_demand`）后返回；`snapshot_id` 是这条记录对应的 `data_snapshots.id`（`purpose='horizon'`，带本人 `user_id`，用到证书数据时带 `licence_id`），在库中可查到。同一输入重复请求返回同一条记录。**v0.2.9 #31（T-B46-47 前端待定，前端显示口径）**：某周期不在 `suitable` 中、`caps` 中有该周期 `kind="data_missing"` 的封顶、且**没有**该周期 `kind="gate"` 的封顶时，该周期显示“数据不足”（gate 优先：硬门槛已排除的周期不显示“数据不足”）；`suitable=[]` 且至少一个周期显示“数据不足”时整体显示“数据不足”，否则整体显示“—”；界面不出现“都不适合”。判定只用本响应的 `suitable` 与 `caps`，不用分数与阈值（plan 第 9 节问题 89） |
+
+**T-A13 裁定（架构师 2026-11-07，T-B71 MVP 最小方案）**：
+1. **`/strategies` 的 `health`** 类型改为 `{state, weight, n} | null`。版本还没有健康记录时（例如 draft，或刚进入 simulating）返回 `null`，不返回 `503`，也不造一个默认的 `published` 状态。前端显示“暂无健康度”。`/strategies/{id}` 等其他带 health 的地方同样处理。
+2. **feature 元数据放在哪**：放在 `feature_catalog` 表，增加三个可空列：`dimension`（2.5 节的六维枚举）、`warmup_bars int`、`epistemic_type`（§3 枚举）。
+   - `available_at` 直接序列化表里已有的 `pit_rule`，不另加列。
+   - `description` 复用已有列。
+   - 迁移由后端做，只加列，不回填猜测值。
+3. **缺省规则**：
+   - 研究员没有提供的字段，API 一律返回 `null`；`description` 缺失时返回 `null`，不拿 `feature_key` 代替。
+   - 不按工作日、数据源或频率去推断类型和预热长度，`503` 取消。
+   - 缺元数据不影响 G2 判定：G2 只看 `status` 和白名单。
+4. **内容来源**：研究员新增 `docs/strategies/feature_catalog_meta.yaml`，由 cards-import 写入上面这几列。MVP 只需覆盖 H-01、W-01，以及系统组件 G-01、G-02、N-01 用到的全部 `f.*`。每个键一条：
+   - `feature_key`
+   - `description`：中文一句话
+   - `dimension`：technical/capital/fundamental/sentiment/sector_market/news 之一
+   - `warmup_bars`：需要的历史根数，没有回看就填 0
+   - `available_at`：可得时点，例如“T 日 15:05 收盘定版后”或“公告日 plrq 次日”，与 feature_spec 的 PIT 口径一致
+   - `epistemic_type`：fact/estimate/hypothesis/execution 之一
+   - `spec_ref`：feature_spec 中的条目号，例如 F49
+
 
 ### 7.5 L3 实例、限制与风控
 | 方法 | 路径 | 说明 |

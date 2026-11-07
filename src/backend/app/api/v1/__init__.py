@@ -9,6 +9,7 @@ from app.api.v1 import (
     admin,
     aggregates,
     auth,
+    candidate_signals,
     candidates,
     data_licence,
     health,
@@ -43,3 +44,5 @@ router.include_router(instances.router)
 router.include_router(aggregates.router)
 
 router.include_router(strategy_cards.router)
+
+router.include_router(candidate_signals.router)

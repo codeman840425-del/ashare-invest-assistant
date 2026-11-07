@@ -1,0 +1,34 @@
+[
+  {
+    "security_code": "688018.SH",
+    "name": "Synthetic Alpha",
+    "qty": "1200",
+    "sellable_qty": "800",
+    "cash": "15234.56",
+    "price": "45.67"
+  },
+  {
+    "security_code": "688073.SH",
+    "name": "Synthetic Beta",
+    "qty": "3500",
+    "sellable_qty": "3500",
+    "cash": "9876.54",
+    "price": "12.34"
+  },
+  {
+    "security_code": "300364.SZ",
+    "name": "Synthetic Gamma",
+    "qty": "640",
+    "sellable_qty": "0",
+    "cash": "23456.78",
+    "price": "78.90"
+  },
+  {
+    "security_code": "301218.SZ",
+    "name": "Synthetic Delta",
+    "qty": "2750",
+    "sellable_qty": "1500",
+    "cash": "5432.10",
+    "price": "23.45"
+  }
+]

@@ -702,11 +702,21 @@
 `consensus.status`（v0.2.3）：0 个策略 → `none`；1 个 → `single`；≥ 2 个且各策略 `(action, t_leg)` 全部相同 → `unanimous`；否则 `divergent`。
 
 ### 5.3 日报（`DailyReport`，不可变）
-`{date: string(date), generated_at, account_id: uuid \| null, market: {regime: market_regime \| null, regime_position_range: {min_pct: string(decimal), max_pct: string(decimal)} \| null, breadth: {up: int, down: int, limit_up: int, limit_down: int} \| null, summary: TextWithEvidence[]}, account: {total_assets, cash, position_pct: string(decimal), pnl_day: string(decimal), position_vs_regime: "below" \| "within" \| "above" \| null} \| null, reconciliation: {status: reconciliation_status, as_of: string(datetime) \| null, diff_count: int, important_count: int}, stocks: [{security_code, name, close: string(decimal) \| null, change_pct: string(decimal) \| null, data_status: data_status, max_risk_level: risk_level \| null, suggestion_id: uuid \| null, suggestion: SuggestionSummary \| null, change_from_previous: "new" \| "changed" \| "unchanged" \| "removed", highlights: TextWithEvidence[], invalidation: TextWithEvidence[], next_watch: TextWithEvidence[]}], pending: {plan_drafts: int, active_reasons: int}, explanation: {source: "template" \| "llm", text: string, llm_call_id: string \| null}, evidence: Evidence[], DataStatusBlock}`。
+`{date: string(date), generated_at, account_id: uuid \| null, market: {regime: market_regime \| null, regime_position_range: {min_pct: string(decimal), max_pct: string(decimal)} \| null, breadth: {up: int, down: int, limit_up: int, limit_down: int} \| null, summary: TextWithEvidence[]}, account: {total_assets, cash, position_pct: string(decimal) | null, pnl_day: string(decimal) | null, position_vs_regime: "below" \| "within" \| "above" \| null} \| null, reconciliation: {status: reconciliation_status, as_of: string(datetime) \| null, diff_count: int, important_count: int}, stocks: [{security_code, name, close: string(decimal) \| null, change_pct: string(decimal) \| null, data_status: data_status, max_risk_level: risk_level \| null, suggestion_id: uuid \| null, suggestion: SuggestionSummary \| null, change_from_previous: "new" \| "changed" \| "unchanged" \| "removed", highlights: TextWithEvidence[], invalidation: TextWithEvidence[], next_watch: TextWithEvidence[]}], pending: {plan_drafts: int, active_reasons: int}, explanation: {source: "template" \| "llm", text: string, llm_call_id: string \| null}, evidence: Evidence[], DataStatusBlock}`。
 - `regime_position_range` 是该 regime 下的**参考仓位区间**（模板参数，取自风控 RC3 的 `regime_ranges`（plan 2.5.6、6.1 `config/risk_controls.yaml`：上行 60–90%、震荡 40–60%、下行 0–30%，用户可调）），不是指令；`position_vs_regime` 由当前仓位与区间比较得出。
 - 没有账户或未导入时 `account=null`、`reconciliation.status="not_imported"`。
 - `stocks[].close`/`change_pct` 为日报所属交易日的收盘价与涨跌幅（停牌或缺数据为 `null`）；`max_risk_level` 取该证券建议卡 `risk_flags` 的最高级别，无则 `null`（v0.2.3）。
 - `account.cash` 与全文其他 `cash`（如 `PlanDraft.user_context_snapshot.cash`）同义：由交割单与资金流水重建的现金余额；与 `/terminal` 的 `cash_available`（可用资金）不同（v0.2.3）。
+
+---
+
+### 5.4 T-A11：Phase 2 离线最小闭环的默认口径（v0.2.9 内）
+
+- 回放仅限隔离本地模拟环境：全合成输入、禁止外呼、按用户隔离快照与实例；无真实证书时快照 `licence_id=null`，不得伪造 active 证书或写入生产证书内共享信号状态。证据用既有 `provider=system`、`epistemic_type=hypothesis/estimate`，解释明确“模拟回放”；不新增 provider 枚举，不把虚构行情当 mairui 实测事实。生产证书不可用时仍按 §1.1 降级。仅管理员/自愿用户可使用 simulating 模板，永不生成计划草案。
+- 以 §7.7 为准：无原因的候选先为 open，解除后为 released；均只有用户显式 `POST /plan-drafts` 才进入 drafted，不自动生草案。hold/wait 不生成候选。此条优先于旧 plan §2.5.4 的自动草案描述。
+- 日报按 `(user_id, trade_date, revision)` 保存不可变版本；`GET /daily-reports/{date}` 取该日最新 ready/partial 完成版，列表每日期一条。构建中的新版不遮掉旧完成版；无完成版的日期详情返回 `404 NOT_FOUND`，由 `/today.daily_report` 表示 generating/not_yet。partial完成版在today映射 ready，缺口保留在日报/今日的相应结构，不能表示数据完整。
+- **可空性补充**：`DailyReport.account.pnl_day` 与 `/terminal.account.pnl_day` 明确为 `string(decimal) | null`（缺上日估值/当日资金流等计算基准时）；两者 `position_pct` 明确为 `string(decimal) | null`（资产分母不可用或≤0时）。缺值在已有 gaps 或今日 data_gaps 中按适用原因列出，不填伪0；`regime` 无来源时为 null，不默认为 range。其余字段沿用原定义，不以 account=null 隐藏已存在账户。
+- MVP聚合仍返回 §7.3 的全部必填字段；草案/提醒/计划未有记录时是空集合，unread_notifications 为实际通知表未读计数。尚未交付的全量 /plans、/notifications、/signals、/stream 留后续，不能用空壳200宣称对应业务已实现。
 
 ---
 

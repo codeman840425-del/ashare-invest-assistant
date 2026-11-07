@@ -5,7 +5,7 @@
 #   不带 q 的 /securities/* 不进搜索桶；/securities/* 的 200 / 429 / 502 都只带 Cache-Control: private, no-store（桩上游故意回 public）。
 # 反例：GET /api/v1/imports（列表）不进导入桶；dev 限流文件（limit_req_dry_run）下连发不触发 429、只记日志；超大请求体仍是 413（不被 429 盖住）。
 # 上游动态解析（T-O13，upstream 模式）：路由/前缀/参数/编码原样转发、/health/live 改写带参数、X-Request-Id 透传与重生成、
-# X-Real-IP 覆盖、方法透传与 405；桩上游删掉 → 502 走统一错误页、挂起 ≤ 5s（T-A04 ⑥⑦），换一个不同 IP 重建 → 不重启网关即恢复 200（静态 upstream 会一直 502）。
+# X-Real-IP 覆盖、方法透传与 405；桩上游删掉 → 502 或 504 走统一错误页（错误码与状态对应）、挂起 ≤ 5s（T-A04 ⑥⑦），换一个不同 IP 重建 → 不重启网关即恢复 200（静态 upstream 会一直 502）。
 # 不连真实后端、不读任何密钥；容器/网络结束即删。用法：scripts/ci/nginx_limits_smoke.sh [prod|dev|upstream|both]（默认 both = 三者）
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -144,24 +144,39 @@ PY
   curl -s -o /dev/null -D "$h" -X TRACE "$base/other"
   grep -q '^HTTP/1.1 405' "$h" && grep -qi '^Allow: GET, HEAD' "$h" && ! grep -qi '^X-Stub' "$h" && ok "TRACE 非 /api/ → 网关自答 405 + Allow" \
     || bad "TRACE 非 /api/：$(head -1 "$h")"
-  # 上游换 IP：删桩 → 502；占位容器先占掉旧 IP，再重建桩 → 新 IP；网关不重启，应在 resolver valid（10s）内恢复
+  # 上游换 IP：删桩 → 502 或 504（错误码与状态对应）；占位容器先占掉旧 IP，再重建桩 → 新 IP；网关不重启，应在 resolver valid（10s）内恢复
   local old new code t
   old="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$id-api")"
   docker rm -f "$id-api" >/dev/null
   # 网关断开了外部 DNS（--dns 127.0.0.1）：名字查不到 → nginx 自己 502，不会被宿主 DNS 解析到外部地址
   # （以前在给未知名字假 IP 的宿主上，这里会是出口代理的应答）。
   # 紧接着删桩发请求：仍在 resolver valid=10s 缓存窗口内，连的是旧 IP（T-A04 ⑥⑦：proxy_connect_timeout 3s，挂起应约 ≤ 3 秒）
-  local tt
+  local tt err post post_err
   read -r code tt < <(curl -s -o "$work/50x.json" -D "$h" -w '%{http_code} %{time_total}\n' --max-time 30 "$base/health/live")
-  [ "$code" = 502 ] && ! grep -qi '^X-Stub' "$h" && ok "上游删除 → 502（不再连旧 IP，也没有解析到外部）" || bad "上游删除后是 $code（应为网关 502）"
+  # 删桩后仍可能命中 resolver 缓存里的旧 IP：拒绝连接是 502，不应答 SYN 是 504。两者都合规，错误码必须与状态对应。
+  case "$code" in
+    502) err=GATEWAY_UPSTREAM_UNAVAILABLE ;;
+    504) err=GATEWAY_UPSTREAM_TIMEOUT ;;
+    *) err= ;;
+  esac
+  [ -n "$err" ] && ! grep -qi '^X-Stub' "$h" \
+    && ok "上游删除 → $code（不再连旧 IP，也没有解析到外部）" \
+    || bad "上游删除后是 $code（应为网关 502 或 504，且无 X-Stub）"
   awk -v t="$tt" 'BEGIN{exit !(t <= 5)}' && ok "上游删除后请求挂起 ${tt}s（≤ 5s，proxy_connect_timeout 3s）" || bad "上游删除后请求挂起 ${tt}s（> 5s）"
-  grep -q '"code":"GATEWAY_UPSTREAM_UNAVAILABLE"' "$work/50x.json" && grep -qi '^X-Request-Id: .' "$h" && cc_only "$h" \
+  [ -n "$err" ] && grep -q '"code":"'"$err"'"' "$work/50x.json" && grep -qi '^X-Request-Id: .' "$h" && cc_only "$h" \
     && grep -qi '^Content-Type: application/json' "$h" \
-    && ok "502 走统一错误页（JSON 信封 GATEWAY_UPSTREAM_UNAVAILABLE + X-Request-Id + private, no-store）" \
-    || bad "502 没走统一错误页：$(head -c 200 "$work/50x.json")"
+    && ok "$code 走统一错误页（JSON 信封 $err + X-Request-Id + private, no-store）" \
+    || bad "$code 没走统一错误页：$(head -c 200 "$work/50x.json")"
   curl -s -o "$work/50x.json" -D "$h" -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/v1/auth/login"
-  grep -q '^HTTP/1.1 502' "$h" && grep -q '"code":"GATEWAY_UPSTREAM_UNAVAILABLE"' "$work/50x.json" \
-    && ok "POST 的 502 同样走统一错误页（状态码保留）" || bad "POST 502：$(head -1 "$h" | tr -d '\r')"
+  # 按这一次 POST 的实际状态核对，不沿用上面 GET 的结果；状态行原样保留（只有 502/504 通过）。
+  post="$(awk 'NR==1{print $2}' "$h" | tr -d '\r')"
+  case "$post" in
+    502) post_err=GATEWAY_UPSTREAM_UNAVAILABLE ;;
+    504) post_err=GATEWAY_UPSTREAM_TIMEOUT ;;
+    *) post_err= ;;
+  esac
+  [ -n "$post_err" ] && grep -q '^HTTP/1.1 '"$post" "$h" && grep -q '"code":"'"$post_err"'"' "$work/50x.json" \
+    && ok "POST 的 $post 同样走统一错误页（状态码保留）" || bad "POST ${post:-无}：$(head -1 "$h" | tr -d '\r') $(head -c 160 "$work/50x.json")"
   curl -s -o /dev/null -D "$h" "$base/api/v1/securities/search?q=1"
   grep -q '^HTTP/1.1 50[24]' "$h" && cc_only "$h" && ok "上游删除时 /securities/* 的网关 50x 也带 private, no-store" \
     || bad "/securities/* 50x：$(head -1 "$h" | tr -d '\r')，$(grep -i '^Cache-Control' "$h" | tr -d '\r' || echo 无 Cache-Control)"

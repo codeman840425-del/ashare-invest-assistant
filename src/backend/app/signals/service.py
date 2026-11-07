@@ -243,7 +243,9 @@ def write_candidate(
         raise AppError(ErrorCode.NOT_FOUND)
     if version.lifecycle not in {"published", "observing"}:
         return {"id": None, "diagnostic": "version_not_runnable"}
-    declared_rules = {rule["id"]: rule for rule in version.config.get("spec", {}).get("rules", [])}
+    declared_rules = {
+        rule["id"]: rule for rule in version.config.get("spec", version.config).get("rules", [])
+    }
     if not declared_rules:
         return {"id": None, "diagnostic": "version_rules_not_defined"}
     for reference in content.rule_refs:

@@ -17,6 +17,7 @@ from app.schemas.enums import (
     StrategyEvalState,
 )
 from app.signals.models import Gap, Model, RuleRef, SignalInput, TextEvidence
+from app.suggestions.confidence import ConfidenceComponents
 
 
 class DimensionConclusion(Model):
@@ -40,6 +41,9 @@ class Conclusion(Model):
     priority_weight: Decimal = Field(ge=0)
     priority_downweighted: bool
     dimension_views: list[DimensionConclusion]
+    confidence_components: ConfidenceComponents | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
     reasons: list[TextEvidence]
 
     @model_validator(mode="after")
@@ -65,6 +69,7 @@ class Conclusion(Model):
 
 
 class SuggestionInput(Model):
+    engine_policy_id: uuid.UUID | None = Field(default=None, exclude_if=lambda v: v is None)
     security_code: str = Field(pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$")
     snapshot_id: uuid.UUID
     feature_set_version: str = Field(min_length=1)

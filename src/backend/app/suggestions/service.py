@@ -47,6 +47,7 @@ def view(row: Any) -> dict[str, Any]:
         raise AppError(ErrorCode.MAINTENANCE, details={"issue": "suggestion_view_not_available"})
     return {
         **body,
+        "engine_policy": body.get("engine_policy"),
         "id": str(row.id),
         "status": row.status,
         "origin": row.origin,
@@ -63,7 +64,10 @@ def summary(row: Any) -> dict[str, Any]:
     return {key: body[key] for key in ["id", "security_code", "name", "created_at", "status"]} | {
         "consensus": body["consensus"]["status"],
         "actions": [
-            {key: s[key] for key in ["strategy_key", "strategy_name", "action", "t_leg"]}
+            {
+                key: s[key]
+                for key in ["strategy_key", "strategy_name", "action", "t_leg", "lifecycle"]
+            }
             for s in body["strategies"]
         ],
         "executability_status": body["executability"]["status"],
@@ -257,6 +261,26 @@ def archive(
                 "reason_ids": active,
             }
     body = assemble(content, candidates)
+    body["engine_policy"] = None
+    if content.engine_policy_id is not None:
+        from app.db.tables.strategy import engine_policies
+        from app.suggestions.confidence import ConfidenceComponents
+
+        policy = conn.execute(
+            select(engine_policies).where(engine_policies.c.id == content.engine_policy_id)
+        ).one()
+        for conclusion in content.conclusions:
+            ConfidenceComponents.model_validate(conclusion.confidence_components)
+            source = owned_snapshot(conn, user_id, conclusion.signal.snapshot_id)
+            if (
+                source.items.get("engine_policy_version_no"),
+                source.items.get("content_sha256"),
+            ) != (policy.version_no, policy.config["content_sha256"]):
+                raise ValueError("candidate_policy_snapshot_mismatch")
+        body["engine_policy"] = {
+            "version_no": policy.version_no,
+            "content_sha256": policy.config["content_sha256"],
+        }
     if any(c.lifecycle == "simulating" for c in content.conclusions):
         body["explanation"]["text"] = "模拟中；不生成计划草案。" + body["explanation"]["text"]
     fingerprint = hashlib.sha256(
@@ -328,6 +352,7 @@ def archive(
             status="active",
             origin=origin,
             snapshot_id=content.snapshot_id,
+            engine_policy_id=content.engine_policy_id,
             strategy_version_ids=[c.strategy_version_id for c in content.conclusions],
             holding_context={"input_hash": fingerprint, "suggestion_view": body},
             explanation_text=body["explanation"]["text"],

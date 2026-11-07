@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import Connection, insert, select, text, true, update
+from sqlalchemy import Connection, Row, insert, select, text, true, update
 
 from app.aggregates.service import select_account
 from app.api.v1.portfolio import _account
 from app.config import Settings
 from app.db.tables.market import securities
 from app.db.tables.realtime import pipeline_runs
+from app.db.tables.research import watchlist_items
 from app.db.tables.reviews import data_snapshots
 from app.db.tables.strategy import (
     feature_catalog,
@@ -22,10 +24,12 @@ from app.db.tables.strategy import (
     strategy_versions,
 )
 from app.db.tables.users import users
+from app.engine_policies import latest as latest_policy
 from app.features.evaluation import evaluate_snapshot
 from app.replay.baseline import VERSION, require_isolated
 from app.reports.service import build, canonical, covered
 from app.strategy.runtime import runnable
+from app.workers.assembly import archive_conclusions, conclusion
 
 ANALYZE = "daily_analysis"
 REPORT = "daily_report"
@@ -34,8 +38,24 @@ BEIJING = dt.timezone(dt.timedelta(hours=8))
 
 
 def analyze(
-    conn: Connection, settings: Settings, owner: uuid.UUID, date: dt.date, role: str
+    conn: Connection,
+    settings: Settings,
+    owner: uuid.UUID,
+    date: dt.date,
+    role: str,
+    policy: Row[Any] | None = None,
 ) -> dict[str, Any]:
+    conn.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:owner,74))"), {"owner": str(owner)}
+    )
+    assembled: dict[str, list[Any]] = {}
+    watches = set(
+        conn.execute(
+            select(watchlist_items.c.security_code).where(
+                watchlist_items.c.user_id == owner, watchlist_items.c.removed_at.is_(None)
+            )
+        ).scalars()
+    )
     account_id = select_account(conn, owner, None)
     account = _account(conn, account_id, date) if account_id else None
     positions = account.positions if account else {}
@@ -50,6 +70,8 @@ def analyze(
     if not instances:
         issues.append("active_instances_missing")
     for instance in instances:
+        if instance.account_id != account_id:
+            continue
         version = conn.execute(
             select(strategy_versions)
             .join(strategies, strategies.c.id == strategy_versions.c.strategy_id)
@@ -105,10 +127,10 @@ def analyze(
             for row in conn.execute(select(feature_catalog.c.feature_key, feature_catalog.c.unit))
         }
         codes = (
-            sorted(positions)
+            sorted(set(positions) | watches)
             if instance.scope == "account" and instance.account_id == account_id
             else [instance.security_code]
-            if instance.scope == "security" and instance.security_code in positions
+            if instance.scope == "security" and instance.security_code in set(positions) | watches
             else []
         )
         for code in codes:
@@ -120,7 +142,18 @@ def analyze(
             if security is None or security.type != "stock" or security.listing_status != "listed":
                 issues.append("security_not_eligible:" + code)
                 continue
-            position = positions[code]
+            position = positions.get(code)
+            spec = copy.deepcopy(version.config.get("spec", version.config))
+            for key, value in (instance.param_overrides or {}).items():
+                if key not in spec["params_schema"]:
+                    raise ValueError("instance_parameter_not_declared")
+                spec["params_schema"][key]["default"] = value
+            instrument = next(
+                (i for i in source.items["instruments"] if i["security_code"] == code), None
+            )
+            if instrument is None:
+                issues.append("owned_source_security_missing:" + code)
+                continue
             result = evaluate_snapshot(
                 conn,
                 user_id=owner,
@@ -128,11 +161,17 @@ def analyze(
                 security_code=code,
                 as_of=dt.datetime.combine(date, dt.time(17, 30), BEIJING),
                 card=card,
-                spec=version.config.get("spec", version.config),
+                spec=spec,
                 registry=registry,
                 market_rules=settings.business.market_rules,
-                factors=[],
-                holding={"qty": position.qty, "sellable": position.sellable},
+                factors=instrument.get("factors", []),
+                scalars=instrument.get("scalars", []),
+                lots=instrument.get("lots", []),
+                entry=instrument.get("entry"),
+                holding={
+                    "qty": position.qty if position else 0,
+                    "sellable": position.sellable if position else 0,
+                },
             )
             evaluations.append(
                 {
@@ -147,10 +186,40 @@ def analyze(
                     "gaps": result["gaps"],
                 }
             )
-            # RuleEvaluator currently has no complete P1 confidence/stops/dimension
-            # output. Never fake those required fields to force archive admission.
-            issues.append("p1_conclusion_assembler_missing:" + code)
-    return {"issues": sorted(set(issues)), "evaluations": evaluations, "bindings": bindings}
+            if policy is None:
+                issues.append("engine_policy_seed_missing:" + code)
+                continue
+            strategy = conn.execute(
+                select(strategies).where(strategies.c.id == version.strategy_id)
+            ).one()
+            produced = conclusion(
+                conn,
+                owner=owner,
+                instance=instance,
+                version=version,
+                strategy=strategy,
+                result=result,
+                registry=registry,
+                source=source,
+                policy=policy,
+                settings=settings,
+            )
+            assembled.setdefault(code, []).append(produced)
+    archives = (
+        [archive_conclusions(conn, owner, code, rows, policy) for code, rows in assembled.items()]
+        if policy is not None
+        else []
+    )
+    for entry in archives:
+        if entry["suggestion"]["gaps"]:
+            issues.append("evaluated_input_gaps:" + entry["suggestion"]["security_code"])
+    return {
+        "issues": sorted(set(issues)),
+        "evaluations": evaluations,
+        "bindings": bindings,
+        "suggestion_ids": [entry["suggestion"]["id"] for entry in archives],
+        "engine_policy_id": str(policy.id) if policy else None,
+    }
 
 
 def phase(settings: Settings, phase: str, trade_date: str, user_id: str | None = None) -> int:
@@ -204,12 +273,15 @@ def phase(settings: Settings, phase: str, trade_date: str, user_id: str | None =
                 .order_by(users.c.id)
             ).all()
             conn.commit()
+            # Freeze once for every owner in this job; later seeds do not change it mid-run.
+            policy = latest_policy(conn)
+            conn.commit()
             outcomes: dict[str, Any] = {}
             for owner in owners:
                 with conn.begin():
                     if phase == ANALYZE:
                         outcomes[str(owner.id)] = analyze(
-                            conn, settings, owner.id, date, owner.role
+                            conn, settings, owner.id, date, owner.role, policy
                         )
                     elif phase == REPORT:
                         outcomes[str(owner.id)] = {

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
-from sqlalchemy import Connection, insert, select, text
+from sqlalchemy import Connection, Row, insert, select, text
 
 from app.db.tables.strategy import engine_policies
 
@@ -95,6 +95,18 @@ def load(directory: Path) -> EnginePolicyReference:
     return EnginePolicyReference.model_validate(
         load_reference_file(directory, "engine_policy.yaml").model_dump()
     )
+
+
+def latest(conn: Connection) -> Row[Any] | None:
+    row = conn.execute(
+        select(engine_policies).order_by(engine_policies.c.version_no.desc()).limit(1)
+    ).first()
+    if row is not None:
+        content = {k: v for k, v in row.config.items() if k != "content_sha256"}
+        reference = EnginePolicyReference.model_validate({"version_no": row.version_no, **content})
+        if reference.digest() != row.config.get("content_sha256"):
+            raise ValueError("engine_policy_stored_hash_invalid")
+    return row
 
 
 def main() -> None:

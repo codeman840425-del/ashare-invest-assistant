@@ -101,6 +101,7 @@ class RuleEvaluator:
             "feature_set_version": frame["feature_set_version"],
             "as_of": frame["as_of"],
             "columns": {key: column.value for key, column in columns.items()},
+            "frame": frame,
         }
 
 

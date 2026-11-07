@@ -72,7 +72,18 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
             )
         ).scalars()
     )
-    codes = sorted(set(positions) | watches)
+
+    def ordering(code: str) -> tuple[int, bool, Decimal, str]:
+        position = positions.get(code)
+        price = position.price if position else None
+        return (
+            0 if position else 1,
+            price is None if position else False,
+            -(position.qty * price) if position is not None and price is not None else Decimal(0),
+            code,
+        )
+
+    codes = sorted(set(positions) | watches, key=ordering)
     master = {
         row.code: row
         for row in conn.execute(select(securities).where(securities.c.code.in_(codes)))
@@ -195,6 +206,28 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
         )
         if ids and ids == attributed:
             own.setdefault(row.security_code, row)
+    report_evidence = [
+        dict(e, id=row.security_code + ":" + e["id"])
+        for row in own.values()
+        for e in (row.evidence or [])
+    ]
+
+    def text_items(row: Any, key: str, limit: int | None = None) -> list[dict[str, Any]]:  # noqa: ANN401
+        found: dict[str, dict[str, Any]] = {}
+        for strategy in (row.strategies or []) if row else []:
+            for item in strategy.get(key, []):
+                fingerprint = canonical({"text": item["text"], "expr": item.get("expr")})
+                renamed = [
+                    row.security_code + ":" + identifier for identifier in item["evidence_ids"]
+                ]
+                if fingerprint in found:
+                    found[fingerprint]["evidence_ids"] = list(
+                        dict.fromkeys(found[fingerprint]["evidence_ids"] + renamed)
+                    )
+                else:
+                    found[fingerprint] = {**item, "evidence_ids": renamed}
+        return list(found.values())[:limit]
+
     stocks: list[dict[str, Any]] = []
     for code in codes:
         suggestion = own.get(code)
@@ -220,8 +253,8 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
                 "suggestion": summary(suggestion) if suggestion else None,
                 "change_from_previous": None,
                 "change_fields": [],
-                "highlights": [],
-                "invalidation": [],
+                "highlights": text_items(suggestion, "reasons", 3),
+                "invalidation": text_items(suggestion, "invalidation"),
                 "next_watch": [],
             }
         )
@@ -258,7 +291,7 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
             "text": "缺口日报；不代表正式卡或真实闭环验收通过。",
             "llm_call_id": None,
         },
-        "evidence": [],
+        "evidence": report_evidence,
         "data_status": "partial",
         "data_as_of": None,
         "gaps": gaps,

@@ -17,7 +17,7 @@ def assemble(content: SuggestionInput, candidates: dict[str, dict[str, Any]]) ->
     flags: list[dict[str, Any]] = []
     blocks = []
     for conclusion in sorted(content.conclusions, key=lambda c: str(c.instance_id)):
-        row = conclusion.model_dump(mode="json", exclude={"signal"})
+        row = conclusion.model_dump(mode="json", exclude={"signal", "confidence_components"})
         raw = conclusion.signal.model_dump(mode="json")
         # A suggestion merges evidence namespaces from different source snapshots.
         # Prefixing references avoids confusing two unrelated local E1 observations.
@@ -32,6 +32,8 @@ def assemble(content: SuggestionInput, candidates: dict[str, dict[str, Any]]) ->
         )
         row["action"] = raw["proposed_action"]
         row["confidence"]["value"] = float(row["confidence"]["value"])
+        if conclusion.confidence_components is not None:
+            row["confidence"]["components"] = conclusion.confidence_components.model_dump()
         for key in ["rule_refs", "model_refs", "counter_evidence", "invalidation"]:
             row[key] = [reference(value) for value in raw[key]]
         row["reasons"] = [reference(value) for value in row["reasons"]]

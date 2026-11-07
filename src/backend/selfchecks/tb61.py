@@ -773,6 +773,24 @@ def main() -> int:
             == dt.datetime(2026, 11, 2, 23, 30, tzinfo=dt.UTC),
             "18:00批次截止次日07:30北京时间",
         )
+        for started, expected in [
+            (
+                dt.datetime(2026, 11, 6, 11, tzinfo=dt.UTC),
+                dt.datetime(2026, 11, 6, 23, 30, tzinfo=dt.UTC),
+            ),
+            (
+                dt.datetime(2026, 11, 7, 0, tzinfo=dt.UTC),
+                dt.datetime(2026, 11, 9, 10, tzinfo=dt.UTC),
+            ),
+            (
+                dt.datetime(2026, 11, 8, 22, tzinfo=dt.UTC),
+                dt.datetime(2026, 11, 9, 10, tzinfo=dt.UTC),
+            ),
+        ]:
+            check(
+                deadline_for(started, "manual") == expected,
+                "手动对账截止时间与既有slot_jobs工作日/次日补拉排程一致",
+            )
         clock[0] += dt.timedelta(days=15)
         check(
             jobs.purge_snapshots_task(settings) > 0, "真实purge_snapshots任务一并清理14天前批次行"

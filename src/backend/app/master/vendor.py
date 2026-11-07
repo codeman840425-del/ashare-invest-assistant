@@ -30,13 +30,17 @@ def deadline_for(started: dt.datetime, trigger: str) -> dt.datetime:
         hour, minute = 7, 30
     elif trigger == "beat_0730":
         hour, minute = 18, 0
-    elif bj.time() < dt.time(7, 30):
-        hour, minute = 7, 30
-    elif bj.time() < dt.time(18):
-        hour, minute = 18, 0
     else:
-        day += dt.timedelta(days=1)
-        hour, minute = 7, 30
+        # manual 的“下一次计划时间”沿用 jobs.slot_jobs：工作日傍晚、次日补拉。
+        # 不把周一早间、周六傍晚或周日不存在的钟点当作截止时刻。
+        for offset in range(8):
+            target = day + dt.timedelta(days=offset)
+            wd = target.weekday()
+            for hour, minute, enabled in ((7, 30, 1 <= wd <= 5), (18, 0, wd <= 4)):
+                candidate = dt.datetime.combine(target, dt.time(hour, minute), BEIJING)
+                if enabled and candidate > bj:
+                    return candidate.astimezone(dt.UTC)
+        raise RuntimeError("未找到下一次既有主数据计划时段")
     return dt.datetime.combine(day, dt.time(hour, minute), BEIJING).astimezone(dt.UTC)
 
 

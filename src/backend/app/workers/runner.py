@@ -30,6 +30,9 @@ def alive_file(name: str) -> Path:
 def run(name: str, tick: Tick | None = None, interval_s: float = ALIVE_INTERVAL_S) -> int:
     """常驻运行直到收到 SIGTERM / SIGINT；返回进程退出码。"""
     settings = get_settings()  # 与 api 相同：配置有未知键 / 缺文件时直接失败
+    from app.db.migration_check import check_startup
+
+    check_startup(settings)
     configure_logging(settings.log_level)
     log = logging.getLogger(f"app.workers.{name}")
     stop = threading.Event()

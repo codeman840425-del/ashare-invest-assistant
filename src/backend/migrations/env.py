@@ -19,12 +19,16 @@ from logging.config import fileConfig
 from typing import Any
 
 from alembic import context
+from alembic.script import ScriptDirectory
 from sqlalchemy import engine_from_config, pool
 
 import app.db.tables  # noqa: F401  导入全部表
 from app.db.base import SCHEMAS, metadata
+from app.db.migration_check import require_database_mainline, require_single_head
 
 config = context.config
+mainline_script = ScriptDirectory.from_config(config)
+require_single_head(mainline_script)
 if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
@@ -100,6 +104,8 @@ def run_migrations_online() -> None:
     section["sqlalchemy.url"] = _database_url()
     connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
+        with connection.begin():
+            require_database_mainline(connection, mainline_script, allow_empty=True)
         context.configure(connection=connection, **_configure_kwargs())
         with context.begin_transaction():
             context.run_migrations()

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -22,6 +24,7 @@ from app.common.middleware import (
 )
 from app.config import ConfigError, Settings, get_settings
 from app.config_files import BUSINESS_FILES
+from app.db.migration_check import check_startup
 from app.licences.keys import PRIVATE_KEYS_NAME, private_keys_present
 from app.version import APP_VERSION
 
@@ -47,7 +50,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # plan §2.1B（T-A07）：证书解密私钥只能注入 ingest；api 进程看到私钥即拒绝启动
         raise ConfigError(f"api 不得持有 {PRIVATE_KEYS_NAME}（只给 ingest）")
 
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        check_startup(cfg)
+        yield
+
     app = FastAPI(
+        lifespan=lifespan,
         title="ashare-invest-assistant API",
         version=APP_VERSION,
         openapi_url=f"{cfg.api_prefix}/openapi.json",

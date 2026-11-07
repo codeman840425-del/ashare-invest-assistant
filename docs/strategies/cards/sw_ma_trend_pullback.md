@@ -77,6 +77,8 @@ data_needs:
   - {feature_key: f.ind_rs20, frequency: daily, adjust: none, available_at: T 日盘后}
 epistemic:
   hypothesis: hypothesis
+  params_schema.ma_fast: hypothesis
+  params_schema.ma_slow: hypothesis
   params_schema.trend_days: hypothesis
   params_schema.pullback_pct: hypothesis
   params_schema.max_dd_from_high: hypothesis

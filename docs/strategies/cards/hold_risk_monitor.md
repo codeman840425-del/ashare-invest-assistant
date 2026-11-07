@@ -63,6 +63,7 @@ epistemic:
   params_schema.cost_atr_k: hypothesis
   params_schema.ma_long: hypothesis
   params_schema.ma_break_days: hypothesis
+  params_schema.reclaim_days: hypothesis
   params_schema.single_cap: estimate
   params_schema.sector_cap: estimate
 universe:

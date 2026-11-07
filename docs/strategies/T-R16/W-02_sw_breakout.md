@@ -1,6 +1,8 @@
 # W-02 收敛放量突破 `sw_breakout` — 知识卡 v1（T-R16 首批）
 
-> **标签：可进入模板**（所用特征均在 feature_spec 中已注册；DSL 已按白名单复核）。有 1 项待定：“跌回突破位”需要入场时记录突破位，契约里没有对应的 qfq 键，暂以入场价近似。初稿来自 DeepSeek（`team/reports/deepseek/T-R16/W-02.md`，未核实草稿），本文为复核后版本。阈值均为 hypothesis；来源：通用规则组合，无外部来源；不含收益数字。
+> **当前状态：不可导入**（83a66cd 裁定：本批不补卡/golden，实现 MVP 后再议；文中做T配对、null 与组合约束、新特征等“待定”项一律暂停）。下文“可进入模板”仅表示未来潜力。
+
+> **标签：未来可进入模板，当前不可导入**（所用特征均在 feature_spec 中已注册；DSL 已按白名单复核）。突破位用 `plan.breakout_level_qfq`，实现 MVP 后可用。初稿来自 DeepSeek（`team/reports/deepseek/T-R16/W-02.md`，未核实草稿），本文为复核后版本。阈值均为 hypothesis；来源：通用规则组合，无外部来源；不含收益数字。
 
 ## 1 身份
 key `sw_breakout`；category `momentum`；horizons `[swing]`（观察窗 3–10 日，最长持有 `p.max_hold` 日）。
@@ -36,7 +38,7 @@ f.close_qfq（qfq@as_of）；f.boll_bw20_pct120；f.amount、f.amount_20d_avg（
   - 原稿 `highest(...)[1]` 的下标写法不在 DSL 内 → 改为 `ref(..., 1)`。
   - 原稿 C2/X3 写成 `... not (...) for 3 days`，DSL 语义不清 → 改为 X4。
   - 原稿 X5（公告）→ N-01 处理。
-- **待定**：跌回“突破位”需要入场时把 `ref(highest(f.close_qfq,20),1)` 存成 qfq 价位（如 `plan.breakout_level_qfq`），契约中没有该键；目前用入场价近似（I1）。
+- X5 跌回突破位（实现 MVP 后）：`f.close_qfq < plan.breakout_level_qfq * (1 - p.fail_pct)`（83a66cd 裁定）；本卡在 MVP 前不可导入，不以入场价替代突破位。
 
 ## 8–10 执行与仓位
 T 日盘后确认，T+1 开盘价模拟入场；信号有效 1 个交易日。止损价截断到涨跌停价之内。仓位按 RC2/RC3 建议。
@@ -69,4 +71,4 @@ T 日盘后确认，T+1 开盘价模拟入场；信号有效 1 个交易日。�
 | slippage_bp（estimate） | float | 15.0 | 0.0 | 50.0 | 1.0 |
 
 ## 复核记录
-key 与 name 已改正；category 已归入枚举；下标写法已改为 `ref`；veto 与执行层原因已分开；公告与可交易性交还 G-01、N-01；“未站稳”时间修饰已改写；突破位口径标为待定。
+key 与 name 已改正；category 已归入枚举；下标写法已改为 `ref`；veto 与执行层原因已分开；公告与可交易性交还 G-01、N-01；“未站稳”时间修饰已改写；突破位改用 `plan.breakout_level_qfq`（MVP 后）。

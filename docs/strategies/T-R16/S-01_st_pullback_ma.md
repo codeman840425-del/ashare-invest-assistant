@@ -1,6 +1,8 @@
 # S-01 强势股短线回踩 `st_pullback_ma` — 知识卡 v1（T-R16 首批）
 
-> **标签：可进入模板（全市场分支）**，但有 1 项待定（结构止损的口径），定稿前不写正式 `strategy-card` 块。初稿来自 DeepSeek（`team/reports/deepseek/T-R16/S-01.md`，未核实草稿），本文是研究员复核后的版本。阈值均为 hypothesis；来源：通用规则组合，无外部来源；不含收益数字。
+> **当前状态：不可导入**（83a66cd 裁定：本批不补卡/golden，实现 MVP 后再议；文中做T配对、null 与组合约束、新特征等“待定”项一律暂停）。下文“可进入模板”仅表示未来潜力。
+
+> **标签：未来可进入模板（全市场分支），当前不可导入**，但结构止损用 `plan.stop_loss_qfq`，实现 MVP 后可用。初稿来自 DeepSeek（`team/reports/deepseek/T-R16/S-01.md`，未核实草稿），本文是研究员复核后的版本。阈值均为 hypothesis；来源：通用规则组合，无外部来源；不含收益数字。
 > 数据：日线价量已实测（catalog）；截面分位 `rank_pct` 在 DSL 白名单内。行业内排名分支依赖 `f.sw_l1`（来源待 T003），首版不用。
 
 ## 1 身份
@@ -32,7 +34,7 @@ key `st_pullback_ma`；category `momentum`；horizons `[short]`（持有 1–5 �
 | X1 | exit | `f.close_qfq < ma(f.close_qfq, 10) for p.exit_confirm_days days` |
 | X2 | exit（止损） | `f.close_qfq <= plan.entry_price_qfq * (1 - p.hard_stop_pct)` |
 | X3 | exit（时间止损） | `ctx.holding_days >= p.time_stop and ctx.max_r_reached < 1` |
-- 回踩日低点止损（原稿 X2 写成 `f.close_qfq < plan.stop_loss`）**待定**：`plan.stop_loss` 存的是不复权价，与 qfq 序列比较属于口径混用（T-R15 ⓪ 的 adjust_mismatch），契约中又没有 `plan.stop_loss_qfq`。定稿前只用 X2 的硬止损。
+- X4 回踩低点止损（实现 MVP 后）：`f.close_qfq < plan.stop_loss_qfq`（83a66cd 裁定：plan/ctx 价格均派生 `_qfq`）；本卡在 MVP 前不可导入，不提供降级执行方案。
 - 原稿 E5（`close ≤ MA5` 近似回踩）用 E3 的“触及 MA10”代替；原稿 X4（未创新高即时间止损）几乎每天都会成立，已改为 X3。原稿的 X5（大盘转弱减仓）属于 H-01 和风控 RC3 的职责，已删除。
 
 ## 8–10 入场 / 退出 / 仓位
@@ -74,4 +76,4 @@ T 日盘后确认，最早 T+1 09:30 执行，模拟入场价 = T+1 开盘价；
 5. 原稿结构止损存在口径混用：标为待定。
 6. 原稿时间止损每天都会触发：已改写。
 7. 原稿“持仓 2–10 日”与短线 1–5 日的定位不一致：已统一为 1–5 日。
-**待定**：回踩低点止损的 qfq 口径键（需架构师裁定是否增加 `plan.stop_loss_qfq`）；行业内排名分支（`f.sw_l1`）。
+**已裁定**：`plan.stop_loss_qfq`（实现 MVP 后）。**暂停**：行业内排名分支（`f.sw_l1`）。

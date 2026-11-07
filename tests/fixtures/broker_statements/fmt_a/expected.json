@@ -1,0 +1,2374 @@
+{
+  "schema_version": 1,
+  "marker": "# SYNTHETIC",
+  "contract": "api-contract v0.2.2",
+  "_comment": "fmt_a 夹具期望解析结果（测试维护，唯一期望来源；README §6 只引用本文件，冲突时以本文件为准）。结构见 plan.md 3.5A-2；扩展键说明见 _schema_extensions。不含任何股东代码、席位代码或资金账号。",
+  "_schema_extensions": {
+    "encoding_accept": "可接受的 detected_encoding 集合（GBK 文件判为 gb18030 也算对）",
+    "preconditions": "导入前账户状态：account=empty 或 after_import:<fixture>；security_master=all_fixture_codes 表示主数据夹具含全部夹具代码与名称；trading_calendar 假设夹具日期均为交易日；snapshot_as_of=null 表示上传时不填",
+    "rows_asserted": "false = 文件级 error 或上传即拒绝，不做行级断言（rows/row_counts 不比对）",
+    "row.kind": "trade（缺省）| event | ignored | snapshot_position",
+    "row.event_type": "kind=event 时的 account_events 类型（plan 3.5A-1 规则 7：股息红利税暂记 other，映射表待范本）",
+    "row.of_row_no": "duplicate_in_file 时重复的原始行号",
+    "confirm": "{mode, acknowledge_warnings, result: committed | rejected, http_error（仅 rejected，见 http_error）, http_status, written（仅 committed）}",
+    "http_error": "confirm/upload 被拒时契约 §4 的 HTTP 错误码（非 §4.1 提示码），记为去掉 IMPORT_ 前缀的后缀，完整码 = \"IMPORT_\" + 值（如 NOTHING_TO_COMMIT、FILE_ERRORS）。这样 expected.json 里出现的 IMPORT_* 只有 §4.1 提示码，满足 plan 3.5A-2 ② 与 scripts/ci/check_fixtures.py",
+    "upload": "{http_status, http_error, batch_created}：上传即被拒（不建批次）时的期望",
+    "reconciliation_kinds": "null = 本条不断言（对账依赖前置成交，见 scenario_with_trades）",
+    "same_as": "字段值须与另一夹具对应行（row_map: 本文件行→对方行）的规范化结果逐字段相等",
+    "aggregates / snapshot_summary": "便于断言的合计值（Decimal 字符串）",
+    "scenarios": "多步骤、依赖库内状态的期望（重复文件、快照覆盖、主数据名称不一致、手动重复）",
+    "generated_cases": "由 tests/backend/unit/test_import_codes_generated.py 参数化生成输入的用例，覆盖没有固定夹具的提示码",
+    "reconciliation_cost_cases": "T-T01b（契约 v0.2.2 §7 /reconciliation、plan 3.5A 与第 9 节问题 19）：摊薄成本对账用例，与 .txt 夹具无关的内联虚构流水。ledger[].type ∈ buy/sell/fee/dividend/dividend_tax/other/bonus_shares；amount 为正数金额（other 用 net 带符号的发生金额，负=支出→计入成本）；ours_cost_price = (买入金额 + 费用 − 卖出回款 − 现金红利 + 股息红利税补缴 − Σother.net) ÷ 当前持股数，四舍五入到 4 位；送转股只加数量。超出容差 max(0.01 元, 0.1%×broker) 记 cost_differs（等于容差不记），note 需提示可能原因（缺红利/税费流水等）。"
+  },
+  "defaults": {
+    "unlisted_data_row": {
+      "status": "ok",
+      "codes": [],
+      "dedup_status": "new",
+      "kind": "trade"
+    }
+  },
+  "files": {
+    "empty.txt": {
+      "parser_id": null,
+      "encoding": null,
+      "encoding_accept": [],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": null,
+      "file_findings": [
+        "IMPORT_EMPTY_FILE"
+      ],
+      "row_counts": null,
+      "rows": [],
+      "normalized": [],
+      "confirm": null,
+      "reconciliation_kinds": [],
+      "rows_asserted": false,
+      "upload": {
+        "http_status": 422,
+        "http_error": "FILE_ERRORS",
+        "batch_created": false
+      }
+    },
+    "positions_multi_currency.txt": {
+      "parser_id": "tdx_positions_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [
+        "IMPORT_SNAPSHOT_AS_OF_ASSUMED",
+        "IMPORT_SNAPSHOT_TOTALS_MISMATCH",
+        "IMPORT_UNSUPPORTED_CURRENCY"
+      ],
+      "row_counts": {
+        "ok": 2,
+        "warning": 0,
+        "error": 0,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 6,
+          "status": "ok",
+          "codes": [],
+          "dedup_status": null,
+          "kind": "snapshot_position"
+        },
+        {
+          "row_no": 7,
+          "status": "ok",
+          "codes": [],
+          "dedup_status": null,
+          "kind": "snapshot_position"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 7,
+          "field": "security_code",
+          "equals": "688001.SH"
+        },
+        {
+          "row_no": 7,
+          "field": "qty",
+          "equals": "3000"
+        },
+        {
+          "row_no": 7,
+          "field": "cost_price",
+          "equals": "55.0000"
+        },
+        {
+          "row_no": 7,
+          "field": "market_value",
+          "equals": "168690.00"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 0,
+          "events": 0,
+          "snapshot_positions": 2
+        }
+      },
+      "reconciliation_kinds": null,
+      "snapshot_summary": {
+        "currency": "CNY",
+        "balance": "6558986.88",
+        "market_value": "4079325.00",
+        "total_assets": "10650229.03",
+        "pnl": "-447921.65"
+      },
+      "rows_asserted": true
+    },
+    "positions_sample.txt": {
+      "parser_id": "tdx_positions_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [
+        "IMPORT_SNAPSHOT_AS_OF_ASSUMED",
+        "IMPORT_SNAPSHOT_TOTALS_MISMATCH"
+      ],
+      "row_counts": {
+        "ok": 1,
+        "warning": 0,
+        "error": 0,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 5,
+          "status": "ok",
+          "codes": [],
+          "dedup_status": null,
+          "kind": "snapshot_position"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 5,
+          "field": "security_code",
+          "equals": "002001.SZ"
+        },
+        {
+          "row_no": 5,
+          "field": "qty",
+          "equals": "202100"
+        },
+        {
+          "row_no": 5,
+          "field": "cost_price",
+          "equals": "21.5698"
+        },
+        {
+          "row_no": 5,
+          "field": "market_value",
+          "equals": "3910635.00"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 0,
+          "events": 0,
+          "snapshot_positions": 1
+        }
+      },
+      "reconciliation_kinds": null,
+      "snapshot_summary": {
+        "currency": "CNY",
+        "balance": "6558986.88",
+        "available": "6558986.88",
+        "withdrawable": "6558986.88",
+        "market_value": "3910635.00",
+        "total_assets": "10481539.03",
+        "pnl": "-451611.65"
+      },
+      "scenario_with_trades": {
+        "precondition": "after_import:trades_sample.txt",
+        "note": "裁定 R7（T-B46-47-rulings.md）：契约要求汇总 cash_chain_break 与逐行 IMPORT_CASH_CHAIN_BREAK 同时出现；replay 把超卖截到 0，所以不再有 missing_in_broker",
+        "reconciliation_kinds": [
+          "cash_chain_break",
+          "cash_gap"
+        ],
+        "cash_gap": "-0.02",
+        "quantity_match": {
+          "002001.SZ": "202100"
+        }
+      },
+      "rows_asserted": true
+    },
+    "trades_bad_formats.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 2,
+        "warning": 0,
+        "error": 3,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "error",
+          "codes": [
+            "IMPORT_INVALID_DATE"
+          ],
+          "dedup_status": null
+        },
+        {
+          "row_no": 5,
+          "status": "error",
+          "codes": [
+            "IMPORT_INVALID_TIME"
+          ],
+          "dedup_status": null
+        },
+        {
+          "row_no": 6,
+          "status": "error",
+          "codes": [
+            "IMPORT_INVALID_TIME"
+          ],
+          "dedup_status": null
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 7,
+          "field": "qty",
+          "equals": "1000"
+        },
+        {
+          "row_no": 7,
+          "field": "trade_time",
+          "equals": "09:30:05"
+        },
+        {
+          "row_no": 8,
+          "field": "qty",
+          "equals": "1000"
+        },
+        {
+          "row_no": 8,
+          "field": "trade_time",
+          "equals": "09:30:06"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 2,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": true
+    },
+    "trades_blank_lines.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 0,
+        "warning": 4,
+        "error": 0,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 6,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 8,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 11,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        }
+      ],
+      "normalized": [],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 4,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "same_as": {
+        "file": "trades_sample.txt",
+        "row_map": {
+          "4": 4,
+          "6": 5,
+          "8": 6,
+          "11": 7
+        }
+      },
+      "rows_asserted": true
+    },
+    "trades_cancelled.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 2,
+        "warning": 0,
+        "error": 0,
+        "skipped": 3
+      },
+      "rows": [
+        {
+          "row_no": 5,
+          "status": "skipped",
+          "codes": [
+            "IMPORT_ROW_CANCELLED"
+          ],
+          "dedup_status": null,
+          "kind": "ignored"
+        },
+        {
+          "row_no": 6,
+          "status": "skipped",
+          "codes": [
+            "IMPORT_ROW_CANCELLED"
+          ],
+          "dedup_status": null,
+          "kind": "ignored"
+        },
+        {
+          "row_no": 7,
+          "status": "skipped",
+          "codes": [
+            "IMPORT_ROW_REJECTED"
+          ],
+          "dedup_status": null,
+          "kind": "ignored"
+        }
+      ],
+      "normalized": [],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 2,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": true
+    },
+    "trades_column_mismatch.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 0,
+        "warning": 2,
+        "error": 2,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 6,
+          "status": "error",
+          "codes": [
+            "IMPORT_ROW_COLUMN_MISMATCH"
+          ],
+          "dedup_status": null
+        },
+        {
+          "row_no": 7,
+          "status": "error",
+          "codes": [
+            "IMPORT_ROW_COLUMN_MISMATCH"
+          ],
+          "dedup_status": null
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 5,
+          "field": "name",
+          "equals": "科创 甲"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 2,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": true
+    },
+    "trades_cr.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 1,
+        "warning": 4,
+        "error": 0,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 6,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 7,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 4,
+          "field": "trade_date",
+          "equals": "2026-10-09"
+        },
+        {
+          "row_no": 4,
+          "field": "trade_time",
+          "equals": "10:44:33"
+        },
+        {
+          "row_no": 4,
+          "field": "security_code",
+          "equals": "600001.SH"
+        },
+        {
+          "row_no": 4,
+          "field": "side",
+          "equals": "sell"
+        },
+        {
+          "row_no": 4,
+          "field": "qty",
+          "equals": "77300"
+        },
+        {
+          "row_no": 4,
+          "field": "price",
+          "equals": "29.40000000"
+        },
+        {
+          "row_no": 4,
+          "field": "amount",
+          "equals": "2272620.00"
+        },
+        {
+          "row_no": 4,
+          "field": "net_amount",
+          "equals": "2271110.48"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 5,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "same_as": {
+        "file": "trades_sample.txt",
+        "row_map": {
+          "4": 4,
+          "5": 5,
+          "6": 6,
+          "7": 7,
+          "8": 8
+        }
+      },
+      "rows_asserted": true
+    },
+    "trades_duplicates_in_file.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 0,
+        "warning": 4,
+        "error": 0,
+        "skipped": 1
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 6,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 7,
+          "status": "skipped",
+          "codes": [
+            "IMPORT_DUPLICATE_IN_FILE"
+          ],
+          "dedup_status": "duplicate_in_file",
+          "of_row_no": 5
+        },
+        {
+          "row_no": 8,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION",
+            "IMPORT_CASH_CHAIN_BREAK"
+          ],
+          "dedup_status": "new"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 8,
+          "field": "trade_date",
+          "equals": "2026-10-12"
+        },
+        {
+          "row_no": 8,
+          "field": "trade_time",
+          "equals": "09:30:01"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 4,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": true
+    },
+    "trades_extra_column.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [
+        "IMPORT_UNKNOWN_COLUMN"
+      ],
+      "row_counts": {
+        "ok": 0,
+        "warning": 3,
+        "error": 0,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 6,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 4,
+          "field": "security_code",
+          "equals": "600001.SH"
+        },
+        {
+          "row_no": 4,
+          "field": "qty",
+          "equals": "77300"
+        },
+        {
+          "row_no": 4,
+          "field": "amount",
+          "equals": "2272620.00"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 3,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "same_as": {
+        "file": "trades_sample.txt",
+        "row_map": {
+          "4": 4,
+          "5": 5,
+          "6": 6
+        }
+      },
+      "rows_asserted": true
+    },
+    "trades_gb18030_ext_char.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gb18030",
+      "encoding_accept": [
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 0,
+        "warning": 2,
+        "error": 0,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 4,
+          "field": "security_code",
+          "equals": "600004.SH"
+        },
+        {
+          "row_no": 4,
+          "field": "name",
+          "equals": "示例䶮业"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 2,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": true
+    },
+    "trades_header_only.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [
+        "IMPORT_NO_DATA_ROWS"
+      ],
+      "row_counts": {
+        "ok": 0,
+        "warning": 0,
+        "error": 0,
+        "skipped": 0
+      },
+      "rows": [],
+      "normalized": [],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "rejected",
+        "http_error": "NOTHING_TO_COMMIT",
+        "http_status": 422
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": true
+    },
+    "trades_lf.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 1,
+        "warning": 4,
+        "error": 0,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 6,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 7,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 4,
+          "field": "trade_date",
+          "equals": "2026-10-09"
+        },
+        {
+          "row_no": 4,
+          "field": "trade_time",
+          "equals": "10:44:33"
+        },
+        {
+          "row_no": 4,
+          "field": "security_code",
+          "equals": "600001.SH"
+        },
+        {
+          "row_no": 4,
+          "field": "side",
+          "equals": "sell"
+        },
+        {
+          "row_no": 4,
+          "field": "qty",
+          "equals": "77300"
+        },
+        {
+          "row_no": 4,
+          "field": "price",
+          "equals": "29.40000000"
+        },
+        {
+          "row_no": 4,
+          "field": "amount",
+          "equals": "2272620.00"
+        },
+        {
+          "row_no": 4,
+          "field": "net_amount",
+          "equals": "2271110.48"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 5,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "same_as": {
+        "file": "trades_sample.txt",
+        "row_map": {
+          "4": 4,
+          "5": 5,
+          "6": 6,
+          "7": 7,
+          "8": 8
+        }
+      },
+      "rows_asserted": true
+    },
+    "trades_missing_column.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "failed",
+      "file_findings": [
+        "IMPORT_REQUIRED_COLUMN_MISSING"
+      ],
+      "row_counts": null,
+      "rows": [],
+      "normalized": [],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "rejected",
+        "http_error": "FILE_ERRORS",
+        "http_status": 422
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": false
+    },
+    "trades_non_trade_events.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 3,
+        "warning": 0,
+        "error": 0,
+        "skipped": 1
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "ok",
+          "codes": [],
+          "dedup_status": null,
+          "kind": "event",
+          "event_type": "dividend"
+        },
+        {
+          "row_no": 5,
+          "status": "ok",
+          "codes": [],
+          "dedup_status": null,
+          "kind": "event",
+          "event_type": "other"
+        },
+        {
+          "row_no": 6,
+          "status": "ok",
+          "codes": [],
+          "dedup_status": null,
+          "kind": "event",
+          "event_type": "ipo_allot"
+        },
+        {
+          "row_no": 7,
+          "status": "skipped",
+          "codes": [
+            "IMPORT_UNKNOWN_BIZ_TYPE"
+          ],
+          "dedup_status": null,
+          "kind": "ignored"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 4,
+          "field": "net_amount",
+          "equals": "1234.50"
+        },
+        {
+          "row_no": 5,
+          "field": "net_amount",
+          "equals": "-123.45"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 0,
+          "events": 3,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": true
+    },
+    "trades_reimport_overlap.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "after_import:trades_sample.txt",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 2,
+        "warning": 0,
+        "error": 0,
+        "skipped": 3
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "skipped",
+          "codes": [
+            "IMPORT_DUPLICATE_IN_DB"
+          ],
+          "dedup_status": "duplicate_in_db"
+        },
+        {
+          "row_no": 5,
+          "status": "skipped",
+          "codes": [
+            "IMPORT_DUPLICATE_IN_DB",
+            "IMPORT_CASH_CHAIN_BREAK"
+          ],
+          "dedup_status": "duplicate_in_db"
+        },
+        {
+          "row_no": 6,
+          "status": "skipped",
+          "codes": [
+            "IMPORT_DUPLICATE_IN_DB"
+          ],
+          "dedup_status": "duplicate_in_db"
+        }
+      ],
+      "normalized": [],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 2,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": true
+    },
+    "trades_sample.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 55,
+        "warning": 11,
+        "error": 0,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 6,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 7,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 19,
+          "status": "warning",
+          "codes": [
+            "IMPORT_CASH_CHAIN_BREAK"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 22,
+          "status": "warning",
+          "codes": [
+            "IMPORT_CASH_CHAIN_BREAK"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 30,
+          "status": "warning",
+          "codes": [
+            "IMPORT_CASH_CHAIN_BREAK"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 42,
+          "status": "warning",
+          "codes": [
+            "IMPORT_CASH_CHAIN_BREAK"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 60,
+          "status": "warning",
+          "codes": [
+            "IMPORT_CASH_CHAIN_BREAK"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 65,
+          "status": "warning",
+          "codes": [
+            "IMPORT_CASH_CHAIN_BREAK"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 68,
+          "status": "warning",
+          "codes": [
+            "IMPORT_CASH_CHAIN_BREAK"
+          ],
+          "dedup_status": "new"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 4,
+          "field": "trade_date",
+          "equals": "2026-10-09"
+        },
+        {
+          "row_no": 4,
+          "field": "trade_time",
+          "equals": "10:44:33"
+        },
+        {
+          "row_no": 4,
+          "field": "security_code",
+          "equals": "600001.SH"
+        },
+        {
+          "row_no": 4,
+          "field": "side",
+          "equals": "sell"
+        },
+        {
+          "row_no": 4,
+          "field": "qty",
+          "equals": "77300"
+        },
+        {
+          "row_no": 4,
+          "field": "price",
+          "equals": "29.40000000"
+        },
+        {
+          "row_no": 4,
+          "field": "amount",
+          "equals": "2272620.00"
+        },
+        {
+          "row_no": 4,
+          "field": "net_amount",
+          "equals": "2271110.48"
+        },
+        {
+          "row_no": 4,
+          "field": "fee_total",
+          "equals": "1509.52"
+        },
+        {
+          "row_no": 30,
+          "field": "trade_time",
+          "equals": "09:30:05"
+        },
+        {
+          "row_no": 7,
+          "field": "price",
+          "equals": "51.94800000"
+        },
+        {
+          "row_no": 7,
+          "field": "amount",
+          "equals": "935064.00"
+        },
+        {
+          "row_no": 69,
+          "field": "security_code",
+          "equals": "301002.SZ"
+        },
+        {
+          "row_no": 69,
+          "field": "side",
+          "equals": "sell"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 66,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "aggregates": {
+        "data_rows": 66,
+        "buy_rows": 43,
+        "sell_rows": 23,
+        "buy_amount": "11857466.62",
+        "sell_amount": "11883080.85",
+        "net_amount_sum": "15776.12",
+        "commission": "2374.06",
+        "stamp_tax": "5942.19",
+        "transfer_fee": "237.42",
+        "other_fees": "1284.44",
+        "last_balance": "6558986.90",
+        "market_rows": {
+          "SH": 17,
+          "SZ": 49
+        },
+        "distinct_trade_no": 66
+      },
+      "rows_asserted": true
+    },
+    "trades_sign_and_value_errors.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 0,
+        "warning": 2,
+        "error": 5,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "error",
+          "codes": [
+            "IMPORT_SIDE_QTY_SIGN_MISMATCH"
+          ],
+          "dedup_status": null
+        },
+        {
+          "row_no": 6,
+          "status": "error",
+          "codes": [
+            "IMPORT_SIDE_QTY_SIGN_MISMATCH"
+          ],
+          "dedup_status": null
+        },
+        {
+          "row_no": 7,
+          "status": "error",
+          "codes": [
+            "IMPORT_INVALID_PRICE"
+          ],
+          "dedup_status": null
+        },
+        {
+          "row_no": 8,
+          "status": "error",
+          "codes": [
+            "IMPORT_AMOUNT_MISMATCH"
+          ],
+          "dedup_status": null
+        },
+        {
+          "row_no": 9,
+          "status": "error",
+          "codes": [
+            "IMPORT_INVALID_QUANTITY"
+          ],
+          "dedup_status": null
+        },
+        {
+          "row_no": 10,
+          "status": "warning",
+          "codes": [
+            "IMPORT_NET_AMOUNT_MISMATCH"
+          ],
+          "dedup_status": "new"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 4,
+          "field": "side",
+          "equals": "sell"
+        },
+        {
+          "row_no": 4,
+          "field": "qty",
+          "equals": "1000"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 2,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": true
+    },
+    "trades_truncated_last_line.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [
+        "IMPORT_FILE_POSSIBLY_TRUNCATED"
+      ],
+      "row_counts": {
+        "ok": 0,
+        "warning": 3,
+        "error": 1,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 6,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 7,
+          "status": "error",
+          "codes": [
+            "IMPORT_ROW_TRUNCATED"
+          ],
+          "dedup_status": null
+        }
+      ],
+      "normalized": [],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 3,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": true
+    },
+    "trades_truncated_mid_char.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "gbk",
+      "encoding_accept": [
+        "gbk",
+        "gb18030"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [
+        "IMPORT_FILE_POSSIBLY_TRUNCATED"
+      ],
+      "row_counts": {
+        "ok": 0,
+        "warning": 1,
+        "error": 1,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "error",
+          "codes": [
+            "IMPORT_ROW_DECODE_ERROR"
+          ],
+          "dedup_status": null
+        }
+      ],
+      "normalized": [],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 1,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "rows_asserted": true
+    },
+    "trades_utf8.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "utf-8",
+      "encoding_accept": [
+        "utf-8"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 1,
+        "warning": 4,
+        "error": 0,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 6,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 7,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 4,
+          "field": "trade_date",
+          "equals": "2026-10-09"
+        },
+        {
+          "row_no": 4,
+          "field": "trade_time",
+          "equals": "10:44:33"
+        },
+        {
+          "row_no": 4,
+          "field": "security_code",
+          "equals": "600001.SH"
+        },
+        {
+          "row_no": 4,
+          "field": "side",
+          "equals": "sell"
+        },
+        {
+          "row_no": 4,
+          "field": "qty",
+          "equals": "77300"
+        },
+        {
+          "row_no": 4,
+          "field": "price",
+          "equals": "29.40000000"
+        },
+        {
+          "row_no": 4,
+          "field": "amount",
+          "equals": "2272620.00"
+        },
+        {
+          "row_no": 4,
+          "field": "net_amount",
+          "equals": "2271110.48"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 5,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "same_as": {
+        "file": "trades_sample.txt",
+        "row_map": {
+          "4": 4,
+          "5": 5,
+          "6": 6,
+          "7": 7,
+          "8": 8
+        }
+      },
+      "rows_asserted": true
+    },
+    "trades_utf8_bom.txt": {
+      "parser_id": "tdx_trades_v1",
+      "encoding": "utf-8-sig",
+      "encoding_accept": [
+        "utf-8",
+        "utf-8-sig"
+      ],
+      "preconditions": {
+        "account": "empty",
+        "security_master": "all_fixture_codes",
+        "trading_calendar": "all_fixture_dates_are_trading_days",
+        "snapshot_as_of": null
+      },
+      "batch_status_after_preview": "previewed",
+      "file_findings": [],
+      "row_counts": {
+        "ok": 1,
+        "warning": 4,
+        "error": 0,
+        "skipped": 0
+      },
+      "rows": [
+        {
+          "row_no": 4,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 5,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 6,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        },
+        {
+          "row_no": 7,
+          "status": "warning",
+          "codes": [
+            "IMPORT_MISSING_OPENING_POSITION"
+          ],
+          "dedup_status": "new"
+        }
+      ],
+      "normalized": [
+        {
+          "row_no": 4,
+          "field": "trade_date",
+          "equals": "2026-10-09"
+        },
+        {
+          "row_no": 4,
+          "field": "trade_time",
+          "equals": "10:44:33"
+        },
+        {
+          "row_no": 4,
+          "field": "security_code",
+          "equals": "600001.SH"
+        },
+        {
+          "row_no": 4,
+          "field": "side",
+          "equals": "sell"
+        },
+        {
+          "row_no": 4,
+          "field": "qty",
+          "equals": "77300"
+        },
+        {
+          "row_no": 4,
+          "field": "price",
+          "equals": "29.40000000"
+        },
+        {
+          "row_no": 4,
+          "field": "amount",
+          "equals": "2272620.00"
+        },
+        {
+          "row_no": 4,
+          "field": "net_amount",
+          "equals": "2271110.48"
+        }
+      ],
+      "confirm": {
+        "mode": "valid_rows_only",
+        "acknowledge_warnings": true,
+        "result": "committed",
+        "http_status": 200,
+        "written": {
+          "trades": 5,
+          "events": 0,
+          "snapshot_positions": 0
+        }
+      },
+      "reconciliation_kinds": [],
+      "same_as": {
+        "file": "trades_sample.txt",
+        "row_map": {
+          "4": 4,
+          "5": 5,
+          "6": 6,
+          "7": 7,
+          "8": 8
+        }
+      },
+      "rows_asserted": true
+    }
+  },
+  "scenarios": [
+    {
+      "id": "SC-DUP-FILE",
+      "code": "IMPORT_DUPLICATE_FILE",
+      "steps": [
+        "import+confirm trades_sample.txt",
+        "upload trades_sample.txt again (same account)"
+      ],
+      "expect": {
+        "upload_http_status": 201,
+        "file_findings": [
+          "IMPORT_DUPLICATE_FILE"
+        ],
+        "rows": "all 66 rows skipped / duplicate_in_db",
+        "written_trades": 0
+      },
+      "cases": [
+        "TC-DUP-02"
+      ]
+    },
+    {
+      "id": "SC-SNAP-SUPERSEDES",
+      "code": "IMPORT_SNAPSHOT_SUPERSEDES",
+      "steps": [
+        "import+confirm positions_sample.txt with snapshot_as_of=T",
+        "upload positions_sample.txt again with the same snapshot_as_of=T"
+      ],
+      "expect": {
+        "file_findings": [
+          "IMPORT_DUPLICATE_FILE",
+          "IMPORT_SNAPSHOT_SUPERSEDES",
+          "IMPORT_SNAPSHOT_TOTALS_MISMATCH"
+        ]
+      },
+      "cases": [
+        "TC-POS-01"
+      ]
+    },
+    {
+      "id": "SC-NAME-MISMATCH",
+      "code": "IMPORT_NAME_MISMATCH",
+      "steps": [
+        "security master: 688001 name differs from fixture name (e.g. '科创乙')",
+        "upload trades_column_mismatch.txt"
+      ],
+      "expect": {
+        "rows": [
+          {
+            "row_no": 5,
+            "codes_include": [
+              "IMPORT_NAME_MISMATCH"
+            ],
+            "status": "warning"
+          }
+        ]
+      },
+      "note": "同名仅空白不同（'科创 甲' vs '科创甲'）不报此码（契约 §4.1 #35）",
+      "cases": [
+        "TC-FW-08"
+      ]
+    },
+    {
+      "id": "SC-MANUAL-DUP",
+      "code": "IMPORT_POSSIBLE_DUPLICATE_OF_MANUAL",
+      "steps": [
+        "manually enter a trade equal to trades_sample.txt row 4 (date, code, side, qty, price)",
+        "upload trades_sample.txt"
+      ],
+      "expect": {
+        "rows": [
+          {
+            "row_no": 4,
+            "codes_include": [
+              "IMPORT_POSSIBLE_DUPLICATE_OF_MANUAL"
+            ],
+            "dedup_status": "possible_duplicate_of_manual"
+          }
+        ]
+      },
+      "cases": [
+        "TC-DUP-07"
+      ]
+    }
+  ],
+  "generated_cases": {
+    "GEN-FILE-TOO-LARGE": {
+      "code": "IMPORT_FILE_TOO_LARGE",
+      "scope": "file",
+      "input": "5 MB + 1 字节的合法 GBK 成交文件；上传即 422（契约 §4 文件级错误码，http_error=FILE_ERRORS），不建批次",
+      "expect": {
+        "codes_include": [
+          "IMPORT_FILE_TOO_LARGE"
+        ]
+      }
+    },
+    "GEN-UNSUPPORTED-TYPE-EXT": {
+      "code": "IMPORT_UNSUPPORTED_FILE_TYPE",
+      "scope": "file",
+      "input": "扩展名 .xlsx 的文本内容",
+      "expect": {
+        "codes_include": [
+          "IMPORT_UNSUPPORTED_FILE_TYPE"
+        ]
+      }
+    },
+    "GEN-UNSUPPORTED-TYPE-NUL": {
+      "code": "IMPORT_UNSUPPORTED_FILE_TYPE",
+      "scope": "file",
+      "input": "NUL 字节占比 > 1% 的 .txt",
+      "expect": {
+        "codes_include": [
+          "IMPORT_UNSUPPORTED_FILE_TYPE"
+        ]
+      }
+    },
+    "GEN-TOO-MANY-ROWS": {
+      "code": "IMPORT_TOO_MANY_ROWS",
+      "scope": "file",
+      "input": "50,001 个数据行",
+      "expect": {
+        "codes_include": [
+          "IMPORT_TOO_MANY_ROWS"
+        ]
+      }
+    },
+    "GEN-ENCODING-UNDETECTED": {
+      "code": "IMPORT_ENCODING_UNDETECTED",
+      "scope": "file",
+      "input": "固定种子的随机高位字节",
+      "expect": {
+        "codes_include": [
+          "IMPORT_ENCODING_UNDETECTED"
+        ]
+      }
+    },
+    "GEN-UNRECOGNIZED-FORMAT": {
+      "code": "IMPORT_UNRECOGNIZED_FORMAT",
+      "scope": "file",
+      "input": "无表头的纯数据文本",
+      "expect": {
+        "codes_include": [
+          "IMPORT_UNRECOGNIZED_FORMAT"
+        ]
+      }
+    },
+    "GEN-ACCOUNT-MISMATCH": {
+      "code": "IMPORT_ACCOUNT_MISMATCH",
+      "scope": "file",
+      "input": "账户已登记股东代码 HMAC(A000000001)，文件中股东代码改为另一个虚构值（测试运行时按 ^A0{8}[0-9]$ 构造、末位≠1；不写进仓库，避免触发 S5）",
+      "expect": {
+        "codes_include": [
+          "IMPORT_ACCOUNT_MISMATCH"
+        ]
+      }
+    },
+    "GEN-REQUIRED-FIELD-EMPTY": {
+      "code": "IMPORT_REQUIRED_FIELD_EMPTY",
+      "scope": "field",
+      "input": "成交日期列为空（列位置保持）",
+      "expect": {
+        "codes_include": [
+          "IMPORT_REQUIRED_FIELD_EMPTY"
+        ]
+      }
+    },
+    "GEN-FUTURE-DATE": {
+      "code": "IMPORT_FUTURE_DATE",
+      "scope": "field",
+      "input": "成交日期 = 导入当天 + 1",
+      "expect": {
+        "codes_include": [
+          "IMPORT_FUTURE_DATE"
+        ]
+      }
+    },
+    "GEN-INVALID-NUMBER": {
+      "code": "IMPORT_INVALID_NUMBER",
+      "scope": "field",
+      "input": "成交金额为 '12a.00'",
+      "expect": {
+        "codes_include": [
+          "IMPORT_INVALID_NUMBER"
+        ]
+      }
+    },
+    "GEN-INVALID-SECURITY-CODE": {
+      "code": "IMPORT_INVALID_SECURITY_CODE",
+      "scope": "field",
+      "input": "证券代码 '60A001'",
+      "expect": {
+        "codes_include": [
+          "IMPORT_INVALID_SECURITY_CODE"
+        ]
+      }
+    },
+    "GEN-ENCODING-LOW-CONFIDENCE": {
+      "code": "IMPORT_ENCODING_LOW_CONFIDENCE",
+      "scope": "file",
+      "input": "只含 1 个短中文名的极短 GBK 文件",
+      "expect": {
+        "codes_include": [
+          "IMPORT_ENCODING_LOW_CONFIDENCE"
+        ]
+      }
+    },
+    "GEN-FORMAT-LOW-CONFIDENCE": {
+      "code": "IMPORT_FORMAT_LOW_CONFIDENCE",
+      "scope": "file",
+      "input": "去掉可选列（席位代码、交易规费）",
+      "expect": {
+        "codes_include": [
+          "IMPORT_FORMAT_LOW_CONFIDENCE"
+        ]
+      }
+    },
+    "GEN-UNKNOWN-SECURITY": {
+      "code": "IMPORT_UNKNOWN_SECURITY",
+      "scope": "row",
+      "input": "证券代码 600999（主数据夹具中不存在）",
+      "expect": {
+        "codes_include": [
+          "IMPORT_UNKNOWN_SECURITY"
+        ]
+      }
+    },
+    "GEN-MARKET-CONFLICT": {
+      "code": "IMPORT_MARKET_INFERRED_CONFLICT",
+      "scope": "row",
+      "input": "沪市代码 600001 配深市股东代码样式 0000000001",
+      "expect": {
+        "codes_include": [
+          "IMPORT_MARKET_INFERRED_CONFLICT"
+        ]
+      }
+    },
+    "GEN-NON-TRADING-DAY": {
+      "code": "IMPORT_NON_TRADING_DAY",
+      "scope": "row",
+      "input": "成交日期 20261031（周六）",
+      "expect": {
+        "codes_include": [
+          "IMPORT_NON_TRADING_DAY"
+        ]
+      }
+    },
+    "GEN-TIME-OUTSIDE-SESSION": {
+      "code": "IMPORT_TIME_OUTSIDE_SESSION",
+      "scope": "row",
+      "input": "成交时间 120000（午间休市）",
+      "expect": {
+        "codes_include": [
+          "IMPORT_TIME_OUTSIDE_SESSION"
+        ]
+      }
+    },
+    "GEN-LOT-SIZE-IRREGULAR": {
+      "code": "IMPORT_LOT_SIZE_IRREGULAR",
+      "scope": "row",
+      "input": "主板买入 150 股；科创板买入 199 股",
+      "expect": {
+        "codes_include": [
+          "IMPORT_LOT_SIZE_IRREGULAR"
+        ]
+      }
+    },
+    "GEN-POSSIBLE-DUP-MANUAL": {
+      "code": "IMPORT_POSSIBLE_DUPLICATE_OF_MANUAL",
+      "scope": "row",
+      "input": "先手动录入同一笔，再导入生成的 1 行文件",
+      "expect": {
+        "codes_include": [
+          "IMPORT_POSSIBLE_DUPLICATE_OF_MANUAL"
+        ]
+      }
+    },
+    "GEN-MISSING-OPENING": {
+      "code": "IMPORT_MISSING_OPENING_POSITION",
+      "scope": "row",
+      "input": "空账户中只有 1 笔卖出",
+      "expect": {
+        "codes_include": [
+          "IMPORT_MISSING_OPENING_POSITION"
+        ]
+      }
+    },
+    "GEN-CANCELLED-NO-QTY-ERROR": {
+      "code": "IMPORT_ROW_CANCELLED",
+      "scope": "row",
+      "input": "撤单行数量 0、价格 0：只报 ROW_CANCELLED，不报 INVALID_QUANTITY/INVALID_PRICE",
+      "expect": {
+        "codes_include": [
+          "IMPORT_ROW_CANCELLED"
+        ]
+      }
+    }
+  },
+  "reconciliation_cost_cases": [
+    {
+      "id": "RC-COST-01",
+      "desc": "买入+费用+现金红利+股息红利税补缴+送股，券商成本价一致 → 无差异项",
+      "ledger": [
+        {
+          "type": "buy",
+          "qty": 1000,
+          "amount": "10000.00"
+        },
+        {
+          "type": "fee",
+          "amount": "5.00"
+        },
+        {
+          "type": "dividend",
+          "amount": "300.00"
+        },
+        {
+          "type": "dividend_tax",
+          "amount": "30.00"
+        },
+        {
+          "type": "bonus_shares",
+          "qty": 300
+        }
+      ],
+      "broker_cost_price": "7.4885",
+      "expect": {
+        "qty": 1300,
+        "ours_cost_price": "7.4885",
+        "items": []
+      }
+    },
+    {
+      "id": "RC-COST-02",
+      "desc": "同上，券商成本价差 0.0065 元（容差内）→ 无差异项",
+      "ledger": "same_as:RC-COST-01",
+      "broker_cost_price": "7.4950",
+      "expect": {
+        "qty": 1300,
+        "ours_cost_price": "7.4885",
+        "items": []
+      }
+    },
+    {
+      "id": "RC-COST-03",
+      "desc": "我方缺红利入账流水 → 成本偏高，超容差 → cost_differs，note 提示缺红利/税费流水",
+      "ledger": [
+        {
+          "type": "buy",
+          "qty": 1000,
+          "amount": "10000.00"
+        },
+        {
+          "type": "fee",
+          "amount": "5.00"
+        },
+        {
+          "type": "dividend_tax",
+          "amount": "30.00"
+        },
+        {
+          "type": "bonus_shares",
+          "qty": 300
+        }
+      ],
+      "broker_cost_price": "7.4885",
+      "expect": {
+        "qty": 1300,
+        "ours_cost_price": "7.7192",
+        "items": [
+          {
+            "kind": "cost_differs",
+            "ours": "7.7192",
+            "broker": "7.4885",
+            "diff": "0.2307",
+            "note_mentions": [
+              "红利"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "RC-COST-04",
+      "desc": "部分卖出回款冲减 + kind=other 税费行按发生金额符号计入（-12.00 计入成本，+2.00 冲减）",
+      "ledger": [
+        {
+          "type": "buy",
+          "qty": 2000,
+          "amount": "20000.00"
+        },
+        {
+          "type": "fee",
+          "amount": "10.00"
+        },
+        {
+          "type": "sell",
+          "qty": 500,
+          "amount": "6000.00"
+        },
+        {
+          "type": "fee",
+          "amount": "8.00"
+        },
+        {
+          "type": "dividend",
+          "amount": "150.00"
+        },
+        {
+          "type": "other",
+          "net": "-12.00"
+        },
+        {
+          "type": "other",
+          "net": "2.00"
+        }
+      ],
+      "broker_cost_price": "9.2520",
+      "expect": {
+        "qty": 1500,
+        "ours_cost_price": "9.2520",
+        "items": []
+      }
+    },
+    {
+      "id": "RC-COST-05",
+      "desc": "容差下限取 0.01 元：券商成本价低于 10 元时 0.1% 不足 0.01，差 0.0110 → cost_differs",
+      "ledger": [
+        {
+          "type": "buy",
+          "qty": 1000,
+          "amount": "5000.00"
+        },
+        {
+          "type": "fee",
+          "amount": "5.00"
+        }
+      ],
+      "broker_cost_price": "4.9940",
+      "expect": {
+        "qty": 1000,
+        "ours_cost_price": "5.0050",
+        "items": [
+          {
+            "kind": "cost_differs",
+            "ours": "5.0050",
+            "broker": "4.9940",
+            "diff": "0.0110",
+            "note_mentions": [
+              "红利"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -2,16 +2,16 @@
 
 # 券商 TXT 导出测试夹具（broker_statements/fmt_a）
 
-> 任务：T004　负责人：测试　状态：初版
+> 任务：T004（初版）、T-T01a（v0.2 对齐：expected.json、CR 夹具、fake_identifiers）、T-T01b（v0.2.2：expected.json 增 `reconciliation_cost_cases`）　负责人：测试
 >
 > 本目录全部为**虚构/脱敏数据**，不含任何真实账户信息。原始样本（`/workspace/team/samples/`）未复制进仓库，本文件也不包含任何原始敏感值。
 
 ## 1. 概述
 
-- 来源格式：某券商客户端导出的“成交明细”与“资金持仓”TXT（对应 plan.md §3.5A 的 `fmt_a_trades_v1` / `fmt_a_positions_v1`）。
+- 来源格式：通达信（TDX）客户端导出的“成交明细”与“资金持仓”TXT。plan.md v0.2 §3.5A 的解析器 ID 为 `tdx_trades_v1` / `tdx_positions_v1`（旧名 `fmt_a_trades_v1` / `fmt_a_positions_v1` 保留为别名，目录名 `fmt_a/` 不改）。
 - 两个主夹具 `trades_sample.txt`、`positions_sample.txt` 由原样本**逐字节等长**脱敏得到：编码、换行、每行字节长度、每列起始字节偏移、数值格式（小数位、符号、补齐空格）全部与原样本一致，可直接用于定宽解析测试。
 - 其余文件是在脱敏数据基础上人工构造的**异常/边界夹具**，每个文件只聚焦 1～2 类问题。
-- 本目录只放数据和说明，不含可执行测试（技术栈未定）。
+- 期望解析结果放在 `expected.json`（**唯一期望来源**，见 §6）；可执行测试在 `tests/backend/unit/`（`test_fixtures_fmt_a.py`、`test_expected_json.py`、`test_import_cases_skeleton.py`、`test_import_codes_generated.py`）。
 
 ## 2. 合成标记、meta.json 与 generate.py
 
@@ -20,11 +20,11 @@
   2. `generate.py` 第 2 行注释 `# SYNTHETIC`；
   3. 本 README 第 1 行。
   CI 检查可按“`meta.json` 前 2 行含 `# SYNTHETIC` 且 `synthetic: true`，并且目录内每个 `.txt` 都在 `meta.json.files` 中、sha256 一致”实现。
-- **`meta.json`**：由 `generate.py` 生成，逐文件记录 `kind`、`parser_hint`、`encoding`、`line_ending`、`bytes`、`physical_lines`、`data_lines`（以日期/编号开头的行数，含截断行与错误行）、`sha256`、`synthetic: true`、`origin`（`desensitized_main` / `generate.py`）、`description`。
-- **`generate.py`**（仅用标准库）：只生成 19 个异常/边界夹具和 `meta.json`。它们全部从同目录已脱敏的 `trades_sample.txt`、`positions_sample.txt` 派生，或使用完全虚构的值；脚本中不含任何原始值。两个主夹具是人工脱敏结果，不由脚本生成，脚本也不会修改它们。
-  - `python3 generate.py --check`：只比对，不写文件，有差异时退出码为 1（当前结果：20 个输出全部 `OK`）。
+- **`meta.json`**：由 `generate.py` 生成，逐文件记录 `kind`、`parser_hint`（v0.2 解析器 ID）、`parser_alias`（旧名）、`encoding`、`line_ending`、`bytes`、`physical_lines`、`data_lines`（以日期/编号开头的行数，含截断行与错误行）、`sha256`、`synthetic: true`、`origin`（`desensitized_main` / `generate.py`）、`description`；顶层 `fake_identifiers` 是本目录 `.txt` 中允许出现的全部虚构股东代码/席位代码的**字符串扁平列表**（值来自 generate.py 常量；T-T01c 起按 scripts/ci/check_fixtures.py、secret_scan.py 的格式），供 CI（plan 7.4A 条件 5）做 S5/S6 豁免：命中值必须全部落在该列表内；`fake_identifiers_detail` 保留市场、格式与每个文件的 S5/S6 命中值和次数。
+- **`generate.py`**（仅用标准库）：只生成 20 个异常/边界夹具（T-T01a 新增 `trades_cr.txt`）和 `meta.json`。它们全部从同目录已脱敏的 `trades_sample.txt`、`positions_sample.txt` 派生，或使用完全虚构的值；脚本中不含任何原始值。两个主夹具是人工脱敏结果，不由脚本生成，脚本也不会修改它们。
+  - `python3 generate.py --check`：只比对，不写文件，有差异时退出码为 1（当前结果：21 个输出全部 `OK`，`0 file(s) differ`）。
   - `python3 generate.py`：在本目录重新生成；`--out DIR` 可输出到其他目录。
-  - 修改主夹具或脚本后，必须重新运行，并同步更新本 README 的字节数与 sha256。
+  - 修改主夹具或脚本后，必须重新运行，并同步更新本 README 的字节数与 sha256；`test_fixtures_fmt_a.py` 会比对 README 表格、meta.json 与实际文件。
 
 ## 3. 文件清单
 
@@ -37,9 +37,10 @@
 | `trades_blank_lines.txt` | GBK | CRLF | 13 | 1968 | `8e953abcbe76e0091994e95a015bb9513af9c345def56dcbc886007e93998907` | 数据行之间夹空行、纯空格行、纯 Tab 行 |
 | `trades_cancelled.txt` | GBK | CRLF | 9 | 2318 | `954b3f10e41ec677e2c2434c683bd66fa717a06f804ef1db380bb5c531821b85` | 撤单/废单行与正常成交混排 |
 | `trades_column_mismatch.txt` | GBK | CRLF | 8 | 1951 | `2deeadc42c2c2bac7a26e8834e9f7f607ddab641819bf1a99ce2bba311e1408e` | 列错位、缺字段、名称含单个空格 |
+| `trades_cr.txt` | GBK | CR（仅 `\r`） | 9 | 2309 | `fd2d940878538bd3ec3674d6ddca6985e4614c6f39894e32eb1381b61b85355f` | 换行只有 CR 的成交明细（前 5 笔，内容同 trades_lf.txt；T-T01a 新增） |
 | `trades_duplicates_in_file.txt` | GBK | CRLF | 9 | 2318 | `f763bd1b947d163df80073736c1527b7912266e8072af6f662c29f86b2427e10` | 同一文件内重复行；同成交编号不同日期 |
 | `trades_extra_column.txt` | GBK | CRLF | 7 | 1648 | `1a874a432c25de9f7285130978a33314c28002119e255594bbc78e29526fe29c` | 多一个未知列“扩展标志”（插在成交金额之后） |
-| `trades_gb18030_ext_char.txt` | GB18030（非 GBK） | CRLF | 6 | 1217 | `52d25cacd73666b2b96476d77e49cff60101b9e2065eed3d1f4ddecc7a65d8db` | 证券名称含 GBK 之外的汉字（GB18030 四字节） |
+| `trades_gb18030_ext_char.txt` | GB18030（非 GBK） | CRLF | 6 | 1217 | `364bdf08d9b9298e02ff97412394392c140dc02ac3caaa885c402c1d89370e66` | 证券名称含 GBK 之外的汉字（GB18030 四字节） |
 | `trades_header_only.txt` | GBK | CRLF | 4 | 483 | `d8094c4ca49cc926382d9f092b5650c222804f1425f1688e1b96e503c8c37cfd` | 只有分隔线+表头，无数据行 |
 | `trades_lf.txt` | GBK | LF | 9 | 2309 | `8d94b20ccd55225d745c95bbda6a840c50e27992c5ecaf4537ea88228540be51` | 换行为 LF 的成交明细（前 5 笔） |
 | `trades_missing_column.txt` | GBK | CRLF | 7 | 1504 | `434a09d0f5e82a884632f413bae2d4278b80a9693e867a3a09447acdf6755be9` | 缺少必填列“成交价格” |
@@ -51,14 +52,15 @@
 | `trades_truncated_mid_char.txt` | GBK | CRLF（末行无换行） | 5 | 898 | `ef77a12cd2f5f2b994de6fb325dd3111e39b4746261d20e75cc9aa62d197dd8e` | 末行在汉字双字节中间被截断（半个汉字） |
 | `trades_utf8.txt` | UTF-8（无 BOM） | CRLF | 9 | 2441 | `73c0985e451760fcadb98e63dd497293e23f53a02a2f3132ef7d8d7869864a51` | UTF-8 编码的成交明细（前 5 笔，按显示宽度对齐） |
 | `trades_utf8_bom.txt` | UTF-8（带 BOM） | CRLF | 9 | 2444 | `0cf14cee8b9e71b4ad861cff380955b7efd40d104969a086081fbad957f3f1fd` | 同上，文件头带 EF BB BF |
+| `expected.json` | UTF-8 | LF | — | — | （不记录） | 各夹具期望解析结果（唯一期望来源，见 §6） |
 | `meta.json` | UTF-8 | LF | — | — | （自身不记录） | 合成标记 + 各夹具元数据，由 generate.py 生成 |
 | `generate.py` | UTF-8 | LF | — | — | — | 异常/边界夹具生成脚本（标准库） |
 | `README.md` | UTF-8 | LF | — | — | — | 本说明 |
 
 说明：
-- “物理行数”按 `\n`（或 LF）计数；文件末尾的 CRLF 之后不再算一行。
+- “物理行数”按 `\n`（或 LF）计数；`trades_cr.txt` 按 `\r` 计数；文件末尾的换行之后不再算一行。
 - 除注明外，构造夹具都复用主夹具的“分隔线 + 空行 + 表头”三行结构，并以“单个空格 + CRLF”结尾（与原样本一致）。
-- `trades_lf.txt`、`trades_utf8*.txt` 的数据行 = `trades_sample.txt` 的前 5 笔（文件第 4–8 行）；`trades_blank_lines.txt` 的数据行 = 前 4 笔（第 4–7 行）。
+- `trades_lf.txt`、`trades_cr.txt`、`trades_utf8*.txt` 的数据行 = `trades_sample.txt` 的前 5 笔（文件第 4–8 行）；`trades_blank_lines.txt` 的数据行 = 前 4 笔（第 4–7 行）。
 
 ## 4. 原始格式特征（实测）
 
@@ -154,61 +156,27 @@
 - 泄漏扫描：以原样本中全部敏感值（股东代码、席位代码、委托/申报/成交编号及其绝对值、价格、金额、余额、费用合计、证券代码与名称、摘要金额等 13 类）为词表，对本目录全部 21 个夹具分别以 GBK/GB18030/UTF-8 解码做按词匹配，并对 ≥6 字节的值做 GBK/GB18030/UTF-8/UTF-16LE 原始字节子串匹配：**命中 0**。以原样本自身做阳性对照可检出。
 - 等宽校验：`trades_sample.txt`（71 段）与 `positions_sample.txt`（6 段）逐行字节长度、表头列起点、CRLF 数量、文件大小与原样本完全一致；严格 GBK 解码通过；保留列（日期、时间、方向、数量、备注）0 差异。
 
-## 6. 各夹具期望解析结果
+## 6. 各夹具期望解析结果 → `expected.json`
 
-约定：
-- “行 N”指文件物理行号（从 1 起）。导入预览中的 `row_no` 建议就用物理行号。
-- 错误码只有 `IMPORT_ROW_COLUMN_MISMATCH` 在 plan.md 中有定义；其余带 `IMPORT_` 前缀的为**测试建议码**，开发可改名，但语义（错误/警告、是否阻断该行）应一致。`cash_chain_break`、`cash_gap`、`quantity_mismatch`、`new / duplicate_in_db / duplicate_in_file`、`possible_duplicate_of_manual` 取自 plan.md。
-- “错误行”= 不入库；“警告”= 可入库但需展示。
-- 多数构造夹具复用主夹具开头几笔**卖出**（行 4–7 均无前序买入），在空账户中导入会附带“缺少期初持仓”警告；下表不再逐一列出该警告。
-- 未特别说明时，非数据行（分隔线、空行、表头、只有空格的行）一律静默跳过，不计入错误。
+**T-T01a 起，期望结果只写在 [`expected.json`](expected.json)，本节不再重复任何数值；两者冲突时以 `expected.json` 为准。** 原 §6 的全部内容（含主夹具合计、资金链断点行号、对账差额等）已逐条迁入，并把错误/提示码统一改为契约 v0.2 §4.1（行/文件级提示码）与 §4（HTTP 错误码）。
 
-### 6.1 `trades_sample.txt`（主夹具）
+`expected.json` 结构（详见文件内 `_schema_extensions`）：
 
-- 识别：编码 GBK/GB18030；格式 `fmt_a_trades_v1`，置信度 ≥ 0.95；两种切分策略逐行结果一致。
-- 数据行：66 行（行 4–69），**全部有效，0 错误**；买入 43、卖出 23；证券 12 只；沪市行 17（股东代码 `A…`）、深市行 49（`0…`）。
-- 交易日与笔数：20261009:15、20261013:3、20261015:8、20261019:11、20261020:1、20261023:18、20261026:5、20261027:3、20261029:2。
-- 首行（行 4）：`20261009 104433 600001 示例甲业 卖出 -77300.00 29.40000000 2272620.00 9001 -80000007 2271110.48 8814321.46 9001 A000000001 90001 227.26 1136.58 22.73 122.95 证券卖出`
-  → side=sell，quantity=77300，price=29.40000000，amount=2272620.00，net=2271110.48，traded_at=2026-10-09 10:44:33 +08:00，market=SH，broker_trade_no=`-80000007`（字符串，保留负号）。
-- 末行（行 69）：`20261029 130934 301002 创业癸 卖出 -1700.00 30.47250000 51803.25 9002 -8000000217 51768.84 6558986.90 …` → market=SZ。
-- 5 位时间：行 30、42–48，例如行 30 `93005` → 09:30:05。
-- 合计（便于断言）：买入成交金额 11857466.62；卖出成交金额 11883080.85；发生金额合计 15776.12；净佣金 2374.06、印花税 5942.19、过户费 237.42、交易规费 1284.44；末笔剩余金额 6558986.90。
-- 逐行校验：`发生金额 = ±成交金额 − 费用合计` 66 行全部精确成立；`｜数量×价格 − 金额｜ ≤ 0.0001` 全部成立；印花税仅卖出行非 0。
-- 资金链（上一行剩余金额 + 本行发生金额 vs 本行剩余金额）出现 7 处 `cash_chain_break` **提示**（非错误），均在交易日首行：行 19（−0.04）、22（−0.02）、30（−0.02）、42（−0.06）、60（−0.01）、65（−0.03）、68（−0.02）。
-- 持仓重建（账户无期初持仓时）：行 4–7 四笔卖出没有前序买入 → 4 条“缺少期初持仓”警告（建议码 `IMPORT_MISSING_OPENING_POSITION`）。净数量：002001 +202100；600001 −77300、688001 −3000、688002 −18025、688003 −18000（即上述 4 只缺期初）；其余 7 只为 0。
-- 002001 移动加权成本（含费用）：买入 8 笔（行 22–29），成本合计 4359245.63 / 202100 ≈ 21.5697。
-- 去重：66 个成交编号互不相同；委托编号有跨日重复，但规则 1 键含交易日与成交编号，首次导入 66 行全部 `new`。
-
-### 6.2 `positions_sample.txt`
-
-- 识别：`fmt_a_positions_v1`（首行以 `人民币:` 开头 + 表头），GBK。
-- 摘要：币种 CNY；余额 = 可用 = 可取 = 6558986.88；参考市值 3910635.00；资产 10481539.03；盈亏 −451611.65。
-- 明细 1 行：编号 1，002001 深市辛号，数量 202100.00，可卖 202100.00，成本价 21.5698，当前价 19.3500，市值 3910635.00，浮盈 −451611.65，比例 −10.291，股东代码 → 掩码 `0****`，market=SZ。
-- 与 `trades_sample.txt` 对账：数量一致（202100）；成本价与自算 21.5697 相差 0.0001（在容差内）；现金 `cash_gap` = 6558986.88 − 6558986.90 = −0.02（提示）；资产 − 余额 − 参考市值 = 11917.15（未解释差额，仅展示，不报错）；浮盈与 数量×(当前价−成本价) 相差约 3000（券商口径，仅展示，不报错）。
-
-### 6.3 构造夹具
-
-| 夹具 | 期望结果 |
+| 键 | 内容 |
 |---|---|
-| `trades_lf.txt` | 识别同主夹具；5 行有效，字段值与主夹具行 4–8 **完全相同**（LF/CRLF 不影响结果，行尾不残留 `\r`） |
-| `trades_utf8.txt` | 检测为 UTF-8；对齐按**显示宽度**（汉字=2 列）而非字节，5 行字段值与主夹具行 4–8 相同；不得出现乱码或列错位 |
-| `trades_utf8_bom.txt` | 检测为 UTF-8（依据 BOM）；BOM 被剥离，第 1 行仍识别为分隔线；5 行结果同上 |
-| `trades_blank_lines.txt` | 4 行有效（行 4、6、8、11，字段值同主夹具行 4–7），中间与末尾的空行 / 纯空格行 / 纯 Tab 行静默跳过，不报错、不计数 |
-| `trades_truncated_last_line.txt` | 行 4–6 有效；行 7 在“成交编号”中途截断（无换行）→ 错误行（`IMPORT_ROW_COLUMN_MISMATCH` 或 `IMPORT_ROW_TRUNCATED`），**不得**把残缺的成交编号当作有效值入库；建议附文件级警告“文件可能不完整” |
-| `trades_truncated_mid_char.txt` | 末行在证券名称的双字节汉字中间截断，整文件严格解码失败。期望：编码仍判为 GBK/GB18030（不能因最后 1 个半字节落到 charset-normalizer 误判），行 4 有效，行 5 为错误行（建议 `IMPORT_ROW_DECODE_ERROR`）；不得整文件拒绝 |
-| `trades_extra_column.txt` | 表头多 1 列“扩展标志”（插在成交金额后，宽 16）。期望：仍识别为 `fmt_a_trades_v1`；文件级警告未知列（建议 `IMPORT_UNKNOWN_COLUMN`）并忽略该列；3 行字段值与主夹具行 4–6 相同（按表头名取列，而非按固定列序） |
-| `trades_missing_column.txt` | 缺必填列“成交价格”。期望：不自动套用 `fmt_a_trades_v1`（或置信度 < 0.95），预览阶段报 `IMPORT_REQUIRED_COLUMN_MISSING`，不能确认入库；**不得**用 金额/数量 静默推算价格 |
-| `trades_sign_and_value_errors.txt` | 行 4 有效（卖出 −1000 → sell 1000）；行 5 买入负数量 → 错误（`IMPORT_SIDE_QTY_SIGN_MISMATCH`）；行 6 卖出正数量 → 同上；行 7 价格/金额为负 → 错误（`IMPORT_INVALID_PRICE`）；行 8 成交金额 29500.00 ≠ 1000×29.40 → 错误（`IMPORT_AMOUNT_MISMATCH`）；行 9 证券买入但数量 0 → 错误（`IMPORT_INVALID_QUANTITY`，因备注不是撤单/废单，不能当撤单忽略）；行 10 发生金额与 −(金额+费用) 差 1.00 → 警告（建议 `IMPORT_NET_AMOUNT_MISMATCH`，严重级别待定）。合计有效 2、错误 5 |
-| `trades_cancelled.txt` | 行 4 买入 1000 有效；行 5（买入、数量 0、备注“买入撤单”、成交编号 `0`）、行 6（买卖标志“撤单”）→ 忽略（建议 `IMPORT_ROW_CANCELLED`，信息级）；行 7（备注“废单”）→ 忽略（建议 `IMPORT_ROW_REJECTED`）；行 8 卖出 500 有效。结果：2 笔成交、3 行忽略、0 错误；成交编号 `0` 不参与去重；资金链连续 |
-| `trades_non_trade_events.txt` | 4 行均不生成 trades：行 4 红利入账 +1234.50 → account_event `dividend`；行 5 股息红利税补缴 −123.45 → `fee`（或 `other`，待定）；行 6 新股入帐 301002 500 股 → `ipo_allot`；行 7 未知业务 → 警告（建议 `IMPORT_UNKNOWN_BIZ_TYPE`），不入成交、不猜测。成交时间 `0`、委托/成交编号 `0` 视为缺失，不报时间格式错误 |
-| `trades_header_only.txt` | 识别为 `fmt_a_trades_v1`；0 数据行，警告（建议 `IMPORT_NO_DATA_ROWS`），不能生成空批次或生成 0 行批次（二选一，待定） |
-| `empty.txt` | 错误（建议 `IMPORT_EMPTY_FILE`），编码检测不得抛异常 |
-| `trades_duplicates_in_file.txt` | 行 4–6 `new`；行 7 与行 5 完全相同 → `duplicate_in_file`；行 8 与行 6 成交编号、委托编号相同但日期为 20261012 → 规则 1 键不同 → `new`，同时出现 `cash_chain_break` 提示。合计 new 4、duplicate_in_file 1 |
-| `trades_reimport_overlap.txt` | 前提：`trades_sample.txt` 已入库同一账户。行 4–6（= 主夹具行 67–69）→ `duplicate_in_db`；行 7–8（20261030 301002 买 1000 @33 / 卖 1000 @33.5）→ `new`；行 4→5 之间 `cash_chain_break` −0.02（与主夹具一致），行 6→8 资金链连续 |
-| `trades_column_mismatch.txt` | 行 4 有效；行 5 证券名称为“科创 甲”（内部单空格）：两种策略结果一致 → 有效，名称原样保留（可附名称与主数据不一致的提示）；行 6 成交数量整体左移 2 字节 → 按字节切分与按 `\s{2,}` 切分不一致 → `IMPORT_ROW_COLUMN_MISMATCH`；行 7 席位代码为空 → 只有 19 个 token → `IMPORT_ROW_COLUMN_MISMATCH`。有效 2、错误 2 |
-| `trades_bad_formats.txt` | 行 4 日期 20261332 → 错误（`IMPORT_INVALID_DATE`）；行 5 时间 256000 → 错误（`IMPORT_INVALID_TIME`）；行 6 时间 4 位 `9305` → 错误（不猜测）；行 7 数量 `1,000.00` → 去千分位得 1000，时间 `93005` → 09:30:05，有效；行 8 全角数字 `１０００.００` → 转半角得 1000，有效。有效 2、错误 3 |
-| `trades_gb18030_ext_char.txt` | 严格 GBK 解码失败、严格 UTF-8 失败、GB18030 成功 → 检测为 GB18030；行 4 证券名称 `示例䶮业`（第 3 字为 GB18030 四字节字符）；该行按**字节**补齐（四字节字符占 4 字节），字节偏移与表头一致，按字节切分正确；共 2 行有效 |
-| `positions_multi_currency.txt` | 人民币摘要：余额/可用/可取 6558986.88、参考市值 4079325.00、资产 10650229.03、盈亏 −447921.65；`美元:` 摘要行 → 警告（建议 `IMPORT_UNSUPPORTED_CURRENCY`）并忽略；明细 2 行：002001（SZ，掩码 `0****`）与 688001 科创甲 3000 股、成本 55.0000、当前 56.2300、市值 168690.00、浮盈 3690.00、比例 2.236（SH，掩码 `A****`） |
+| `files.<夹具名>` | 每个 `.txt` 一条，与 `meta.json.files` 一一对应：`parser_id`、`encoding` / `encoding_accept`、`preconditions`（账户、主数据、交易日历、快照时间）、`batch_status_after_preview`、`file_findings`、`row_counts`、`rows`（逐行 `status` / `codes` / `dedup_status` / `kind`）、`normalized`（字段级断言）、`confirm`、`reconciliation_kinds`、`same_as`、`aggregates` / `snapshot_summary`、`upload` |
+| `defaults.unlisted_data_row` | 未列出的数据行默认 `status=ok`、`dedup_status=new` |
+| `scenarios` | 依赖库内状态的多步骤场景（`SC-DUP-FILE`、`SC-SNAP-SUPERSEDES`、`SC-NAME-MISMATCH`、`SC-MANUAL-DUP`） |
+| `generated_cases` | 没有固定夹具、由测试按描述生成输入的用例（`GEN-*`），保证 §4.1 全部提示码都有覆盖 |
+| `reconciliation_cost_cases` | T-T01b（契约 v0.2.2）：摊薄成本对账用例 `RC-COST-*`（内联虚构流水，不对应 .txt）：成本计入现金红利（冲减）与股息红利税补缴（计入），`kind=other` 按发生金额符号计入，送转股只加数量；容差 `max(0.01 元, 0.1%)`，超出记 `cost_differs` |
+
+约定（与原 §6 相同）：
+- `row_no` = 文件物理行号（从 1 起）。
+- 非数据行（分隔线、空行、表头、只有空格/Tab 的行）静默跳过，不计入错误。
+- 多数构造夹具复用主夹具开头几笔**卖出**，空账户导入时会带 `IMPORT_MISSING_OPENING_POSITION` 警告，`expected.json` 已逐行写出。
+- `confirm.result` 为 `committed` 或契约 §4 的 HTTP 错误码（如 `IMPORT_NOTHING_TO_COMMIT`、`IMPORT_WARNINGS_UNACKNOWLEDGED`），不是 §4.1 提示码。
+
+使用方：`tests/backend/unit/test_import_cases_skeleton.py`（导入用例骨架，从 `expected.json` 读取期望）、`test_expected_json.py`（一致性：与 meta.json 1:1、码都在 v0.2.2 码表 `import_codes.json` 内、码表全覆盖、与契约 §4.1 一致、对账成本用例 oracle）、`/workspace/team/reports/T004-import-cases.md`（用例说明，54 条，不在仓库内；码与 v0.2.2 相同）。
 
 ## 7. 使用约定
 
@@ -218,11 +186,11 @@
 
 ## 8. 已知疑点（需产品/开发确认）
 
-1. plan.md 要求本目录“只允许由生成脚本产生的合成文件”，但两个主夹具是人工脱敏的派生文件，不由 generate.py 生成（脚本只派生异常夹具）。meta.json 用 `origin: desensitized_main` 标明，CI 规则需要允许这一类；另外，plan.md 目录树中提到的配套 `expected.json` 尚未提供，期望结果目前写在本 README §6。
-2. plan.md 提到 CI 用 `[A-Z]\d{9}` 扫描股东代码，虚构值 `A000000001` 会命中，需加白名单或改用其他虚构前缀。
+1. plan.md 要求本目录“只允许由生成脚本产生的合成文件”，但两个主夹具是人工脱敏的派生文件，不由 generate.py 生成（脚本只派生异常夹具）。meta.json 用 `origin: desensitized_main` 标明，CI 规则需要允许这一类；配套 `expected.json` 已于 T-T01a 提供（见 §6）。
+2. plan.md 7.4A 的 S5/S6 会命中虚构股东代码 `A000000001` / `0000000001`；`meta.json.fake_identifiers`（扁平列表）给出完整豁免集合，`fake_identifiers_detail` 给出逐文件命中次数；CI（T-O02a，1d2fbda）已按该列表放行。两个脱敏主样本还需在仓库根 `.secretscan-allow.yaml` 按 path+sha256+reviewer+日期登记（plan 7.4A 条件 4，运维/架构师负责）。
 3. 原样本“资产 ≠ 余额 + 参考市值”、“浮动盈亏 ≠ 数量×(当前价−成本价)”的口径未知，夹具保留了这一特征，期望仅展示不报错。
 4. 成交编号为负数的含义未知，按不透明字符串处理。
 5. 撤单/废单、红利、新股入帐等行在真实导出中的具体写法（买卖标志还是备注、成交编号是否为 0）未见真实样本，夹具为推测构造。
 6. 发生金额不符、名称含空格、行截断等的严重级别（错误/警告）plan.md 未规定，本文件给出建议。
 7. GB18030 四字节字符在“按显示宽度”对齐时与“按字节”对齐不同；真实券商软件如何补齐未知，夹具按字节补齐。
-8. 未覆盖仅 CR 换行（老 Mac）文件。
+8. ~~未覆盖仅 CR 换行（老 Mac）文件~~：T-T01a 已新增 `trades_cr.txt`（期望见 `expected.json`）。

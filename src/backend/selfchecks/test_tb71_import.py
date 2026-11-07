@@ -83,9 +83,9 @@ def test_formal_import_idempotence_generation_queries(
         == 404
     )
     listing = client.get("/api/v1/strategies")
-    assert listing.status_code == 503
-    assert listing.json()["error"]["details"]["issue"] == "draft_health_default_not_defined"
-    assert client.get("/api/v1/feature-catalog").status_code == 503
+    assert listing.status_code == 200
+    assert all(row["health"] is None for row in listing.json()["items"])
+    assert client.get("/api/v1/feature-catalog").status_code == 200
     account = client.post(
         "/api/v1/accounts", json={"alias": "合成", "broker_name": "合成券商"}
     ).json()["id"]

@@ -24,6 +24,7 @@ from app.db.tables.strategy import (
     strategy_cards,
     strategy_versions,
 )
+from app.strategy.cards.feature_meta import FeatureMeta, import_metadata, validate_keys
 from app.strategy.cards.models import PendingImport
 from app.strategy.cards.preflight import preflight
 
@@ -74,13 +75,20 @@ def generate_files(staged: list[PendingImport], directory: Path) -> list[Path]:
 
 
 def import_batch(
-    conn: Connection, documents: list[str], registry: dict[str, dict[str, Any]]
+    conn: Connection,
+    documents: list[str],
+    registry: dict[str, dict[str, Any]],
+    metadata_rows: list[FeatureMeta] | None = None,
 ) -> list[dict[str, str]]:
     staged = validate_batch(documents, registry)
+    if metadata_rows is not None:
+        validate_keys(metadata_rows, registry)
     # A transaction-scoped lock serializes formal global-key imports, not user activity.
     from sqlalchemy import text
 
     conn.execute(text("select pg_advisory_xact_lock(714071)"))
+    if metadata_rows is not None:
+        import_metadata(conn, metadata_rows, registry)
     result = []
     for item in staged:
         key, number = item.identity.key, item.identity.version_no

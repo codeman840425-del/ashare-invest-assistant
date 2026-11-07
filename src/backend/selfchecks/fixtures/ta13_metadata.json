@@ -1,0 +1,29 @@
+[
+  {
+    "feature_key": "f.amount",
+    "description": "Synthetic fixture row for testing only",
+    "dimension": "technical",
+    "warmup_bars": 0,
+    "available_at": "bar_close",
+    "epistemic_type": "fact",
+    "spec_ref": "F19"
+  },
+  {
+    "feature_key": "f.rsi14",
+    "description": "Synthetic fixture row for testing only",
+    "dimension": "technical",
+    "warmup_bars": 14,
+    "available_at": "bar_close",
+    "epistemic_type": "estimate",
+    "spec_ref": "F20"
+  },
+  {
+    "feature_key": "f.synthetic_unknown",
+    "description": "Synthetic fixture row for testing only",
+    "dimension": null,
+    "warmup_bars": null,
+    "available_at": null,
+    "epistemic_type": null,
+    "spec_ref": null
+  }
+]

@@ -1,4 +1,4 @@
-"""T-B71 read surfaces; absent health/catalog metadata fails explicitly, never mocked."""
+"""T-B71 read surfaces; reviewed nullable health/catalog metadata; never guessed."""
 
 from __future__ import annotations
 
@@ -140,31 +140,19 @@ def catalog(auth: AuthDep, engine: EngineDep) -> list[FeatureCatalogItem]:
     with engine.connect() as conn:
         rows = conn.execute(select(feature_catalog).order_by(feature_catalog.c.feature_key)).all()
     result = []
-    required = {"dimension", "warmup_bars", "available_at", "epistemic_type"}
     for row in rows:
-        metadata = row.pit_rule or {}
-        missing = sorted(required - metadata.keys())
-        if missing or row.description is None:
-            raise AppError(
-                ErrorCode.MAINTENANCE,
-                details={
-                    "issue": "feature_api_metadata_not_defined",
-                    "feature_key": row.feature_key,
-                    "fields": missing + ([] if row.description is not None else ["description"]),
-                },
-            )
         result.append(
             FeatureCatalogItem(
                 feature_key=row.feature_key,
                 description=row.description,
-                dimension=metadata["dimension"],
+                dimension=row.dimension,
                 frequency=row.frequency,
                 adjust=row.adjust,
                 unit=row.unit,
-                warmup_bars=metadata["warmup_bars"],
-                available_at=metadata["available_at"],
+                warmup_bars=row.warmup_bars,
+                available_at=row.pit_rule,
                 status=row.status,
-                epistemic_type=metadata["epistemic_type"],
+                epistemic_type=row.epistemic_type,
             )
         )
     return result
@@ -242,10 +230,6 @@ def strategy_list(
                 .order_by(health.c.as_of_date.desc())
                 .limit(1)
             ).first()
-            if latest is None:
-                raise AppError(
-                    ErrorCode.MAINTENANCE, details={"issue": "draft_health_default_not_defined"}
-                )
             items.append(
                 {
                     "id": str(row.id),
@@ -258,7 +242,9 @@ def strategy_list(
                         "version_no": row.version_no,
                         "lifecycle": row.lifecycle,
                     },
-                    "health": {"state": latest.state, "weight": str(latest.weight), "n": latest.n},
+                    "health": {"state": latest.state, "weight": str(latest.weight), "n": latest.n}
+                    if latest
+                    else None,
                 }
             )
     return build_page(

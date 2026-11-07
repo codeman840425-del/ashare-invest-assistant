@@ -25,15 +25,15 @@ class ContractModel(BaseModel):
 
 class FeatureCatalogItem(ContractModel):
     feature_key: str
-    description: str
-    dimension: Dimension
+    description: str | None
+    dimension: Dimension | None
     frequency: Literal["1m", "daily", "quarterly", "event"]
     adjust: BarAdjust
     unit: str
-    warmup_bars: int = Field(strict=True, ge=0)
-    available_at: str
+    warmup_bars: int | None = Field(strict=True, ge=0)
+    available_at: JsonValue
     status: FeatureStatus
-    epistemic_type: EpistemicType
+    epistemic_type: EpistemicType | None
 
 
 class CurrentVersion(ContractModel):

@@ -46,7 +46,17 @@ EXPECT = {
 }
 INSURERS_SW = {"601318": "中国平安", "601628": "中国人寿", "601601": "中国太保", "601336": "新华保险",
                "601319": "中国人保"}
-CURRENCY_UNIT_HINT = re.compile(r"(bz|hb|bizhong|currency|curr|dw|danwei|unit|币|单位)", re.I)
+# Exact metadata names AND recognized values: business abbreviations (hbzj/yfbzj)
+# and strings in arbitrary business fields are never metadata evidence.
+CURRENCY_KEYS = {"currency", "currency_code", "bizhong", "bz", "币种"}
+UNIT_KEYS = {"unit", "amount_unit", "monetary_unit", "danwei", "dw", "单位", "金额单位"}
+CURRENCY_VALUES = {
+    "cny": "CNY", "rmb": "CNY", "人民币": "CNY", "人民币元": "CNY",
+    "usd": "USD", "美元": "USD", "hkd": "HKD", "港元": "HKD", "港币": "HKD",
+    "eur": "EUR", "欧元": "EUR", "jpy": "JPY", "日元": "JPY", "gbp": "GBP", "英镑": "GBP",
+}
+UNIT_VALUES = {"元": "元", "人民币元": "元", "千元": "千元", "万元": "万元",
+               "百万元": "百万元", "亿元": "亿元", "yuan": "元"}
 
 
 # --------------------------------------------------------------------------- 基础
@@ -745,24 +755,75 @@ def industry_pct(values: dict, industry: dict, min_n: int = 5) -> dict:
 
 # --------------------------------------------------------------------------- ⑨ 币种/单位
 def currency_unit_conclusion(by_response: dict) -> dict:
-    """T-R12b 第 4 条（S1 硬条件 V5h）：没有币种/单位字段时，结论必须写明只靠数量级不连续检查。"""
+    """V5h: only explicit metadata with recognized values is confirmation.
+
+    Confirmation is local to each response, not proof that other responses have
+    the same basis. Unknown/partial metadata remains unconfirmed; never convert.
+    """
     keys = sorted({k for v in by_response.values() for k in v["key_hits"]})
     strs = sorted({x for v in by_response.values() for x in v["string_value_hits"]})
-    if keys or strs:
-        concl = "有币种/单位标识：字段 " + ",".join(keys or ["-"]) + "；非人民币/非元 → unit_mismatch（不换算）"
+    mismatch = any(v["unit_mismatch"] for v in by_response.values())
+    complete = bool(by_response) and all(v["status"] == "confirmed" for v in by_response.values())
+    if not keys:
+        concl = "币种/单位未确认（未发现可信明确元数据）：只靠数量级不连续检查"
+    elif not complete:
+        concl = "仅部分币种/单位元数据已确认；其余未确认：只靠数量级不连续检查"
     else:
-        concl = "财报响应无币种/单位字段：只靠数量级不连续检查"
-    return {"by_response": by_response, "fields_found": keys, "string_hits": strs[:10], "conclusion": concl}
+        concl = "各响应均有明确币种/单位元数据（仅限本批样本）"
+    if mismatch:
+        concl += "；已确认非人民币/非元 → unit_mismatch（不换算）"
+    return {"by_response": by_response, "fields_found": keys, "string_hits": strs[:10],
+            "status": "confirmed" if complete else "unconfirmed", "unit_mismatch": mismatch,
+            "conclusion": concl}
 
 
 def currency_unit_fields(responses: dict) -> dict:
+    """Inspect only exact metadata names in records/envelopes or meta/metadata.
+
+    Unknown values, units embedded in numbers, notes, and substring matches are
+    not trusted. Distinct values in one response are a conflict, not confirmation.
+    """
     hits = {}
-    for name, rows in responses.items():
-        keys = sorted({k for r in rows for k in r})
-        h = [k for k in keys if CURRENCY_UNIT_HINT.search(k) and k not in ("bdhlzc",)]
-        strs = sorted({str(r.get(k)) for r in rows for k in keys
-                       if isinstance(r.get(k), str) and re.search(r"(美元|港元|港币|USD|HKD|万元|千元|百万)", str(r.get(k)))})
-        hits[name] = {"key_hits": h, "string_value_hits": strs[:10], "n_keys": len(keys)}
+    for name, response in responses.items():
+        evidence, unknown, keys = [], [], set()
+
+        def visit(value, path="", depth=0):
+            if depth > 8:
+                return
+            if isinstance(value, list):
+                for item in value:
+                    visit(item, path, depth + 1)
+            elif isinstance(value, dict):
+                for k, v in value.items():
+                    key = str(k).strip().lower()
+                    keys.add(key)
+                    if key in CURRENCY_KEYS or key in UNIT_KEYS:
+                        kind = "currency" if key in CURRENCY_KEYS else "unit"
+                        lookup = CURRENCY_VALUES if kind == "currency" else UNIT_VALUES
+                        normalized = lookup.get(v.strip().lower()) if isinstance(v, str) else None
+                        # Do not log arbitrary unrecognized metadata contents.
+                        item = {"field": path + key, "kind": kind}
+                        if normalized:
+                            evidence.append({**item, "value": normalized})
+                        else:
+                            unknown.append(item)
+                    elif key in {"meta", "metadata", "data", "rows", "result"}:
+                        visit(v, path + key + ".", depth + 1)
+
+        visit(response)
+        evidence = [dict(zip(("field", "kind", "value"), v)) for v in
+                    sorted({(x["field"], x["kind"], x["value"]) for x in evidence})]
+        unknown = [dict(zip(("field", "kind"), v)) for v in
+                   sorted({(x["field"], x["kind"]) for x in unknown})]
+        currencies = {e["value"] for e in evidence if e["kind"] == "currency"}
+        units = {e["value"] for e in evidence if e["kind"] == "unit"}
+        conflict = len(currencies) > 1 or len(units) > 1
+        status = "confirmed" if len(currencies) == len(units) == 1 and not unknown and not conflict else "unconfirmed"
+        hits[name] = {"key_hits": sorted({e["field"] for e in evidence}),
+                      "string_value_hits": sorted({e["value"] for e in evidence}),
+                      "n_keys": len(keys), "metadata": evidence, "unrecognized_metadata": unknown,
+                      "status": status, "conflict": conflict,
+                      "unit_mismatch": bool(currencies - {"CNY"} or units - {"元"})}
     return hits
 
 
@@ -861,7 +922,7 @@ def analyze(raw: dict, plan: dict, first_seen: dict | None = None) -> dict:
                  for b in bars[-5:]]
     out["6_pb"] = pb
     out["9_currency_unit"] = currency_unit_conclusion(currency_unit_fields(
-        {k: v for k, v in R.items() if k.split("_")[0] in ("income", "balance", "cashflow", "capital")}))
+        {k: v for k, v in raw.items() if k.split("_")[0] in ("income", "balance", "cashflow", "capital")}))
     decs = [v.get("decision") for v in out["8_dividend"]["visibility"].values() if v.get("decision")]
     # T-R12b 第 4 条（S1 硬条件 V5d）：股本行普遍晚于除权日才可见 → 必须接入送转数据
     out["8_dividend"]["overall_decision"] = (
@@ -1068,7 +1129,7 @@ def selftest_pure() -> list:
     t("行业分位：null 不进分母、组内 N<5 → null", pc["a"] == 0.0 and pc["e"] == 1.0 and pc["f"] is None
       and pc["g"] is None, str(pc))
     cu = currency_unit_fields({"balance_x": [{"jzrq": "2025", "bz": "CNY", "zczj": 1.0}],
-                               "balance_y": [{"jzrq": "2025", "zczj": "1.0 万元"}]})
+                               "balance_y": [{"jzrq": "2025", "unit": "万元"}]})
     t("⑨ 币种/单位字段名与字符串值扫描", cu["balance_x"]["key_hits"] == ["bz"] and cu["balance_y"]["string_value_hits"])
     t("⑨ 无币种/单位字段 → 结论写明“只靠数量级不连续检查”",
       "只靠数量级不连续检查" in currency_unit_conclusion(currency_unit_fields({"b": [{"zczj": 1.0}]}))["conclusion"]

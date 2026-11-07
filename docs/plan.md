@@ -3494,6 +3494,9 @@ admin:
 | T-B61 | **麦蕊对账批次交接、比对提交与重试（4.6.5A；v0.2.9 内，架构师裁定，源于 reports/T-B58.md）**：注册 `master.reconcile_vendor` 和 `master.reconcile_vendor_apply`；新迁移 `master_vendor_batches`、`master_vendor_list_rows`；`ingest` 处理 `vendor_lists` 意图并写批次；worker 单事务比对提交；beat 兜底扫描；`/admin/ingest/status.alerts` 由差异表生成 5 个 `master.*` 键。**验收标准**：① 离线端到端用例：注入虚构的 ingest 结果，走完 `SYNC_LISTS` → `RECONCILE_VENDOR` → `requested` → `fetched` → `RECONCILE_VENDOR_APPLY` → 差异提交 → `/admin/ingest/status` 出现对应的 `master.*` 告警，`/admin/securities/reconciliation` 能查到；② 重复投递同一 `batch_id` 只比对一次；③ 三份列表任一失败时为 `failed`，按 `attempt` 重试到 3 次为止，不用局部列表比对；④ 证书不可用时为 `skipped`，不跨证书回退；⑤ 旧批次为 `superseded`，不重开已关闭的差异；⑥ 已过 `deadline_at` 的批次为 `expired`，beat 兜底能重新投递漏掉的 apply；⑦ 队列、表、日志不含证书值（用哨兵值断言）。运维同步 `grants.sql` 和 `verify-roles.sh`（4.6.5A 第 9 条） | 后端（运维配合权限） | T-B53, T-B58, T-B45 |
 | T-F25 | **管理端证券主数据对账页（契约 §7.9）**：`/admin/securities/reconciliation` 列表（状态、类型、来源筛选，游标翻页）；`ingest` 状态页显示 5 个 `master.*` 告警文案。交付：页面、组件测试（`src/frontend/src`）。验收：不显示证书值；非管理员不可见入口；告警按 `critical` 在前 | 前端 | 1 | T-B53 |
 | T-F26 | **搜索结果展示补充（契约 §7.3、§5.1）**：曾用名、旧代码命中时显示“曾用名：…”“旧代码：…”；`quote_missing=true` 显示“本人行情源暂无此证券”；`missing_from_list`、`delisting_period`、`delisted` 徽标；ETF 未建档时无结果的空态文案。交付：组件与组件测试。验收：`match_kind`、`listing_status` 的取值只从 `/meta/enums` 读，不写死 | 前端 | 1 | T-B54 |
+| T-A10 | Windows 本地部署（WSL）：见 [runbook](runbook/windows-local.md)；前端构建与 nginx 待 T-O19 补齐 | 架构师 | — | T-O19, T-B64 |
+
+缺口：`create-admin` 命令未实现，已排给后端 T-B64；管理员创建步骤实现后再验收。
 
 ### 关键路径
 T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → **T-B05（真实证书实测，与 T003 对账）** → T-B06 → T-B07 → T-B35 特征底座 → T-B09 → **T-B20a → T-B20b → T-B20c → T-B32 → T-B33 → T-B34**（与 T-B21 建议引擎、T-B31 风控、T-B36 交易规则并行汇合） → T-B24 盘后日报 →（T-B22 → T-B23 盘中）→ T-B26 通知 → T-B27 跟踪 → M2。T-B08/T-B18/T-B19 导入与 T-B30 分类并行（T-B30 完成前须先完成 T-R11 → T-B30a 分类器特征，挂在 T-B35 之后，v0.2.9 内裁定）；T-B25 LLM 网关独立并行（主线不依赖它，模板兜底）。前端全程按契约 mock 并行。

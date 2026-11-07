@@ -390,4 +390,4 @@ def test_watch_group_fails_closed_pending_selector_contract(component: Any) -> N
         },
     )
     assert response.status_code == 422
-    assert response.json()["error"]["details"]["issue"] == "watch_group_selector_not_defined"
+    assert response.json()["error"]["details"]["issue"] == "scope_deferred"

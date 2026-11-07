@@ -214,7 +214,7 @@ def create(
             ErrorCode.INSTANCE_SCOPE_INVALID,
             details={
                 "scope": scope,
-                "issue": "watch_group_selector_not_defined",
+                "issue": "scope_deferred",
             },
         )
     if (scope == "security") != (security_code is not None):

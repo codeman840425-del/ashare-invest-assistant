@@ -39,6 +39,12 @@
       该 location 为 internal、return 414、信封含 URI_TOO_LONG、details.max_bytes == SIZE 字节、request_id、X-Request-Id 头；
       error_page 494 =400 指向的 location return 400、信封含 REQUEST_HEADER_TOO_LARGE、max_bytes == SIZE、X-Request-Id 头。
       limits*.conf 不得再写 large_client_header_buffers（prod / dev 共用 nginx.conf 的值，信封里的 max_bytes 才一致）。
+证券搜索限流与缓存（T-A04 ⑤，架构师定）：
+  11. limits*.conf 定义 zone aia_search，键 $aia_search_key，生产 5r/s；nginx.conf 的 map "$uri?$args" $aia_search_key
+      只把 /api/v1/securities/search 与带 ?q= 的 /api/v1/securities 映射到 $binary_remote_addr、default 为空串；
+      location ~ ^/api/v1/securities(/|$) 同时有 aia_api 与 aia_search burst=20 nodelay，proxy_hide_header Cache-Control
+      并 add_header Cache-Control "private, no-store" always；网关自产信封（429/413/414/400）都带 private, no-store；
+      任何地方不得出现 proxy_cache*。
 用法：check_gateway_limits.py [--repo DIR]   不一致或缺文件时退出码 1，输出 ::error。
 """
 
@@ -127,15 +133,18 @@ LIMITS_DEV = "deploy/nginx/limits.dev.conf"
 COMPOSE_BASE = "deploy/compose/docker-compose.yml"
 COMPOSE_DEV = "deploy/compose/docker-compose.dev.yml"
 LIMITS_TARGET = "/etc/nginx/aia-limits.conf"
-ZONES = ("aia_api", "aia_auth", "aia_import")
-ZONE_KEY = {"aia_api": "$binary_remote_addr", "aia_auth": "$binary_remote_addr", "aia_import": "$aia_import_key"}
+ZONES = ("aia_api", "aia_auth", "aia_import", "aia_search")
+ZONE_KEY = {"aia_api": "$binary_remote_addr", "aia_auth": "$binary_remote_addr", "aia_import": "$aia_import_key",
+            "aia_search": "$aia_search_key"}
 ZONE_RE = re.compile(r"^\s*limit_req_zone\s+(\S+)\s+zone=(\w+):\S+\s+rate=(\d+)r/([sm])\s*;", re.M)
 # $aia_retry_after_s 的 map 分支 → 对应 zone
-RETRY_BRANCH = {"default": "aia_api", "~^/api/v1/auth/(login|register)$": "aia_auth", "~^/api/v1/imports$": "aia_import"}
+RETRY_BRANCH = {"default": "aia_api", "~^/api/v1/auth/(login|register)$": "aia_auth", "~^/api/v1/imports$": "aia_import",
+                "~^/api/v1/securities(/search)?$": "aia_search"}
 LOCATIONS = {  # location 头 → 必须出现的 limit_req zone
     "location /api/ {": ("aia_api",),
     "location ~ ^/api/v1/auth/(login|register)$ {": ("aia_api", "aia_auth"),
     "location = /api/v1/imports {": ("aia_api", "aia_import"),
+    "location ~ ^/api/v1/securities(/|$) {": ("aia_api", "aia_search"),
 }
 
 
@@ -456,12 +465,66 @@ def check_header_limits(repo: Path) -> list[str]:
     return errors
 
 
+SEARCH_LOC = "location ~ ^/api/v1/securities(/|$) {"
+SEARCH_RATE = 5.0  # r/s（架构师定）
+SEARCH_BURST = 20
+SEARCH_MAP = {r"~^/api/v1/securities/search\?": "$binary_remote_addr",
+              r"~^/api/v1/securities\?(.*&)?q=": "$binary_remote_addr", "default": ""}
+NO_STORE = 'add_header Cache-Control "private, no-store" always;'
+ERROR_LOCS = ("@rate_limited", "@payload_too_large", "@header_too_large", "/__aia_errors/414")  # 网关自产信封
+
+
+def check_search(repo: Path) -> list[str]:
+    errors: list[str] = []
+    nc = repo / NGINX_CONF
+    if not nc.is_file():
+        return [f"{NGINX_CONF} 不存在"]
+    conf = strip_comments(nc.read_text(encoding="utf-8"))
+    m = re.search(r'map\s+"\$uri\?\$args"\s+\$aia_search_key\s*\{(.*?)\n\s*\}', conf, re.S)
+    got: dict[str, str] = {}
+    for line in (m.group(1).splitlines() if m else []):
+        mm = re.match(r'\s*("[^"]*"|\S+)\s+("[^"]*"|\S+?)\s*;\s*$', line)
+        if mm:
+            got[mm.group(1).strip('"')] = mm.group(2).strip('"')
+    if got != SEARCH_MAP:
+        errors.append(f'{NGINX_CONF}: map "$uri?$args" $aia_search_key 应只把 /api/v1/securities/search 与带 ?q= 的 '
+                      f"/api/v1/securities 映射到 $binary_remote_addr、default \"\"（实际：{got or '无'}）")
+    blk = _block(conf, SEARCH_LOC)
+    if blk is None:
+        errors.append(f"{NGINX_CONF}: 缺少 {SEARCH_LOC.rstrip(' {')}")
+    else:
+        if not re.search(r"^\s*limit_req\s+zone=aia_search\s+burst=" + str(SEARCH_BURST) + r"\s+nodelay\s*;", blk, re.M):
+            errors.append(f"{NGINX_CONF}: 证券 location 需要 limit_req zone=aia_search burst={SEARCH_BURST} nodelay")
+        if not re.search(r"^\s*proxy_hide_header\s+Cache-Control\s*;", blk, re.M):
+            errors.append(f"{NGINX_CONF}: 证券 location 需要 proxy_hide_header Cache-Control（否则与上游的 Cache-Control 重复）")
+        if NO_STORE not in blk:
+            errors.append(f"{NGINX_CONF}: 证券 location 需要 {NO_STORE}")
+    for name in ERROR_LOCS:
+        body = _location_body(conf, name)
+        if body is None:
+            errors.append(f"{NGINX_CONF}: 缺少 location {name}")
+        elif NO_STORE not in body:
+            errors.append(f"{NGINX_CONF}: location {name} 缺少 {NO_STORE}（网关自产信封，/securities/* 也会走到）")
+    for rel in (NGINX_CONF, LIMITS_PROD, LIMITS_DEV):
+        f = repo / rel
+        if f.is_file() and re.search(r"^\s*proxy_cache\w*\s", strip_comments(f.read_text(encoding="utf-8")), re.M):
+            errors.append(f"{rel}: 不得启用 proxy_cache（证券响应 private, no-store，网关不缓存）")
+    f = repo / LIMITS_PROD
+    if f.is_file():
+        zones, _ = _parse_limits(strip_comments(f.read_text(encoding="utf-8")))
+        if "aia_search" in zones and zones["aia_search"][1] != SEARCH_RATE:
+            errors.append(f"{LIMITS_PROD}: aia_search 生产速率应为 {SEARCH_RATE:g}r/s（实际 {zones['aia_search'][1]:g}r/s）")
+    if not errors:
+        print(f"OK   证券搜索 aia_search {SEARCH_RATE:g}r/s 突发 {SEARCH_BURST}，叠加全站 aia_api；/securities/* private, no-store；无 proxy_cache")
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo", type=Path, default=Path.cwd())
     args = ap.parse_args(argv)
     repo = args.repo.resolve()
-    errors = check(repo) + check_rate_limits(repo) + check_dynamic_upstream(repo) + check_header_limits(repo)
+    errors = check(repo) + check_rate_limits(repo) + check_dynamic_upstream(repo) + check_header_limits(repo) + check_search(repo)
     for e in errors:
         print(f"::error title=gateway-limits::{e}")
     print(f"check_gateway_limits: {len(errors)} 个问题")

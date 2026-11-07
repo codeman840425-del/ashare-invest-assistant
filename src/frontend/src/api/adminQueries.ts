@@ -1,7 +1,8 @@
 /** 管理端查询（契约 v0.2.8 §7.9）。非管理员 404，不重试。 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from './client';
-import type { AdminDataLicence, AdminIngestStatus } from './adminTypes';
+import type { AdminDataLicence, AdminIngestStatus, SecurityReconciliationDiff } from './adminTypes';
+import type { SecurityReconciliationKind, SecurityReconciliationSource } from './enums';
 import { useCursorPages } from '../lib/cursorPaging';
 
 export const useAdminIngestStatus = () =>
@@ -28,3 +29,21 @@ export function useAdminLicenceAction() {
     ]),
   });
 }
+
+/** GET /admin/securities/reconciliation 的筛选（v0.2.9 内 T-A04 #33 ④）：status 默认 open；kind 逗号分隔多选；source 单选 */
+export interface ReconFilter {
+  status: 'open' | 'resolved' | 'all';
+  kinds: SecurityReconciliationKind[];
+  source: SecurityReconciliationSource | null;
+}
+const reconId = (r: SecurityReconciliationDiff) => r.id;
+/** §1.2 游标分页，排序由服务端给（last_seen_on desc, id desc），前端不重排 */
+export const useAdminSecurityReconciliation = (f: ReconFilter, limit = 50) =>
+  useCursorPages<SecurityReconciliationDiff>({
+    queryKey: ['admin', 'securities', 'reconciliation', f.status, [...f.kinds].sort().join(','), f.source ?? ''],
+    path: '/admin/securities/reconciliation',
+    params: { status: f.status, kind: f.kinds.length ? f.kinds.join(',') : null, source: f.source },
+    limit,
+    retry: false,
+    idOf: reconId,
+  });

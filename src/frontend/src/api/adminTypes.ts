@@ -2,7 +2,7 @@
  * 管理端类型（契约 v0.2.8 §5.1、§7.9）。/admin/* 不进 openapi.json（v0.2.8 #15，架构师裁定），
  * 因此按契约手写，不从 openapi 生成。只含状态元数据，不含证书值或其任何片段。
  */
-import type { DataLicenceState, DataLicenceTier, DataStatus, IngestHealth } from './enums';
+import type { DataLicenceState, DataLicenceTier, DataStatus, IngestHealth, SecurityReconciliationKind, SecurityReconciliationSource } from './enums';
 import type { DataLicenceErrorCode, DataLicenceStatus } from './licenceTypes';
 
 /** §5.1 IngestLicenceStatus：/admin/ingest/status 的 licences[] 元素，每张证书一行 */
@@ -71,3 +71,33 @@ export interface AdminDataLicence extends DataLicenceStatus {
 /** §7.9 POST /admin/data-licences/{user_id}/pause · /resume 请求体 → 204 */
 export interface AdminLicenceAction { reason: string }
 export const ADMIN_REASON_MAX = 200;
+
+/** §7.9 GET /admin/securities/reconciliation 的 field（只有 field_mismatch 有） */
+export const RECON_FIELDS = ['name', 'list_date', 'delist_date', 'exchange', 'board'] as const;
+export type SecurityReconField = (typeof RECON_FIELDS)[number];
+export type SecurityReconStatus = 'open' | 'resolved';
+/**
+ * 契约 v0.2.9 内 T-A04（#33 ④）：GET /admin/securities/reconciliation 元素。证券主数据对账差异，只读。
+ * 不含证书值、行情数值或原始快照内容；quote_conflict 只给代码与天数，不给冲突的价格。
+ */
+export interface SecurityReconciliationDiff {
+  id: string;
+  kind: SecurityReconciliationKind;
+  source: SecurityReconciliationSource;
+  security_code: string;
+  /** 主数据简称；vendor_unknown 为 null */
+  name: string | null;
+  /** 对方给出的简称 */
+  source_name: string | null;
+  field: SecurityReconField | null;
+  master_value: string | null;
+  source_value: string | null;
+  /** 只有 mairui_* 有 */
+  licence_owner: { user_id: string; username: string } | null;
+  first_seen_on: string;
+  last_seen_on: string;
+  /** 出现过的工作日数 */
+  seen_days: number;
+  status: SecurityReconStatus;
+  resolved_on: string | null;
+}

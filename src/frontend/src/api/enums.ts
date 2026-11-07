@@ -96,6 +96,9 @@ export const ENUMS = {
   plan_condition_type: ['price_above', 'price_below', 'pct_change', 'indicator', 'event', 'date', 'custom'],
   plan_origin: ['manual', 'plan_draft'],
   data_gap_scope: ['user', 'account', 'security', 'market'],
+  // v0.2.9 内，T-A04（#33 ③）：证券主数据对账，只出现在 /admin/securities/reconciliation
+  security_reconciliation_kind: ['vendor_stale_listed', 'vendor_unknown', 'quote_missing', 'quote_conflict', 'field_mismatch'],
+  security_reconciliation_source: ['mairui_lists', 'mairui_real_all', 'cninfo', 'akshare'],
 } as const;
 
 /** §6.1 不可执行原因码（v0.2.5：22 个） */
@@ -182,4 +185,6 @@ export type PlanStatus = E<'plan_status'>;
 export type PlanConditionType = E<'plan_condition_type'>;
 export type PlanOrigin = E<'plan_origin'>;
 export type DataGapScope = E<'data_gap_scope'>;
+export type SecurityReconciliationKind = E<'security_reconciliation_kind'>;
+export type SecurityReconciliationSource = E<'security_reconciliation_source'>;
 export type ReasonCode = (typeof REASON_CODES)[number];

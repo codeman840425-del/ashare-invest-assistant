@@ -223,7 +223,7 @@ python3 run_all.py p13 --p13-restated 600590.SH --p13-announce 2024-11-09 --p13-
 输出：`results/run-<…>/p13_fin_pit/raw_<key>.json`（完整原始响应，同 jzrq 的每个 plrq 版本都在里面）、`manifest.json`（脱敏 URL、参数、状态、行数、字段、sha256）、`plan_meta.json`；
 `results/run-<…>/p13_analysis.json` 是离线分析结果（`p13_analyze.py`，只读原始文件，不出网，可在开发 box 上重跑：
 `python3 p13_analyze.py results/run-<…> --stdout`）。OCF 用 jyhdcsdxjlxj→jyhdcsdxjlje 逐分量 coalesce，`basis.ocf_field` 逐分量记录，两者都空 → null（`ocf_missing`），从不补 0；
-PB 按 plan 2.12.1：zgb 取 `bdrq ≤ d` 且 `plrq < d` 的最近一行，权益取 15 个月内 `plrq < d` 的最近报告，原因码只用 plan 2.12.1 T-R12b 的封闭 14 码（如权益 ≤0 → `non_positive_equity`、停牌 → `no_valid_bar`、除权后股本未更新 → `share_change_pending`、zgb 只含 A 股 → `a_share_only_capital`，多个命中取表中靠前的一个）；`basis.share_change_check`、`basis.share_class_check` 无法判定时为 `unavailable`。⑧ 给总判定 `overall_decision`，⑨ 没有币种/单位字段时结论写“只靠数量级不连续检查”。
+PB 按 plan 2.12.1：zgb 取 `bdrq ≤ d` 且已可见的最近一行（T-R12e 第 1 条 + T-R12f 第 1–3 条：`bdrq` 为季末且 `plrq = bdrq` 或 `plrq` 为季末 → 可见 = max(next_trading_day(plrq), next_trading_day(`bdrq` 所属报告期截止日) 09:30)，`basis.pit_basis`（字符串数组）含 `capital_deadline`——只用于首次全量回填写入的季末行，增量采集取 max(next_trading_day(plrq), first_seen_at)（T-R12g），探针的全历史拉取按首次回填口径；其余按 next_trading_day(plrq)；离线把下一交易日近似为下一自然日），权益取 15 个月内 `plrq < d` 的最近报告，原因码只用 plan 2.12.1 T-R12b 的封闭 14 码（如权益 ≤0 → `non_positive_equity`、停牌 → `no_valid_bar`、除权后股本未更新 → `share_change_pending`、zgb 只含 A 股 → `a_share_only_capital`，多个命中取表中靠前的一个）；`basis.share_change_check` 无法判定时为 `unavailable`；`basis.share_class_check` 在名单未接入时为 `unavailable`、接入后所有行为 `list`（名单内另打 `non_a_share_capital`，探针用 `p13_analyze.SHARE_CLASS_LISTS_SAMPLE` 样本名单，不接进 app）。CDR（`securities.type = cdr`，探针用 kinds=CDR 代替；不设 CDR 名单）照常算、`verify_pending` 含 `cdr_unit`（只是值上的标记，S2 池与分位池本就不含 CDR，不写剔除条款，T-R12g）；银行/保险只继承 `verify_pending`，照常参与排序。V5i 回填分析输出 `4_capital.v5i_backfill`（plrq 季末占比、季末行与同期 balance/cashflow 最早 plrq 的差天数分布与样例、判定 backfilled/true_disclosure/inconclusive，每行 `first_seen_at` = manifest `fetched_at`）；V5j 输出 `v5j_cdr_unit`（zgb≈基础股数 / zgb≈CDR份数 / neither）。`run_all.py` 的 opt-in 项只按完整名或编号（`p13` / `p13_fin_pit`）点名，`p1`、`p` 前缀不会带上。⑧ 给总判定 `overall_decision`，⑨ 没有币种/单位字段时结论写“只靠数量级不连续检查”。
 dry-run 阶段 6 用本地伪造服务端跑缺省和 `--p13-restated` 两遍，核对 28 次 = 服务端增量、manifest sha256、①–⑨ 都有调用、分析结果可重算、输出不含证书。
 离线自检：`env -u MAIRUI_LICENCE python3 ../selfchecks/tr12_fin.py [运行目录]`。
 
@@ -257,7 +257,7 @@ env -u MAIRUI_LICENCE python3 p11_replay.py results/run-20261101-190106
 env -u MAIRUI_LICENCE python3 p11_replay.py --tag T-B05 results/run-20261101-190106   # 另存，不覆盖旧重放
 ```
 
-结果写到运行目录下的 `p11_gaps.replay-<tag>.json`（缺省 T-B48；同名已存在则拒绝写），不覆盖原 `p11_gaps.json`。batch 请求日取原运行记录的请求日（重建序列只含跳变点，中点会漂移）。T-B05 收紧精度规则后的自检：`env -u MAIRUI_LICENCE python3 selfchecks/tb05_switches.py`。重放期间 socket、requests 和 `common.call` 都被换成抛异常的桩，一旦尝试出网，退出码为 2。自检：`cd src/backend && env -u MAIRUI_LICENCE python3 selfchecks/tb48_p11.py`。
+结果写到运行目录下的 `p11_gaps.replay-<tag>.json`（缺省 T-B48；同名已存在则拒绝写），不覆盖原 `p11_gaps.json`。batch 请求日取原运行记录的请求日（重建序列只含跳变点，中点会漂移）。T-B05 收紧精度规则后的自检：`env -u MAIRUI_LICENCE python3 selfchecks/tb05_switches.py [运行目录]`；其中“离线重放（收紧规则后）”一项只在给出运行目录（不给时用缺省 `results/run-20261101-190106`）且该目录有 `p11_gaps.json` 时执行，否则记 SKIP（结果目录不入库）。重放期间 socket、requests 和 `common.call` 都被换成抛异常的桩，一旦尝试出网，退出码为 2。自检：`cd src/backend && env -u MAIRUI_LICENCE python3 selfchecks/tb48_p11.py`。
 
 ## 安全与限流约束（脚本内已强制）
 - 证书只从 `os.environ["MAIRUI_LICENCE"]` 读取；控制台、日志、样例、结果中的 URL 一律替换成 `***`，写盘前断言不含证书。dry-run 用假证书。

@@ -85,6 +85,13 @@ export const routes: RouteObject[] = [
           return { element: <AdminGate><AdminDataLicencesPage /></AdminGate> };
         },
       },
+      {
+        path: 'admin/securities/reconciliation',
+        lazy: async () => {
+          const { AdminSecurityReconciliationPage } = await import('../pages/admin/AdminSecurityReconciliationPage');
+          return { element: <AdminGate><AdminSecurityReconciliationPage /></AdminGate> };
+        },
+      },
       { path: 'admin/*', element: <AdminGate><PlaceholderPage title="管理后台" /></AdminGate> },
       { path: '*', element: <NotFoundPage /> },
     ],

@@ -14,7 +14,6 @@ from sqlalchemy import Connection, func, insert, or_, select, text, update
 from app.aggregates.service import select_account
 from app.api.v1.portfolio import _account
 from app.common.errors import AppError, ErrorCode
-from app.db.tables.accounts import reconciliation_items, reconciliation_runs
 from app.db.tables.market import securities, trading_calendar
 from app.db.tables.realtime import daily_report_items, daily_reports, pipeline_runs, suggestions
 from app.db.tables.research import watchlist_items
@@ -136,35 +135,10 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
             gaps.append(
                 _gap("account.total_assets", "缺行情估值或重建现金，净资产与仓位不可计算。")
             )
-    reconciliation = {
-        "status": "not_imported",
-        "as_of": None,
-        "diff_count": 0,
-        "important_count": 0,
-    }
-    run = (
-        conn.execute(
-            select(reconciliation_runs)
-            .where(reconciliation_runs.c.account_id == identifier)
-            .order_by(reconciliation_runs.c.created_at.desc(), reconciliation_runs.c.id.desc())
-            .limit(1)
-        ).first()
-        if identifier
-        else None
-    )
-    if run:
-        count = conn.execute(
-            select(func.count())
-            .select_from(reconciliation_items)
-            .where(reconciliation_items.c.run_id == run.id)
-        ).scalar_one()
-        if count:
-            # Important-count policy is not defined by the existing reader; never invent 0.
-            raise AppError(
-                ErrorCode.MAINTENANCE,
-                details={"issue": "reconciliation_item_importance_adapter_pending"},
-            )
-        reconciliation.update(status=run.status, as_of=run.created_at)
+    from app.aggregates.reconciliation import read as read_reconciliation
+
+    recon = read_reconciliation(conn, identifier, now)
+    reconciliation = {k: recon[k] for k in ["status", "as_of", "diff_count", "important_count"]}
     rows = (
         conn.execute(
             select(suggestions)

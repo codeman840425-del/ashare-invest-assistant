@@ -86,3 +86,17 @@ def overview(
             market_clock(conn, dt.datetime.now(dt.UTC), settings.business.market_rules)
         )
     return response(value, if_none_match)
+
+
+@router.get("/reconciliation")
+def reconciliation(
+    auth: AuthDep, engine: EngineDep, account_id: uuid.UUID | None = None
+) -> models.ReconciliationResult:
+    from app.aggregates.reconciliation import read
+
+    with engine.connect() as conn:
+        identifier = service.select_account(conn, auth.user_id, account_id)
+        result = read(conn, identifier, dt.datetime.now(dt.UTC))
+    return models.ReconciliationResult.model_validate_json(
+        json.dumps({key: result[key] for key in ["status", "as_of", "items"]}, default=str)
+    )

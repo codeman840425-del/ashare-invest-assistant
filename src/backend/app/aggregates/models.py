@@ -1,7 +1,7 @@
 """Public field boilerplate reviewed locally from DeepSeek T-B77 draft.
 
 Enums/nullability/required fields verified against api-contract §5.1/7.3.
-EmptyBlocks deliberately reject nonempty future products: no mock suggestions/evidence.
+Real owned products are typed; unbuilt alert/plan event producers remain empty with gaps.
 """
 
 from __future__ import annotations
@@ -10,8 +10,9 @@ import datetime as dt
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+from app.schemas import enums as e
 from app.schemas.enums import (
     DataGapScope,
     DataStatus,
@@ -22,6 +23,7 @@ from app.schemas.enums import (
     RiskLevel,
     SecurityType,
 )
+from app.signals.models import Evidence, RiskFlag
 
 
 class Model(BaseModel):
@@ -70,6 +72,27 @@ class TerminalQuote(Model):
     t: dt.datetime
 
 
+class SummaryAction(Model):
+    strategy_key: str
+    strategy_name: str
+    action: e.Action
+    t_leg: e.TLeg | None
+    lifecycle: e.Lifecycle
+
+
+class SuggestionSummary(Model):
+    id: uuid.UUID
+    created_at: dt.datetime
+    status: e.SuggestionStatus
+    security_code: str
+    name: str
+    consensus: e.ConsensusStatus
+    actions: list[SummaryAction]
+    executability_status: e.ExecutabilityStatus
+    divergent_dimensions: list[e.Dimension]
+    top_score: int | None = Field(ge=0, le=100)
+
+
 class TerminalRow(Model):
     security_code: str
     name: str
@@ -77,7 +100,7 @@ class TerminalRow(Model):
     focus: bool
     quote: TerminalQuote | None
     holding: TerminalHolding | None
-    suggestion: None
+    suggestion: SuggestionSummary | None
     active_reason_count: int = Field(ge=0)
     max_risk_level: RiskLevel | None
     data_status: DataStatus
@@ -123,6 +146,7 @@ class Account(Model):
 
 
 class Terminal(DataBlock):
+    _focus_more: bool = PrivateAttr(default=False)
     account_id: uuid.UUID | None
     server_time: dt.datetime
     trade_date: dt.date
@@ -131,6 +155,44 @@ class Terminal(DataBlock):
     rows: list[TerminalRow] = Field(max_length=300)
     truncated: bool
     unread_notifications: int = Field(ge=0)
+
+
+class ProductBlock[T](Model):
+    items: list[T] = Field(max_length=50)
+    more: bool
+
+
+class PendingDraft(Model):
+    id: uuid.UUID
+    security_code: str
+    name: str
+    action: e.Action
+    valid_until: dt.datetime
+    status: e.PlanDraftStatus
+
+
+class ReleasedReason(Model):
+    reason_id: uuid.UUID
+    signal_id: uuid.UUID
+    code: e.ReasonCode
+    security_code: str
+    name: str
+    released_at: dt.datetime
+
+
+class TodayRiskFlag(RiskFlag):
+    security_code: str | None
+    name: str | None
+    risk_event_id: uuid.UUID | None
+
+
+class Invalidation(Model):
+    suggestion_id: uuid.UUID
+    security_code: str
+    name: str
+    strategy_key: str
+    text: str
+    at: dt.datetime
 
 
 class EmptyBlock(Model):
@@ -190,14 +252,31 @@ class Today(DataBlock):
     session: MarketSession
     market: TodayMarket
     focus: Focus
-    pending_plan_drafts: EmptyBlock
-    released_reasons: EmptyBlock
-    risk_flags: EmptyBlock
-    invalidations_today: EmptyBlock
+    pending_plan_drafts: ProductBlock[PendingDraft]
+    released_reasons: ProductBlock[ReleasedReason]
+    risk_flags: ProductBlock[TodayRiskFlag]
+    invalidations_today: ProductBlock[Invalidation]
     daily_report: Report
     reconciliation: Reconciliation
     unread_notifications: int = Field(ge=0)
     alerts: EmptyBlock
     plan_triggers: EmptyBlock
     data_gaps: GapBlock
-    evidence: tuple[()]
+    evidence: list[Evidence]
+
+
+class ReconciliationItem(Model):
+    kind: e.ReconciliationItemKind
+    security_code: str | None
+    name: str | None
+    ours: str | None
+    broker: str | None
+    diff: str | None
+    important: bool
+    note: str
+
+
+class ReconciliationResult(Model):
+    status: ReconciliationStatus
+    as_of: dt.datetime | None
+    items: list[ReconciliationItem]

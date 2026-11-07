@@ -1,41 +1,37 @@
-"""T-B77 conservative skeleton: own imported ledger facts, no shared vendor reads.
-
-Clock/default-account policies are NOT guessed. Missing clock is an explicit 503;
-nonempty unintegrated products also fail closed rather than pretending they are empty.
-"""
+"""Owned ledger/product aggregation with honest gaps; DB calendar is the only 503 boundary."""
 
 from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections import Counter
 from decimal import Decimal
 from typing import Literal
 
-from sqlalchemy import Connection, Table, func, literal, select, union_all
+from sqlalchemy import Connection, func, select
 
 from app.aggregates import models as m
+from app.aggregates import products
+from app.aggregates.reconciliation import read as read_reconciliation
 from app.api.v1.portfolio import _account
 from app.common.errors import AppError, ErrorCode
 from app.db.tables.accounts import (
     accounts,
     broker_position_snapshots,
-    reconciliation_items,
-    reconciliation_runs,
 )
 from app.db.tables.market import securities
 from app.db.tables.notify import notifications
-from app.db.tables.realtime import daily_reports, suggestions, user_realtime_prefs
-from app.db.tables.research import action_plans, alerts, watchlist_items
-from app.db.tables.signals import non_executable_reasons, plan_drafts
-from app.db.tables.strategy import risk_events
+from app.db.tables.realtime import daily_reports, user_realtime_prefs
+from app.db.tables.research import watchlist_items
 from app.importing.pipeline import live_snapshots
 from app.schemas.enums import (
     DataGapScope,
     DataStatus,
     GapReason,
-    ReconciliationStatus,
+    RiskLevel,
     SecurityType,
 )
+from app.suggestions.service import summary
 
 
 def unavailable(issue: str) -> AppError:
@@ -56,27 +52,6 @@ def select_account(
         .limit(1)
     ).scalar_one_or_none()
     return uuid.UUID(str(selected)) if selected is not None else None
-
-
-def ensure_empty_products(conn: Connection, user_id: uuid.UUID) -> None:
-    tables: tuple[Table, ...] = (
-        suggestions,
-        plan_drafts,
-        non_executable_reasons,
-        risk_events,
-        alerts,
-        action_plans,
-    )
-    query = union_all(
-        *(
-            select(literal(table.name)).where(
-                select(table.c.id).where(table.c.user_id == user_id).exists()
-            )
-            for table in tables
-        )
-    )
-    if conn.execute(query).first() is not None:
-        raise unavailable("nonempty_products_require_full_aggregation")
 
 
 def gap(key: str, message: str, reason: GapReason = GapReason.NO_SOURCE) -> m.Gap:
@@ -105,10 +80,11 @@ def terminal(
     clock: m.MarketClock,
     now: dt.datetime,
     scope: str,
+    *,
+    _focus_only: bool = False,
 ) -> m.Terminal:
-    ensure_empty_products(conn, user_id)
     gaps = [
-        gap("aggregation", "契约桩：建议/行情尚未接线，不代表完整聚合验收通过。"),
+        gap("aggregation", "行情与部分事件来源尚未接线，已存在的本人建议按实际产物聚合。"),
         gap("account.pnl_day", "缺少上日基准，日盈亏不可计算。"),
     ]
     watched = conn.execute(
@@ -164,6 +140,12 @@ def terminal(
         gaps.append(
             gap("cash", "未录入可核实的现金余额，仓位比例不可计算。", GapReason.USER_INPUT_MISSING)
         )
+    current = products.owned_suggestions(conn, user_id, account_id, now)
+    reason_counts = Counter(
+        r.security_code
+        for r in products.reasons(conn, user_id, account_id, now)
+        if r.status == "active"
+    )
     result_rows = []
     for code in codes:
         position = positions.get(code)
@@ -205,9 +187,23 @@ def terminal(
                 focus=code in focused,
                 quote=None,
                 holding=holding,
-                suggestion=None,
-                active_reason_count=0,
-                max_risk_level=None,
+                suggestion=m.SuggestionSummary.model_validate_json(
+                    products.encoded(summary(current[code]))
+                )
+                if code in current
+                else None,
+                active_reason_count=reason_counts[code],
+                max_risk_level=max(
+                    (RiskLevel(f["level"]) for f in current[code].risk_flags or []),
+                    key={
+                        RiskLevel.INFO: 0,
+                        RiskLevel.WARNING: 1,
+                        RiskLevel.CRITICAL: 2,
+                    }.__getitem__,
+                    default=None,
+                )
+                if code in current
+                else None,
                 data_status=DataStatus.PARTIAL,
                 data_as_of=None,
             )
@@ -247,19 +243,22 @@ def terminal(
         .select_from(notifications)
         .where(notifications.c.user_id == user_id, notifications.c.read_at.is_(None))
     ).scalar_one()
-    return m.Terminal(
+    focused_rows, focus_more = products.focus_rows(result_rows)
+    value = m.Terminal(
         server_time=now,
         trade_date=clock.trade_date,
         session=clock.session,
         account_id=account_id,
         account=account_out,
-        rows=result_rows[:300],
+        rows=focused_rows[:50] if _focus_only else result_rows[:300],
         truncated=len(result_rows) > 300,
         unread_notifications=int(unread),
         data_status=DataStatus.PARTIAL,
         data_as_of=None,
         gaps=gaps,
     )
+    value._focus_more = focus_more
+    return value
 
 
 def today(
@@ -269,38 +268,27 @@ def today(
     clock: m.MarketClock,
     now: dt.datetime,
 ) -> m.Today:
-    base = terminal(conn, user_id, account_id, clock, now, "all")
-    if base.truncated:
-        raise unavailable("focus_aggregation_pending_large_universe")
-    reconciliation = m.Reconciliation(
-        status=ReconciliationStatus.NOT_IMPORTED, as_of=None, diff_count=0, important_count=0
+    base = terminal(conn, user_id, account_id, clock, now, "all", _focus_only=True)
+    recon = read_reconciliation(conn, account_id, now)
+    reconciliation = m.Reconciliation.model_validate_json(
+        products.encoded(
+            {k: recon[k] for k in ["status", "as_of", "diff_count", "important_count"]}
+        )
     )
-    if account_id:
-        run = conn.execute(
-            select(reconciliation_runs)
-            .where(reconciliation_runs.c.account_id == account_id)
-            .order_by(reconciliation_runs.c.created_at.desc())
-            .limit(1)
-        ).first()
-        if run is not None:
-            count = conn.execute(
-                select(func.count())
-                .select_from(reconciliation_items)
-                .where(reconciliation_items.c.run_id == run.id)
-            ).scalar_one()
-            if count:
-                raise unavailable("reconciliation_item_importance_adapter_pending")
-            reconciliation = m.Reconciliation(
-                status=ReconciliationStatus(run.status),
-                as_of=run.created_at,
-                diff_count=0,
-                important_count=0,
-            )
+    current = products.owned_suggestions(conn, user_id, account_id, now)
+    reason_rows = products.reasons(conn, user_id, account_id, now)
+    names = {r.code: r.name for r in conn.execute(select(securities.c.code, securities.c.name))}
+    actual = products.blocks(
+        conn, user_id, account_id, now, clock.trade_date, current, names, reason_rows
+    )
+    base.gaps.extend(gap(key, message) for key, message in actual["gaps"])
     reports = (
         conn.execute(
             select(daily_reports.c.status)
             .where(
-                daily_reports.c.user_id == user_id, daily_reports.c.trade_date == clock.trade_date
+                daily_reports.c.user_id == user_id,
+                daily_reports.c.trade_date == clock.trade_date,
+                daily_reports.c.account_id == account_id,
             )
             .order_by(daily_reports.c.revision.desc())
         )
@@ -314,7 +302,7 @@ def today(
         if "building" in reports
         else "not_yet"
     )
-    focus = [row for row in base.rows if row.focus]
+    focus = base.rows
     empty = m.EmptyBlock(items=(), more=False)
     action_gaps = [
         m.TodayGap(
@@ -339,18 +327,18 @@ def today(
         market=m.TodayMarket(
             regime=None, regime_position_range=None, data_status=DataStatus.UNAVAILABLE
         ),
-        focus=m.Focus(items=focus[:50], more=len(focus) > 50),
-        pending_plan_drafts=empty,
-        released_reasons=empty,
-        risk_flags=empty,
-        invalidations_today=empty,
+        focus=m.Focus(items=focus[:50], more=base._focus_more),
+        pending_plan_drafts=actual["pending_plan_drafts"],
+        released_reasons=actual["released_reasons"],
+        risk_flags=actual["risk_flags"],
+        invalidations_today=actual["invalidations_today"],
         daily_report=m.Report(date=clock.trade_date, status=status),
         reconciliation=reconciliation,
         unread_notifications=base.unread_notifications,
         alerts=empty,
         plan_triggers=empty,
         data_gaps=m.GapBlock(items=action_gaps, more=False),
-        evidence=(),
+        evidence=actual["evidence"],
         data_status=DataStatus.PARTIAL,
         data_as_of=None,
         gaps=base.gaps,

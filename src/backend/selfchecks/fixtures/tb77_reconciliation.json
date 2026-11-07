@@ -1,0 +1,61 @@
+[
+  {
+    "sequence": 1,
+    "kind": "quantity_mismatch",
+    "ours": "100",
+    "broker": "200",
+    "diff": "100",
+    "resolution": null
+  },
+  {
+    "sequence": 2,
+    "kind": "missing_in_broker",
+    "ours": "101",
+    "broker": "201",
+    "diff": "100",
+    "resolution": null
+  },
+  {
+    "sequence": 3,
+    "kind": "missing_in_ours",
+    "ours": "102",
+    "broker": "202",
+    "diff": "100",
+    "resolution": null
+  },
+  {
+    "sequence": 4,
+    "kind": "cost_differs",
+    "ours": "103",
+    "broker": "203",
+    "diff": "100",
+    "resolution": null
+  },
+  {
+    "sequence": 5,
+    "kind": "cash_gap",
+    "ours": "104",
+    "broker": "204",
+    "diff": "100",
+    "resolution": null
+  },
+  {
+    "sequence": 6,
+    "kind": "cash_chain_break",
+    "ours": "105",
+    "broker": "205",
+    "diff": "100",
+    "resolution": null
+  },
+  {
+    "sequence": 7,
+    "kind": "quantity_mismatch",
+    "ours": "106",
+    "broker": "206",
+    "diff": "100",
+    "resolution": {
+      "action": "ignore",
+      "note": "fictional"
+    }
+  }
+]

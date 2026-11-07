@@ -485,6 +485,7 @@
 | 409 | `STRATEGY_VERSION_PUBLISHED` | 已发布版本不可修改 | `{version_no}` |
 | 403 | `STRATEGY_NOT_OWNED` | 修改内置策略或他人策略（须先复制） | — |
 | 422 | `STRATEGY_HORIZON_MISMATCH` | 给股票绑定的策略不支持所选周期 | `{strategy_key, horizons}` |
+| 422 | `STRATEGY_SYSTEM_ONLY` | 该策略 `mount_policy=system_only`（如 H-01），只能由系统挂载，用户不能创建实例（plan 2.5.14 T-R15 裁定第 2 条） | `{strategy_key}` |
 | 422 | `RISK_CONTROL_INVALID_PARAMS` | 风控阈值越界 | `{control, fields}` |
 | 409 | `SUGGESTION_SUPERSEDED` | 对已被取代的建议执行动作 | `{current_id}` |
 | 409 | `SUGGESTION_REFRESH_TOO_FREQUENT` | 手动刷新过于频繁（受权益 `realtime.min_notify_interval_s` 约束） | `{retry_after_s}` |

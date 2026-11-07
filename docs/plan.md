@@ -549,7 +549,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 
 | 类别 | 字段 | 说明 |
 |---|---|---|
-| 必填 1 | 身份：`key`、`name`、`category`、`version_no` | `category` 取值：trend / momentum / reversal / breakout / value / quality / dividend / low_vol / event / intraday_t |
+| 必填 1 | 身份：`key`、`name`、`category`、`version_no` | `category` 取值：trend / momentum / reversal / breakout / value / quality / dividend / low_vol / event / intraday_t / risk（T-R15） |
 | 必填 2 | 适用周期 `horizons[]` | intraday_t / short / swing / long |
 | 必填 3 | 一句话原理 `hypothesis.why_it_works`，以及否定它的证据 `hypothesis.falsified_by[]` | `hypothesis` |
 | 必填 4 | 维度与角色 `dimensions[]`：`{dimension, role(core/auxiliary/veto)}` | 六个维度 |
@@ -916,7 +916,7 @@ class RuleTemplateStrategy(ScreenerStrategy, TimingStrategy):
 | `key` | string | ✓ | `^[a-z][a-z0-9_]{2,40}$`，全站唯一；建议用周期前缀（`t_`/`st_`/`sw_`/`lt_`） |
 | `version_no` | int ≥ 1 | ✓ | 只增 |
 | `name` | string ≤ 30 字 | ✓ | |
-| `category` | enum | ✓ | `trend / momentum / reversal / breakout / value / quality / dividend / low_vol / event / intraday_t`；需要新增取值时提给架构师 |
+| `category` | enum | ✓ | `trend / momentum / reversal / breakout / value / quality / dividend / low_vol / event / intraday_t / risk`（T-R15）；需要新增取值时提给架构师 |
 | `horizons[]` | enum[] | ✓ | `intraday_t / short / swing / long` |
 | `hypothesis` | `{why_it_works: string, falsified_by: string[≥1]}` | ✓ | |
 | `dimensions[]` | `{dimension, role: core\|auxiliary\|veto}[]` | ✓ | `dimension` 取六个维度之一 |
@@ -955,6 +955,28 @@ screen: null               # 选股模板写 {universe, filters[], rank_by, top_
   - 白名单只能由架构师和后端修改，研究员可以提出新增函数的需求。
 - **硬性要求**（G1）：至少 1 条 `entry`、1 条 `counter`、1 条 `invalidation`，以及至少一种止损（`stops.stop_loss` 或 `time_stop_days`）。做T 模板必须有当日回补规则或时间止损。
 - **G1 豁免（T-A03，契约 v0.2.3）**：只由系统挂载（`strategy_instances.origin=system`）、规则只含 weakening/exit（可另有 counter/invalidation）的**纯离场组件**（目前只有 H-01）不要求 `entry` 与止损类规则，但须至少 1 条 exit 或 weakening、1 条 counter、1 条 invalidation；不能被用户实例化为普通模板，`action_map` 不得含 buy/add。导入器按 `origin=system` + 规则角色集合判定，不满足即 `CARD_IMPORT_INVALID`。
+- **T-R15 补充裁定（架构师 2026-11-07，对应研究员 reports/T-R15.md 第 11–17 行，一次定完）**：
+  0. **价格基准统一，除权不得混用**（取代 W-01 模板 `max2` 止损里原来的混用写法）：
+     - 记 `A(d)` 为 d 日累计后复权因子，满足 `close_hfq(d) = close(d) × A(d)`。DSL 求值时，`qfq` 序列的基准日是当次的 `as_of`（T）：`x_qfq(d) = x(d) × A(d) / A(T)`。`A(d)` 只取 T 日已可得的除权信息，回放和回测也一样，不用之后的除权信息。由此 T 日的 `qfq` 值就等于 T 日的不复权值。
+     - 持久化的价格一律存不复权值，包括 `plan.entry_price`、`ctx.cost_price`、止损价和目标价。求值器派生出 `plan.entry_price_qfq` 和 `ctx.cost_price_qfq`：`P × A(e) / A(T)`，e 为成交或建仓日；摊薄成本按每笔成交分别折算后再加权。
+     - 卡片里价格类表达式两边必须同一口径：`plan.*` 或 `ctx.*` 的不复权价格不能直接和 `*_qfq` 序列比较。导入器按 `feature_catalog.adjust` 做静态口径检查，口径不一致返回 `CARD_IMPORT_INVALID`（`issue=adjust_mismatch`）。
+     - 用 `qfq@T` 算出来的止损价和目标价，就是 T 日的不复权价，可以直接展示，也可以写进计划。
+     - 除权 golden 由研究员补，每类至少 1 个：W-01 至少 2 个（建仓后 20 日内发生送转和现金分红），H-01 至少 1 个（成本价跨除权日）。期望值按上面的公式算，并写明 `A(d)` 的序列。
+  1. **`action_map` 的键**只能取 `entry_all_core_pass`、`held_hold`、`weakening`、`exit`、`else`。H-01 写成 `{exit: sell, weakening: reduce, held_hold: hold, else: hold}`。
+     - `insufficient_data` 不是 `action_map` 的键：求值结果为 `insufficient_data` 时不产生候选，建议里显示 `hold`（纯离场组件）或 `wait`（入场策略），并带上缺口原因。
+     - 数据缺失时一律不产生 sell 或 reduce。
+  2. **category 增加 `risk`**，用于纯离场或风控组件，H-01 改用 `risk`。
+     - 卡片加字段 `mount_policy: system_only | user`，默认 `user`。导入器判定 G1 豁免的依据是 `mount_policy=system_only`，且规则只含 weakening/exit（可另有 counter/invalidation）。
+     - `origin` 仍然只是实例的属性，不写在卡片里。`system_only` 的策略，用户用 `POST /strategy-instances` 创建会返回 422，错误码 `STRATEGY_SYSTEM_ONLY`，登记到契约。
+  3. **单位与指标口径**：
+     - `ctx.position_weight` 和 `ctx.sector_weight` 是 0–1 之间的小数。
+     - `atr(n)` 用 Wilder 平滑：TR 取 `max(h−l, |h−c₋₁|, |l−c₋₁|)`，用 qfq 序列；第一个值取前 n 个 TR 的简单平均，之后 `ATR_t = (ATR_{t−1}×(n−1) + TR_t)/n`；`warmup_bars = n+1`。
+     - 实现之后，研究员补 1 个 golden 在 SMA 与 Wilder 结果不同的区间，用来锁定口径。
+  4. **夹具 schema 扩展**：
+     - 夹具增加顶层字段 `security: {code, board: main|chinext|star|bse, list_date}`，只用于测试，T-B71 导入器接受这个字段。
+     - `feature_catalog` 增加 `f.is_suspended`（日频布尔值，来源是停牌标记 `sf`，P0），停牌场景用它表达。
+     - `expect` 可以写 `lot_rule`（可选），写了就要逐项比对。
+  5. **`LIMIT_LOCKED` 卖出方向也记这个码**（plan 2.5.9 已经包括“一字跌停卖不出”），`detail.direction` 取 `sell`。H01-FX7 要改成记 `LIMIT_LOCKED`。
 - **代码策略**：只在 DSL 表达不了时使用。研究员写清楚输入特征、输出特征和伪代码，由后端实现成 `FeaturePlugin`（只产出特征列）或注册的 `TimingStrategy`/`ScreenerStrategy`。输出协议不变（2.5.13）。
 
 **D. 参数 schema 格式**（G4）

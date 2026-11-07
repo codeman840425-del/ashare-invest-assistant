@@ -977,6 +977,18 @@ screen: null               # 选股模板写 {universe, filters[], rank_by, top_
      - `feature_catalog` 增加 `f.is_suspended`（日频布尔值，来源是停牌标记 `sf`，P0），停牌场景用它表达。
      - `expect` 可以写 `lot_rule`（可选），写了就要逐项比对。
   5. **`LIMIT_LOCKED` 卖出方向也记这个码**（plan 2.5.9 已经包括“一字跌停卖不出”），`detail.direction` 取 `sell`。H01-FX7 要改成记 `LIMIT_LOCKED`。
+  6. **（T-R15 第二轮）跟踪止盈**：增加派生键 `ctx.highest_close_since_entry_qfq`，等于 e 日到 T 日之间 `close(d) × A(d) / A(T)` 的最大值，e 是建仓日。W-01 的 X5 改用这个键，恢复成可量化的 golden，至少 1 例跨越除权日。
+     - 原来的不复权 `ctx.highest_close_since_entry` 只用于展示，不能出现在规则里，否则按第 0 条报 `adjust_mismatch`。
+  7. **`f.is_suspended` 登记**：研究员在 `docs/strategies/feature_spec.md` 新增一个 F 条目，写明：
+     - 日频布尔值，来源是停牌标记 `sf`，P0；
+     - 证券已退市（`delisted`）或不在列表中（`missing_from_list`）时取 null，与 F14 相同；
+     - 分类器读到 null 时按 true 处理。
+     - 登记合入之前，校验器的临时放行不算验收通过。
+  8. **夹具 expect 的原因明细**：增加可选字段 `expect.reason_details: {<原因码>: {direction: buy|sell}}`。期望原因码里有 `LIMIT_LOCKED` 或 `SUSPENDED` 时，这个字段必填并逐项比对，T-B71 导入器支持这个字段。
+  9. **`expect.lot_rule` 的形状**：`{min_buy: int, step: int, odd_lot_sell_all: bool, sell_qty?: int}`，键名和契约中 `issue="lot_rule"` 错误的 `details` 一致（`min_buy`、`step`）。研究员拟定的形状采纳，T-B71 照此实现，不需要再确认。
+  10. **停牌时卖出**：`SUSPENDED` 买卖两个方向都适用，`direction=sell`。
+      - H/W 的状态照常输出 exit 或 weakening，原因码加上 `SUSPENDED`，信号标为不可执行。
+      - 建议页显示“复牌后卖出”，不生成可确认的卖出草案。`LIMIT_LOCKED` 卖出方向同样这样处理。
 - **代码策略**：只在 DSL 表达不了时使用。研究员写清楚输入特征、输出特征和伪代码，由后端实现成 `FeaturePlugin`（只产出特征列）或注册的 `TimingStrategy`/`ScreenerStrategy`。输出协议不变（2.5.13）。
 
 **D. 参数 schema 格式**（G4）

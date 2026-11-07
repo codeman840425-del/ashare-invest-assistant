@@ -199,6 +199,8 @@ def create(
     if account is None:
         raise AppError(ErrorCode.NOT_FOUND)
     version = version_owned(conn, user_id, version_id)
+    if version.config.get("mount_policy") == "system_only":
+        raise AppError(ErrorCode.STRATEGY_SYSTEM_ONLY)
     if version.lifecycle not in {"published", "observing"} and not (
         is_admin and version.lifecycle == "simulating"
     ):

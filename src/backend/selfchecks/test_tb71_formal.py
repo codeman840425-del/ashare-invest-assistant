@@ -50,18 +50,10 @@ def test_all_golden_independently(corpus: Any, index: int) -> None:
     assert any(trace.computed_values for trace in result.rule_traces)
 
 
-def test_preflight_collects_all_known_epistemic_blockers(corpus: Any) -> None:
+def test_preflight_formal_metadata_correction(corpus: Any) -> None:
     staged, errors, _, _ = corpus
     assert len(staged) == 2
-    assert {(error["key"], error["path"], error["issue"]) for error in errors} == {
-        (
-            "hold_risk_monitor",
-            "epistemic.params_schema.reclaim_days",
-            "required_threshold_epistemic",
-        ),
-        ("sw_ma_trend_pullback", "epistemic.params_schema.ma_fast", "required_threshold_epistemic"),
-        ("sw_ma_trend_pullback", "epistemic.params_schema.ma_slow", "required_threshold_epistemic"),
-    }
+    assert errors == []  # d783fdf supplies all three research-owned annotations
     assert all(not item.persistable and not item.runnable for item in staged)
 
 

@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     accounts,
     admin,
+    aggregates,
     auth,
     candidates,
     data_licence,
@@ -37,3 +38,5 @@ router.include_router(horizon.router)
 router.include_router(candidates.router)
 
 router.include_router(instances.router)
+
+router.include_router(aggregates.router)

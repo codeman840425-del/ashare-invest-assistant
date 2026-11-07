@@ -53,7 +53,8 @@ def assess_master(
         raise ValueError("证券上市状态未确认，不能决定候选写入")
     # T-B60 的具体方向限定与 §2.5.11 一致：退市整理只阻断买入，不抹掉卖出。
     if row["listing_status"] == ListingStatus.DELISTING_PERIOD and action in {
-        Action.BUY, Action.ADD
+        Action.BUY,
+        Action.ADD,
     }:
         return MasterAdmission(False, "delisting_buy", ReasonCode.ST_OR_DELISTING)
     return MasterAdmission(True)
@@ -73,11 +74,15 @@ def run_with_master_guard[T](
     可信调用边界，不是接收用户自定义 SQL 的接口，也不替代完整候选 P1/归属校验。
     """
     with conn.begin_nested():
-        row = conn.execute(
-            select(securities)
-            .where(securities.c.code == security_code)
-            .with_for_update(read=True)
-        ).mappings().one_or_none()
+        row = (
+            conn.execute(
+                select(securities)
+                .where(securities.c.code == security_code)
+                .with_for_update(read=True)
+            )
+            .mappings()
+            .one_or_none()
+        )
         decision = assess_master(
             dict(row) if row is not None else None, action=action, trade_date=trade_date
         )

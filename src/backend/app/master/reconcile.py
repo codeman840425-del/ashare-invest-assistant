@@ -101,15 +101,15 @@ def reconcile_vendor_lists(
     }
     if any(as_of < r["last_seen_on"] for r in opened.values()):
         raise ValueError("拒绝用早于最近对账日的快照更新或关闭差异")
-    for key, old in opened.items():
-        if key not in wanted:
+    for diff_key, open_row in opened.items():
+        if diff_key not in wanted:
             conn.execute(
                 update(table)
-                .where(table.c.id == old["id"])
+                .where(table.c.id == open_row["id"])
                 .values(status="resolved", resolved_on=as_of)
             )
             result.resolved += 1
-    for (kind, code), name in sorted(wanted.items()):
+    for (kind, code), source_name in sorted(wanted.items()):
         old = opened.get((kind, code))
         if old is None:
             ident = conn.execute(
@@ -118,7 +118,7 @@ def reconcile_vendor_lists(
                     kind=kind,
                     source="mairui_lists",
                     security_code=code,
-                    source_name=name,
+                    source_name=source_name,
                     source_licence_id=source_licence_id,
                     first_seen_on=as_of,
                     last_seen_on=as_of,
@@ -135,7 +135,7 @@ def reconcile_vendor_lists(
                 update(table)
                 .where(table.c.id == old["id"])
                 .values(
-                    source_name=name,
+                    source_name=source_name,
                     last_seen_on=as_of,
                     seen_days=days,
                 )

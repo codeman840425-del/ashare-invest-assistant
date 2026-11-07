@@ -3,6 +3,7 @@
 运行：python selfchecks/tb58.py [--replay <run_dir> ...]
 更正结果单独写 p13_analysis.corrected-T-B58.json，原始分析与响应均不覆盖。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -12,9 +13,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "probes"))
-from p13_analyze import (  # noqa: E402
-    SUBDIR, analyze, currency_unit_conclusion, currency_unit_fields,
-    load_first_seen, load_raw, selftest_pure,
+from p13_analyze import (
+    SUBDIR,
+    analyze,
+    currency_unit_conclusion,
+    currency_unit_fields,
+    load_first_seen,
+    load_raw,
+    selftest_pure,
 )
 
 
@@ -36,10 +42,20 @@ def main() -> int:
         # Existing probe pure selftests return (label, bool, detail).
         check(row[1], "p13: " + row[0])
 
-    business = [{"hbzj": 100, "yfbzj": 22, "bhbfzhbqsljlr": 3,
-                 "qdfzgsjqtywdwzfdxjje": 4, "wbbzbzhc": 5, "ysfbzk": 7}]
+    business = [
+        {
+            "hbzj": 100,
+            "yfbzj": 22,
+            "bhbfzhbqsljlr": 3,
+            "qdfzgsjqtywdwzfdxjje": 4,
+            "wbbzbzhc": 5,
+            "ysfbzk": 7,
+        }
+    ]
     x = assess(business)
-    check(not x["fields_found"] and x["status"] == "unconfirmed", "hbzj/yfbzj 等业务字段不是币种/单位")
+    check(
+        not x["fields_found"] and x["status"] == "unconfirmed", "hbzj/yfbzj 等业务字段不是币种/单位"
+    )
     check("只靠数量级不连续检查" in x["conclusion"], "业务字段反例输出未确认/数量级检查")
     x = assess([{"note": "USD 万元", "zczj": "1.0 万元", "company": "港币"}])
     check(not x["fields_found"] and not x["unit_mismatch"], "任意字符串/金额后缀不当作元数据")
@@ -57,20 +73,43 @@ def main() -> int:
     x = assess([{"currency": "CNY"}])
     check(x["status"] == "unconfirmed", "仅币种不推定单位")
     x = assess([{"currency": "CNY", "unit": "元"}, {"currency": "HKD", "unit": "元"}])
-    check(x["status"] == "unconfirmed" and x["by_response"]["sample"]["conflict"], "冲突元数据不宣称统一口径")
-    x = currency_unit_conclusion(currency_unit_fields({"a": [{"currency": "CNY", "unit": "元"}], "b": business}))
+    check(
+        x["status"] == "unconfirmed" and x["by_response"]["sample"]["conflict"],
+        "冲突元数据不宣称统一口径",
+    )
+    x = currency_unit_conclusion(
+        currency_unit_fields({"a": [{"currency": "CNY", "unit": "元"}], "b": business})
+    )
     check(x["status"] == "unconfirmed", "单个响应确认不得外推整个批次")
     check(assess([])["status"] == "unconfirmed", "空响应不可确认")
 
     for run in args.replay:
         original = run / "p13_analysis.json"
-        source_files = sorted((run / SUBDIR).glob("raw_*.json")) + [original, run / SUBDIR / "plan_meta.json", run / SUBDIR / "manifest.json"]
-        digests = {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest() for p in source_files}
+        source_files = [
+            *sorted((run / SUBDIR).glob("raw_*.json")),
+            original,
+            run / SUBDIR / "plan_meta.json",
+            run / SUBDIR / "manifest.json",
+        ]
+        digests = {
+            str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in source_files
+        }
         old = json.loads(original.read_text())
-        corrected = analyze(load_raw(run), json.loads((run / SUBDIR / "plan_meta.json").read_text()), load_first_seen(run))
-        check(all(old[k] == corrected[k] for k in old if k != "9_currency_unit"), run.name + " 非⑨分析完全不变")
+        corrected = analyze(
+            load_raw(run),
+            json.loads((run / SUBDIR / "plan_meta.json").read_text()),
+            load_first_seen(run),
+        )
+        check(
+            all(old[k] == corrected[k] for k in old if k != "9_currency_unit"),
+            run.name + " 非⑨分析完全不变",
+        )
         cu = corrected["9_currency_unit"]
-        check(cu["status"] == "unconfirmed" and not cu["fields_found"], run.name + " 原误报更正为未确认")
+        check(
+            cu["status"] == "unconfirmed" and not cu["fields_found"],
+            run.name + " 原误报更正为未确认",
+        )
         output = run / "p13_analysis.corrected-T-B58.json"
         provenance = run / "p13_analysis.corrected-T-B58.provenance.json"
         # Exclusive create: never overwrite original or a previous correction.
@@ -79,10 +118,26 @@ def main() -> int:
         with output.open("x") as f:
             json.dump(corrected, f, ensure_ascii=False, indent=2)
         with provenance.open("x") as f:
-            json.dump({"task": "T-B58", "original": original.name, "correction": output.name,
-                       "changed_section": "9_currency_unit", "input_sha256": digests,
-                       "method": "离线重算，不代表生产验收"}, f, ensure_ascii=False, indent=2)
-        check(all(hashlib.sha256((run / p).read_bytes()).hexdigest() == digest for p, digest in digests.items()), run.name + " 原始取证SHA256未变")
+            json.dump(
+                {
+                    "task": "T-B58",
+                    "original": original.name,
+                    "correction": output.name,
+                    "changed_section": "9_currency_unit",
+                    "input_sha256": digests,
+                    "method": "离线重算，不代表生产验收",
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
+        check(
+            all(
+                hashlib.sha256((run / p).read_bytes()).hexdigest() == digest
+                for p, digest in digests.items()
+            ),
+            run.name + " 原始取证SHA256未变",
+        )
         print("更正回放: " + str(output))
 
     print(f"{sum(results)} passed, {len(results) - sum(results)} failed")

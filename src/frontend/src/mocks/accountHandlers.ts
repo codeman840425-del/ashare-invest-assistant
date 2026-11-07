@@ -13,7 +13,7 @@ import { ENUMS } from '../api/enums';
 import { LICENCE_RE, type DataLicencePatch, type DataLicencePut } from '../api/licenceTypes';
 import { OVERRIDE_CHOICES } from '../i18n/importLabels';
 import {
-  MOCK_INVITE_CODES, MOCK_REGISTER_IP_PER_HOUR, emptyStats, finding, applyParse, currentUser, publicBatch, reconciliationFor, requestCookies, rotateCsrf, setSessionCsrf, state, toAdminUser, toMe,
+  MOCK_INVITE_CODES, MOCK_REGISTER_IP_PER_HOUR, computeStats, emptyStats, finding, applyParse, currentUser, publicBatch, reconciliationFor, requestCookies, rotateCsrf, setSessionCsrf, state, toAdminUser, toMe,
   type MockBatch, type MockUser,
 } from './session';
 import { errorBody, page } from './handlerUtils';
@@ -504,6 +504,8 @@ export const accountHandlers = [
     const st = url.searchParams.get('status');
     const code = url.searchParams.get('code');
     const dd = url.searchParams.get('dedup_status');
+    // #35：discarded / failed → 200、items: []、next_cursor: null（不新增 410）
+    if (b.status === 'discarded' || b.status === 'failed') return json({ items: [], next_cursor: null });
     const items = b.rows_data.filter((r) => (!st || r.status === st) && (!code || r.findings.some((f) => f.code === code)) && (!dd || r.dedup_status === dd));
     return json(page(items, url));
   }),
@@ -523,6 +525,8 @@ export const accountHandlers = [
   http.post(`${API}/imports/:id/findings/:fid/resolve`, async ({ params, request }) => {
     const b = myBatch(String(params.id));
     if (!b) return notFound('导入批次');
+    // #35：discarded 批次的行级提示已随预览行删除，resolve 一律 409 INVALID_STATE_TRANSITION
+    if (b.status === 'discarded') return badTransition(b.status, 'previewed');
     const all = [...b.file_findings, ...b.rows_data.flatMap((r) => r.findings)];
     const f = all.find((x) => x.id === params.fid);
     if (!f) return notFound('提示');
@@ -583,7 +587,10 @@ export const accountHandlers = [
     const b = myBatch(String(params.id));
     if (!b) return notFound('导入批次');
     if (b.status !== 'previewed' && b.status !== 'failed') return badTransition(b.status, 'discarded');
+    // #35：同一事务删除全部预览行，批次头（stats、file_findings）保留
+    b.stats_frozen = computeStats(b);
     b.status = 'discarded';
+    b.rows_data = [];
     return json({ status: 'discarded' });
   }),
   http.post(`${API}/imports/:id/revert`, ({ params }) => {
@@ -602,7 +609,8 @@ export const accountHandlers = [
     if (!b) return notFound('导入批次');
     const esc = (v: unknown) => `"${String(v ?? '').replaceAll('"', '""')}"`;
     const lines = ['row_no,code,severity,field,message,raw_masked'];
-    for (const f of b.file_findings) lines.push([f.row_no, f.code, f.severity, f.field, f.message, ''].map(esc).join(','));
+    // #35：discarded / failed 批次只有表头
+    if (b.status !== 'discarded' && b.status !== 'failed') for (const f of b.file_findings) lines.push([f.row_no, f.code, f.severity, f.field, f.message, ''].map(esc).join(','));
     for (const r of b.rows_data) for (const f of r.findings) lines.push([r.row_no, f.code, f.severity, f.field, f.message, r.raw_masked].map(esc).join(','));
     return new HttpResponse(`\uFEFF${lines.join('\r\n')}\r\n`, { headers: { 'Content-Type': 'text/csv; charset=utf-8' } });
   }),

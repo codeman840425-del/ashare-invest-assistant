@@ -35,6 +35,19 @@ ENDPOINTS = [
     ("hsrl_real_all", "全市场实时（网络源）", "/hsrl/real/all/{licence}", True, "p01_realtime"),
 ]
 LIST_KEYS = ("hslt_list", "bj_list_all", "kc_list_all")
+# --p12-only：None = 全部 5 个接口；("hslt_list",) = 只取 /hslt/list（T-B05 复测 4，单独跑 1 次调用，
+# 同一次运行里 p11 GAP4 已取过时复用、0 次调用）
+ONLY_KEYS = None
+ONLY_CHOICES = {"hslt": ("hslt_list",)}
+
+
+def active_endpoints() -> list:
+    if ONLY_KEYS is None:
+        return list(ENDPOINTS)
+    bad = [k for k in ONLY_KEYS if k not in {e[0] for e in ENDPOINTS}]
+    if bad:
+        raise ValueError(f"未知 p12 接口：{bad}")
+    return [e for e in ENDPOINTS if e[0] in ONLY_KEYS]
 CSV_FIELDS = ["endpoint", "dm_raw", "code6", "mc", "jys", "suffix"]
 _CODE_RE = re.compile(r"^(?:(sh|sz|bj)\.?)?(\d{6})(?:\.(sh|sz|bj))?$", re.I)
 
@@ -91,7 +104,7 @@ def main(res):
     w = csv.DictWriter(csv_buf, fieldnames=CSV_FIELDS, lineterminator="\n")
     w.writeheader()
     sets, items = {}, []
-    for key, title, tpl, bulk, src in ENDPOINTS:
+    for key, title, tpl, bulk, src in active_endpoints():
         r, how, fetched_utc = _get(key, tpl, src)
         rows = extract(r.data) if r.ok else []
         raw_path = c.write_raw(f"{SUBDIR}/raw_{key}.json", r.text or "")
@@ -119,7 +132,8 @@ def main(res):
     lp = c.write_raw(f"{SUBDIR}/mairui_dm_lists.txt", dm_text(lists)) if lists else None
     up = c.write_raw(f"{SUBDIR}/mairui_dm_union_all.txt", dm_text(union)) if union else None
     res.extend(items)
-    res.append({"name": "CODES_SUMMARY", "csv_file": _rel(csv_path),
+    res.append({"name": "CODES_SUMMARY", "only": list(ONLY_KEYS) if ONLY_KEYS is not None else None,
+                "endpoints": [x["name"][6:] for x in items], "csv_file": _rel(csv_path),
                 "lists_union_file": _rel(lp) if lp else None, "lists_union_n": len(lists),
                 "all_union_file": _rel(up) if up else None, "all_union_n": len(union),
                 "calls_made": sum(1 for x in items if x["source"] == "called"),

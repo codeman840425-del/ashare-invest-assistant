@@ -204,7 +204,8 @@ export function SuggestionDetailPage() {
   const q = useSuggestion(id);
   const list = useSuggestions();
   const refresh = useRefreshSuggestion();
-  const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
+  // 提示绑定到所指的卡：取代旧卡后跳到新卡仍显示；切到别的卡则不显示
+  const [refreshMsg, setRefreshMsg] = useState<{ id: string | null; text: string } | null>(null);
   useMarkViewed(q.data?.id);
   if (q.isLoading) return <Loading />;
   if (q.isError || !q.data) return <div className="page-scroll"><ErrorBox error={q.error ?? new Error('未找到候选信号卡')} /></div>;
@@ -231,9 +232,13 @@ export function SuggestionDetailPage() {
             onClick={() => {
               setRefreshMsg(null);
               refresh.mutate(sg.security_code, {
-                onSuccess: (newId) => {
-                  if (newId && newId !== sg.id) navigate(`/suggestions/${newId}`);
-                  else setRefreshMsg('已重算，当前卡没有变化');
+                // 契约 #36：以响应体为准
+                onSuccess: (res) => {
+                  if (!res.suggestion) setRefreshMsg({ id: sg.id, text: `已重算，本证券当前没有候选信号卡（数据截至 ${fmtTime(res.data_as_of)}）` });
+                  else if (res.suggestion.id !== sg.id) {
+                    setRefreshMsg({ id: res.suggestion.id, text: `已重算，结论有变化，已切换到新卡（数据截至 ${fmtTime(res.data_as_of)}）` });
+                    navigate(`/suggestions/${res.suggestion.id}`);
+                  } else setRefreshMsg({ id: sg.id, text: res.changed ? '已重算，本卡已更新' : `已重算，当前卡没有变化（数据截至 ${fmtTime(res.data_as_of)}）` });
                 },
               });
             }}
@@ -248,7 +253,7 @@ export function SuggestionDetailPage() {
       </div>
 
       {refresh.isError ? <Alert type="error" showIcon className="div-alert" data-testid="sg-refresh-error" title={errorText(refresh.error)} /> : null}
-      {refreshMsg ? <Alert type="info" showIcon className="div-alert" data-testid="sg-refresh-msg" title={refreshMsg} /> : null}
+      {refreshMsg && refreshMsg.id === sg.id ? <Alert type="info" showIcon className="div-alert" data-testid="sg-refresh-msg" title={refreshMsg.text} /> : null}
       <SupersedeInfo sg={sg} />
 
       {sg.divergence.length ? (
@@ -352,7 +357,7 @@ function FollowUp({ sg }: { sg: Suggestion }) {
         {tr.isLoading ? <div className="muted small">加载中…</div> : tr.isError || !tr.data ? <div className="muted small">跟踪统计暂不可用</div> : (
           <div className="sg-track-grid">
             {(['t1', 't5', 't20'] as const).map((k) => (
-              <div key={k}><label>{k === 't1' ? '1 日后' : k === 't5' ? '5 日后' : '20 日后'}</label><StatValue s={tr.data[k]} kind="ratio" testId={`sg-track-${k}`} /></div>
+              <div key={k}><label>{k === 't1' ? '1 日后' : k === 't5' ? '5 日后' : '20 日后'}</label><StatValue s={tr.data[k]} kind="raw" testId={`sg-track-${k}`} /></div>
             ))}
           </div>
         )}

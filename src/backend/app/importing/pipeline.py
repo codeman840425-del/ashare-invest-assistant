@@ -363,12 +363,53 @@ def purge_uncommitted_import_rows(conn: Connection) -> int:
     return int(res.rowcount or 0)
 
 
+#: 单次清理最多处理的原始文件数（下一轮继续，避免长事务）
+RAW_PURGE_BATCH: Final = 500
+
+
+def purge_expired_raw_files(
+    conn: Connection, settings: Settings, now: dt.datetime | None = None
+) -> int:
+    """定时清理（评审 bbf58a0 m6，plan §3.5A）：删除 ``retained_until`` 已到期的加密原始文件。
+
+    逐条：先删磁盘文件（不存在视为已删），再把 ``import_files`` 置 ``deleted_at=now,
+    storage_path=NULL``。``FOR UPDATE SKIP LOCKED`` 避免与并发的放弃 / 注销争用。幂等：
+    事务回滚后下一轮重删（``unlink(missing_ok)``）。删除失败（路径越界、权限）只记批次号与
+    异常类型，该行保留，下一轮重试。返回本轮成功清理的文件数。"""
+    now = now or dt.datetime.now(dt.UTC)
+    f = import_files
+    rows = conn.execute(
+        select(f.c.id, f.c.batch_id, f.c.storage_path)
+        .where(
+            f.c.deleted_at.is_(None),
+            f.c.storage_path.is_not(None),
+            f.c.retained_until.is_not(None),
+            f.c.retained_until <= now,
+        )
+        .order_by(f.c.retained_until)
+        .limit(RAW_PURGE_BATCH)
+        .with_for_update(skip_locked=True)
+    ).all()
+    done: list[uuid.UUID] = []
+    for r in rows:
+        try:
+            storage.delete_raw(settings, r.storage_path)
+        except (OSError, ValueError, AppError) as exc:
+            log.warning("raw file purge failed batch=%s exc=%s", r.batch_id, type(exc).__name__)
+            continue
+        done.append(r.id)
+    if done:
+        conn.execute(update(f).where(f.c.id.in_(done)).values(deleted_at=now, storage_path=None))
+    return len(done)
+
+
 def run_parse(engine: Engine, settings: Settings, batch_id: uuid.UUID) -> None:
     """后台任务：解析一个 ``uploaded``/``parsing`` 批次。任何异常 → ``failed``（只记批次 id）。"""
     try:
         _run_parse(engine, settings, batch_id)
-    except Exception:
-        log.exception("import parse failed batch=%s", batch_id)
+    except Exception as exc:  # noqa: BLE001
+        # 评审 bbf58a0 m5：只记异常类型与批次号，不记 str(exc) / 堆栈（可能带原文）
+        log.error("import parse failed batch=%s exc=%s", batch_id, type(exc).__name__)
         with engine.begin() as conn:
             res = conn.execute(
                 update(import_batches)

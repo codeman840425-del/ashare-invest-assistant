@@ -228,30 +228,8 @@ services:
       <<: *worker-healthcheck
       test: ["CMD", "python", "-m", "app.workers.healthcheck", "beat"]
 
-  # 定时清理到期证书冷却记录（T-B10 部署项）：beat 仍是占位，先由本服务周期调用后端函数
-  # app.licences.service.purge_expired_cooldowns（deploy/docker/cooldown-purge.py，只读挂载）。
-  # 以 aia_api 连库（它本来就在证书 PUT/DELETE 时执行同一函数，不新增权限）；不挂任何 secret、不用属主。
-  # beat 落地定时任务后（后端需要做），删掉本服务即可。手动补跑一次：
-  #   deploy/scripts/compose.sh run --rm --no-deps -e AIA_COOLDOWN_PURGE_ONCE=1 cooldown-purge
-  cooldown-purge:
-    image: *backend-image
-    command: ["python", "/aia/cooldown-purge.py"]
-    restart: unless-stopped
-    deploy:
-      replicas: 1
-    environment:
-      APP_ENV: ${APP_ENV:-local}
-      SERVICE_NAME: cooldown-purge
-      DATABASE_URL: *db-api-url
-      TZ: Asia/Shanghai
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      AIA_COOLDOWN_PURGE_INTERVAL_S: ${AIA_COOLDOWN_PURGE_INTERVAL_S:-3600}
-    volumes:
-      - ../docker/cooldown-purge.py:/aia/cooldown-purge.py:ro
-    depends_on: *app-depends
-    healthcheck:
-      <<: *worker-healthcheck
-      test: ["CMD", "python", "/aia/cooldown-purge.py", "health"]
+  # 到期证书冷却记录的定时清理由 beat 调度、worker 执行（后端 6670b10，任务 licences.purge_expired_cooldowns），
+  # 原 deploy 的 cooldown-purge 服务已删除（review-6670b10 m5）。
 
   # 一次性：数据库迁移（T-O01b）。成功退出（0）后 timescale-apply 才运行；失败则 api 等服务不会启动。
   migrate:

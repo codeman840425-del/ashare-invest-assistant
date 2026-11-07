@@ -161,75 +161,299 @@ BEGIN
 END
 $purges$;
 
--- T-O11：aia_maint（删除用户数据 CLI 专用）。整段在一个 DO 里：先撤后授，事务内完成，不留中间态。
+-- T-O11：aia_maint（删除用户数据 CLI 专用）——列级最小授权（升级部署门槛）。
+-- 清单来源：后端 reports/aia_maint-grants.md §3（78c5281；由 CLI 实际语句的 RTEPermissionInfo 采集）。
+--   SELECT / UPDATE / INSERT 只按列授予；DELETE 是表级权限，只在清单里的表上给；不给任何表级 SELECT/UPDATE/INSERT、
+--   不给序列、不给默认权限（新表不会自动获得权限：迁移新增带 user FK 的表，须后端更新清单，否则 CLI 报 permission denied，不会静默漏删）。
+--   market：按后端 §7 规则，凡带 source_licence_id 列的表，只给 USAGE ON SCHEMA market + SELECT(source_licence_id) + DELETE。
+-- 整段在一个 DO 里：先撤后授，事务内完成，不留中间态。表或列在旧库上不存在时只告警（迁移未到）。
 DO $maint$
 DECLARE
   owner_role text := current_user;
-  t          text;
-  r          record;
-  p          text;
+  -- '表|权限|列,列'；DELETE 行的列为空（表级）
+  spec text[] := ARRAY[
+    'app.account_events|SELECT|account_id',
+    'app.account_events|DELETE|',
+    'app.account_reviews|SELECT|admin_id,id,user_id',
+    'app.account_reviews|UPDATE|admin_id,reason,user_id',
+    'app.accounts|SELECT|id,user_id',
+    'app.accounts|DELETE|',
+    'app.action_plans|SELECT|current_version_id,id,user_id',
+    'app.action_plans|UPDATE|current_version_id',
+    'app.action_plans|DELETE|',
+    'app.alert_rules|SELECT|id,user_id',
+    'app.alert_rules|DELETE|',
+    'app.alerts|SELECT|id,user_id',
+    'app.alerts|DELETE|',
+    'app.audit_logs|SELECT|actor_id,detail,ip_hash,target_id',
+    'app.audit_logs|UPDATE|actor_id,detail,ip_hash,target_id',
+    'app.audit_logs|INSERT|action,actor_id,actor_role,detail,target_id,target_type',
+    'app.broker_position_snapshot_items|SELECT|snapshot_id',
+    'app.broker_position_snapshot_items|DELETE|',
+    'app.broker_position_snapshots|SELECT|account_id,id',
+    'app.broker_position_snapshots|DELETE|',
+    'app.candidate_signal_events|SELECT|signal_id',
+    'app.candidate_signal_events|DELETE|',
+    'app.candidate_signals|SELECT|id,user_id',
+    'app.candidate_signals|DELETE|',
+    'app.candidate_versions|SELECT|candidate_id,created_by,id',
+    'app.candidate_versions|DELETE|',
+    'app.cash_movements|SELECT|account_id',
+    'app.cash_movements|DELETE|',
+    'app.claim_links|SELECT|claim_id',
+    'app.claim_links|DELETE|',
+    'app.claims|SELECT|id,user_id',
+    'app.claims|DELETE|',
+    'app.daily_report_items|SELECT|report_id',
+    'app.daily_report_items|DELETE|',
+    'app.daily_reports|SELECT|id,llm_call_id,user_id',
+    'app.daily_reports|DELETE|',
+    'app.data_snapshots|SELECT|id,items,known_events,licence_id,user_id',
+    'app.data_snapshots|DELETE|',
+    'app.entitlement_overrides|SELECT|created_by,user_id',
+    'app.entitlement_overrides|UPDATE|created_by',
+    'app.entitlement_overrides|DELETE|',
+    'app.holdings|SELECT|account_id',
+    'app.holdings|DELETE|',
+    'app.import_batches|SELECT|id,user_id',
+    'app.import_batches|DELETE|',
+    'app.import_files|SELECT|batch_id,storage_path',
+    'app.import_files|DELETE|',
+    'app.import_mappings|SELECT|id,user_id',
+    'app.import_mappings|DELETE|',
+    'app.import_rows|SELECT|batch_id',
+    'app.import_rows|DELETE|',
+    'app.invite_codes|SELECT|bound_username,created_by,id,revoked_by,used_by',
+    'app.invite_codes|UPDATE|bound_username,used_by',
+    'app.llm_calls|SELECT|id,target_id,target_type',
+    'app.llm_calls|UPDATE|request_body,request_hash,response_body,target_id,target_type,validation_errors',
+    'app.llm_calls|DELETE|',
+    'app.llm_providers|SELECT|created_by,id',
+    'app.llm_providers|UPDATE|created_by',
+    'app.llm_strategy_drafts|SELECT|id,llm_call_ids,requested_by,reviewer_id',
+    'app.llm_strategy_drafts|UPDATE|reviewer_id',
+    'app.login_attempts|SELECT|id,user_id,username_tried',
+    'app.login_attempts|DELETE|',
+    'app.non_executable_reasons|SELECT|id,released_by,user_id',
+    'app.non_executable_reasons|UPDATE|released_by',
+    'app.non_executable_reasons|DELETE|',
+    'app.notification_channel_bindings|SELECT|id,user_id',
+    'app.notification_channel_bindings|DELETE|',
+    'app.notification_deliveries|SELECT|binding_id,notification_id',
+    'app.notification_deliveries|DELETE|',
+    'app.notification_preferences|SELECT|user_id',
+    'app.notification_preferences|DELETE|',
+    'app.notifications|SELECT|id,target_id,user_id',
+    'app.notifications|UPDATE|target_id,target_route,target_type',
+    'app.notifications|DELETE|',
+    'app.opening_positions|SELECT|account_id',
+    'app.opening_positions|DELETE|',
+    'app.plan_conditions|SELECT|plan_version_id',
+    'app.plan_conditions|DELETE|',
+    'app.plan_draft_confirmations|SELECT|id,user_id',
+    'app.plan_draft_confirmations|DELETE|',
+    'app.plan_drafts|SELECT|id,user_id',
+    'app.plan_drafts|DELETE|',
+    'app.plan_versions|SELECT|id,plan_id',
+    'app.plan_versions|DELETE|',
+    'app.prompt_templates|SELECT|created_by,id',
+    'app.realtime_settings|SELECT|changed_by,id',
+    'app.reason_status_events|SELECT|reason_id',
+    'app.reason_status_events|DELETE|',
+    'app.reconciliation_items|SELECT|run_id',
+    'app.reconciliation_items|DELETE|',
+    'app.reconciliation_runs|SELECT|account_id,id',
+    'app.reconciliation_runs|DELETE|',
+    'app.research_candidates|SELECT|current_version_id,id,user_id',
+    'app.research_candidates|UPDATE|current_version_id',
+    'app.research_candidates|DELETE|',
+    'app.review_versions|SELECT|review_id',
+    'app.review_versions|DELETE|',
+    'app.reviews|SELECT|current_version_id,id,user_id',
+    'app.reviews|UPDATE|current_version_id',
+    'app.reviews|DELETE|',
+    'app.risk_control_settings|SELECT|id,user_id',
+    'app.risk_control_settings|DELETE|',
+    'app.risk_control_settings_history|SELECT|changed_by,id,setting_id,user_id',
+    'app.risk_control_settings_history|DELETE|',
+    'app.risk_events|SELECT|id,user_id',
+    'app.risk_events|DELETE|',
+    'app.signal_events|SELECT|id,user_id',
+    'app.signal_events|DELETE|',
+    'app.strategies|SELECT|id,owner_user_id',
+    'app.strategy_card_versions|SELECT|created_by,id',
+    'app.strategy_cards|SELECT|id,owner_user_id',
+    'app.strategy_instance_events|SELECT|actor_id,id,instance_id',
+    'app.strategy_instance_events|DELETE|',
+    'app.strategy_instances|SELECT|id,user_id',
+    'app.strategy_instances|DELETE|',
+    'app.strategy_lifecycle_events|SELECT|actor_id,id',
+    'app.strategy_promotion_reviews|SELECT|id,reviewer_id',
+    'app.strategy_promotion_reviews|UPDATE|reviewer_id',
+    'app.strategy_runs|SELECT|id,user_id',
+    'app.strategy_runs|DELETE|',
+    'app.strategy_tracking_stats|SELECT|id,user_id',
+    'app.strategy_tracking_stats|DELETE|',
+    'app.strategy_versions|SELECT|id,lifecycle_changed_by,published_by',
+    'app.suggestion_threads|SELECT|current_suggestion_id,id,user_id',
+    'app.suggestion_threads|UPDATE|current_suggestion_id',
+    'app.suggestion_threads|DELETE|',
+    'app.suggestion_tracking|SELECT|suggestion_id',
+    'app.suggestion_tracking|DELETE|',
+    'app.suggestion_user_actions|SELECT|id,user_id',
+    'app.suggestion_user_actions|DELETE|',
+    'app.suggestions|SELECT|id,llm_call_id,user_id',
+    'app.suggestions|DELETE|',
+    'app.symbol_horizon_assessments|SELECT|id,user_id',
+    'app.symbol_horizon_assessments|DELETE|',
+    'app.trades|SELECT|id,user_id',
+    'app.trades|DELETE|',
+    'app.user_data_licence_cooldowns|SELECT|user_id',
+    'app.user_data_licence_cooldowns|DELETE|',
+    'app.user_data_licence_holds|SELECT|user_id',
+    'app.user_data_licence_holds|DELETE|',
+    'app.user_data_licences|SELECT|id,user_id',
+    'app.user_data_licences|DELETE|',
+    'app.user_profiles|SELECT|id,user_id',
+    'app.user_profiles|DELETE|',
+    'app.user_realtime_prefs|SELECT|user_id',
+    'app.user_realtime_prefs|DELETE|',
+    'app.user_restrictions|SELECT|id,user_id',
+    'app.user_restrictions|DELETE|',
+    'app.user_signal_states|SELECT|id,user_id',
+    'app.user_signal_states|DELETE|',
+    'app.user_strategy_weights|SELECT|user_id',
+    'app.user_strategy_weights|DELETE|',
+    'app.user_subscriptions|SELECT|created_by,id,user_id',
+    'app.user_subscriptions|UPDATE|created_by',
+    'app.user_subscriptions|DELETE|',
+    'app.users|SELECT|id,reviewed_by,role,status,username',
+    'app.users|UPDATE|reviewed_by,status',
+    'app.users|DELETE|',
+    'app.watchlist_items|SELECT|id,user_id',
+    'app.watchlist_items|DELETE|',
+    'ops.data_licence_events|SELECT|id,user_id',
+    'ops.data_licence_events|UPDATE|licence_id,user_id',
+    'ops.ingest_request_log|SELECT|dedup_key,licence_id,requester',
+    'ops.ingest_request_log|UPDATE|dedup_key,licence_id,requester',
+    'ops.pending_file_purges|SELECT|attempts,created_at,id,last_error,path',
+    'ops.pending_file_purges|UPDATE|attempts,last_attempt_at,last_error',
+    'ops.pending_file_purges|INSERT|attempts,last_attempt_at,last_error,path',
+    'ops.pending_file_purges|DELETE|'
+  ];
+  funcs text[] := ARRAY[
+    'app.purge_ref_ids(uuid[])', 'app.purge_target_ref(text, uuid[])', 'app.purge_json_mentions(jsonb, text[])',
+    'app.purge_scrub_json(jsonb, text[])', 'app.purge_scrub_json(jsonb)', 'app.purge_pii_key(text)',
+    'app.purge_permits(text, text, jsonb, jsonb)', 'app.purge_user_ids()', 'app.purge_row_owner(text, jsonb)',
+    'app.purge_anonymize_ok(text, jsonb, jsonb, uuid[])'];
+  -- 不可读的列（后端 §1）；另有 users.role / users.password_hash 不可写
+  maint_deny text[] := ARRAY[
+    'app.users.password_hash', 'app.user_data_licences.ciphertext', 'app.user_data_licences.licence_hmac',
+    'app.llm_providers.api_key_ciphertext', 'app.notification_channel_bindings.target_ciphertext',
+    'app.import_rows.raw_line', 'app.llm_calls.request_body', 'app.llm_calls.response_body',
+    'app.user_data_licence_cooldowns.fingerprint'];
+  del_ok  text[] := ARRAY[]::text[];   -- 允许 DELETE 的表（清单 + market 证书表），自检用
+  t text; s text; p text; cols text[]; have text[]; r record; e text;
 BEGIN
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO aia_maint', current_database());
   -- 成员关系已在授权之前由 $maint_members$ 撤清（见文件前部），这里只在末尾自检。
 
-  FOR t IN SELECT unnest(ARRAY['app', 'ops', 'market']) LOOP
-    IF to_regnamespace(t) IS NULL THEN CONTINUE; END IF;
-    EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM aia_maint', t);
-    EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM aia_maint', t);
-    EXECUTE format('GRANT USAGE ON SCHEMA %I TO aia_maint', t);
+  -- 0. 撤清（REVOKE ... ON TABLE 同时撤掉该表全部列级授权）+ 旧版遗留的默认权限
+  FOREACH s IN ARRAY ARRAY['app', 'ops', 'market'] LOOP
+    CONTINUE WHEN to_regnamespace(s) IS NULL;
+    EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM aia_maint', s);
+    EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM aia_maint', s);
+    EXECUTE format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA %I FROM aia_maint', s);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I REVOKE ALL ON TABLES FROM aia_maint', owner_role, s);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I REVOKE ALL ON SEQUENCES FROM aia_maint', owner_role, s);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I REVOKE ALL ON FUNCTIONS FROM aia_maint', owner_role, s);
+    EXECUTE format('REVOKE ALL ON SCHEMA %I FROM aia_maint', s);
+  END LOOP;
+  FOREACH s IN ARRAY ARRAY['app', 'ops'] LOOP
+    IF to_regnamespace(s) IS NOT NULL THEN EXECUTE format('GRANT USAGE ON SCHEMA %I TO aia_maint', s); END IF;
   END LOOP;
 
-  -- app：删除 / 匿名化 / 解除关联；新表由默认权限覆盖（plan §7.3 物理删除清单会随迁移增加）
-  GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO aia_maint;
-  GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app TO aia_maint;
-  EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA app GRANT SELECT, UPDATE, DELETE ON TABLES TO aia_maint', owner_role);
-  IF to_regclass('app.audit_logs') IS NOT NULL THEN
-    GRANT INSERT ON TABLE app.audit_logs TO aia_maint;
-  END IF;
-
-  -- ops：只到匿名化的两张审计/日志表 + 待清文件队列
-  FOREACH t IN ARRAY ARRAY['ops.data_licence_events', 'ops.ingest_request_log'] LOOP
-    IF to_regclass(t) IS NULL THEN RAISE WARNING 'db-roles: % 不存在，aia_maint 跳过', t; CONTINUE; END IF;
-    EXECUTE format('GRANT SELECT, UPDATE, DELETE ON TABLE %s TO aia_maint', t::regclass);
+  -- 1. 函数（都是 SECURITY INVOKER；PUBLIC 默认也有 EXECUTE，这里显式给，防将来收回 PUBLIC）
+  FOREACH t IN ARRAY funcs LOOP
+    IF to_regprocedure(t) IS NULL THEN RAISE WARNING 'db-roles: 函数 % 不存在，aia_maint 跳过', t; CONTINUE; END IF;
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aia_maint', to_regprocedure(t));
   END LOOP;
-  IF to_regclass('ops.pending_file_purges') IS NOT NULL THEN
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ops.pending_file_purges TO aia_maint;
-  END IF;
 
-  -- market：按 source_licence_id 删除用该用户证书取到的行
-  IF to_regnamespace('market') IS NOT NULL THEN
-    GRANT SELECT, DELETE ON ALL TABLES IN SCHEMA market TO aia_maint;
-    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA market GRANT SELECT, DELETE ON TABLES TO aia_maint', owner_role);
-  END IF;
+  -- 2. 表 / 列
+  FOREACH e IN ARRAY spec LOOP
+    t := split_part(e, '|', 1); p := split_part(e, '|', 2);
+    IF to_regclass(t) IS NULL THEN RAISE WARNING 'db-roles: % 不存在（迁移未到？），aia_maint 跳过 %', t, p; CONTINUE; END IF;
+    IF p = 'DELETE' THEN
+      EXECUTE format('GRANT DELETE ON TABLE %s TO aia_maint', to_regclass(t));
+      del_ok := del_ok || to_regclass(t)::text;
+      CONTINUE;
+    END IF;
+    cols := string_to_array(split_part(e, '|', 3), ',');
+    SELECT array_agg(c ORDER BY c) INTO have FROM unnest(cols) c
+     WHERE EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = to_regclass(t) AND a.attname = c AND a.attnum > 0 AND NOT a.attisdropped);
+    IF coalesce(cardinality(have), 0) < cardinality(cols) THEN
+      RAISE WARNING 'db-roles: % 缺列 %（迁移未到？），aia_maint 只授存在的列', t,
+        (SELECT string_agg(c, ',') FROM unnest(cols) c WHERE NOT (c = ANY (coalesce(have, '{}'))));
+    END IF;
+    CONTINUE WHEN have IS NULL;
+    EXECUTE format('GRANT %s (%s) ON TABLE %s TO aia_maint', p,
+                   (SELECT string_agg(quote_ident(c), ', ') FROM unnest(have) c), to_regclass(t));
+  END LOOP;
 
-  -- 需要 INSERT 的两张表若用序列取号，只给它们自己的序列
+  -- 3. market：带 source_licence_id 的表（不含分区子表）
   FOR r IN
-    SELECT DISTINCT format('%I.%I', sn.nspname, s.relname) AS q
-      FROM pg_depend d
-      JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
-      JOIN pg_namespace sn ON sn.oid = s.relnamespace
-     WHERE d.deptype IN ('a', 'i')
-       AND d.refobjid IN (SELECT x::regclass FROM unnest(ARRAY['app.audit_logs', 'ops.pending_file_purges']) x
-                           WHERE to_regclass(x) IS NOT NULL)
+    SELECT c.oid::regclass::text AS q FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'market' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+       AND a.attname = 'source_licence_id' AND a.attnum > 0 AND NOT a.attisdropped
+     ORDER BY 1
   LOOP
-    EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %s TO aia_maint', r.q);
+    GRANT USAGE ON SCHEMA market TO aia_maint;
+    EXECUTE format('GRANT SELECT (source_licence_id) ON TABLE %s TO aia_maint', r.q);
+    EXECUTE format('GRANT DELETE ON TABLE %s TO aia_maint', r.q);
+    del_ok := del_ok || r.q;
+    RAISE NOTICE 'db-roles: aia_maint 可按 source_licence_id 删除 %', r.q;
   END LOOP;
 
-  -- 自检：aia_maint 不得有 TRUNCATE / REFERENCES / TRIGGER，INSERT 只在两张表上；api/ingest 对待清队列无权限
+  -- 4. 自检（失败即整段回滚）
   FOR r IN
-    SELECT c.oid::regclass::text AS q FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND n.nspname IN ('app', 'ops', 'market')
+    SELECT c.oid::regclass::text AS q, c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S') AND n.nspname IN ('app', 'ops', 'market')
   LOOP
-    FOREACH p IN ARRAY ARRAY['TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+    IF r.relkind = 'S' THEN
+      IF has_sequence_privilege('aia_maint', r.q, 'USAGE') OR has_sequence_privilege('aia_maint', r.q, 'SELECT')
+         OR has_sequence_privilege('aia_maint', r.q, 'UPDATE') THEN
+        RAISE EXCEPTION 'db-roles: aia_maint 不应有序列权限 %', r.q;
+      END IF;
+      CONTINUE;
+    END IF;
+    -- 表级 SELECT/INSERT/UPDATE 会覆盖全部列（含将来新增的列）：一律不允许
+    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
       IF has_table_privilege('aia_maint', r.q, p) THEN
-        RAISE EXCEPTION 'db-roles: aia_maint 不应有 % ON %', p, r.q;
+        RAISE EXCEPTION 'db-roles: aia_maint 不应有表级 % ON %', p, r.q;
       END IF;
     END LOOP;
-    IF has_table_privilege('aia_maint', r.q, 'INSERT')
-       AND r.q NOT IN ('app.audit_logs', 'ops.pending_file_purges') THEN
+    IF has_table_privilege('aia_maint', r.q, 'DELETE') AND NOT (r.q = ANY (del_ok)) THEN
+      RAISE EXCEPTION 'db-roles: aia_maint 不应有 DELETE ON %（不在清单）', r.q;
+    END IF;
+    IF has_any_column_privilege('aia_maint', r.q, 'INSERT') AND r.q NOT IN ('app.audit_logs', 'ops.pending_file_purges') THEN
       RAISE EXCEPTION 'db-roles: aia_maint 不应有 INSERT ON %', r.q;
     END IF;
   END LOOP;
+  FOREACH e IN ARRAY maint_deny LOOP
+    t := split_part(e, '.', 1) || '.' || split_part(e, '.', 2);
+    CONTINUE WHEN to_regclass(t) IS NULL;
+    IF has_column_privilege('aia_maint', t, split_part(e, '.', 3), 'SELECT') THEN
+      RAISE EXCEPTION 'db-roles: aia_maint 不应可 SELECT %', e;
+    END IF;
+  END LOOP;
+  IF to_regclass('app.users') IS NOT NULL AND (has_column_privilege('aia_maint', 'app.users', 'role', 'UPDATE')
+       OR has_column_privilege('aia_maint', 'app.users', 'password_hash', 'UPDATE')) THEN
+    RAISE EXCEPTION 'db-roles: aia_maint 不应可 UPDATE app.users.role / password_hash';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_default_acl d, aclexplode(d.defaclacl) a WHERE a.grantee = 'aia_maint'::regrole) THEN
+    RAISE EXCEPTION 'db-roles: aia_maint 仍有默认权限';
+  END IF;
   IF to_regclass('ops.pending_file_purges') IS NOT NULL THEN
     FOREACH t IN ARRAY ARRAY['aia_api', 'aia_ingest'] LOOP
       FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
@@ -255,6 +479,6 @@ BEGIN
   IF (SELECT rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolinherit FROM pg_roles WHERE rolname = 'aia_maint') THEN
     RAISE EXCEPTION 'db-roles: aia_maint 角色属性不是最小（SUPERUSER/BYPASSRLS/CREATEROLE/CREATEDB/INHERIT）';
   END IF;
-  RAISE NOTICE 'db-roles: aia_maint 已按 CLI 最小权限授权';
+  RAISE NOTICE 'db-roles: aia_maint 已按列级清单授权（% 张表可 DELETE）', cardinality(del_ok);
 END
 $maint$;

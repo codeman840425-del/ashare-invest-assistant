@@ -7,3 +7,9 @@ ccf7cbab6ad23471089bca76328ad2e165fad656:deploy/env/.env.example:S4-env-example-
 ccf7cbab6ad23471089bca76328ad2e165fad656:deploy/env/.env.example:S4-env-example-value:21
 # ccf7cba src/backend/probes/common.py 第 39 行：dry-run 虚构证书常量 DRY_RUN_LICENCE（已用本机真实值精确比对确认不是真实值；3f04eda 起改为分段拼接）
 ccf7cbab6ad23471089bca76328ad2e165fad656:src/backend/probes/common.py:S1-mairui-licence-assign:39
+# 3e5e288 src/backend/selfchecks/tb46x.py 第 336、353、372 行（gitleaks --all 共 4 处，336 行两处同指纹）：日志脱敏自检里的虚构股东代码
+#   （A 加 9 位连续递增数字的占位模式，全 4 处为同一个值，只用于断言 redact() 会把它脱敏；见 reports/T-T25.md §8.3）。
+#   b3aab3c 已改为运行时拼接、HEAD 不再含该字面量；历史不改写，故在此按指纹豁免。核实方式见 reports/gitleaks-3e5e288.md。
+3e5e28896d05a15952f10252c2f77fb1440ad3f5:src/backend/selfchecks/tb46x.py:S5-sh-holder-code:336
+3e5e28896d05a15952f10252c2f77fb1440ad3f5:src/backend/selfchecks/tb46x.py:S5-sh-holder-code:353
+3e5e28896d05a15952f10252c2f77fb1440ad3f5:src/backend/selfchecks/tb46x.py:S5-sh-holder-code:372

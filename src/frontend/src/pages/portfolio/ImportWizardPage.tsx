@@ -5,7 +5,7 @@ import {
 import type { Dayjs } from 'dayjs';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
-  downloadErrorsCsv, useAccounts, useConfirmImport, useDiscardImport, useImportBatch, useImportOptions, useImportRows, useResolveFinding, useRevertImport,
+  downloadErrorsCsv, rowsAvailable, useAccounts, useConfirmImport, useDiscardImport, useImportBatch, useImportOptions, useImportRows, useResolveFinding, useRevertImport,
   useUploadImport, type RowFilter,
 } from '../../api/accountQueries';
 import type { ImportBatch, ImportConfirmResponse, ImportFinding, ImportKind, ImportRow } from '../../api/accountTypes';
@@ -213,9 +213,11 @@ function DetectPanel({ b }: { b: ImportBatch }) {
 
 function PreviewStep({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: ImportConfirmResponse) => void }) {
   const previewed = b.status === 'previewed';
+  // #35：failed（及 discarded）批次服务端已删预览行，不发 /rows；计数取批次头 stats
+  const withRows = rowsAvailable(b.status);
   const [filter, setFilter] = useState<RowFilter>({});
-  const rows = useImportRows(b.batch_id, previewed, filter);
-  const allRows = useImportRows(b.batch_id, previewed, {});
+  const rows = useImportRows(b.batch_id, withRows, filter);
+  const allRows = useImportRows(b.batch_id, withRows, {});
   const resolve = useResolveFinding();
   const discard = useDiscardImport();
   const navigate = useNavigate();
@@ -246,14 +248,7 @@ function PreviewStep({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Impo
       {previewed ? (
         <>
           <section className="imp-section" data-testid="import-stats">
-            <Space wrap size={6}>
-              <span>共 <b className="mono">{s.rows}</b> 行</span>
-              <Tag color="green">正常 {s.ok}</Tag><Tag color="gold">警告 {s.warning}</Tag><Tag color="red">错误 {s.error}</Tag><Tag>跳过 {s.skipped}</Tag>
-              <span className="muted">｜</span>
-              <Tag color="green">新成交 {s.new}</Tag><Tag>库内已有 {s.duplicate_in_db}</Tag><Tag>文件内重复 {s.duplicate_in_file}</Tag>
-              <Tag color="orange">疑似手动录入重复 {s.possible_duplicate_of_manual}</Tag>
-              {s.needs_action_open ? <Tag color="orange">待处理 {s.needs_action_open}</Tag> : <Tag color="green">无待处理项</Tag>}
-            </Space>
+            <BatchStats s={s} />
             <ToneLegend />
           </section>
 
@@ -284,14 +279,21 @@ function PreviewStep({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Impo
           <ConfirmPanel b={b} onCommitted={onCommitted} />
         </>
       ) : (
-        <Alert type="error" showIcon style={{ marginTop: 12 }} title="解析失败" description="请根据上面的提示调整编码、解析器或列映射后重新解析；也可以放弃本批次重新上传。" />
+        <>
+          <Alert type="error" showIcon style={{ marginTop: 12 }} title="解析失败" description="请根据上面的提示调整编码、解析器或列映射后重新解析；也可以放弃本批次重新上传。" />
+          <section className="imp-section" data-testid="import-stats">
+            <BatchStats s={s} />
+            <div className="muted small">计数取自批次记录；解析失败的批次没有逐行预览。</div>
+          </section>
+        </>
       )}
       <Space style={{ marginTop: 12 }}>
         <Popconfirm title="放弃这个批次？" description="不会写入任何数据。" okText="放弃" okButtonProps={{ danger: true }}
           onConfirm={() => discard.mutate({ id: b.batch_id, v: null }, { onSuccess: () => navigate(`/portfolio?account_id=${b.account_id}&tab=imports`) })}>
           <Button danger loading={discard.isPending}>放弃本批次</Button>
         </Popconfirm>
-        {s.error + s.warning > 0 ? <Button onClick={() => { setDlErr(null); downloadErrorsCsv(b.batch_id).catch(setDlErr); }}>下载问题清单 CSV</Button> : null}
+        {/* #35：failed 批次的 errors.csv 只有表头，不提供下载 */}
+        {withRows && s.error + s.warning > 0 ? <Button onClick={() => { setDlErr(null); downloadErrorsCsv(b.batch_id).catch(setDlErr); }}>下载问题清单 CSV</Button> : null}
       </Space>
       {discard.isError ? <ErrorBox error={discard.error} prefix="放弃失败" /> : null}
       {dlErr ? <ErrorBox error={dlErr} prefix="下载失败" /> : null}
@@ -357,11 +359,32 @@ function ConfirmPanel({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Imp
   );
 }
 
+/** 批次头 stats 计数（previewed / failed / discarded 共用；#35 后者只能看这里的计数） */
+function BatchStats({ s }: { s: ImportBatch['stats'] }) {
+  return (
+    <Space wrap size={6}>
+      <span>共 <b className="mono">{s.rows}</b> 行</span>
+      <Tag color="green">正常 {s.ok}</Tag><Tag color="gold">警告 {s.warning}</Tag><Tag color="red">错误 {s.error}</Tag><Tag>跳过 {s.skipped}</Tag>
+      <span className="muted">｜</span>
+      <Tag color="green">新成交 {s.new}</Tag><Tag>库内已有 {s.duplicate_in_db}</Tag><Tag>文件内重复 {s.duplicate_in_file}</Tag>
+      <Tag color="orange">疑似手动录入重复 {s.possible_duplicate_of_manual}</Tag>
+      {s.needs_action_open ? <Tag color="orange">待处理 {s.needs_action_open}</Tag> : <Tag color="green">无待处理项</Tag>}
+    </Space>
+  );
+}
+
 function DoneStep({ b, result }: { b: ImportBatch; result: ImportConfirmResponse | null }) {
   const revert = useRevertImport();
   const [dlErr, setDlErr] = useState<unknown>(null);
   const toRecon = `/portfolio?account_id=${b.account_id}&tab=reconciliation`;
-  if (b.status === 'discarded') return <Result status="info" title="本批次已放弃" subTitle="没有写入任何数据。" extra={<Link to="/portfolio/import">重新上传</Link>} />;
+  if (b.status === 'discarded') {
+    // #35：放弃后预览行已删除，只显示批次头 stats 的计数，不请求 /rows、不提供只有表头的 errors.csv
+    return (
+      <Result status="info" title="本批次已放弃" subTitle="没有写入任何数据。" extra={<Link to="/portfolio/import">重新上传</Link>} data-testid="import-discarded">
+        <div data-testid="import-stats"><BatchStats s={b.stats} /><div className="muted small">计数取自批次记录；已放弃的批次不再提供逐行预览。</div></div>
+      </Result>
+    );
+  }
   if (b.status === 'reverted') {
     return <Result status="info" title="本批次已撤销" subTitle={`撤销于 ${b.reverted_at ? fmtTime(b.reverted_at) : '—'}；写入的成交已标记为作废，持仓与对账已重算。`} extra={<Link to={toRecon}>查看对账</Link>} data-testid="import-reverted" />;
   }

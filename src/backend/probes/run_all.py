@@ -8,6 +8,13 @@
   python run_all.py --skip-pro-host      # 跳过 pro.mairuiapi.com 的 2 次调用，全程只连 api.mairuiapi.com
   python run_all.py --use-env-proxy      # 改为使用 HTTP(S)_PROXY/系统代理（默认 --no-env-proxy：忽略代理、本机直连）
 
+T-B05 复测开关（缺省 = 原行为；调用次数见 README §6A）：
+  python run_all.py p11 --p11-only gap1 --gap1-codes 000001,600519,300750,688981,920000 \
+                    --ntp-file ntp_am_before.txt --ntp-file ntp_am_after.txt     # 复测 1：只跑 GAP1，5 只
+  python run_all.py p11 --p11-only gap6-history [--history-baseline <run_id 或样例目录>]   # 复测 3：2 次
+  python run_all.py p11 --p11-only gap6-nulls [--zt-codes 002001,603001]          # 复测 2：8 次
+  python run_all.py p12 --p12-only hslt                                           # 复测 4：1 次
+
 results/STOP 存在时拒绝真实调用；删除前请确认已等待 ≥60 秒且出口 IP 固定。
 """
 from __future__ import annotations
@@ -119,28 +126,125 @@ def _scan_dir_for_licence(d: Path) -> int:
     return hits
 
 
-def _check_gaps(check, run_dir, expect_latency, want):
-    """检查 p11_gaps 结果：7 项（GAP1–GAP7）均有结构化结论字段。"""
-    if "p11_gaps" not in want:
-        return
+def _load_gap_items(run_dir) -> dict:
     files = sorted(run_dir.glob("p11_gaps*.json"))
     items = {}
     if files:
         for x in json.loads(files[-1].read_text(encoding="utf-8")):
             if isinstance(x, dict) and str(x.get("name", "")).startswith("GAP") and "status" in x:
-                items[x["name"].split("_")[0]] = x
-    need = [f"GAP{i}" for i in range(1, 8)]
-    struct_ok = all(k in items and isinstance(items[k].get("conclusion"), dict) and items[k]["status"] in (
-        "measured", "skipped", "inconclusive") and "limits" in items[k] for k in need)
-    check(f"p11：7 项补测均输出结构化结论（status/conclusion/evidence/limits）", struct_ok,
-          ", ".join(f"{k}={items[k]['status']}" if k in items else f"{k}=缺失" for k in need))
-    g1 = items.get("GAP1")
-    check(f"p11：快照延迟项状态 = {expect_latency}", g1 is not None and g1["status"] == expect_latency,
-          (g1 or {}).get("conclusion", {}).get("summary", "")[:120])
+                items[x["name"]] = x
+    return items
+
+
+def _check_gaps(check, run_dir, expect_latency, want, label=""):
+    """检查 p11_gaps 结果：缺省 7 项（GAP1–GAP7）；--p11-only 时只应有该模式的项，且不多不少。"""
+    if "p11_gaps" not in want:
+        return {}
+    import p11_gaps as g
+    items = _load_gap_items(run_dir)
+    if g.ONLY is None:
+        by_pre = {k.split("_")[0]: v for k, v in items.items()}
+        need = [f"GAP{i}" for i in range(1, 8)]
+        extra = []
+    else:
+        by_pre = dict(items)
+        need = [x[0] for x in g.ONLY_PLAN[g.ONLY]]
+        extra = [k for k in items if k not in need]
+    struct_ok = not extra and all(k in by_pre and isinstance(by_pre[k].get("conclusion"), dict) and by_pre[k][
+        "status"] in ("measured", "skipped", "inconclusive") and "limits" in by_pre[k] for k in need)
+    check(f"p11{label}：{len(need)} 项补测均输出结构化结论（status/conclusion/evidence/limits）"
+          + ("" if g.ONLY is None else f"，且只有 --p11-only {g.ONLY} 的项"), struct_ok,
+          ", ".join(f"{k}={by_pre[k]['status']}" if k in by_pre else f"{k}=缺失" for k in need)
+          + (f"；多余 {extra}" if extra else ""))
+    if expect_latency is not None:
+        g1 = by_pre.get("GAP1") or by_pre.get("GAP1_snapshot_latency")
+        check(f"p11{label}：快照延迟项状态 = {expect_latency}", g1 is not None and g1["status"] == expect_latency,
+              (g1 or {}).get("conclusion", {}).get("summary", "")[:160])
+    return items
+
+
+def _p12_expected_calls(sel) -> int:
+    """p12 在本次选择下应实际调用几次：可复用的接口（p01 的两个全市场、p11 GAP4 的 /hslt/list）不再调用。"""
+    import p11_gaps as g
+    import p12_code_lists as p12
+    reusable = set()
+    if "p01_realtime" in sel:
+        reusable |= {"hsrl_ssjy_all", "hsrl_real_all"}
+    if "p11_gaps" in sel and g.ONLY is None:
+        reusable.add("hslt_list")
+    return sum(1 for e in p12.active_endpoints() if e[0] not in reusable)
+
+
+SWITCH_DEFAULTS = {}     # apply_switches 首次调用前的模块变量，开关矩阵用来复原
+
+
+def apply_switches(args) -> dict:
+    """把命令行开关写进 p11_gaps / p12_code_lists 的模块变量；非法输入抛 ValueError（cli 返回 2）。
+    只读本地文件（--ntp-file、--history-baseline），不发任何请求。返回本次生效的开关（写进日志）。"""
+    import p11_gaps as g
+    import p12_code_lists as p12
+    if not SWITCH_DEFAULTS:
+        SWITCH_DEFAULTS.update({
+            "g": {k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
+                  for k, v in vars(g).items() if k in ("LAT_CODES", "ONLY", "LOCAL_AHEAD_S", "NTP_SOURCES",
+                                                       "NTP_RAW", "HISTORY_BASELINE", "ZT_CODES", "PIT_BATCH_DAY")},
+            "p12": {"ONLY_KEYS": p12.ONLY_KEYS}})
+    cfg = {}
+    if args.gap1_codes:
+        codes = g.parse_codes(args.gap1_codes)
+        if not 1 <= len(codes) <= g.LAT_MAX_CODES:
+            raise ValueError(f"--gap1-codes 需要 1–{g.LAT_MAX_CODES} 只，给了 {len(codes)} 只")
+        g.LAT_CODES = codes
+        cfg["gap1_codes"] = codes
+    if args.p11_only:
+        g.ONLY = args.p11_only
+        cfg["p11_only"] = args.p11_only
+    ahead, srcs, raw = [], [], {}
+    for v in args.local_ahead_s or []:
+        ahead.append(float(v))
+        srcs.append(f"--local-ahead-s {float(v)}")
+    for f in args.ntp_file or []:
+        fp = Path(f)
+        if not fp.is_file():
+            raise ValueError(f"--ntp-file 不存在：{f}")
+        txt = fp.read_text(encoding="utf-8", errors="replace")
+        vals = g.parse_w32tm(txt)
+        if not vals:
+            raise ValueError(f"--ntp-file 里没有可解析的 w32tm 偏差行：{f}")
+        ahead.append(sum(vals) / len(vals))
+        srcs.append(f"{fp.name}（{len(vals)} 个样本）")
+        raw[fp.name] = txt[:4000]
+    if ahead:
+        g.LOCAL_AHEAD_S, g.NTP_SOURCES, g.NTP_RAW = ahead, srcs, raw
+        cfg["local_ahead_s"] = ahead
+    if args.history_baseline:
+        g.HISTORY_BASELINE = args.history_baseline
+        cfg["history_baseline"] = args.history_baseline
+        bd = g._baseline_dir()
+        if bd is None or not bd.is_dir():
+            raise ValueError(f"--history-baseline 找不到目录：{args.history_baseline}")
+    if args.zt_codes:
+        g.ZT_CODES = g.parse_codes(args.zt_codes)
+        cfg["zt_codes"] = g.ZT_CODES
+    if args.p12_only:
+        p12.ONLY_KEYS = p12.ONLY_CHOICES[args.p12_only]
+        cfg["p12_only"] = args.p12_only
+    if (args.history_baseline and g.ONLY != "gap6-history") or (args.zt_codes and g.ONLY != "gap6-nulls"):
+        raise ValueError("--history-baseline 只配合 --p11-only gap6-history；--zt-codes 只配合 --p11-only gap6-nulls")
+    return cfg
+
+
+def restore_switches():
+    import p11_gaps as g
+    import p12_code_lists as p12
+    for k, v in SWITCH_DEFAULTS.get("g", {}).items():
+        setattr(g, k, list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
+    for k, v in SWITCH_DEFAULTS.get("p12", {}).items():
+        setattr(p12, k, v)
 
 
 def _check_codes(check, run_dir, want, expect_calls, label):
-    """检查 p12_code_lists：5 个接口原始响应 + codes.csv + dm 文本可被 compare_mairui_codes.py 直接读取。"""
+    """检查 p12_code_lists：本次启用的接口（缺省 5 个；--p12-only hslt 时 1 个）原始响应 + codes.csv + dm 文本可被 compare_mairui_codes.py 直接读取。"""
     if "p12_code_lists" not in want:
         return
     import csv
@@ -151,8 +255,8 @@ def _check_codes(check, run_dir, want, expect_calls, label):
     per = {x["name"][6:]: x for x in items if isinstance(x, dict) and str(x.get("name", "")).startswith("CODES_")
            and x["name"] != "CODES_SUMMARY"}
     summ = next((x for x in items if isinstance(x, dict) and x.get("name") == "CODES_SUMMARY"), {})
-    keys = [e[0] for e in p12.ENDPOINTS]
-    check(f"p12（{label}）：5 个接口均有记录且成功", all(k in per and per[k]["ok"] for k in keys),
+    keys = [e[0] for e in p12.active_endpoints()]
+    check(f"p12（{label}）：{len(keys)} 个接口均有记录且成功、没有多余接口", all(k in per and per[k]["ok"] for k in keys) and set(per) == set(keys),
           ", ".join(f"{k}={per[k]['rows']}行/{per[k]['source']}" if k in per else f"{k}=缺失" for k in keys))
     raw_ok, dm_ok, detail = True, True, []
     for k in keys:
@@ -189,6 +293,109 @@ def _check_codes(check, run_dir, want, expect_calls, label):
           f"calls_made={summ.get('calls_made')} reused={summ.get('reused')}")
 
 
+def _switch_matrix(check, args, st_api, st_pro, base_api, base_pro, echo_url):
+    import tempfile
+
+    import p11_gaps as g
+    import p12_code_lists as p12
+    saved_cli = {k: getattr(g, k) for k in ("LAT_CODES", "ONLY", "LOCAL_AHEAD_S", "NTP_SOURCES", "NTP_RAW",
+                                            "HISTORY_BASELINE", "ZT_CODES")}
+    saved_p12 = p12.ONLY_KEYS
+    tmp = Path(tempfile.mkdtemp(prefix="tb05-ntp-"))
+    (tmp / "ntp_before.txt").write_text(
+        "Tracking ntp.aliyun.com [203.0.113.123:123].\nCollecting 3 samples.\n"
+        "09:20:01, +01.5000000s\n09:20:03, +01.4000000s\n09:20:05, +01.6000000s\n", encoding="utf-8")
+    (tmp / "ntp_after.txt").write_text("11:31:01, +01.5000000s\n11:31:03, error: 0x800705B4\n", encoding="utf-8")
+
+    def one(label, argv, probes, expect_calls, force_session=None):
+        restore_switches()
+        cfg = apply_switches(_switch_args(argv))
+        g.FORCE_SESSION = force_session
+        ctx = c.init_run(dry_run=True, base=base_api, pro_base=base_pro, min_interval=args.dry_interval,
+                         skip_pro_host=True, no_env_proxy=args.no_env_proxy, egress_url=echo_url,
+                         tag=f"dryrun-switch-{label}")
+        print(f"[dry-run] 阶段 5 开关 {label} {cfg}，输出目录 {ctx.run_dir}")
+        a0, p0 = st_api.requests, st_pro.requests
+        ok = run_probes(probes)
+        s = c.close_run()
+        delta = st_api.requests - a0 + st_pro.requests - p0
+        check(f"开关 {label}：客户端 {expect_calls} 次 = 服务端增量、未熔断",
+              ok and s["calls"] == expect_calls and delta == expect_calls,
+              f"client={s['calls']} server=+{delta} argv={' '.join(argv)}")
+        check(f"开关 {label}：输出不含证书", _scan_dir_for_licence(ctx.run_dir) == 0)
+        return ctx
+
+    try:
+        five = "000001,600519,300750,688981,920000"
+        # 复测 1：GAP1 5 只 + NTP 文件；盘中 1 + 5×2×6 = 61 次；盘后 0 次
+        ctx = one("gap1", ["--p11-only", "gap1", "--gap1-codes", five, "--ntp-file", str(tmp / "ntp_before.txt"),
+                           "--ntp-file", str(tmp / "ntp_after.txt")], ["p11_gaps"], 1 + 5 * 2 * g.LAT_SAMPLES, True)
+        items = _check_gaps(check, ctx.run_dir, "measured", ["p11_gaps"], "（开关 gap1）")
+        cc = (items.get("GAP1_snapshot_latency") or {}).get("conclusion", {})
+        st_ = cc.get("stale_threshold") or {}
+        check("开关 gap1：5 只 × 2 源分别给分位数；未修正与 NTP 修正两套；stale 参考 = 修正后 p95",
+              len(cc.get("per_source_stock") or {}) == 10 and cc.get("codes") == five.split(",")
+              and all(v.get("ntp_corrected", {}).get("p95") is not None for v in (cc.get("per_source") or {}).values())
+              and st_.get("basis") == "ntp_corrected_p95"
+              and abs((cc.get("ntp_offset") or {}).get("local_ahead_s", 0) - 1.5) < 1e-9,
+              f"stale={st_} ntp={(cc.get('ntp_offset') or {}).get('local_ahead_s')}")
+        ctx = one("gap1-afterhours", ["--p11-only", "gap1", "--gap1-codes", five], ["p11_gaps"], 0, False)
+        _check_gaps(check, ctx.run_dir, "skipped", ["p11_gaps"], "（开关 gap1 盘后）")
+        # 复测 3：GAP6 history only，先取基线，再以基线目录比对（各 2 次，比对离线）
+        ctx_a = one("gap6-history", ["--p11-only", "gap6-history"], ["p11_gaps"], 2)
+        ia = _check_gaps(check, ctx_a.run_dir, None, ["p11_gaps"], "（开关 gap6-history）")
+        ctx_b = one("gap6-history-baseline", ["--p11-only", "gap6-history", "--history-baseline",
+                                              str(ctx_a.samples_dir)], ["p11_gaps"], 2)
+        ib = _check_gaps(check, ctx_b.run_dir, None, ["p11_gaps"], "（开关 gap6-history+基线）")
+        vb = (ib.get("GAP6_history_only") or {}).get("conclusion", {})
+        check("开关 gap6-history：首次作为基线；带基线复取逐日比对 → no_rewrite（mock 序列不变）",
+              (ia.get("GAP6_history_only") or {}).get("status") == "measured"
+              and vb.get("verdict") == {f: "no_rewrite" for f in g.PIT_FACTORS},
+              str(vb.get("verdict")))
+        # 复测 2：空值复测，1 次涨停池 + 2 只涨停股 + 5 只原样本 = 8 次
+        ctx = one("gap6-nulls", ["--p11-only", "gap6-nulls"], ["p11_gaps"], 1 + g.NULLS_ZT_PICK
+                  + len(g.NULLS_BASE_CODES))
+        inl = _check_gaps(check, ctx.run_dir, None, ["p11_gaps"], "（开关 gap6-nulls）")
+        cn = (inl.get("GAP6_nulls_retest") or {}).get("conclusion", {})
+        smp = cn.get("limit_up_sampling") or {}
+        check("开关 gap6-nulls：只选取样时刻前已封板的涨停股、记录取样时刻、排除原样本",
+              cn.get("zt_codes") == ["002001", "603001"] and smp.get("sampled_at_bj")
+              and smp.get("rejected", {}).get("fbt_after_sample") == 1 and smp.get("rejected", {}).get("no_fbt") == 1
+              and smp.get("rejected", {}).get("excluded") == 1,
+              f"zt={cn.get('zt_codes')} sampled_at={smp.get('sampled_at_bj')} rejected={smp.get('rejected')}")
+        one("gap6-nulls-zt-codes", ["--p11-only", "gap6-nulls", "--zt-codes", "002001,603001"], ["p11_gaps"],
+            1 + 2 + len(g.NULLS_BASE_CODES))
+        # 复测 4：p12 只取 /hslt/list：单独 1 次；与完整 p11 同次运行时复用 GAP4（p12 为 0 次）
+        ctx = one("p12-hslt", ["--p12-only", "hslt"], ["p12_code_lists"], 1)
+        _check_codes(check, ctx.run_dir, ["p12_code_lists"], 1, "开关 hslt 单独")
+        restore_switches()
+        apply_switches(_switch_args(["--p12-only", "hslt"]))
+        g.FORCE_SESSION = False
+        ctx = c.init_run(dry_run=True, base=base_api, pro_base=base_pro, min_interval=args.dry_interval,
+                         skip_pro_host=True, no_env_proxy=args.no_env_proxy, egress_url=echo_url,
+                         tag="dryrun-switch-p11-p12-hslt")
+        run_probes(["p11_gaps", "p12_code_lists"])
+        c.close_run()
+        _check_codes(check, ctx.run_dir, ["p12_code_lists"], 0, "开关 hslt 与 p11 同次运行")
+        # 非法输入 → ValueError（cli 返回 2）
+        bad = []
+        for argv in (["--gap1-codes", "1234567"], ["--gap1-codes", ",".join(f"{i:06d}" for i in range(11))],
+                     ["--ntp-file", str(tmp / "missing.txt")], ["--history-baseline", "x", "--p11-only", "gap1"]):
+            restore_switches()
+            try:
+                apply_switches(_switch_args(argv))
+                bad.append(argv)
+            except ValueError:
+                pass
+        check("开关参数非法时拒绝（返回 2，不发请求）", not bad, f"未拒绝：{bad}")
+    finally:
+        restore_switches()
+        for k, v in saved_cli.items():
+            setattr(g, k, v)
+        p12.ONLY_KEYS = saved_p12
+        g.FORCE_SESSION = None
+
+
 def dry_run(args) -> int:
     import dryrun_mock as m
 
@@ -218,7 +425,9 @@ def dry_run(args) -> int:
         p11_gaps.FORCE_SESSION = True          # 阶段 1 强制走“盘中采样”分支（仅 dry-run 生效）
         ok1 = run_probes(select(args.probes))
         s1 = c.close_run()
-        _check_gaps(check, ctx1.run_dir, expect_latency="measured", want=select(args.probes))
+        import p11_gaps as _g
+        _check_gaps(check, ctx1.run_dir, expect_latency="measured" if _g.ONLY in (None, "gap1") else None,
+                    want=select(args.probes))
         check("全流程跑完未熔断", ok1)
         check("客户端调用数 = 服务端请求数", s1["calls"] == st_api.requests + st_pro.requests,
               f"client={s1['calls']} server={st_api.requests}+{st_pro.requests}")
@@ -239,7 +448,7 @@ def dry_run(args) -> int:
         n_files = sum(1 for f in ctx1.run_dir.rglob("*") if f.is_file())
         check("输出文件不含证书（假证书/真实证书）", _scan_dir_for_licence(ctx1.run_dir) == 0, f"扫描 {n_files} 个文件")
         # ---- 阶段 1b：p11 盘后分支（强制视为盘后）→ 快照延迟项记“盘后无法测”，不发采样请求
-        if "p11_gaps" in select(args.probes):
+        if "p11_gaps" in select(args.probes) and p11_gaps.ONLY in (None, "gap1"):
             p11_gaps.FORCE_SESSION = False
             ctx1b = c.init_run(dry_run=True, base=base_api, pro_base=base_pro, min_interval=args.dry_interval,
                                skip_pro_host=args.skip_pro_host, no_env_proxy=args.no_env_proxy,
@@ -248,19 +457,23 @@ def dry_run(args) -> int:
             run_probes(["p11_gaps"])
             s1b = c.close_run()
             _check_gaps(check, ctx1b.run_dir, expect_latency="skipped", want=["p11_gaps"])
-            names = [json.loads(x).get("name", "") for x in ctx1b.call_log.read_text(encoding="utf-8").splitlines()]
+            names = [json.loads(x).get("name", "") for x in ctx1b.call_log.read_text(encoding="utf-8").splitlines()] \
+                if ctx1b.call_log.exists() else []     # --p11-only gap1 盘后 0 次调用时不生成 calls.jsonl
             check("p11 盘后：不发快照延迟采样请求（lat_*/tcalendar 为 0）",
                   not any(n.startswith("lat_") or n.startswith("tcalendar") for n in names),
                   f"本阶段调用 {s1b['calls']} 次")
             check("p11 输出不含证书", _scan_dir_for_licence(ctx1b.run_dir) == 0)
             p11_gaps.FORCE_SESSION = None
+        if "p11_gaps" in select(args.probes):
             for n_, ok_, d_ in p11_gaps.selftest_pure():
                 check("p11 纯函数单测：" + n_, ok_, d_)
-        # ---- p12：阶段 1 中复用 p01/p11 的响应，只新增 2 次调用
+        # ---- p12：阶段 1 中复用 p01/p11 的响应，只新增 2 次调用（开关生效时按启用接口重算）
         sel = select(args.probes)
-        exp12 = 5 - ("p01_realtime" in sel) * 2 - ("p11_gaps" in sel)
+        exp12 = _p12_expected_calls(sel)
         _check_codes(check, ctx1.run_dir, sel, exp12, "全流程")
-        if "p12_code_lists" in sel:
+        import p12_code_lists as _p12
+        if "p12_code_lists" in sel and _p12.ONLY_KEYS is None and p11_gaps.ONLY is None \
+                and "p01_realtime" in sel:
             import p12_code_lists
             n12 = [json.loads(x).get("name", "") for x in ctx1.call_log.read_text(encoding="utf-8").splitlines()]
             check("p12（全流程）：/hslt/list、两个全市场接口在本次运行中各只调用 1 次",
@@ -282,6 +495,9 @@ def dry_run(args) -> int:
             check("p12 输出不含证书", _scan_dir_for_licence(ctx1c.run_dir) == 0)
             for n_, ok_, d_ in p12_code_lists.selftest_pure():
                 check("p12 纯函数单测：" + n_, ok_, d_)
+        # ---- 阶段 5：T-B05 开关矩阵（每个开关单独跑，核对调用次数 = 服务端增量、结构、无证书；跑完复原）
+        if not args.skip_switch_matrix:
+            _switch_matrix(check, args, st_api, st_pro, base_api, base_pro, echo_url)
         # ---- 阶段 2：熔断（第 3 个请求起返回 429 + 103）
         ctx2 = c.init_run(dry_run=True, base=base_api, pro_base=base_pro, min_interval=args.dry_interval,
                           tag="dryrun-limit", no_env_proxy=args.no_env_proxy, egress_url=echo_url)
@@ -393,8 +609,37 @@ def cli(argv=None) -> int:
     g.add_argument("--use-env-proxy", dest="no_env_proxy", action="store_false",
                    help="使用环境变量/系统代理（关闭 --no-env-proxy）")
     ap.add_argument("--skip-pro-host", action="store_true", help="跳过 pro.mairuiapi.com 的调用（只用一个主机）")
+    ap.add_argument("--skip-switch-matrix", action="store_true", help="dry-run 不跑 T-B05 开关矩阵（默认会跑）")
+    add_switch_args(ap)
     args = ap.parse_args(argv)
+    try:
+        cfg = apply_switches(args)
+    except ValueError as e:
+        print(f"开关参数错误：{e}")
+        return 2
+    if cfg:
+        print("T-B05 开关：" + json.dumps(cfg, ensure_ascii=False))
     return dry_run(args) if args.dry_run else real_run(args)
+
+
+def add_switch_args(ap):
+    s = ap.add_argument_group("T-B05 复测开关（缺省 = 原行为）")
+    s.add_argument("--gap1-codes", help="GAP1 采样股票，逗号分隔 6 位代码（≤10 只），如 000001,600519,300750,688981,920000")
+    s.add_argument("--p11-only", choices=("gap1", "gap6-history", "gap6-nulls"),
+                   help="p11 只跑一项：gap1=快照延迟；gap6-history=因子历史复取(2 次)；gap6-nulls=空值复测(8 次)")
+    s.add_argument("--local-ahead-s", type=float, action="append",
+                   help="本机比 NTP 快的秒数（本机−NTP），可给多次取均值；用于 GAP1 修正延迟")
+    s.add_argument("--ntp-file", action="append",
+                   help="w32tm /stripchart ... /dataonly 的输出文件，可给多次（时段前、后）；只读本地文件")
+    s.add_argument("--history-baseline", help="gap6-history 比对基线：样例目录或真实运行的 run_id（只读本地文件）")
+    s.add_argument("--zt-codes", help="gap6-nulls 收盘后复跑：沿用盘中选出的涨停股代码")
+    s.add_argument("--p12-only", choices=("hslt",), help="p12 只取 /hslt/list（同次运行 p11 GAP4 已取过则复用 0 次）")
+
+
+def _switch_args(argv):
+    ap = argparse.ArgumentParser(add_help=False)
+    add_switch_args(ap)
+    return ap.parse_args(argv)
 
 
 if __name__ == "__main__":

@@ -438,5 +438,7 @@ def void_trade(
             .values(voided_at=dt.datetime.now(dt.UTC), void_reason=reason)
         )
         rebuild_holdings(conn, row.account_id)
-        _audit(conn, request, settings, auth, "trade.voided", trade_id, {"reason": reason})
+        # 评审 bbf58a0 m9 / 追加裁定 B：作废理由只存在 trades.void_reason（随用户数据删除），
+        # 审计 detail 不存自由文本
+        _audit(conn, request, settings, auth, "trade.voided", trade_id, {"reason_given": True})
         return _out(conn, conn.execute(select(trades).where(trades.c.id == trade_id)).one())

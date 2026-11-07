@@ -238,12 +238,18 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
   | `signal-rt` | 读库与缓存计算信号；SSE 与游标在 `api` | 不需要 | 不得挂载 | 不要求 |
   | `maint-cli` | 删除用户数据 CLI 按 `user_id` 删行、删文件、删 Redis 键，不计算 HMAC；连接串只读 `AIA_MAINT_DATABASE_URL_FILE` | 不需要 | 不得挂载 | 不要求 |
   | `migrate` | alembic 迁移不计算 HMAC；`migrations/env.py` 只在没给 `DATABASE_URL` 时才加载 Settings | 不需要 | 不得挂载 | 不要求 |
-  | `cooldown-purge`（过渡，T-B10 部署项） | 每小时调用 `licences/service.py` 的 `purge_expired_cooldowns` 物理删除过期证书冷却记录；只删行，不计算 HMAC，不加载 Settings；以 `aia_api` 连库（与证书 PUT/DELETE 的读取时清理同角色，不新增权限），不用属主；不挂任何 secret（CI `check_secret_boundary.py` 的 `NO_SECRET_SVCS`）。`beat` 落地定时任务后改由 `beat` 调度、`worker` 执行，并删除本服务 | 不需要 | **不得挂载** | 不要求 |
+  | ~~`cooldown-purge`~~（**已删除**，028c077；review-6670b10 m5） | 冷却记录清理已改由 `beat` 调度、`worker` 执行 `licences.purge_expired_cooldowns`（6670b10）；本服务及 CI 规则 7 登记已删除。已部署过的主机升级后用 `compose.sh up -d --remove-orphans` 清掉残留容器 | — | — | — |
   | `nginx`、`postgres`、`redis` 及其他基础设施 | 无 | 不需要 | 不得挂载 | — |
 
   - **后端**：Settings 的“非 local/test 必须有 `APP_MASTER_KEY`”只对 `SERVICE_NAME ∈ {api, worker}` 生效；`SERVICE_NAME` 缺省仍按 `api` 处理，取到白名单外的未知值时在非 local/test 下拒绝启动（失败即关闭）。所有用主密钥派生子密钥的函数（游标、邀请码、登录 IP、证书去重与冷却指纹、导入文件密钥）在非 local/test 下取不到主密钥时必须抛错，不得退回进程内临时密钥。`ingest` 启动时发现主密钥即拒绝启动。
   - **CI 规则 7（`scripts/ci/check_secret_boundary.py`）改为显式白名单**：脚本内写死一张表，`api`、`worker` 必须挂载 `app_master_key`，表中列出的其余服务必须不挂载；compose 中出现表里没有的服务 → CI 失败，新增服务时必须先在表里登记“挂或不挂”。`.env.example` 仍只有变量名与假值。
   - **升级约束**（运维实现于 `deploy/scripts/`，runbook 同步）：① 升级流程的任何一步都**不得自动生成**主密钥；只有全新部署（secret 文件不存在、旧 `.env` 与环境里没有非占位值、数据库为空）才允许生成。② secret 文件缺失、但旧 `.env`（或环境变量）里有非占位值的 `APP_MASTER_KEY` → 把该值迁移进 secret 文件（权限 600，不打印、不写日志），提示从 `.env` 删除该行，不生成新值。③ 两者都没有、但数据库已有数据（`app.users`、`app.invite_codes`、`app.user_data_licences` 任一非空）→ **拒绝启动**，提示从备份恢复主密钥；连不上数据库时同样拒绝。④ secret 文件与旧 `.env` 都有且不一致 → 拒绝启动，等人工确认。⑤ 主密钥轮换不在 V1 范围。
+  - **主密钥多版本是上线门槛（v0.2.9 内，评审 b195ca6 / T-O12 架构师裁定）**：上线前还没有真实用户数据，现在加密钥编号几乎没有成本；上线后再加就要对真实密文做回填迁移。门槛范围是最小集，由后端 **T-B57** 完成：所有加密列 / 密文带 `kek_id`（或版本前缀）、HMAC 索引列带 `key_id`；密钥环“当前钥加密、按 `kek_id` 选钥解密、HMAC 查询逐个有效版本比对”；主密钥 secret 文件支持多把带 id 的钥并标出当前钥；自检“加新钥后旧数据仍可读、新数据用新钥写”。**后台重加密 CLI 与运维轮换流程不是门槛**，属上线后 V2（运维在 T-O12 之后跟进，方案见团队报告 T-O12 §2）；V1 仍不执行轮换（⑤ 不变）。契约不变。第 9 节问题 95。
+  - **主密钥备份 / 恢复（T-O12，`deploy/scripts/app-master-key-backup.sh`）**：恢复必须以运维台账记下的 sha256 为准核对（不能只信与备份放在一起的 `.sha256`），核对不过不写入；迁移流程第 1 步用该脚本恢复（评审 b195ca6）。
+- **网关上游连接超时（v0.2.9 内，T-O13 演练架构师裁定 A，运维实现）**：nginx 在 server 级加 `proxy_connect_timeout 3s`（覆盖所有变量形式 `proxy_pass` 的 location，含健康检查探针）；内部网络连接应在毫秒级，`api` 停掉后、`resolver valid=10s` 缓存窗口内的请求挂起从最长 60 秒降到约 3 秒，返回 502/504，走部署层统一错误页（与全局维护页同类，不进契约错误码表）；`proxy_read_timeout` 不变（SSE 与长请求依赖它）。CI `check_gateway_limits.py` 规则 9 同步检查该值 ≤ 5s；正式目标宿主重做 T-O13 停机演练时复测“挂起 ≤ 约 3 秒”。（2026-11-01 复核：裁定不变，`proxy_connect_timeout 3s`、`proxy_read_timeout` 不变。）
+- **证券接口：搜索单独限流与禁止共享缓存（v0.2.9 内，架构师裁定 2026-11-01；依据 reports/T-A04-ops.md；契约 v0.2.9 #41）**：
+  - **搜索单独限流**：网关给 `/api/v1/securities/search` 与 `/api/v1/securities?q=` 单独设 `limit_req` zone，**每客户端（与全站 `aia_api` zone 同键，按客户端 IP）5 r/s、burst 20**，与全站 20 r/s 同时生效（取更严者）；超限走现有 `@rate_limited`，返回契约统一的 `429 RATE_LIMITED` 错误信封（`details.retry_after_s`）+ `Retry-After` 头。目的：抑制用代码前缀枚举全市场名单（事实上的批量导出，问题 52）。CI `check_gateway_limits.py` 同步检查 zone 存在、数值与两个 location 都引用。V1 本机自用阶段也启用（成本低）。
+  - **`/securities/*` 一律 `Cache-Control: private, no-store`**：需登录、数据来自授权数据源（部分字段按本人证书取），不得被任何中间缓存或浏览器磁盘缓存保存。适用于 `/api/v1/securities` 下全部路径（含 `search`、`?q=`、`{code}` 及其子资源）的所有响应（含 `304` 与错误响应）；弱 ETag 照常返回、`If-None-Match` → `304` 照常支持。后端在路由层统一设置；网关继续不做 `proxy_cache`、不上 CDN；网关自己生成的错误（429/414/502/504）对该前缀同样带 `no-store`。后端如以后加响应缓存，只能按用户隔离。
 - **无云厂商锁定**：只依赖 PostgreSQL、Redis、本地卷（或任意 S3 兼容存储，通过 `IMPORT_STORAGE_BACKEND=local|s3` 切换）；不用托管专有服务；镜像可在任意主机运行。
 - **迁移流程（本地 → 服务器）**：`pg_dump` 加原始文件卷打包（加密）→ **把原主机 `$AIA_SECRETS_DIR/app_master_key` 拷到新主机同一路径（600、属主容器用户；否则新主机空库会按 1.3 升级约束①生成新主密钥，`pg_restore` 后既有 HMAC 与加密文件全部失效）；主密钥随备份单独离线保存，不与 `pg_dump` 放在一起（v0.2.9 内，评审 75c233b 裁定）** → 新主机 `docker compose up`（**先不启动 `ingest`**）→ `pg_restore` → 修改 `PUBLIC_BASE_URL` 与 DNS → **停止本地 `ingest` → 等待 ≥ 60 秒 → 启动服务器 `ingest` → 核对出口 IP → 从本地 `.env` 删除 licence**。迁移期间及之后，开发机不得用同一证书做真实调用（2.1A；第 9 节问题 27）。操作手册写在 `deploy/scripts/migrate.md` 和 `deploy/runbooks/ingest-failover.md`（T-O06、T-O07）。
 - **测试期访问**：本地 `http://localhost`，不对公网开放；如需让少数测试用户访问，用内网/VPN（如自建 WireGuard）而非把未备案域名解析到境内主机。
@@ -706,8 +712,9 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 **候选信号 `candidate_signals`**（不可变正文 + 头表状态）
 - 正文包括：实例与模板版本、证券、`state`、`proposed_action`、`t_leg`、分数、置信度、`stops`、`rule_refs[]`、`evidence[]`、`counter_evidence[]`、`invalidation[]`、`model_refs[]`（`role=auxiliary`）、`gate_results`、`risk_flags`、`snapshot_id`、`valid_until`（计划有效期，按周期默认：做T 为当日 14:50，短线为下一交易日收盘，波段为 5 个交易日，中长线为 20 个交易日，可在模板中配置）。
 - 状态：
-  - 初始 `open`，经可执行性检查后进入 `drafted` 或 `blocked`；
-  - `blocked` 在原因解除后进入 `released`，重新检查后回到 `drafted` 或 `blocked`；
+  - 初始 `open`；可执行性检查发现生效原因时进入 `blocked`，不会自动进入 `drafted`；
+  - `blocked` 在原因解除后进入 `released`，重新检查后可能再次进入 `blocked`；
+  - `open`、`released`、`drafted` 只有在用户拟草案（POST /plan-drafts，cause=user）时才进入或保持 `drafted`；判定顺序见契约 §7.7（v0.2.9 #30、#37）；
   - `drafted` 经用户确认后为 `confirmed`；
   - 终止状态：`dismissed`（用户）、`expired`、`invalidated`（失效条件触发）、`superseded`（同实例、同证券出现更新的信号）。
 - 状态变化写入 `candidate_signal_events`（只追加）。
@@ -826,7 +833,7 @@ H-01 是"周期分类只推荐、不自动启用"（问题 15）的**唯一例�
 | S-01 `st_pullback_ma` | 日线盘后 | 基本覆盖（`ma`、`pct_change`、`rank_pct`） | 行业内排名分支需要分组截面函数 `rank_pct_in(x, group_key)` 和行业归属特征 `f.sw_l1`（申万一级，来源【待 T003】）→ T-B42、T-B43 |
 | W-01 `sw_ma_trend_pullback` | 日线盘后 | 部分 | ① `ctx.highest_close_since_entry`（跟踪止盈）；② `max2(a,b)`；③ `for p.x days`（N 取参数）；④ 特征请求 `f.ind_rs20`、`f.main_net_20d`、`f.np_yoy_latest`、`f.ann_risk_count_10d`【待 T003】→ T-B42、T-B43 |
 | W-02 `sw_breakout` | 日线盘后 | 部分 | 布林带宽及其自身 120 日分位：新增 `std(x,n)`、`ts_pct_rank(x,n)`，或登记派生特征 `f.boll_bw20`、`f.boll_bw20_pct120`（两种都支持，常用的登记为派生特征以便缓存）→ T-B42 |
-| L-01 `lt_value` | 筛选型，**每月**首个交易日盘后 | 部分 | ① 调度 `scan.schedule=monthly_first_trading_day`；② 行业内分位 `rank_pct_in` 或派生特征（如 `f.pe_ttm_ind_pct`）；③ 筛选的单行业上限 `screen.per_group_cap`；④ 因子历史值是否按时点计算【待 T003】；⑤ **v0.2.9 内，架构师裁定（L-01 研究口径）**：研究与回测的 `pe_ttm`、`roe_ttm`、经营现金流/净利润、资产负债率改为**按披露日（`plrq`）自算**（2.12.1“财务按时点自算”），不用麦蕊回溯拉取的历史因子值（只作对照）；**P0 不受影响**——清单、规则逻辑与数据源都不变，只改研究与回测的计算口径；派生值落 `market.financial_derived`，由 T-B35 特征底座读取；研究员在 `feature_spec.md` 登记对应特征键并决定线上切换时点 → T-B42、T-B43、T-B55 |
+| L-01 `lt_value` | 筛选型，**每月**首个交易日盘后 | 部分 | ① 调度 `scan.schedule=monthly_first_trading_day`；② 行业内分位 `rank_pct_in` 或派生特征（如 `f.pe_ttm_ind_pct`）；③ 筛选的单行业上限 `screen.per_group_cap`；④ 因子历史值是否按时点计算【待 T003】；⑤ **v0.2.9 内，架构师裁定（L-01 研究口径）**：研究与回测改为按 `plrq` 时点自算（口径见 2.12.1“财务按时点自算”；特征键见 `feature_spec.md` §7A），麦蕊历史因子只作对照；**P0 不受影响**；线上切换条件见 `feature_spec.md` **§7C** → T-B42、T-B43、T-B55 |
 
 - **S-03**（`st_strong_momo`，高风险）：随附为模板，`risk_level: high`，默认不启用、不被分类器推荐（C(2)）；手动启用无需确认，开关旁固定展示风险说明（T006e）。
 - **北交所**：V1 不扫描（`boards.bse=false`），持仓仍可导入和展示（C(8)）。
@@ -1180,7 +1187,90 @@ class LLMGateway:
   - TTM：`TTM(y,q) = YTD(y,q) + FY(y−1) − YTD(y−1,q)`（年报直接取 FY）；三个分量在 T 时都必须可见，否则退到上一个可计算的报告期，但不早于 T 前 15 个月，再不行为 `null`。字段是否为累计值及单位以 T-B05 实测为准。
   - `pe_ttm` = 当日不复权收盘价 × 总股本 `zgb`（取 `bdrq ≤ T` 且已披露的最新值）÷ TTM 归母净利润（`gsmgsyzzdjlr`）；净利润 ≤ 0 → `null`（不给负 PE）。
   - `roe_ttm` = TTM 归母净利润 ÷ 归母权益（`gsmgdqsyhj`）在 P 期与 P−4 期的平均；P−4 缺失时只用 P 期，并标 `roe_basis=single_period`。
-  - 经营现金流/净利润 = TTM `jyhdcsdxjlje` ÷ TTM 归母净利润（净利润 ≤ 0 → `null`）；资产负债率 = `fzhj` ÷ `zczj`，银行、保险不计算（`null`）。
+  - 经营现金流/净利润 = TTM 经营现金流 ÷ TTM 归母净利润，分子、分母用同一个报告期 P（净利润 ≤ 0 → `null`）；资产负债率 = `fzhj` ÷ `zczj`，银行、保险不计算（`null`）。
+  - **经营现金流字段（v0.2.9 内，架构师裁定 T-R12，取代原写法 `jyhdcsdxjlje`）**：主字段 `jyhdcsdxjlxj`（600519 实测有值，且等于经营活动现金流入小计 `jyhdxjlrxj` − 流出小计 `jyhdxjlcxj`，即主表“经营活动产生的现金流量净额”），备用字段 `jyhdcsdxjlje`（600519 两期均为 `'-'`）。每个 YTD 分量取 `coalesce(jyhdcsdxjlxj, jyhdcsdxjlje)`，并在 `basis.ocf_field` 按分量记录实际所用字段（来源字段）；两者都为空（`'-'` 或缺失）→ 该分量缺失，TTM 经营现金流为 `null`，**不用 0 补**。两字段的非空率与 cashflow 是否为累计口径由 T-B05 实测确认；若实测推翻主次，只改本条与 T-B55 配置，不改公式。
+  - **PB（v0.2.9 内，架构师裁定 T-R12，G3）**：`pb` = d 日总市值 ÷ 归母股东权益 `gsmgdqsyhj`。总市值 = d 日不复权收盘价 × `zgb`（与 `pe_ttm` 同一取法，不用快照或因子里的市值）；归母权益取 balance 中按 `plrq` 时点规则（本节第一条）在 T 时可见的最新一期（时点值，不做 TTM，回退下限同 15 个月）。归母权益 ≤ 0 或缺失 → `pb = null`，不参与行业分位排序（不进入分母）。银行、保险同样计算，但其 balance 字段（`gsmgdqsyhj`）未实测，T-B05 核对前该类证券的 `pb` 标待核实。行业分位同 `pe_ttm` 的行业分位（申万一级、因子池排除、组内 N < 5 → `null`）。特征键由研究员在 `feature_spec.md` §7A 登记（建议 `f.pb_pit`、`f.pb_pit_ind_pct`）。
+  - **边界情况（v0.2.9 内，架构师裁定 T-R12a；适用于 `pe_ttm`、`pb`，以及 `roe_ttm` 中的权益部分）**。原则：拿不准就留空（`null`），并在 `basis.null_reason` 写原因码；不用前值、0、插值、估算或别的数据源补数。
+    1. **停牌和无效日线**：d 日没有日线、`sf=1`，或日线被 T-B05a 标为 `suspect` → 当日 `pe_ttm`、`pb` 为 `null`（`null_reason=no_valid_bar`）。不用停牌前的收盘价顶替。
+    2. **股本变动日**：`zgb(d)` 取 capital 中 `bdrq ≤ d` 且 `next_trading_day(plrq) ≤ d` 的行里 `bdrq` 最大的一行（同 `pe_ttm`），并把所用行的 `bdrq` 记入 `basis.zgb_bdrq`。
+       - 已披露但 `bdrq` 还没到的行不提前用；
+       - `bdrq` 已到但还没披露的行也不用。
+       - 如果 T 时已经可以知道送转方案及其除权日（数据来源需 T-B05 确认麦蕊是否提供分红送转数据），而 d ≥ 除权日时仍然没有 `bdrq ≥ 除权日` 的可见 capital 行，就按“价格已除权、股本未更新”处理：值为 `null`（`null_reason=share_change_pending`）。
+       - 没有送转数据源时，不做这项检查，`basis.share_change_check=unavailable`。是否必须接入这类数据，按 T-B05 对 V5d 的实测结论决定：如果 capital 行普遍晚于除权日才可见，就必须接入。
+    3. **B 股、H 股股本**：总市值 = A 股不复权收盘价 × `zgb`（全部股本，含 B 股、H 股），记 `basis.mcap_basis=a_price_total_shares`。不用 B 股或 H 股价格，也不做汇率换算。这是常用的“A 股口径总市值”，分母归母权益覆盖整个公司，两边口径一致。
+       - `zgb` 是否包含 B 股和 H 股尚未实测。T-B05 用一家 A+H 公司和一家 A+B 公司核对。
+       - 核对之前，有非 A 股股本的公司标 `basis.verify_pending` 含 `non_a_share_capital`（见下方“待核实标记”）。
+       - 实测如果发现 `zgb` 只含 A 股，这类公司的 `pe_ttm`、`pb` 一律为 `null`，直到另行裁定。
+    4. **新股和报告空窗**：
+       - 上市后还没有有效报告期（只有 `plrq ≤ jzrq` 的占位行，或回退到 15 个月下限仍没有可用期）→ `null`（`null_reason=no_visible_report`）。
+       - 所选报告期的 `jzrq` 早于上市日时，归母权益不含募集资金：这时 `pb` 以及 `roe_ttm` 为 `null`（`null_reason=pre_listing_equity`）；`pe_ttm` 照常计算，因为上市前的利润是真实披露数。
+       - 最新可见的 capital 行 `bdrq` 早于上市日（股本未含新发股份）→ `pe_ttm`、`pb` 为 `null`。
+       - 不用招股书或募资额推算上市后的权益。
+       - 上市不满 60 个交易日的证券本来就在因子池之外，这条规则主要影响回测，以及上市 60 个交易日至第一份定期报告之间的空窗。
+    5. **币种和单位**：金额一律按人民币“元”处理（600519、000001 已实测，麦蕊已经把百万元换算成元）。
+       - 原始响应中出现非人民币币种、非“元”单位的标识（字段名由 T-B05 确认），或同一证券不同报告期的数量级明显不连续 → 该期分量为 `null`，并告警 `unit_mismatch`。
+       - 不按数量级猜单位并自动换算。
+       - 不要求跨版本数值精确相等（千元、百万元取整差，见 feature_spec §7B）。
+    6. **归母权益是极小的正数**：`pb` 不设上限、不缩尾，按原值落库。分位排序和 Spearman 都基于秩，不受影响。展示层和对照报告可以把 `pb > 100` 标为离群，但不改值。
+    7. **不用每股字段**：不用每股净资产、每股收益等每股字段推算 `pe_ttm`、`pb`（送转会追溯重述这些字段，见 feature_spec §7B R5）。
+  - **待核实标记（v0.2.9 内，架构师裁定 T-R12a）**：
+    - 键级状态沿用 `feature_catalog.status`（`declared` → `verified_live`），不变。
+    - 证券级的“这类公司还没实测”写在每行 `market.financial_derived.basis.verify_pending`（字符串数组，空数组表示没有）。当前取值：
+      - `bank_balance`：`f.sw_l1` = 银行；
+      - `insurance_balance`：按 2.12.1 线上切换条中的保险名单或申万二级识别；
+      - `non_a_share_capital`：见上方第 3 条。
+    - 适用范围：
+      - 前两项适用于 `pb`、`roe_ttm`（用到 `gsmgdqsyhj` 的行）；`debt_ratio` 对银行、保险本来就为 `null`，不加标记。
+      - 第三项适用于 `pe_ttm`、`pb`。
+      - 截面派生键（PB 分位、PE 分位）继承所用底层值的 `verify_pending`（T-B35 在特征值元数据里保留）。
+    - 带标记的值照常计算和落库，研究与回测报告必须单列这部分。
+    - 在 feature_spec §7C S2 覆盖率中，这部分**同时从分子和分母中剔除**，并单列它们的个数。只剔分子会让银行、保险（约 1% 的样本）直接把 PB 的 99% 门槛压到不达标。
+    - S1 要求 V5b、V5e、V5g 关闭（T-R12b 补 V5g），含义是：切换时所有 `verify_pending` 取值都必须已由 T-B05 清除；T-B05 核实后，T-B55 重算时不再写这个标记。S1 另需关闭 V5d、V5h（见下方 T-R12b 补充裁定第 4 条）。
+  - **PB 覆盖率门槛（feature_spec §7C S2 增补，v0.2.9 内，架构师裁定 T-R12a）**：
+    - 分母 D(d) = S2 的池 U（F43 的池：§1.4 股票池 + 因子池排除，即 d 日可交易、非 ST、非退市整理、上市满 60 个交易日），再剔除两类：
+      - T 时所选报告期的归母权益**已知且 ≤ 0** 的证券。归母权益缺失的证券留在分母里，计为未覆盖。
+      - `verify_pending` 非空的证券。
+    - 分子：D(d) 中 `f.pb_pit` 非 `null` 的个数。
+    - 全市场门槛：分子 / D(d) ≥ 99%，与 PE 相同；PB 只需要价格、股本和一期权益，比 PE 少 TTM 的三个分量。
+    - 行业门槛：在每个申万一级行业中，组内 D ≥ 5 时，组内覆盖率 ≥ 95%（与其他键的 95% 相同）。组内 D < 5 的行业不考核（这时 PB 分位本来就为 `null`），但要列出。`f.sw_l1` 为空的证券只计入全市场口径，单列个数。
+    - 同时报告 PB 分位非 `null` 的个数，作为参考，不作门禁。
+  - **T-R12b 补充裁定（v0.2.9 内，架构师；对应 feature_spec v1.1.2 的 6 个非阻塞点）**：
+    1. **原因码补全，且列表封闭**：`market.financial_derived` 中 `value` 为 `null` 的行必须写 `basis.null_reason`，`value` 非空的行不写这个字段；T-B55 的单元测试要断言这两条。取值只能是下表所列，要新增原因码先改本条。
+
+       | 原因码 | 情形 | 适用 metric |
+       |---|---|---|
+       | `no_valid_bar` | 边界 1 | `pe_ttm`、`pb` |
+       | `share_change_pending` | 边界 2 | `pe_ttm`、`pb` |
+       | `a_share_only_capital` | 边界 3：实测 `zgb` 只含 A 股时，有 B、H 股的公司 | `pe_ttm`、`pb` |
+       | `no_visible_report` | 边界 4：没有有效报告期，或回退 15 个月仍取不到 | 全部 |
+       | `pre_listing_equity` | 边界 4：所选报告期 P 早于上市日 | `pb`、`roe_ttm` |
+       | `pre_listing_capital` | 边界 4：最新可见 capital 行的 `bdrq` 早于上市日 | `pe_ttm`、`pb` |
+       | `unit_mismatch` | 边界 5（既是告警名，也是原因码） | 全部 |
+       | `non_positive_earnings` | TTM 归母净利润 ≤ 0（PE）；现金流比的分母 `NP_TTM ≤ 0` 也用这个码 | `pe_ttm`、`ocf_to_np_ttm` |
+       | `non_positive_equity` | E(P) ≤ 0 | `pb`、`roe_ttm` |
+       | `no_capital_row` | 没有 `bdrq ≤ d` 且已可见的 capital 行，或 `zgb` 为空、≤ 0 | `pe_ttm`、`pb` |
+       | `ocf_missing` | 经营现金流两个字段都为空 | `ocf_to_np_ttm` |
+       | `component_missing` | 回退选出的 P 中某个必需分量仍为空，且不属于上述任何一种（例如 `zczj` 为空） | 全部 |
+       | `data_conflict` | 补充规则 ②：两个版本不可区分且数值不同（既是告警名，也是原因码） | 全部 |
+       | `financial_sector_na` | 银行、保险的资产负债率 | `debt_ratio` |
+
+       一行同时命中多个原因时，只写表中靠前的一个。分位键（PB 分位、PE 分位）在组内 N < 5 或底层值为 null 时为 null，原因由 T-B35 记在特征值元数据中（`group_too_small` / `input_null`），不写进 `financial_derived`。
+    2. **`unit_mismatch` 同时作原因码**：确认 feature_spec v1.1.2 的做法，名称与告警相同。
+    3. **ROE 中 P−4 早于上市日**：E(P−4) 不含募集资金，拿它和 E(P) 平均会压低分母、高估 ROE。这种情况按 E(P−4) 缺失处理，走 `roe_basis=single_period`，并记 `basis.single_period_reason=p4_pre_listing`。同时给已有的两种 single_period 情形补上记录：`p4_missing`、`p4_non_positive`（补充规则 ③）。不用招股书数据补 E(P−4)。
+    4. **S1 的关闭项**：
+       - 确认把 V5g 写进 S1。
+       - V5d、V5h 虽然不产生 `verify_pending` 标记，但也要在 S1 里关闭（取保守默认）。不关闭的话，股本口径和单位口径就没有经过实测，自算值可能静默出错。
+       - V5d 的关闭条件：T-B05 写出结论；如果 capital 行普遍晚于除权日才可见，送转数据已经接入，且切换时 `basis.share_change_check` 不再为 `unavailable`。
+       - V5h 的关闭条件：确认币种、单位字段的字段名，或者确认没有这类字段。没有字段时，只靠边界 5 的数量级不连续检查，并把这一点写进 V5h 的结论。
+       - 这一条会延长切换前的等待，见 §9 问题 96。
+    5. **其他键的 `unit_mismatch`**：边界 5 扩展到 `market.financial_derived` 的全部 metric，包括 `ocf_to_np_ttm`、`debt_ratio`。比值键的分子、分母只要有一个分量（含 TTM 用到的任一期）命中，该值就为 null（`unit_mismatch`）。理由：比值只能抵消同一期内的单位差，抵消不了 TTM 跨期拼接时的单位差。
+    6. **B、H 股识别字段待实测期间**：字段名由 T-B05 ⑦（V5g）确认，确认之前不猜。
+       - capital 中能识别有 B、H 股本的公司，照常打 `non_a_share_capital`。
+       - 无法识别时，记 `basis.share_class_check=unavailable`，不打 `non_a_share_capital`，也不按代码段或名称推断。
+       - 只要还有 `unavailable` 的行，V5g 就没有关闭，S1 不通过，所以不会因此提前切换。
+       - 研究和回测报告要单列 `share_class_check=unavailable` 的证券数。
+  - **补充规则（`feature_spec.md` §7A.0 / §13 A5，4 条）——【已确认 v0.2.9 内，架构师 T-R12】**，并入 T-B55：① 首次全量回填写入、`plrq` 早于回填日的行只按 `plrq` 计算，标 `basis.pit_basis=plrq_only`；② 同一 (code, report_type, jzrq) 的两行 `available_from` 相同 → 取 `first_seen_at` 较晚者，仍无法区分且数值不同 → 该分量 `null` 并告警 `data_conflict`；③ E(P−4) ≤ 0 按缺失处理（`roe_basis=single_period`）；④ 现金流比的分子、分母用同一个 P，不各自回退。说明：P 按“该键所需分量都可见且非空”逐期回退，所以同一 T 下不同键（如 `pe_ttm` 与 `ocf_to_np_ttm`）的 P 可以不同，各自记入 `basis.period`。
+  - **线上切换**：条件与阈值以 `feature_spec.md` §7C（S1–S6）为准——【已确认 v0.2.9 内，架构师 T-R12】；本文不重复。保险识别（V5e）若 T-B05 确认麦蕊没有申万二级，按配置中的保险证券名单识别（名单注明来源），以此关闭 V5e，不因缺申万二级而阻塞切换。等待期的产品取舍见第 9 节问题 93。
   - 幸存者偏差：已退市证券的财报接口返回 404，历史截面缺这些证券；回测报告必须带 `survivorship_bias=true` 标记，不能当作无偏结果。
   - 麦蕊历史因子值只作对照：按截面报告与自算值的 Spearman ρ，不作为门禁。
 - **因子池排除**：停牌、ST/*ST、退市整理、上市不满 60 个交易日的次新股（阈值可配置）不进入截面排名和分位计算。**例外**（v0.2.9 内，T-O11 评审裁定）：分类器特征的 `rank_pct_universe`（如 `f.volatility_20d` 的全市场分位）不排除 ST、*ST、退市整理股，只要求上市满 20 个交易日（并排除北交所与当日停牌）；定义以 `docs/strategies/feature_spec.md` §1.4 为准。
@@ -1488,7 +1578,7 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 | `market.trading_calendar` | date, is_open |
 | `market.daily_bars` | code, trade_date, open, high, low, close, volume, amount, adj_type, fetched_at（按年分区） |
 | `market.quotes_snapshot` | code, ts, price, pct_change, … （只保留当日+近 5 日，热数据在 Redis） |
-| `market.financial_derived` | v0.2.9 内（L-01 裁定，T-B55）：`code`、`period_end`、`version_available_from`、`metric`（`pe_ttm`/`roe_ttm`/`ocf_to_np_ttm`/`debt_ratio`；`pe_ttm` 按交易日存）、`trade_date null`、`value numeric null`、`basis jsonb`（所用报告期、各分量版本、`roe_basis`、回退标记）、`calc_version`、`computed_at`。PK `(code, metric, period_end, version_available_from, coalesce(trade_date))` 以唯一索引实现；btree `(metric, trade_date)`。按证书数据计算时带 `source_licence_id`（2.1B） |
+| `market.financial_derived` | v0.2.9 内（L-01 裁定，T-B55）：`code`、`period_end`、`version_available_from`、`metric`（`pe_ttm`/`pb`/`roe_ttm`/`ocf_to_np_ttm`/`debt_ratio`；`pe_ttm`、`pb` 按交易日存；`pb` 为 T-R12 裁定新增）、`trade_date null`、`value numeric null`、`basis jsonb`（所用报告期、各分量版本、`roe_basis`、`ocf_field`（经营现金流实际所用字段）、`pit_basis`、回退标记；T-R12a 起加 `null_reason`（封闭枚举，见 2.12.1 T-R12b 补充裁定 1）、`zgb_bdrq`、`mcap_basis`、`share_change_check`、`verify_pending`（字符串数组，见 2.12.1）；T-R12b 起加 `single_period_reason`、`share_class_check`）、`calc_version`、`computed_at`。PK `(code, metric, period_end, version_available_from, coalesce(trade_date))` 以唯一索引实现；btree `(metric, trade_date)`。按证书数据计算时带 `source_licence_id`（2.1B） |
 | `market.financial_reports` | code, report_type(balance/income/cashflow/pershareindex), period_end, payload(jsonb), first_seen_at, last_seen_at, payload_hash — **数据变化时新增行**，保留"重述"历史，支持 as-of；增加 announce_date(公告日 plrq【待 T003 验证】), available_from（按时点可用时间，2.12.1）。v0.2.9 内（L-01 裁定）：`plrq` 已由 T003 缺口目录第 3 项核实（空值率 0，三表都有）；同一报告期多行的含义待研究员对照巨潮原文；派生值另存 `market.financial_derived`（T-B55） |
 | `market.fund_flows` | code, trade_date, payload(jsonb), fetched_at |
 | `market.factor_values` | code, trade_date, factor_id, value, calc_version, fetched_at, available_from, first_seen_at — hypertable（chunk 1 个月） |
@@ -3005,6 +3095,7 @@ admin:
     5. 运维更新 `deploy/db/roles/grants.sql` 与 `verify-roles.sh`：`aia_maint` 只授予 CLI 必需的权限；`aia_api`、`aia_ingest` 对 `ops.pending_file_purges` 没有任何权限；`verify-roles.sh` 断言 `aia_api` 在一个事务里执行“置 `purging` → 删除 → 改回 → 提交”会失败。
     6. **`aia_maint` 角色细则（v0.2.9 内，评审 be607b3/f72b8c7/8fd9502 裁定）**：① `aia_maint` 是 LOGIN 角色，按最小权限只授予 CLI 用到的表与列；`aia_api`、`aia_ingest` 都不得是它的成员（反过来也不得）；② CLI 只从 `AIA_MAINT_DATABASE_URL_FILE` 指向的文件读取连接串（文件不在镜像和仓库中，`api`、`ingest` 容器不挂载）；③ `grants.sql` 中对 `ops` 的 schema 级 GRANT 之后，显式 `REVOKE ALL ON ops.pending_file_purges FROM aia_api, aia_ingest`（必须放在 schema 级 GRANT 与 `ALTER DEFAULT PRIVILEGES` 之后，避免被覆盖）；④ `verify-roles.sh` 增加断言：`aia_maint` 可登录；`aia_api`、`aia_ingest` 不是 `aia_maint` 的成员（`pg_has_role(..., 'MEMBER')` 为 false）；`aia_api`、`aia_ingest` 对 `ops.pending_file_purges` 的 SELECT/INSERT/UPDATE/DELETE 都为 false；⑤ dry-run 也用 `aia_maint` 连接，或用一个对相关表只读的连接，不得用 `aia_api` 的连接。运维改 `deploy/db/roles/`，后端改 CLI 的连接读取。
     7. **`aia_maint` 列级授权原则（v0.2.9 内，T-O11 评审裁定）**：① 不得 SELECT 任何密文列（`user_data_licences.ciphertext`、LLM `api_key_ciphertext` 等）与 `app.users.password_hash`；② 不得 UPDATE `app.users.role`；③ SELECT 与 UPDATE 都按列授予：只授 CLI 实际读的列（主键、`user_id` 类关联列、文件路径等）和实际写的列（`app.users.status` 与匿名化细则列出的列）；DELETE 只对 CLI 清单内的表授予（PostgreSQL 没有列级 DELETE）。**后端**在 CLI 代码中维护一份“表 → SELECT 列 / UPDATE 列 / DELETE”的清单并随 CLI 改动同步，交给运维；**运维**在 `grants.sql` 用列级 GRANT 实现，`verify-roles.sh` 用 `has_column_privilege` 断言 ①② 为 false。
+    8. **后台服务的数据库角色：`worker` 改用 `aia_api`（v0.2.9 内，架构师裁定 2026-11-01，与 T-O10/T-O11 分库角色一致；review-028c077 M1）**：① `worker` 现用库属主连接，违反最小权限；改为 `DATABASE_URL: *db-api-url`（`aia_api`），不再持有属主凭据。② 只给 `worker` 任务**实际用到**的表补缺少的 **DML** 权限（SELECT/INSERT/UPDATE/DELETE，按需、能按列就按列），**不给任何 DDL**（CREATE/ALTER/DROP/TRUNCATE、属主、`SET ROLE` 到属主）；当前任务：冷却清理 `licences.purge_expired_cooldowns`（`app.user_data_licence_cooldowns`：SELECT、DELETE）、预览行每小时清理 `imports.purge_preview_rows`（`app.import_rows`：SELECT、DELETE；`app.import_batches`：SELECT）、原始文件到期清理 `imports.purge_expired_raw_files`（另须 worker 挂 imports 卷，见 review-028c077 M2）（`app.import_files`：SELECT，UPDATE `deleted_at`、`storage_path`，`FOR UPDATE` 所需权限）；T-B52 交付后的 `master.*` 同步与首次导入（`market` 下主数据、历史、词条、`master_runs`、`master_snapshots` 的 DML）。③ `aia_api` 仍不得读证书密文列（列级授权不变），新增授权不得放开它。④ 运维在 `deploy/db/roles/grants.sql` 补授权、`verify-roles.sh` 断言（worker 任务全部能跑；`aia_api` 无 DDL、读不到密文列），CI 规则 7 的 `DB_ROLE_OF` 把 `worker` 登记为 `aia_api`。⑤ 如有任务必须用属主或 `aia_maint` 才能跑，**不得自行放权**，报架构师裁定。⑥ `beat`（只调度，不应连库写数据）与 `signal-rt` 仍用属主，同样按本条原则另行收窄（运维核实各自实际用到的表后报架构师）。
   - **威胁模型与触发器自检（v0.2.9 内，T-T25 裁定）**：数据库属主、超级用户或能执行 DDL 的角色**不在**删除 CLI 的威胁模型内——这类角色本来就能直接读取或复制全部数据，CLI 无法防御，也不承诺防御（例如预先植入的 AFTER DELETE 触发器把行复制到别处）。作为防误配的完整性检查（不是安全保证）：CLI 在 dry-run 与 `--execute` 前，用只读查询（`pg_trigger` 中 `NOT tgisinternal` 的行）列出删除与匿名化清单内各表上的触发器，与 CLI 代码中维护的白名单（表名 + 触发器名 + 函数名，随迁移同步）比对；dry-run 输出差异，`--execute` 遇到白名单外的触发器拒绝执行并以非零码退出，不提供跳过参数。白名单由后端随迁移维护；不检查函数体内容，不检查清单外的表。
   - **物理删除**（个人财务数据和由它派生的数据）：持仓、成交（`app.trades`）、导入批次与解析行、证书（`ops.data_licences`，含密文）、画像（`app.user_profiles`）、自选、策略实例、候选信号（含各分区）、`signal_events`、`suggestions`、`suggestion_user_actions`、`plan_drafts`、`plan_draft_confirmations`、`risk_events`、风控设置及其历史、`claims` 与 `claim_links`、研究候选（`research_candidates`、`candidate_versions`；T-A11 同步，后端已删）、`symbol_horizon_assessments`、`daily_reports`、通知、会话。另外删除用该用户证书取到的 `market.*` 行（按 `source_licence_id`）以及对应的 Redis 键。
   - **匿名化保留**（有不可变要求的审计和日志表）：`app.audit_logs`、`app.account_reviews`、`ops.data_licence_events`、`ops.ingest_request_log`。
@@ -3162,7 +3253,7 @@ admin:
 | T-B03b | 管理员：`create-admin` CLI、用户审核/禁用/重置、`account_reviews`、`audit_logs`、禁用即吊销会话 | 后端 | T-B03 |
 | T-B03c | 邀请码：`invite_codes` 表、`/admin/invites`、注册核验（同事务、统一错误）、审计；`invite` 模式启用前必须完成（T-A05） | 后端 | T-B03b |
 | T-B04 | ~~麦蕊网关 `datagw`~~ **由 T-B04a（`ingest` 服务）取代**，以下功能全部移入 `ingest`：URL 构造、Redis Lua 令牌桶（`per_minute_budget` 可配置）、并发上限（`max_concurrency`）、singleflight、错误码映射（101/102/103/403/429/503）与自适应退避、licence 脱敏、`raw_payloads`、日计数器与降级开关、**录制/回放模式**（本地与 CI 不访问真实麦蕊） | 后端 | T-B02 |
-| T-B05 | **麦蕊实测联调（真实证书，仅一台机器）**：逐一调用 0A.6 与 4.2 的接口，确认字段、空值、延迟、`/hsrl/ssjy/all` 每分钟次数、并发规则、6000/分钟是按接口还是按证书、因子数量（77/85）、`dividend_yield` 可用性、资金流盘中更新频率、板块实时；产出 `docs/mairui-verified.md` 与脱敏 fixtures；回填本文全部【待核实】与【待 T003 验证】；**与 T003 报告 `/workspace/team/reports/T003-mairui-capability.md` 对账**，只在当前唯一调用方上执行 | 后端 | T-B04a |
+| T-B05 | **麦蕊实测联调（真实证书，仅一台机器）**：逐一调用 0A.6 与 4.2 的接口，确认字段、空值、延迟、`/hsrl/ssjy/all` 每分钟次数、并发规则、6000/分钟是按接口还是按证书、因子数量（77/85）、`dividend_yield` 可用性、资金流盘中更新频率、板块实时；产出 `docs/mairui-verified.md` 与脱敏 fixtures；回填本文全部【待核实】与【待 T003 验证】；**与 T003 报告 `/workspace/team/reports/T003-mairui-capability.md` 对账**，只在当前唯一调用方上执行。**财务时点自算实测项（v0.2.9 内，T-R12 并入；对应 `feature_spec.md` §11 V5b–V5f、V9）**：① cashflow：抽 ≥ 5 家（含至少 1 家银行、1 家保险），多个年份与季度，统计 `jyhdcsdxjlxj`、`jyhdcsdxjlje` 各自非空率（`'-'` 计为空），核对 `jyhdcsdxjlxj` = `jyhdxjlrxj` − `jyhdxjlcxj`、两字段同时有值时是否相等、是否为年初至报告期末累计口径；② 银行（000001、600000）与一家保险的 balance：`gsmgdqsyhj`、`fzhj`、`zczj` 是否有值、单位，以及归母权益 ≤ 0 的情形（供 PB 判定）；③ 多版本行：探针保存同一 `jzrq` 多个 `plrq` 版本的完整数值，并选一家发布过差错更正的公司对照巨潮，确认更正版本如何成行、`plrq` 是否为更正公告日；④ capital：`plrq` = `bdrq` 的含义，用 600519 2011-07-01 送股对照巨潮；⑤ `sw_l1` 代码格式（`/hszg/list`），“银行”“保险”在返回中的代码，是否有申万二级；没有申万二级时提供保险证券名单及来源；⑥ PB 分量：`c`（不复权）× `zgb` 与巨潮/交易所披露的总股本、总市值抽样核对；⑦（T-R12a）`zgb` 是否含 B 股、H 股：各取一家 A+H、A+B 公司对照巨潮，并确认 capital 中区分 A/B/H 股本的字段名；⑧（T-R12a）麦蕊是否有分红送转数据（送转比例、除权日），以及 capital 送转行的 `plrq` 相对除权日的先后（与 V5d 一起做）；⑨（T-R12a）财报响应中有无币种、单位字段，抽一家 CDR 或境外上市背景公司检查。结果写入 `docs/mairui-verified.md`，并标出 2.12.1 的现金流主备字段是否需调整 | 后端 | T-B04a |
 | T-B05a | **日线数据质量检查**（T003 发现的伪停牌占位行）：`sf=1` 且同日快照有成交 → 标 `suspect`，排除出指标、信号与跟踪计算，生成管理端告警；补测结果写入 T-B05 产出 | 后端 | T-B05 |
 | T-B06 | 行情层（按证书隔离；证券公开主数据全站一份；契约 v0.2.8 起含 ETF）：主数据、日历、指数、日 K、全市场快照、板块与成分、涨跌停池、`marketdata` 查询 + `gaps`；`/securities/search`（pg_trgm + 拼音首字母）、`/securities/{code}`、周 K 聚合（契约 v0.2.7；公开主数据范围与来源见第 9 节问题 51–52） | 后端 | T-B05 |
 | T-B07 | 盘后数据批：因子截面（2.5 所需因子）、资金流、龙虎榜、公告/问董秘/jrts/解禁/业绩预告、财务；`/securities/{code}/financials` `/fund-flows` `/factors` `/announcements`、`/market/sector-flows`（契约 v0.2.7） | 后端 | T-B06 |
@@ -3293,7 +3384,8 @@ admin:
 | T-B53 | **对账、交叉核对与告警（4.6.4、契约 §7.9）**：`master.reconcile_vendor`（`ingest` P1 按证书拉麦蕊 `/hslt/list`、`/bj/list/all`、`/kc/list/all`、`/hsrl/real/all`，worker 比对）、`master.crosscheck`（巨潮、AKShare）、差异开关闭、5 个 `master.*` 告警键、`GET /admin/securities/reconciliation`。交付：任务、接口、测试。验收：契约 §9 v0.2.9 验收 5–8；响应与日志不含证书值；证书不可用时跳过该证书且不跨证书回退 | 后端 | 1 | T-B52, T-B45 |
 | T-B54 | **搜索词条与搜索接口（4.6.3、契约 §7.3）**：词条生成（多音字展开上限 16、默认读音保留、去 ST 变体、曾用名与曾用名首字母、北交所旧代码）、改名时同事务重建、`generator_version` 全量重建任务；`/securities/search` 改走词条表，`SecurityHit.quote_missing`、`master_as_of` 按契约 #33 给值。交付：词条模块、接口、测试。验收：契约 §9 v0.2.9 验收 3–4、7；P95 ≤ 100 ms（3A.5） | 后端 | 1 | T-B52, T-B53 |
 | T-B56 | **放弃或失败批次的预览行清理（3.5，契约 #35）**：`discarded`/`failed` 状态变更同一事务删除预览行与未提交行级数据；discard 不再删除原始文件（改按留存策略）；`/rows` 返回空、`errors.csv` 只有表头、resolve 返回 409；beat 每小时调度的 `imports.purge_preview_rows`。交付：代码与测试。验收：契约 §9 v0.2.9 验收 9 | 后端 | 1 | T-B18 |
-| T-B55 | **财务按时点自算（L-01 研究口径，2.12.1；v0.2.9 内，架构师裁定）**：从 `market.financial_reports` 按 `plrq` 选版本，计算 TTM、`pe_ttm`、`roe_ttm`、经营现金流/净利润、资产负债率，写 `market.financial_derived`；占位行丢弃、重述新版本、15 个月回退、`survivorship_bias` 标记；与麦蕊历史因子的截面 Spearman 对照报告。交付：模块、表迁移、虚构夹具单元测试、对照报告。验收：任一 T 的计算只用 `available_from ≤ T` 的数据（属性测试）；净利润 ≤ 0 时 PE 为 null；银行、保险负债率为 null；T-B35 能读取 | 后端 | 2 | T-B05, T-B35 |
+| T-B55 | **财务按时点自算（L-01 研究口径，2.12.1；v0.2.9 内，架构师裁定）**：从 `market.financial_reports` 按 `plrq` 选版本，计算 TTM、`pe_ttm`、`pb`、`roe_ttm`、经营现金流/净利润、资产负债率，写 `market.financial_derived`；占位行丢弃、重述新版本、15 个月回退、`survivorship_bias` 标记；经营现金流取 `coalesce(jyhdcsdxjlxj, jyhdcsdxjlje)` 并记 `basis.ocf_field`、都空为缺失；2.12.1 的 4 条补充规则（T-R12 已确认）；2.12.1 的 7 条边界规则与 `basis.verify_pending` 标记（T-R12a）；2.12.1 T-R12b 补充裁定 6 条（`null_reason` 封闭枚举，且单元测试断言“`value` 为 null ⇔ 有 `null_reason`”；`single_period_reason`；`unit_mismatch` 覆盖全部 metric；`share_class_check`）；对照报告输出 feature_spec §7C S2 覆盖率（含 PB 全市场与分行业口径、`verify_pending` 单列）；与麦蕊历史因子的截面 Spearman 对照报告。交付：模块、表迁移、虚构夹具单元测试、对照报告。验收：任一 T 的计算只用 `available_from ≤ T` 的数据（属性测试）；净利润 ≤ 0 时 PE 为 null；归母权益 ≤ 0 时 PB 为 null 且不进入行业分位；经营现金流两字段都空时现金流比为 null（不为 0）；银行、保险负债率为 null；T-B35 能读取 | 后端 | 2 | T-B05, T-B35 |
+| T-B57 | **主密钥多版本（上线门槛；v0.2.9 内，评审 b195ca6 / T-O12 架构师裁定，1.3）**：① 所有用主密钥加密的列（导入文件头与 `raw_line`、LLM `api_key_ciphertext` 等）带 `kek_id`（旁列或密文版本前缀，如 `AIA2|kek_id|…`、`v2:<kek_id>:…`），HMAC 索引列（邀请码、登录 IP、证书去重与冷却指纹等）带 `key_id`；② 密钥环：用当前钥加密 / 签名，按 `kek_id` 选钥解密，HMAC 查询与签名校验（含游标）对每个有效版本都算一遍；③ 主密钥 secret 文件支持多把带 id 的钥并标出当前钥，`kek_id` 由钥单向派生（不泄露钥），旧的单钥格式视为只有一把；与 `deploy/scripts` 的 ensure / 备份脚本兼容（运维配合改格式校验）；④ 自检：加入新钥并切为当前后，旧数据仍可读、HMAC 仍能命中，新数据用新钥写。**不含**后台重加密 CLI 与运维轮换流程（上线后 V2，运维在 T-O12 之后跟进）。契约不变；第 9 节问题 95。交付：迁移、密钥环、测试 | 后端 | 4（上线门槛，M3 前） | T-B03, T-B45 |
 | T-F25 | **管理端证券主数据对账页（契约 §7.9）**：`/admin/securities/reconciliation` 列表（状态、类型、来源筛选，游标翻页）；`ingest` 状态页显示 5 个 `master.*` 告警文案。交付：页面、组件测试（`src/frontend/src`）。验收：不显示证书值；非管理员不可见入口；告警按 `critical` 在前 | 前端 | 1 | T-B53 |
 | T-F26 | **搜索结果展示补充（契约 §7.3、§5.1）**：曾用名、旧代码命中时显示“曾用名：…”“旧代码：…”；`quote_missing=true` 显示“本人行情源暂无此证券”；`missing_from_list`、`delisting_period`、`delisted` 徽标；ETF 未建档时无结果的空态文案。交付：组件与组件测试。验收：`match_kind`、`listing_status` 的取值只从 `/meta/enums` 读，不写死 | 前端 | 1 | T-B54 |
 
@@ -3391,7 +3483,7 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 49. **每用户自用麦蕊证书**——**【用户已定 2026-11-02】**：用户为每位朋友单独购买一张麦蕊证书；每位用户在“设置 → 数据证书”录入自己的证书，只用自己的证书取数（2.1B，契约 v0.2.6）。架构取舍（架构师，T-A07）：证书 HPKE 加密、只有 `ingest` 能解密、从不回显；每证书令牌桶与 P0>P1>P2 队列、证书之间轮转；默认 `data_sharing.mode=per_licence`；证书不可用时**不回退**到他人或管理员的证书；生产不再使用全站 `MAIRUI_LICENCE`。建议朋友买**钻石版 + Quant Pro**（全市场快照只限包年/钻石或 Quant Pro，1 分钟 K 需 Quant Pro），并以朋友本人账号申请。
 50. **【待麦蕊书面确认，未决，不阻断开发】证书归属与共享**：请用户向麦蕊书面询问（QQ 3826425416 或 https://www.mairuiapi.com/linkmeans 的企业顾问表单，保留记录）：① 用户付费、以朋友本人账号申请的证书，由用户的服务器代朋友调用，是否允许；② 同一台服务器（同一出口 IP）同时使用多位不同持有人的证书是否允许，“60 秒 2 个 IP”是否按证书单独计算；③ 用 A 的证书取到的行情（含派生指标）缓存后展示给同样持有证书的 B，是否允许（即 `shared_cache`）；④ 如需书面授权或企业版，范围与费用。答复前一律 `per_licence`，`shared_cache` 禁用；答复存档后由用户拍板。
 51. **证券公开主数据是否全站一份（T-A08 Q1）**——**【架构师已定 2026-11-02，T-A08】**：只有交易所公开信息全站共享：代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示；行业、概念、股本等仍按本人证书各取（2.1B 例外，契约 v0.2.7 §1.1、变更 #19）。公开信息的确切来源（交易所公开列表，或用管理员本人证书拉取）【待问题 52 / T-A04 补测】；**确认前不得用他人（含管理员）的证书**为其他用户取数，只用交易所公开列表。公司全称不在范围内，不收录。
-52. **【暂按默认，补测后复核】只展示问题 51 所列公开字段并加来源说明】交易所公开证券列表能否展示、能否再分发（T007 §4；T-A08 Q2）**：连同问题 51 的来源一起定。默认：只展示问题 51 所列字段，响应带 `attribution` 注明来源；来源确认前只用交易所公开列表。需要谁定：用户（合规）；T-A04 补测。
+52. **【默认执行，用户可改】（编排者 2026-11-01 按保守默认定下）交易所公开证券列表能否展示、能否再分发（T007 §4；T-A08 Q2；T-A04、reports/T-A04-ops.md）**：行情和数据**只对登录用户展示，不提供批量导出，不对外分发**。约束：① `/securities/*` 与一切行情、数据接口都需登录，不新增匿名（未登录）接口、公开下载文件或对外数据接口；② 不提供批量导出端点（CSV/Excel/整表下载等）；搜索不分页、每次最多 50 条，网关对搜索单独限流（每客户端 5 r/s、burst 20，1.3），抑制脚本枚举；③ `/securities/*` 一律 `Cache-Control: private, no-store`，网关不缓存、不上 CDN（1.3）；④ 只展示问题 51 所列公开字段，响应带 `attribution` 注明来源；来源确认前只用交易所公开列表，不用他人（含管理员）的证书为其他用户取数；⑤ 对账表中的麦蕊值只给管理员看，不进任何对外页面或报表；库备份只用于本系统恢复，不对外分享、不作数据集给他人；`data/master/` 原始名单不进异地备份、按 90 天清理；⑥ 日志不落整份名单或响应体。用户确认各来源许可条款（交易所、巨潮、AKShare 上游、麦蕊再分发条款）后可放宽或收紧。契约核对：现有导出类接口只有 `GET /imports/{batch_id}/errors.csv`（本人导入文件的掩码错误行，不含行情与主数据），与本条不冲突。需要谁定：用户（合规）。
 53. **【编排者已定 2026-11-02】ETF、可转债是否纳入 `security_type` 和搜索（T-A08 Q3）**：ETF 纳入 `security_type`、搜索与持仓（交割单可能含 ETF 成交），策略不对 ETF 运行；可转债本版不纳入。枚举与接口同步在 T-A09 完成——**已在契约 v0.2.8 同步**：`security_type` 加 `etf`；搜索 `types=` 默认含 `etf`；资料、行情、持仓、导入照常；ETF 不能建策略实例（复用 `422 INSTANCE_SCOPE_INVALID`）；财务、因子、资金流、公告返回空数组与 `not_applicable` gap；HG1 不变。
 54. **【编排者 2026-11-02 定为按默认】不提供，只给全市场排名】因子的行业内分位（T-A08 Q4）**：麦蕊没有直接提供，自行计算需要定义行业口径和最小样本数。需要谁定：研究员。
 55. **【编排者 2026-11-02 定为按默认】暂不变更状态，信号自然过期】实例归档时其已开放的候选信号如何处理（T-A08 Q5）**：继续有效直到过期，还是置为 `invalidated`。需要谁定：架构师 + 研究员。
@@ -3432,6 +3524,10 @@ T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → 
 90. **【默认执行，T-A04 新增，用户可改】上交所、北交所上线前的曾用名是否从巨潮或 AKShare 回填**：默认**不回填**——这两所的曾用名从上线日起按交易所每日快照比对积累，深交所用官方改名表回填全部历史；巨潮、AKShare 只核对、不写曾用名（4.6.1）。影响：上线前改过名的沪、北交所证券，按旧名搜不到。若改为回填，需标明来源并接受非交易所数据。
 91. **【默认执行，T-A04 新增，用户可改】麦蕊有、交易所没有的代码（`vendor_unknown`）能否搜到**：默认**搜不到**——进隔离区，不建档、不生成词条，`/securities/{code}` 返回 404，只在管理端对账页可见（契约 #33）。若改为可搜，需在结果上标“交易所未收录”。
 92. **【默认执行，T-A04 新增，用户可改】证券主数据告警发给谁**：默认**只在管理端显示**（`/admin/ingest/status.alerts` 的 `master.*` 键与对账页），不发站内通知、不发邮件，也不告知普通用户。若需要通知，另定渠道与频率上限。
+93. **【默认执行，T-R12 新增，用户可改】L-01 线上从麦蕊因子切到自算口径要等多久**：默认按 `feature_spec.md` §7C 执行——自算键与麦蕊因子线上并行至少 3 个月度截面（其中一个在法定披露截止日后），巨潮抽样 30 只全部通过后才切换；等待期内 L-01 线上信号仍用麦蕊因子；切换前已产生的 L-01 信号不重算，只标 `basis=mairui_factor`。影响：切换至少要 3 个月；若用户希望更快切换或要求重算旧信号，需放宽 §7C 阈值（研究员升版本）。需要谁定：用户（产品）、研究员。
+94. **【默认执行，架构师 T-F23-24 新增，用户可改】数据证书没填到期日怎么提醒**：用户登记证书时到期日可以不填。默认把“没填到期日”当作“不知道何时到期”，不当作“永不过期”：管理端和“我的数据证书”显示“未填写到期日”，不发“即将到期”提醒，排序排在有到期日的证书之后（契约 v0.2.9 #40）。已过了填写的到期日但证书状态还不是“已过期”时，也不单独提醒，以证书状态为准。影响：没填到期日的证书到期前不会收到提醒；若用户希望对这类证书也定期提醒（例如每月提醒一次“请补填到期日”），需要新增告警键（契约升版本）。需要谁定：用户（产品）。
+95. **【默认执行，T-O12 / b195ca6 评审新增，用户可改】主密钥多版本是否作为上线门槛**：默认**是**——上线前由后端完成 T-B57（加密列与 HMAC 列带密钥编号、多钥密钥环、多钥 secret 文件、自检）。理由：上线前没有真实用户数据，现在加列几乎没有成本，上线后再加就要对真实密文做回填迁移；后台重加密 CLI 与轮换流程仍放上线后 V2。影响：**上线推迟约一个后端任务（T-B57）的工作量**。若用户选择不推迟，T-B57 改到上线后，届时要对真实数据做回填迁移。需要谁定：用户（产品）。
+96. **【默认执行，架构师 T-R12b 新增，用户可改】L-01 切换到自算口径前，是否必须先核实送转时点（V5d）和财报币种单位（V5h）**：默认**必须**——feature_spec §7C S1 除 V5b、V5c、V5e、V5g 外，还要关闭 V5d、V5h（2.12.1 T-R12b 补充裁定 4）。如果 T-B05 发现 capital 股本行普遍晚于除权日才可见，还要先接入分红送转数据，才能切换。理由：不核实的话，送转后的几天内 PE、PB 会因为价格已除权而股本未更新被低估；个别公司金额单位不一致时，也只能靠数量级检查发现。影响：切换可能在问题 93 的至少 3 个月之外再推迟，推迟多久取决于 T-B05 的结论和接入送转数据的工作量；等待期间 L-01 线上继续用麦蕊因子。若用户接受风险、不等 V5d、V5h，可以从 S1 中去掉这两项，送转检查保持 `share_change_check=unavailable`，自算值在研究报告中单列标注。需要谁定：用户（产品）、研究员。
 
 **I. 编排者默认（2026-11-01 12:32）——【编排者默认，用户可否决】**
 - **C(1) 首批 P0 策略**：G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01（研究员 `docs/strategies/catalog.md` 第 2 节总表；取代早期方案中 2.5.10 的 ①–⑨ MVP 模板清单）。引擎接口覆盖核对与缺口见 2.5.11A。

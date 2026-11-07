@@ -8,12 +8,15 @@
 """
 from __future__ import annotations
 
+import json
 import math
 import re
 import statistics
 import time
 from datetime import date, datetime, timedelta, timezone
+from decimal import ROUND_DOWN, ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, InvalidOperation
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 
 import common as c
 from _helpers import probe
@@ -26,6 +29,24 @@ FORCE_SESSION = None
 LAT_CODE = "000001"
 LAT_SAMPLES = 6            # 每个快照源采样次数（5～10 之间）
 LAT_INTERVAL_S = 5.0       # 采样间隔秒数（dry-run 时缩短）
+
+# ---- 探针开关（T-B05 复测；由 run_all.py 的命令行参数设置，缺省 = 原行为）
+LAT_CODES: list = [LAT_CODE]   # --gap1-codes：GAP1 采样股票列表（复测 1 用 5 只）
+LAT_MAX_CODES = 10             # 上限：每只每轮 2 次调用，10 只 × 2 × 6 = 120 次
+# --local-ahead-s / --ntp-file：本机时钟比 NTP 快多少秒（本机 − NTP）。可给多次（时段前、后），取均值修正。
+# w32tm /stripchart /dataonly 的数值按“正值 = 本机比目标快”读入（w32tm.com 说明）；符号另用 HTTP Date 头交叉检查。
+LOCAL_AHEAD_S: list = []
+NTP_SOURCES: list = []         # 记录 NTP 数值来源（文件名/命令行），写进结论
+NTP_RAW: dict = {}             # --ntp-file 的原文（文件名 → 文本），原样存进 GAP1 evidence 备查
+ONLY = None                    # --p11-only：None=全部 GAP1–7；见 ONLY_CHOICES
+ONLY_CHOICES = ("gap1", "gap6-history", "gap6-nulls")
+HISTORY_BASELINE = None        # --history-baseline：基线样例目录（只读本地文件，比对是否回填；不发请求）
+PIT_BATCH_DAY = None           # batch 请求日期 YYYY-MM-DD；None = history 序列中点（离线重放时填原请求日）
+NULLS_BASE_CODES = ["600519", "300750", "000001", "688981", "920000"]   # 复测 2：原 3 只 + 科创 + 北交所
+NULLS_ZT_PICK = 2              # 复测 2：取当时已在涨停池里的前 N 只（按首次封板时间升序）
+ZT_CODES: list = []            # --zt-codes：收盘后复跑时沿用盘中那次选出的涨停股（仍会取一次涨停池核对）
+SEAL_FACTORS = ["limit_up_streak", "seal_ratio", "seal_to_float"]
+_CODE6 = re.compile(r"^\d{6}$")
 
 # ---- 文档依据（/tmp/mrdoc 缓存的公开文档页，2026-11-01 读取）
 DOC_UNITS = {
@@ -60,7 +81,10 @@ DOC_FACTOR_IDS = [f for v in DOC_FACTORS.values() for f in v.split()]
 DOC_NORTH_EMPTY = ["north_5d_net", "north_20d_net", "north_holding_ratio"]
 DOC_82 = [f for f in DOC_FACTOR_IDS if f not in DOC_NORTH_EMPTY]
 FACTOR_META = {"code", "name", "trade_date", "update_time", "report_period", "calc_version", "dm", "mc", "theme"}
-# 小数位数相同到这一位就视为“同一个值”（T-B48：history 里出现 1.4714182949831487 ↔ 1.471418 这类截断，不是真跳变）
+# 精度差判定（T-B48，T-B05 前按架构裁定收紧）：只有“较短一方 = 较长一方四舍五入或截断到较短一方的小数位数”
+# 才算精度噪声；较短一方的小数位数须在 [MIN, MAX] 之间。MIN=4：像 15.0（0 位）↔ 14.97 这种位数很少的值，
+# 舍入后相等也可能是真实变化，不算。实测截断是 6 位（1.4714182949831487 ↔ 1.471418）。
+PRECISION_MIN_DECIMALS = 4
 PRECISION_MAX_DECIMALS = 8
 
 # 上市较早的股票（上市日期为公开常识：000001 平安银行(原深发展) 1991-04-03；600000 浦发银行 1999-11-10；
@@ -240,19 +264,26 @@ def _decimals(x: float) -> int:
 
 
 def precision_only(a, b) -> bool:
-    """a、b 只是小数位数不同（一方是另一方四舍五入或截断到较少位数的结果）→ True。
-    例：1.4714182949831487 与 1.471418（截断到 6 位）、82.98214819072565 与 82.982148。
-    较短一方的小数位数必须 ≤ PRECISION_MAX_DECIMALS，否则不算（避免把真实的小变化当成精度差）。"""
+    """a、b 只是小数位数不同 → True。规则（架构裁定，T-B05 前收紧）：
+    1. 两者小数位数（repr 去掉末尾 0 后）不同；位数相同的不同值一定是真变化；
+    2. 较短一方的位数 k 满足 PRECISION_MIN_DECIMALS ≤ k ≤ PRECISION_MAX_DECIMALS；
+    3. 较长一方按 k 位四舍五入（half-up 或 half-even）或截断（向零）后，与较短一方逐位相等（十进制精确比较）。
+    例：1.4714182949831487 ↔ 1.471418（截断到 6 位）、82.98214819072565 ↔ 82.982148 → True；
+    15.0 ↔ 14.97（较短一方 0 位，<4）、1.471419 ↔ 1.4714182949831487（舍入/截断都得不到）→ False。"""
     x, y = _num(a), _num(b)
     if x is None or y is None or x == y:
         return False
-    k = min(_decimals(x), _decimals(y))
-    if k > PRECISION_MAX_DECIMALS:
+    dx, dy = _decimals(x), _decimals(y)
+    if dx == dy:
         return False
-    if round(x, k) == round(y, k):
-        return True
-    m = 10 ** k
-    return math.trunc(x * m) / m == math.trunc(y * m) / m
+    (short, k), long_ = ((x, dx), y) if dx < dy else ((y, dy), x)
+    if not (PRECISION_MIN_DECIMALS <= k <= PRECISION_MAX_DECIMALS):
+        return False
+    try:
+        ds, dl, q = Decimal(repr(float(short))), Decimal(repr(float(long_))), Decimal(1).scaleb(-k)
+        return any(dl.quantize(q, rounding=m) == ds for m in (ROUND_HALF_UP, ROUND_HALF_EVEN, ROUND_DOWN))
+    except InvalidOperation:
+        return False
 
 
 def change_points(series: list) -> list:
@@ -349,6 +380,191 @@ def batch_values(d, code: str) -> tuple:
     return {k: v for k, v in vals.items() if k not in FACTOR_META}, td
 
 
+def batch_dates(d, code: str) -> tuple:
+    """factor/batch 返回 → (该股记录自带的数据日期, 响应层 data.trade_date)，都规范成 YYYY-MM-DD 或 None。"""
+    resp_td = None
+    if isinstance(d, dict) and isinstance(d.get("data"), (dict, list)):
+        d = d["data"]
+    if isinstance(d, dict):
+        resp_td = norm_date(d.get("trade_date"))
+    items = d.get("items") if isinstance(d, dict) else d
+    row = None
+    if isinstance(items, dict):
+        row = items.get(code)
+        if row is None and len(items) == 1 and isinstance(next(iter(items.values())), dict):
+            row = next(iter(items.values()))
+    elif isinstance(items, list):
+        cand = [x for x in items if isinstance(x, dict)]
+        row = next((x for x in cand if str(x.get("code", x.get("dm", ""))).split(".")[0] == code),
+                   cand[0] if len(cand) == 1 else None)
+    rec_td = None
+    if isinstance(row, dict):
+        f = row.get("factors") if isinstance(row.get("factors"), dict) else {}
+        rec_td = norm_date(row.get("trade_date") or f.get("trade_date"))
+    return rec_td, resp_td
+
+
+def batch_asof(requested: str | None, record_date: str | None, response_date: str | None) -> dict:
+    """/factor/batch 的数据日期裁定（plan 34d475d）：一律以响应里每条记录自带的数据日期为准；
+    没有这个字段或与请求日期不一致 → as_of_mismatch，该批不用于回填（use_for_backfill=False）。
+    记录层没有日期、但响应层 data.trade_date 有时，用响应层日期（它是这批记录共同携带的数据日期），source 记为
+    "response"——实测响应只有响应层 trade_date（T-B48），是否接受响应层日期见 T-B05-switches.md 待裁定项。
+    记录层与响应层都有但不同 → as_of_mismatch。"""
+    req = norm_date(requested) if requested else None
+    if record_date and response_date and record_date != response_date:
+        data_date, source, reason = record_date, "record", "record_vs_response_differ"
+    elif record_date:
+        data_date, source, reason = record_date, "record", None
+    elif response_date:
+        data_date, source, reason = response_date, "response", None
+    else:
+        data_date, source, reason = None, None, "missing_data_date"
+    if reason is None and req and data_date != req:
+        reason = "data_date_differs_from_request"
+    if reason is None and not req:
+        reason = "missing_requested_date"
+    ok = reason is None
+    return {"requested_date": req, "record_date": record_date, "response_date": response_date,
+            "data_date": data_date, "date_source": source, "status": "ok" if ok else "as_of_mismatch",
+            "reason": reason, "use_for_backfill": ok}
+
+
+def parse_codes(text, max_n: int = LAT_MAX_CODES) -> list:
+    """'000001,600519 300750' → ['000001','600519','300750']（6 位数字、去重保序）；非法或超过上限抛 ValueError。"""
+    raw = [x.strip() for x in re.split(r"[,\s]+", str(text or "")) if x.strip()]
+    bad = [x for x in raw if not _CODE6.match(x)]
+    if bad:
+        raise ValueError(f"股票代码须为 6 位数字：{bad[:5]}")
+    out = list(dict.fromkeys(raw))
+    if not out:
+        raise ValueError("股票列表为空")
+    if len(out) > max_n:
+        raise ValueError(f"股票最多 {max_n} 只（每只每轮 2 次调用），收到 {len(out)} 只")
+    return out
+
+
+_W32TM = re.compile(r"^\s*\d{1,2}:\d{2}:\d{2}\s*,\s*(?:d:\S+\s+)?(?:o:)?([+-]?\d+(?:\.\d+)?)s\b", re.M)
+_W32TM_O = re.compile(r"\bo:([+-]?\d+(?:\.\d+)?)s\b")
+
+
+def parse_w32tm(text: str) -> list:
+    """w32tm /stripchart /dataonly 输出 → 偏差秒数列表（"18:45:01, -00.0008123s" 或 "... o:+00.1024506s"）。
+    出错行（如 "error: 0x800705B4"）跳过。数值按 w32tm 原样返回（正值 = 本机比目标快）。"""
+    vals = []
+    for ln in str(text or "").splitlines():
+        m = _W32TM_O.search(ln) or _W32TM.match(ln)
+        if m:
+            try:
+                vals.append(float(m.group(1)))
+            except ValueError:
+                pass
+    return vals
+
+
+def pctl(vals, q: float):
+    """线性插值分位数（与 numpy percentile 默认法一致）；空 → None。"""
+    v = sorted(x for x in vals if x is not None)
+    if not v:
+        return None
+    pos = (len(v) - 1) * q
+    lo, hi = math.floor(pos), math.ceil(pos)
+    return round(v[lo] + (v[hi] - v[lo]) * (pos - lo), 3)
+
+
+def lag_quantiles(lags, local_ahead_s=None) -> dict:
+    """延迟样本 → 未修正与按 NTP 修正两套 min/p50/p95/max（研究员要求）。
+    修正：真实延迟 = 本机收到时刻 − 本机快的秒数 − 快照 t = lag − local_ahead_s。没有 NTP 值时修正套为 None。"""
+    lags = [x for x in lags if x is not None]
+
+    def q(v):
+        return {"n": len(v), "min": min(v) if v else None, "p50": pctl(v, 0.5), "p95": pctl(v, 0.95),
+                "max": max(v) if v else None}
+    out = {"uncorrected": q(lags), "ntp_corrected": None}
+    if local_ahead_s is not None:
+        out["ntp_corrected"] = q([round(x - local_ahead_s, 3) for x in lags])
+    return out
+
+
+def stale_threshold(per_source_q: dict) -> dict:
+    """stale_threshold_s 参考值 = 各源修正后 p95 的最大值（研究员要求）；没有 NTP 时退回未修正 p95 并注明。
+    建议值 = ceil(max(2 × 参考值, 10))，由用户确认（倍数 2 与下限 10s 是后端拟定，非研究口径）。"""
+    corr = [v["ntp_corrected"]["p95"] for v in per_source_q.values() if v.get("ntp_corrected")
+            and v["ntp_corrected"]["p95"] is not None]
+    unc = [v["uncorrected"]["p95"] for v in per_source_q.values() if v["uncorrected"]["p95"] is not None]
+    if corr:
+        ref, basis = max(corr), "ntp_corrected_p95"
+    elif unc:
+        ref, basis = max(unc), "uncorrected_p95（无 NTP 偏差，仅供参考）"
+    else:
+        return {"ref_p95_s": None, "basis": None, "suggested_s": None}
+    return {"ref_p95_s": ref, "basis": basis, "suggested_s": int(math.ceil(max(ref * 2, 10)))}
+
+
+def compare_history(base: list, new: list) -> dict:
+    """复测 3：两次 factor/history 序列 [(YYYY-MM-DD, 值)] 逐日比对。
+    已有日期的值变了（精度差除外，用 precision_only）→ 改写；基线有、新序列没有 → 删除；
+    新序列在基线末日之前多出的日期 → 插入；只在末尾新增日期 → 正常。"""
+    b, n = dict(base), dict(new)
+    last = max(b) if b else None
+    changed, prec = [], []
+    for d in sorted(set(b) & set(n)):
+        x, y = _num(b[d]), _num(n[d])
+        if x == y or (x is None and y is None):
+            continue
+        (prec if precision_only(x, y) else changed).append({"date": d, "base": b[d], "new": n[d]})
+    removed = sorted(set(b) - set(n))
+    inserted = sorted(d for d in set(n) - set(b) if last and d <= last)
+    appended = sorted(d for d in set(n) - set(b) if not last or d > last)
+    if not b or not n:
+        verdict = "inconclusive"
+    elif changed or removed or inserted:
+        verdict = "rewritten"
+    else:
+        verdict = "no_rewrite"
+    return {"verdict": verdict, "common_days": len(set(b) & set(n)), "changed": len(changed),
+            "precision_only": len(prec), "removed": len(removed), "inserted": len(inserted),
+            "appended_tail": len(appended), "examples": {"changed": changed[:8], "precision_only": prec[:4],
+                                                         "removed": removed[:8], "inserted": inserted[:8]}}
+
+
+def history_series(data) -> list:
+    """factor/history 响应（或 save_sample 文件里的 data）→ [(YYYY-MM-DD, 值)] 升序。"""
+    return sorted((norm_date(x.get("trade_date")), x.get("value")) for x in c.rows(data)
+                  if isinstance(x, dict) and norm_date(x.get("trade_date")))
+
+
+def load_history_sample(path) -> list:
+    """读 save_sample 写的 p11_pit_history_*.json（本地文件，不发请求）→ 序列。"""
+    d = json.loads(Path(path).read_text(encoding="utf-8"))
+    return history_series(d.get("data") if isinstance(d, dict) and "url" in d else d)
+
+
+def pick_limit_up(pool: list, sampled_at: datetime, k: int, exclude=()) -> dict:
+    """复测 2：从涨停池里选 k 只（研究员要求：限于取样时刻已在池中的股票，避免事后选样）。
+    条件：dm 为 6 位代码、不在 exclude、首次封板时间 fbt（HH:mm:ss）存在且 ≤ 取样时刻（北京时间）。
+    顺序按接口给的顺序（文档：按封板时间升序）。返回 {picks, rejected 计数, sampled_at_bj}。"""
+    t_s = sampled_at.astimezone(BJ).strftime("%H:%M:%S")
+    picks, rej = [], {"bad_code": 0, "excluded": 0, "no_fbt": 0, "fbt_after_sample": 0}
+    for r in pool:
+        if not isinstance(r, dict):
+            continue
+        dm = str(r.get("dm", "")).split(".")[0]
+        fbt = str(r.get("fbt") or "")
+        if not _CODE6.match(dm):
+            rej["bad_code"] += 1
+        elif dm in exclude:
+            rej["excluded"] += 1
+        elif not re.match(r"^\d{2}:\d{2}:\d{2}$", fbt):
+            rej["no_fbt"] += 1
+        elif fbt > t_s:
+            rej["fbt_after_sample"] += 1
+        elif len(picks) < k:
+            picks.append({"dm": dm, "mc": r.get("mc"), "fbt": fbt, "lbt": r.get("lbt"), "zbc": r.get("zbc"),
+                          "lbc": r.get("lbc")})
+    return {"sampled_at_bj": sampled_at.astimezone(BJ).isoformat(timespec="seconds"), "pool_rows": len(pool),
+            "picks": picks, "rejected": rej}
+
+
 def selftest_pure() -> list:
     """dry-run 离线单测纯函数（不发请求）。返回 [(名称, 是否通过, 细节)]。"""
     out = []
@@ -381,6 +597,77 @@ def selftest_pure() -> list:
     out.append(("嵌套解析：factor/all 的 data.factors、factor/batch 的 data.items.{code}（T-B48）",
                 sorted(fk) == ["pe_ttm", "seal_ratio"] and fd.get("trade_date") == "20261030"
                 and bv == {"profit_yoy": 6.2, "roe_ttm": 90.1} and btd == "20260130", f"{fk} / {bv} / {btd}"))
+    # ---- 精度差规则收紧（架构裁定）：反例必须判为真变化
+    pos = [(1.4714182949831487, 1.471418), (82.98214819072565, 82.982148), (1.471418, 1.4714182949831487),
+           (-1.9515948550279467, -1.951594), (2.12345678, 2.1235)]
+    neg = [(15.0, 14.97), (14.97, 15.0), (1.4714182949831487, 1.471419), (1.4714182949831487, 1.47),
+           (1.471418, 1.471419), (100.0, 99.99999), (6.2458449524124315, 6.245846)]
+    bad = [x for x in pos if not precision_only(*x)] + [x for x in neg if precision_only(*x)]
+    out.append(("精度差规则：截断/舍入到较短一方位数（≥4 位）才算；反例 15.0↔14.97 不算",
+                not bad, f"正例 {len(pos)}、反例 {len(neg)}" + (f"；错判 {bad}" if bad else "")))
+    cp3 = change_points([("2026-04-01", 15.0), ("2026-04-02", 14.97)])
+    pit3 = classify_pit(cp3, [{"jzrq": "2026-03-31", "plrq": "2026-04-28"}])
+    out.append(("精度差规则：15.0→14.97 计入真实跳变（披露前 → 前视嫌疑），不进 precision_only",
+                pit3["counts"]["precision_only"] == 0 and pit3["verdict"] == "lookahead_suspected", str(pit3["counts"])))
+    # ---- factor/batch 数据日期裁定（plan 34d475d）
+    real = {"code": 200, "data": {"items": {"600519": {"profit_yoy": 6.2, "roe_ttm": 90.1}}, "trade_date": "20260130"}}
+    a_ok = batch_asof("2026-01-30", *batch_dates(real, "600519"))
+    a_mis = batch_asof("2026-04-17", *batch_dates(real, "600519"))
+    a_miss = batch_asof("2026-01-30", *batch_dates({"code": 200, "data": {"items": {"600519": {"roe_ttm": 1}}}},
+                                                    "600519"))
+    a_rec = batch_asof("2026-01-30", *batch_dates({"data": {"trade_date": "20260130", "items": [
+        {"code": "600519", "trade_date": "20260129", "factors": {"roe_ttm": 1}}]}}, "600519"))
+    a_rec_ok = batch_asof("2026-01-30", *batch_dates({"data": {"items": [
+        {"code": "600519", "trade_date": "2026-01-30", "roe_ttm": 1}]}}, "600519"))
+    out.append(("batch 数据日期：一致=ok；与请求不同/缺失/记录与响应层不同 → as_of_mismatch 且不用于回填",
+                a_ok["status"] == "ok" and a_ok["use_for_backfill"] and a_ok["date_source"] == "response"
+                and a_mis["status"] == "as_of_mismatch" and a_mis["reason"] == "data_date_differs_from_request"
+                and not a_mis["use_for_backfill"] and a_mis["data_date"] == "2026-01-30"
+                and a_miss["reason"] == "missing_data_date" and not a_miss["use_for_backfill"]
+                and a_rec["reason"] == "record_vs_response_differ" and not a_rec["use_for_backfill"]
+                and a_rec_ok["status"] == "ok" and a_rec_ok["date_source"] == "record",
+                f"{a_ok['status']}/{a_mis['reason']}/{a_miss['reason']}/{a_rec['reason']}/{a_rec_ok['date_source']}"))
+    # ---- 开关用到的纯函数
+    try:
+        parse_codes("000001,60051")
+        pc_bad = False
+    except ValueError:
+        pc_bad = True
+    pc = parse_codes("000001, 600519 300750,000001")
+    out.append(("GAP1 股票列表解析：6 位、去重保序、非法拒绝", pc == ["000001", "600519", "300750"] and pc_bad, str(pc)))
+    w = parse_w32tm("Tracking ntp.aliyun.com [1.2.3.4:123].\nCollecting 3 samples.\n"
+                    "18:45:01, -00.0008123s\n18:45:03, +01.2500000s\n08:38:57 d:+00.0417301s o:+00.1024506s [ * ]\n"
+                    "18:45:05, error: 0x800705B4\n")
+    out.append(("w32tm 输出解析（/dataonly 与 o: 两种格式，跳过 error 行）", w == [-0.0008123, 1.25, 0.1024506], str(w)))
+    lq = lag_quantiles([7.0, 8.0, 9.0, 10.0, 11.0, 12.0], 1.5)
+    st_ = stale_threshold({"a": lq, "b": lag_quantiles([1.0, 2.0], 1.5)})
+    st_u = stale_threshold({"a": lag_quantiles([7.0, 8.0, 9.0, 10.0, 11.0, 12.0])})
+    out.append(("延迟分位数：未修正与 NTP 修正两套；stale 参考 = 修正后 p95（无 NTP 时退回未修正 p95）",
+                lq["uncorrected"]["p95"] == 11.75 and lq["ntp_corrected"]["p95"] == 10.25
+                and lq["ntp_corrected"]["min"] == 5.5 and st_["ref_p95_s"] == 10.25
+                and st_["basis"] == "ntp_corrected_p95" and st_["suggested_s"] == 21
+                and st_u["basis"].startswith("uncorrected") and st_u["ref_p95_s"] == 11.75, f"{lq} / {st_}"))
+    base = [("2026-01-29", 1.4714182949831487), ("2026-01-30", 2.0), ("2026-02-02", 3.0)]
+    h_ok = compare_history(base, [("2026-01-29", 1.471418), ("2026-01-30", 2.0), ("2026-02-02", 3.0),
+                                  ("2026-11-09", 4.0)])
+    h_bad = compare_history(base, [("2026-01-29", 1.4714182949831487), ("2026-01-30", 2.5), ("2026-02-02", 3.0)])
+    h_ins = compare_history(base, [*base, ("2026-01-31", 2.0)])
+    h_rm = compare_history(base, base[1:])
+    out.append(("回填比对：精度差/末尾新增=未改写；值变、插入、删除=改写",
+                h_ok["verdict"] == "no_rewrite" and h_ok["precision_only"] == 1 and h_ok["appended_tail"] == 1
+                and h_bad["verdict"] == "rewritten" and h_bad["changed"] == 1 and h_ins["verdict"] == "rewritten"
+                and h_rm["verdict"] == "rewritten",
+                f"{h_ok['verdict']}/{h_bad['verdict']}/{h_ins['verdict']}/{h_rm['verdict']}"))
+    pool = [{"dm": "600519", "fbt": "09:30:00"}, {"dm": "002001", "fbt": "09:31:05"}, {"dm": "300001"},
+            {"dm": "603001", "fbt": "09:40:00"}, {"dm": "000002", "fbt": "10:30:00"}, {"dm": "603002", "fbt": "09:59:59"}]
+    pk = pick_limit_up(pool, datetime(2026, 11, 2, 10, 0, 0, tzinfo=BJ), 2, exclude=NULLS_BASE_CODES)
+    pk3 = pick_limit_up(pool, datetime(2026, 11, 2, 10, 0, 0, tzinfo=BJ), 5, exclude=NULLS_BASE_CODES)
+    out.append(("涨停股选样：只取取样时刻前已封板（fbt ≤ 取样时刻）、排除原样本、记录取样时刻",
+                [x["dm"] for x in pk["picks"]] == ["002001", "603001"]
+                and [x["dm"] for x in pk3["picks"]] == ["002001", "603001", "603002"]
+                and pk3["rejected"]["fbt_after_sample"] == 1 and pk3["rejected"]["no_fbt"] == 1
+                and pk3["rejected"]["excluded"] == 1 and pk["sampled_at_bj"] == "2026-11-02T10:00:00+08:00",
+                f"{[x['dm'] for x in pk3['picks']]} {pk3['rejected']}"))
     return out
 
 
@@ -412,23 +699,36 @@ def _snap_record(r) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
+def _local_ahead():
+    """本机比 NTP 快的秒数（多次取均值）；没有提供 → None。"""
+    return round(statistics.fmean(LOCAL_AHEAD_S), 4) if LOCAL_AHEAD_S else None
+
+
 def item1_latency(res, shared):
     name, item = "GAP1_snapshot_latency", "快照延迟：快照时间戳 t vs 本机时钟（北京时间）"
     ctx = c.ctx()
     now = bj_now()
-    need = LAT_SAMPLES * (LAT_INTERVAL_S if not ctx.dry_run else 0.05) * 2 + 20
+    codes = list(LAT_CODES) or [LAT_CODE]
+    interval = 0.05 if ctx.dry_run else LAT_INTERVAL_S
+    # 每轮 2×N 次调用（按调用间隔约 0.25s + RTT 约 0.25s 估）+ 轮间停顿；留 20s 余量
+    need = LAT_SAMPLES * (interval + 2 * len(codes) * (0.05 if ctx.dry_run else 0.5)) + 20
     in_sess = is_bj_session(now, need)
     if ctx.dry_run and FORCE_SESSION is not None:
         in_sess = bool(FORCE_SESSION)
-    limits = ["本机时钟与标准时间（NTP）的偏差未知：延迟 = 本机收到响应时刻 − 快照 t，含本机时钟误差；"
-              "另用服务端 HTTP Date 头（秒级）估计本机与服务端的钟差供参考，服务端时钟本身的准确性同样未知",
-              "t 字段只到秒，单次延迟分辨率约 ±1s"]
+    ahead = _local_ahead()
+    ntp = {"local_ahead_s": ahead, "values_s": list(LOCAL_AHEAD_S), "sources": list(NTP_SOURCES),
+           "convention": "本机 − NTP（秒），正值=本机快；w32tm /dataonly 数值按正值=本机比目标快读入"} \
+        if LOCAL_AHEAD_S else "unknown"
+    limits = ["延迟 = 本机收到响应时刻 − 快照 t，含本机时钟误差；提供 NTP 偏差（--local-ahead-s/--ntp-file）时另给"
+              "修正后的一套分位数。另用服务端 HTTP Date 头（秒级）估计本机与服务端的钟差供参考，服务端时钟本身的准确性同样未知",
+              "t 字段只到秒，单次延迟分辨率约 ±1s",
+              "每个 源×股票 只有 6 个样本，p95 实际接近最大值"]
     if not in_sess:
         return _item(res, name, item, "skipped",
-                     {"summary": "盘后无法测", "bj_now": now.isoformat(timespec="seconds"),
+                     {"summary": "盘后无法测", "bj_now": now.isoformat(timespec="seconds"), "codes": codes,
                       "reason": "当前北京时间不在连续竞价时段（工作日 9:30–11:30、13:00–15:00），或距本时段结束不足"
-                                f" {need:.0f}s；盘后快照 t 停在收盘时刻，延迟无意义"},
-                     limits=limits, next_steps=["在北京时间交易时段内重跑：python run_all.py p11"])
+                                f" {need:.0f}s；盘后快照 t 停在收盘时刻，延迟无意义", "ntp_offset": ntp},
+                     limits=limits, next_steps=["在北京时间交易时段内重跑：python run_all.py p11 --p11-only gap1"])
     # 交易日历确认是否节假日（1 次调用）
     cal = probe(res, "tcalendar_this_year", "/tcalendar/list/" + str(now.year) + "/{licence}")
     days = [str(x) for x in (cal.data if isinstance(cal.data, list) else c.rows(cal.data))]
@@ -437,55 +737,70 @@ def item1_latency(res, shared):
                                             else "holiday")
     if cal_state == "holiday" and not (ctx.dry_run and FORCE_SESSION):
         return _item(res, name, item, "skipped", {"summary": "盘后无法测（交易日历显示今日非交易日）",
-                                                   "bj_now": now.isoformat(timespec="seconds")}, limits=limits)
-    interval = 0.05 if ctx.dry_run else LAT_INTERVAL_S
-    srcs = {"real_time_broker": f"/hsstock/real/time/{LAT_CODE}/{{licence}}",
-            "ssjy_web": f"/hsrl/ssjy/{LAT_CODE}/{{licence}}"}
-    samples = {k: [] for k in srcs}
+                                                   "bj_now": now.isoformat(timespec="seconds"), "codes": codes,
+                                                   "ntp_offset": ntp}, limits=limits)
+    srcs = {"real_time_broker": "/hsstock/real/time/{code}/{{licence}}",
+            "ssjy_web": "/hsrl/ssjy/{code}/{{licence}}"}
+    samples = {k: {cd: [] for cd in codes} for k in srcs}
     for i in range(LAT_SAMPLES):
-        for k, tpl in srcs.items():
-            t_send = time.time()
-            r = probe(res, f"lat_{k}_{i + 1}", tpl)
-            t_recv = time.time()
-            rec = _snap_record(r)
-            if rec is not None:
-                shared.setdefault("snap", {})[(k, LAT_CODE)] = rec
-            ts = parse_bj(rec.get("t")) if rec else None
-            srv = None
-            try:
-                srv = parsedate_to_datetime(r.headers.get("Date") or r.headers.get("date")).timestamp()
-            except Exception:
+        for code in codes:
+            for k, tpl in srcs.items():
+                t_send = time.time()
+                # 单只时沿用原调用名 lat_<源>_<i>，多只时加代码，便于与原 run 对照
+                nm = f"lat_{k}_{i + 1}" if len(codes) == 1 else f"lat_{k}_{code}_{i + 1}"
+                r = probe(res, nm, tpl.format(code=code))
+                t_recv = time.time()
+                rec = _snap_record(r)
+                if rec is not None:
+                    shared.setdefault("snap", {})[(k, code)] = rec
+                ts = parse_bj(rec.get("t")) if rec else None
                 srv = None
-            samples[k].append({
-                "i": i + 1, "t": rec.get("t") if rec else None,
-                "recv_bj": datetime.fromtimestamp(t_recv, BJ).isoformat(timespec="milliseconds"),
-                "lag_s": round(t_recv - ts.timestamp(), 3) if ts else None,
-                "rtt_ms": r.ms,
-                "local_minus_server_date_s": round((t_send + t_recv) / 2 - srv, 3) if srv else None})
+                try:
+                    srv = parsedate_to_datetime(r.headers.get("Date") or r.headers.get("date")).timestamp()
+                except Exception:
+                    srv = None
+                samples[k][code].append({
+                    "i": i + 1, "t": rec.get("t") if rec else None,
+                    "recv_bj": datetime.fromtimestamp(t_recv, BJ).isoformat(timespec="milliseconds"),
+                    "lag_s": round(t_recv - ts.timestamp(), 3) if ts else None,
+                    "rtt_ms": r.ms,
+                    "local_minus_server_date_s": round((t_send + t_recv) / 2 - srv, 3) if srv else None})
         if i + 1 < LAT_SAMPLES:
             time.sleep(interval)
-    stats = {}
-    for k, ss in samples.items():
-        lags = [s["lag_s"] for s in ss if s["lag_s"] is not None]
-        offs = [s["local_minus_server_date_s"] for s in ss if s["local_minus_server_date_s"] is not None]
-        ts_distinct = len({s["t"] for s in ss if s["t"]})
-        stats[k] = {"n": len(ss), "n_with_t": len(lags),
-                    "lag_s_min": min(lags) if lags else None, "lag_s_p50": statistics.median(lags) if lags else None,
-                    "lag_s_max": max(lags) if lags else None, "t_distinct": ts_distinct,
-                    "clock_offset_vs_server_date_s_p50": statistics.median(offs) if offs else None}
-    p50s = [v["lag_s_p50"] for v in stats.values() if v["lag_s_p50"] is not None]
-    suggest = None
-    if p50s:
-        worst = max(v["lag_s_max"] for v in stats.values() if v["lag_s_max"] is not None)
-        suggest = int(math.ceil(max(worst * 2, 10)))
-    return _item(res, name, item, "measured" if p50s else "inconclusive", {
-        "summary": "；".join(f"{k}: 延迟 p50={v['lag_s_p50']}s max={v['lag_s_max']}s，t 变化 {v['t_distinct']} 次/"
-                            f"{v['n']} 次采样" for k, v in stats.items()),
-        "bj_start": now.isoformat(timespec="seconds"), "calendar": cal_state, "per_source": stats,
-        "suggested_stale_threshold_s": suggest,
-        "ntp_offset": "unknown"}, evidence={"samples": samples}, limits=limits,
-        next_steps=["如需排除本机钟差：运行前在 Windows 执行 w32tm /stripchart /computer:ntp.aliyun.com /samples:3 "
-                    "/dataonly 记录偏差（只读命令，不改系统时间）"])
+    per_stock, per_source, offs_all = {}, {}, []
+    for k, by_code in samples.items():
+        pooled = []
+        for code, ss in by_code.items():
+            lags = [s["lag_s"] for s in ss if s["lag_s"] is not None]
+            offs = [s["local_minus_server_date_s"] for s in ss if s["local_minus_server_date_s"] is not None]
+            offs_all += offs
+            pooled += lags
+            per_stock[f"{k}/{code}"] = {"n": len(ss), "n_with_t": len(lags),
+                                         "t_distinct": len({s["t"] for s in ss if s["t"]}),
+                                         "clock_offset_vs_server_date_s_p50": statistics.median(offs) if offs else None,
+                                         **lag_quantiles(lags, ahead)}
+        per_source[k] = lag_quantiles(pooled, ahead)
+    thr = stale_threshold(per_source)
+    http_off = statistics.median(offs_all) if offs_all else None
+    sign_check = None
+    if ahead is not None and http_off is not None and abs(ahead) >= 0.5 and abs(http_off) >= 0.5:
+        sign_check = "consistent" if (ahead > 0) == (http_off > 0) else \
+            "opposite（NTP 偏差与 HTTP Date 钟差符号相反：先核对 w32tm 符号约定再用修正值）"
+    measured = any(v["uncorrected"]["p50"] is not None for v in per_source.values())
+    unc = {k: v["uncorrected"] for k, v in per_source.items()}
+    return _item(res, name, item, "measured" if measured else "inconclusive", {
+        "summary": "；".join(f"{k}: 延迟 p50={v['p50']}s p95={v['p95']}s max={v['max']}s（未修正，{v['n']} 个样本）"
+                            for k, v in unc.items())
+                   + (f"；NTP 修正（本机快 {ahead}s）后 p95=" + "/".join(
+                       str(v["ntp_corrected"]["p95"]) for v in per_source.values()) if ahead is not None else "")
+                   + f"；stale_threshold 参考 {thr['ref_p95_s']}s（{thr['basis']}）",
+        "bj_start": now.isoformat(timespec="seconds"), "calendar": cal_state, "codes": codes,
+        "per_source": per_source, "per_source_stock": per_stock,
+        "stale_threshold": thr, "suggested_stale_threshold_s": thr["suggested_s"],
+        "clock_offset_vs_server_date_s_p50": http_off, "ntp_offset": ntp, "ntp_sign_check": sign_check},
+        evidence={"samples": samples, "ntp_raw": dict(NTP_RAW)}, limits=limits,
+        next_steps=["时段开始前、结束后各在 Windows 执行 w32tm /stripchart /computer:ntp.aliyun.com /samples:3 "
+                    "/dataonly > ntp_<时段>_<前|后>.txt（只读，不改系统时间），用 --ntp-file 传入"])
 
 
 def item2_units(res, shared):
@@ -631,6 +946,103 @@ def item5_announce(res, shared):
         limits=["字段格式的精度不等于真实发布时刻的准确度；若为 day，事件研究只能按“T 日盘后可用、T+1 开盘可交易”处理"])
 
 
+def _fetch_pit_history(res) -> dict:
+    """600519 的 PIT_FACTORS 各取一次 factor/history（共 2 次），保存完整序列（≤400 行）供复测 3 比对回填。"""
+    out = {}
+    for fid in PIT_FACTORS:
+        r = probe(res, f"pit_history_{fid}_600519", f"/factor/history/{fid}/600519/{{licence}}",
+                  sample=f"p11_pit_history_{fid}_600519", n=400,
+                  st=PIT_ST, et=PIT_ET, limit=400)
+        out[fid] = history_series(r.data)
+    return out
+
+
+def _baseline_dir():
+    """--history-baseline：给目录（含 p11_pit_history_*.json）或真实运行的 run_id（到 samples/<run_id>/ 找）。"""
+    if not HISTORY_BASELINE:
+        return None
+    d = Path(HISTORY_BASELINE)
+    if d.is_dir() and any(d.glob("p11_pit_history_*.json")):
+        return d
+    alt = c.SAMPLES_ROOT / Path(HISTORY_BASELINE).name
+    return alt if alt.is_dir() else d
+
+
+def item6_history_only(res, shared):
+    """--p11-only gap6-history（复测 3）：只取 2 次 factor/history；给了基线目录时离线逐日比对是否回填/改写。"""
+    name, item = "GAP6_history_only", "因子历史复取（只跑 GAP6 history，比对回填）"
+    hist = _fetch_pit_history(res)
+    per = {fid: {"points": len(ser), "first": ser[0][0] if ser else None, "last": ser[-1][0] if ser else None,
+                 "change_points": len(change_points(ser))} for fid, ser in hist.items()}
+    bdir, cmp_, missing = _baseline_dir(), {}, []
+    if bdir is not None:
+        for fid, ser in hist.items():
+            f = bdir / f"p11_pit_history_{fid}_600519.json"
+            if f.is_file():
+                cmp_[fid] = compare_history(load_history_sample(f), ser)
+            else:
+                missing.append(str(f.name))
+    verdicts = {fid: v["verdict"] for fid, v in cmp_.items()}
+    if not all(v["points"] for v in per.values()):
+        st, summ = "inconclusive", "factor/history 有因子没取到数据"
+    elif bdir is None:
+        st, summ = "measured", "已保存完整序列（未给 --history-baseline，本次作为基线）"
+    elif missing or not cmp_:
+        st, summ = "inconclusive", f"基线目录缺文件 {missing}"
+    elif any(v == "rewritten" for v in verdicts.values()):
+        st, summ = "measured", f"存在回填/改写：{verdicts}"
+    else:
+        st, summ = "measured", f"已有日期的值未改写（精度差除外）：{verdicts}"
+    return _item(res, name, item, st, {
+        "summary": summ, "baseline": str(bdir) if bdir else None, "per_factor": per, "compare": cmp_,
+        "verdict": verdicts}, evidence={"baseline_missing": missing},
+        limits=["只比对 600519 的 profit_yoy、roe_ttm；精度差（precision_only）不算改写",
+                "基线与复取须用同一区间 PIT_ST–PIT_ET 和 limit"])
+
+
+def item6_nulls(res, shared):
+    """--p11-only gap6-nulls（复测 2）：先取当日涨停池并记录取样时刻，只从当时已在池中的股票里选
+    NULLS_ZT_PICK 只（研究员要求），再加 NULLS_BASE_CODES，逐只 factor/all 统计空值。共 1 + 7 = 8 次。"""
+    name, item = "GAP6_nulls_retest", "空值因子复测（涨停股 + 原样本）"
+    t0 = bj_now()
+    pool_r = probe(res, "ztgc_today", f"/hslt/ztgc/{t0.date().isoformat()}/{{licence}}")
+    t1 = bj_now()
+    pool = [x for x in c.rows(pool_r.data) if isinstance(x, dict)]
+    sel = pick_limit_up(pool, t0, NULLS_ZT_PICK, exclude=NULLS_BASE_CODES)
+    sel["received_at_bj"] = t1.isoformat(timespec="seconds")
+    in_pool = {str(x.get("dm", "")).split(".")[0] for x in pool}
+    if ZT_CODES:          # 收盘后复跑：沿用盘中选出的代码；记录它们此刻是否仍在池中
+        zt = list(ZT_CODES)
+        sel["zt_codes_given"] = {cd: cd in in_pool for cd in zt}
+    else:
+        zt = [x["dm"] for x in sel["picks"]]
+    per, null_sets = {}, {}
+    for code in [*zt, *NULLS_BASE_CODES]:
+        r = probe(res, f"factor_all_{code}", f"/factor/all/{code}/{{licence}}")
+        d, ks = factor_keys(r.data)
+        if not ks:
+            per[code] = {"ok": False, "err": (r.text or "")[:200] or r.error}
+            continue
+        nl = sorted(k for k in ks if d.get(k) in (None, "", "null"))
+        null_sets[code] = nl
+        per[code] = {"ok": True, "n_factors": len(ks), "nulls": nl, "limit_up": code in zt,
+                     "trade_date": d.get("trade_date"), "update_time": d.get("update_time")}
+    seal = {f: {"limit_up_null": [cd for cd in zt if f in null_sets.get(cd, [f])],
+                "others_null": [cd for cd in NULLS_BASE_CODES if f in null_sets.get(cd, [f])]} for f in SEAL_FACTORS}
+    ok_zt = [cd for cd in zt if cd in null_sets]
+    if not ok_zt:
+        st, summ = "inconclusive", f"没有可用的涨停股（池 {len(pool)} 行，选中 {len(zt)} 只）"
+    else:
+        has_val = [f for f in SEAL_FACTORS if not seal[f]["limit_up_null"]]
+        st, summ = "measured", (f"涨停股 {ok_zt} 上有值的封板类因子 {has_val}；"
+                                f"仍为空 {[f for f in SEAL_FACTORS if f not in has_val]}")
+    return _item(res, name, item, st, {
+        "summary": summ, "limit_up_sampling": sel, "zt_codes": zt, "base_codes": NULLS_BASE_CODES,
+        "seal_factors": seal, "null_sets": null_sets}, evidence={"per_stock": per},
+        limits=["涨停池盘中每 10 分钟更新，取样时刻的池子本身有滞后；只选 fbt ≤ 取样时刻的股票",
+                "factor/* 需要因子包或 Quant Pro 权益，否则 403"])
+
+
 def item67_factors(res, shared):
     name6, item6 = "GAP6_factor_nulls_pit", "因子空值统计与时点性（point-in-time）"
     name7, item7 = "GAP7_factor_count", "因子数量核对（文档 85 / 82）"
@@ -656,32 +1068,30 @@ def item67_factors(res, shared):
     inc = shared.get("income_600519") or []
     reports = [{"jzrq": norm_date(r.get("jzrq")), "plrq": norm_date(r.get("plrq"))} for r in inc if isinstance(r, dict)]
     reports = [r for r in reports if r["jzrq"] and r["jzrq"] >= "2024-01-01"]
-    pit, hist_dates = {}, {}
+    pit = {}
+    hist_dates = _fetch_pit_history(res)
     for fid in PIT_FACTORS:
-        # 保存完整序列（≤400 行），供 ≥1 周后复取比对是否回填（T-B05 复测 3）
-        r = probe(res, f"pit_history_{fid}_600519", f"/factor/history/{fid}/600519/{{licence}}",
-                  sample=f"p11_pit_history_{fid}_600519", n=400,
-                  st=PIT_ST, et=PIT_ET, limit=400)
-        ser = sorted((norm_date(x.get("trade_date")), x.get("value")) for x in c.rows(r.data)
-                     if isinstance(x, dict) and norm_date(x.get("trade_date")))
-        hist_dates[fid] = ser
+        ser = hist_dates[fid]
         cp = change_points(ser)
         pit[fid] = {"points": len(ser), "first": ser[0][0] if ser else None, "last": ser[-1][0] if ser else None,
                     "null_points": sum(1 for _, v in ser if _num(v) is None),
                     **classify_pit(cp, reports)}
     # batch 指定历史 trade_date 与 history 同日值比对（同一张表应一致；不一致说明有重算）
     ser = hist_dates.get(PIT_FACTORS[0]) or []
-    probe_day = ser[len(ser) // 2][0] if ser else "2025-10-15"
+    probe_day = PIT_BATCH_DAY or (ser[len(ser) // 2][0] if ser else "2025-10-15")
     b = probe(res, "pit_batch_hist_date", "/factor/batch/{licence}", method="POST",
               json_body={"codes": ["600519"], "factor_ids": PIT_FACTORS, "trade_date": probe_day.replace("-", "")})
-    bf, b_td = batch_values(b.data, "600519")
-    day = norm_date(b_td) or probe_day          # 以 batch 实际返回的 trade_date 为准（T-B48）
+    bf, _ = batch_values(b.data, "600519")
+    # 数据日期一律取响应自带的日期（plan 34d475d）；缺失或与请求不一致 → as_of_mismatch，不参与比对/回填
+    asof = batch_asof(probe_day, *batch_dates(b.data, "600519"))
+    day = asof["data_date"]
     cmp_ = {}
     for fid in PIT_FACTORS:
-        hv = dict(hist_dates.get(fid) or []).get(day)
+        hv = dict(hist_dates.get(fid) or []).get(day) if day else None
         bv = bf.get(fid)
-        cmp_[fid] = {"date": day, "requested_date": probe_day, "history": hv, "batch": bv,
-                     "equal": (hv is not None and bv is not None and _num(hv) == _num(bv))}
+        cmp_[fid] = {"date": day, "requested_date": probe_day, "as_of_status": asof["status"], "history": hv,
+                     "batch": bv, "equal": (hv is not None and bv is not None and _num(hv) == _num(bv))
+                     if asof["use_for_backfill"] else None}
     has_asof = {k: sorted(v) for k, v in meta_seen.items()}
     verdicts = {fid: v["verdict"] for fid, v in pit.items()}
     prec_n = {fid: v["counts"].get("precision_only", 0) for fid, v in pit.items()}
@@ -699,11 +1109,12 @@ def item67_factors(res, shared):
         "null_factors": null_any, "doc_declared_empty": DOC_NORTH_EMPTY + ["attention_score(FAQ)", "ev_ebitda(可 null)"],
         "pit_verdict": verdicts, "pit_conclusion": pit_c, "precision_only_changes": prec_n,
         "asof_fields_in_factor_all": has_asof,
-        "history_vs_batch_same_day": cmp_},
+        "history_vs_batch_same_day": cmp_, "batch_as_of": asof},
         evidence={"per_stock": per, "pit": pit, "reports_used": reports},
         limits=["factor/history 文档注明“历史表随日终追加”：上线之后的点天然按时点；上线前若有回填，口径未知",
                 "只用 600519 一只、两个财务因子；行情类因子（动量/估值分母价格）无法用此法判定",
-                "history 与 batch 读同一张表，二者一致只能说明接口自洽，不能证明按时点"],
+                "history 与 batch 读同一张表，二者一致只能说明接口自洽，不能证明按时点",
+                "batch 的数据日期以响应自带日期为准；as_of_mismatch 时 equal=null，该批不参与比对、不用于回填"],
         next_steps=["保存本次 factor/history 结果，间隔 ≥1 周后重取同一区间逐日比对：若历史值被改写 → 非时点（会重算）",
                     "用 plrq ≤ T 的利润表自行计算 T 日 profit_yoy，与 history 的 T 日值逐点比对"])
     # ---- 第 7 项：数量核对
@@ -720,8 +1131,24 @@ def item67_factors(res, shared):
         evidence={"returned": ret, "factor_list_ids": list_ids})
 
 
+ONLY_PLAN = {    # --p11-only 各模式跑哪些项（调用次数见 README §6A）
+    "gap1": (("GAP1_snapshot_latency", "快照延迟", item1_latency),),
+    "gap6-history": (("GAP6_history_only", "因子历史复取", item6_history_only),),
+    "gap6-nulls": (("GAP6_nulls_retest", "空值因子复测", item6_nulls),),
+}
+
+
 def main(res):
     shared: dict = {}
+    if ONLY is not None:
+        if ONLY not in ONLY_PLAN:
+            raise ValueError(f"未知 --p11-only：{ONLY}")
+        for name, item, fn in ONLY_PLAN[ONLY]:
+            _guard(res, name, item, lambda fn=fn: fn(res, shared))
+        res.append({"name": "GAP_SUMMARY", "only": ONLY, "items": [
+            {"name": x["name"], "status": x["status"], "summary": x["conclusion"].get("summary")}
+            for x in res if isinstance(x, dict) and str(x.get("name", "")).startswith("GAP") and "status" in x]})
+        return
     for name, item, fn in (
             ("GAP1_snapshot_latency", "快照延迟", item1_latency),
             ("GAP2_cje_v_units", "cje/v 单位", item2_units),

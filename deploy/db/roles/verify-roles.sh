@@ -3,6 +3,7 @@
 # T-O11（评审 45589c2 m3、plan §7.3）：aia_api / aia_ingest 对 ops.pending_file_purges 无任何权限；
 #   “置 purging → 删不可变行 → 改回 → 提交”的攻击序列必须失败（只有失败才算通过）；aia_maint 只有 CLI 所需权限，
 #   且它自己也不能把 purging 改回、不能不删行就提交；aia_maint 必须 LOGIN，aia_api/aia_ingest 不得是其成员。
+#   aia_maint 是列级授权：清单外的列读不到、写不了，DELETE 只在清单里的表上（第 4 节）。
 # T-O10 部分只读（SELECT … LIMIT 0）。T-O11 的事务用例会插入名为 t_o11_<随机> 的探针用户：失败的序列整体回滚；
 #   需要落库的探针最后用正规删除路径（aia_maint：purging → 删 → 提交）清掉，并用属主连接确认无残留。
 #   属主连接 = 调用方的 PGUSER/PGPASSWORD（compose db-roles / CI 都是库属主）。连接参数同 apply-roles.sh（PGHOST/PGPORT/PGDATABASE；口令目录 AIA_DB_ROLE_PASSWORD_DIR）。
@@ -117,9 +118,38 @@ expect_tx_ok aia_maint "正规删除：purging→删画像→删用户→提交"
 [ "$(probe_left "$u")" = 0 ] || { echo "FAIL 探针用户 $u 未被正规删除路径清掉（已用属主连接清理）"; fail=1
   own -c "BEGIN; SET LOCAL ROLE aia_maint; $(purge_sql "$u" | sed '1d;$d') COMMIT;" >/dev/null || true; }
 
-# 4) aia_maint 最小权限
-expect_ok     aia_maint "SELECT * FROM ops.pending_file_purges LIMIT 0"
-expect_ok     aia_maint "SELECT id FROM app.users LIMIT 0"
+# 4) aia_maint 最小权限（列级，清单见 reports/aia_maint-grants.md §3）：清单内的列可读写，清单外的列读不到、写不了
+expect_ok     aia_maint "SELECT id, path, attempts, last_error, created_at FROM ops.pending_file_purges LIMIT 0"
+expect_ok     aia_maint "SELECT id, username, role, status, reviewed_by FROM app.users LIMIT 0"
+expect_ok     aia_maint "UPDATE app.users SET status = status WHERE false"
+expect_ok     aia_maint "DELETE FROM app.trades WHERE user_id IS NULL AND false"
+# 清单外的列：读
+expect_denied aia_maint "SELECT * FROM app.users LIMIT 0"
+expect_denied aia_maint "SELECT password_hash FROM app.users LIMIT 0"
+expect_denied aia_maint "SELECT email FROM app.users LIMIT 0"
+expect_denied aia_maint "SELECT ciphertext FROM app.user_data_licences LIMIT 0"
+expect_denied aia_maint "SELECT licence_hmac FROM app.user_data_licences LIMIT 0"
+expect_denied aia_maint "SELECT api_key_ciphertext FROM app.llm_providers LIMIT 0"
+expect_denied aia_maint "SELECT raw_line FROM app.import_rows LIMIT 0"
+expect_denied aia_maint "SELECT request_body FROM app.llm_calls LIMIT 0"
+expect_denied aia_maint "SELECT security_code FROM app.trades LIMIT 0"
+expect_denied aia_maint "SELECT last_attempt_at FROM ops.pending_file_purges LIMIT 0"
+# 清单外的列：写（WHERE false 不改数据；列权限在规划时检查）
+expect_denied aia_maint "UPDATE app.users SET role = role WHERE false"
+expect_denied aia_maint "UPDATE app.users SET password_hash = password_hash WHERE false"
+expect_denied aia_maint "UPDATE app.trades SET quantity = quantity WHERE false"
+expect_denied aia_maint "UPDATE ops.pending_file_purges SET path = path WHERE false"
+# DELETE 只在清单里的表上
+expect_denied aia_maint "DELETE FROM app.invite_codes WHERE false"
+expect_denied aia_maint "DELETE FROM app.prompt_templates WHERE false"
+# 汇总断言（属主连接）：任何表都没有表级 SELECT/INSERT/UPDATE；没有序列权限、没有默认权限
+expect_attr_early() { local v; v="$(own -c "$2" || true)"; if [ "$v" = t ]; then echo "OK   $1"; else echo "FAIL $1（SQL 结果 $v，应为 t）"; fail=1; fi; }
+expect_attr_early "aia_maint 在 app/ops/market 无任何表级 SELECT/INSERT/UPDATE/TRUNCATE/REFERENCES/TRIGGER" \
+  "SELECT NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','TRUNCATE','REFERENCES','TRIGGER']) p WHERE n.nspname IN ('app','ops','market') AND c.relkind IN ('r','p','v','m','f') AND has_table_privilege('aia_maint', c.oid, p))"
+expect_attr_early "aia_maint 无序列权限、无默认权限" \
+  "SELECT NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('app','ops','market') AND CASE WHEN c.relkind = 'S' THEN has_sequence_privilege('aia_maint', c.oid, 'USAGE,SELECT,UPDATE') ELSE false END) AND NOT EXISTS (SELECT 1 FROM pg_default_acl d, aclexplode(d.defaclacl) a WHERE a.grantee = 'aia_maint'::regrole)"
+expect_attr_early "aia_maint 在 market 只可读 source_licence_id" \
+  "SELECT NOT EXISTS (SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'market' AND c.relkind IN ('r','p') AND a.attnum > 0 AND NOT a.attisdropped AND a.attname <> 'source_licence_id' AND has_column_privilege('aia_maint', c.oid, a.attnum, 'SELECT'))"
 expect_denied aia_maint "INSERT INTO app.users (username, password_hash, role, status) VALUES ('t_o11_denied', 'x', 'user', 'purging')"
 expect_denied aia_maint "INSERT INTO app.trades DEFAULT VALUES"
 expect_denied aia_maint "TRUNCATE ops.pending_file_purges"

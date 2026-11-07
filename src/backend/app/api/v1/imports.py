@@ -185,7 +185,8 @@ class StatusOut(BaseModel):
 
 class ResolveIn(_Body):
     choice: Annotated[str, StringConstraints(min_length=1, max_length=64)]
-    reason: Annotated[str, StringConstraints(max_length=1000)] | None = None
+    # 评审 bbf58a0 m2：OpenAPI 与契约一致（≤200 字）；业务层 resolutions 仍按去空白后再校验
+    reason: Annotated[str, StringConstraints(max_length=200)] | None = None
 
 
 class ConfirmIn(_Body):
@@ -693,7 +694,13 @@ def resolve_finding(
             auth,
             "import.finding_resolved",
             batch_id,
-            {"finding_id": finding_id, "code": f["code"], "choice": body.choice, "reason": note},
+            # 评审 bbf58a0 m9 / 追加裁定 B：审计不存自由文本，只记是否填写了理由
+            {
+                "finding_id": finding_id,
+                "code": f["code"],
+                "choice": body.choice,
+                "reason_given": bool(note),
+            },
         )
     # 处理结果影响行状态与去重：同步重新解析（解析器读取已保存的处理结果）
     pipeline.run_parse(engine, settings, batch_id)
@@ -782,30 +789,17 @@ def discard_import(
     rds: RedisDep,
 ) -> dict[str, str]:
     _limit(rds, auth, "imports:write", WRITES_PER_HOUR)
-    now = dt.datetime.now(dt.UTC)
     with engine.begin() as conn:
         b = _owned_batch(conn, auth, batch_id, lock=True)
         if b.status not in ("previewed", "failed"):
             raise AppError(ErrorCode.INVALID_STATE_TRANSITION)
-        files = conn.execute(
-            select(import_files).where(
-                import_files.c.batch_id == batch_id, import_files.c.deleted_at.is_(None)
-            )
-        ).all()
         conn.execute(
             update(import_batches).where(import_batches.c.id == batch_id).values(status="discarded")
         )
-        # 架构师裁定（T-live §8）：同一事务内删除预览行，批次头保留
+        # 契约 #35 / plan 3.5（T-live §8 裁定）：同一事务内删除预览行，批次头保留；
+        # 原始文件**不**提前删除，按 retained_until 留存策略由定时任务清理（T-B56）
         pipeline.drop_uncommitted_rows(conn, batch_id)
-        conn.execute(
-            update(import_files)
-            .where(import_files.c.batch_id == batch_id)
-            .values(deleted_at=now, storage_path=None)
-        )
         _audit(conn, request, settings, auth, "import.discarded", batch_id, {})
-    for f in files:
-        if f.storage_path:
-            storage.delete_raw(settings, f.storage_path)
     return {"status": "discarded"}
 
 
@@ -856,18 +850,26 @@ def errors_csv(
     w.writerow(["row_no", "code", "severity", "field", "message", "raw_masked"])
     with engine.connect() as conn:
         b = _owned_batch(conn, auth, batch_id)
-        for f in b.file_findings or []:
+        # 契约 #35：discarded / failed 批次的 errors.csv 只有表头（批次头 file_findings 仅留作审计）
+        dropped = b.status in pipeline.ROWS_DROPPED_STATUSES
+        for f in [] if dropped else b.file_findings or []:
             if f["severity"] in ("error", "warning"):
                 w.writerow(
                     ["", f["code"], f["severity"], _cell(f.get("field")), _cell(f["message"]), ""]
                 )
-        for r in conn.execute(
-            select(import_rows)
-            .where(
-                import_rows.c.batch_id == batch_id, import_rows.c.status.in_(["error", "warning"])
-            )
-            .order_by(import_rows.c.row_no)
-        ):
+        rows = (
+            []
+            if dropped
+            else conn.execute(
+                select(import_rows)
+                .where(
+                    import_rows.c.batch_id == batch_id,
+                    import_rows.c.status.in_(["error", "warning"]),
+                )
+                .order_by(import_rows.c.row_no)
+            ).all()
+        )
+        for r in rows:
             raw = storage.decrypt_line(settings, r.raw_line)
             for f in r.findings or []:
                 if f["severity"] in ("error", "warning"):

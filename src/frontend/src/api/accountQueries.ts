@@ -170,6 +170,11 @@ export const useImportBatch = (id: string | null) =>
   });
 
 export interface RowFilter { status?: string; code?: string; dedup_status?: string }
+/**
+ * 契约 v0.2.9 #35：批次转为 discarded / failed 时服务端删除全部预览行（/rows 恒为空、errors.csv 只有表头），
+ * 前端对这两种状态不再请求逐行预览，计数一律取批次头 stats。只有 previewed 才有可看的预览行。
+ */
+export const rowsAvailable = (status: ImportBatch['status']) => status === 'previewed';
 export const useImportRows = (id: string | null, enabled: boolean, f: RowFilter) =>
   useQuery({
     queryKey: ak.rows(id ?? '', JSON.stringify(f)),
@@ -206,7 +211,25 @@ export function useConfirmImport() {
     },
   });
 }
-export const useDiscardImport = () => useBatchMutation<null, { status: 'discarded' }>((id) => apiPost<{ status: 'discarded' }>(p(id, '/discard')));
+/**
+ * 放弃批次（#35）：服务端在同一事务里删掉预览行。成功后先把缓存里的批次头置为 discarded（页面随即不再挂行查询），
+ * 再移除本批次的行缓存；只让批次头与列表失效，不让 /rows 被失效重拉。
+ */
+export function useDiscardImport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string; v: null }) => apiPost<{ status: 'discarded' }>(p(id, '/discard')),
+    onSuccess: (_r, { id }) => {
+      qc.setQueryData<ImportBatch>(ak.batch(id), (old) => (old ? { ...old, status: 'discarded' } : old));
+      void qc.cancelQueries({ queryKey: [...ak.batch(id), 'rows'] });
+      qc.removeQueries({ queryKey: [...ak.batch(id), 'rows'] });
+    },
+    onSettled: (_r, _e, { id }) => {
+      void qc.invalidateQueries({ queryKey: ak.batch(id), exact: true });
+      void qc.invalidateQueries({ queryKey: ['imports'] });
+    },
+  });
+}
 export function useRevertImport() {
   const qc = useQueryClient();
   return useMutation({

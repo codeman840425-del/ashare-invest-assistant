@@ -7,6 +7,7 @@ import logging
 from fastapi import FastAPI
 
 from app.api.v1 import router as v1_router
+from app.auth import body_order
 from app.common.errors import (
     ErrorResponse,
     UriTooLongResponse,
@@ -54,6 +55,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #: 生效的 Settings（T-B03f / review-f72b8c7 m1：路由类在依赖注入之外读取，不调用 override）
     app.state.settings = cfg
     install_exception_handlers(app)
+    # 契约 §1.3 #30：非法 JSON 不得先于认证 / CSRF（覆盖上面的 RequestValidationError 处理器）
+    body_order.install(app)
     # add_middleware 后加的在外层：RequestId 在最外，413 也带 X-Request-Id
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=cfg.business.imports.max_request_bytes)
     app.add_middleware(RequestIdMiddleware)

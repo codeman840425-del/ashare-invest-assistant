@@ -169,6 +169,8 @@ class Interpreter:
         params: dict[str, Any],
     ) -> None:
         self.features, self.series, self.context, self.params = features, series, context, params
+        self.columns: dict[str, Any] = {}
+        self.materialize = True
         self.inputs: dict[str, Any] = {}
         self.computed: dict[str, Any] = {}
 
@@ -234,75 +236,9 @@ class Interpreter:
         raise ValueError("unsupported_ast")
 
     def call(self, node: ast.Call, offset: int) -> Any:
-        if not isinstance(node.func, ast.Name):
-            raise ValueError("unsafe_function")
-        name = node.func.id  # validated Name, never looked up in Python globals
-        args = node.args
-        if name == "atr":
-            n = int(self.value(args[0], offset))
-            if not 1 <= n <= 250:
-                return None
-            close, high, low = (
-                self.series.get("f." + key + "_qfq", []) for key in ("close", "high", "low")
-            )
-            end = len(close) - offset
-            if end < n + 1 or len(high) != len(close) or len(low) != len(close):
-                return None
-            tr = []
-            for i in range(1, end):
-                if any(v is None for v in (high[i], low[i], close[i - 1])):
-                    return None
-                h, low_value, c = (decimal(v) for v in (high[i], low[i], close[i - 1]))
-                tr.append(max(h - low_value, abs(h - c), abs(low_value - c)))
-            result = sum(tr[:n], Decimal(0)) / n
-            for value in tr[n:]:
-                result = (result * (n - 1) + value) / n
-            self.inputs["atr_source"] = {
-                "f.high_qfq": high[:end],
-                "f.low_qfq": low[:end],
-                "f.close_qfq": close[:end],
-            }
-            return result
-        if name in {"max2", "greatest", "min2", "least"}:
-            values = [self.value(arg, offset) for arg in args]
-            return (
-                None
-                if None in values
-                else (max(values) if name in {"max2", "greatest"} else min(values))
-            )
-        if name == "between":
-            values = [self.value(arg, offset) for arg in args]
-            return None if None in values else values[1] <= values[0] <= values[2]
-        if name in {"cross_up", "cross_down"}:
-            a, b, old_a, old_b = [
-                self.value(arg, off) for off in (offset, offset + 1) for arg in args
-            ]
-            if None in (a, b, old_a, old_b):
-                return None
-            return a > b and old_a <= old_b if name == "cross_up" else a < b and old_a >= old_b
-        n_value = self.value(args[1], offset)
-        if n_value is None or n_value != int(n_value):
-            return None
-        n = int(n_value)
-        if not 0 <= n <= 250:
-            return None
-        if name == "ref":
-            return self.value(args[0], offset + n)
-        if name == "pct_change":
-            current, prior = self.value(args[0], offset), self.value(args[0], offset + n)
-            return None if current is None or prior in (None, 0) else current / prior - 1
-        window_values = self.window(args[0], n, offset)
-        if window_values is None:
-            return None
-        if name in {"highest", "max"}:
-            return max(window_values)
-        if name in {"lowest", "min"}:
-            return min(window_values)
-        if name == "ma":
-            return sum(window_values, Decimal(0)) / n
-        # Other contract functions need their production/cross-section input contracts
-        # in T-B72. Never guess an answer merely to make a fixture pass.
-        return None
+        from app.features.pipeline import indicator
+
+        return indicator(self, node, offset)
 
     def evaluate(self, parsed: tuple[ast.expr, str | None, str | None]) -> bool | None:
         node, mode, count = parsed

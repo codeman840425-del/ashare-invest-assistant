@@ -55,6 +55,8 @@ def calculate(
     as_of: dt.date,
     market_rules: MarketRulesConfig,
     feature_keys: set[str],
+    columns: dict[str, Any] | None = None,
+    materialize: bool = True,
 ) -> dict[str, Any]:
     """Deliberately cannot accept fixture id, desc or expect. No template-key branching."""
     params = {name: entry["default"] for name, entry in spec["params_schema"].items()}
@@ -73,6 +75,9 @@ def calculate(
         if "plan." in expression and not any(key.startswith("plan.") for key in context):
             continue
         evaluator = Interpreter(features, series, context, params)
+        if columns is not None:
+            evaluator.columns = columns
+        evaluator.materialize = materialize
         passed = evaluator.evaluate(parsed)
         if passed is None:
             inputs_missing.update(

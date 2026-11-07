@@ -20,7 +20,7 @@ import { mockLoginAs } from '../mocks/session';
 import { apiFetch } from '../test/apiFetch';
 
 beforeAll(() => preloadRoutes(routes), 30_000);
-afterEach(() => setMockIngestHeartbeat('fresh'));
+afterEach(() => setMockIngestHeartbeat('ok'));
 
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
@@ -42,7 +42,7 @@ const quiet: Base = {
   queues: [{ priority: 'p0_intraday', depth: 0, oldest_age_s: 0 }, { priority: 'p1_daily', depth: 0, oldest_age_s: 0 }],
   errors_24h: [], ip_limit_alerts_24h: 0,
   freshness: INGEST_DATASETS.map((dataset) => ({ dataset, data_as_of: '2026-11-02', data_status: 'fresh' as const })),
-  licences: [], licences_truncated: false,
+  licences: [], licences_truncated: false, heartbeat: 'ok',
 };
 const lic = (status: IngestLicenceStatus['status'], days_left: number | null, i: number): IngestLicenceStatus => ({
   licence_id: `lic-demo-${i}`, user_id: `user-demo-${i}`, username: `demo_${i}`, display_name: `示例用户${i}`, status, tier: 'monthly', has_quant_pro: false,
@@ -131,8 +131,8 @@ describe('③ m3：告警 key 与固定文案（#31 ②④）', () => {
       ...quiet, budget: { per_minute_limit: 100, used_last_minute: 95 }, ip_limit_alerts_24h: 1,
       errors_24h: [{ upstream_code: 'http_5xx', count: 20 }, { upstream_code: '101', count: 25 }],
       freshness: INGEST_DATASETS.map((dataset) => ({ dataset, data_as_of: null, data_status: dataset === 'quotes' ? 'unavailable' as const : 'stale' as const })),
-      licences: [lic('active', 5, 1), lic('invalid', null, 2), lic('expired', 0, 3)],
-    }, 'stale');
+      licences: [lic('active', 5, 1), lic('invalid', null, 2), lic('expired', 0, 3)], heartbeat: 'stale',
+    });
     expect(out.map((a) => a.key)).toEqual([
       'heartbeat', 'ip_limit', 'freshness.quotes', 'licence.invalid',
       'budget', 'errors.101', 'errors.http_5xx', 'freshness.minute_bars', 'freshness.daily_bars', 'freshness.financials', 'freshness.announcements', 'freshness.security_master',
@@ -170,9 +170,11 @@ describe('⑤ 可选：React key 防御与 heartbeat 示例场景', () => {
   });
 
   it('心跳 stale/unknown 且 leader 不为 null → heartbeat critical；leader 为 null 时只出 leader', async () => {
-    expect(ingestAlerts(quiet, 'fresh')).toEqual([]);
-    expect(ingestAlerts(quiet, 'unknown')).toEqual([{ level: 'critical', key: 'heartbeat', message: '采集主实例心跳超时' }]);
-    expect(ingestAlerts({ ...quiet, leader: null }, 'stale').map((a) => a.key)).toEqual(['leader']);
+    // v0.2.9 #38：心跳状态改为响应字段 heartbeat；paused 不出告警
+    expect(ingestAlerts(quiet)).toEqual([]);
+    expect(ingestAlerts({ ...quiet, heartbeat: 'paused' })).toEqual([]);
+    expect(ingestAlerts({ ...quiet, heartbeat: 'unknown' })).toEqual([{ level: 'critical', key: 'heartbeat', message: '采集主实例心跳超时' }]);
+    expect(ingestAlerts({ ...quiet, leader: null, heartbeat: 'stale' }).map((a) => a.key)).toEqual(['leader']);
     setMockIngestHeartbeat('stale');
     mockLoginAs('admin');
     const d = await getJson<AdminIngestStatus>('/admin/ingest/status');

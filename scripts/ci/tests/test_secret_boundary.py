@@ -118,6 +118,29 @@ def test_api_on_owner_role_rejected(repo: Path) -> None:
     assert any("服务 api 的 DATABASE_URL 应为 aia_api" in e for e in errs), errs
 
 
+def test_worker_registered_as_aia_api() -> None:
+    assert ccs.DB_ROLE_OF["worker"] == ("aia_api", "AIA_DB_API_PASSWORD")
+
+
+def test_worker_on_owner_role_rejected(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "      DATABASE_URL: *db-api-url\n      # 到期原始文件清理",
+         "      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aia}:${POSTGRES_PASSWORD:?x}@postgres:5432/aia\n      # 到期原始文件清理")
+    errs = ccs.check(repo)
+    assert any("服务 worker 的 DATABASE_URL 应为 aia_api" in e for e in errs), errs
+
+
+def test_worker_without_explicit_url_rejected(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "      DATABASE_URL: *db-api-url\n      # 到期原始文件清理", "      # 到期原始文件清理")
+    errs = ccs.check(repo)
+    # 不显式覆盖时 <<: *app-env 带进属主 DATABASE_URL，必须被拒
+    assert any("服务 worker 的 DATABASE_URL 应为 aia_api" in e or "服务 worker 没有显式 DATABASE_URL" in e for e in errs), errs
+
+
+def test_overlay_cannot_switch_worker_back_to_owner(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  worker:\n    environment:\n      DATABASE_URL: postgresql://aia:${POSTGRES_PASSWORD}@postgres/aia\n")
+    assert any("服务 worker 的 DATABASE_URL" in e for e in errs), errs
+
+
 def test_ingest_literal_password_rejected(repo: Path) -> None:
     _sub(repo, ccs.BASE_COMPOSE, "DATABASE_URL: *db-ingest-url",
          "DATABASE_URL: postgresql+psycopg://aia_ingest:" + "x" * 8 + "@postgres:5432/aia")
@@ -195,8 +218,8 @@ def test_master_key_secret_must_be_file_and_mounted(repo: Path) -> None:
 
 
 def test_worker_must_mount_master_key(repo: Path) -> None:
-    _sub(repo, ccs.BASE_COMPOSE, "    secrets:\n      - app_master_key\n    volumes:\n      - ../../config:/app/config:ro",
-         "    volumes:\n      - ../../config:/app/config:ro")
+    _sub(repo, ccs.BASE_COMPOSE, "    secrets:\n      - app_master_key\n    volumes:\n      # 读写（删除到期文件）",
+         "    volumes:\n      # 读写（删除到期文件）")
     assert any("服务 worker 缺少 secrets ['app_master_key']" in e for e in ccs.check(repo))
 
 
@@ -299,6 +322,72 @@ def test_whitelist_covers_every_base_service() -> None:
     doc = yaml.safe_load((REPO / ccs.BASE_COMPOSE).read_text(encoding="utf-8"))
     assert set(doc["services"]) <= set(ccs.MASTER_KEY_ALLOC)
     assert {k for k, v in ccs.MASTER_KEY_ALLOC.items() if v} == {"api", "worker"}
+
+
+
+# ---------- T-A04 ②：规则 7 按服务的 secret 白名单 SERVICE_SECRETS ----------
+
+
+def test_service_secrets_match_base_exactly() -> None:
+    import yaml
+    doc = yaml.safe_load((REPO / ccs.BASE_COMPOSE).read_text(encoding="utf-8"))
+    for name, svc in doc["services"].items():
+        assert set(ccs._secret_names((svc or {}).get("secrets"))) == set(ccs.SERVICE_SECRETS[name]), name
+    assert set(doc.get("secrets") or {}) == set(ccs.PROTECTED_SECRETS)
+    assert ccs.MASTER_KEY_ALLOC == {k: ccs.MASTER_SECRET in v for k, v in ccs.SERVICE_SECRETS.items()}
+
+
+@pytest.mark.parametrize(("svc", "secret"), [
+    ("worker", "data_licence_seal_public_keys"),
+    ("worker", "db_password_aia_api"),
+    ("api", "db_password_aia_api"),
+    ("ingest", "db_password_aia_ingest"),
+    ("maint-cli", "data_licence_seal_public_keys"),
+    ("db-roles", "app_master_key"),
+    ("beat", "data_licence_seal_public_keys"),
+    ("signal-rt", "db_password_aia_maint"),
+    ("migrate", "data_licence_seal_public_keys"),
+    ("timescale-apply", "db_password_aia_api"),
+    ("nginx", "data_licence_seal_public_keys"),
+    ("postgres", "db_password_aia_api"),
+    ("redis", "app_master_key"),
+])
+def test_secret_outside_service_whitelist_rejected(repo: Path, svc: str, secret: str) -> None:
+    errs = _overlay(repo, f"services:\n  {svc}:\n    secrets:\n      - {secret}\n")
+    assert any(f"服务 {svc} 挂了 {secret}，不在该服务的 secret 白名单" in e for e in errs), errs
+
+
+def test_secret_long_form_outside_whitelist_rejected(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  beat:\n    secrets:\n      - source: app_master_key\n        target: k\n")
+    assert any("服务 beat 挂了 app_master_key，不在该服务的 secret 白名单" in e for e in errs), errs
+
+
+def test_unregistered_top_level_secret_rejected(repo: Path) -> None:
+    errs = _overlay(repo, "secrets:\n  extra_key:\n    file: ./extra\nservices:\n  api:\n    secrets:\n      - extra_key\n")
+    assert any("顶层 secret extra_key 未登记" in e for e in errs), errs
+    assert any("服务 api 挂了 extra_key，不在该服务的 secret 白名单" in e for e in errs), errs
+
+
+def test_unregistered_service_with_secret_rejected(repo: Path) -> None:
+    errs = _overlay(repo, "services:\n  newsvc:\n    secrets:\n      - data_licence_seal_public_keys\n")
+    assert any("服务 newsvc 未在 MASTER_KEY_ALLOC 白名单登记" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("svc", ["api", "worker", "ingest", "db-roles", "maint-cli"])
+def test_whitelisted_secret_allowed(repo: Path, svc: str) -> None:
+    lines = "".join(f"      - {s}\n" for s in sorted(ccs.SERVICE_SECRETS[svc]))
+    errs = _overlay(repo, f"services:\n  {svc}:\n    secrets:\n{lines}")
+    assert not any("不在该服务的 secret 白名单" in e for e in errs), errs
+
+
+def test_base_missing_whitelisted_secret_rejected(repo: Path) -> None:
+    import yaml
+    p = repo / ccs.BASE_COMPOSE
+    doc = yaml.safe_load(p.read_text(encoding="utf-8"))
+    doc["services"]["maint-cli"]["secrets"] = []
+    p.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    errs = ccs.check(repo)
+    assert any("服务 maint-cli 缺少 secrets ['db_password_aia_maint']" in e for e in errs), errs
 
 
 def test_ingest_forbid_flag_required_in_base(repo: Path) -> None:
@@ -418,3 +507,48 @@ def test_rule10_ingest_cannot_bind_mount_private_keys(repo: Path) -> None:
     # 规则 3 放行 ingest 挂私钥路径；规则 10 要求私钥也只经 secrets:
     errs = _overlay(repo, "services:\n  ingest:\n    volumes:\n      - /srv/data_licence_seal_private_keys:/k:ro\n")
     assert any("服务 ingest 把受保护的密钥文件当普通卷挂载" in e for e in errs), errs
+
+
+# ---------- T-A04 ⑪：imports 卷（review-028c077 M2）----------
+
+IMPORTS_MOUNT = "      - imports:${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}\n"
+
+
+def test_worker_mounts_imports_rw_in_base() -> None:
+    import yaml
+    doc = yaml.safe_load((REPO / ccs.BASE_COMPOSE).read_text(encoding="utf-8"))
+    w = doc["services"]["worker"]
+    mounts = ccs._volume_mounts(w["volumes"])
+    assert ("imports", "${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}", False) in mounts
+    assert w["environment"]["IMPORT_STORAGE_PATH"] == "${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}"
+
+
+def test_worker_without_imports_rejected(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "      # 读写（删除到期文件）；卷根目录属主 10001、700，与 api 共用同一卷\n" + IMPORTS_MOUNT, "")
+    errs = ccs.check(repo)
+    assert any("服务 worker 没有挂数据卷 imports" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("svc", ["ingest", "beat", "signal-rt", "migrate", "nginx"])
+def test_imports_on_other_service_rejected(repo: Path, svc: str) -> None:
+    errs = _overlay(repo, f"services:\n  {svc}:\n    volumes:\n      - imports:/data\n")
+    assert any(f"服务 {svc} 挂了数据卷 imports" in e for e in errs), errs
+
+
+@pytest.mark.parametrize("vol", ["      - imports:/var/lib/aia-dev/imports:ro\n",
+                                 "      - type: volume\n        source: imports\n        target: /x\n        read_only: true\n"])
+def test_imports_read_only_rejected(repo: Path, vol: str) -> None:
+    errs = _overlay(repo, "services:\n  worker:\n    volumes:\n" + vol)
+    assert any("服务 worker 只读挂载了数据卷 imports" in e for e in errs), errs
+
+
+def test_imports_target_must_match_env(repo: Path) -> None:
+    _sub(repo, ccs.BASE_COMPOSE, "      # 读写（删除到期文件）；卷根目录属主 10001、700，与 api 共用同一卷\n" + IMPORTS_MOUNT,
+         "      - imports:/srv/elsewhere\n")
+    errs = ccs.check(repo)
+    assert any("服务 worker 的数据卷 imports 挂载点 /srv/elsewhere ≠ 其 IMPORT_STORAGE_PATH" in e for e in errs), errs
+
+
+def test_volume_mounts_parses_colon_in_target() -> None:
+    assert ccs._volume_mounts(["imports:${P:-/a/b}:ro", "x:/y", {"source": "s", "target": "/t"}]) == [
+        ("imports", "${P:-/a/b}", True), ("x", "/y", False), ("s", "/t", False)]

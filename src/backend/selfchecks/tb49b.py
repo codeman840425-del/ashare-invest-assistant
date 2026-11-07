@@ -493,6 +493,23 @@ check(all(has_header(b) for b in (old_f, old_d)), "清理任务：批次头保�
 with engine().begin() as c:
     again = pipeline.purge_uncommitted_import_rows(c)
 check(again == 0, "清理任务：幂等，第二次删除 0 行")
+# 架构师评审（9e693b2 跟进）：预览行清理分块，每条 DELETE ≤ chunk 行
+ch1, ch2 = mk_batch("failed"), mk_batch("discarded")
+with engine().begin() as c:
+    first = pipeline.purge_uncommitted_import_rows(c, chunk=2)
+check(first == 2 and nrows(ch1) + nrows(ch2) == 4, f"清理分块：chunk=2 只删 2 行（{first}）")
+check(pipeline.PREVIEW_PURGE_CHUNK == 10_000, "清理分块：默认每块 10 000 行")
+_orig_chunk = pipeline.PREVIEW_PURGE_CHUNK
+pipeline.PREVIEW_PURGE_CHUNK = 2  # type: ignore[misc]
+try:
+    total = jobs.purge_import_rows_task(s_job)
+finally:
+    pipeline.PREVIEW_PURGE_CHUNK = _orig_chunk  # type: ignore[misc]
+check(
+    total == 4 and nrows(ch1) == 0 and nrows(ch2) == 0,
+    f"清理分块：任务按块循环提交直到删完（{total}）",
+)
+check(nrows(live) == 3 and nrows(committed) == 3, "清理分块：其他批次的行不动")
 
 # ---------------------------------------------------------------- B6 截断 + ETF 闸门
 from app.market_rules.lots import clamp_draft_qty, fund_t_plus, lot_spec  # noqa: E402

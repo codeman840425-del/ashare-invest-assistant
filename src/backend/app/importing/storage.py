@@ -55,6 +55,10 @@ def resolve_imports_root(storage_path: str | os.PathLike[str] | None, app_env: s
     return None
 
 
+class StorageRootMissingError(FileNotFoundError):
+    """原始导入文件存储根目录不存在（不含路径，避免日志泄露部署布局）。"""
+
+
 def storage_root(settings: Settings) -> Path:
     root = resolve_imports_root(settings.import_storage_path, settings.app_env)
     if root is None:
@@ -123,8 +127,14 @@ def read_raw(settings: Settings, rel: str, batch_id: str) -> bytes:
 def delete_raw(settings: Settings, rel: str) -> None:
     """删除加密原始文件（不存在则忽略）。
 
-    契约 #35 起放弃批次不再调用；只由 retained_until 到期清理（T-B56）使用。"""
+    契约 #35 起放弃批次不再调用；只由 retained_until 到期清理（T-B56）使用。
+
+    存储根目录不存在（如 worker 没挂 imports 卷）→ 抛 :class:`StorageRootMissingError`，
+    **不**当作已删除（契约 v0.2.9 #41 / review-028c077 M2）；调用方保留该行下轮重试。
+    根目录存在而文件不存在才视为已删除。"""
     root = storage_root(settings).resolve()
+    if not root.is_dir():
+        raise StorageRootMissingError("import storage root does not exist")
     path = (root / rel).resolve()
     if root not in path.parents:
         raise ValueError("path escapes storage root")

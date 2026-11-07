@@ -18,6 +18,14 @@
 # 不经 compose.sh 直接调用时这里报错，避免回落到所有工作树共用的“aia”。
 name: ${COMPOSE_PROJECT_NAME:?请用 deploy/scripts/compose.sh（或 up.sh）调用}
 
+# 日志轮转（T-A04 ③）：所有容器统一 json-file，单文件 10m、保留 5 个（每容器最多约 50MB）。
+# 每个服务都写 logging: *default-logging；CI（scripts/ci/check_compose_logging.py）检查每个服务都配了。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 # 镜像全部固定到精确 tag + digest（T-O08）。升级流程：改 tag → docker buildx imagetools inspect <tag>
 # 取新 digest → 本地 up.sh + db-restore-drill.sh 验证 → 提交。PG/TimescaleDB 升级还需按官方流程 ALTER EXTENSION。
 # 后端镜像（T-O01a）。dockerfile 路径相对 context；上下文过滤见 deploy/docker/backend.Dockerfile.dockerignore
@@ -49,8 +57,10 @@ x-app-env: &app-env
 x-secret-env-entrypoint: &secret-env-entrypoint ["sh", "/aia/secret-env.sh"]
 x-secret-env-mount: &secret-env-mount ../docker/secret-env.sh:/aia/secret-env.sh:ro
 
-# 原始导入文件卷（T-B46 / T-O11，plan §3.5A）：挂载点跟随 IMPORT_STORAGE_PATH；只挂给写入/读取的 api，
-# 以及删除用户数据时清文件的 maint-cli（按需 run）。worker / ingest / beat / signal-rt 不挂。
+# 原始导入文件卷（T-B46 / T-O11，plan §3.5A）：挂载点跟随 IMPORT_STORAGE_PATH；读写挂给写入/读取的 api、
+# 执行 imports.purge_expired_raw_files 到期删文件的 worker（T-A04 ⑪，review-028c077 M2：不挂则根目录不存在、报错保留行），
+# 以及删除用户数据时清文件的 maint-cli（按需 run）。ingest / beat / signal-rt 不挂。
+# CI（check_secret_boundary.py DATA_VOLUMES）：只允许这三个服务挂、三者都必须读写挂、挂载点 = 各自的 IMPORT_STORAGE_PATH。
 # 卷根目录属主 10001、权限 700（镜像内预建目录决定新卷的初始属主；已有卷由运维 chmod 一次）。
 
 x-app-depends: &app-depends
@@ -74,6 +84,7 @@ x-db-ingest-url: &db-ingest-url postgresql+psycopg://aia_ingest:${AIA_DB_INGEST_
 
 services:
   nginx:
+    logging: *default-logging
     image: nginx:1.31.2-alpine3.23@sha256:54f2a904c251d5a34adf545a72d32515a15e08418dae0266e23be2e18c66fefa
     restart: unless-stopped
     ports:
@@ -101,6 +112,7 @@ services:
       start_period: 5s
 
   api:
+    logging: *default-logging
     image: *backend-image
     build: *backend-build
     # 入口以 src/backend/app/main.py 为准；--proxy-headers 信任 nginx 的 X-Forwarded-*
@@ -141,12 +153,18 @@ services:
       start_period: 15s
 
   worker:
+    logging: *default-logging
     image: *backend-image
     command: ["python", "-m", "app.workers.worker"]
     restart: unless-stopped
     environment:
       <<: *app-env
       SERVICE_NAME: worker
+      # T-A04 ④（review-028c077 M1）：worker 以 aia_api 连库（不用属主）；所需 DML 见 deploy/db/roles/grants.sql $worker$
+      DATABASE_URL: *db-api-url
+      # 到期原始文件清理（imports.purge_expired_raw_files）的存储根目录，与 api 相同
+      IMPORT_STORAGE_BACKEND: ${IMPORT_STORAGE_BACKEND:-local}
+      IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -157,6 +175,8 @@ services:
     secrets:
       - app_master_key
     volumes:
+      # 读写（删除到期文件）；卷根目录属主 10001、700，与 api 共用同一卷
+      - imports:${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
       - ../../config:/app/config:ro
       - *secret-env-mount
     depends_on: *app-depends
@@ -166,6 +186,7 @@ services:
 
   # 行情采集服务：全站唯一调用麦蕊、唯一能解密用户证书（plan §2.1A、§2.1B）
   ingest:
+    logging: *default-logging
     image: *backend-image
     command: ["python", "-m", "app.workers.ingest"]
     restart: unless-stopped
@@ -198,6 +219,7 @@ services:
 
   # 盘中信号计算：单实例，无 licence
   signal-rt:
+    logging: *default-logging
     image: *backend-image
     command: ["python", "-m", "app.workers.signal_rt"]
     restart: unless-stopped
@@ -213,6 +235,7 @@ services:
 
   # Celery beat：全站唯一
   beat:
+    logging: *default-logging
     image: *backend-image
     command: ["python", "-m", "app.workers.beat"]
     restart: unless-stopped
@@ -233,6 +256,7 @@ services:
 
   # 一次性：数据库迁移（T-O01b）。成功退出（0）后 timescale-apply 才运行；失败则 api 等服务不会启动。
   migrate:
+    logging: *default-logging
     image: *backend-image
     command: ["alembic", "upgrade", "head"]
     restart: "no"
@@ -248,6 +272,7 @@ services:
   # 一次性：TimescaleDB 部署侧策略（压缩/保留/连续聚合，deploy/db/timescale/policies.conf）。
   # 后端镜像没有 psql，放在 postgres 镜像里经网络直连执行（AIA_PSQL_MODE=direct）；脚本幂等，每次 up 都会重跑。
   timescale-apply:
+    logging: *default-logging
     # 与 postgres 服务同一镜像（含 psql）；升级时两处一起改（deploy/scripts/lib/common.sh 的 aia_compose_image 读 postgres 服务那一行）
     image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
     entrypoint: ["bash", "/aia/deploy/scripts/db-apply-timescale.sh"]
@@ -274,6 +299,7 @@ services:
   # 角色与列级授权（T-O10）：migrate、timescale-apply 之后幂等执行 deploy/db/roles/apply-roles.sh（每次 up 都跑，
   # 新迁移建的表/列也会被覆盖到）。以属主连接；口令以 secret 文件传入，不经环境变量。
   db-roles:
+    logging: *default-logging
     image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
     entrypoint: ["bash", "/aia/deploy/db/roles/apply-roles.sh"]
     command: []
@@ -305,6 +331,7 @@ services:
   # 没有属主 DATABASE_URL（不回落到属主）。用法（先 dry-run，确认后再 --execute，会交互要求输入完整 user-id）：
   #   deploy/scripts/compose.sh --profile maint run --rm --no-deps maint-cli --user-id <uuid> [--execute]
   maint-cli:
+    logging: *default-logging
     image: *backend-image
     profiles: ["maint"]
     entrypoint: ["sh", "/aia/secret-env.sh", "python", "-m", "app.cli", "delete-user-data"]
@@ -335,6 +362,7 @@ services:
         condition: service_healthy
 
   postgres:
+    logging: *default-logging
     # TimescaleDB 2.31.0 + PostgreSQL 16.15（digest 固定 PG 小版本；plan §3A.1 避开 16.5/17.1）
     image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
     restart: unless-stopped
@@ -360,6 +388,7 @@ services:
       start_period: 30s
 
   redis:
+    logging: *default-logging
     image: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]

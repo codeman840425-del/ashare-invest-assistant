@@ -31,5 +31,13 @@ export function transitionText(e: unknown, kind: 'signal' | 'draft', opts: { reg
   return null;
 }
 
+/** v0.2.9 #37 ②：拟定草案时信号不存在或不属于本人 → 400 VALIDATION_ERROR，fields 含 {field:"signal_ids", issue:"not_found"}（不再是 404） */
+export function signalNotFound(e: unknown): boolean {
+  if (!(e instanceof ApiError) || e.code !== 'VALIDATION_ERROR') return false;
+  const fields = e.details?.fields;
+  return Array.isArray(fields) && fields.some((f) => !!f && typeof f === 'object' && (f as { field?: unknown }).field === 'signal_ids' && (f as { issue?: unknown }).issue === 'not_found');
+}
+
 /** 先按状态跃迁给具体文案，否则回落到通用错误文案 */
-export const stateErrorText = (e: unknown, kind: 'signal' | 'draft', opts: { regen?: boolean } = {}) => transitionText(e, kind, opts) ?? errorText(e);
+export const stateErrorText = (e: unknown, kind: 'signal' | 'draft', opts: { regen?: boolean } = {}) =>
+  transitionText(e, kind, opts) ?? (signalNotFound(e) ? '候选信号不存在或已不可见' : errorText(e));

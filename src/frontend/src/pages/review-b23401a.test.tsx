@@ -13,6 +13,7 @@ import type { AdminDataLicence } from '../api/adminTypes';
 import { ApiError } from '../api/client';
 import { transitionText } from '../lib/stateTransition';
 import { CANDIDATE_SIGNALS, uid } from '../mocks/fixtures';
+import { signalAllowed } from '../mocks/planHandlers';
 import { server } from '../mocks/server';
 import { mockLoginAs } from '../mocks/session';
 import { apiFetch } from '../test/apiFetch';
@@ -51,17 +52,17 @@ function serveRows(rows: AdminDataLicence[], seen: (string | null)[] = []) {
 }
 
 describe('d26e1d3 m1：管理端证书列表的到期显示', () => {
-  it('已过期显示“已过期”、当天显示“今天到期”，不出现“剩 -N 天”', async () => {
+  it('已过期显示“已过填写的到期日”、当天显示“今天到期”，不出现“剩 -N 天”（文案按 #40）', async () => {
     mockLoginAs('admin');
-    const rows = await manyRows(3, (i) => ({ expires_on: '2026-11-02', days_to_expiry: [-5, 0, 12][i] }));
+    const rows = await manyRows(3, (i) => ({ status: 'active', licence_id: uid(21000 + i), expires_on: '2026-11-02', days_to_expiry: [-5, 0, 12][i] }));
     serveRows(rows);
     renderAt('/admin/data-licences');
     const table = await screen.findByTestId('lic-table');
     await within(table).findByText(/demo_000/);
     const text = table.textContent ?? '';
-    expect(text).toContain('2026-11-02（已过期）');
+    expect(text).toContain('2026-11-02（已过填写的到期日）');
     expect(text).toContain('2026-11-02（今天到期）');
-    expect(text).toContain('2026-11-02（剩 12 天）');
+    expect(text).toContain('2026-11-02（还剩 12 天）');
     expect(text).not.toMatch(/剩 -\d/);
   });
 });
@@ -131,14 +132,15 @@ describe('N1：409 文案只认自有键', () => {
 });
 
 describe('N7：blocked 信号的 allowed 含 released', () => {
-  it('对 blocked 信号拟定草案 → 409 allowed = [released, dismissed]（按枚举顺序）', async () => {
-    // v0.2.9 #30 ③：因 STRATEGY_CONFLICT 处于 blocked 的信号改为 409 SIGNAL_NOT_EXECUTABLE，这里取其他原因 blocked 的信号
+  it('blocked 的 allowed 仍为 [released, dismissed]；对 blocked 信号拟定草案按 #37 → 409 SIGNAL_NOT_EXECUTABLE', async () => {
+    // v0.2.9 #37：不论原因码，blocked 拟定草案一律 SIGNAL_NOT_EXECUTABLE；INVALID_STATE_TRANSITION 只用于终态
+    expect(signalAllowed('blocked')).toEqual(['released', 'dismissed']);
     const blocked = CANDIDATE_SIGNALS.find((c) => c.id === uid(1016))!;
     expect(blocked.state).toBe('blocked');
     const r = await apiFetch(`${API}/plan-drafts`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ signal_ids: [blocked.id] }) });
     expect(r.status).toBe(409);
-    const b = (await r.json()) as { error: { code: string; details: { from: string; allowed: string[] } } };
-    expect(b.error.code).toBe('INVALID_STATE_TRANSITION');
-    expect(b.error.details).toMatchObject({ from: 'blocked', allowed: ['released', 'dismissed'] });
+    const b = (await r.json()) as { error: { code: string; details: { reason_ids: string[] } } };
+    expect(b.error.code).toBe('SIGNAL_NOT_EXECUTABLE');
+    expect(b.error.details.reason_ids).toEqual([uid(1017)]);
   });
 });

@@ -19,7 +19,7 @@ import {
 import { errorBody, page } from './handlerUtils';
 import { adminPause, adminResume, deleteLicence, licenceEntries, licenceEntryOf, licenceOf, licenceState, mockIngestPaused, mockLicenceSettingsEnabled, patchLicence, putLicence, rateHit, testLicence } from './licenceStore';
 import { NOW, uid } from './fixtures';
-import { ingestAlerts } from './ingestAlerts';
+import { ingestAlerts, mockIngestHeartbeat } from './ingestAlerts';
 import { addMockNotification, setNotificationViewer } from './notificationStore';
 
 const API = '/api/v1';
@@ -310,6 +310,7 @@ export const accountHandlers = [
       ],
       licences: rows.slice(0, 500),
       licences_truncated: rows.length > 500,
+      heartbeat: mockIngestHeartbeat(),
     };
     const body: AdminIngestStatus = { ...base, alerts: ingestAlerts(base) };
     return json(body);

@@ -180,7 +180,7 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
         </Button>
         <span className="spacer" />
         {/* T-F12：只对本策略生成的候选信号拟定草案（POST /plan-drafts {signal_ids}，§7）；状态不允许时禁用并说明 */}
-        <Tooltip title={!sig ? '本策略没有候选信号，不能拟定计划草案' : canDraft(sig.state) ? '按你的持仓与资金拟定计划草案；草案需你确认，交易由你在券商端自行完成' : `候选信号为“${SIGNAL_STATE[sig.state].text}”，仅“可拟定草案”或“原因已解除”状态可拟定`}>
+        <Tooltip title={!sig ? '本策略没有候选信号，不能拟定计划草案' : canDraft(sig.state) ? '按你的持仓与资金拟定计划草案；草案需你确认，交易由你在券商端自行完成' : `候选信号为“${SIGNAL_STATE[sig.state].text}”，仅“待检查”“可拟定草案”“原因已解除”状态可拟定`}>
           <Button
             size="small"
             disabled={!sig || !canDraft(sig.state) || sg.status !== 'active'}

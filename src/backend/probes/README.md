@@ -107,7 +107,7 @@ py -3 run_all.py --dry-run          # Linux/macOS: python3 run_all.py --dry-run
 确认默认模式下代理端口收到 0 个请求、`--use-env-proxy` 时请求改走代理；
 另对 p11 分别强制走“盘中采样”和“盘后跳过”两个分支，检查 7 项都输出结构化结论、盘后不发采样请求，并离线单测时段判定、单位推断、时间精度和时点判定逻辑。
 对 p12 检查：全流程只新增 2 次调用（`/hslt/list` 与两个全市场接口全程各只调 1 次）、单独运行（阶段 1c）调用 5 次；原始响应可解析且 sha256 一致；`codes.csv` 表头/行数正确；`mairui_dm_*.txt` 按 compare 脚本的读法得到 6 位代码集合；输出不含证书。
-另跑“阶段 5 开关矩阵”（见 §6A）：每个 T-B05 复测开关单独跑一遍，核对客户端调用数 = 服务端增量 = 预计次数、结果只含该开关的项、输出不含证书，非法参数一律拒绝（退出码 2）；跑完复原缺省值。`--skip-switch-matrix` 可跳过。
+另跑“阶段 6 p13”（见 §6B，28 次 ×2）；另跑“阶段 5 开关矩阵”（见 §6A）：每个 T-B05 复测开关单独跑一遍，核对客户端调用数 = 服务端增量 = 预计次数、结果只含该开关的项、输出不含证书，非法参数一律拒绝（退出码 2）；跑完复原缺省值。`--skip-switch-matrix` 可跳过。
 带开关的 dry-run（如 `python3 run_all.py --dry-run p11 --p11-only gap6-nulls`）在阶段 1 也按开关执行并核对。
 最后应看到 **“全部通过”**，退出码 0。dry-run 输出在 `results/dryrun/run-*-dryrun*/`（可删除，不需要回传）。
 （Windows 防火墙一般不会对只绑定 127.0.0.1 的程序弹窗；如弹窗，选择“取消/不允许”也不影响本地自检。）
@@ -200,6 +200,32 @@ done
 - `results/run-<…>/p01_realtime.json` … `p12_code_lists.json`：各探针结果；`summary.json`：调用总数、各主机累计 TCP 连接数
 - `samples/run-<…>/`：脱敏、截断后的接口样例
 - 如果 `summary.json` 或控制台提示某主机连接数 > 1（服务端关闭了空闲连接后重连），出口 IP 固定时不影响，但请在回传时说明。
+
+## 6B. p13 财务时点自算预检（T-R12 / T-R12a，只点名运行，缺省全量不含）
+
+```bash
+python3 run_all.py p13                                   # 28 次调用，串行、不重试
+python3 run_all.py p13 --p13-restated 600590.SH --p13-announce 2024-11-09 --p13-periods 2023-12-31,2024-06-30   # 换差错更正样例（仍 28 次）
+```
+
+| 项 | 调用 | 次数 |
+|---|---|---|
+| ① 现金流 OCF 两字段非空率、xj 恒等式、xj/je 一致性、YTD 判定 | `financial/cashflow`：600519、000001（银行）、600000（银行）、601318（保险）、300750、更正样例 600525 | 6 |
+| ② 银行/保险资产负债：gsmgdqsyhj、fzhj、zczj、单位、权益 ≤0 | `financial/balance`：同 ① 去掉 600000（银行由 000001 覆盖） | 5 |
+| ③ 同 jzrq 多 plrq 版本全量保存、对照 cninfo 更正公告 | `financial/income` 更正样例（cashflow/balance 复用 ①②） | 1 |
+| ④ capital plrq 语义（600519 2011-07-01 送股）；⑦ zgb 是否含 B/H；⑥ zgb；V5j CDR zgb 按基础股数还是 CDR 份数（输出 `v5j_cdr_unit`） | `financial/capital`：600519、000001、601318（A+H）、000550（A+B）、689009（CDR） | 5 |
+| ⑤ `/hszg/list` 申万一级代码、银行/保险节点、是否有申万二级 | `hszg/list` 1 + `hszg/gg/<银行节点>`、`hszg/gg/<保险节点>`（按 list 动态选，找不到就不调）+ `hszg/zg/000001`、`hszg/zg/601318` | 5 |
+| ⑥ PB = 不复权 c × zgb / 归母权益 | `history/<code>/d/n` 600519、000001、601318，2026-09-01..10-31 | 3 |
+| ⑧ 送转事件 vs capital 行可见时间（V5d） | `hscp/jnfh`：600519、000001 | 2 |
+| ⑨ 币种/单位字段（CDR 样例） | `financial/balance/689009.SH` | 1 |
+| 合计 | | **28** |
+
+输出：`results/run-<…>/p13_fin_pit/raw_<key>.json`（完整原始响应，同 jzrq 的每个 plrq 版本都在里面）、`manifest.json`（脱敏 URL、参数、状态、行数、字段、sha256）、`plan_meta.json`；
+`results/run-<…>/p13_analysis.json` 是离线分析结果（`p13_analyze.py`，只读原始文件，不出网，可在开发 box 上重跑：
+`python3 p13_analyze.py results/run-<…> --stdout`）。OCF 用 jyhdcsdxjlxj→jyhdcsdxjlje 逐分量 coalesce，`basis.ocf_field` 逐分量记录，两者都空 → null（`ocf_missing`），从不补 0；
+PB 按 plan 2.12.1：zgb 取 `bdrq ≤ d` 且 `plrq < d` 的最近一行，权益取 15 个月内 `plrq < d` 的最近报告，原因码只用 plan 2.12.1 T-R12b 的封闭 14 码（如权益 ≤0 → `non_positive_equity`、停牌 → `no_valid_bar`、除权后股本未更新 → `share_change_pending`、zgb 只含 A 股 → `a_share_only_capital`，多个命中取表中靠前的一个）；`basis.share_change_check`、`basis.share_class_check` 无法判定时为 `unavailable`。⑧ 给总判定 `overall_decision`，⑨ 没有币种/单位字段时结论写“只靠数量级不连续检查”。
+dry-run 阶段 6 用本地伪造服务端跑缺省和 `--p13-restated` 两遍，核对 28 次 = 服务端增量、manifest sha256、①–⑨ 都有调用、分析结果可重算、输出不含证书。
+离线自检：`env -u MAIRUI_LICENCE python3 ../selfchecks/tr12_fin.py [运行目录]`。
 
 ## 7. 遇到 103（或 429 / 101）怎么办
 

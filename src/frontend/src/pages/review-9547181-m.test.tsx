@@ -199,18 +199,19 @@ describe('m4：/test 判断顺序与后端一致（暂停 409 先于限速）', 
   });
 });
 
-describe('m5：过期后显示“已过期”，不显示“剩 -N 天”', () => {
+describe('m5：过期后显示“已过填写的到期日”（#40 文案），不显示“剩 -N 天”', () => {
   it('文案函数', () => {
-    expect(expiryLeftText(null)).toBeNull();
-    expect(expiryLeftText(-3)).toBe('已过期');
+    // v0.2.9 #40 文案
+    expect(expiryLeftText(null)).toBe('未填写到期日');
+    expect(expiryLeftText(-3)).toBe('已过填写的到期日');
     expect(expiryLeftText(0)).toBe('今天到期');
-    expect(expiryLeftText(5)).toBe('剩 5 天');
+    expect(expiryLeftText(5)).toBe('还剩 5 天');
   });
   it('设置页', async () => {
     setMockLicence(uid(2), { expires_on: '2026-10-01', days_to_expiry: -32 });
     renderAt('/settings/data-licence');
     const box = await screen.findByTestId('licence-status');
-    await waitFor(() => expect(box).toHaveTextContent('2026-10-01（已过期）'));
+    await waitFor(() => expect(box).toHaveTextContent('2026-10-01（已过填写的到期日）'));
     expect(box.textContent).not.toMatch(/剩 -/);
   });
   it('管理端采集表与证书列表', async () => {
@@ -218,14 +219,14 @@ describe('m5：过期后显示“已过期”，不显示“剩 -N 天”', () =
     setMockLicence(uid(13), { expires_on: '2026-10-01', days_to_expiry: -32 });
     renderAt('/admin/ingest');
     const table = await screen.findByTestId('admin-ingest');
-    await waitFor(() => expect(within(table).getByText('2026-10-01（已过期）')).toBeInTheDocument());
+    await waitFor(() => expect(within(table).getByText('2026-10-01（已过填写的到期日）')).toBeInTheDocument());
     expect(table.textContent).not.toMatch(/剩 -/);
   });
   it('管理端证书列表', async () => {
     mockLoginAs('admin');
     setMockLicence(uid(13), { expires_on: '2026-10-01', days_to_expiry: -32 });
     renderAt('/admin/data-licences');
-    await waitFor(() => expect(screen.getByText('2026-10-01（已过期）')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('2026-10-01（已过填写的到期日）')).toBeInTheDocument());
     expect(document.body.textContent).not.toMatch(/剩 -/);
   });
 });

@@ -22,8 +22,8 @@ export function conflictsOf(sig: CandidateSignal, all: readonly CandidateSignal[
   return all.filter((o) => o.id !== sig.id && o.security_code === sig.security_code && !isTerminal(o.state) && direction(o.proposed_action) !== null && direction(o.proposed_action) !== d);
 }
 
-/** 可拟定计划草案的状态（契约 §7.7：drafted / released） */
-export const canDraft = (s: CandidateSignalState) => s === 'drafted' || s === 'released';
+/** 可拟定计划草案的状态（契约 v0.2.9 #37 §7.7：open、released、drafted；drafted 即重新生成） */
+export const canDraft = (s: CandidateSignalState) => s === 'open' || s === 'drafted' || s === 'released';
 
 /** 名单类原因（契约 v0.2.9 #9）：BLOCKLISTED、USER_MUTED 只能删除 /restrictions 解除，/release → 409 */
 export const VIA_RESTRICTIONS: ReadonlySet<string> = new Set(['BLOCKLISTED', 'USER_MUTED']);

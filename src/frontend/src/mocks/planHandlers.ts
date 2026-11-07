@@ -18,6 +18,7 @@ export const signalAllowed = (st: CandidateSignalState): CandidateSignalState[] 
   TERMINAL_SIGNAL_STATES.includes(st) ? [] : st === 'drafted' ? ['confirmed', 'dismissed'] : st === 'blocked' ? ['released', 'dismissed'] : ['dismissed'];
 
 const API = '/api/v1';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fail = (status: number, code: string, message: string, details: Record<string, unknown> | null = null) =>
   HttpResponse.json(errorBody(code, message, details), { status });
 
@@ -123,29 +124,39 @@ export const planHandlers = [
   }),
 
   http.post(`${API}/plan-drafts`, async ({ request }) => {
+    // 契约 v0.2.9 #37（§7.7 完整判定顺序）：每一步对全部信号检查完再进入下一步，返回第一个不通过的步骤
     const body = (await request.json().catch(() => null)) as { signal_ids?: unknown } | null;
-    const ids = Array.isArray(body?.signal_ids) ? (body!.signal_ids as unknown[]).filter((x): x is string => typeof x === 'string') : [];
-    if (!ids.length) return validation('signal_ids', '至少一个候选信号');
+    const raw = body?.signal_ids;
+    // ① 格式：非空 uuid 数组
+    if (!Array.isArray(raw) || !raw.length || !raw.every((x) => typeof x === 'string' && UUID_RE.test(x))) {
+      return validation('signal_ids', 'signal_ids 须为非空 uuid 数组');
+    }
+    const ids = raw as string[];
     const all = signalsNow();
     const list = ids.map((id) => all.find((c) => c.id === id));
-    if (list.some((c) => !c)) return notFound('候选信号');
+    // ② 不存在或不属于本人 → 400 not_found（不返回 404，不区分两种情况）
+    if (list.some((c) => !c)) {
+      return HttpResponse.json(errorBody('VALIDATION_ERROR', '候选信号不存在', { fields: [{ field: 'signal_ids', issue: 'not_found' }] }), { status: 400 });
+    }
     const css = list as CandidateSignal[];
-    // v0.2.9 #30 ③：400 先于 409——方向不同 / 跨证券 / 动作不同 / t_leg 不同 → 400 signal_ids；
-    // 同向但带 STRATEGY_CONFLICT 等未解除原因 → 后面的 409 SIGNAL_NOT_EXECUTABLE
+    // ③ 同一证券、同一 proposed_action、同一 t_leg
     const same = (k: (c: CandidateSignal) => unknown) => new Set(css.map(k)).size === 1;
     if (!same((c) => c.security_code) || !same((c) => c.proposed_action) || !same((c) => c.t_leg)) {
       return validation('signal_ids', '多个信号须属于同一证券、同一动作（有 t_leg 时 t_leg 也相同）');
     }
+    // ④ simulating 模板
     const sim = css.find((c) => c.lifecycle === 'simulating');
     if (sim) return fail(409, 'STRATEGY_VERSION_NOT_RUNNABLE', '模拟期策略不能拟定计划草案', { lifecycle: sim.lifecycle });
-    // v0.2.9 #30 ③ / 验收 5：同向、但其中有信号因 STRATEGY_CONFLICT（生效中）处于 blocked → 409 SIGNAL_NOT_EXECUTABLE；
-    // 其余非 drafted/released（含其他原因的 blocked）→ 409 INVALID_STATE_TRANSITION；再有生效原因 → SIGNAL_NOT_EXECUTABLE
+    // ⑤ 终态 → INVALID_STATE_TRANSITION，allowed=[]
+    const term = css.find((c) => TERMINAL_SIGNAL_STATES.includes(c.state));
+    if (term) return fail(409, 'INVALID_STATE_TRANSITION', `候选信号状态为 ${term.state}，不能拟定计划草案`, { from: term.state, to: 'drafted', allowed: [] });
+    // ⑥ blocked 或仍有 active 原因（不论原因码）→ SIGNAL_NOT_EXECUTABLE，reason_ids 去重后按 id 升序
     const activeR = reasonsNow().filter((r) => ids.includes(r.signal_id) && r.status === 'active');
-    const conflictBlocked = css.filter((c) => c.state === 'blocked' && activeR.some((r) => r.signal_id === c.id && r.code === 'STRATEGY_CONFLICT'));
-    if (conflictBlocked.length) return fail(409, 'SIGNAL_NOT_EXECUTABLE', '信号存在未解除的不可执行原因', { reason_ids: activeR.map((r) => r.id) });
-    const bad = css.find((c) => c.state !== 'drafted' && c.state !== 'released');
-    if (bad) return fail(409, 'INVALID_STATE_TRANSITION', `候选信号状态为 ${bad.state}，不能拟定计划草案`, { from: bad.state, to: 'drafted', allowed: signalAllowed(bad.state) });
-    if (activeR.length) return fail(409, 'SIGNAL_NOT_EXECUTABLE', '信号存在未解除的不可执行原因', { reason_ids: activeR.map((r) => r.id) });
+    if (activeR.length || css.some((c) => c.state === 'blocked')) {
+      const reasonIds = [...new Set(activeR.map((r) => r.id))].sort();
+      return fail(409, 'SIGNAL_NOT_EXECUTABLE', '信号存在未解除的不可执行原因', { reason_ids: reasonIds });
+    }
+    // ⑦ 没有可解释的规则引用 → 422；open、released、drafted 均可拟定（drafted 即重新生成）
     const unexplained = css.find((c) => !c.rule_refs.some((r) => EXPLAINABLE_ROLES.has(r.role) && r.passed === true));
     if (unexplained) return fail(422, 'PLAN_REQUIRES_EXPLAINABLE_SIGNAL', '信号缺少可解释的规则依据');
     seq += 1;

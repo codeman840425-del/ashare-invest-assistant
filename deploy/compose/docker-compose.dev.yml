@@ -10,6 +10,14 @@
 #   3) 便于调试：postgres / redis 只在 127.0.0.1 上暴露端口。
 # 需要真实联调时（仅"当前唯一调用方"主机）：AIA_PROFILE=live deploy/scripts/up.sh（不叠加本文件）。
 
+# 日志轮转（T-A04 ③）：所有容器统一 json-file，单文件 10m、保留 5 个（每容器最多约 50MB）。
+# 每个服务都写 logging: *default-logging；CI（scripts/ci/check_compose_logging.py）检查每个服务都配了。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 x-dev-env: &dev-env
   APP_ENV: local
   APP_RELOAD: "true"
@@ -18,6 +26,7 @@ x-dev-env: &dev-env
 
 services:
   migrate:
+    logging: *default-logging
     environment:
       <<: *dev-env
     volumes:
@@ -25,6 +34,7 @@ services:
       - ../../config:/app/config:ro
 
   api:
+    logging: *default-logging
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*",
               "--reload", "--reload-dir", "/app/src/backend/app"]
     environment:
@@ -34,6 +44,7 @@ services:
       - ../../config:/app/config:ro
 
   worker:
+    logging: *default-logging
     environment:
       <<: *dev-env
     volumes:
@@ -41,6 +52,7 @@ services:
       - ../../config:/app/config:ro
 
   ingest:
+    logging: *default-logging
     environment:
       <<: *dev-env
       MAIRUI_MODE: replay
@@ -51,6 +63,7 @@ services:
       - ../../tests/fixtures:/fixtures:ro
 
   signal-rt:
+    logging: *default-logging
     environment:
       <<: *dev-env
     volumes:
@@ -58,6 +71,7 @@ services:
       - ../../config:/app/config:ro
 
   beat:
+    logging: *default-logging
     environment:
       <<: *dev-env
     volumes:
@@ -66,13 +80,16 @@ services:
 
   # 网关限流（T-O10）：dev 改挂宽松取值（同一容器路径覆盖基础文件的 limits.conf），避免测试方 live 契约套件/e2e 被网关 429。
   nginx:
+    logging: *default-logging
     volumes:
       - ../nginx/limits.dev.conf:/etc/nginx/aia-limits.conf:ro
 
   postgres:
+    logging: *default-logging
     ports:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
 
   redis:
+    logging: *default-logging
     ports:
       - "127.0.0.1:${REDIS_HOST_PORT:-56379}:6379"

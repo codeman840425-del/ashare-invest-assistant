@@ -22,6 +22,10 @@
      （plan e56462c）：api / worker 必须挂，表中其余服务不得挂；任何 compose 文件里出现表里没有的服务 → 失败
      （新增服务必须先登记“挂或不挂”）；ingest 必须设 AIA_FORBID_APP_MASTER_KEY: "1" 并用入口包装（发现主密钥即拒绝启动），
      任何 compose 文件都不得改掉。
+     按服务的 secret 白名单 SERVICE_SECRETS（T-A04 ②，MASTER_KEY_ALLOC 由它派生）：api = 公钥 + app_master_key；
+     worker = app_master_key；ingest = 私钥 + 公钥；db-roles = 三个 db_password_*；maint-cli = db_password_aia_maint；
+     beat / signal-rt / migrate / timescale-apply / nginx / postgres / redis = 无。服务挂了表外的 secret、
+     表外的服务、顶层定义了未登记的 secret → 失败；base compose 里表中服务必须挂齐（少挂 → 失败）。
   8. 不悄悄换主密钥（T-O11 评审 M1）：deploy/scripts/compose.sh 不直接调用 app-master-keygen.sh，只经
      app-master-key-ensure.sh（已有 → 用；旧 .env 有 → 迁移；库有数据 → 拒绝；全新空库 → 生成）；基础 compose 里
      api / worker 设 AIA_REQUIRE_APP_MASTER_KEY: "1"（没挂 secret 就拒绝启动，不回落临时密钥），任何 compose 文件都不得改掉它。
@@ -34,6 +38,8 @@
      - 顶层 configs 不得引用密钥目录（AIA_SECRETS_DIR / .config/aia/secrets）或受保护文件；顶层 volumes 的 driver_opts
        （如 bind 的 device）同样不得引用；服务的 volumes 不得直接挂受保护文件；
      - 禁止 include:（引入的文件不在本检查范围内）和服务级 extends.file（同理）。
+  11. 数据卷白名单（T-A04 ⑪/⑫，DATA_VOLUMES）：imports 只允许 api / worker / maint-cli 挂，base 里三者都必须读写挂、
+     挂载点 = 各自的 IMPORT_STORAGE_PATH；其它服务挂、或任何只读挂载都拒绝。
 
 失败退出码 1，依赖缺失退出码 2。用法：check_secret_boundary.py [--repo DIR]
 """
@@ -60,7 +66,9 @@ PRIVATE_SECRET = "data_licence_seal_private_keys"
 PUBLIC_SECRET = "data_licence_seal_public_keys"
 PRIVATE_ENV_RE = re.compile(r"_PRIVATE_KEYS?$")
 PRIVATE_OWNER = "ingest"
-DB_ROLE_OF = {"api": ("aia_api", "AIA_DB_API_PASSWORD"), "ingest": ("aia_ingest", "AIA_DB_INGEST_PASSWORD")}
+# worker 也用 aia_api（T-A04 ④，review-028c077 M1）：只跑清理任务，所需 DML 由 grants.sql $worker$ 段授予并自检
+DB_ROLE_OF = {"api": ("aia_api", "AIA_DB_API_PASSWORD"), "worker": ("aia_api", "AIA_DB_API_PASSWORD"),
+              "ingest": ("aia_ingest", "AIA_DB_INGEST_PASSWORD")}
 # 不挂任何 secret 的服务（只需 DATABASE_URL）。原 cooldown-purge 服务已删除（冷却清理改由 beat 调度、worker 执行，后端 6670b10）
 NO_SECRET_SVCS: tuple[str, ...] = ()
 DB_PW_SECRETS = ("db_password_aia_api", "db_password_aia_ingest", "db_password_aia_maint")
@@ -70,14 +78,21 @@ DB_PW_ALLOWED = {s: {DB_PW_OWNER} for s in DB_PW_SECRETS} | {"db_password_aia_ma
 MAINT_URL_ENV_RE = re.compile(r"^AIA_MAINT_DATABASE_URL")
 MASTER_ENV = "APP_MASTER_KEY"
 MASTER_SECRET = "app_master_key"
-# 显式白名单（plan e56462c“APP_MASTER_KEY 按服务分配”，CI 规则 7）：True = 必须挂 app_master_key，False = 不得挂。
-# 新增 compose 服务必须先登记在这里，否则 CI 失败。
-MASTER_KEY_ALLOC = {
-    "api": True, "worker": True,
-    "ingest": False, "beat": False, "signal-rt": False, "maint-cli": False, "migrate": False,
-    "timescale-apply": False, "db-roles": False,
-    "nginx": False, "postgres": False, "redis": False,
+# 显式白名单（plan e56462c“APP_MASTER_KEY 按服务分配”，CI 规则 7，T-A04 ②）：每个 compose 服务允许挂哪些 secret，
+# 逐个服务写明。不在表里的服务一律拒绝（新增服务必须先登记）；服务挂了表外的 secret 拒绝；
+# 顶层 secrets 定义了未登记的名字也拒绝。base compose 里每个服务必须恰好挂齐表里的集合（多挂、少挂都报）。
+# dev compose 不挂任何 secret（是表的子集即可）。
+SERVICE_SECRETS: dict[str, frozenset[str]] = {
+    "api": frozenset({PUBLIC_SECRET, MASTER_SECRET}),
+    "worker": frozenset({MASTER_SECRET}),
+    "ingest": frozenset({PRIVATE_SECRET, PUBLIC_SECRET}),
+    "db-roles": frozenset(DB_PW_SECRETS),
+    "maint-cli": frozenset({"db_password_aia_maint"}),
+    "beat": frozenset(), "signal-rt": frozenset(), "migrate": frozenset(), "timescale-apply": frozenset(),
+    "nginx": frozenset(), "postgres": frozenset(), "redis": frozenset(),
 }
+# 兼容：True = 必须挂 app_master_key，False = 不得挂（由 SERVICE_SECRETS 派生，不再单独维护）
+MASTER_KEY_ALLOC = {k: MASTER_SECRET in v for k, v in SERVICE_SECRETS.items()}
 MASTER_OWNERS = tuple(k for k, v in MASTER_KEY_ALLOC.items() if v)
 MASTER_FORBID_ENV = "AIA_FORBID_APP_MASTER_KEY"
 MASTER_FORBID_SVCS = ("ingest",)
@@ -221,6 +236,59 @@ def _check_rule10(rel: str, doc: dict, is_base: bool, errs: list[str]) -> None:
             errs.append(f"{rel}: 卷 {vname} 的 driver_opts 引用了 {hit}（会把密钥目录当普通卷挂进容器，m2）")
 
 
+# 数据卷白名单（T-A04 ⑪ / ⑫）：卷名 → 允许挂的服务、base 里必须挂的服务、挂载点须等于的环境变量（None = 不查）。
+# 任何挂载都必须读写（这些卷都要在容器里删 / 写文件）；未列出的服务挂了就拒绝。
+DATA_VOLUMES: dict[str, dict] = {
+    "imports": {"allowed": frozenset({"api", "worker", "maint-cli"}),
+                "required": frozenset({"api", "worker", "maint-cli"}),
+                "path_env": "IMPORT_STORAGE_PATH"},
+}
+
+
+def _volume_mounts(vols) -> list[tuple[str, str, bool]]:
+    """(source, target, read_only)；短语法 src:dst[:mode]，长语法 dict。"""
+    out = []
+    for v in vols or []:
+        if isinstance(v, dict):
+            out.append((str(v.get("source", "")), str(v.get("target", "")), bool(v.get("read_only"))))
+            continue
+        s = str(v)
+        # 目标路径里可能有 ${VAR:-/x} 这样的冒号：先取 source，再从末尾剥 mode
+        src, _, rest = s.partition(":")
+        mode = ""
+        for m in (":ro", ":rw", ":z", ":Z", ":ro,z", ":ro,Z"):
+            if rest.endswith(m):
+                rest, mode = rest[: -len(m)], m[1:]
+                break
+        out.append((src, rest, "ro" in mode.split(",")))
+    return out
+
+
+def _check_data_volumes(rel: str, doc: dict, is_base: bool, errs: list[str]) -> None:
+    svcs = doc.get("services") or {}
+    for name, svc in svcs.items():
+        svc = svc or {}
+        for src, target, ro in _volume_mounts(svc.get("volumes")):
+            spec = DATA_VOLUMES.get(src)
+            if spec is None:
+                continue
+            if name not in spec["allowed"]:
+                errs.append(f"{rel}: 服务 {name} 挂了数据卷 {src}，只允许 {'/'.join(sorted(spec['allowed']))}")
+                continue
+            if ro:
+                errs.append(f"{rel}: 服务 {name} 只读挂载了数据卷 {src}（必须读写：要在容器里写 / 删文件）")
+            env = svc.get("environment")
+            if is_base and spec.get("path_env") and isinstance(env, dict) and str(env.get(spec["path_env"])) != target:
+                errs.append(f"{rel}: 服务 {name} 的数据卷 {src} 挂载点 {target} ≠ 其 {spec['path_env']}")
+    if is_base:
+        for vname, spec in DATA_VOLUMES.items():
+            for name in sorted(spec["required"]):
+                if name in svcs and not any(s == vname for s, _, _ in _volume_mounts((svcs[name] or {}).get("volumes"))):
+                    errs.append(f"{rel}: 服务 {name} 没有挂数据卷 {vname}（T-A04 ⑪/⑫）")
+                if name in svcs and spec.get("path_env") and spec["path_env"] not in _env_keys((svcs[name] or {}).get("environment")):
+                    errs.append(f"{rel}: 服务 {name} 缺少 {spec['path_env']}（数据卷 {vname} 的挂载点）")
+
+
 def check(repo: Path) -> list[str]:
     errs: list[str] = []
     for rel, text in _texts(repo):
@@ -237,6 +305,7 @@ def check(repo: Path) -> list[str]:
         if doc is None:
             continue
         _check_rule10(rel, doc, rel == BASE_COMPOSE, errs)
+        _check_data_volumes(rel, doc, rel == BASE_COMPOSE, errs)
         for name, svc in (doc.get("services") or {}).items():
             svc = svc or {}
             where = f"{rel}: 服务 {name}"
@@ -264,8 +333,11 @@ def check(repo: Path) -> list[str]:
             for sn in sorted(names & set(DB_PW_SECRETS)):
                 if name not in DB_PW_ALLOWED[sn]:
                     errs.append(f"{rel}: 服务 {name} 挂了 {sn}，只允许 {'/'.join(sorted(DB_PW_ALLOWED[sn]))}")
-            if name not in MASTER_KEY_ALLOC:
-                errs.append(f"{rel}: 服务 {name} 未在 MASTER_KEY_ALLOC 白名单登记（新增服务必须先登记是否挂 {MASTER_SECRET}，plan e56462c）")
+            if name not in SERVICE_SECRETS:
+                errs.append(f"{rel}: 服务 {name} 未在 MASTER_KEY_ALLOC 白名单登记（SERVICE_SECRETS；新增服务必须先登记允许挂哪些 secret、是否挂 {MASTER_SECRET}，plan e56462c）")
+            else:
+                for sn in sorted(names - SERVICE_SECRETS[name]):
+                    errs.append(f"{rel}: 服务 {name} 挂了 {sn}，不在该服务的 secret 白名单（SERVICE_SECRETS[{name!r}] = {sorted(SERVICE_SECRETS[name]) or '无'}，规则 7）")
             if name in MASTER_FORBID_SVCS and MASTER_FORBID_ENV in _env_keys(svc.get("environment")):
                 fenv = svc.get("environment")
                 fv = fenv.get(MASTER_FORBID_ENV) if isinstance(fenv, dict) else next(
@@ -300,6 +372,8 @@ def check(repo: Path) -> list[str]:
                 if not m or m.group(1) != user or m.group(3) != var:
                     errs.append(f"{rel}: 服务 {name} 的 DATABASE_URL 应为 {user}:${{{var}}}@…（不得用属主或明文口令）")
         for sname, sdef in (doc.get("secrets") or {}).items():
+            if sname not in PROTECTED_SECRETS:
+                errs.append(f"{rel}: 顶层 secret {sname} 未登记（只允许 {'/'.join(PROTECTED_SECRETS)}，并须在 SERVICE_SECRETS 分配，规则 7）")
             if isinstance(sdef, dict) and "environment" in sdef:
                 errs.append(f"{rel}: secret {sname} 用 environment: 定义（必须用 file:，不经环境变量）")
 
@@ -318,8 +392,6 @@ def check(repo: Path) -> list[str]:
             env = (svcs.get(svc) or {}).get("environment")
             if not (isinstance(env, dict) and "DATABASE_URL" in env):
                 errs.append(f"{BASE_COMPOSE}: 服务 {svc} 没有显式 DATABASE_URL（必须用独立角色）")
-        need = {PRIVATE_OWNER: {PRIVATE_SECRET, PUBLIC_SECRET}, "api": {PUBLIC_SECRET, MASTER_SECRET},
-                "worker": {MASTER_SECRET}}
         for svc in MASTER_OWNERS:
             env = (svcs.get(svc) or {}).get("environment")
             if not (isinstance(env, dict) and str(env.get(MASTER_REQUIRE_ENV)) == "1"):
@@ -331,7 +403,9 @@ def check(repo: Path) -> list[str]:
                 errs.append(f"{BASE_COMPOSE}: 服务 {svc} 缺少 {MASTER_FORBID_ENV}: \"1\"（plan：ingest 不得持有主密钥）")
             if sd.get("entrypoint") != SECRET_ENV_ENTRY:
                 errs.append(f"{BASE_COMPOSE}: 服务 {svc} 没用入口包装 {SECRET_ENV_ENTRY}（主密钥检测）")
-        for svc, want in need.items():
+        for svc, want in SERVICE_SECRETS.items():
+            if svc not in svcs:
+                continue
             have = set(_secret_names((svcs.get(svc) or {}).get("secrets")))
             if not want <= have:
                 errs.append(f"{BASE_COMPOSE}: 服务 {svc} 缺少 secrets {sorted(want - have)}")

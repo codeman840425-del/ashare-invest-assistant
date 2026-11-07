@@ -92,7 +92,8 @@ describe('mock 与契约 §7.7 一致', () => {
   it('生成：参数、状态、成功后信号关联新草案', async () => {
     expect((await post('/plan-drafts', { signal_ids: [] })).status).toBe(400);
     const blocked = await post('/plan-drafts', { signal_ids: [SIG_BLOCKED] });
-    expect([blocked.status, (await blocked.json()).error.code]).toEqual([409, 'INVALID_STATE_TRANSITION']);
+    // v0.2.9 #37：blocked（不论原因码）→ SIGNAL_NOT_EXECUTABLE；INVALID_STATE_TRANSITION 只用于终态
+    expect([blocked.status, (await blocked.json()).error.code]).toEqual([409, 'SIGNAL_NOT_EXECUTABLE']);
     const ok = await post('/plan-drafts', { signal_ids: [SIG_DRAFTED] });
     expect(ok.status).toBe(201);
     const d = (await ok.json()) as PlanDraft;

@@ -349,17 +349,29 @@ def drop_uncommitted_rows(conn: Connection, batch_id: uuid.UUID) -> int:
     return int(res.rowcount or 0)
 
 
-def purge_uncommitted_import_rows(conn: Connection) -> int:
-    """定时清理（beat 每小时排程、worker 执行）：删除 discarded / failed 批次残留的预览行。
+#: 预览行清理每条 DELETE 最多删除的行数（架构师评审：分块、避免长事务与大锁）
+PREVIEW_PURGE_CHUNK: Final = 10_000
 
-    幂等：只按批次当前状态删除，重复执行第二次删 0 行；状态判定与删除在同一条语句里，
-    并发的“重新解析”（failed → parsing）不会被误删（语句快照内批次已不是 failed）。"""
+
+def purge_uncommitted_import_rows(conn: Connection, *, chunk: int = PREVIEW_PURGE_CHUNK) -> int:
+    """定时清理（beat 每小时排程、worker 执行）：删除 discarded / failed 批次残留的预览行，
+    **一次最多 ``chunk`` 行**（默认 10 000）。返回本次删除的行数；等于 ``chunk`` 表示可能还有剩余，
+    调用方（:func:`app.workers.jobs.purge_import_rows_task`）每块单独提交并继续。
+
+    幂等：只按批次当前状态删除，重复执行删 0 行；状态判定与删除在同一条语句里，并发的
+    “重新解析”（failed → parsing）不会被误删（语句快照内批次已不是 failed）。"""
+    if chunk < 1:
+        raise ValueError("chunk 必须 ≥ 1")
     b = import_batches
-    res = conn.execute(
-        delete(import_rows).where(
+    ids = (
+        select(import_rows.c.id)
+        .where(
             import_rows.c.batch_id.in_(select(b.c.id).where(b.c.status.in_(ROWS_DROPPED_STATUSES)))
         )
+        .limit(chunk)
+        .scalar_subquery()
     )
+    res = conn.execute(delete(import_rows).where(import_rows.c.id.in_(ids)))
     return int(res.rowcount or 0)
 
 
@@ -372,9 +384,10 @@ def purge_expired_raw_files(
 ) -> int:
     """定时清理（评审 bbf58a0 m6，plan §3.5A）：删除 ``retained_until`` 已到期的加密原始文件。
 
-    逐条：先删磁盘文件（不存在视为已删），再把 ``import_files`` 置 ``deleted_at=now,
+    逐条：先删磁盘文件（根目录存在而文件不存在视为已删；根目录不存在报错、行保留，
+    契约 v0.2.9 #41 ②），再把 ``import_files`` 置 ``deleted_at=now,
     storage_path=NULL``。``FOR UPDATE SKIP LOCKED`` 避免与并发的放弃 / 注销争用。幂等：
-    事务回滚后下一轮重删（``unlink(missing_ok)``）。删除失败（路径越界、权限）只记批次号与
+    事务回滚后下一轮重删（``unlink(missing_ok)``）。删除失败（路径越界、权限、存储根目录不存在）只记批次号与
     异常类型，该行保留，下一轮重试。返回本轮成功清理的文件数。"""
     now = now or dt.datetime.now(dt.UTC)
     f = import_files

@@ -14,6 +14,8 @@ T-B05 复测开关（缺省 = 原行为；调用次数见 README §6A）：
   python run_all.py p11 --p11-only gap6-history [--history-baseline <run_id 或样例目录>]   # 复测 3：2 次
   python run_all.py p11 --p11-only gap6-nulls [--zt-codes 002001,603001]          # 复测 2：8 次
   python run_all.py p12 --p12-only hslt                                           # 复测 4：1 次
+  python run_all.py p13 [--p13-restated 600525.SH]                                # T-R12/T-R12a ①–⑨：28 次（只点名运行）
+  python p13_analyze.py results/run-<ts>                                          # 离线重算 p13 分析（不联网）
 
 results/STOP 存在时拒绝真实调用；删除前请确认已等待 ≥60 秒且出口 IP 固定。
 """
@@ -37,10 +39,13 @@ import common as c  # noqa: E402
 ORDER = ["p01_realtime", "p02_kline", "p03_moneyflow", "p04_lhb_pool_auction", "p05_fundamental",
          "p06_factors", "p07_sector_index", "p08_news", "p11_gaps", "p12_code_lists", "p10_stability",
          "p09_ratelimit"]
+# 只在显式点名时运行（不进缺省全量，缺省全量的调用次数不变）
+OPT_IN = ["p13_fin_pit"]
 
 
 def select(want: list) -> list:
-    return [m for m in ORDER if not want or any(m.startswith(w) for w in want)]
+    base = [m for m in ORDER if not want or any(m.startswith(w) for w in want)]
+    return base + [m for m in OPT_IN if want and any(m.startswith(w) for w in want)]
 
 
 def run_probes(mods: list) -> bool:
@@ -188,7 +193,7 @@ def apply_switches(args) -> dict:
             "g": {k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
                   for k, v in vars(g).items() if k in ("LAT_CODES", "ONLY", "LOCAL_AHEAD_S", "NTP_SOURCES",
                                                        "NTP_RAW", "HISTORY_BASELINE", "ZT_CODES", "PIT_BATCH_DAY")},
-            "p12": {"ONLY_KEYS": p12.ONLY_KEYS}})
+            "p12": {"ONLY_KEYS": p12.ONLY_KEYS}, "p13": {"RESTATED": dict(_p13().RESTATED)}})
     cfg = {}
     if args.gap1_codes:
         codes = g.parse_codes(args.gap1_codes)
@@ -229,14 +234,33 @@ def apply_switches(args) -> dict:
     if args.p12_only:
         p12.ONLY_KEYS = p12.ONLY_CHOICES[args.p12_only]
         cfg["p12_only"] = args.p12_only
+    if getattr(args, "p13_restated", None):
+        code = args.p13_restated.strip().upper()
+        if not __import__("re").fullmatch(r"\d{6}\.(SH|SZ|BJ)", code):
+            raise ValueError(f"--p13-restated 需要 6 位代码加 .SH/.SZ/.BJ，给了 {args.p13_restated!r}")
+        _p13().RESTATED = {**_p13().RESTATED, "code": code}
+        if args.p13_announce:
+            _p13().RESTATED["announce"] = args.p13_announce
+        if args.p13_periods:
+            _p13().RESTATED["periods"] = [x.strip() for x in args.p13_periods.split(",") if x.strip()]
+        cfg["p13_restated"] = _p13().RESTATED
+    elif getattr(args, "p13_announce", None) or getattr(args, "p13_periods", None):
+        raise ValueError("--p13-announce / --p13-periods 只配合 --p13-restated")
     if (args.history_baseline and g.ONLY != "gap6-history") or (args.zt_codes and g.ONLY != "gap6-nulls"):
         raise ValueError("--history-baseline 只配合 --p11-only gap6-history；--zt-codes 只配合 --p11-only gap6-nulls")
     return cfg
 
 
+def _p13():
+    import p13_fin_pit
+    return p13_fin_pit
+
+
 def restore_switches():
     import p11_gaps as g
     import p12_code_lists as p12
+    for k, v in SWITCH_DEFAULTS.get("p13", {}).items():
+        setattr(_p13(), k, dict(v))
     for k, v in SWITCH_DEFAULTS.get("g", {}).items():
         setattr(g, k, list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
     for k, v in SWITCH_DEFAULTS.get("p12", {}).items():
@@ -396,6 +420,96 @@ def _switch_matrix(check, args, st_api, st_pro, base_api, base_pro, echo_url):
         g.FORCE_SESSION = None
 
 
+P13_EXPECT_CALLS = 28
+
+
+def _p13_phase(check, args, st_api, st_pro, base_api, base_pro, echo_url):
+    import hashlib
+    import p13_analyze as an
+    p13 = _p13()
+    check("p13：缺省全量不含 p13（只点名运行）", "p13_fin_pit" not in select([]) and "p13_fin_pit" in select(["p13"]))
+    for label, argv, restated in (("p13", [], "600525.SH"), ("p13-restated", ["--p13-restated", "600590.SH",
+                                  "--p13-announce", "2024-11-09", "--p13-periods", "2023-12-31,2024-06-30"],
+                                  "600590.SH")):
+        restore_switches()
+        apply_switches(_switch_args(argv))
+        ctx = c.init_run(dry_run=True, base=base_api, pro_base=base_pro, min_interval=args.dry_interval,
+                         skip_pro_host=args.skip_pro_host, no_env_proxy=args.no_env_proxy, egress_url=echo_url,
+                         tag=f"dryrun-{label}")
+        print(f"[dry-run] 阶段 6 {label}，输出目录 {ctx.run_dir}")
+        a0, p0 = st_api.requests, st_pro.requests
+        ok = run_probes(["p13_fin_pit"])
+        s = c.close_run()
+        delta = st_api.requests - a0 + st_pro.requests - p0
+        check(f"{label}：未熔断且客户端 {P13_EXPECT_CALLS} 次 = 服务端增量",
+              ok and s["calls"] == P13_EXPECT_CALLS == delta, f"client={s['calls']} server=+{delta}")
+        sub = ctx.run_dir / p13.SUBDIR
+        try:
+            man = json.loads((sub / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            man = []
+        good = bool(man)
+        for e in man:
+            try:
+                b = (ctx.run_dir / e["raw_file"]).read_bytes()
+                good &= hashlib.sha256(b).hexdigest() == e["sha256"] and e["ok"]
+            except (OSError, KeyError):
+                good = False
+        check(f"{label}：manifest {len(man)} 条，原始响应齐全、sha256 一致、全部 200", good and len(man) == P13_EXPECT_CALLS)
+        items = {x for e in man for x in e.get("item", "")}
+        check(f"{label}：条目 ①–⑨ 都有调用", set("①②③④⑤⑥⑦⑧⑨") <= items, "".join(sorted(items)))
+        rs_ok = any(e["key"] == f"income_{restated[:6]}" for e in man)
+        check(f"{label}：更正样例公司 = {restated}（③ income 已取）", rs_ok)
+        try:
+            a = json.loads((ctx.run_dir / "p13_analysis.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            a = {}
+        meta = json.loads((sub / "plan_meta.json").read_text(encoding="utf-8")) if (sub / "plan_meta.json").exists() else {}
+        again = json.loads(json.dumps(an.analyze(an.load_raw(ctx.run_dir), meta), ensure_ascii=False, default=str))
+        check(f"{label}：p13_analysis.json 存在且与离线脚本对原始文件重算结果一致", bool(a) and a == again)
+        if label == "p13":
+            cf = a.get("1_cashflow", {})
+            check("p13 mock：① 银行 OCF 走 jyhdcsdxjlje、一般企业走 jyhdcsdxjlxj、累计口径判定 ytd",
+                  cf.get("000001", {}).get("ocf_field_used_latest", {}).get("jyhdcsdxjlje", 0) > 0
+                  and cf.get("600519", {}).get("ocf_field_used_latest", {}).get("jyhdcsdxjlxj", 0) > 0
+                  and cf.get("600519", {}).get("ytd", {}).get("verdict") == "ytd_cumulative")
+            b = a.get("4_capital", {}).get("600519_bonus_2011", {})
+            check("p13 mock：④ 600519 2011-07-01 股本行被找到", b.get("first_after_bdrq_eq_ex_date") is True,
+                  str(b.get("first_row_on_or_after")))
+            sc = a.get("7_share_class", {})
+            check("p13 mock：⑦ 601318 判定 includes_non_a、000550 判定 includes_non_a",
+                  sc.get("601318_A+H", {}).get("verdict") == "includes_non_a"
+                  and sc.get("000550_A+B", {}).get("verdict") == "includes_non_a")
+            v = a.get("8_dividend", {}).get("visibility", {})
+            check("p13 mock：⑧ 两个送转事件都匹配到股本行", sum(x.get("matched", 0) for x in v.values()) == 2,
+                  json.dumps({k: x.get("decision") for k, x in v.items()}, ensure_ascii=False))
+            check("p13 mock：⑧ 总判定 = must_integrate_dividend_feed（mock 000001 股本行晚于除权日）",
+                  a.get("8_dividend", {}).get("overall_decision") == "must_integrate_dividend_feed")
+            cu = a.get("9_currency_unit", {})
+            check("p13 mock：⑨ 无币种/单位字段 → 结论“只靠数量级不连续检查”",
+                  not cu.get("fields_found") and "只靠数量级不连续检查" in (cu.get("conclusion") or ""),
+                  str(cu.get("fields_found")))
+            reasons = {x["basis"].get("null_reason") for xs in a.get("6_pb", {}).values() for x in xs}
+            check("p13 mock：⑥ null_reason 只取 plan 2.12.1 封闭 14 码", reasons - {None} <= set(an.NULL_REASONS)
+                  and len(an.NULL_REASONS) == 14, str(reasons))
+            pb = a.get("6_pb", {})
+            check("p13 mock：⑥ 三只 PB 均有值且 basis 含 zgb_bdrq/mcap_basis",
+                  all(x and x[-1].get("value") and x[-1]["basis"].get("zgb_bdrq") for x in pb.values()) and len(pb) == 3)
+            check("p13 mock：V5j 689009 capital 已采集、v5j_cdr_unit 有结论（mock 按 CDR 份数 → zgb≈CDR份数）",
+                  a.get("v5j_cdr_unit", {}).get("689009") == "zgb≈CDR份数"
+                  and a.get("10_cdr", {}).get("689009", {}).get("rows", 0) > 0, str(a.get("v5j_cdr_unit")))
+            check("p13 mock：② balance 不含 600000（M1 腾出 1 次）、600000 cashflow 保留",
+                  "600000" not in a.get("2_balance", {}) and "600000" in a.get("1_cashflow", {}))
+            sw = a.get("5_sw", {})
+            check("p13 mock：⑤ 识别出银行/保险节点与申万二级", sw.get("has_sw_l2") and sw.get("bank_nodes")
+                  and sw.get("insurance_nodes"))
+        check(f"{label}：输出不含证书", _scan_dir_for_licence(ctx.run_dir) == 0)
+    restore_switches()
+    check("p13：开关复原（更正样例回到 600525.SH）", p13.RESTATED["code"] == "600525.SH")
+    for n_, ok_, d_ in an.selftest_pure():
+        check("p13 纯函数单测：" + n_, ok_, d_)
+
+
 def dry_run(args) -> int:
     import dryrun_mock as m
 
@@ -498,6 +612,9 @@ def dry_run(args) -> int:
         # ---- 阶段 5：T-B05 开关矩阵（每个开关单独跑，核对调用次数 = 服务端增量、结构、无证书；跑完复原）
         if not args.skip_switch_matrix:
             _switch_matrix(check, args, st_api, st_pro, base_api, base_pro, echo_url)
+        # ---- 阶段 6：p13（T-R12/T-R12a）只点名运行：28 次 = 服务端增量、原始响应完整、离线分析可复算
+        if not args.skip_switch_matrix or "p13_fin_pit" in select(args.probes):
+            _p13_phase(check, args, st_api, st_pro, base_api, base_pro, echo_url)
         # ---- 阶段 2：熔断（第 3 个请求起返回 429 + 103）
         ctx2 = c.init_run(dry_run=True, base=base_api, pro_base=base_pro, min_interval=args.dry_interval,
                           tag="dryrun-limit", no_env_proxy=args.no_env_proxy, egress_url=echo_url)
@@ -634,6 +751,9 @@ def add_switch_args(ap):
     s.add_argument("--history-baseline", help="gap6-history 比对基线：样例目录或真实运行的 run_id（只读本地文件）")
     s.add_argument("--zt-codes", help="gap6-nulls 收盘后复跑：沿用盘中选出的涨停股代码")
     s.add_argument("--p12-only", choices=("hslt",), help="p12 只取 /hslt/list（同次运行 p11 GAP4 已取过则复用 0 次）")
+    s.add_argument("--p13-restated", help="p13 ③ 差错更正样例公司（缺省 600525.SH 长园集团），如 600590.SH")
+    s.add_argument("--p13-announce", help="配合 --p13-restated：更正公告日 YYYY-MM-DD")
+    s.add_argument("--p13-periods", help="配合 --p13-restated：受影响报告期，逗号分隔 YYYY-MM-DD")
 
 
 def _switch_args(argv):

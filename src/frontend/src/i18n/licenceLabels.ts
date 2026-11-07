@@ -30,10 +30,18 @@ export const LICENCE_UNAVAILABLE: readonly DataLicenceState[] = ['invalid', 'exp
 export const LICENCE_BANNER_TEXT = '你的数据证书不可用：行情与候选信号可能停在旧数据，不会用他人的证书补齐。';
 export const LICENCE_NOT_SET_TEXT = '你还没有设置数据证书：行情数据只能用你本人的麦蕊证书获取。';
 
-/** 到期剩余天数的文案（评审 9547181 m5）：过期后显示“已过期”，不显示“剩 -N 天” */
-export function expiryLeftText(days: number | null): string | null {
-  if (days == null) return null;
-  if (days < 0) return '已过期';
+/**
+ * 到期剩余天数（days_left / days_to_expiry）的文案，契约 v0.2.9 #40：
+ * null = 用户没有填写到期日（不表示不会过期，也不告警）→“未填写到期日”；负数 →“已过填写的到期日”；0 →“今天到期”；正数 →“还剩 N 天”。
+ * 到期日是用户自填的，所以过期的说法带“填写的”。
+ */
+export function expiryLeftText(days: number | null): string {
+  if (days == null) return '未填写到期日';
+  if (days < 0) return '已过填写的到期日';
   if (days === 0) return '今天到期';
-  return `剩 ${days} 天`;
+  return `还剩 ${days} 天`;
 }
+
+/** 到期列 / 到期日的完整显示：有到期日时“日期（剩余文案）”，没有时只显示“未填写到期日” */
+export const expiryCellText = (expiresOn: string | null, days: number | null): string =>
+  expiresOn ? `${expiresOn}（${expiryLeftText(days)}）` : expiryLeftText(null);

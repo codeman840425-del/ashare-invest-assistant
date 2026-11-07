@@ -422,6 +422,9 @@ jobs:
           version: ${{ env.UV_VERSION }}
       - name: check_secret_boundary.py
         run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_secret_boundary.py
+      # 日志轮转（T-A04 ③）：每个 compose 服务都 logging: *default-logging（json-file 10m×5）
+      - name: check_compose_logging.py
+        run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_compose_logging.py
 
   # 源码不得被 .gitignore 误伤（T-O09a）：已跟踪源码被规则命中、相对引用指向被忽略的文件、
   # 敏感词文件名探针（licence.ts 等）被宽规则命中，都失败。正反例在 scripts/ci/tests/test_ignored_sources.py。

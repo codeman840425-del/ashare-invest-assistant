@@ -15,7 +15,11 @@ from app.common.errors import (
     install_exception_handlers,
 )
 from app.common.logging import configure_logging
-from app.common.middleware import BodySizeLimitMiddleware, RequestIdMiddleware
+from app.common.middleware import (
+    BodySizeLimitMiddleware,
+    PathCacheControlMiddleware,
+    RequestIdMiddleware,
+)
 from app.config import ConfigError, Settings, get_settings
 from app.config_files import BUSINESS_FILES
 from app.licences.keys import PRIVATE_KEYS_NAME, private_keys_present
@@ -30,6 +34,10 @@ _ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     414: {"model": UriTooLongResponse, "description": "请求地址过长（nginx 产生，信封同 413）"},
     "5XX": {"model": ErrorResponse, "description": "统一错误格式（契约 §2）"},
 }
+
+
+#: 契约 v0.2.9 #41
+SECURITIES_CACHE_CONTROL = "private, no-store"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -60,6 +68,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # add_middleware 后加的在外层：RequestId 在最外，413 也带 X-Request-Id
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=cfg.business.imports.max_request_bytes)
     app.add_middleware(RequestIdMiddleware)
+    # 契约 v0.2.9 #41：/securities/* 全部响应（含 304、错误）private, no-store；最外层统一设置
+    app.add_middleware(
+        PathCacheControlMiddleware,
+        prefixes=(f"{cfg.api_prefix}/securities",),
+        value=SECURITIES_CACHE_CONTROL,
+    )
     app.include_router(v1_router, prefix=cfg.api_prefix)
 
     logger.info(

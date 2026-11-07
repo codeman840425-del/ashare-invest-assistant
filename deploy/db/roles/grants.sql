@@ -4,6 +4,8 @@
 --                但下表 deny 列表里的“密文列”一律不可 SELECT（列级授权：同表其余列可 SELECT，表级 INSERT/UPDATE 保留，
 --                api 只用公钥封装后写入、注销时置空，从不读回；T-B45“api 不读证书密文”）。
 --   aia_ingest ：同上且全列可读（ingest 持私钥，需要读密文解封）。
+--                例外（plan 4.6.5A 第 9 条）：master_vendor_batches 只有 SELECT，以及
+--                status、fetched_at、datasets、error_code 的 UPDATE；master_vendor_list_rows 只有 INSERT。
 --   两者对 ops.pending_file_purges（待清文件队列，path 含 uid）没有任何权限（T-O11，评审 45589c2 m3、plan §7.3）。
 --   aia_maint  ：只给删除用户数据 CLI（app.cli.delete_user_data）用，api/ingest 进程不持有其凭据（T-O11，plan §7.3
 --                “purging 的写入权”）。只有 0013 的触发器认它能把 app.users.status 写成 purging；对其他不可变表
@@ -462,12 +464,14 @@ BEGIN
                    (SELECT string_agg(quote_ident(c), ', ') FROM unnest(have) c), to_regclass(t));
   END LOOP;
 
-  -- 3. market：带 source_licence_id 的表（不含分区子表）
+  -- 3. market：带 source_licence_id 的表（不含分区子表）。
+  -- 4.6.5A 第 9 条的两张对账表不在删除用户数据清单里，不因同名列自动获得 DELETE。
   FOR r IN
     SELECT c.oid::regclass::text AS q FROM pg_attribute a
       JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = 'market' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
        AND a.attname = 'source_licence_id' AND a.attnum > 0 AND NOT a.attisdropped
+       AND c.relname NOT IN ('master_vendor_batches', 'master_vendor_list_rows')
      ORDER BY 1
   LOOP
     GRANT USAGE ON SCHEMA market TO aia_maint;
@@ -544,3 +548,144 @@ BEGIN
   RAISE NOTICE 'db-roles: aia_maint 已按列级清单授权（% 张表可 DELETE）', cardinality(del_ok);
 END
 $maint$;
+
+-- plan 4.6.5A 第 9 条（T-B61）：收窄 aia_ingest。表未落地只告警（迁移前）；
+-- 两表数量不是各 1，或批次表缺裁定点名的列，则失败并列出事实，不改成表级 UPDATE、不给 DDL。
+-- 先单独提交撤权：后面的授权自检若失败，ingest 也不会留下 $grants$ 刚授上的全表 DML。
+DO $vendor_revoke$
+DECLARE
+  n_b int;
+  n_r int;
+  batches regclass;
+  rows_tbl regclass;
+  seq record;
+  child record;
+BEGIN
+  SELECT count(*) INTO n_b FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE c.relname = 'master_vendor_batches' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+     AND n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema';
+  SELECT count(*) INTO n_r FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE c.relname = 'master_vendor_list_rows' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+     AND n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema';
+  IF n_b = 0 AND n_r = 0 THEN
+    RAISE WARNING 'db-roles: master_vendor_batches / master_vendor_list_rows 不存在（T-B61 迁移未到？），跳过 4.6.5A 第 9 条';
+    RETURN;
+  END IF;
+  IF n_b <> 1 OR n_r <> 1 THEN
+    RAISE EXCEPTION 'db-roles: 4.6.5A 第 9 条需要后端确认表的位置（master_vendor_batches=% 张, master_vendor_list_rows=% 张；期望各 1 张）', n_b, n_r;
+  END IF;
+  SELECT c.oid INTO batches FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE c.relname = 'master_vendor_batches' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+     AND n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema';
+  SELECT c.oid INTO rows_tbl FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE c.relname = 'master_vendor_list_rows' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+     AND n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema';
+  EXECUTE format('REVOKE ALL ON TABLE %s FROM aia_ingest', batches);
+  EXECUTE format('REVOKE ALL ON TABLE %s FROM aia_ingest', rows_tbl);
+  FOR child IN SELECT inhrelid::regclass AS q FROM pg_inherits WHERE inhparent IN (batches, rows_tbl) LOOP
+    EXECUTE format('REVOKE ALL ON TABLE %s FROM aia_ingest', child.q);
+  END LOOP;
+  FOR seq IN
+    SELECT DISTINCT s.oid::regclass AS q
+      FROM pg_depend d
+      JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
+     WHERE d.deptype IN ('a', 'i')
+       AND (d.refobjid IN (batches, rows_tbl)
+            OR d.refobjid IN (SELECT inhrelid FROM pg_inherits WHERE inhparent IN (batches, rows_tbl)))
+  LOOP
+    EXECUTE format('REVOKE ALL ON SEQUENCE %s FROM aia_ingest', seq.q);
+  END LOOP;
+END
+$vendor_revoke$;
+
+DO $vendor_grant$
+DECLARE
+  batches regclass;
+  rows_tbl regclass;
+  need text[] := ARRAY['status', 'fetched_at', 'datasets', 'error_code'];
+  missing text;
+  c text;
+  priv text;
+  child record;
+BEGIN
+  SELECT c.oid INTO batches FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE c.relname = 'master_vendor_batches' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+     AND n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema';
+  SELECT c.oid INTO rows_tbl FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE c.relname = 'master_vendor_list_rows' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+     AND n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema';
+  IF batches IS NULL AND rows_tbl IS NULL THEN
+    RETURN;  -- 迁移前：撤权段已告警
+  END IF;
+  IF batches IS NULL OR rows_tbl IS NULL THEN
+    RAISE EXCEPTION 'db-roles: 4.6.5A 第 9 条需要后端确认表的位置（master_vendor_batches=%, master_vendor_list_rows=%）', batches, rows_tbl;
+  END IF;
+  SELECT string_agg(x, ', ' ORDER BY x) INTO missing
+    FROM unnest(need) AS u(x)
+   WHERE NOT EXISTS (
+     SELECT 1 FROM pg_attribute a
+      WHERE a.attrelid = batches AND a.attname = x AND a.attnum > 0 AND NOT a.attisdropped);
+  IF missing IS NOT NULL THEN
+    RAISE EXCEPTION 'db-roles: % 缺少 4.6.5A 第 9 条点名的列（%），不放宽为表级 UPDATE，需后端确认', batches, missing;
+  END IF;
+  EXECUTE format('GRANT SELECT ON TABLE %s TO aia_ingest', batches);
+  EXECUTE format('GRANT UPDATE (%s) ON TABLE %s TO aia_ingest',
+                 (SELECT string_agg(quote_ident(x), ', ' ORDER BY x) FROM unnest(need) AS u(x)), batches);
+  EXECUTE format('GRANT INSERT ON TABLE %s TO aia_ingest', rows_tbl);
+  IF NOT has_table_privilege('aia_ingest', batches, 'SELECT')
+     OR has_table_privilege('aia_ingest', batches, 'INSERT')
+     OR has_table_privilege('aia_ingest', batches, 'UPDATE')
+     OR has_table_privilege('aia_ingest', batches, 'DELETE')
+     OR has_table_privilege('aia_ingest', batches, 'TRUNCATE') THEN
+    RAISE EXCEPTION 'db-roles: aia_ingest 对 % 不是“只 SELECT、无表级写”', batches;
+  END IF;
+  FOREACH c IN ARRAY need LOOP
+    IF NOT has_column_privilege('aia_ingest', batches, c, 'UPDATE') THEN
+      RAISE EXCEPTION 'db-roles: aia_ingest 缺少 UPDATE(%) ON %', c, batches;
+    END IF;
+  END LOOP;
+  IF EXISTS (
+    SELECT 1 FROM pg_attribute a
+     WHERE a.attrelid = batches AND a.attnum > 0 AND NOT a.attisdropped
+       AND a.attname <> ALL (need)
+       AND has_column_privilege('aia_ingest', batches, a.attname, 'UPDATE')) THEN
+    RAISE EXCEPTION 'db-roles: aia_ingest 对 % 的非点名列仍有 UPDATE', batches;
+  END IF;
+  IF NOT has_table_privilege('aia_ingest', rows_tbl, 'INSERT')
+     OR has_table_privilege('aia_ingest', rows_tbl, 'SELECT')
+     OR has_table_privilege('aia_ingest', rows_tbl, 'UPDATE')
+     OR has_table_privilege('aia_ingest', rows_tbl, 'DELETE')
+     OR has_table_privilege('aia_ingest', rows_tbl, 'TRUNCATE')
+     OR has_any_column_privilege('aia_ingest', rows_tbl, 'SELECT')
+     OR has_any_column_privilege('aia_ingest', rows_tbl, 'UPDATE') THEN
+    RAISE EXCEPTION 'db-roles: aia_ingest 对 % 超出 INSERT', rows_tbl;
+  END IF;
+  FOREACH priv IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE'] LOOP
+    IF NOT has_table_privilege('aia_api', batches, priv) OR NOT has_table_privilege('aia_api', rows_tbl, priv) THEN
+      RAISE EXCEPTION 'db-roles: aia_api 缺少 %（4.6.5A 第 9 条：其余由 worker 读写）', priv;
+    END IF;
+  END LOOP;
+  FOREACH priv IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'] LOOP
+    IF has_table_privilege('aia_maint', batches, priv) OR has_table_privilege('aia_maint', rows_tbl, priv) THEN
+      RAISE EXCEPTION 'db-roles: aia_maint 不应有表级 % ON 对账批次表', priv;
+    END IF;
+  END LOOP;
+  IF has_any_column_privilege('aia_maint', batches, 'SELECT')
+     OR has_any_column_privilege('aia_maint', batches, 'UPDATE')
+     OR has_any_column_privilege('aia_maint', rows_tbl, 'SELECT')
+     OR has_any_column_privilege('aia_maint', rows_tbl, 'UPDATE') THEN
+    RAISE EXCEPTION 'db-roles: aia_maint 不应有对账批次表的列权限';
+  END IF;
+  FOR child IN SELECT inhrelid AS relid, inhrelid::regclass AS q FROM pg_inherits WHERE inhparent IN (batches, rows_tbl) LOOP
+    IF has_table_privilege('aia_ingest', child.relid, 'SELECT')
+       OR has_table_privilege('aia_ingest', child.relid, 'INSERT')
+       OR has_table_privilege('aia_ingest', child.relid, 'UPDATE')
+       OR has_table_privilege('aia_ingest', child.relid, 'DELETE')
+       OR has_any_column_privilege('aia_ingest', child.relid, 'SELECT')
+       OR has_any_column_privilege('aia_ingest', child.relid, 'UPDATE') THEN
+      RAISE EXCEPTION 'db-roles: aia_ingest 对分区 % 仍有权限', child.q;
+    END IF;
+  END LOOP;
+  RAISE NOTICE 'db-roles: 4.6.5A 第 9 条已收窄 aia_ingest（% 只 SELECT+点名列 UPDATE，% 只 INSERT）', batches, rows_tbl;
+END
+$vendor_grant$;

@@ -5,6 +5,8 @@
 #   且它自己也不能把 purging 改回、不能不删行就提交；aia_maint 必须 LOGIN，aia_api/aia_ingest 不得是其成员。
 #   aia_maint 是列级授权：清单外的列读不到、写不了，DELETE 只在清单里的表上（第 4 节）。
 # T-A04 ④：worker 用 aia_api，其任务所需 DML 可用；aia_api 无 DDL、读不到证书密文列（第 6 节）。
+# plan 4.6.5A 第 9 条：aia_ingest 对 master_vendor_batches 只有 SELECT 与 status、fetched_at、datasets、error_code
+#   的 UPDATE，对 master_vendor_list_rows 只有 INSERT；其余读写在 aia_api。两表都未落地则跳过；只落地一张或点名列缺失则失败。
 # T-O10 部分只读（SELECT … LIMIT 0）。T-O11 的事务用例会插入名为 t_o11_<随机> 的探针用户：失败的序列整体回滚；
 #   需要落库的探针最后用正规删除路径（aia_maint：purging → 删 → 提交）清掉，并用属主连接确认无残留。
 #   属主连接 = 调用方的 PGUSER/PGPASSWORD（compose db-roles / CI 都是库属主）。连接参数同 apply-roles.sh（PGHOST/PGPORT/PGDATABASE；口令目录 AIA_DB_ROLE_PASSWORD_DIR）。
@@ -202,6 +204,64 @@ expect_attr "aia_api 不拥有任何表或 schema；库与业务 schema 上无 C
   "SELECT NOT EXISTS (SELECT 1 FROM pg_class WHERE relowner = 'aia_api'::regrole) AND NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = 'aia_api'::regrole) AND NOT has_database_privilege('aia_api', current_database(), 'CREATE') AND NOT EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema' AND has_schema_privilege('aia_api', n.oid, 'CREATE'))"
 expect_attr "aia_api 在 app/ops/market 无表级 TRUNCATE/REFERENCES/TRIGGER" \
   "SELECT NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace CROSS JOIN unnest(ARRAY['TRUNCATE','REFERENCES','TRIGGER']) p WHERE n.nspname IN ('app','ops','market') AND c.relkind IN ('r','p') AND has_table_privilege('aia_api', c.oid, p))"
+# 7) plan 4.6.5A 第 9 条（T-B61）。列名只使用裁定点名的四列；其余列从库里现查，不写死未落地的字段。
+vendor_count() {
+  own -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = '$1' AND c.relkind IN ('r','p') AND NOT c.relispartition AND n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'"
+}
+vendor_rel() {
+  own -c "SELECT format('%I.%I', n.nspname, c.relname) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = '$1' AND c.relkind IN ('r','p') AND NOT c.relispartition AND n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'"
+}
+nb="$(vendor_count master_vendor_batches)"
+nr="$(vendor_count master_vendor_list_rows)"
+if [ "$nb" = 0 ] && [ "$nr" = 0 ]; then
+  echo "SKIP 4.6.5A 第 9 条：master_vendor_batches / master_vendor_list_rows 未落地（T-B61 迁移前）"
+elif [ "$nb" != 1 ] || [ "$nr" != 1 ]; then
+  echo "FAIL 4.6.5A 第 9 条需要后端确认表的位置（master_vendor_batches=$nb 张, master_vendor_list_rows=$nr 张）"
+  fail=1
+else
+  batches="$(vendor_rel master_vendor_batches)"
+  rows="$(vendor_rel master_vendor_list_rows)"
+  missing="$(own -c "SELECT coalesce(string_agg(x, ',' ORDER BY x), '') FROM unnest(ARRAY['status','fetched_at','datasets','error_code']) x WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = '$batches'::regclass AND a.attname = x AND a.attnum > 0 AND NOT a.attisdropped)")"
+  if [ -n "$missing" ]; then
+    echo "FAIL $batches 缺少 4.6.5A 第 9 条点名的列：$missing"
+    fail=1
+  else
+    expect_ok     aia_ingest "SELECT * FROM $batches LIMIT 0"
+    expect_ok     aia_ingest "UPDATE $batches SET status = status, fetched_at = fetched_at, datasets = datasets, error_code = error_code WHERE false"
+    expect_denied aia_ingest "INSERT INTO $batches (status) SELECT NULL WHERE false"
+    expect_denied aia_ingest "DELETE FROM $batches WHERE false"
+    expect_denied aia_ingest "TRUNCATE $batches"
+    while IFS= read -r stmt; do
+      [ -n "$stmt" ] || continue
+      expect_denied aia_ingest "$stmt"
+    done < <(own -c "SELECT format('UPDATE %s SET %I = %I WHERE false', '$batches'::regclass, a.attname, a.attname) FROM pg_attribute a WHERE a.attrelid = '$batches'::regclass AND a.attnum > 0 AND NOT a.attisdropped AND a.attname NOT IN ('status','fetched_at','datasets','error_code') ORDER BY a.attnum")
+    expect_denied aia_ingest "SELECT * FROM $rows LIMIT 0"
+    expect_denied aia_ingest "DELETE FROM $rows WHERE false"
+    expect_denied aia_ingest "TRUNCATE $rows"
+    while IFS= read -r stmt; do
+      [ -n "$stmt" ] || continue
+      expect_denied aia_ingest "$stmt"
+    done < <(own -c "SELECT format('UPDATE %s SET %I = %I WHERE false', '$rows'::regclass, a.attname, a.attname) FROM pg_attribute a WHERE a.attrelid = '$rows'::regclass AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum")
+    ins="$(own -c "SELECT format('INSERT INTO %s (%I) SELECT NULL WHERE false', '$rows'::regclass, a.attname) FROM pg_attribute a WHERE a.attrelid = '$rows'::regclass AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum LIMIT 1")"
+    expect_ok aia_ingest "$ins"
+    expect_ok aia_api "SELECT * FROM $batches LIMIT 0"
+    expect_ok aia_api "UPDATE $batches SET status = status WHERE false"
+    expect_ok aia_api "DELETE FROM $batches WHERE false"
+    expect_ok aia_api "SELECT * FROM $rows LIMIT 0"
+    expect_ok aia_api "DELETE FROM $rows WHERE false"
+    expect_ok aia_api "$ins"
+    api_upd="$(own -c "SELECT format('UPDATE %s SET %I = %I WHERE false', '$batches'::regclass, a.attname, a.attname) FROM pg_attribute a WHERE a.attrelid = '$batches'::regclass AND a.attnum > 0 AND NOT a.attisdropped AND a.attname NOT IN ('status','fetched_at','datasets','error_code') ORDER BY a.attnum LIMIT 1")"
+    [ -z "$api_upd" ] || expect_ok aia_api "$api_upd"
+    expect_attr "aia_ingest 对批次表无表级 INSERT/UPDATE/DELETE，对行表无 SELECT/UPDATE/DELETE" \
+      "SELECT NOT has_table_privilege('aia_ingest', '$batches'::regclass, 'INSERT') AND NOT has_table_privilege('aia_ingest', '$batches'::regclass, 'UPDATE') AND NOT has_table_privilege('aia_ingest', '$batches'::regclass, 'DELETE') AND NOT has_table_privilege('aia_ingest', '$rows'::regclass, 'SELECT') AND NOT has_table_privilege('aia_ingest', '$rows'::regclass, 'UPDATE') AND NOT has_table_privilege('aia_ingest', '$rows'::regclass, 'DELETE') AND NOT has_any_column_privilege('aia_ingest', '$rows'::regclass, 'SELECT')"
+    expect_attr "aia_api 对两张对账表有 SELECT/INSERT/UPDATE/DELETE" \
+      "SELECT has_table_privilege('aia_api', '$batches'::regclass, 'SELECT') AND has_table_privilege('aia_api', '$batches'::regclass, 'INSERT') AND has_table_privilege('aia_api', '$batches'::regclass, 'UPDATE') AND has_table_privilege('aia_api', '$batches'::regclass, 'DELETE') AND has_table_privilege('aia_api', '$rows'::regclass, 'SELECT') AND has_table_privilege('aia_api', '$rows'::regclass, 'INSERT') AND has_table_privilege('aia_api', '$rows'::regclass, 'UPDATE') AND has_table_privilege('aia_api', '$rows'::regclass, 'DELETE')"
+    expect_attr "aia_maint 对两张对账表无表级 DML、也无列级 SELECT" \
+      "SELECT NOT has_table_privilege('aia_maint', '$batches'::regclass, 'DELETE') AND NOT has_table_privilege('aia_maint', '$rows'::regclass, 'DELETE') AND NOT has_any_column_privilege('aia_maint', '$batches'::regclass, 'SELECT') AND NOT has_any_column_privilege('aia_maint', '$rows'::regclass, 'SELECT') AND NOT has_table_privilege('aia_maint', '$batches'::regclass, 'INSERT') AND NOT has_table_privilege('aia_maint', '$rows'::regclass, 'INSERT')"
+    expect_denied aia_api "SELECT ciphertext FROM app.user_data_licences WHERE false"
+  fi
+fi
+
 [ "$(own -c "SELECT count(*) FROM app.users WHERE username LIKE 't\_o11\_%'")" = 0 ] \
   || { echo "FAIL 仍有 t_o11_ 探针用户残留"; fail=1; }
 exit "$fail"

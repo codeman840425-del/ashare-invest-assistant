@@ -25,6 +25,7 @@ from app.schemas.enums import Action, Horizon
 from app.signals.models import Evidence, Stops
 from app.strategy.cards.fixtures import run_fixtures
 from app.strategy.cards.preflight import preflight
+from app.strategy.g6 import Overlap, compare, missing_history_gate
 from app.suggestions.risk import RiskContext, evaluate_risk
 
 
@@ -181,17 +182,8 @@ def prepare(
             },
         }
     )
-    results.append(
-        {
-            "gate": "G6",
-            "result": "warn" if fixture_ok else "fail",
-            "detail": {
-                "fixtures_all_pass": fixture_ok,
-                "history": "not_examined_no_real_120_day_owned_history",
-                "warning": "未体检/覆盖不足；不使用合成golden冒充真实历史统计。",
-            },
-        }
-    )
+    overlap = compare(None, set(), [])
+    results.append(missing_history_gate(fixture_ok, overlap))
     results.append(
         {
             "gate": "G7",
@@ -204,15 +196,8 @@ def prepare(
     report = {
         "trigger_rate": stat,
         "coverage": stat,
-        "max_jaccard": None,
+        **overlap.model_dump(),
         "quota_delta_per_min": 0 if not validation.get("feature_requests") else None,
-        "contract_gaps": [
-            {
-                "key": "g6_report.max_jaccard",
-                "reason": "no_source",
-                "issue": "contract_requires_nonnull_decimal_but_unexamined_history_has_no_value",
-            }
-        ],
     }
     review_id = uuid.uuid4()
     conn.execute(
@@ -252,13 +237,31 @@ def owned_review(conn: Connection, owner: uuid.UUID, review_id: uuid.UUID) -> An
 
 
 def public_review(row: Any) -> dict[str, Any]:  # noqa: ANN401
-    if (row.g6_report or {}).get("contract_gaps"):
-        raise AppError(
-            ErrorCode.MAINTENANCE,
-            details={
-                "issue": "G6_REPORT_SCHEMA_UNDEFINED",
-                "fields": ["g6_report.max_jaccard"],
-                "review_id": str(row.id),
-            },
+    report = dict(row.g6_report or {})
+    # A pre-T-A17 stored report remains immutable. Explicitly labelled unexamined
+    # history is the only legacy case for which its already-known reason is recoverable.
+    if report.get("contract_gaps"):
+        legacy_unexamined = any(
+            g.get("issue")
+            == "contract_requires_nonnull_decimal_but_unexamined_history_has_no_value"
+            for g in report.pop("contract_gaps")
         )
-    return {k: getattr(row, k) for k in ["decision", "gate_results", "fixture_runs", "g6_report"]}
+        if (
+            legacy_unexamined
+            and report.get("max_jaccard") is None
+            and (report.get("trigger_rate") or {}).get("n") == 0
+        ):
+            report["max_jaccard_null_reason"] = "no_history"
+    overlap = Overlap.model_validate(
+        {key: report.get(key) for key in ["max_jaccard", "max_jaccard_null_reason"]}
+    )
+    report.update(overlap.model_dump())
+    result = {k: getattr(row, k) for k in ["decision", "gate_results", "fixture_runs"]}
+    result["gate_results"] = [
+        {**g, "detail": {**g["detail"], "max_jaccard_null_reason": overlap.max_jaccard_null_reason}}
+        if g["gate"] == "G6"
+        else g
+        for g in result["gate_results"]
+    ]
+    result["g6_report"] = report
+    return result

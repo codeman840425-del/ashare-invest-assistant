@@ -7,10 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from sqlalchemy import select
 
-from app.common.errors import AppError
 from app.db.tables.strategy import strategy_cards, strategy_promotion_reviews, strategy_versions
 from app.strategy.cards.persistence import import_batch
 from app.strategy.cards.preflight import feature_registry
@@ -56,9 +54,9 @@ def test_formal_26_real_gate_reports_remain_draft_with_explicit_unknown_g6(
             assert all(r["passed"] for r in row.fixture_runs)
             assert row.g6_report["trigger_rate"]["n"] == 0
             assert row.g6_report["max_jaccard"] is None
-            with pytest.raises(AppError) as error:
-                public_review(row)
-            assert error.value.details["issue"] == "G6_REPORT_SCHEMA_UNDEFINED"
+            public = public_review(row)
+            assert public["g6_report"]["max_jaccard"] is None
+            assert public["g6_report"]["max_jaccard_null_reason"] == "no_history"
             reports.append(
                 {
                     "strategy_key": key,

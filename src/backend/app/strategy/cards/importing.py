@@ -1,7 +1,7 @@
 """In-memory import preparation only (plan 2.5.14 A/G).
 
 No filesystem discovery, config generation, DB writes, evaluator or lifecycle action.
-Formal-card validation/persistence must be added after T-R15 is explicitly released.
+Formal semantic preflight is separate; persistence remains blocked on card errors.
 An inspection result is never authority to persist, enable or run a strategy.
 """
 
@@ -23,7 +23,8 @@ _FENCE = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 _MAX_DOCUMENT = 100_000
-_MAX_TOKENS = 10_000
+# Formal cards include bounded 26-case synthetic series blocks, larger than sketches.
+_MAX_TOKENS = 100_000
 
 
 class _UniqueLoader(yaml.SafeLoader):

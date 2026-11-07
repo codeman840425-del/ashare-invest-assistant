@@ -74,3 +74,6 @@ key `lt_value`；category `value`；horizons `[long]`（月度再平衡，持有
 
 ## 复核记录
 key 与 name 已改正；删除未注册特征 1 个；删除非白名单函数 5 个；修正口径混用 1 处；组合层约束与 null 语义列为待定。
+
+## 缺口交叉引用
+见 [engine_gaps.md](engine_gaps.md)：DAT-2, ENG-3, RUL-1, DAT-3, ENG-5, FEA-5。

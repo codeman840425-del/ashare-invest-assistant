@@ -80,3 +80,6 @@ T+1；做T必须有底仓（`sell_first` 卖的是旧股，`buy_first` 当日买
 8. 原稿把涨跌停价标为 qfq：已改为 none。
 9. 原稿把资金、情绪辅助维度写进卡里：已删除。
 **暂停（83a66cd，等 MVP）**：t_leg 配对机制、入场条件中 ctx 字段的用法、时刻类参数类型、vwap 类特征的单位与延迟实测。
+
+## 缺口交叉引用
+见 [engine_gaps.md](engine_gaps.md)：ENG-1, ENG-2, ENG-4, RUL-2, DAT-1。

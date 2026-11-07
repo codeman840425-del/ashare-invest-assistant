@@ -72,3 +72,6 @@ T 日盘后确认，T+1 开盘价模拟入场；信号有效 1 个交易日。�
 
 ## 复核记录
 key 与 name 已改正；category 已归入枚举；下标写法已改为 `ref`；veto 与执行层原因已分开；公告与可交易性交还 G-01、N-01；“未站稳”时间修饰已改写；突破位改用 `plan.breakout_level_qfq`（MVP 后）。
+
+## 缺口交叉引用
+见 [engine_gaps.md](engine_gaps.md)：QFQ-2, RUL-3。

@@ -918,10 +918,10 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 |---|---|---|---|
 | f.close_qfq / f.high_qfq / f.low_qfq（F16–F18） | verified_doc | ② | 只用 as_of 当次取数并存快照；历史回写值不作时点依据、不用于回测；单位“元/股”是推断，记入 gaps，待 T-B05 |
 | f.list_days（F13） | verified_doc | ③ | list_date 早于交易日历覆盖起点时为 null，记 gap（insufficient_data），不估算 |
-| f.np_yoy_latest（F22） | verified_doc | ④ | 可见时点取 plrq；V5f 未结前以首次观测值为准，带 observed_at；更正作为新观测，不改写旧快照；V5f 随 T-B05 复核 |
+| f.np_yoy_latest（F22） | verified_doc | ④ | 可见时点沿用 F22 `next_trading_day(plrq) 09:30`；V5f 未结前以首次观测值为准，带 observed_at；更正作为新观测，不改写旧快照；V5f 随 T-B05 复核 |
 | f.amount、f.main_net_20d、f.market_regime、f.ind_rs20 | declared | ⑤ | 需要实测或补来源；H-01、W-01 的 G2 仍不通过 |
 
-**歧义（只记录，不自行裁定）**：裁定④写“可见时点取 plrq”，F22 正文和 pit_rule 写的是 `next_trading_day(plrq) 09:30`；两者是否一致、首次观测与 plrq 怎样组合，待架构师确认。在此之前不修改 F22 的 pit_rule。
+**裁定④已确认**：架构师明确“plrq”沿用 F22 的 `next_trading_day(plrq) 09:30`，不放宽原 `pit_rule`；首次观测与更正快照仍遵守上表限定。
 
 ## 11. 缺口与【待核实】清单
 

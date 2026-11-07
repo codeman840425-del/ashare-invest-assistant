@@ -64,7 +64,8 @@ def main() -> int:
     check(known["basis"]["mcap"] == 5 * 720335580 and "cdr_unit" not in known["basis"]["verify_pending"], "689009 c×zgb不乘10且逐只清标记")
     check("cdr_unit" in other["basis"]["verify_pending"], "其他CDR同份数判定也不自动推广签收")
     drafts = load_share_classes(a.SHARE_CLASS_PATH)
-    check(len(drafts["records"]) == 283 and not any(r["verified"] for r in drafts["records"]), "283条草稿保持verified=false")
+    check(not drafts["records"] and len(drafts["sources"]["pending_records"]) == 283
+          and not any(r["verified"] for r in drafts["sources"]["pending_records"]), "283条草稿保持verified=false")
     sample = {"601318_A+H": {"verdict": "includes_non_a"}, "000550_A+B": {"verdict": "includes_non_a"}}
     actual = v5g_conditions(drafts, sample)
     check(len(actual) == 4 and sum(actual.values()) == 1, "V5g四条件仅A+H/A+B总股本对照已满足")
@@ -87,6 +88,13 @@ def main() -> int:
         check(True, "verified=true但缺生效日期必须拒绝")
     else:
         check(False, "缺生效日期未拒绝")
+    broken["records"][0]["verified"] = False
+    try:
+        validate_share_classes(broken)
+    except ValueError:
+        check(True, "verified=false也不能让缺上市日期的草稿冒充正式记录")
+    else:
+        check(False, "正式记录缺上市日期未拒绝")
 
     for run in args.replay:
         original = run / "p13_analysis.json"

@@ -60,7 +60,7 @@ def load_calendar(path: Path) -> TradingCalendar | None:
 
 
 def validate_share_classes(data: Mapping[str, Any]) -> None:
-    """空 effective_from 仅允许未核实草稿，不允许作为历史成员使用。"""
+    """正式记录必须有上市生效日期；缺证草稿仅允许作为来源元数据保存。"""
     if type(data.get("list_version")) is not int or data["list_version"] < 1:
         raise ValueError("名单版本必须为正整数")
     dt.date.fromisoformat(data["as_of"])
@@ -90,8 +90,8 @@ def validate_share_classes(data: Mapping[str, Any]) -> None:
         if row["paired_market"] not in ({"HK"} if kind == "H" else {"SH", "SZ"}):
             raise ValueError("配对交易所非法")
         begin, end = row["effective_from"], row["effective_to"]
-        if begin is None and row["verified"]:
-            raise ValueError("已核实记录不能缺上市生效日期")
+        if begin is None:
+            raise ValueError("正式名单记录不能缺上市生效日期；草稿只可保存在来源元数据")
         if begin is not None:
             dt.date.fromisoformat(begin)
         if end is not None:
@@ -115,7 +115,7 @@ def load_share_classes(path: Path) -> dict[str, Any]:
 def share_class_at(data: Mapping[str, Any], code: str, day: str) -> dict[str, Any]:
     rows = data["records"]
     # Missing a listing date means interval-safe list integration is incomplete.
-    ready = bool(rows) and all(r["effective_from"] is not None for r in rows)
+    ready = bool(rows) and not data["sources"].get("pending_records")
     eligible = [
         r
         for r in rows
@@ -134,7 +134,7 @@ def share_class_at(data: Mapping[str, Any], code: str, day: str) -> dict[str, An
 
 def v5g_conditions(data: Mapping[str, Any], sample_checks: Mapping[str, Any]) -> dict[str, bool]:
     rows = data["records"]
-    integrated = bool(rows) and all(r["effective_from"] is not None for r in rows)
+    integrated = bool(rows) and not data["sources"].get("pending_records")
     conditions = {
         "list_integrated": integrated,
         "a_h_and_a_b_zgb_verified": all(

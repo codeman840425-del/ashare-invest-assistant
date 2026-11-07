@@ -938,10 +938,10 @@ def analyze(raw: dict, plan: dict, first_seen: dict | None = None, calendar: Tra
         "000550_A+B": share_split_check(R.get("capital_000550", []), EXPECT["000550_capital"])}
     conditions = v5g_conditions(lists, out["7_share_class"])
     lists_on = conditions["list_integrated"]
-    out["7_share_class_lists"] = {"config_loaded": bool(lists["records"]), "configured_in_probe": lists_on,
+    out["7_share_class_lists"] = {"config_loaded": bool(lists["list_version"]), "configured_in_probe": lists_on,
                                  "list_version": lists["list_version"],
                                  "members": {c: membership(c, lists["as_of"])["member"] for c in plan.get("capital", [])},
-                                 "pending_effective_dates": sum(r["effective_from"] is None for r in lists["records"]),
+                                 "pending_effective_dates": sum(r["effective_from"] is None for r in lists["records"] + lists["sources"].get("pending_records", [])),
                                  "v5g_close": {"conditions": conditions, "closed": all(conditions.values())}}
     out["trading_calendar"] = {"confirmed": calendar is not None,
                                 "source": calendar.source if calendar else None,

@@ -1194,7 +1194,7 @@ class SecuritiesConfig(_File):
     master: SecuritiesMaster
 
 
-# T-R12h/i：名单草稿允许未核实的空生效日期，但不能用于历史打标。
+# T-R12h/i：正式记录必须有上市生效日期，缺证草稿只保存在来源元数据中。
 class ShareClassListConfig(_File):
     list_version: PosInt
     as_of: StrictStr

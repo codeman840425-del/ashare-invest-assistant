@@ -970,6 +970,7 @@ class RuleTemplateStrategy(ScreenerStrategy, TimingStrategy):
 3. **门禁：G1–G7 全部要通过，一项都不豁免或放宽**：
    - G1：W-01 不能有 `to_quantify`（X5 已改用 `_qfq`）。H-01 按 `mount_policy=system_only` 和纯离场规则享受 G1 豁免（T-R15 第 2 条）。
    - G2：所需字段至少 `verified_doc`，不能是 gap。feature 元数据里的 null 不影响 G2（T-A13）。
+   - **T-R18 裁定（架构师 2026-11-07）**：① 公开文档依据可写 `verified_doc`（只够到 simulating，见 2.5.13 G2），前提是公式、窗口、可见时点有文档依据；由研究员在 feature_spec 状态列改写并引用 `docs/strategies/T-R18_source_matrix.yaml` 对应行，架构师代提交；后端只按 feature_spec/catalog 导入，不凭报告或口头升级。② `f.close_qfq/f.high_qfq/f.low_qfq`：接受 PIT 限定——按 T-R15 规则 0 只用 as_of 当次取数并存快照，历史回写值不作时点正确依据、不用于回测；单位“元/股”属推断，记入 gaps，待 T-B05 实测。③ `f.list_days`：接受；上市日早于交易日历覆盖起点时值为 null 并记 gap（insufficient_data），不估算。④ `f.np_yoy_latest`：接受，可见时点取 `plrq`；V5f 未结前以首次观测值为准，入库带 observed_at，后续更正作为新观测、不改写旧快照，V5f 随 T-B05 复核。⑤ `f.amount/f.main_net_20d/f.market_regime/f.ind_rs20` 保持 declared，H-01、W-01 的 G2 仍不通过，需实测或补来源，不得放宽 G2。
    - G3、G4、G5：按现有规则自动检查。
    - G6：fixtures 必须全部通过（26 例 golden）。120 日历史体检只做统计，原本就只出警告：数据不足 120 日时如实记“未体检/覆盖不足”的警告，并显示在 G7 报告里，不编造统计结果。**T-A17**：重合度 `max_jaccard` 无值（历史不足，或没有可比较的命中集合）时报 `null` 加原因码 `no_history` / `no_comparable_set`（契约 §7.4），G6 记 `warn` 不记 `fail`；fixtures 失败仍是 `fail`。
    - G7：由用户本人以管理员身份逐条核对卡片原文与规则的对应关系后批准。代理只准备报告，不代为批准。

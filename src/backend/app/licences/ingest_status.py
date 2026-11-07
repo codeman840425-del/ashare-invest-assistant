@@ -36,6 +36,7 @@ from app.config import Settings
 from app.db.tables.licences import data_licence_events
 from app.db.tables.ops import ingest_leases, ingest_request_log
 from app.licences import service
+from app.master.alerts import master_alerts
 from app.schemas.enums import DataLicenceStatus
 
 logger = logging.getLogger("app.licences.ingest_status")
@@ -175,6 +176,7 @@ def build(conn: Connection, rds: redis.Redis, settings: Settings) -> dict[str, A
         "freshness": [],
         "licences": licences,
         "licences_truncated": truncated,
+        "alerts": master_alerts(conn, settings.business.securities.master),
     }
 
 

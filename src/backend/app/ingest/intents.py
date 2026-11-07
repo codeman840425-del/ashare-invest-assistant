@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import datetime as dt
+import json
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -46,11 +48,43 @@ def _s(fields: Mapping[bytes | str, bytes | str], key: str) -> str | None:
     return None
 
 
-def parse_intent(fields: Mapping[bytes | str, bytes | str]) -> VerifyIntent | None:
+@dataclass(frozen=True)
+class VendorIntent:
+    batch_id: uuid.UUID
+    licence_id: uuid.UUID
+    datasets: tuple[str, ...]
+    deadline_at: dt.datetime
+    priority: Priority = Priority.P1
+
+
+def parse_vendor_intent(fields: Mapping[bytes | str, bytes | str]) -> VendorIntent:
+    allowed = {"kind", "batch_id", "licence_id", "datasets", "priority", "deadline_at"}
+    if {k.decode() if isinstance(k, bytes) else k for k in fields} != allowed:
+        raise IntentError("vendor_lists intent: invalid fields")
+    try:
+        lid, bid = (
+            uuid.UUID(_s(fields, "licence_id") or ""),
+            uuid.UUID(_s(fields, "batch_id") or ""),
+        )
+        datasets = json.loads(_s(fields, "datasets") or "[]")
+        deadline = dt.datetime.fromisoformat(_s(fields, "deadline_at") or "")
+        required = {"hslt_list", "bj_list", "kc_list", "hsrl_real"}
+        if not isinstance(datasets, list) or len(datasets) != 4 or set(datasets) != required:
+            raise ValueError
+        if deadline.tzinfo is None or _s(fields, "priority") != "p1_daily":
+            raise ValueError
+    except (ValueError, TypeError) as exc:
+        raise IntentError("vendor_lists intent: invalid metadata") from exc
+    return VendorIntent(bid, lid, tuple(datasets), deadline)
+
+
+def parse_intent(fields: Mapping[bytes | str, bytes | str]) -> VerifyIntent | VendorIntent | None:
     """解析一条 Stream 记录；不是 ``verify_licence`` 返回 ``None``（交给其他处理器）。
 
     拒绝带 ``licence`` 字段的记录（明文不得经过 Redis），错误消息不含字段值。
     """
+    if _s(fields, "kind") == "vendor_lists":
+        return parse_vendor_intent(fields)
     if _s(fields, "kind") != VERIFY_INTENT:
         return None
     if _s(fields, "licence") is not None:

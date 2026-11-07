@@ -228,3 +228,97 @@ def get_ingest_status(
     del admin
     with engine.connect() as conn:
         return ingest_status.build(conn, rds, settings)
+
+
+@router.get("/securities/reconciliation")
+def get_master_reconciliation(
+    admin: AdminDep,
+    settings: SettingsDep,
+    engine: EngineDep,
+    page: Annotated[PageParams, Depends(page_params)],
+    status: str = "open",
+    kind: str | None = None,
+    source: str | None = None,
+) -> dict[str, Any]:
+    from app.db.tables.licences import user_data_licence_status as licences
+    from app.db.tables.market import securities
+    from app.db.tables.market import security_reconciliation_diffs as diffs
+    from app.db.tables.users import users
+    from app.schemas.enums import SecurityReconciliationKind, SecurityReconciliationSource
+
+    del admin
+    kinds = sorted(set(kind.split(","))) if kind is not None else []
+    if (
+        status not in {"open", "resolved", "all"}
+        or any(x not in {k.value for k in SecurityReconciliationKind} for x in kinds)
+        or (source is not None and source not in {s.value for s in SecurityReconciliationSource})
+    ):
+        raise AppError(ErrorCode.VALIDATION_ERROR)
+    scope = f"admin:reconciliation:{status}:{','.join(kinds)}:{source or ''}"
+    stmt = select(
+        diffs, securities.c.name, licences.c.user_id.label("owner_id"), users.c.username
+    ).select_from(
+        diffs.outerjoin(securities, securities.c.code == diffs.c.security_code)
+        .outerjoin(
+            licences, (licences.c.id == diffs.c.source_licence_id) & licences.c.deleted_at.is_(None)
+        )
+        .outerjoin(users, users.c.id == licences.c.user_id)
+    )
+    if status != "all":
+        stmt = stmt.where(diffs.c.status == status)
+    if kinds:
+        stmt = stmt.where(diffs.c.kind.in_(kinds))
+    if source:
+        stmt = stmt.where(diffs.c.source == source)
+    if page.cursor:
+        keys = decode_cursor(page.cursor, scope=scope, settings=settings)
+        try:
+            day, ident = dt.date.fromisoformat(str(keys[0])), int(keys[1])
+            if len(keys) != 2 or ident < 1:
+                raise ValueError
+        except (ValueError, TypeError, IndexError) as exc:
+            raise AppError(ErrorCode.VALIDATION_ERROR) from exc
+        stmt = stmt.where(tuple_(diffs.c.last_seen_on, diffs.c.id) < tuple_(day, ident))
+    with engine.connect() as conn:
+        rows = (
+            conn.execute(
+                stmt.order_by(diffs.c.last_seen_on.desc(), diffs.c.id.desc()).limit(page.limit + 1)
+            )
+            .mappings()
+            .all()
+        )
+    fields = (
+        "id",
+        "kind",
+        "source",
+        "security_code",
+        "source_name",
+        "field",
+        "master_value",
+        "source_value",
+        "first_seen_on",
+        "last_seen_on",
+        "seen_days",
+        "status",
+        "resolved_on",
+    )
+    items = []
+    for row in rows:
+        item = {
+            key: row[key].isoformat() if isinstance(row[key], dt.date) else row[key]
+            for key in fields
+        }
+        item["name"] = None if row["kind"] == "vendor_unknown" else row["name"]
+        item["licence_owner"] = (
+            {"user_id": str(row["owner_id"]), "username": row["username"]}
+            if row["owner_id"]
+            else None
+        )
+        items.append(item)
+    return build_page(
+        items,
+        limit=page.limit,
+        key=lambda r: [r["last_seen_on"], r["id"]],
+        scope=scope,
+        settings=settings,
+    ).model_dump()

@@ -50,9 +50,10 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from typing import Any, Final
+from typing import Any, Final, Self
 
 import redis
+from redis.typing import EncodableT
 from sqlalchemy import Engine
 
 from app.config import Settings
@@ -86,9 +87,24 @@ LOCK_TTL_S: Final = 3600
 SYNC_LISTS: Final = "master.sync_exchange_lists"
 SYNC_CODE_MAP: Final = "master.sync_bse_code_map"
 PURGE_SNAPSHOTS: Final = "master.purge_snapshots"
-RECONCILE_VENDOR: Final = "master.reconcile_vendor"  # T-B53 注册
+RECONCILE_VENDOR: Final = "master.reconcile_vendor"
+RECONCILE_VENDOR_APPLY: Final = "master.reconcile_vendor_apply"
+VENDOR_SWEEP: Final = "master.vendor_batches_sweep"
 CODE_MAP_TIME: Final = "18:30"
 PURGE_SNAPSHOTS_TIME: Final = "03:30"
+
+
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
+class MasterCount(int):
+    run_id: int
+
+    def __new__(cls, count: int, run_id: int) -> Self:
+        obj = super().__new__(cls, count)
+        obj.run_id = run_id
+        return obj
 
 
 def _redis(settings: Settings) -> redis.Redis:
@@ -172,7 +188,7 @@ def _master_run(settings: Settings, trigger: str, sources: list[str] | None) -> 
 
     cfg = settings.business.securities.master
     root = _master_root(settings)
-    now = dt.datetime.now(dt.UTC)
+    now = _now()
     td = sync.snapshot_trade_date(now)
     eng = _engine(settings)
     if sources is None:
@@ -190,7 +206,7 @@ def _master_run(settings: Settings, trigger: str, sources: list[str] | None) -> 
         )
     if res.status == "failed":
         raise MasterSyncFailedError(res.status)
-    return len(res.snaps)
+    return MasterCount(len(res.snaps), res.run_id)
 
 
 def sync_exchange_lists_task(settings: Settings, trigger: str = "manual") -> int:
@@ -205,7 +221,9 @@ def purge_snapshots_task(settings: Settings) -> int:
     from app.master.sync import purge_snapshots
 
     with _engine(settings).begin() as conn:
-        return purge_snapshots(conn, _master_root(settings))
+        from app.master.vendor import purge_batch_rows
+
+        return purge_snapshots(conn, _master_root(settings)) + purge_batch_rows(conn, now=_now())
 
 
 def _record_master_failure(settings: Settings, args: dict[str, Any], exc: BaseException) -> None:
@@ -218,6 +236,64 @@ def _record_master_failure(settings: Settings, args: dict[str, Any], exc: BaseEx
         record_failed_run(conn, str(args.get("trigger", "manual")), td, type(exc).__name__)
 
 
+def reconcile_vendor_task(
+    settings: Settings, trigger: str = "manual", master_run_id: int | None = None
+) -> int:
+    from app.master.vendor import request_batches
+
+    # 先提交 requested，再投递。投递中断由既有任务重试重新发布同一 requested id。
+    with _engine(settings).begin() as conn:
+        run_id, intents, pending = request_batches(
+            conn, master_run_id=master_run_id, trigger=trigger, now=_now()
+        )
+    rds = _redis(settings)
+    try:
+        for intent in intents:
+            fields: dict[EncodableT, EncodableT] = {}
+            for key, value in intent.items():
+                fields[key] = value
+            rds.xadd("ingest:requests", fields)
+        if pending:
+            body = {
+                "task": RECONCILE_VENDOR,
+                "args": {"trigger": trigger, "master_run_id": run_id},
+                "attempt": 1,
+            }
+            rds.zadd(
+                DELAYED_KEY, {json.dumps(body, sort_keys=True): _now().timestamp() + RETRY_DELAY_S}
+            )
+    finally:
+        rds.close()
+    return len(intents)
+
+
+def reconcile_vendor_apply_task(settings: Settings, batch_id: str) -> int:
+    from app.master.vendor import apply_batch
+
+    with _engine(settings).begin() as conn:
+        result = apply_batch(
+            conn,
+            uuid.UUID(batch_id),
+            now=_now(),
+            stale_alert_days=settings.business.securities.master.vendor_stale_alert_days,
+        )
+    return int(result == "reconciled")
+
+
+def vendor_sweep_task(settings: Settings) -> int:
+    from app.master.vendor import sweep_batches
+
+    with _engine(settings).begin() as conn:
+        batches = sweep_batches(conn, now=_now())
+    rds = _redis(settings)
+    try:
+        for bid in batches:
+            _push(rds, RECONCILE_VENDOR_APPLY, {"batch_id": str(bid)})
+    finally:
+        rds.close()
+    return len(batches)
+
+
 #: 任务名 → 实现
 TASKS: Final[dict[str, Task]] = {
     PURGE_COOLDOWNS: purge_expired_cooldowns_task,
@@ -226,13 +302,21 @@ TASKS: Final[dict[str, Task]] = {
     SYNC_LISTS: sync_exchange_lists_task,
     SYNC_CODE_MAP: sync_bse_code_map_task,
     PURGE_SNAPSHOTS: purge_snapshots_task,
+    RECONCILE_VENDOR: reconcile_vendor_task,
+    RECONCILE_VENDOR_APPLY: reconcile_vendor_apply_task,
+    VENDOR_SWEEP: vendor_sweep_task,
 }
 #: 失败重试（10 分钟后，共 3 次）且执行时持锁的任务 → 重试用尽时的处理
 RETRY_TASKS: Final[dict[str, Callable[[Settings, dict[str, Any], BaseException], None]]] = {
     SYNC_LISTS: _record_master_failure,
     SYNC_CODE_MAP: _record_master_failure,
+    RECONCILE_VENDOR: _record_master_failure,
+    RECONCILE_VENDOR_APPLY: _record_master_failure,
+    VENDOR_SWEEP: _record_master_failure,
 }
-LOCKED_TASKS: Final = frozenset({SYNC_LISTS, SYNC_CODE_MAP, PURGE_SNAPSHOTS})
+LOCKED_TASKS: Final = frozenset(
+    {SYNC_LISTS, SYNC_CODE_MAP, PURGE_SNAPSHOTS, RECONCILE_VENDOR, VENDOR_SWEEP}
+)
 
 
 def schedule(settings: Settings) -> dict[str, int]:
@@ -241,6 +325,7 @@ def schedule(settings: Settings) -> dict[str, int]:
         PURGE_COOLDOWNS: settings.cooldown_purge_interval_s,
         PURGE_IMPORT_ROWS: settings.import_rows_purge_interval_s,
         PURGE_RAW_FILES: settings.import_raw_purge_interval_s,
+        VENDOR_SWEEP: 900,
     }
 
 
@@ -373,10 +458,15 @@ def worker_tick(settings: Settings, client: redis.Redis | None = None) -> list[t
                     r.delete(lock)
             log.info("worker 任务 %s 完成：%s", task, n)
             done.append((task, "ok"))
-            beat = str(args.get("trigger", "")).startswith("beat_")
-            if task == SYNC_LISTS and beat and RECONCILE_VENDOR in TASKS:
+            if task == SYNC_LISTS and RECONCILE_VENDOR in TASKS:
                 # T-B53；首次导入（CLI）从不走这里
-                _push(r, RECONCILE_VENDOR, {"trigger": args["trigger"]})
+                _push(
+                    r,
+                    RECONCILE_VENDOR,
+                    {"trigger": args.get("trigger", "manual"), "master_run_id": n.run_id}
+                    if isinstance(n, MasterCount)
+                    else {"trigger": args.get("trigger", "manual")},
+                )
     finally:
         if client is None:
             r.close()

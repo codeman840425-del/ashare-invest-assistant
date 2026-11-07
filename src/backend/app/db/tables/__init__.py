@@ -20,6 +20,7 @@ from app.db.tables import (
     signals,
     strategy,
     users,
+    vendor,
 )
 
 __all__ = [
@@ -37,4 +38,5 @@ __all__ = [
     "signals",
     "strategy",
     "users",
+    "vendor",
 ]

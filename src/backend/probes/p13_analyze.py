@@ -20,7 +20,13 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app.financial_basis import (  # noqa: E402
+    CDR_UNIT_SIGNOFF, TradingCalendar, load_calendar, load_share_classes, share_class_at, v5g_conditions,
+)
+
 SUBDIR = "p13_fin_pit"
+SHARE_CLASS_PATH = Path(__file__).resolve().parents[3] / "config/share_class_list.yaml"
 NULL_TOKENS = {"", "-", "--", "—", "null", "None", "nan", "NaN"}
 OCF_FIELDS = ("jyhdcsdxjlxj", "jyhdcsdxjlje")
 # 公开来源核对值（引用见 /workspace/team/reports/T-R12-material.md §0）
@@ -456,24 +462,25 @@ def cdr_unit_check(rows: list, exp: dict) -> dict:
         r = row_in_window(rows, cp["at"], cp.get("not_before"))
         z = num(r.get("zgb")) if r else None
         v = ("neither" if z is None
-             else "zgb≈CDR份数" if close_enough(z, cp["cdr_units"], abs_tol=1e3, rel_tol=0.002)
-             else "zgb≈基础股数" if close_enough(z, cp["base_shares"], abs_tol=1e3, rel_tol=0.002) else "neither")
+             else "zgb≈CDR份数" if abs(z - cp["cdr_units"]) / cp["cdr_units"] <= 0.001
+             else "zgb≈基础股数" if abs(z - cp["base_shares"]) / cp["base_shares"] <= 0.001 else "neither")
         res.append({**cp, "row": _cap_view(r) if r else None, "zgb": z, "verdict": v,
                     "zgb_over_cdr_units": round(z / cp["cdr_units"], 6) if z else None})
     vs = {x["verdict"] for x in res}
     verdict = vs.pop() if len(vs) == 1 else "neither"
     return {"checkpoints": res, "v5j_cdr_unit": verdict, "ratio": exp.get("ratio"), "source": exp.get("source"),
-            "rows": len(capital_rows(rows)),
-            "rule": "zgb≈CDR份数 → 总市值 = c × zgb，不乘转换比；zgb≈基础股数 → 总市值 = c × zgb × 10（比例入配置，"
+            "rows": len(capital_rows(rows)), "relative_tolerance": 0.001,
+            "data_quality": verdict == "neither",
+            "rule": "T-R13容差0.1%：zgb≈CDR份数 → 总市值 = c × zgb，不乘转换比；zgb≈基础股数 → 总市值 = c × zgb × 10（比例入配置，"
                     "注明来源）；neither → 保留 verify_pending cdr_unit（T-R12e 第 3 条、T-R12f 第 7 条）"}
 
 
 # --------------------------------------------------------------------------- V5g 名单（探针样本）
-# T-R12e 第 2 条 / T-R12f 第 4 条：B/H 只按配置名单识别（不按代码段/名称）。这里只带探针样本用到的成员，
+# T-R12e 第 2 条 / T-R12f 第 4 条：B/H 只按配置名单识别（不按代码段/名称）。旧plan元数据保留两个样本；正式分析读取版本化配置，
 # 供 pb_at 读 non_a_share_capital（review-af589c0 m3，不再在 VERIFY_PENDING 写死）；全量名单草案见
-# /workspace/team/reports/T-R12ef-lists.md。config/*.yaml 归后端，这里不接进 app。
+# /workspace/team/reports/T-R12ef-lists.md。配置已由BusinessConfig接入；空生效日期草稿不参与历史打标。
 SHARE_CLASS_LISTS_SAMPLE = {
-    "source_note": "探针样本，非 app 配置；名单未接入 app 前 app 侧 share_class_check 仍为 unavailable",
+    "source_note": "旧样本元数据；正式分析读取 config/share_class_list.yaml，缺上市日期时仍 unavailable",
     "A+H": {"601318": {"h_code": "02318", "source": "cninfo 1225038326 中国平安 2025 年年度报告摘要", "as_of": "2025-12-31"}},
     "A+B": {"000550": {"b_code": "200550", "source": "cninfo 江铃汽车 2025 年年度报告（2026-03-28）", "as_of": "2025-12-31"}},
 }
@@ -501,22 +508,36 @@ def v5i_applies(bdrq: str, plrq: str | None) -> bool:
     return bool(plrq) and bdrq[5:] in QUARTER_ENDS and (plrq == bdrq or plrq[5:] in QUARTER_ENDS)
 
 
-def capital_visible(r: dict, incremental_first_seen_at: str | None = None) -> dict:
+def capital_visible(r: dict, incremental_first_seen_at: str | None = None, calendar: TradingCalendar | None = None) -> dict:
     """T-R12e 第 1 条 + T-R12f 第 1–3 条 + T-R12g：适用 V5i 的行——
       首次全量回填写入（无可信 first_seen_at，探针的全历史拉取即属此类）→ max(next_trading_day(plrq),
         next_trading_day(bdrq 所属报告期截止日) 09:30)，pit_basis 含 capital_deadline；
       增量采集（传 incremental_first_seen_at）→ max(next_trading_day(plrq), first_seen_at)，不套截止日。
     其余行 = next_trading_day(plrq) 09:30（与财务行一致）。pit_basis 为数组。
-    离线保守近似：next_trading_day(x) ≈ x 的下一自然日；visible_from 为“该日 09:30 起可见”。"""
+    T-B59：只用显式交易日历；缺少日历或覆盖不足则未确认，不再以自然日近似。"""
     b, p = r["_bdrq"], r["_plrq"]
-    nxt = lambda x: (to_date(x) + timedelta(days=1)).isoformat()
+    nxt = lambda x: calendar.next_day(x) if calendar else None
     if not p:
         return {"visible_from": None, "visible_at": None, "pit_basis": [], "deadline": None}
+    next_plrq = nxt(p)
+    deadline = capital_deadline(b) if v5i_applies(b, p) and not incremental_first_seen_at else None
+    next_deadline = nxt(deadline) if deadline else None
+    if not next_plrq or (deadline and not next_deadline):
+        return {"visible_from": None, "visible_at": None,
+                "pit_basis": ["capital_deadline"] if deadline else [], "deadline": deadline,
+                "calendar_status": "unconfirmed", "reason": "calendar_missing_or_out_of_coverage"}
     if v5i_applies(b, p) and incremental_first_seen_at:
         cn = timezone(timedelta(hours=8))
         fs = datetime.fromisoformat(incremental_first_seen_at.replace("Z", "+00:00")).astimezone(cn)
         base = datetime.fromisoformat(f"{nxt(p)}T09:30:00+08:00")
         va = max(base, fs)
+        # first_seen_at on a holiday is not itself a tradable visible session.
+        if calendar and va.date().isoformat() not in calendar.open_days:
+            nd = calendar.next_day(va.date().isoformat())
+            if nd is None:
+                return {"visible_from": None, "visible_at": None, "pit_basis": [], "deadline": None,
+                        "calendar_status": "unconfirmed", "reason": "calendar_out_of_coverage"}
+            va = datetime.fromisoformat(f"{nd}T09:30:00+08:00")
         return {"visible_from": va.date().isoformat(), "visible_at": va.isoformat(timespec="minutes"),
                 "pit_basis": [], "deadline": None, "rule": "incremental_first_seen_at"}
     if v5i_applies(b, p):
@@ -539,7 +560,7 @@ def _quantiles(xs: list) -> dict:
 V5I_VERDICTS = ("backfilled", "true_disclosure", "inconclusive")
 
 
-def v5i_backfill(cap_rows: list, report_rows: list, first_seen_at: str | None = None) -> dict:
+def v5i_backfill(cap_rows: list, report_rows: list, first_seen_at: str | None = None, calendar: TradingCalendar | None = None) -> dict:
     """V5i 回填判定（review-af589c0 M2，T-R12f 第 1 条范围）。
     1) plrq 为季末的行数/占比；2) 每个季末 bdrq 行与同公司同 jzrq 的 balance/cashflow 最早 plrq 比较，
     diff = capital.plrq − 报告最早 plrq（天）；3) 判定：
@@ -565,7 +586,7 @@ def v5i_backfill(cap_rows: list, report_rows: list, first_seen_at: str | None = 
             diffs.append(diff)
         rows.append({"bdrq": r["_bdrq"], "plrq": r["_plrq"], "zgb": num(r.get("zgb")), "report_first_plrq": rep,
                      "diff_days": diff, "v5i_applies": v5i_applies(r["_bdrq"], r["_plrq"]),
-                     "first_seen_at": first_seen_at, **{k: v for k, v in capital_visible(r).items()}})
+                     "first_seen_at": first_seen_at, **{k: v for k, v in capital_visible(r, calendar=calendar).items()}})
     early = sum(1 for x in diffs if x < 0)
     aligned = sum(1 for x in diffs if 0 <= x <= 3)
     if not first:
@@ -616,12 +637,12 @@ def sw_codes(list_rows: list, zg: dict, gg: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- ⑥ PB
-def zgb_at(cap_rows: list, d: str):
+def zgb_at(cap_rows: list, d: str, calendar: TradingCalendar | None = None):
     """review-af589c0 M3：bdrq ≤ d 且 visible_from ≤ d（T-R12e 第 1 条 + T-R12f 第 1–3 条，见 capital_visible；
     收盘价口径下“d 日 09:30 前可见”即可用）中 bdrq 最大的行；行上带 _pit。"""
     best = None
     for r in capital_rows(cap_rows):
-        v = capital_visible(r)
+        v = capital_visible(r, calendar=calendar)
         if r["_bdrq"] <= d and v["visible_from"] and v["visible_from"] <= d:
             if best is None or (r["_bdrq"], r["_plrq"]) > (best["_bdrq"], best["_plrq"]):
                 best = {**r, "_pit": v}
@@ -660,7 +681,8 @@ def first_reason(hits: set) -> str | None:
 def pb_at(bar: dict, cap_rows: list, bal_rows: list, verify_pending: list | None = None,
           ex_dates: list | None = None, share_class: str | None = None, share_class_list: str | None = None,
           lists_configured: bool = False, is_cdr: bool = False, cdr_unit: str | None = None,
-          cdr_per_base_share: float | None = None) -> dict:
+          cdr_per_base_share: float | None = None, security_code: str | None = None,
+          calendar: TradingCalendar | None = None, share_class_list_version: int | None = None) -> dict:
     """PB = 不复权 c × zgb(d) / 归母权益（plan 2.12.1 + T-R12a 边界 1–5 + T-R12b 原因码）。
 
     ex_dates：已知送转除权日（None = 没有送转数据源 → share_change_check=unavailable）；
@@ -671,16 +693,24 @@ def pb_at(bar: dict, cap_rows: list, bal_rows: list, verify_pending: list | None
       （只是值上的标记；S2 池、F43/F48 分位池按 §1.4 本就不含 CDR，不写剔除条款）。
       cdr_unit="zgb≈CDR份数" → mcap = c × zgb，无需配置，T-B05 确认后即清除 cdr_unit；
       "zgb≈基础股数" → mcap = c × zgb × cdr_per_base_share（逐证券配置），确认且配置接入后清除。
-      探针不自行清除：mock/样本结论不算 T-B05 确认。
+      T-R13：只对已有逐证券签收且份数判定一致的 689009 清除，其他CDR不推广。
     银行/保险的 verify_pending 只继承标记，照常参与排序（T-R12f）。
     """
     d = d10(bar.get("t") or bar.get("d") or bar.get("trade_date"))
     vp = list(verify_pending or [])
     if lists_configured and share_class_list and "non_a_share_capital" not in vp:
         vp.append("non_a_share_capital")
-    if is_cdr and "cdr_unit" not in vp:
+    cdr_signed = (security_code or "").split(".")[0] in CDR_UNIT_SIGNOFF and cdr_unit == "zgb≈CDR份数"
+    if is_cdr and cdr_signed:
+        vp = [flag for flag in vp if flag != "cdr_unit"]
+    elif is_cdr and "cdr_unit" not in vp:
         vp.append("cdr_unit")
-    basis = {"trade_date": d, "mcap_basis": "a_price_total_shares", "verify_pending": vp}
+    basis = {"trade_date": d, "mcap_basis": "a_price_total_shares", "verify_pending": vp,
+             "calendar_status": "confirmed" if calendar else "unconfirmed"}
+    if share_class_list_version is not None:
+        basis["share_class_list_version"] = share_class_list_version
+    if is_cdr and cdr_signed:
+        basis["cdr_unit_signoff"] = CDR_UNIT_SIGNOFF[(security_code or "").split(".")[0]]
     basis["share_change_check"] = "unavailable" if ex_dates is None else "checked"
     basis["share_class_check"] = "list" if lists_configured else "unavailable"
     if lists_configured:
@@ -694,7 +724,7 @@ def pb_at(bar: dict, cap_rows: list, bal_rows: list, verify_pending: list | None
     c_ = num(bar.get("c"))
     if c_ is None or str(bar.get("sf", "0")) in ("1", "1.0"):
         hits.add("no_valid_bar")
-    z = zgb_at(cap_rows, d) if d else None
+    z = zgb_at(cap_rows, d, calendar=calendar) if d else None
     zv = num(z.get("zgb")) if z else None
     if zv is None or zv <= 0:
         hits.add("no_capital_row")
@@ -848,7 +878,8 @@ def load_first_seen(run_dir: Path) -> dict:
         return {}
 
 
-def analyze(raw: dict, plan: dict, first_seen: dict | None = None) -> dict:
+def analyze(raw: dict, plan: dict, first_seen: dict | None = None, calendar: TradingCalendar | None = None,
+            share_class_config: dict | None = None) -> dict:
     """raw: {调用名: 解析后的 JSON}；plan: p13_fin_pit.PLAN_META（公司、类别、核对值）；
     first_seen: {调用名: manifest.fetched_at}（V5i 每行的 first_seen_at；缺 → None）。"""
     first_seen = first_seen or {}
@@ -880,26 +911,49 @@ def analyze(raw: dict, plan: dict, first_seen: dict | None = None) -> dict:
     out["4_capital"]["600519_bonus_2011"] = zgb_change_around(R.get("capital_600519", []), "2011-07-01")
     out["4_capital"]["600519_bonus_2011"]["expected"] = EXPECT["600519_bonus_2011"]
     reports = lambda c: [x for t in ("balance", "cashflow") for x in R.get(f"{t}_{c}", [])]
-    bf = {c: v5i_backfill(R.get(f"capital_{c}", []), reports(c), first_seen.get(f"capital_{c}"))
+    bf = {c: v5i_backfill(R.get(f"capital_{c}", []), reports(c), first_seen.get(f"capital_{c}"), calendar=calendar)
           for c in plan.get("capital", [])}
+    # Local citation permits only this annual public-disclosure cross-check;
+    # it is NOT a fabricated vendor balance/cashflow row or earliest-plrq proof.
+    annual550 = row_in_window(R.get("capital_000550", []), "2025-12-31")
+    if "000550" in bf:
+        bf["000550"]["public_annual_report_comparison"] = {
+            "period": "2025-12-31", "public_disclosure_date": "2026-03-28",
+            "source": EXPECT["000550_capital"]["source"],
+            "capital_row": _cap_view(annual550) if annual550 else None,
+            "diff_days": (to_date(d10(annual550["plrq"])) - date(2026, 3, 28)).days if annual550 and d10(annual550.get("plrq")) else None,
+            "limitation": "仅本机已存巨潮年报披露日期引用；非供应商同期报告最早plrq，不能替代待补balance/cashflow响应"}
     out["4_capital"]["v5i_backfill"] = {
         "by_code": bf, "verdicts": {c: v["verdict"] for c, v in bf.items()},
         "rule": "T-R12f 第 1–3 条 + T-R12g：bdrq 季末且（plrq=bdrq 或 plrq 季末）——首次全量回填 → max(next_trading_day(plrq), "
                 "next_trading_day(bdrq 所属报告期截止日) 09:30)，pit_basis 含 capital_deadline；增量 → max(ntd(plrq), "
                 "first_seen_at)；其余 → plrq。探针为全历史拉取 = 首次回填口径"}
-    lists = plan.get("share_class_lists") or {}
-    lists_on = bool(lists.get("A+H") or lists.get("A+B"))
+    lists = share_class_config if share_class_config is not None else (
+        load_share_classes(SHARE_CLASS_PATH) if SHARE_CLASS_PATH.is_file() else
+        {"list_version": 0, "as_of": "1970-01-01", "sources": {}, "records": []})
+    canonical = lambda c: next((r["code"] for r in lists["records"] if r["code"].split(".")[0] == c), c)
+    membership = lambda c, day: share_class_at(lists, canonical(c), day)
     out["7_share_class"] = {
         "601318_A+H": share_split_check(R.get("capital_601318", []), EXPECT["601318_capital"]),
         "000550_A+B": share_split_check(R.get("capital_000550", []), EXPECT["000550_capital"])}
-    out["7_share_class_lists"] = {"configured_in_probe": lists_on,
-                                  "members": {c: share_class_member(lists, c) for c in plan.get("capital", [])},
-                                  "v5g_close": "名单接入 app + zgb 含 B/H 已对照巨潮总股本核实（A+H 601318、A+B 000550）"}
+    conditions = v5g_conditions(lists, out["7_share_class"])
+    lists_on = conditions["list_integrated"]
+    out["7_share_class_lists"] = {"config_loaded": bool(lists["records"]), "configured_in_probe": lists_on,
+                                 "list_version": lists["list_version"],
+                                 "members": {c: membership(c, lists["as_of"])["member"] for c in plan.get("capital", [])},
+                                 "pending_effective_dates": sum(r["effective_from"] is None for r in lists["records"]),
+                                 "v5g_close": {"conditions": conditions, "closed": all(conditions.values())}}
+    out["trading_calendar"] = {"confirmed": calendar is not None,
+                                "source": calendar.source if calendar else None,
+                                "rule": "明确日历严格下一开市日；缺失或超覆盖不猜测"}
     # V5j：CDR 以 securities.type=cdr 识别（T-R12f 第 5 条）；探针里用 plan.kinds == "CDR" 代替
     cdrs = sorted(c for c, k in kinds.items() if k == "CDR")
     out["10_cdr"] = {c: cdr_unit_check(R.get(f"capital_{c}", []), EXPECT[f"{c}_cdr"]) for c in cdrs
                      if f"{c}_cdr" in EXPECT}
     out["v5j_cdr_unit"] = {c: v["v5j_cdr_unit"] for c, v in out["10_cdr"].items()}
+    for code, check in out["10_cdr"].items():
+        check["cdr_unit_cleared"] = code in CDR_UNIT_SIGNOFF and check["v5j_cdr_unit"] == "zgb≈CDR份数"
+        check["signoff"] = CDR_UNIT_SIGNOFF.get(code) if check["cdr_unit_cleared"] else None
     ev = {c: dividend_events(R.get(f"jnfh_{c}", [])) for c in plan.get("jnfh", [])}
     out["8_dividend"] = {"has_dividend_feed": any(R.get(f"jnfh_{c}") for c in plan.get("jnfh", [])),
                          "fields": {c: sorted({k for r in R.get(f"jnfh_{c}", []) for k in r}) for c in plan.get("jnfh", [])},
@@ -916,7 +970,9 @@ def analyze(raw: dict, plan: dict, first_seen: dict | None = None) -> dict:
                    and v.get("verdict") in ("includes_non_a", "a_share_only")), None)
         is_cdr = kinds.get(c) == "CDR"
         pb[c] = [pb_at(b, R.get(f"capital_{c}", []), R.get(f"balance_{c}", []), vp, exd, sc,
-                       share_class_list=share_class_member(lists, c), lists_configured=lists_on, is_cdr=is_cdr,
+                       share_class_list=membership(c, d10(b.get("t") or b.get("d")) or lists["as_of"])["member"],
+                       lists_configured=lists_on, is_cdr=is_cdr, security_code=c, calendar=calendar,
+                       share_class_list_version=lists["list_version"],
                        cdr_unit=out["v5j_cdr_unit"].get(c),
                        cdr_per_base_share=(CDR_RATIO_SAMPLE.get(c) or {}).get("cdr_per_base_share"))
                  for b in bars[-5:]]
@@ -974,6 +1030,12 @@ def summary_lines(a: dict) -> list:
 def selftest_pure() -> list:
     """纯函数单测（dry-run 阶段 6 与 selfchecks/tr12_fin.py 共用）。返回 [(名称, 通过, 说明)]。"""
     out = []
+    # This is a synthetic all-open scenario, NOT a live exchange calendar.
+    days = [(date(2000, 1, 1) + timedelta(days=i)).isoformat() for i in range(10227)]
+    test_calendar = TradingCalendar("2000-01-01", "2027-12-31", tuple(days), "synthetic_selftest_only")
+    cv = lambda *a, **k: capital_visible(*a, calendar=test_calendar, **k)
+    z_at = lambda *a, **k: zgb_at(*a, calendar=test_calendar, **k)
+    pb = lambda *a, **k: pb_at(*a, calendar=test_calendar, **k)
 
     def t(name, cond, detail=""):
         out.append((name, bool(cond), detail))
@@ -1013,7 +1075,7 @@ def selftest_pure() -> list:
            {"bdrq": "20260930", "plrq": "2026-10-28", "zgb": 1250081601}]
     sem = capital_semantics(cap)
     t("capital：plrq−bdrq 天数统计", (sem["plrq_eq_bdrq"], sem["plrq_after_bdrq"], sem["lag_days_max"]) == (2, 1, 28))
-    z = zgb_at(cap, "2026-10-28")
+    z = z_at(cap, "2026-10-28")
     t("zgb(d)：plrq 当日不可见（下一交易日才可见），取上一行", z and z["_bdrq"] == "2011-07-01")
     vis = bonus_visibility(cap, [{"cdate": "2011-07-01", "give": 1.0, "change": 0.0, "sdate": "2011-06-26"}])
     t("送转可见性：2011 10送1 匹配到 20110701 行，plrq−除权日 = 0 天", vis["matched"] == 1 and
@@ -1029,28 +1091,28 @@ def selftest_pure() -> list:
            {"jzrq": "2025-09-30", "plrq": "2025-10-30", "gsmgdqsyhj": -5.0},
            {"jzrq": "2001-06-30", "plrq": "2001-06-30", "gsmgdqsyhj": 7.0}]
     capx = [{"bdrq": "20250630", "plrq": "2025-06-30", "zgb": 10}]
-    t("PB：权益 ≤0 → null(non_positive_equity)", pb_at({"t": "2025-11-03", "c": 5.0, "sf": 0}, capx, bal)["basis"]
+    t("PB：权益 ≤0 → null(non_positive_equity)", pb({"t": "2025-11-03", "c": 5.0, "sf": 0}, capx, bal)["basis"]
       .get("null_reason") == "non_positive_equity")
-    p = pb_at({"t": "2025-10-30", "c": 5.0, "sf": 0}, capx, bal)
+    p = pb({"t": "2025-10-30", "c": 5.0, "sf": 0}, capx, bal)
     t("PB：plrq 当日不可见 → 用上一期权益；值 = c×zgb/权益", p["value"] == 0.5 and p["basis"]["period"] == "2025-06-30"
       and p["basis"]["mcap_basis"] == "a_price_total_shares", str(p))
-    t("PB：停牌 → no_valid_bar", pb_at({"t": "2025-10-30", "c": 5.0, "sf": 1}, capx, bal)["basis"]["null_reason"]
+    t("PB：停牌 → no_valid_bar", pb({"t": "2025-10-30", "c": 5.0, "sf": 1}, capx, bal)["basis"]["null_reason"]
       == "no_valid_bar")
-    t("PB：15 个月外无报告 → no_visible_report", pb_at({"t": "2027-03-01", "c": 5.0}, capx, bal[:1])["basis"]
+    t("PB：15 个月外无报告 → no_visible_report", pb({"t": "2027-03-01", "c": 5.0}, capx, bal[:1])["basis"]
       ["null_reason"] == "no_visible_report")
-    r = pb_at({"t": "2025-10-30", "c": 5.0}, capx, bal, ex_dates=["2025-07-10"])["basis"]
+    r = pb({"t": "2025-10-30", "c": 5.0}, capx, bal, ex_dates=["2025-07-10"])["basis"]
     t("PB：除权日 ≤ d 但无 bdrq ≥ 除权日的可见股本行 → share_change_pending", r.get("null_reason") == "share_change_pending"
       and r["share_change_check"] == "checked")
-    r = pb_at({"t": "2025-10-30", "c": 5.0}, capx, bal)["basis"]
+    r = pb({"t": "2025-10-30", "c": 5.0}, capx, bal)["basis"]
     t("PB：无送转数据源/无法识别股本类别 → share_change_check、share_class_check = unavailable",
       r["share_change_check"] == "unavailable" and r["share_class_check"] == "unavailable" and "null_reason" not in r)
     t("PB：zgb 只含 A 股 → a_share_only_capital",
-      pb_at({"t": "2025-10-30", "c": 5.0}, capx, bal, share_class="a_share_only")["basis"].get("null_reason")
+      pb({"t": "2025-10-30", "c": 5.0}, capx, bal, share_class="a_share_only")["basis"].get("null_reason")
       == "a_share_only_capital")
-    r = pb_at({"t": "2025-10-30", "c": 5.0, "sf": 1}, [], [])["basis"]
+    r = pb({"t": "2025-10-30", "c": 5.0, "sf": 1}, [], [])["basis"]
     t("PB：多个原因同时命中 → 只写封闭表中靠前的一个（no_valid_bar 先于 no_visible_report/no_capital_row）",
       r.get("null_reason") == "no_valid_bar")
-    t("PB：无可见股本行 → no_capital_row", pb_at({"t": "2025-10-30", "c": 5.0}, [], bal)["basis"].get("null_reason")
+    t("PB：无可见股本行 → no_capital_row", pb({"t": "2025-10-30", "c": 5.0}, [], bal)["basis"].get("null_reason")
       == "no_capital_row")
     t("PB：plrq ≤ jzrq 的占位行不作为可见报告", equity_at(bal[2:], "2001-07-05") is None)
     cdr_rows = [{"bdrq": "20241231", "plrq": "2025-04-01", "zgb": 717_120_523},
@@ -1065,7 +1127,7 @@ def selftest_pure() -> list:
     t("V5i：截止日按 bdrq 所属报告期 Q1→4-30、H1→8-31、Q3→10-31、年报→次年 4-30，非季末 → None",
       [capital_deadline(x) for x in ("2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31", "2025-07-01")]
       == ["2025-04-30", "2025-08-31", "2025-10-31", "2026-04-30", None])
-    cr5 = {r["_bdrq"]: capital_visible(r) for r in capital_rows([
+    cr5 = {r["_bdrq"]: cv(r) for r in capital_rows([
         {"bdrq": "20250630", "plrq": "2025-06-30"}, {"bdrq": "20250930", "plrq": "2025-12-31"},
         {"bdrq": "20251231", "plrq": "2026-03-28"}, {"bdrq": "20250716", "plrq": "2025-07-16"},
         {"bdrq": "20240331", "plrq": "2024-06-30"}])}
@@ -1076,9 +1138,9 @@ def selftest_pure() -> list:
           "2025-12-31": ("2026-03-29", []), "2025-07-16": ("2025-07-17", []),
           "2024-03-31": ("2024-07-01", ["capital_deadline"])}
       and cr5["2025-06-30"]["visible_at"] == "2025-09-01T09:30+08:00", str(cr5))
-    z5 = zgb_at([{"bdrq": "20250630", "plrq": "2025-06-30", "zgb": 2}, {"bdrq": "20250331", "plrq": "2025-04-20", "zgb": 1}],
+    z5 = z_at([{"bdrq": "20250630", "plrq": "2025-06-30", "zgb": 2}, {"bdrq": "20250331", "plrq": "2025-04-20", "zgb": 1}],
                 "2025-08-20")
-    z6 = zgb_at([{"bdrq": "20250630", "plrq": "2025-06-30", "zgb": 2}], "2025-09-01")
+    z6 = z_at([{"bdrq": "20250630", "plrq": "2025-06-30", "zgb": 2}], "2025-09-01")
     t("V5i（M3）：zgb_at 用可见日——H1 回填行 ntd(8-31) 前不可见取上一行，之后可见且带 pit_basis",
       z5 and z5["_bdrq"] == "2025-03-31" and z6 and z6["_pit"]["pit_basis"] == ["capital_deadline"])
     rep = [{"jzrq": "2025-06-30", "plrq": "2025-08-13"}, {"jzrq": "2025-09-30", "plrq": "2025-10-25"},
@@ -1103,16 +1165,16 @@ def selftest_pure() -> list:
       and share_split_check([{"bdrq": "20260930", "plrq": "2026-09-30", "zgb": 1}],
                             EXPECT["000550_capital"])["verdict"] == "no_row_in_window")
     capc = [{"bdrq": "20250415", "plrq": "2025-04-20", "zgb": 10}]
-    r0 = pb_at({"t": "2025-10-30", "c": 5.0}, capc, bal)["basis"]
-    r1 = pb_at({"t": "2025-10-30", "c": 5.0}, capc, bal, share_class_list="A+H", lists_configured=True)["basis"]
-    r2 = pb_at({"t": "2025-10-30", "c": 5.0}, capc, bal, lists_configured=True)["basis"]
+    r0 = pb({"t": "2025-10-30", "c": 5.0}, capc, bal)["basis"]
+    r1 = pb({"t": "2025-10-30", "c": 5.0}, capc, bal, share_class_list="A+H", lists_configured=True)["basis"]
+    r2 = pb({"t": "2025-10-30", "c": 5.0}, capc, bal, lists_configured=True)["basis"]
     t("V5g（T-R12f 4）：名单未接入 → unavailable；接入后所有行 list，名单内另打 non_a_share_capital",
       r0["share_class_check"] == "unavailable" and r1["share_class_check"] == "list"
       and r1["verify_pending"] == ["non_a_share_capital"] and r2["share_class_check"] == "list"
       and r2["verify_pending"] == [] and "pit_basis" not in r0)
-    rc = pb_at({"t": "2025-10-30", "c": 5.0}, capc, bal, is_cdr=True)
-    rb = pb_at({"t": "2025-10-30", "c": 5.0}, capc, bal, is_cdr=True, cdr_unit="zgb≈基础股数", cdr_per_base_share=10)
-    rk = pb_at({"t": "2025-10-30", "c": 5.0}, capc, bal, ["bank_balance"])["basis"]
+    rc = pb({"t": "2025-10-30", "c": 5.0}, capc, bal, is_cdr=True)
+    rb = pb({"t": "2025-10-30", "c": 5.0}, capc, bal, is_cdr=True, cdr_unit="zgb≈基础股数", cdr_per_base_share=10)
+    rk = pb({"t": "2025-10-30", "c": 5.0}, capc, bal, ["bank_balance"])["basis"]
     t("V5j（T-R12f 5–7 + T-R12g）：CDR → 照常算、verify_pending cdr_unit、无剔除字段；zgb≈基础股数 → mcap × 10；"
       "银行只继承标记",
       rc["value"] == 0.5 and rc["basis"]["verify_pending"] == ["cdr_unit"]
@@ -1121,9 +1183,9 @@ def selftest_pure() -> list:
       and rk["verify_pending"] == ["bank_balance"], str(rc))
     h1 = capital_rows([{"bdrq": "20250630", "plrq": "2025-06-30"}])[0]
     t("V5i（T-R12g）：增量采集的季末行 → max(ntd(plrq), first_seen_at)，不套截止日；首次回填 → 截止日",
-      capital_visible(h1, "2025-07-03T01:00:00+00:00")["visible_from"] == "2025-07-03"
-      and capital_visible(h1, "2025-07-03T01:00:00+00:00")["pit_basis"] == []
-      and capital_visible(h1)["pit_basis"] == ["capital_deadline"])
+      cv(h1, "2025-07-03T01:00:00+00:00")["visible_from"] == "2025-07-03"
+      and cv(h1, "2025-07-03T01:00:00+00:00")["pit_basis"] == []
+      and cv(h1)["pit_basis"] == ["capital_deadline"])
     pc = industry_pct({"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0, "e": 5.0, "f": None, "g": 1.0},
                       {"a": "X", "b": "X", "c": "X", "d": "X", "e": "X", "f": "X", "g": "Y"})
     t("行业分位：null 不进分母、组内 N<5 → null", pc["a"] == 0.0 and pc["e"] == 1.0 and pc["f"] is None
@@ -1149,7 +1211,9 @@ def main(argv=None) -> int:
     if not meta_f.is_file():
         print(f"找不到 {meta_f}（需要 p13_fin_pit 的运行目录）")
         return 2
-    a = analyze(load_raw(run_dir), json.loads(meta_f.read_text(encoding="utf-8")), load_first_seen(run_dir))
+    calendar_path = Path(argv[argv.index("--calendar") + 1]) if "--calendar" in argv else run_dir / "trading_calendar.json"
+    a = analyze(load_raw(run_dir), json.loads(meta_f.read_text(encoding="utf-8")), load_first_seen(run_dir),
+                calendar=load_calendar(calendar_path))
     for line in summary_lines(a):
         print(line)
     if "--stdout" not in argv:

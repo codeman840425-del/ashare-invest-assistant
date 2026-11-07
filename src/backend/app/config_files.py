@@ -3,8 +3,8 @@
 - 每个文件对应一个 pydantic 模型，全部 ``extra="forbid"``、``frozen=True``：未知键、缺键、
   类型或取值不符 → :class:`pydantic.ValidationError`，进程启动即失败（plan §6.1 通用规则）。
 - 默认值**只在 YAML 里**（plan §6.1 是唯一出处），这里不写默认值，只写类型与取值范围；
-  因此九个文件（v0.2.7 加 ``securities.yaml``）缺一不可，``config/`` 顶层也不允许出现
-  其他 yaml 文件（防止文件名拼错被忽略）。
+  因此十个文件（含 ``securities.yaml`` 与 ``share_class_list.yaml``）缺一不可；
+  ``config/`` 顶层也不允许出现其他 yaml 文件（防止文件名拼错被忽略）。
 - 范围约束只取 plan 明文给出的（如 ``quote_interval_s`` 下限 5、``per_minute_budget`` 热调上限
   5400、RC2 用户可调范围 5–50）以及“数值本身必须有意义”的约束（正数、上下界有序）。
 - ``config/strategies/`` 不在本模块范围（由导入器处理，plan §2.5.14）。
@@ -1194,13 +1194,28 @@ class SecuritiesConfig(_File):
     master: SecuritiesMaster
 
 
+# T-R12h/i：名单草稿允许未核实的空生效日期，但不能用于历史打标。
+class ShareClassListConfig(_File):
+    list_version: PosInt
+    as_of: StrictStr
+    sources: dict[str, Any]
+    records: list[dict[str, Any]]
+
+    @model_validator(mode="after")
+    def _validate_records(self) -> ShareClassListConfig:
+        from app.financial_basis import validate_share_classes
+
+        validate_share_classes(self.model_dump())
+        return self
+
+
 # ---------------------------------------------------------------------------
 # 汇总
 # ---------------------------------------------------------------------------
 
 
 class BusinessConfig(_Strict):
-    """``config/`` 顶层九个文件；键为文件名（不含扩展名）。"""
+    """``config/`` 顶层十个文件；键为文件名（不含扩展名）。"""
 
     realtime: RealtimeConfig
     ingest: IngestConfig
@@ -1212,6 +1227,7 @@ class BusinessConfig(_Strict):
     auth: AuthConfig
     #: v0.2.7（T-A08）
     securities: SecuritiesConfig
+    share_class_list: ShareClassListConfig
 
 
 BUSINESS_FILES: tuple[str, ...] = tuple(BusinessConfig.model_fields)

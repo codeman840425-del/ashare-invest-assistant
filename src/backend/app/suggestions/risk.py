@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from decimal import ROUND_FLOOR, Decimal, InvalidOperation
+from decimal import ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 
 from pydantic import Field, model_validator
 from sqlalchemy import Connection, or_, select
@@ -71,6 +71,27 @@ class RiskResult(Model):
 
 
 def evaluate_risk(
+    config: RiskControlsConfig,
+    context: RiskContext,
+    *,
+    action: Action,
+    horizon: Horizon,
+    stops: Stops,
+    lot: LotSpec | None = None,
+) -> RiskResult:
+    # Preserve supplied Decimal precision; final share counts use exact positive
+    # integer division, not a rounded quotient crossing an integer boundary.
+    with localcontext() as ctx:
+        ctx.prec = max(
+            64,
+            len(config.model_dump_json())
+            + max((len(str(e.value)) for e in context.observations.values()), default=0)
+            + 64,
+        )
+        return _evaluate_risk(config, context, action=action, horizon=horizon, stops=stops, lot=lot)
+
+
+def _evaluate_risk(
     config: RiskControlsConfig,
     context: RiskContext,
     *,
@@ -158,7 +179,7 @@ def evaluate_risk(
         qty = number("proposed_quantity") if action in {"buy", "add"} else Decimal(0)
         if assets is not None and assets <= 0:
             gaps.add("total_assets")
-        elif assets is not None and position is not None and price is not None and qty is not None:
+        elif assets is not None and position is not None and price is not None:
             if price <= 0:
                 gaps.add("price")
             else:
@@ -166,17 +187,39 @@ def evaluate_risk(
                     Decimal(0),
                     assets * config.rc2_position_cap.single_position_max_pct / 100 - position,
                 )
-                quantity_cap = (room / price).to_integral_value(rounding=ROUND_FLOOR)
+                quantity_cap = room // price
+                if lot is not None:
+                    quantity_cap = min(quantity_cap, Decimal(lot.max_qty))
+                    quantity_cap = (
+                        Decimal(0)
+                        if quantity_cap < lot.min_buy
+                        else Decimal(lot.min_buy)
+                        + ((quantity_cap - lot.min_buy) // lot.step) * lot.step
+                    )
+                elif action in {"buy", "add"}:
+                    quantity_cap = None
+                    gaps.add("market_lot_rules")
                 if (
-                    position + price * qty
-                    > assets * config.rc2_position_cap.single_position_max_pct / 100
+                    position > assets * config.rc2_position_cap.single_position_max_pct / 100
+                    or (
+                        action in {Action.BUY, Action.ADD}
+                        and position
+                        >= assets * config.rc2_position_cap.single_position_max_pct / 100
+                    )
+                    or (
+                        qty is not None
+                        and position + price * qty
+                        > assets * config.rc2_position_cap.single_position_max_pct / 100
+                    )
                 ):
                     flag(
                         RiskControl.POSITION_CAP,
-                        "拟买入后单只仓位超过本人上限",
+                        "当前或拟买入后的单只仓位达到/超过本人上限；不改变候选动作",
                         ids("total_assets", "security_value", "price", "proposed_quantity"),
                         cap=quantity_cap,
-                        gated=[Action.BUY, Action.ADD],
+                        gated=[Action.BUY, Action.ADD]
+                        if action in {Action.BUY, Action.ADD}
+                        else [],
                     )
     increasing = action in {Action.BUY, Action.ADD} and context.t_leg is None
 
@@ -219,7 +262,7 @@ def evaluate_risk(
                     if lot is None:
                         gaps.add("market_lot_rules")
                     else:
-                        raw = min((upper - current) / price, Decimal(lot.max_qty))
+                        raw = min((upper - current) // price, Decimal(lot.max_qty))
                         cap = (
                             Decimal(0)
                             if raw < lot.min_buy
@@ -287,6 +330,8 @@ def evaluate_risk(
             ("sw_l1.", config.rc4_sector_concentration.sw_l1_max_pct),
             ("concept.", config.rc4_sector_concentration.concept_max_pct),
         ]:
+            if limit == 100:  # T-A25: enabled but no sector/concept alert at 100%.
+                continue
             keys = sorted(
                 {key for key in context.observations if key.startswith(prefix)}
                 | {key for key in memberships or [] if key.startswith(prefix)}
@@ -410,6 +455,13 @@ def effective_config(
     for row in rows:
         field = CONTROL_FIELDS[row.control]
         values[field] = {**values[field], **(row.params or {}), "enabled": row.enabled}
+    own_position = any(r.scope == "user" and r.control == "position_cap" for r in rows)
+    if not own_position:
+        from app.auth.service import latest_profile
+
+        profile = latest_profile(conn, user_id)
+        if profile is not None and profile.max_single_position_pct is not None:
+            values["rc2_position_cap"]["single_position_max_pct"] = profile.max_single_position_pct
     return RiskControlsConfig.model_validate(values)
 
 

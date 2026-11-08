@@ -14,6 +14,9 @@ from sqlalchemy import Connection, Row, insert, select
 from app.config import Settings
 from app.db.tables.market import trading_calendar
 from app.db.tables.reviews import data_snapshots
+from app.risk.evaluation import assessed
+from app.risk.evaluation import inputs as risk_inputs
+from app.risk.events import record as record_risk_events
 from app.schemas.enums import Action, Dimension, GapReason, Horizon
 from app.signals.models import Gap, MarketFacts, SignalInput, Stops
 from app.signals.service import snapshot_items as signal_items
@@ -21,7 +24,7 @@ from app.signals.service import write_candidate
 from app.strategy.cards.dsl import Interpreter, parse
 from app.suggestions.confidence import components, numeric
 from app.suggestions.models import Conclusion, SuggestionInput
-from app.suggestions.risk import RiskContext, apply_risk, effective_config, evaluate_risk
+from app.suggestions.risk import apply_risk, effective_config
 from app.suggestions.service import archive
 from app.suggestions.service import snapshot_items as suggestion_items
 
@@ -205,19 +208,22 @@ def conclusion(
         "gaps": gaps,
     }
     signal = SignalInput.model_validate(raw)
-    risk = evaluate_risk(
+    owned_risk = risk_inputs(
+        conn,
+        owner,
+        result["security_code"],
+        instance.account_id,
+        settings,
+        at,
+        feature_set_version=result["feature_set_version"],
+    )
+    risk, risk_controls = assessed(
         effective_config(conn, owner, settings.business.risk_controls),
-        RiskContext(
-            observations={},
-            regime=None,
-            trade_action=None,
-            plan_action=None,
-            invalidated=None,
-            plan_stop_loss=None,
-        ),
+        owned_risk,
         action=Action(result["action"]),
         horizon=Horizon(instance.horizon),
         stops=Stops.model_validate(stops),
+        at=at,
     )
     signal = apply_risk(
         signal,
@@ -233,6 +239,8 @@ def conclusion(
         "instance_id": str(instance.id),
         "policy_id": str(policy.id),
         "components": confidence["components"],
+        "risk_account_id": str(owned_risk.account_id) if owned_risk.account_id else None,
+        "risk_control_evaluation": risk_controls,
     }
     identifier = uuid.uuid5(uuid.NAMESPACE_URL, canonical(signature))
     signal = signal.model_copy(update={"snapshot_id": identifier})
@@ -251,6 +259,8 @@ def conclusion(
         "source_snapshot_id": str(source.id),
         "source_hash": source.hash,
         "stop_evaluations": stop_trace,
+        "risk_account_id": str(owned_risk.account_id) if owned_risk.account_id else None,
+        "risk_control_evaluation": risk_controls,
         "confidence_components": confidence["components"],
     }
     persist(conn, owner, identifier, items, at)
@@ -306,4 +316,29 @@ def archive_conclusions(
     identifier = uuid.uuid5(uuid.NAMESPACE_URL, canonical(content.model_dump(mode="json")))
     content = content.model_copy(update={"snapshot_id": identifier})
     persist(conn, owner, identifier, suggestion_items(content), at)
-    return archive(conn, user_id=owner, content=content)
+    archived = archive(conn, user_id=owner, content=content)
+    for row in rows:
+        snapshot = conn.execute(
+            select(data_snapshots).where(
+                data_snapshots.c.id == row.signal.snapshot_id,
+                data_snapshots.c.user_id == owner,
+            )
+        ).one()
+        cached = snapshot._mapping["items"]
+        # Old immutable snapshots have no new evaluation and remain unchanged.
+        if "risk_control_evaluation" not in cached:
+            continue
+        account = cached.get("risk_account_id")
+        record_risk_events(
+            conn,
+            owner=owner,
+            account_id=uuid.UUID(account) if account else None,
+            instance_id=row.instance_id,
+            code=code,
+            name=archived["suggestion"]["name"],
+            controls=cached["risk_control_evaluation"],
+            evidence=[e.model_dump(mode="json") for e in row.signal.evidence],
+            at=at,
+            suggestion_id=uuid.UUID(archived["suggestion"]["id"]),
+        )
+    return archived

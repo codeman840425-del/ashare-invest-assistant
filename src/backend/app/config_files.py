@@ -529,17 +529,20 @@ class MarketRulesConfig(_File):
 
 class Rc1StopTake(_Strict):
     enabled: bool
-    long_horizon_default_stop_pct: Annotated[Decimal, Field(lt=0, ge=-100)]
+    long_horizon_default_stop_pct: Annotated[Decimal, Field(ge=-50, le=-5, decimal_places=2)]
     clamp_to_price_limit: bool
 
 
 class Rc2PositionCap(_Strict):
     enabled: bool
     #: plan §6.1：用户可调范围 5–50，系统默认也须落在该范围内
-    single_position_max_pct: Annotated[Decimal, Field(ge=5, le=50)]
+    single_position_max_pct: Annotated[Decimal, Field(ge=5, le=50, decimal_places=2)]
 
 
-PctRange = tuple[Annotated[int, Field(ge=0, le=100)], Annotated[int, Field(ge=0, le=100)]]
+PctRange = tuple[
+    Annotated[Decimal, Field(ge=0, le=100, decimal_places=2)],
+    Annotated[Decimal, Field(ge=0, le=100, decimal_places=2)],
+]
 
 
 class RegimeRanges(_Strict):
@@ -557,22 +560,22 @@ class RegimeRanges(_Strict):
 class Rc3TotalExposure(_Strict):
     enabled: bool
     regime_ranges: RegimeRanges
-    regime_confirm_days: PosInt
+    regime_confirm_days: Annotated[int, Field(ge=1, le=5)]
 
 
 class Rc4SectorConcentration(_Strict):
     enabled: bool
-    sw_l1_max_pct: Annotated[Decimal, Field(gt=0, le=100)]
-    concept_max_pct: Annotated[Decimal, Field(gt=0, le=100)]
+    sw_l1_max_pct: Annotated[Decimal, Field(ge=10, le=100, decimal_places=2)]
+    concept_max_pct: Annotated[Decimal, Field(ge=10, le=100, decimal_places=2)]
 
 
 class Rc5LossStreakDrawdown(_Strict):
     enabled: bool
-    closed_loss_streak: PosInt
-    drawdown_from_peak_pct: Annotated[Decimal, Field(gt=0, le=100)]
-    strategy_sim_fail_streak: PosInt
+    closed_loss_streak: Annotated[int, Field(ge=2, le=10)]
+    drawdown_from_peak_pct: Annotated[Decimal, Field(ge=3, le=50, decimal_places=2)]
+    strategy_sim_fail_streak: Annotated[int, Field(ge=3, le=20)]
     pause_on_trigger: bool
-    pause_days: PosInt
+    pause_days: Annotated[int, Field(ge=1, le=20)]
 
 
 Rc6Check = Literal[

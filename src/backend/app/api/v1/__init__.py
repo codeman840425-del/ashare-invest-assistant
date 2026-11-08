@@ -22,6 +22,7 @@ from app.api.v1 import (
     notifications,
     portfolio,
     promotions,
+    risk_controls,
     strategy_cards,
     suggestions,
     trades,
@@ -58,3 +59,4 @@ router.include_router(suggestions.router)
 router.include_router(daily_reports.router)
 
 router.include_router(promotions.router)
+router.include_router(risk_controls.router)

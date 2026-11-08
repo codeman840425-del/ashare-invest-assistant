@@ -1169,7 +1169,7 @@ evidence: Evidence[]
 
 #### 7.11.2 风控设置与可判定性（status: draft；P2N-02/08）
 
-沿用 §7.5 `GET/PUT /risk-controls`（不分页）。GET 返回六项有效设置；PUT 请求项 `{control, enabled: boolean, params: object}`，只覆盖所提交的 control，未提交项保持原值；返回完整六项有效设置（含只读 `source`）。同一 control 重复、未知键或参数类型错误 → `400 VALIDATION_ERROR`；合法类型但超出配置 min/max、区间 min > max → `422 RISK_CONTROL_INVALID_PARAMS`。整次更新原子提交，不部分写入；实际阈值及允许范围以 plan §6.1 配置为准，本节不新设范围。
+沿用 §7.5 `GET/PUT /risk-controls`（不分页）。GET 返回六项有效设置；PUT 请求项 `{control, enabled: boolean, params: object}`，只覆盖所提交的 control，未提交项保持原值；返回完整六项有效设置（含只读 `source`）。同一 control 重复、未知键或参数类型错误 → `400 VALIDATION_ERROR`；合法类型但超出配置 min/max、区间 min > max → `422 RISK_CONTROL_INVALID_PARAMS`。整次更新原子提交，不部分写入；默认值以 plan §6.1 配置为准，允许范围见下表（T-A25）。
 
 | control | params 的键（类型） |
 |---|---|
@@ -1179,6 +1179,28 @@ evidence: Evidence[]
 | `sector_concentration` | `sw_l1_max_pct: string(decimal)`、`concept_max_pct: string(decimal)` |
 | `loss_streak_drawdown` | `closed_loss_streak: int`、`drawdown_from_peak_pct: string(decimal)`、`strategy_sim_fail_streak: int`、`pause_on_trigger: boolean`、`pause_days: int` |
 | `plan_violation` | `checks: string[]`（只取 plan §6.1 已列的五种检查，不接受自定义表达式） |
+
+**参数范围（T-A25 裁定，status: draft；前端表单与后端校验共用）**：闭区间；百分比为 string(decimal)，最多 2 位小数；int 必须为整数；boolean 无范围。超出 → `422 RISK_CONTROL_INVALID_PARAMS`（`fields[]` 指明键）。
+
+| control | 键 | 默认 | min | max | 说明 |
+|---|---|---|---|---|---|
+| `stop_take`(RC1) | `long_horizon_default_stop_pct` | -20 | -50 | -5 | 必须为负；关闭 RC1 用 `enabled=false`，不用 0 |
+| `stop_take`(RC1) | `clamp_to_price_limit` | true | — | — | boolean |
+| `position_cap`(RC2) | `single_position_max_pct` | 20 | 5 | 50 | 沿用 plan §6.1 ◇ 5–50 |
+| `total_exposure`(RC3) | `regime_ranges.uptrend` | [60, 90] | 0 | 100 | 每个区间 `0 ≤ 下限 ≤ 上限 ≤ 100`；下限 > 上限 → 422；三档之间不强制单调 |
+| `total_exposure`(RC3) | `regime_ranges.range` | [40, 60] | 0 | 100 | 同上 |
+| `total_exposure`(RC3) | `regime_ranges.downtrend` | [0, 30] | 0 | 100 | 同上 |
+| `total_exposure`(RC3) | `regime_confirm_days` | 2 | 1 | 5 | 交易日；须与 F25 计算一致，改动只影响提示口径 |
+| `sector_concentration`(RC4) | `sw_l1_max_pct` | 40 | 10 | 100 | 100 等于不预警，但仍为 enabled |
+| `sector_concentration`(RC4) | `concept_max_pct` | 50 | 10 | 100 | 概念数据未接入时该项 unknown + gap |
+| `loss_streak_drawdown`(RC5) | `closed_loss_streak` | 3 | 2 | 10 | 已平仓笔数 |
+| `loss_streak_drawdown`(RC5) | `drawdown_from_peak_pct` | 10 | 3 | 50 | 正数，表示自高点回撤幅度 |
+| `loss_streak_drawdown`(RC5) | `strategy_sim_fail_streak` | 5 | 3 | 20 | 模拟跟踪次数 |
+| `loss_streak_drawdown`(RC5) | `pause_on_trigger` | true | — | — | boolean |
+| `loss_streak_drawdown`(RC5) | `pause_days` | 5 | 1 | 20 | 交易日；仅 `pause_on_trigger=true` 时生效 |
+
+- 范围放在后端常量/配置校验中（与 `config/risk_controls.yaml` 默认值同源），不放进用户可改项；系统默认值本身必须落在范围内（启动校验）。
+- 前端输入控件按本表设 min/max/step（百分比 step 1，可输 2 位小数）；“恢复默认”取 GET 中 `source="system"` 的值。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

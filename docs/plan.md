@@ -3028,6 +3028,8 @@ executability:                  # 2.5.9 原因码的默认阈值
   # DATA_STALE 的阈值不在此处，统一用 realtime.yaml 的 stale_threshold_s
 ```
 
+- **T-A25（架构师 2026-11-08）**：RC1–RC5 用户可调参数的 min/max 以 api-contract §7.11.2“参数范围”表为准；本 yaml 只存默认值，不改。
+
 **`config/horizon_classifier.yaml`**（周期分类器的**框架参数**与种子版本，2.5.3；导入为不可变的 `horizon_classifier_versions`，规则正文由策略研究员给出）
 ```yaml
 schema_version: 1

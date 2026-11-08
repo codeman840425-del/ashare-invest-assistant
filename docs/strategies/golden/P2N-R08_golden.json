@@ -98,6 +98,51 @@
       "file": "docs/plan.md",
       "section": "2.8.2",
       "quote": "只在 `published` 与 `observing` 之间自动切换"
+    },
+    "ta33_3": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.3 T-A33 point 3",
+      "quote": "账户 × 证券的一个持仓段：持仓数从 0 变正起，到回到 0 的那笔成交止"
+    },
+    "ta33_4": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.3 T-A33 point 4",
+      "quote": "暂停中再次边沿触发 → `paused_until` 取 max(现值, 新计算值)，不叠加"
+    },
+    "ta33_5": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.3 T-A33 point 5",
+      "quote": "实例保持 paused、`pause_reason_code` 不变、`paused_until` 置 null"
+    },
+    "ta33_6": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.3 T-A33 point 6",
+      "quote": "累计 **>** 计划数量才触发（等于不触发）；每计划版本只触发一次"
+    },
+    "ta33_7": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.3 T-A33 point 7",
+      "quote": "计划版本有效期为半开区间 `[生效时刻, 被替代/关闭时刻)`"
+    },
+    "ta33_8": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.3 T-A33 point 8",
+      "quote": "两个计数都清零（不跃迁，保守），记 gap"
+    },
+    "ta33_9": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.3 T-A33 point 9",
+      "quote": "恢复 ⇔ 稳健度 ≥ 基线 × `health.internal_recover_ratio`（默认 0.8，可配置）"
+    },
+    "ta36_2": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.3 T-A33 point2 updated T-A36 / T-A37 correction",
+      "quote": "`intraday_t`→1、`short`→5、`swing`→20、`long`→20"
+    },
+    "ta27_3": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.3 T-A27 point3",
+      "quote": "观测唯一键为 (suggestion_id, strategy_version_id, horizon_days)"
     }
   },
   "cases": [
@@ -3966,26 +4011,1294 @@
     },
     {
       "id": "P2N-R08-084",
-      "desc": "【纯虚构】spec_ambiguity",
-      "case_status": "blocked",
-      "kind": "spec_ambiguity",
+      "desc": "【纯虚构】按自身周期本人模拟失败及去重",
+      "case_status": "ready",
+      "kind": "t33_sim",
       "input": {
-        "tracking_results": [
+        "scenarios": [
           {
-            "action": "buy",
-            "direction_correct": false,
-            "return_pct": "2",
-            "excess_pct": "-1"
+            "strategy_version": "v1",
+            "version_horizon": null,
+            "observations": [
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_excluded",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "excluded",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_untradable",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "untradable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_unavailable",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "unavailable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_pending",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "pending",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "other_version",
+                "suggestion_id": "other_version",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "other",
+                "strategy_version": "v1",
+                "suggestion_id": "other",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i2",
+                "instance_created_at": "2026-10-02T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s4",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-06T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s3",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-05T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s2",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-04T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s1",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-03T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "intraday_t",
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              }
+            ]
+          },
+          {
+            "strategy_version": "v1",
+            "version_horizon": null,
+            "observations": [
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_excluded",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "excluded",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_untradable",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "untradable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_unavailable",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "unavailable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_pending",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "pending",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "other_version",
+                "suggestion_id": "other_version",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "other",
+                "strategy_version": "v1",
+                "suggestion_id": "other",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i2",
+                "instance_created_at": "2026-10-02T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s4",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-06T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s3",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-05T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s2",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-04T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s1",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-03T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "short",
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              }
+            ]
+          },
+          {
+            "strategy_version": "v1",
+            "version_horizon": null,
+            "observations": [
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_excluded",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "excluded",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_untradable",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "untradable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_unavailable",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "unavailable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_pending",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "pending",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "other_version",
+                "suggestion_id": "other_version",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "other",
+                "strategy_version": "v1",
+                "suggestion_id": "other",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i2",
+                "instance_created_at": "2026-10-02T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s4",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-06T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s3",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-05T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s2",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-04T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s1",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-03T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              }
+            ]
+          },
+          {
+            "strategy_version": "v1",
+            "version_horizon": null,
+            "observations": [
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_excluded",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "excluded",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_untradable",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "untradable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_unavailable",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "unavailable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_pending",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "pending",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "other_version",
+                "suggestion_id": "other_version",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "other",
+                "strategy_version": "v1",
+                "suggestion_id": "other",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i2",
+                "instance_created_at": "2026-10-02T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s4",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-06T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s3",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-05T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s2",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-04T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s1",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-03T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "long",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              }
+            ]
+          },
+          {
+            "strategy_version": "v1",
+            "version_horizon": "short",
+            "observations": [
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_excluded",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "excluded",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_untradable",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "untradable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_unavailable",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "unavailable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_pending",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "pending",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "other_version",
+                "suggestion_id": "other_version",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "other",
+                "strategy_version": "v1",
+                "suggestion_id": "other",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i2",
+                "instance_created_at": "2026-10-02T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s4",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-06T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s3",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-05T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s2",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-04T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s1",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-03T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": null,
+                "horizon_days": 5,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              }
+            ]
+          },
+          {
+            "strategy_version": "v1",
+            "version_horizon": null,
+            "observations": [
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_excluded",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "excluded",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_untradable",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "untradable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_unavailable",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "unavailable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_pending",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "pending",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "other_version",
+                "suggestion_id": "other_version",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "other",
+                "strategy_version": "v1",
+                "suggestion_id": "other",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i2",
+                "instance_created_at": "2026-10-02T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s4",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-06T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s3",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-05T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s2",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-04T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s1",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-03T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": null,
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              }
+            ]
+          },
+          {
+            "strategy_version": "v1",
+            "version_horizon": "long",
+            "observations": [
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_excluded",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "excluded",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_untradable",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "untradable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_unavailable",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "unavailable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_pending",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "pending",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "other_version",
+                "suggestion_id": "other_version",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "other",
+                "strategy_version": "v1",
+                "suggestion_id": "other",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i2",
+                "instance_created_at": "2026-10-02T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s4",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-06T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s3",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-05T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s2",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-04T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s1",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-03T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "success",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-10T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              }
+            ]
+          },
+          {
+            "strategy_version": "v1",
+            "version_horizon": "long",
+            "observations": [
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_excluded",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "excluded",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_untradable",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "untradable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_unavailable",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "unavailable",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "skip_pending",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "pending",
+                "direction_correct": false,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "other_version",
+                "suggestion_id": "other_version",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "other",
+                "strategy_version": "v1",
+                "suggestion_id": "other",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-09T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i2",
+                "instance_created_at": "2026-10-02T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s4",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-06T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s3",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-05T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s2",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-04T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s1",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-03T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "s0",
+                "horizon": "swing",
+                "horizon_days": 20,
+                "state": "complete",
+                "direction_correct": false,
+                "exit_at": "2026-11-02T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              },
+              {
+                "owner": "self",
+                "strategy_version": "v1",
+                "suggestion_id": "wrong_days",
+                "horizon": "swing",
+                "horizon_days": 1,
+                "state": "complete",
+                "direction_correct": true,
+                "exit_at": "2026-11-10T15:00:00+08:00",
+                "instance_id": "i1",
+                "instance_created_at": "2026-10-01T10:00:00+08:00"
+              }
+            ]
           }
         ]
       },
       "steps": [
-        "未确定期望；不计入ready金标准"
+        "正式T-A36选项B，并按T-A37最新修正：intraday_t=1、short=5、swing/long=20；RC5早期预警，不替代终评",
+        "优先建议中该版本horizon，其次版本声明；仍未知跳过并gap，不清零",
+        "限定本人和本策略版本；按建议×版本×horizon_days去重，实例最早优先",
+        "按exit_at、suggestion_id排序，complete false加1，true清零，四类非complete跳过",
+        "5个false -> 连续5触发；其他本人范围外成功、重复实例均不改变；末尾本人成功才清零"
       ],
-      "expected": null,
+      "expected": {
+        "results": [
+          {
+            "trailing_failures": 5,
+            "triggered": true,
+            "gap_codes": []
+          },
+          {
+            "trailing_failures": 5,
+            "triggered": true,
+            "gap_codes": []
+          },
+          {
+            "trailing_failures": 5,
+            "triggered": true,
+            "gap_codes": []
+          },
+          {
+            "trailing_failures": 5,
+            "triggered": true,
+            "gap_codes": []
+          },
+          {
+            "trailing_failures": 5,
+            "triggered": true,
+            "gap_codes": []
+          },
+          {
+            "trailing_failures": 0,
+            "triggered": false,
+            "gap_codes": [
+              "sim_fail_horizon_unknown"
+            ]
+          },
+          {
+            "trailing_failures": 0,
+            "triggered": false,
+            "gap_codes": []
+          },
+          {
+            "trailing_failures": 5,
+            "triggered": true,
+            "gap_codes": []
+          }
+        ]
+      },
       "source_refs": [
         "rc5",
-        "asof"
+        "ta36_2",
+        "ta27_3"
       ],
       "units": {
         "pnl": "CNY",
@@ -3993,43 +5306,298 @@
         "qty": "shares",
         "weight": "ratio",
         "avg_excess_pct": "pct",
-        "time": "Asia/Shanghai UTC+8"
+        "time": "Asia/Shanghai UTC+8",
+        "price": "CNY/share",
+        "fee": "CNY",
+        "robustness": "synthetic index points",
+        "recover_ratio": "ratio",
+        "pause_days": "trading days",
+        "horizon_days": "trading days"
       },
       "precision": {
         "decimal_input": "strings",
         "oracle_abs_tolerance": "0",
         "business_rounding": "not_added"
       },
-      "topic": "sim_failure_mapping",
-      "block_reason": "spec_ambiguity",
-      "question": "模拟失败究竟按direction_correct、绝对亏损、失效触发还是其他标志？跟踪期/排序/去重范围需明确；本包只验证上游预分类失败数列。"
+      "review": {
+        "authority": "api-contract §7.11.3 T-A36 B / T-A37 3b36b74d7bf9187a00816008f3eca5a19c3f137a",
+        "method": "reuse existing R08 synthetic failure booleans; independent deterministic oracle",
+        "reviewed_input_sha256": "a5b6a4460a264ffd1aca104897064c0f72c565781e30d5a179191e6d7043b3b0",
+        "oracle_scope": "unit projection; authority review, not implementation/E2E acceptance"
+      }
     },
     {
       "id": "P2N-R08-085",
-      "desc": "【纯虚构】spec_ambiguity",
-      "case_status": "blocked",
-      "kind": "spec_ambiguity",
+      "desc": "【纯虚构】闭仓段含费用/部分卖出/平本",
+      "case_status": "ready",
+      "kind": "t33_closed",
       "input": {
-        "fills": [
+        "scenarios": [
           {
-            "side": "buy",
-            "qty": "200"
+            "fills": [
+              {
+                "id": "t01",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:01:00+08:00",
+                "side": "sell",
+                "qty": "1",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t02",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:02:00+08:00",
+                "side": "buy",
+                "qty": "200",
+                "price": "10",
+                "fee": "1"
+              },
+              {
+                "id": "t03",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:03:00+08:00",
+                "side": "sell",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t04",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:04:00+08:00",
+                "side": "sell",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t05",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:05:00+08:00",
+                "side": "buy",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t06",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:06:00+08:00",
+                "side": "sell",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t07",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:07:00+08:00",
+                "side": "buy",
+                "qty": "100",
+                "price": "10",
+                "fee": "2"
+              },
+              {
+                "id": "t08",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:08:00+08:00",
+                "side": "sell",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t09",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:09:00+08:00",
+                "side": "buy",
+                "qty": "100",
+                "price": "10",
+                "fee": "3"
+              },
+              {
+                "id": "t10",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:10:00+08:00",
+                "side": "sell",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              }
+            ]
           },
           {
-            "side": "sell",
-            "qty": "100"
-          },
-          {
-            "side": "sell",
-            "qty": "100"
+            "fills": [
+              {
+                "id": "t01",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:01:00+08:00",
+                "side": "sell",
+                "qty": "1",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t02",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:02:00+08:00",
+                "side": "buy",
+                "qty": "200",
+                "price": "10",
+                "fee": "1"
+              },
+              {
+                "id": "t03",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:03:00+08:00",
+                "side": "sell",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t04",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:04:00+08:00",
+                "side": "sell",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t05",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:05:00+08:00",
+                "side": "buy",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t06",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:06:00+08:00",
+                "side": "sell",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t07",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:07:00+08:00",
+                "side": "buy",
+                "qty": "100",
+                "price": "10",
+                "fee": "2"
+              },
+              {
+                "id": "t08",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:08:00+08:00",
+                "side": "sell",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t09",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:09:00+08:00",
+                "side": "buy",
+                "qty": "100",
+                "price": "10",
+                "fee": "3"
+              },
+              {
+                "id": "t10",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:10:00+08:00",
+                "side": "sell",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t11",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:11:00+08:00",
+                "side": "buy",
+                "qty": "100",
+                "price": "10",
+                "fee": "0"
+              },
+              {
+                "id": "t12",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "executed_at": "2026-11-02T10:12:00+08:00",
+                "side": "sell",
+                "qty": "100",
+                "price": "10.01",
+                "fee": "0"
+              }
+            ]
           }
         ]
       },
       "steps": [
-        "未确定期望；不计入ready金标准"
+        "按executed_at、id排序；首笔无开仓卖出不计并记gap",
+        "200股持仓部分卖100不结束，回零才闭段；2000-2000-1=-1",
+        "下一段1000-1000=0跳过且不清零；随后-2/-3，连亏3",
+        "追加100*10.01-100*10=1盈利，清零"
       ],
-      "expected": null,
+      "expected": {
+        "results": [
+          {
+            "closed_pnl": [
+              "-1",
+              "0",
+              "-2",
+              "-3"
+            ],
+            "trailing_losses": 3,
+            "triggered": true,
+            "gap": true
+          },
+          {
+            "closed_pnl": [
+              "-1",
+              "0",
+              "-2",
+              "-3",
+              "1"
+            ],
+            "trailing_losses": 0,
+            "triggered": false,
+            "gap": true
+          }
+        ]
+      },
       "source_refs": [
+        "ta33_3",
         "rc5"
       ],
       "units": {
@@ -4038,32 +5606,146 @@
         "qty": "shares",
         "weight": "ratio",
         "avg_excess_pct": "pct",
-        "time": "Asia/Shanghai UTC+8"
+        "time": "Asia/Shanghai UTC+8",
+        "price": "CNY/share",
+        "fee": "CNY",
+        "robustness": "synthetic index points",
+        "recover_ratio": "ratio",
+        "pause_days": "trading days",
+        "horizon_days": "trading days"
       },
       "precision": {
         "decimal_input": "strings",
         "oracle_abs_tolerance": "0",
         "business_rounding": "not_added"
       },
-      "topic": "closed_trade_grouping",
-      "block_reason": "spec_ambiguity",
-      "question": "已平仓一笔按往返持仓段、成交、匹配批次还是其他？费用/平本是否中断/跳过及并列结束时刻排序需裁定。"
+      "review": {
+        "authority": "T-A33 462057c / api-contract §7.11.3",
+        "method": "researcher arithmetic and clauses; oracle independently recalculates input",
+        "note": "复用原R08负数序列机械种子；原始成交段拆分及费用规则按裁定独立定稿。",
+        "reviewed_input_sha256": "73740678308435a790240547e30c78d22698f98b703d2325063c614ee7577a26",
+        "oracle_scope": "unit projection; authority review, not implementation/E2E acceptance"
+      }
     },
     {
       "id": "P2N-R08-086",
-      "desc": "【纯虚构】spec_ambiguity",
-      "case_status": "blocked",
-      "kind": "spec_ambiguity",
+      "desc": "【纯虚构】第0日与15:00及缺日历",
+      "case_status": "ready",
+      "kind": "t33_expiry",
       "input": {
-        "trigger_at": "2026-11-02T10:00:00+08:00",
-        "pause_days": 5
+        "scenarios": [
+          {
+            "trigger_at": "2026-11-02T10:00:00+08:00",
+            "pause_days": 5,
+            "calendar": [
+              "2026-11-02",
+              "2026-11-03",
+              "2026-11-04",
+              "2026-11-05",
+              "2026-11-06",
+              "2026-11-09",
+              "2026-11-10",
+              "2026-11-11",
+              "2026-11-12",
+              "2026-11-13",
+              "2026-11-16"
+            ]
+          },
+          {
+            "trigger_at": "2026-11-02T15:00:00+08:00",
+            "pause_days": 5,
+            "calendar": [
+              "2026-11-02",
+              "2026-11-03",
+              "2026-11-04",
+              "2026-11-05",
+              "2026-11-06",
+              "2026-11-09",
+              "2026-11-10",
+              "2026-11-11",
+              "2026-11-12",
+              "2026-11-13",
+              "2026-11-16"
+            ]
+          },
+          {
+            "trigger_at": "2026-11-02T15:00:01+08:00",
+            "pause_days": 5,
+            "calendar": [
+              "2026-11-02",
+              "2026-11-03",
+              "2026-11-04",
+              "2026-11-05",
+              "2026-11-06",
+              "2026-11-09",
+              "2026-11-10",
+              "2026-11-11",
+              "2026-11-12",
+              "2026-11-13",
+              "2026-11-16"
+            ]
+          },
+          {
+            "trigger_at": "2026-11-07T10:00:00+08:00",
+            "pause_days": 5,
+            "calendar": [
+              "2026-11-02",
+              "2026-11-03",
+              "2026-11-04",
+              "2026-11-05",
+              "2026-11-06",
+              "2026-11-09",
+              "2026-11-10",
+              "2026-11-11",
+              "2026-11-12",
+              "2026-11-13",
+              "2026-11-16"
+            ]
+          },
+          {
+            "trigger_at": "2026-11-02T10:00:00+08:00",
+            "pause_days": 5,
+            "calendar": []
+          }
+        ]
       },
       "steps": [
-        "未确定期望；不计入ready金标准"
+        "触发交易日第0天；仅>15:00或非交易日移下一交易日",
+        "N=5，索引day0+5，对应第5个交易日15:00",
+        "恰15:00仍当日；15:00:01移次日；周末移下个开市日",
+        "无日历不推进、不推算，gap"
       ],
-      "expected": null,
+      "expected": {
+        "results": [
+          {
+            "day0": "2026-11-02",
+            "paused_until": "2026-11-09T15:00:00+08:00",
+            "gap": false
+          },
+          {
+            "day0": "2026-11-02",
+            "paused_until": "2026-11-09T15:00:00+08:00",
+            "gap": false
+          },
+          {
+            "day0": "2026-11-03",
+            "paused_until": "2026-11-10T15:00:00+08:00",
+            "gap": false
+          },
+          {
+            "day0": "2026-11-09",
+            "paused_until": "2026-11-16T15:00:00+08:00",
+            "gap": false
+          },
+          {
+            "day0": null,
+            "paused_until": null,
+            "gap": true
+          }
+        ]
+      },
       "source_refs": [
-        "pause"
+        "ta33_4"
       ],
       "units": {
         "pnl": "CNY",
@@ -4071,152 +5753,222 @@
         "qty": "shares",
         "weight": "ratio",
         "avg_excess_pct": "pct",
-        "time": "Asia/Shanghai UTC+8"
+        "time": "Asia/Shanghai UTC+8",
+        "price": "CNY/share",
+        "fee": "CNY",
+        "robustness": "synthetic index points",
+        "recover_ratio": "ratio",
+        "pause_days": "trading days",
+        "horizon_days": "trading days"
       },
       "precision": {
         "decimal_input": "strings",
         "oracle_abs_tolerance": "0",
         "business_rounding": "not_added"
       },
-      "topic": "pause_expiry_origin",
-      "block_reason": "spec_ambiguity",
-      "question": "5交易日起点是否第0天、到期盘前/收盘/原时刻未定；不能把RC1时间止损起点裁定移用于RC5。"
+      "review": {
+        "authority": "T-A33 462057c / api-contract §7.11.3",
+        "method": "researcher arithmetic and clauses; oracle independently recalculates input",
+        "note": "日期是显式合成日历；不请求真实日历接口、不引RC1规则。",
+        "reviewed_input_sha256": "f8a9e68d68cd4609fd452938abf649373bb135ff8a53bc9ff288f587ba017b6a",
+        "oracle_scope": "unit projection; authority review, not implementation/E2E acceptance"
+      }
     },
     {
       "id": "P2N-R08-087",
-      "desc": "【纯虚构】spec_ambiguity",
-      "case_status": "blocked",
-      "kind": "spec_ambiguity",
+      "desc": "【纯虚构】80%内部复验与联合10日",
+      "case_status": "ready",
+      "kind": "t33_recovery",
       "input": {
-        "state": "observing",
-        "n": 20,
-        "site_daily_weights": [
-          ".9",
-          ".9",
-          ".9",
-          ".9",
-          ".9",
-          ".9",
-          ".9",
-          ".9",
-          ".9",
-          ".9"
-        ],
-        "internal_evaluation_enabled": true,
-        "baseline_robustness": "100",
-        "robustness": "70"
-      },
-      "steps": [
-        "未确定期望；不计入ready金标准"
-      ],
-      "expected": null,
-      "source_refs": [
-        "recover"
-      ],
-      "units": {
-        "pnl": "CNY",
-        "nav": "CNY",
-        "qty": "shares",
-        "weight": "ratio",
-        "avg_excess_pct": "pct",
-        "time": "Asia/Shanghai UTC+8"
-      },
-      "precision": {
-        "decimal_input": "strings",
-        "oracle_abs_tolerance": "0",
-        "business_rounding": "not_added"
-      },
-      "topic": "internal_recovery",
-      "block_reason": "spec_ambiguity",
-      "question": "内部复验恢复没有明确数值条件；不得擅设>=70%或>=100%。"
-    },
-    {
-      "id": "P2N-R08-088",
-      "desc": "【纯虚构】spec_ambiguity",
-      "case_status": "blocked",
-      "kind": "spec_ambiguity",
-      "input": {
-        "planned_qty": "100",
-        "trades": [
-          "60",
-          "60"
+        "scenarios": [
+          {
+            "state": "observing",
+            "n": 20,
+            "enabled": true,
+            "baseline": "100",
+            "recover_ratio": ".8",
+            "weights": [
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9"
+            ],
+            "robustness": [
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80"
+            ]
+          },
+          {
+            "state": "observing",
+            "n": 20,
+            "enabled": true,
+            "baseline": "100",
+            "recover_ratio": ".8",
+            "weights": [
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9"
+            ],
+            "robustness": [
+              "79.99",
+              "79.99",
+              "79.99",
+              "79.99",
+              "79.99",
+              "79.99",
+              "79.99",
+              "79.99",
+              "79.99",
+              "79.99"
+            ]
+          },
+          {
+            "state": "observing",
+            "n": 20,
+            "enabled": true,
+            "baseline": "100",
+            "recover_ratio": ".8",
+            "weights": [
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9"
+            ],
+            "robustness": [
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80"
+            ]
+          },
+          {
+            "state": "observing",
+            "n": 20,
+            "enabled": false,
+            "baseline": "100",
+            "recover_ratio": ".8",
+            "weights": [
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9"
+            ],
+            "robustness": [
+              "1",
+              "1",
+              "1",
+              "1",
+              "1",
+              "1",
+              "1",
+              "1",
+              "1",
+              "1"
+            ]
+          },
+          {
+            "state": "observing",
+            "n": 19,
+            "enabled": true,
+            "baseline": "100",
+            "recover_ratio": ".8",
+            "weights": [
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9"
+            ],
+            "robustness": [
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80",
+              "80"
+            ]
+          }
         ]
       },
       "steps": [
-        "未确定期望；不计入ready金标准"
+        "内部启用仅第三阶段合成测试，不声明已启用生产",
+        "100*.8=80；恰80和weight=.9同时连续10日恢复",
+        "79.99<80不恢复；仅9日不恢复；内部未启用忽略复验",
+        "n=19<20优先保持状态"
       ],
-      "expected": null,
-      "source_refs": [
-        "rc6"
-      ],
-      "units": {
-        "pnl": "CNY",
-        "nav": "CNY",
-        "qty": "shares",
-        "weight": "ratio",
-        "avg_excess_pct": "pct",
-        "time": "Asia/Shanghai UTC+8"
-      },
-      "precision": {
-        "decimal_input": "strings",
-        "oracle_abs_tolerance": "0",
-        "business_rounding": "not_added"
-      },
-      "topic": "rc6_cumulative_qty",
-      "block_reason": "spec_ambiguity",
-      "question": "数量超计划按单笔还是累计、冲正后累积范围未定；本包只验单笔明显边界。"
-    },
-    {
-      "id": "P2N-R08-089",
-      "desc": "【纯虚构】spec_ambiguity",
-      "case_status": "blocked",
-      "kind": "spec_ambiguity",
-      "input": {
-        "trade_at": "2026-11-02T10:00:00+08:00",
-        "plan_new_version_at": "2026-11-02T10:00:00+08:00"
-      },
-      "steps": [
-        "未确定期望；不计入ready金标准"
-      ],
-      "expected": null,
-      "source_refs": [
-        "asof"
-      ],
-      "units": {
-        "pnl": "CNY",
-        "nav": "CNY",
-        "qty": "shares",
-        "weight": "ratio",
-        "avg_excess_pct": "pct",
-        "time": "Asia/Shanghai UTC+8"
-      },
-      "precision": {
-        "decimal_input": "strings",
-        "oracle_abs_tolerance": "0",
-        "business_rounding": "not_added"
-      },
-      "topic": "rc6_plan_boundary",
-      "block_reason": "spec_ambiguity",
-      "question": "同一时刻版本生效/关闭与成交先后及多计划选择无明确顺序，不猜半开区间。"
-    },
-    {
-      "id": "P2N-R08-090",
-      "desc": "【纯虚构】spec_ambiguity",
-      "case_status": "blocked",
-      "kind": "spec_ambiguity",
-      "input": {
-        "n": 20,
-        "site_daily_weights": [
-          ".79",
-          null,
-          ".79"
+      "expected": {
+        "results": [
+          {
+            "state": "published",
+            "joint_streak": 10
+          },
+          {
+            "state": "observing",
+            "joint_streak": 0
+          },
+          {
+            "state": "observing",
+            "joint_streak": 9
+          },
+          {
+            "state": "published",
+            "joint_streak": 10
+          },
+          {
+            "state": "observing",
+            "joint_streak": 0
+          }
         ]
       },
-      "steps": [
-        "未确定期望；不计入ready金标准"
-      ],
-      "expected": null,
       "source_refs": [
+        "ta33_9",
+        "recover",
         "health"
       ],
       "units": {
@@ -4225,32 +5977,709 @@
         "qty": "shares",
         "weight": "ratio",
         "avg_excess_pct": "pct",
-        "time": "Asia/Shanghai UTC+8"
+        "time": "Asia/Shanghai UTC+8",
+        "price": "CNY/share",
+        "fee": "CNY",
+        "robustness": "synthetic index points",
+        "recover_ratio": "ratio",
+        "pause_days": "trading days",
+        "horizon_days": "trading days"
       },
       "precision": {
         "decimal_input": "strings",
         "oracle_abs_tolerance": "0",
         "business_rounding": "not_added"
       },
-      "topic": "health_day_gap",
-      "block_reason": "spec_ambiguity",
-      "question": "交易日缺统计时连续计数重置还是暂停未明；本包健康案例均明确连续且齐全。"
+      "review": {
+        "authority": "T-A33 462057c / api-contract §7.11.3",
+        "method": "researcher arithmetic and clauses; oracle independently recalculates input",
+        "note": "不用70%替代恢复阈值；明确同时连续，不以各自不同区间凑10天。",
+        "reviewed_input_sha256": "446f3b225dea63b73a3f64e52b906e96cdcca6f4af763ac0ff0f7a3196956750",
+        "oracle_scope": "unit projection; authority review, not implementation/E2E acceptance"
+      }
+    },
+    {
+      "id": "P2N-R08-088",
+      "desc": "【纯虚构】累计数量/冲正/单版本幂等",
+      "case_status": "ready",
+      "kind": "t33_qty",
+      "input": {
+        "scenarios": [
+          {
+            "plan": {
+              "id": "v1",
+              "account": "synthetic_a",
+              "security": "synthetic_s",
+              "side": "buy",
+              "qty": "100",
+              "from": "2026-11-02T09:00:00+08:00",
+              "until": "2026-11-02T15:00:00+08:00"
+            },
+            "trades": [
+              {
+                "id": "x1",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "plan_version": "v1",
+                "side": "buy",
+                "qty": "60",
+                "voided": false,
+                "executed_at": "2026-11-02T10:01:00+08:00"
+              },
+              {
+                "id": "x2",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "plan_version": "v1",
+                "side": "buy",
+                "qty": "60",
+                "voided": false,
+                "executed_at": "2026-11-02T10:02:00+08:00"
+              }
+            ]
+          },
+          {
+            "plan": {
+              "id": "v1",
+              "account": "synthetic_a",
+              "security": "synthetic_s",
+              "side": "buy",
+              "qty": "100",
+              "from": "2026-11-02T09:00:00+08:00",
+              "until": "2026-11-02T15:00:00+08:00"
+            },
+            "trades": [
+              {
+                "id": "x1",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "plan_version": "v1",
+                "side": "buy",
+                "qty": "60",
+                "voided": false,
+                "executed_at": "2026-11-02T10:01:00+08:00"
+              },
+              {
+                "id": "x2",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "plan_version": "v1",
+                "side": "buy",
+                "qty": "60",
+                "voided": true,
+                "executed_at": "2026-11-02T10:02:00+08:00"
+              }
+            ]
+          },
+          {
+            "plan": {
+              "id": "v1",
+              "account": "synthetic_a",
+              "security": "synthetic_s",
+              "side": "buy",
+              "qty": "100",
+              "from": "2026-11-02T09:00:00+08:00",
+              "until": "2026-11-02T15:00:00+08:00"
+            },
+            "trades": [
+              {
+                "id": "x1",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "plan_version": "v1",
+                "side": "buy",
+                "qty": "60",
+                "voided": false,
+                "executed_at": "2026-11-02T10:01:00+08:00"
+              },
+              {
+                "id": "x2",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "plan_version": "v1",
+                "side": "buy",
+                "qty": "40",
+                "voided": false,
+                "executed_at": "2026-11-02T10:02:00+08:00"
+              }
+            ]
+          },
+          {
+            "plan": {
+              "id": "v1",
+              "account": "synthetic_a",
+              "security": "synthetic_s",
+              "side": "buy",
+              "qty": "100",
+              "from": "2026-11-02T09:00:00+08:00",
+              "until": "2026-11-02T15:00:00+08:00"
+            },
+            "trades": [
+              {
+                "id": "x1",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "plan_version": "v1",
+                "side": "buy",
+                "qty": "100",
+                "voided": false,
+                "executed_at": "2026-11-02T10:01:00+08:00"
+              },
+              {
+                "id": "x2",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "plan_version": "v1",
+                "side": "buy",
+                "qty": "1",
+                "voided": false,
+                "executed_at": "2026-11-02T10:02:00+08:00"
+              },
+              {
+                "id": "x3",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "plan_version": "v1",
+                "side": "buy",
+                "qty": "1",
+                "voided": false,
+                "executed_at": "2026-11-02T10:03:00+08:00"
+              },
+              {
+                "id": "x4",
+                "account": "other",
+                "security": "synthetic_s",
+                "plan_version": "v1",
+                "side": "buy",
+                "qty": "999",
+                "voided": false,
+                "executed_at": "2026-11-02T10:04:00+08:00"
+              },
+              {
+                "id": "x5",
+                "account": "synthetic_a",
+                "security": "synthetic_s",
+                "plan_version": "v1",
+                "side": "sell",
+                "qty": "999",
+                "voided": false,
+                "executed_at": "2026-11-02T10:05:00+08:00"
+              }
+            ]
+          }
+        ]
+      },
+      "steps": [
+        "仅同账户/证券/版本/方向且有效期内未撤销成交",
+        "60+60=120>100；冲正后60；60+40=100不触发",
+        "100+1+1=102仍每版本仅1事件；他账户/反向不计"
+      ],
+      "expected": {
+        "results": [
+          {
+            "cumulative_qty": "120",
+            "triggered": true,
+            "logical_events": 1
+          },
+          {
+            "cumulative_qty": "60",
+            "triggered": false,
+            "logical_events": 0
+          },
+          {
+            "cumulative_qty": "100",
+            "triggered": false,
+            "logical_events": 0
+          },
+          {
+            "cumulative_qty": "102",
+            "triggered": true,
+            "logical_events": 1
+          }
+        ]
+      },
+      "source_refs": [
+        "ta33_6"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8",
+        "price": "CNY/share",
+        "fee": "CNY",
+        "robustness": "synthetic index points",
+        "recover_ratio": "ratio",
+        "pause_days": "trading days",
+        "horizon_days": "trading days"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "review": {
+        "authority": "T-A33 462057c / api-contract §7.11.3",
+        "method": "researcher arithmetic and clauses; oracle independently recalculates input",
+        "note": "原088的60/60保留并补恰等、冲正、幂等及过滤。",
+        "reviewed_input_sha256": "a53ae86218b27900ffc08d5a8bbd13625a2a9c948b027b428bd8e70cb46e5fad",
+        "oracle_scope": "unit projection; authority review, not implementation/E2E acceptance"
+      }
+    },
+    {
+      "id": "P2N-R08-089",
+      "desc": "【纯虚构】同刻半开边界/日期精度/多计划",
+      "case_status": "ready",
+      "kind": "t33_version",
+      "input": {
+        "scenarios": [
+          {
+            "trade_at": "2026-11-02T10:00:00+08:00",
+            "trade_side": "sell",
+            "versions": [
+              {
+                "id": "v1",
+                "side": "buy",
+                "from": "2026-11-02T09:00:00+08:00",
+                "until": "2026-11-02T10:00:00+08:00"
+              },
+              {
+                "id": "v2",
+                "side": "sell",
+                "from": "2026-11-02T10:00:00+08:00",
+                "until": null
+              }
+            ]
+          },
+          {
+            "trade_at": "2026-11-02T10:00:00+08:00",
+            "trade_side": "buy",
+            "versions": [
+              {
+                "id": "v1",
+                "side": "buy",
+                "from": "2026-11-02T09:00:00+08:00",
+                "until": "2026-11-02T10:00:00+08:00"
+              }
+            ]
+          },
+          {
+            "trade_date": "2026-11-02",
+            "trade_side": "sell",
+            "versions": [
+              {
+                "id": "v1",
+                "side": "buy",
+                "from": "2026-11-02T09:00:00+08:00",
+                "until": "2026-11-02T10:00:00+08:00"
+              },
+              {
+                "id": "v2",
+                "side": "sell",
+                "from": "2026-11-02T10:00:00+08:00",
+                "until": null
+              }
+            ]
+          },
+          {
+            "trade_at": "2026-11-02T11:00:00+08:00",
+            "trade_side": "buy",
+            "versions": [
+              {
+                "id": "v2",
+                "side": "sell",
+                "from": "2026-11-02T10:00:00+08:00",
+                "until": null
+              },
+              {
+                "id": "a",
+                "side": "buy",
+                "from": "2026-11-02T09:30:00+08:00",
+                "until": null
+              },
+              {
+                "id": "b",
+                "side": "buy",
+                "from": "2026-11-02T09:30:00+08:00",
+                "until": null
+              }
+            ]
+          },
+          {
+            "trade_at": "2026-11-02T11:00:00+08:00",
+            "trade_side": "buy",
+            "versions": [
+              {
+                "id": "v2",
+                "side": "sell",
+                "from": "2026-11-02T10:00:00+08:00",
+                "until": null
+              }
+            ]
+          }
+        ]
+      },
+      "steps": [
+        "[from,until)：10:00旧版已结束，新版有效；关闭同刻无有效计划",
+        "仅日期当日有版本变化 -> unknown+gap不出flag",
+        "多有效计划先同向；同向按from最新、并列id最小；无同向才opposite"
+      ],
+      "expected": {
+        "results": [
+          {
+            "selected": "v2",
+            "state": "ok",
+            "opposite_side": false,
+            "gap": false
+          },
+          {
+            "selected": null,
+            "state": "unknown",
+            "opposite_side": null,
+            "gap": true
+          },
+          {
+            "selected": null,
+            "state": "unknown",
+            "opposite_side": null,
+            "gap": true
+          },
+          {
+            "selected": "a",
+            "state": "ok",
+            "opposite_side": false,
+            "gap": false
+          },
+          {
+            "selected": "v2",
+            "state": "ok",
+            "opposite_side": true,
+            "gap": false
+          }
+        ]
+      },
+      "source_refs": [
+        "ta33_7",
+        "asof",
+        "missing"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8",
+        "price": "CNY/share",
+        "fee": "CNY",
+        "robustness": "synthetic index points",
+        "recover_ratio": "ratio",
+        "pause_days": "trading days",
+        "horizon_days": "trading days"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "review": {
+        "authority": "T-A33 462057c / api-contract §7.11.3",
+        "method": "researcher arithmetic and clauses; oracle independently recalculates input",
+        "note": "明确比较时间，不以前后端执行顺序猜同刻。",
+        "reviewed_input_sha256": "46b4e26dc7f182ebcb70625ab259cf0609ede346e48867b6d9c9f376c605b619",
+        "oracle_scope": "unit projection; authority review, not implementation/E2E acceptance"
+      }
+    },
+    {
+      "id": "P2N-R08-090",
+      "desc": "【纯虚构】健康缺日清零并重新累计",
+      "case_status": "ready",
+      "kind": "t33_gap",
+      "input": {
+        "scenarios": [
+          {
+            "state": "published",
+            "n": 20,
+            "weights": [
+              ".79",
+              ".79",
+              ".79",
+              ".79",
+              null,
+              ".79",
+              ".79",
+              ".79",
+              ".79"
+            ]
+          },
+          {
+            "state": "observing",
+            "n": 20,
+            "weights": [
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              null,
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9"
+            ]
+          },
+          {
+            "state": "published",
+            "n": 20,
+            "weights": [
+              ".79",
+              ".79",
+              ".79",
+              ".79",
+              null,
+              ".79",
+              ".79",
+              ".79",
+              ".79",
+              ".79"
+            ]
+          },
+          {
+            "state": "observing",
+            "n": 20,
+            "weights": [
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              null,
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9",
+              ".9"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        "每个缺统计交易日low/high两个计数同时清零且当日不跃迁",
+        "4+缺+4不可视作8日；9+缺+9不可视作18日",
+        "缺后重新累计满5/10才跃迁，记录gap"
+      ],
+      "expected": {
+        "results": [
+          {
+            "state": "published",
+            "low_streak": 4,
+            "high_streak": 0,
+            "gap": true
+          },
+          {
+            "state": "observing",
+            "low_streak": 0,
+            "high_streak": 9,
+            "gap": true
+          },
+          {
+            "state": "observing",
+            "low_streak": 5,
+            "high_streak": 0,
+            "gap": true
+          },
+          {
+            "state": "published",
+            "low_streak": 0,
+            "high_streak": 10,
+            "gap": true
+          }
+        ]
+      },
+      "source_refs": [
+        "ta33_8",
+        "health",
+        "recover"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8",
+        "price": "CNY/share",
+        "fee": "CNY",
+        "robustness": "synthetic index points",
+        "recover_ratio": "ratio",
+        "pause_days": "trading days",
+        "horizon_days": "trading days"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "review": {
+        "authority": "T-A33 462057c / api-contract §7.11.3",
+        "method": "researcher arithmetic and clauses; oracle independently recalculates input",
+        "note": "复用原机械权重序列，用裁定验证缺日不跳过。",
+        "reviewed_input_sha256": "ddc8015fc5e30beba6dcaf4e5e932f2262fc96c10aae9320b2bda3c7602042c0",
+        "oracle_scope": "unit projection; authority review, not implementation/E2E acceptance"
+      }
     },
     {
       "id": "P2N-R08-091",
-      "desc": "【纯虚构】spec_ambiguity",
-      "case_status": "blocked",
-      "kind": "spec_ambiguity",
+      "desc": "【纯虚构】新边沿max延长与期满不重挂",
+      "case_status": "ready",
+      "kind": "t33_edge",
       "input": {
-        "status": "paused",
-        "known_trigger": true,
-        "existing_paused_until": "2026-11-09T10:00:00+08:00"
+        "scenarios": [
+          {
+            "before": "2",
+            "after": "3",
+            "threshold": "3",
+            "existing_until": "2026-11-09T15:00:00+08:00",
+            "trigger_at": "2026-11-03T10:00:00+08:00",
+            "calendar": [
+              "2026-11-02",
+              "2026-11-03",
+              "2026-11-04",
+              "2026-11-05",
+              "2026-11-06",
+              "2026-11-09",
+              "2026-11-10",
+              "2026-11-11",
+              "2026-11-12",
+              "2026-11-13",
+              "2026-11-16"
+            ],
+            "pause_days": 5,
+            "at_expiry": false
+          },
+          {
+            "before": "2",
+            "after": "3",
+            "threshold": "3",
+            "existing_until": "2026-11-13T15:00:00+08:00",
+            "trigger_at": "2026-11-03T10:00:00+08:00",
+            "calendar": [
+              "2026-11-02",
+              "2026-11-03",
+              "2026-11-04",
+              "2026-11-05",
+              "2026-11-06",
+              "2026-11-09",
+              "2026-11-10",
+              "2026-11-11",
+              "2026-11-12",
+              "2026-11-13",
+              "2026-11-16"
+            ],
+            "pause_days": 5,
+            "at_expiry": false
+          },
+          {
+            "before": "3",
+            "after": "3",
+            "threshold": "3",
+            "existing_until": "2026-11-09T15:00:00+08:00",
+            "trigger_at": "2026-11-03T10:00:00+08:00",
+            "calendar": [
+              "2026-11-02",
+              "2026-11-03",
+              "2026-11-04",
+              "2026-11-05",
+              "2026-11-06",
+              "2026-11-09",
+              "2026-11-10",
+              "2026-11-11",
+              "2026-11-12",
+              "2026-11-13",
+              "2026-11-16"
+            ],
+            "pause_days": 5,
+            "at_expiry": false
+          },
+          {
+            "before": "3",
+            "after": "3",
+            "threshold": "3",
+            "existing_until": "2026-11-03T15:00:00+08:00",
+            "trigger_at": "2026-11-03T15:00:00+08:00",
+            "calendar": [
+              "2026-11-02",
+              "2026-11-03",
+              "2026-11-04",
+              "2026-11-05",
+              "2026-11-06",
+              "2026-11-09",
+              "2026-11-10",
+              "2026-11-11",
+              "2026-11-12",
+              "2026-11-13",
+              "2026-11-16"
+            ],
+            "pause_days": 5,
+            "at_expiry": true
+          }
+        ]
       },
       "steps": [
-        "未确定期望；不计入ready金标准"
+        "2<3<=3为新边沿；3到3不是新边沿",
+        "新计算11-10与已有11-09/11-13取max，不叠加5日",
+        "期满仍满足但无新边沿：恢复active，仅保留triggered"
       ],
-      "expected": null,
+      "expected": {
+        "results": [
+          {
+            "edge": true,
+            "paused_until": "2026-11-10T15:00:00+08:00",
+            "status": "paused",
+            "risk_triggered": true
+          },
+          {
+            "edge": true,
+            "paused_until": "2026-11-13T15:00:00+08:00",
+            "status": "paused",
+            "risk_triggered": true
+          },
+          {
+            "edge": false,
+            "paused_until": "2026-11-09T15:00:00+08:00",
+            "status": "paused",
+            "risk_triggered": true
+          },
+          {
+            "edge": false,
+            "paused_until": null,
+            "status": "active",
+            "risk_triggered": true
+          }
+        ]
+      },
       "source_refs": [
+        "ta33_4",
         "pause"
       ],
       "units": {
@@ -4259,32 +6688,126 @@
         "qty": "shares",
         "weight": "ratio",
         "avg_excess_pct": "pct",
-        "time": "Asia/Shanghai UTC+8"
+        "time": "Asia/Shanghai UTC+8",
+        "price": "CNY/share",
+        "fee": "CNY",
+        "robustness": "synthetic index points",
+        "recover_ratio": "ratio",
+        "pause_days": "trading days",
+        "horizon_days": "trading days"
       },
       "precision": {
         "decimal_input": "strings",
         "oracle_abs_tolerance": "0",
         "business_rounding": "not_added"
       },
-      "topic": "pause_retrigger",
-      "block_reason": "spec_ambiguity",
-      "question": "重复触发是否延长/覆盖暂停期、期满但风险仍在是否立即重挂未明确。"
+      "review": {
+        "authority": "T-A33 462057c / api-contract §7.11.3",
+        "method": "researcher arithmetic and clauses; oracle independently recalculates input",
+        "note": "复用已分类计数边界，不定义模拟周期；恢复场景明确版本可运行。",
+        "reviewed_input_sha256": "b41bc8411dcfd8ada2962bb0cb83854f8881a657857712652169660d29ce97fb",
+        "oracle_scope": "unit projection; authority review, not implementation/E2E acceptance"
+      }
     },
     {
       "id": "P2N-R08-092",
-      "desc": "【纯虚构】spec_ambiguity",
-      "case_status": "blocked",
-      "kind": "spec_ambiguity",
+      "desc": "【纯虚构】不可运行版本系统到期保持暂停",
+      "case_status": "ready",
+      "kind": "t33_resume",
       "input": {
-        "operation": "schedule",
-        "lifecycle": "retired",
-        "status": "paused"
+        "scenarios": [
+          {
+            "lifecycle": "retired",
+            "calendar_available": true,
+            "paused_by": "system",
+            "paused_until": "2026-11-09T15:00:00+08:00",
+            "now": "2026-11-09T15:00:00+08:00",
+            "reason": "LOSS_STREAK_PAUSE"
+          },
+          {
+            "lifecycle": "simulating",
+            "calendar_available": true,
+            "paused_by": "system",
+            "paused_until": "2026-11-09T15:00:00+08:00",
+            "now": "2026-11-09T15:00:00+08:00",
+            "reason": "LOSS_STREAK_PAUSE"
+          },
+          {
+            "lifecycle": "published",
+            "calendar_available": true,
+            "paused_by": "system",
+            "paused_until": "2026-11-09T15:00:00+08:00",
+            "now": "2026-11-09T15:00:00+08:00",
+            "reason": "LOSS_STREAK_PAUSE"
+          },
+          {
+            "lifecycle": "retired",
+            "calendar_available": false,
+            "paused_by": "system",
+            "paused_until": "2026-11-09T15:00:00+08:00",
+            "now": "2026-11-09T15:00:00+08:00",
+            "reason": "LOSS_STREAK_PAUSE"
+          }
+        ]
       },
       "steps": [
-        "未确定期望；不计入ready金标准"
+        "恰paused_until已到期；与resume同检查",
+        "retired/simulating保持paused，reason保留、until=null，system事件记录expiry_blocked并通知",
+        "published可恢复并清空暂停字段；无日历不解除，gap",
+        "system_event_detail=null仅表示无本条expiry_blocked细节，不断言没有其他事件"
       ],
-      "expected": null,
+      "expected": {
+        "results": [
+          {
+            "status": "paused",
+            "paused_until": null,
+            "reason": "LOSS_STREAK_PAUSE",
+            "expiry_blocked": true,
+            "system_event_detail": {
+              "expiry_blocked": "STRATEGY_VERSION_NOT_RUNNABLE",
+              "lifecycle": "retired"
+            },
+            "blocked_notification_required": true,
+            "gap": false,
+            "expiry_blocked_actor": "system"
+          },
+          {
+            "status": "paused",
+            "paused_until": null,
+            "reason": "LOSS_STREAK_PAUSE",
+            "expiry_blocked": true,
+            "system_event_detail": {
+              "expiry_blocked": "STRATEGY_VERSION_NOT_RUNNABLE",
+              "lifecycle": "simulating"
+            },
+            "blocked_notification_required": true,
+            "gap": false,
+            "expiry_blocked_actor": "system"
+          },
+          {
+            "status": "active",
+            "paused_until": null,
+            "reason": null,
+            "expiry_blocked": false,
+            "system_event_detail": null,
+            "blocked_notification_required": false,
+            "gap": false,
+            "expiry_blocked_actor": null
+          },
+          {
+            "status": "paused",
+            "paused_until": "2026-11-09T15:00:00+08:00",
+            "reason": "LOSS_STREAK_PAUSE",
+            "expiry_blocked": false,
+            "system_event_detail": null,
+            "blocked_notification_required": false,
+            "gap": true,
+            "expiry_blocked_actor": null
+          }
+        ]
+      },
       "source_refs": [
+        "ta33_5",
         "not_runnable",
         "pause"
       ],
@@ -4294,16 +6817,32 @@
         "qty": "shares",
         "weight": "ratio",
         "avg_excess_pct": "pct",
-        "time": "Asia/Shanghai UTC+8"
+        "time": "Asia/Shanghai UTC+8",
+        "price": "CNY/share",
+        "fee": "CNY",
+        "robustness": "synthetic index points",
+        "recover_ratio": "ratio",
+        "pause_days": "trading days",
+        "horizon_days": "trading days"
       },
       "precision": {
         "decimal_input": "strings",
         "oracle_abs_tolerance": "0",
         "business_rounding": "not_added"
       },
-      "topic": "schedule_not_runnable",
-      "block_reason": "spec_ambiguity",
-      "question": "用户resume的不可运行版本拒绝明确，系统期满恢复是否同样检查需明确；不能借此恢复退役策略。"
+      "review": {
+        "authority": "T-A33 462057c / api-contract §7.11.3",
+        "method": "researcher arithmetic and clauses; oracle independently recalculates input",
+        "note": "不把不可运行策略经自动恢复复活；未模拟真实通知。",
+        "reviewed_input_sha256": "26572f47fabdcd25ac8e664550c9613816ddfb8306c8f393278e75fcb9439642",
+        "oracle_scope": "unit projection; authority review, not implementation/E2E acceptance"
+      }
     }
-  ]
+  ],
+  "r08b": {
+    "baseline_first83_sha256": "fedb0505c193e39736c6eb7c1d60ec7645c8f0c8bf1732b7397707bf6bc04cb7",
+    "authority": "T-A33 462057c; api-contract §7.11.3 points1-9 as updated by T-A36; T-A37 3b36b74d7bf9187a00816008f3eca5a19c3f137a corrected map",
+    "status": "9 resolved; formal T-A36 B mapping on disk",
+    "deepseek": "reuse R08 36-row synthetic draft; new calls 0, new tokens 0"
+  }
 }

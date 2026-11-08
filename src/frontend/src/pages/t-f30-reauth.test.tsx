@@ -63,7 +63,7 @@ for (const kind of ['decision', 'lifecycle'] as const) {
     const { modal, input, confirm } = await openDialog(kind);
     expect(input).toHaveValue('');
     expect(input).toHaveAttribute('type', 'password');
-    expect(input).toHaveAttribute('autocomplete', 'off');
+    expect(input).toHaveAttribute('autocomplete', 'new-password');
     expect(confirm).toBeDisabled();
     expect(writes).toBe(0);
     fireEvent.change(input, { target: { value: fakeValue } });
@@ -146,4 +146,18 @@ it('示例错误密码确实返回 401 REAUTH_FAILED，正确示例复核保持�
   const result = await apiPost<PromotionSummary>(`/admin/promotions/${DEMO_REVIEW_ID}/decision`, { decision: 'approved', comment: '示例数据', ack_warn_gates: ['G6'], password: 'x'.repeat(10) });
   expect(result.decision).toBe('approved');
   expect(result.lifecycle).toBe('draft');
+});
+
+/** T-F32 / T-A21：未知配额不补成零，真实的零值仍正常展示。 */
+it.each([
+  { quota: null, expected: '—' },
+  { quota: 0, expected: '0' },
+  { quota: 3, expected: '3' },
+])('每分钟配额增量 $quota 显示 $expected', async ({ quota, expected }) => {
+  const report = structuredClone(EXAMPLE_PROMOTION_REPORT);
+  report.g6_report.quota_delta_per_min = quota;
+  server.use(http.get(`${API}/promotion-requests/:id`, () => HttpResponse.json(report)));
+  renderAt();
+  await screen.findByTestId('approve-g7');
+  expect(screen.getByTestId('quota-delta-per-min').textContent).toBe(expected);
 });

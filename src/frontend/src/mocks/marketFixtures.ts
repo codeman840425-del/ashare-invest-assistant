@@ -61,7 +61,7 @@ export const MARKET_OVERVIEW: MarketOverview = {
     security_code: s.code, name: s.name, price: f2(s.price), change_pct: f2(((s.price - s.prev_close) / s.prev_close) * 100), amount: f2(s.amount), t: NOW,
   })),
   breadth: { up: 2861, down: 2104, flat: 213, limit_up: 47, limit_down: 9 },
-  regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, turnover_total: '950400000000',
+  regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, turnover_total: '950400000000.50',
   data_status: 'fresh', data_as_of: NOW, gaps: [],
 };
 

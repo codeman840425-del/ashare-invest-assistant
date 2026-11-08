@@ -143,7 +143,7 @@ function ReportContent({ id }: { id: string }) {
           <div><label>触发率</label><StatValue s={report.data.g6_report.trigger_rate} kind="raw" /></div>
           <div><label>覆盖率</label><StatValue s={report.data.g6_report.coverage} kind="raw" /></div>
           <div><label>最大 Jaccard</label><span data-testid="max-jaccard">{report.data.g6_report.max_jaccard ?? `—（${report.data.g6_report.max_jaccard_null_reason ? NULL_REASON[report.data.g6_report.max_jaccard_null_reason] : '原因缺失'}）`}</span></div>
-          <div><label>每分钟配额增量</label>{report.data.g6_report.quota_delta_per_min}</div>
+          <div><label>每分钟配额增量</label><span data-testid="quota-delta-per-min">{report.data.g6_report.quota_delta_per_min ?? '—'}</span></div>
         </div>
         <h4>夹具回放</h4>
         {report.data.fixture_runs.length ? report.data.fixture_runs.map((f) => <div key={f.fixture_id}>{f.fixture_id} · {f.passed ? '通过' : '未通过'}<div>{f.diff == null ? <span className="muted">未提供差异详情</span> : <pre>{JSON.stringify(f.diff, null, 2)}</pre>}</div></div>) : <p className="muted">暂无夹具回放记录</p>}
@@ -172,7 +172,7 @@ function ReportContent({ id }: { id: string }) {
       onCancel={() => { if (!approve.isPending) { decisionPassword.clear(); setDialog(null); } }}
       onOk={() => approve.mutate({ comment: comment.trim(), ack_warn_gates: warnings.filter((g) => ack.includes(g)) }, { onSuccess: () => setDialog(null), onSettled: decisionPassword.clear })}>
       <p>请管理员本人重新输入密码并确认。审核意见：{comment}</p>
-      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={decisionPassword.ref} aria-label="审核复核密码" autoComplete="off" onChange={decisionPassword.onChange} disabled={approve.isPending} />
+      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={decisionPassword.ref} aria-label="审核复核密码" autoComplete="new-password" onChange={decisionPassword.onChange} disabled={approve.isPending} />
       <WriteError error={approve.error} />
     </Modal>
     <Modal title="晋级 · 本人密码复核" open={dialog === 'lifecycle'} destroyOnHidden confirmLoading={lifecycle.isPending} closable={!lifecycle.isPending} mask={{ closable: !lifecycle.isPending }}
@@ -180,7 +180,7 @@ function ReportContent({ id }: { id: string }) {
       onCancel={() => { if (!lifecycle.isPending) { lifecyclePassword.clear(); setDialog(null); } }}
       onOk={() => template && lifecycle.mutate({ id: template.id, vid: template.current_version.id, reason: reason.trim(), review_id: id }, { onSuccess: () => setDialog(null), onSettled: lifecyclePassword.clear })}>
       <p>请管理员本人重新输入密码。目标：{template?.name}；审核编号：{id}。此操作独立于 G7 批准。</p>
-      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={lifecyclePassword.ref} aria-label="晋级复核密码" autoComplete="off" onChange={lifecyclePassword.onChange} disabled={lifecycle.isPending} />
+      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={lifecyclePassword.ref} aria-label="晋级复核密码" autoComplete="new-password" onChange={lifecyclePassword.onChange} disabled={lifecycle.isPending} />
       <WriteError error={lifecycle.error} />
     </Modal>
   </>;

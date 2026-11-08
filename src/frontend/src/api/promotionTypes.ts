@@ -27,7 +27,7 @@ export interface G6Report {
   coverage: Stat;
   max_jaccard: string | null;
   max_jaccard_null_reason: MaxJaccardNullReason | null;
-  quota_delta_per_min: number;
+  quota_delta_per_min: number | null;
 }
 
 /** T-F29：DeepSeek 机械草稿逐字段核对 §7.4；修正草稿未引用的 G1..G6 类型。 */

@@ -361,3 +361,41 @@ describe('计划页与提醒页（UI）', () => {
     await waitFor(() => expect(screen.getByTestId('alert-detail-status')).toHaveTextContent('已读'));
   });
 });
+
+
+describe('T-A29 计划条件等号与日期口径', () => {
+  it.each(['0', '-0.0000', '0.00'])('pct_change=%s方向不明，mock写入400 invalid', async (pct) => {
+    const response = await json('POST', '/plans', { ...PLAN_BODY, conditions: [{ kind: 'trigger', type: 'pct_change', params: { pct }, description: '示例数据：涨跌幅计划条件' }] });
+    expect(response.status).toBe(400); expect(((await response.json()) as Err).error.details).toEqual({ fields: [{ field: 'conditions[0].params', issue: 'invalid' }] });
+  });
+  it.each(['0.0001', '-3.00'])('非零有向阈值%s可写入，mock不自动触发条件', async (pct) => {
+    const response = await json('POST', '/plans', { ...PLAN_BODY, conditions: [{ kind: 'trigger', type: 'pct_change', params: { pct }, description: '示例数据：有向涨跌幅计划条件' }] });
+    expect(response.status).toBe(201); expect((await response.json()) as Plan).toMatchObject({ status: 'active', pending_triggers: [] });
+  });
+  it.each([['2026-11-08', 400], ['2026-11-09', 201], ['2026-11-10', 201]])('日期%s按写入当日北京时间校验，status=%s', async (on, status) => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-08T16:30:00Z'));
+    try {
+      const response = await json('POST', '/plans', { ...PLAN_BODY, conditions: [{ kind: 'trigger', type: 'date', params: { on }, description: '示例数据：日期计划条件' }] });
+      expect(response.status).toBe(status);
+      if (status === 400) expect(((await response.json()) as Err).error.details).toEqual({ fields: [{ field: 'conditions[0].params', issue: 'invalid' }] });
+    } finally { clock.mockRestore(); }
+  });
+  it('手工计划详情与编辑都说明等号、顺延、补触发和unknown，不在前端判断交易日', async () => {
+    renderAt(`/plans/${PLAN_ACTIVE}`); await screen.findByTestId('plan-conditions');
+    expect(screen.getByText('价格高于或等于 11.00')).toBeInTheDocument();
+    const rules = screen.getByTestId('plan-condition-rules');
+    expect(rules).toHaveTextContent('last ≥ price'); expect(rules).toHaveTextContent('last ≤ price');
+    expect(rules).toHaveTextContent('ROUND_HALF_UP'); expect(rules).toHaveTextContent('正阈值 chg ≥ pct'); expect(rules).toHaveTextContent('负阈值 chg ≤ pct');
+    expect(rules).toHaveTextContent('非交易日顺延至其后第一个交易日09:00'); expect(rules).toHaveTextContent('unknown + gap');
+    expect(rules).toHaveTextContent('价格类错过不补判'); expect(rules).toHaveTextContent('补触发一次'); expect(rules).toHaveTextContent('scheduled_for');
+    fireEvent.click(screen.getByTestId('plan-edit-btn'));
+    await waitFor(() => expect(screen.getAllByTestId('plan-condition-rules')).toHaveLength(2));
+  });
+  it('示例提醒和计划描述使用不复权最新价及含等号的条件，不再声称收盘价跌破', async () => {
+    const plan = (await getJ<Plan>(`/plans/${uid(7302)}`)).body;
+    const alert = (await getJ<Alert>(`/alerts/${ALERT_PLAN_COND}`)).body;
+    expect(plan.current_version.conditions.find((c) => c.type === 'price_below')?.description).toContain('最新价 ≤ 12.50');
+    expect(plan.pending_triggers[0].condition_text).toContain('最新价 ≤ 12.50');
+    expect(alert.title).toContain('最新价 ≤ 12.50'); expect(alert.title).toContain('示例');
+  });
+});

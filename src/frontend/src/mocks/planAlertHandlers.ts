@@ -65,15 +65,15 @@ function seedPlans(): StoredPlan[] {
       head: head(p1, '000001.SZ', 'plan_draft', 'triggered', 'buy', 2, '2026-10-28T15:10:00+08:00', '2026-11-02T10:29:00+08:00'),
       versions: [
         version(p1, 2, 'buy', '2026-10-30T20:00:00+08:00', [
-          cond(7311, 'trigger', 'price_below', { price: '23.20' }, '价格回落到 23.20 以下（示例计划条件）'),
-          cond(7313, 'invalidation', 'date', { on: '2026-11-20' }, '到 2026-11-20 仍未满足则重新评估（示例）'),
+          cond(7311, 'trigger', 'price_below', { price: '23.20' }, '不复权最新价 ≤ 23.20（示例计划条件）'),
+          cond(7313, 'invalidation', 'date', { on: '2026-11-20' }, '日期2026-11-20，非交易日顺延至其后首个交易日09:00（北京时间；示例计划条件）'),
         ], { qty: '200', price: '23.20', stops: STOPS('21.80', null, 20), review_date: '2026-11-20', change_reason: '示例：放宽计划条件价格',
           checklist_answers: [{ id: 'c1', question: '是否已核对可用资金？（示例）', answer: 'yes', note: null }] }),
         version(p1, 1, 'buy', '2026-10-28T15:10:00+08:00', [
-          cond(7310, 'trigger', 'price_below', { price: '22.80' }, '价格回落到 22.80 以下（示例计划条件）'),
+          cond(7310, 'trigger', 'price_below', { price: '22.80' }, '不复权最新价 ≤ 22.80（示例计划条件）'),
         ], { qty: '200', price: '22.80', checklist_answers: [{ id: 'c1', question: '是否已核对可用资金？（示例）', answer: 'yes', note: null }] }),
       ],
-      pending: [{ condition_id: uid(7311), condition_kind: 'trigger', condition_text: '价格回落到 23.20 以下（计划条件已满足）', triggered_at: '2026-11-02T10:29:00+08:00', alert_id: null, evidence_ids: ['TE4'] }],
+      pending: [{ condition_id: uid(7311), condition_kind: 'trigger', condition_text: '不复权最新价 ≤ 23.20（计划条件已满足）', triggered_at: '2026-11-02T10:29:00+08:00', alert_id: null, evidence_ids: ['TE4'] }],
       evidence: evOf(['TE4']),
     },
     {
@@ -81,16 +81,16 @@ function seedPlans(): StoredPlan[] {
       head: head(p2, '002001.SZ', 'manual', 'triggered', 'buy', 1, '2026-10-27T21:00:00+08:00', '2026-11-02T10:05:00+08:00'),
       versions: [version(p2, 1, 'buy', '2026-10-27T21:00:00+08:00', [
         cond(7314, 'trigger', 'pct_change', { pct: '-3.00' }, '当日跌幅达到 3%（示例计划条件）'),
-        cond(7312, 'invalidation', 'price_below', { price: '12.50' }, '收盘价跌破 12.50 时该计划失效（示例）'),
+        cond(7312, 'invalidation', 'price_below', { price: '12.50' }, '不复权最新价 ≤ 12.50 时该计划失效（示例）'),
       ], { risks: '示例：行业数据披露延迟' })],
-      pending: [{ condition_id: uid(7312), condition_kind: 'invalidation', condition_text: '收盘价跌破 12.50 时该计划失效（失效条件已满足）', triggered_at: '2026-11-02T10:05:00+08:00', alert_id: uid(7199), evidence_ids: ['TE5'] }],
+      pending: [{ condition_id: uid(7312), condition_kind: 'invalidation', condition_text: '不复权最新价 ≤ 12.50 时该计划失效（失效条件已满足）', triggered_at: '2026-11-02T10:05:00+08:00', alert_id: uid(7199), evidence_ids: ['TE5'] }],
       evidence: evOf(['TE5']),
     },
     {
       owner: DEMO_UID,
       head: head(p3, '600000.SH', 'manual', 'active', 'reduce', 1, '2026-10-30T19:00:00+08:00', null),
       versions: [version(p3, 1, 'reduce', '2026-10-30T19:00:00+08:00', [
-        cond(7315, 'trigger', 'price_above', { price: '11.00' }, '价格到达 11.00 以上（示例计划条件）'),
+        cond(7315, 'trigger', 'price_above', { price: '11.00' }, '不复权最新价 ≥ 11.00（示例计划条件）'),
         cond(7316, 'trigger', 'custom', {}, '业绩预告披露后复核（示例，只作文字记录）'),
       ], { qty: '500', review_date: '2026-11-15' })],
       pending: [],
@@ -115,7 +115,7 @@ function seedAlerts(): StoredAlert[] {
   const extra: Alert[] = [
     {
       id: uid(7199), rule_id: uid(7198), origin: 'plan_condition', severity: 'important', status: 'new', security_code: '002001.SZ', name: securityProfile('002001.SZ')?.name ?? '002001.SZ',
-      title: '计划失效条件已满足：收盘价跌破 12.50（示例）', triggered_at: '2026-11-02T10:05:00+08:00', data_as_of: '2026-11-02T10:28:00+08:00',
+      title: '计划失效条件已满足：不复权最新价 ≤ 12.50（示例）', triggered_at: '2026-11-02T10:05:00+08:00', data_as_of: '2026-11-02T10:28:00+08:00',
       affected_plans: [{ plan_id: uid(7302), plan_version_no: 1, condition_id: uid(7312) }], evidence_ids: ['TE5'],
       checklist: ['核对行情数据时间（示例）'], snapshot_id: null, handled_at: null, evidence: evOf(['TE5']),
     },
@@ -177,8 +177,11 @@ function paramsOk(type: PlanConditionType, p: unknown): boolean {
   if (!isObj(p)) return false;
   const keys = Object.keys(p);
   if (type === 'price_above' || type === 'price_below') return keys.length === 1 && isDec(p.price) && Number(p.price) > 0;
-  if (type === 'pct_change') return keys.length === 1 && isDec(p.pct);
-  if (type === 'date') return keys.length === 1 && isDate(p.on);
+  if (type === 'pct_change') return keys.length === 1 && isDec(p.pct) && /[1-9]/.test(String(p.pct));
+  if (type === 'date') {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now());
+    return keys.length === 1 && isDate(p.on) && String(p.on) >= today;
+  }
   return keys.length === 0;
 }
 

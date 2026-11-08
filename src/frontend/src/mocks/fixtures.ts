@@ -782,7 +782,7 @@ export const DAILY_REPORTS: DailyReport[] = [(() => {
       llm_call_id: null,
     },
     evidence,
-    data_status: 'partial', data_as_of: `${REPORT_DATE}T17:30:00+08:00`,
+    data_status: 'partial', data_as_of: `${REPORT_DATE}T15:00:00+08:00`,
     gaps: [
       { key: 'news', reason: 'no_source', message: '本产品不提供新闻资讯；消息维度仅基于公告类型与标题' },
       { key: 'capital.600002.SH', reason: 'not_yet_published', message: '演示医药当日资金流在 17:30 前未发布，资金维度标为“未知”' },
@@ -793,7 +793,7 @@ export const DAILY_REPORTS: DailyReport[] = [(() => {
 })()];
 
 /**
- * T-F13：上一期日报（示例）——未导入交割单（account=null、reconciliation not_imported）、市场宽度缺失、
+ * T-F13：上一期日报（示例）——当期无账户/持仓/现金记录（account=null、reconciliation not_imported）、市场宽度缺失、
  * 一只已移出自选的证券（suggestion=null），用于覆盖日报页的空值分支与日期切换。
  */
 export const PREV_REPORT_DATE = '2026-10-29';
@@ -819,8 +819,9 @@ DAILY_REPORTS.push((() => {
     reconciliation: { status: 'not_imported', as_of: null, diff_count: 0, important_count: 0 },
     stocks: [...keep, removed],
     pending: { plan_drafts: 0, active_reasons: 0 },
-    explanation: { source: 'template', text: '尚未导入交割单，账户概览为空；逐股卡片按自选生成。（示例数据）', llm_call_id: null },
-    data_status: 'partial', data_as_of: `${PREV_REPORT_DATE}T17:30:00+08:00`,
+    explanation: { source: 'template', text: '当期尚无账户、持仓或现金记录，账户概览为空；逐股卡片按自选生成。（示例数据）', llm_call_id: null },
+    // 示例旧记录缺顶层来源时点，读取投影为null，不借生成时间或按收盘时刻猜填。
+    data_status: 'partial', data_as_of: null,
     gaps: [{ key: 'market.breadth', reason: 'not_yet_published', message: '市场宽度在生成时尚未发布（示例）' }],
   } satisfies DailyReport;
 })());

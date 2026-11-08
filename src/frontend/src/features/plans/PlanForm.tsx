@@ -10,7 +10,7 @@ import { WRITABLE_CONDITION_TYPES } from '../../api/planAlertTypes';
 import { ACTION_SHORT, PLAN_CONDITION_KIND } from '../../i18n/labels';
 import { PLAN_CONDITION_TYPE } from '../../i18n/planAlertLabels';
 
-const PARAM_LABEL: Partial<Record<PlanConditionType, string>> = { price_above: '价格', price_below: '价格', pct_change: '涨跌幅 %（带符号）', date: '日期 YYYY-MM-DD' };
+const PARAM_LABEL: Partial<Record<PlanConditionType, string>> = { price_above: '价格', price_below: '价格', pct_change: '涨跌幅 %（非零，带符号）', date: '日期 YYYY-MM-DD' };
 
 
 export function PlanWriteError({ error, onReload }: { error: unknown; onReload?: () => void }) {
@@ -29,6 +29,16 @@ export function PlanWriteError({ error, onReload }: { error: unknown; onReload?:
   if (error.code === 'INVALID_STATE_TRANSITION') return <Alert type="error" showIcon data-testid="plan-terminal" title="计划已结束（已完成或已取消），不能再修改或关闭。" />;
   if (error.status === 400) return <Alert type="error" showIcon data-testid="plan-invalid" title="有字段未通过校验，请按提示修改。" />;
   return <Alert type="error" showIcon title={error.message} />;
+}
+
+/** T-A29：仅解释服务端判定，不在浏览器补算价格穿越或交易日历。 */
+export function PlanConditionRules() {
+  return <div className="muted small" data-testid="plan-condition-rules">
+    <p>价格用不复权新鲜最新价：price_above 为 last ≥ price，price_below 为 last ≤ price，等号算触发。缺价、过期或停牌时 unknown + gap，不触发。</p>
+    <p>涨跌幅 chg = (last / prev_close − 1) × 100；用行情昨收，Decimal 计算并 ROUND_HALF_UP 保留4位后比较；正阈值 chg ≥ pct，负阈值 chg ≤ pct；pct = 0 方向不明，不可写入。缺昨收时 unknown + gap，不触发。</p>
+    <p>每条件每版本只触发一次，新版本重新布防；价格类错过不补判，恢复后只按当时价格判定。</p>
+    <p>日期不得早于写入当日（北京时间）；交易日09:00触发，非交易日顺延至其后第一个交易日09:00；缺交易日历时 unknown + gap，不触发。错过后恢复时立即补触发一次；triggered_at 记实际时刻，证据 scheduled_for 记原定时刻，不重复补发。</p>
+  </div>;
 }
 
 export function PlanFormFields({ create, versioning }: { create?: boolean; versioning?: boolean }) {
@@ -57,6 +67,7 @@ export function PlanFormFields({ create, versioning }: { create?: boolean; versi
       </Form.Item>
       <Form.Item name="risks" label="风险（可空）" rules={[{ max: 2000 }]}><Input.TextArea rows={2} maxLength={2000} /></Form.Item>
       <div className="muted small" style={{ marginBottom: 6 }}>计划条件（最多 20 条）：条件只是你的假设，满足时系统只提示“发生了什么”，不会下单，也不会自动关闭计划。</div>
+      <PlanConditionRules />
       <Form.List name="conditions">
         {(rows, { add, remove }) => (
           <>

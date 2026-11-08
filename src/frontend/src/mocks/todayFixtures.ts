@@ -48,11 +48,11 @@ export function todayPlanTriggers(): TodayPlanTrigger[] {
   return ([
     {
       plan_id: uid(7301), plan_version_no: 2, security_code: '000001.SZ', name: nameOf('000001.SZ'), condition_id: uid(7311), condition_kind: 'trigger',
-      condition_text: '价格回落到 23.20 以下（计划条件已满足）', triggered_at: '2026-11-02T10:29:00+08:00', alert_id: null, evidence_ids: ['TE4'],
+      condition_text: '不复权最新价 ≤ 23.20（计划条件已满足）', triggered_at: '2026-11-02T10:29:00+08:00', alert_id: null, evidence_ids: ['TE4'],
     },
     {
       plan_id: uid(7302), plan_version_no: 1, security_code: '002001.SZ', name: nameOf('002001.SZ'), condition_id: uid(7312), condition_kind: 'invalidation',
-      condition_text: '收盘价跌破 12.50 时该计划失效（失效条件已满足）', triggered_at: '2026-11-02T10:05:00+08:00', alert_id: uid(7199), evidence_ids: ['TE5'],
+      condition_text: '不复权最新价 ≤ 12.50 时该计划失效（失效条件已满足）', triggered_at: '2026-11-02T10:05:00+08:00', alert_id: uid(7199), evidence_ids: ['TE5'],
     },
   ] satisfies TodayPlanTrigger[]).sort((x, y) => (x.condition_kind === y.condition_kind ? 0 : x.condition_kind === 'invalidation' ? -1 : 1)
     || y.triggered_at.localeCompare(x.triggered_at) || x.plan_id.localeCompare(y.plan_id));

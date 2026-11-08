@@ -1,0 +1,120 @@
+{
+  "task": "T-T22-new-20261107",
+  "final_product_sha": null,
+  "wait_for": "编排者明确通知T-B88交付，再固定最新包含交付提交的产品SHA；不轮询、不提前执行业务用例",
+  "prerequisite": "T-T21独立净补丁及tt21_plugin/正式卡审计入口；不能合并3b旧历史链",
+  "cases": [
+    {
+      "original_nodeid": "src/backend/selfchecks/test_ta16_policy_confidence.py::test_actual_isolated_seed_idempotence_and_same_version_conflict",
+      "prepared_nodeid": "tests/backend/milestone/test_tt22_baselines.py::test_actual_isolated_seed_idempotence_and_same_version_conflict",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb71_import.py::test_formal_import_idempotence_generation_queries",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb71_import.py::test_formal_import_idempotence_generation_queries",
+      "execute_after_tb88_signal": false,
+      "deferred_reason": "正式卡保护：本里程碑非阻塞，禁止执行/读取/解除"
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb71_import.py::test_formal_v2_real_gates_no_g7",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb71_import.py::test_formal_v2_real_gates_no_g7",
+      "execute_after_tb88_signal": false,
+      "deferred_reason": "缺git环境：本里程碑非阻塞，不执行、不修环境"
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb74_candidates.py::test_deterministic_paths_idempotency_and_real_routes[buy]",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb74_candidates.py::test_deterministic_paths_idempotency_and_real_routes[buy]",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb74_candidates.py::test_deterministic_paths_idempotency_and_real_routes[reduce]",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb74_candidates.py::test_deterministic_paths_idempotency_and_real_routes[reduce]",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb74_candidates.py::test_deterministic_paths_idempotency_and_real_routes[sell]",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb74_candidates.py::test_deterministic_paths_idempotency_and_real_routes[sell]",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb74_candidates.py::test_blocked_risk_and_bidirectional_conflict_manual_release",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb74_candidates.py::test_blocked_risk_and_bidirectional_conflict_manual_release",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb74_candidates.py::test_pagination_binding_csrf_and_reason_batch_limit",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb74_candidates.py::test_pagination_binding_csrf_and_reason_batch_limit",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb74_flat_config.py::test_tb74_flat_imported_spec_shape",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb74_flat_config.py::test_tb74_flat_imported_spec_shape",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb76_assembly.py::test_real_worker_policy_bound_candidate_suggestion_and_idempotence",
+      "prepared_nodeid": "tests/backend/milestone/test_tt22_baselines.py::test_real_worker_policy_bound_candidate_suggestion_and_idempotence",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb76_daily.py::test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb76_daily.py::test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb77_aggregates.py::test_routes_real_ownership_unread_and_imported_holdings",
+      "prepared_nodeid": "tests/backend/milestone/test_tt22_baselines.py::test_routes_real_ownership_unread_and_imported_holdings",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb80_reports.py::test_formal_26_real_gate_reports_remain_draft_with_explicit_unknown_g6",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb80_reports.py::test_formal_26_real_gate_reports_remain_draft_with_explicit_unknown_g6",
+      "execute_after_tb88_signal": false,
+      "deferred_reason": "正式卡保护：本里程碑非阻塞，禁止执行/读取/解除"
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tr18_sources.py::test_real_import_is_idempotent_v2_scoped_sources_and_formal_g2_fails",
+      "prepared_nodeid": "src/backend/selfchecks/test_tr18_sources.py::test_real_import_is_idempotent_v2_scoped_sources_and_formal_g2_fails",
+      "execute_after_tb88_signal": false,
+      "deferred_reason": "缺git环境：本里程碑非阻塞，不执行、不修环境"
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tr18_sources.py::test_actual_worker_refuses_formal_like_fictional_source_bypass[published-f.close_qfq]",
+      "prepared_nodeid": "src/backend/selfchecks/test_tr18_sources.py::test_actual_worker_refuses_formal_like_fictional_source_bypass[published-f.close_qfq]",
+      "execute_after_tb88_signal": false,
+      "deferred_reason": "缺git环境：本里程碑非阻塞，不执行、不修环境"
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tr18_sources.py::test_actual_worker_refuses_formal_like_fictional_source_bypass[simulating-f.main_net_20d]",
+      "prepared_nodeid": "src/backend/selfchecks/test_tr18_sources.py::test_actual_worker_refuses_formal_like_fictional_source_bypass[simulating-f.main_net_20d]",
+      "execute_after_tb88_signal": false,
+      "deferred_reason": "缺git环境：本里程碑非阻塞，不执行、不修环境"
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb78_acceptance.py::test_independent_assertions_one_to_four_real_import_worker_and_cross_day",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb78_acceptance.py::test_independent_assertions_one_to_four_real_import_worker_and_cross_day",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    },
+    {
+      "original_nodeid": "src/backend/selfchecks/test_tb78_acceptance.py::test_independent_assertion_five_fictional_simulating_visible_without_drafts",
+      "prepared_nodeid": "src/backend/selfchecks/test_tb78_acceptance.py::test_independent_assertion_five_fictional_simulating_visible_without_drafts",
+      "execute_after_tb88_signal": true,
+      "deferred_reason": ""
+    }
+  ],
+  "other_not_run": [
+    "coverage超时",
+    "离线runner13专项"
+  ]
+}

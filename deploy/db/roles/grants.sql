@@ -719,3 +719,134 @@ BEGIN
   RAISE NOTICE 'db-roles: aia_api、aia_ingest 对 public.alembic_version 仅 SELECT';
 END
 $alembic_read$;
+
+-- T-O29：P2N-07 与 T-B90 的最小依赖声明。
+-- 运行角色按 compose 的 DATABASE_URL：worker/api = aia_api，ingest = aia_ingest。
+-- 不撤销 $grants$ 里已经更宽的表级权限（T-B90：现存 ACL 更宽，本任务不缩改），
+-- 也不把这些表加进 aia_maint，不把密文列授给 aia_api，不授 ALL / DDL。
+-- 表还不存在：警告并跳过（旧迁移）。点名列缺失：立即失败，不改授该表的表级 UPDATE 或 SELECT。
+DO $o29$
+DECLARE
+  spec text[] := ARRAY[
+    'aia_api|SELECT|app.users|id,status',
+    'aia_api|SELECT|market.trading_calendar|date,is_open',
+    'aia_api|SELECT|app.action_plans|',
+    'aia_api|SELECT|app.plan_versions|',
+    'aia_api|SELECT|app.plan_conditions|',
+    'aia_api|SELECT|app.data_snapshots|',
+    'aia_api|SELECT|app.alert_rules|id',
+    'aia_api|SELECT|app.alerts|id,user_id,dedup_key',
+    'aia_api|UPDATE|app.action_plans|status,triggered_at,updated_at',
+    'aia_api|INSERT|app.alert_rules|',
+    'aia_api|INSERT|app.alerts|',
+    'aia_api|INSERT|app.data_snapshots|',
+    'aia_api|INSERT|app.audit_logs|',
+    'aia_api|SELECT|app.user_data_licence_status|',
+    'aia_api|SELECT|app.user_data_licence_holds|user_id',
+    'aia_api|SELECT|market.master_runs|',
+    'aia_api|INSERT|market.master_runs|',
+    'aia_api|UPDATE|market.master_runs|status,finished_at,stats,snapshot_ids',
+    'aia_api|SELECT|market.master_vendor_batches|',
+    'aia_api|INSERT|market.master_vendor_batches|',
+    'aia_api|UPDATE|market.master_vendor_batches|status,reconciled_at',
+    'aia_api|SELECT|market.master_vendor_list_rows|',
+    'aia_api|SELECT|market.securities|',
+    'aia_api|UPDATE|market.securities|risk_flag,listing_status,field_sources',
+    'aia_api|SELECT|market.master_snapshots|',
+    'aia_api|INSERT|market.master_snapshots|',
+    'aia_api|UPDATE|market.master_snapshots|parse_status,reject_reason',
+    'aia_api|SELECT|market.security_risk_flag_history|',
+    'aia_api|INSERT|market.security_risk_flag_history|',
+    'aia_api|UPDATE|market.security_risk_flag_history|valid_until',
+    'aia_api|SELECT|market.security_listing_status_history|',
+    'aia_api|INSERT|market.security_listing_status_history|',
+    'aia_api|UPDATE|market.security_listing_status_history|valid_until',
+    'aia_api|SELECT|app.notifications|user_id,read_at',
+    'aia_ingest|SELECT|app.user_data_licences|id,user_id,ciphertext,seal_key_version',
+    'aia_ingest|SELECT|app.user_data_licence_status|',
+    'aia_ingest|SELECT|app.user_data_licence_holds|user_id',
+    'aia_ingest|SELECT|market.securities|code',
+    'aia_ingest|SELECT|market.master_runs|',
+    'aia_ingest|UPDATE|market.master_runs|stats',
+    'aia_ingest|SELECT|market.master_vendor_batches|',
+    'aia_ingest|UPDATE|market.master_vendor_batches|status,fetched_at,datasets,error_code',
+    'aia_ingest|INSERT|market.master_vendor_list_rows|'
+  ];
+  e text; role text; priv text; rel text; cols text; col text; missing text; seq text; part regclass;
+BEGIN
+  FOREACH e IN ARRAY spec LOOP
+    role := split_part(e, '|', 1);
+    priv := split_part(e, '|', 2);
+    rel := split_part(e, '|', 3);
+    cols := split_part(e, '|', 4);
+    IF to_regclass(rel) IS NULL THEN
+      RAISE WARNING 'db-roles: T-O29 表 % 不存在（迁移未到？），跳过 % %', rel, role, priv;
+      CONTINUE;
+    END IF;
+    IF cols <> '' THEN
+      SELECT string_agg(c, ',' ORDER BY c) INTO missing
+        FROM unnest(string_to_array(cols, ',')) AS u(c)
+       WHERE NOT EXISTS (
+         SELECT 1 FROM pg_attribute a
+          WHERE a.attrelid = to_regclass(rel) AND a.attname = c AND a.attnum > 0 AND NOT a.attisdropped);
+      IF missing IS NOT NULL THEN
+        RAISE EXCEPTION 'db-roles: T-O29 % 缺少点名列（%），不退成表级 %', rel, missing, priv;
+      END IF;
+      EXECUTE format('GRANT %s (%s) ON TABLE %s TO %I', priv,
+        (SELECT string_agg(quote_ident(x), ', ') FROM unnest(string_to_array(cols, ',')) AS u(x)),
+        to_regclass(rel), role);
+      FOREACH col IN ARRAY string_to_array(cols, ',') LOOP
+        IF NOT has_column_privilege(role, rel, col, priv) THEN
+          RAISE EXCEPTION 'db-roles: T-O29 % 缺少 %(%) ON %', role, priv, col, rel;
+        END IF;
+      END LOOP;
+    ELSE
+      EXECUTE format('GRANT %s ON TABLE %s TO %I', priv, to_regclass(rel), role);
+      IF NOT has_table_privilege(role, rel, priv) THEN
+        RAISE EXCEPTION 'db-roles: T-O29 % 缺少 % ON %', role, priv, rel;
+      END IF;
+    END IF;
+    FOR part IN SELECT inhrelid FROM pg_inherits WHERE inhparent = to_regclass(rel) LOOP
+      IF cols <> '' THEN
+        EXECUTE format('GRANT %s (%s) ON TABLE %s TO %I', priv,
+          (SELECT string_agg(quote_ident(x), ', ') FROM unnest(string_to_array(cols, ',')) AS u(x)),
+          part, role);
+      ELSE
+        EXECUTE format('GRANT %s ON TABLE %s TO %I', priv, part, role);
+      END IF;
+    END LOOP;
+  END LOOP;
+
+  FOREACH rel IN ARRAY ARRAY['market.master_runs', 'market.master_snapshots'] LOOP
+    IF to_regclass(rel) IS NULL THEN
+      RAISE WARNING 'db-roles: T-O29 表 % 不存在，跳过 identity 序列', rel;
+      CONTINUE;
+    END IF;
+    seq := pg_get_serial_sequence(rel, 'id');
+    IF seq IS NULL THEN
+      RAISE WARNING 'db-roles: T-O29 % 没有 id 序列（迁移未到？），跳过 USAGE', rel;
+      CONTINUE;
+    END IF;
+    EXECUTE format('GRANT USAGE ON SEQUENCE %s TO aia_api', seq);
+    IF NOT has_sequence_privilege('aia_api', seq, 'USAGE') THEN
+      RAISE EXCEPTION 'db-roles: T-O29 aia_api 缺少 % 的 USAGE', seq;
+    END IF;
+  END LOOP;
+
+  IF to_regclass('app.user_data_licences') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM pg_attribute a
+        WHERE a.attrelid = 'app.user_data_licences'::regclass AND a.attname = 'ciphertext' AND a.attnum > 0 AND NOT a.attisdropped)
+     AND has_column_privilege('aia_api', 'app.user_data_licences', 'ciphertext', 'SELECT') THEN
+    RAISE EXCEPTION 'db-roles: T-O29 不得让 aia_api 读取证书密文';
+  END IF;
+  IF to_regclass('app.user_data_licences') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM pg_attribute a
+        WHERE a.attrelid = 'app.user_data_licences'::regclass AND a.attname = 'ciphertext' AND a.attnum > 0 AND NOT a.attisdropped)
+     AND has_column_privilege('aia_maint', 'app.user_data_licences', 'ciphertext', 'SELECT') THEN
+    RAISE EXCEPTION 'db-roles: T-O29 不得让 aia_maint 读取证书密文';
+  END IF;
+  RAISE NOTICE 'db-roles: T-O29 最小依赖已声明（未缩改更宽的既有授权，未授 ALL）';
+END
+$o29$;

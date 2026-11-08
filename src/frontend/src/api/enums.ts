@@ -36,6 +36,7 @@ export const ENUMS = {
   notification_target_type: [
     'suggestion', 'candidate_signal', 'plan_draft', 'plan', 'daily_report', 'import_batch', 'reconciliation', 'strategy_version', 'none',
   ],
+  notification_ref_type: ['signal', 'plan_condition'],
   notification_kind: [
     'suggestion_change', 'invalidation', 'daily_report', 'alert', 'import', 'system', 'reason_released', 'plan_draft_ready',
     'plan_triggered', 'strategy_health', 'data_licence',
@@ -188,3 +189,5 @@ export type DataGapScope = E<'data_gap_scope'>;
 export type SecurityReconciliationKind = E<'security_reconciliation_kind'>;
 export type SecurityReconciliationSource = E<'security_reconciliation_source'>;
 export type ReasonCode = (typeof REASON_CODES)[number];
+
+export type NotificationRefType = E<'notification_ref_type'>;

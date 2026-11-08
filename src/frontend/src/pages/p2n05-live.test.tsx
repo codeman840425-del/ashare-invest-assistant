@@ -38,9 +38,9 @@ it('旧记录投影严格为count1、updated=created、refs空，不计算合并
   expect(merged_count).toBe(1); expect(updated_at).toBe(n.created_at); expect(refs).toHaveLength(1);
   expect(projectNotification(legacy)).toMatchObject({ merged_count: 1, updated_at: n.created_at, refs: [] });
 });
-it('跨页同id取较新版本、created排序不改成updated排序，保留微秒精度', () => {
-  const old = { ...exampleNotificationVersion(), updated_at: '2026-11-02T10:41:00.000001+08:00' };
-  const newer = { ...exampleNotificationVersion(2), updated_at: '2026-11-02T10:41:00.000002+08:00' };
+it('跨页同id只看version，updated_at更晚不代表更新，仍按created排序', () => {
+  const old = { ...exampleNotificationVersion(), updated_at: '2026-11-02T10:42:00+08:00' };
+  const newer = { ...exampleNotificationVersion(2), updated_at: '2026-11-02T10:41:00+08:00' };
   const another = { ...exampleNotificationVersion(), id: uid(9899), security_code: '600001.SH', name: 'TEST示例另一证券', created_at: '2026-11-02T10:40:30+08:00' };
   const rows = latestNotifications([old, another, newer, old]); expect(rows).toHaveLength(2);
   expect(rows[0].id).toBe(another.id); expect(rows[1].merged_count).toBe(2);
@@ -72,8 +72,8 @@ it('MSW→真实SSE消费→React显示合并次数/更新时间/原始refs；�
   expect(screen.getByTestId(`nc-updated-${n.id}`)).toHaveTextContent('10:41'); expect(screen.getAllByTestId(`nc-item-${n.id}`)).toHaveLength(1);
   await waitFor(() => expect(badge()).toBe(baseline + 1));
   const refs = screen.getByTestId(`nc-refs-${n.id}`); fireEvent.click(within(refs).getByText(/合并引用/));
-  expect(within(refs).getAllByRole('listitem')).toHaveLength(2); expect(refs).toHaveTextContent('TEST待定引用类型');
-  expect(within(refs).getByRole('link')).toHaveAttribute('href', '/signals');
+  expect(within(refs).getAllByRole('listitem')).toHaveLength(2); expect(refs).toHaveTextContent('计划条件引用');
+  expect(within(refs).getByRole('link', { name: '查看完整盘中规则事件' })).toHaveAttribute('href', '/signals');
   fireEvent.click(screen.getByTestId(`nc-read-${n.id}`)); await waitFor(() => expect(badge()).toBe(baseline));
   act(() => { pushStreamEvent('notification', exampleNotificationVersion(3)); });
   await waitFor(() => expect(screen.getByTestId(`nc-merged-${n.id}`)).toHaveTextContent('合并 3 次变化')); await waitFor(() => expect(badge()).toBe(baseline + 1));

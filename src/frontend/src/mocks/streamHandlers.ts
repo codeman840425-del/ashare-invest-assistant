@@ -20,7 +20,7 @@ export const HEARTBEAT_MS = 15_000;
 interface LoggedEvent { owner: string; id: string; type: StreamEventType; data: unknown; at: number }
 interface Conn { owner: string; send: (chunk: string) => void; close: () => void }
 
-let seq = 0;
+const sequences = new Map<string, number>();
 let log: LoggedEvent[] = [];
 const conns = new Set<Conn>();
 /** 收到的每次连接的 Last-Event-ID（测试断言续传用） */
@@ -39,13 +39,20 @@ function prune(now = Date.now()) {
 /** 推一条业务事件给所有连接（并写入日志供续传）；notification 事件同时写入通知列表 */
 export function pushStreamEvent<K extends StreamEventType>(type: K, data: StreamEventMap[K], ownerId = currentUser()?.id): string {
   if (!ownerId) throw new Error('示例事件必须属于已登录用户');
-  seq += 1;
+  const seq = (sequences.get(ownerId) ?? 0) + 1; sequences.set(ownerId, seq);
   const e: LoggedEvent = { owner: ownerId, id: String(seq), type, data, at: Date.now() };
   log.push(e);
   prune();
   if (type === 'notification') addMockNotification(data as Notification, ownerId);
   for (const c of conns) if (c.owner === ownerId) c.send(frame(e));
   return e.id;
+}
+
+/** 示例控制帧：不写业务日志、不占事件序号。 */
+export function pushStreamReset(reason: 'expired' | 'unknown' = 'unknown') {
+  const owner = currentUser()?.id; if (!owner) return;
+  const latest = sequences.get(owner) ?? 0;
+  for (const conn of conns) if (conn.owner === owner) conn.send(frame({ type: 'reset', data: { reason, latest_event_id: latest ? String(latest) : null } }));
 }
 
 /** 模拟网络断开：服务端关闭全部连接（客户端应带 Last-Event-ID 重连） */
@@ -57,7 +64,7 @@ export const streamConnectionCount = () => conns.size;
 
 export function resetStreamMock() {
   dropStreamConnections();
-  seq = 0;
+  sequences.clear();
   log = [];
   streamRequests.length = 0;
   demoPushed = false;
@@ -108,10 +115,18 @@ export const streamHandlers = [
         };
         conns.add(conn);
         const c = conn;
-        // 续传：只补发保留期内 id 大于 Last-Event-ID 的事件
+        // T-A31：每用户十进制序号；首次无ID不发reset，未知/过窗先控制事件再实时流。
+        const latest = sequences.get(owner) ?? 0;
         const after = last !== null && /^\d+$/.test(last) ? Number(last) : null;
-        if (after !== null) for (const e of log) if (e.owner === owner && Number(e.id) > after) c.send(frame(e));
-        c.send(': connected\n\n');
+        let prefix = 'retry: 3000\n\n';
+        const anchor = log.find((e) => e.owner === owner && e.id === last);
+        if (last !== null && (after === null || after < 1 || after > latest || !anchor)) {
+          const reason = after !== null && after >= 1 && after <= latest ? 'expired' : 'unknown';
+          prefix += frame({ type: 'reset', data: { reason, latest_event_id: latest ? String(latest) : null } });
+        } else if (after !== null) {
+          for (const e of log) if (e.owner === owner && Number(e.id) > after) prefix += frame(e);
+        }
+        c.send(prefix + ': connected\n\n');
         hb = setInterval(() => c.send(frame({ type: 'heartbeat', data: { at: new Date().toISOString() } })), HEARTBEAT_MS);
         request.signal.addEventListener('abort', () => c.close(), { once: true });
         if (isDemo() && !demoPushed) {

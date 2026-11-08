@@ -4,7 +4,7 @@ import type { StreamState } from '../lib/eventStream';
 
 /**
  * SSE 连接状态（T-F14）。`off` = 未启用（未登录区域、单元测试默认）。
- * 只有 `open` 时实时推送生效；其余状态下各轮询照常（契约 §8：断线时退回轮询）。
+ * 只有 `open` 时实时推送生效；轮询由独立上下文按T-A31三次建流失败门槛控制。
  */
 export type StreamStatus = StreamState | 'off';
 export const StreamStatusContext = createContext<StreamStatus>('off');
@@ -27,3 +27,7 @@ export const streamConfig = {
 export type NotificationSyncState = 'idle' | 'loading' | 'ready' | 'error';
 export const NotificationSyncContext = createContext<NotificationSyncState>('idle');
 export const useNotificationSync = () => useContext(NotificationSyncContext);
+
+/** T-A31：前三次建流尝试不启用定时轮询；三次连续失败后由传输层开启，建流成功关闭。 */
+export const StreamPollingContext = createContext(true);
+export const useStreamPolling = () => useContext(StreamPollingContext);

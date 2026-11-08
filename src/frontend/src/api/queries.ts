@@ -1,5 +1,5 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useStreamLive } from '../app/streamContext';
+import { useStreamPolling } from '../app/streamContext';
 import { apiGet, apiPost } from './client';
 import { isRoutePending } from './errorPolicy';
 import type {
@@ -41,13 +41,13 @@ export const useMe = () =>
   useQuery({ queryKey: qk.me, queryFn: ({ signal }) => apiGet<Me>('/me', undefined, signal), refetchInterval: ME_POLL_MS });
 
 export const useTerminal = (scope: TerminalScope) => {
-  const live = useStreamLive();
+  const polling = useStreamPolling();
   return useQuery({
     queryKey: qk.terminal(scope),
     queryFn: ({ signal }) => apiGet<TerminalResponse>('/terminal', { scope }, signal),
     placeholderData: keepPreviousData,
     // 契约 §8：SSE 连上时由 quote / suggestion 等事件更新；断线（或未启用）时退回 ≥ 15 秒带 If-None-Match 轮询（T-F14）
-    refetchInterval: live ? false : 15_000,
+    refetchInterval: polling ? 15_000 : false,
   });
 };
 
@@ -56,13 +56,13 @@ export const todayPollMs = (session: TodayResponse['session'] | undefined) => (s
 
 /** T-F08：首页聚合 GET /today（契约 §7.3，弱 ETag；SSE 未接入前按 §8 带 If-None-Match 轮询） */
 export const useToday = () => {
-  const live = useStreamLive();
+  const polling = useStreamPolling();
   return useQuery({
     queryKey: qk.today,
     queryFn: ({ signal }) => apiGet<TodayResponse>('/today', undefined, signal),
     placeholderData: keepPreviousData,
     // T-F14：SSE 连上时不轮询（事件触发失效重拉），断线时按 §8 退回轮询
-    refetchInterval: (query) => (live ? false : todayPollMs(query.state.data?.session)),
+    refetchInterval: (query) => (!polling ? false : todayPollMs(query.state.data?.session)),
   });
 };
 
@@ -117,13 +117,13 @@ export const useNotifications = () =>
 /** 契约 §8：SSE 连上时未读数随 notification 事件刷新；断线（或未启用）时退回轮询 /notifications/unread-count */
 export const UNREAD_POLL_MS = 15_000;
 export const useUnreadCount = () => {
-  const live = useStreamLive();
+  const polling = useStreamPolling();
   const pending = isRoutePending(useQueryClient().getQueryState(qk.unread)?.error);
   return useQuery({
     queryKey: qk.unread,
     queryFn: ({ signal }) => apiGet<UnreadCount>('/notifications/unread-count', undefined, signal),
     // T-F20：路由未实现的 404 不再轮询（出错后本组件会重渲染，读到最新的 error）
-    refetchInterval: live || pending ? false : UNREAD_POLL_MS,
+    refetchInterval: !polling || pending ? false : UNREAD_POLL_MS,
   });
 };
 

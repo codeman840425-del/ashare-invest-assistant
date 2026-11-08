@@ -6,7 +6,7 @@
 import type {
   Action, BarAdjust, BarFreq, CandidateSignalState, CheckOn, ComponentHealth, ConfidenceLevel, ConsensusStatus, DataProvider,
   DataStatus, Dimension, DimensionView, EpistemicType, ExecutabilityStatus, DataLicenceState, GapReason, HealthStatus, Horizon, IngestHealth,
-  Lifecycle, MarketRegime, MarketSession, NotificationKind, NotificationTargetType, ReasonCode, ReasonStatus,
+  Lifecycle, MarketRegime, MarketSession, NotificationKind, NotificationRefType, NotificationTargetType, ReasonCode, ReasonStatus,
   ReconciliationStatus, RegistrationMode, ReleaseKind, RiskControl, RiskLevel, Role, AccountStatus, RuleRole, Severity,
   SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus, AlertOrigin, AlertStatus, PlanConditionKind,
   DataGapScope, SecurityType,
@@ -144,8 +144,8 @@ export interface SignalEvent {
   candidate_signal_id: Uuid | null;
 }
 export interface NotificationTarget { type: NotificationTargetType; id: string | null; route: string | null }
-/** refs.type枚举/单引用深链未冻结，保留原值，不推断路由。 */
-export interface NotificationRef { type: string; id: string; at: DateTime }
+/** T-A31：引用路由只读服务端值，null不跳；不从条件id推导plan_id。 */
+export interface NotificationRef { type: NotificationRefType; id: Uuid; at: DateTime; route: string | null }
 export interface Notification {
   id: Uuid;
   kind: NotificationKind;
@@ -157,6 +157,7 @@ export interface Notification {
   security_code: string | null;
   name: string | null;
   target: NotificationTarget;
+  version: number;
   merged_count: number;
   updated_at: DateTime;
   refs: NotificationRef[];

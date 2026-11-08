@@ -10,6 +10,7 @@ export interface StreamQuoteItem { security_code: string; name: string; price: D
 
 export interface StreamEventMap {
   heartbeat: { at: DateTime };
+  reset: { reason: 'expired' | 'unknown'; latest_event_id: string | null };
   quote: { items: StreamQuoteItem[]; data_as_of: DateTime };
   signal: SignalEvent;
   candidate_signal: { id: Uuid; security_code: string; name: string; state: CandidateSignalState; proposed_action: Action; strategy_key: string; strategy_name: string };
@@ -26,6 +27,6 @@ export interface StreamEventMap {
 export type StreamEventType = keyof StreamEventMap;
 export const STREAM_EVENT_TYPES: readonly StreamEventType[] = [
   'heartbeat', 'quote', 'signal', 'candidate_signal', 'reason_released', 'plan_draft_ready', 'plan_triggered', 'suggestion',
-  'notification', 'report', 'data_status', 'data_licence',
+  'notification', 'report', 'data_status', 'data_licence', 'reset',
 ];
 export const isStreamEventType = (x: string): x is StreamEventType => (STREAM_EVENT_TYPES as readonly string[]).includes(x);

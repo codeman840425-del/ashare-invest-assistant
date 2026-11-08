@@ -1,4 +1,4 @@
-import { latestNotifications } from '../lib/notifications';
+import { latestNotifications, rememberNotificationVersions } from '../lib/notifications';
 /**
  * 通知中心（契约 §7.8，T-F14）：GET /notifications（?unread=&kind=，§1.2 游标分页）、
  * POST /notifications/{id}/read、POST /notifications/read-all（均 204，幂等）。
@@ -15,23 +15,25 @@ export interface NotificationFilter { unread: boolean; kind: NotificationKind | 
 export const nk = {
   all: ['notifications'] as const,
   catchup: ['notifications', 'catch-up'] as const,
+  reset: ['notifications', 'reset-read'] as const,
   catchupCount: ['notifications', 'catch-up-count'] as const,
   pages: (f: NotificationFilter) => ['notifications', 'pages', f] as const,
 };
 
 /** 与列表相同的游标协议；游标不解析、不伪造，补读到末页才算完成。 */
-export async function readUnreadNotifications(signal?: AbortSignal): Promise<Notification[]> {
+export async function readUnreadNotifications(signal?: AbortSignal, full = false): Promise<Notification[]> {
   const rows: Notification[] = []; const seen = new Set<string>(); let cursor: string | null = null;
   do {
-    const page: Paged<Notification> = await apiGet('/notifications', { unread: 'true', limit: 50, ...(cursor ? { cursor } : {}) }, signal);
+    const page: Paged<Notification> = await apiGet('/notifications', { ...(full ? {} : { unread: 'true' }), limit: 50, ...(cursor ? { cursor } : {}) }, signal);
     rows.push(...page.items); cursor = page.next_cursor;
     if (cursor) { if (seen.has(cursor)) throw new Error('补读游标重复，未完成补读'); seen.add(cursor); }
   } while (cursor);
   return latestNotifications(rows);
 }
 export const useNotificationPages = (f: NotificationFilter) => {
+  const qc = useQueryClient();
   const q = useCursorPages<Notification>({ queryKey: nk.pages(f), path: '/notifications', params: { unread: f.unread ? 'true' : undefined, kind: f.kind ?? undefined } });
-  return { ...q, items: latestNotifications(q.data?.pages.flatMap((page) => page.items) ?? []) };
+  return { ...q, items: rememberNotificationVersions(qc, q.data?.pages.flatMap((page) => page.items) ?? []).filter((n) => (!f.unread || n.read_at === null) && (!f.kind || n.kind === f.kind)) };
 };
 
 export function useMarkAllNotificationsRead() {

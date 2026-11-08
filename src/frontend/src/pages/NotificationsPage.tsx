@@ -1,3 +1,4 @@
+import { notificationRefRoute } from '../lib/notifications';
 import { useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { resyncAfterReconnect } from '../app/streamEvents';
@@ -8,7 +9,7 @@ import { ENUMS, type NotificationKind } from '../api/enums';
 import { useMarkAllNotificationsRead, useNotificationPages, type NotificationFilter } from '../api/notificationQueries';
 import { useMarkNotificationRead, useUnreadCount } from '../api/queries';
 import type { Notification } from '../api/types';
-import { useNotificationSync, useStreamStatus, type StreamStatus } from '../app/streamContext';
+import { useNotificationSync, useStreamPolling, useStreamStatus, type StreamStatus } from '../app/streamContext';
 import { CursorPager } from '../components/CursorPager';
 import { ErrorBox } from '../components/common';
 import { CardDisclaimer } from '../components/RiskDisclosure';
@@ -21,16 +22,16 @@ const parseKind = (v: string | null): NotificationKind | null => (v && (KINDS as
 
 const STREAM_TEXT: Record<StreamStatus, { text: string; color: string; tip: string }> = {
   open: { text: '实时推送已连接', color: 'green', tip: '新通知通过 SSE 推送，未读数实时更新' },
-  connecting: { text: '正在连接实时推送', color: 'blue', tip: '连接建立前按 15 秒间隔轮询未读数' },
-  retrying: { text: '实时推送已断开，正在重连', color: 'orange', tip: '重连期间按 15 秒间隔轮询未读数；重连时带上最后收到的事件 id 补发漏掉的事件' },
+  connecting: { text: '正在连接实时推送', color: 'blue', tip: '连续3次建流失败前不启动定时轮询' },
+  retrying: { text: '实时推送已断开，正在重连', color: 'orange', tip: '连续3次建流失败后按15秒轮询未读数；重连时带上最后收到的事件 id 补发漏掉的事件' },
   closed: { text: '实时推送已停止', color: 'default', tip: '会话失效、接口未实现或已停止；未读数按 15 秒间隔轮询' },
   off: { text: '实时推送未启用', color: 'default', tip: '未读数按 15 秒间隔轮询' },
 };
 
 function StreamBadge() {
-  const s = useStreamStatus();
+  const s = useStreamStatus(); const polling = useStreamPolling();
   const x = STREAM_TEXT[s];
-  return <Tag color={x.color} title={x.tip} data-testid="stream-status" data-state={s}>{x.text}</Tag>;
+  return <Tag color={x.color} title={`${x.tip}；${polling ? '15秒轮询已启用' : '轮询未启用：连接成功或连续失败未达3次'}`} data-testid="stream-status" data-state={s}>{x.text}</Tag>;
 }
 
 function NotificationRecovery() {
@@ -70,8 +71,8 @@ function NotificationRow({ n }: { n: Notification }) {
         {n.body ? <div className="muted small nc-body">{n.body}</div> : null}
         <details className="small" data-testid={`nc-refs-${n.id}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
           <summary>合并引用（{n.refs.length} 条，最多20条）</summary>
-          {n.refs.length ? <ul>{n.refs.slice(0, 20).map((ref) => <li key={`${ref.type}:${ref.id}`}>{ref.type} · <code>{ref.id}</code> · {fmtTime(ref.at)}</li>)}</ul> : <p>旧记录或本条通知未附引用；不补造出处。</p>}
-          <span className="muted">引用类型枚举与单条深链待契约，当前只展示接口原值。 </span><Link to="/signals">查看完整盘中规则事件</Link>
+          {n.refs.length ? <ul>{n.refs.slice(0, 20).map((ref) => <li key={`${ref.type}:${ref.id}`}>{notificationRefRoute(ref) ? <Link to={notificationRefRoute(ref)!}>计划条件引用 {ref.id}</Link> : <span>{ref.type} · <code>{ref.id}</code>（无单条链接）</span>} · {fmtTime(ref.at)}</li>)}</ul> : <p>旧记录或本条通知未附引用；不补造出处。</p>}
+          <span className="muted">引用只跳转服务端提供的站内深链；route=null不跳。 </span><Link to="/signals">查看完整盘中规则事件</Link>
         </details>
         <div className="small nc-target">
           {route ? <span className="link" data-testid={`nc-go-${n.id}`}>查看{TARGET_TYPE[n.target.type]} ›</span>
@@ -171,7 +172,7 @@ export function NotificationsPage() {
       <div className="muted small" style={{ marginBottom: 8 }}>
         候选信号变化、失效条件、计划条件、日报与系统消息都汇总在这里；点击通知跳到对应页面并标为已读。通知内容只是规则信号的提示，不替你做决定。
       </div>
-      <Alert type="info" style={{ marginBottom: 8 }} title={IS_MOCK ? '示例数据 · 提醒流仅为MSW模拟，非真实通知' : '提醒流尚未真实联调，SSE仅在示例模式启用'} description="事件名、Last-Event-ID、600秒续传及未读数来源已定；重连退避/空闲超时参数、引用类型枚举/深链与同更新时间冲突裁定待契约。本轮不提供外部渠道。" />
+      <Alert type="info" style={{ marginBottom: 8 }} title={IS_MOCK ? '示例数据 · 提醒流仅为MSW模拟，非真实通知' : '提醒流尚未真实联调，SSE仅在示例模式启用'} description="T-A31：按version防重、reset全量补读；3秒起退避、45秒无字节断开、稳定60秒归零、连续3次建流失败转15秒轮询。本轮不提供外部渠道。" />
       <NotificationRecovery />
       <Tabs
         activeKey={tab}

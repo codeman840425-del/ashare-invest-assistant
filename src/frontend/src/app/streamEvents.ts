@@ -1,6 +1,6 @@
 import { apiGet } from '../api/client';
 import { nk, readUnreadNotifications } from '../api/notificationQueries';
-import { compareNotificationTime, isNotificationInput, latestNotifications, projectNotification } from '../lib/notifications';
+import { isNotificationInput, latestNotifications, projectNotification, notificationVersion, rememberNotificationVersions } from '../lib/notifications';
 /**
  * 把 §8 SSE 事件落到 TanStack Query 缓存（T-F14）。原则：
  * - 能直接就地更新的（quote 的行情、suggestion 的摘要）先就地改，避免整页重拉；
@@ -18,6 +18,10 @@ export function parseStreamMessage(m: SseMessage): ParsedStreamEvent | null {
   if (!isStreamEventType(m.event)) return null;
   try {
     const raw: unknown = JSON.parse(m.data);
+    if (m.event === 'reset') {
+      if (!raw || typeof raw !== 'object') return null; const reset = raw as Record<string, unknown>;
+      if (!['expired', 'unknown'].includes(String(reset.reason)) || !(reset.latest_event_id === null || typeof reset.latest_event_id === 'string' && /^\d+$/.test(reset.latest_event_id))) return null;
+    }
     if (m.event === 'notification' && !isNotificationInput(raw)) return null;
     const data = m.event === 'notification' && isNotificationInput(raw) ? projectNotification(raw) : raw;
     return { id: m.id, type: m.event, data: data as StreamEventMap[StreamEventType] };
@@ -81,11 +85,14 @@ export function applyStreamEvent(qc: QueryClient, e: ParsedStreamEvent) {
     case 'plan_triggered':
       inv(qc, ['plans'], ['today']);
       return;
-    case 'notification':
-      updateNotificationPages(qc, [projectNotification(e.data as Notification)]);
+    case 'notification': {
+      const n = projectNotification(e.data as Notification);
+      if (n.version <= notificationVersion(qc, n.id)) return;
+      updateNotificationPages(qc, [n]);
       // 不按merged_count或事件数自增未读：只重读服务端行计数。
       inv(qc, ['notifications']);
       return;
+    }
     case 'report':
       inv(qc, ['daily-reports'], ['daily-report', (e.data as StreamEventMap['report']).date], ['today']);
       return;
@@ -102,10 +109,10 @@ export function applyStreamEvent(qc: QueryClient, e: ParsedStreamEvent) {
 }
 
 /** 断线重连成功后：可能错过了超出服务端 10 分钟保留期的事件，未读数与聚合视图各补拉一次 */
-export async function resyncAfterReconnect(qc: QueryClient) {
+export async function resyncAfterReconnect(qc: QueryClient, full = false) {
   inv(qc, ['notifications'], ...AGGREGATES);
   const [rows, count] = await Promise.all([
-    qc.fetchQuery({ queryKey: nk.catchup, queryFn: ({ signal }) => readUnreadNotifications(signal), staleTime: 0, retry: false }),
+    qc.fetchQuery({ queryKey: full ? nk.reset : nk.catchup, queryFn: ({ signal }) => readUnreadNotifications(signal, full), staleTime: 0, retry: false }),
     // 独立于活动计数查询：实时事件会取消/替代其refetch，不应误把正常取消当补读失败。
     qc.fetchQuery({ queryKey: nk.catchupCount, queryFn: ({ signal }) => apiGet<{ count: number }>('/notifications/unread-count', undefined, signal), staleTime: 0, retry: false }),
   ]);
@@ -115,7 +122,7 @@ export async function resyncAfterReconnect(qc: QueryClient) {
 
 /** 同id只覆盖较新版本；新行匹配当前筛选才加入第一页，不改任何服务端游标。 */
 export function updateNotificationPages(qc: QueryClient, rows: Notification[]) {
-  const byId = new Map(latestNotifications(rows).map((n) => [n.id, n]));
+  const byId = new Map(rememberNotificationVersions(qc, rows).map((n) => [n.id, n]));
   for (const [key] of qc.getQueriesData<InfiniteData<Paged<Notification>>>({ queryKey: ['notifications', 'pages'] })) {
     const filter = key[2] && typeof key[2] === 'object' ? key[2] as Record<string, unknown> : {};
     const matches = (n: Notification) => (!filter.unread || n.read_at === null) && (!filter.kind || n.kind === filter.kind);
@@ -126,19 +133,20 @@ export function updateNotificationPages(qc: QueryClient, rows: Notification[]) {
       return { ...old, pages: old.pages.map((page, i) => ({ ...page, items: latestNotifications([
         ...(i === 0 ? additions : []), ...page.items.map((raw) => {
           const n = projectNotification(raw); const incoming = byId.get(n.id);
-          return incoming && compareNotificationTime(incoming.updated_at, n.updated_at) > 0 ? incoming : n;
+          return incoming && incoming.version > n.version ? incoming : n;
         }),
       ]).filter(matches) })) };
     });
   }
 }
 /** 仅在本次已登录连接生命周期内记事件id；不持久化，不以事件数计算未读。 */
-/** 待确认的本地去重容量，独立于服务端600秒保留窗；逐行版本比较仍是最终防重。 */
+/** T-A31冻结的1024事件id先进先出容量；逐通知version仍是最终防重。 */
 export const STREAM_EVENT_DEDUP_LIMIT = 1024;
-export function createStreamConsumer(qc: QueryClient) {
+export function createStreamConsumer(qc: QueryClient, onReset?: (reset: StreamEventMap['reset']) => void) {
   const seen = new Set<string>();
   return (message: SseMessage) => {
     const e = parseStreamMessage(message); if (!e || e.type === 'heartbeat') return;
+    if (e.type === 'reset') { seen.clear(); onReset?.(e.data as StreamEventMap['reset']); return; }
     if (e.id && seen.has(e.id)) return;
     if (e.id) { seen.add(e.id); if (seen.size > STREAM_EVENT_DEDUP_LIMIT) { const first = seen.values().next().value; if (first) seen.delete(first); } }
     applyStreamEvent(qc, e);

@@ -166,3 +166,14 @@ describe('T-F28 产品字段', () => {
     expect(screen.getAllByText(/数据完整度/).length).toBeGreaterThan(0);
   });
 });
+
+describe('T-F31 门禁 detail 对象展示', () => {
+  it('对象/数组 detail 展开为文字，不出现 [object Object]', async () => {
+    const { formatGateDetail } = await import('./admin/AdminStrategyGatesPage');
+    expect(formatGateDetail({ issues: [], fixtures_all_pass: true })).toBe('issues：无；fixtures_all_pass：是');
+    expect(formatGateDetail({ issue: 'execution_pending' })).toBe('issue：execution_pending');
+    expect(formatGateDetail('示例数据')).toBe('示例数据');
+    expect(formatGateDetail(null)).toBe('—');
+    expect(formatGateDetail({ a: { b: ['x', 'y'] } })).not.toContain('[object Object]');
+  });
+});

@@ -12,7 +12,8 @@ export type MaxJaccardNullReason = "no_history" | "no_comparable_set";
 export interface GateResultEntry {
   gate: GateId;
   result: GateResult;
-  detail: string;
+  /** 契约未定类型；真实后端为 jsonb 对象，展示前用 formatGateDetail 转成文字。 */
+  detail: unknown;
 }
 
 export interface FixtureRun {

@@ -47,7 +47,15 @@ def master_alerts(conn: Connection, cfg: SecuritiesMaster) -> list[dict[str, str
         .where(
             master_runs.c.trigger.in_(["beat_1800", "beat_0730", "manual", "bootstrap"]),
             master_snapshots.c.source.in_(
-                ["sse_list", "sse_delist", "szse_list", "szse_delist", "bse_list", "bse_delist"]
+                [
+                    "sse_list",
+                    "sse_delist",
+                    "szse_list",
+                    "szse_delist",
+                    "bse_list",
+                    "bse_delist",
+                    "mairui_list",
+                ]
             ),
         )
         .order_by(master_runs.c.started_at.desc(), master_runs.c.id.desc())

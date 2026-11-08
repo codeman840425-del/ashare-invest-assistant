@@ -111,6 +111,7 @@ def _period_order(table: str) -> CheckConstraint:
 
 
 MASTER_SNAPSHOT_SOURCES: Final = (
+    "mairui_list",
     "sse_list",
     "sse_delist",
     "szse_list",
@@ -131,7 +132,12 @@ SEARCH_TERM_KINDS: Final = (
     "former_initials",
     "former_code",
 )
-LISTING_STATUS_REASONS: Final = ("exchange_list", "exchange_delist_list", "missing_from_list")
+LISTING_STATUS_REASONS: Final = (
+    "exchange_list",
+    "exchange_delist_list",
+    "missing_from_list",
+    "mairui_list",
+)
 RECONCILIATION_FIELDS: Final = ("name", "list_date", "delist_date", "exchange", "board")
 
 master_snapshots = Table(

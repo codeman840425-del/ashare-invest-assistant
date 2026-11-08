@@ -94,18 +94,19 @@ def collect(conn: Connection, user_id: uuid.UUID, code: str, features: list[str]
             if key in vals and value is not None:
                 vals[key] = value
                 srcs[key] = _src(key, value, "exchange", s_at, now)
-        # 主数据有该行即视为已知：risk_flag 为空 = 无风险警示；listing_status 为空 = 未知
-        flags = (
-            ("f.is_st", sec.risk_flag in {"st", "star_st", "delisting"}),
-            (
-                "f.is_delisting_period",
-                None if sec.listing_status is None else sec.listing_status == "delisting_period",
-            ),
-        )
-        for key, value in flags:
+    # T-A22: current master flags are NOT historical evidence. Require an exact
+    # prior trading-day delivery; failed/absent membership stays unknown.
+    if {"f.is_st", "f.is_delisting_period"}.intersection(vals):
+        from app.master.mairui_snapshot import latest_visible_flags
+
+        flags = latest_visible_flags(conn, code, as_of=now)
+        for key in ("f.is_st", "f.is_delisting_period"):
+            value = flags[key]
             if key in vals and value is not None:
                 vals[key] = value
-                srcs[key] = _src(key, value, "exchange", s_at, now)
+                srcs[key] = _src(
+                    key, value, "mairui_list", flags["data_as_of"], flags["fetched_at"]
+                )
     if vals.get("sec.board") is None and "sec.board" in vals:
         board = infer_board(bare, market or infer_market(bare))
         vals["sec.board"] = board

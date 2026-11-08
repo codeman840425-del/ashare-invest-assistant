@@ -31,12 +31,12 @@
 证券主数据（T-B52，plan 4.6）按**北京时间钟点**排程（:func:`beat_slots`，beat 每轮调用；同一钟点用
 ``SET beat:slot:<task>:<日期>:<HHMM> NX EX 2d`` 去重，钟点后 15 分钟内有效）：
 
-- ``master.sync_exchange_lists``：周一至周五 ``master.fetch_times[0]``（trigger ``beat_1800``），
-  周二至周六 ``fetch_times[1]``（``beat_0730``，只补拉上一交易日没有成功的来源）；
-- ``master.sync_bse_code_map``：每月第一个工作日 18:30（北交所代码对照）；
-- ``master.purge_snapshots``：每天 03:30，删除 90 天前的原始快照文件。
+- T-A22：``master.mairui_risk_snapshot`` 仅交易日北京时间 18:00 排一次；
+  完整名单输入默认关闭（待核实日常授权与安全投递），不含任何网络采集。
+  旧交易所直拉/07:30 补拉/月度代码表不再由 beat 排程，手动旧抓取同样安全拒绝。
 
-主数据任务带 ``args``（``{"trigger": ...}``）与 ``attempt``；执行时持 Redis 锁 ``lock:<task>``；失败
+
+旧主数据任务带 ``args``（``{"trigger": ...}``）与 ``attempt``；执行时持 Redis 锁 ``lock:<task>``；失败
 时第 1、2 次进 ``jobs:delayed``（10 分钟后由 beat 放回队列），第 3 次仍失败则写一条
 ``master_runs.status='failed'``。``master.sync_exchange_lists`` 由 beat 触发且成功时，若
 ``master.reconcile_vendor`` 已注册（T-B53）则接着排它；首次导入（CLI）从不触发。
@@ -58,6 +58,8 @@ from sqlalchemy import Engine
 
 from app.config import Settings
 from app.db.engine import engine_for
+from app.master.mairui_snapshot import TASK as MAIRUI_SNAPSHOT
+from app.master.mairui_snapshot import DailyNames
 from app.workers.daily import (
     ANALYZE,
     RECOVER,
@@ -178,9 +180,9 @@ class MasterSyncFailedError(RuntimeError):
 
 
 def _master_fetcher() -> Any:  # noqa: ANN401  selfcheck 替换为假实现
-    from app.master.sources import http_fetcher
+    from app.master.public_sources import PublicSourceGapError
 
-    return http_fetcher()
+    raise PublicSourceGapError("official_public_download_not_verified")
 
 
 def _master_root(settings: Settings) -> Any:  # noqa: ANN401
@@ -217,6 +219,36 @@ def _master_run(settings: Settings, trigger: str, sources: list[str] | None) -> 
     if res.status == "failed":
         raise MasterSyncFailedError(res.status)
     return MasterCount(len(res.snaps), res.run_id)
+
+
+def _mairui_delivery(settings: Settings, trade_date: dt.date) -> DailyNames | None:
+    """Closed intake port until DAILY authorization/routine + secure ingest exists.
+
+    Does not read any certificate, environment licence or B86 budget/approval.
+    Only an explicitly authorized future ingest adapter may supply DailyNames.
+    """
+    return None
+
+
+def mairui_snapshot_task(settings: Settings, trade_date: str) -> int:
+    from app.master.mairui_snapshot import apply_delivery
+    from app.master.sync import BEIJING
+
+    now = _now()
+    day = dt.date.fromisoformat(trade_date)
+    if now.astimezone(BEIJING).date() != day:
+        raise ValueError("snapshot_slot_expired")
+    delivery = _mairui_delivery(settings, day)
+    if delivery is None:
+        log.warning("mairui_list daily authorization/delivery unavailable; no live request")
+    with _engine(settings).begin() as conn:
+        return apply_delivery(
+            conn,
+            delivery,
+            now=now,
+            cfg=settings.business.securities.master,
+            root=_master_root(settings),
+        )
 
 
 def sync_exchange_lists_task(settings: Settings, trigger: str = "manual") -> int:
@@ -306,6 +338,7 @@ def vendor_sweep_task(settings: Settings) -> int:
 
 #: 任务名 → 实现
 TASKS: Final[dict[str, Task]] = {
+    MAIRUI_SNAPSHOT: mairui_snapshot_task,
     ANALYZE: analysis_task,
     REPORT: report_task,
     RECOVER: recover_task,
@@ -331,6 +364,7 @@ RETRY_TASKS: Final[dict[str, Callable[[Settings, dict[str, Any], BaseException],
 }
 LOCKED_TASKS: Final = frozenset(
     {
+        MAIRUI_SNAPSHOT,
         ANALYZE,
         REPORT,
         RECOVER,
@@ -388,19 +422,17 @@ def slot_jobs(settings: Settings, now: dt.datetime) -> list[tuple[str, str, dict
     from app.master.sync import BEIJING
 
     bj = now.astimezone(BEIJING)
-    fetch = settings.business.securities.master.fetch_times
-    wd = bj.weekday()  # 0=周一
+    # T-A22 supersedes legacy direct official pulls (including 07:30 retry).
     plan: list[tuple[str, str, dict[str, Any], bool]] = [
-        (SYNC_LISTS, fetch[0], {"trigger": "beat_1800"}, wd <= 4),
-        (SYNC_LISTS, fetch[1], {"trigger": "beat_0730"}, 1 <= wd <= 5),
-        (
-            SYNC_CODE_MAP,
-            CODE_MAP_TIME,
-            {"trigger": "beat_1800"},
-            _first_weekday_of_month(bj.date()),
-        ),
         (PURGE_SNAPSHOTS, PURGE_SNAPSHOTS_TIME, {}, True),
     ]
+    start1800 = dt.datetime.combine(bj.date(), dt.time(18), BEIJING)
+    if start1800 <= bj < start1800 + dt.timedelta(seconds=SLOT_WINDOW_S):
+        from app.reports.service import covered
+
+        with _engine(settings).connect() as conn:
+            is_open = covered(conn, bj.date())
+        plan.append((MAIRUI_SNAPSHOT, "18:00", {"trade_date": str(bj.date())}, is_open))
     if any(
         dt.datetime.combine(bj.date(), _hhmm(h), BEIJING)
         <= bj

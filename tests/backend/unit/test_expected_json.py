@@ -1,4 +1,4 @@
-"""T-T26：复用 T-T01 夹具/契约断言；未迁入本次范围外的后端接口空占位。"""
+"""T-T26 整合：保留已验收夹具/契约断言，并恢复 T-T01 原后端占位语义。"""
 from __future__ import annotations
 
 import json
@@ -265,6 +265,11 @@ def test_dividend_lowers_cost() -> None:
     assert ref_cost_items(without, Decimal(RECON_CASES["RC-COST-01"]["broker_cost_price"]))
 
 
+@pytest.mark.parametrize("cid", sorted(RECON_CASES))
+def test_reconciliation_cost_case_backend(cid: str) -> None:
+    pytest.skip("依赖后端 T-B19（对账引擎：摊薄成本重建计入 account_events 的红利与税费）及 T-B18 导入框架；接口就绪后按本用例的 ledger → /reconciliation 断言 items")
+
+
 # ---------------- 与文档比对（需 v0.2.2 docs） ----------------
 _VERSION_RE = re.compile(r"版本：\*\*v(\d+)\.(\d+)(?:\.(\d+))?\*\*")
 
@@ -318,6 +323,7 @@ def test_snapshot_equals_contract_4_1() -> None:
 # ---------------- 契约 v0.2.4 §4.1 处理选项表（#11，T-F02 D3） ----------------
 RESOLUTION = json.loads(Path(__file__).with_name("resolution_choices.json").read_text(encoding="utf-8"))
 PROC_ROW_RE = re.compile(r"^\| ([\d/]+) (`IMPORT_[A-Z_]+`(?: / `IMPORT_[A-Z_]+`)*) \| `\[([a-z_, ]+)\]`[^|]* \| (.+?) \|$", re.M)
+BACKEND_IMPORTS_PENDING = "导入/交易接口（/imports、/trades）后端未实现（T-B 导入任务）；契约 v0.2.4 §9 用例待接口落地后启用"
 
 
 def _parse_processing_options(text: str) -> dict[str, dict]:
@@ -352,6 +358,21 @@ def test_resolution_snapshot_codes_are_import_codes() -> None:
 def test_contract_processing_options_equal_snapshot() -> None:
     text = (_docs_v024() / "api-contract.md").read_text(encoding="utf-8")
     assert _parse_processing_options(text) == RESOLUTION["codes"]
+
+
+@pytest.mark.skip(reason=BACKEND_IMPORTS_PENDING)
+def test_backend_resolution_choices_match_contract_table() -> None:
+    """§9 v0.2.4：预览响应中 ``ImportFinding.resolution_choices`` 与处理选项表一致，首项 = ``default_resolution``；表外提示码为 ``[]``/``null``。"""
+
+
+@pytest.mark.skip(reason=BACKEND_IMPORTS_PENDING)
+def test_backend_force_import_without_reason_is_400() -> None:
+    """§9 v0.2.4：覆盖类选项（如 ``force_import``）提交时缺 ``reason`` → 400 VALIDATION_ERROR。"""
+
+
+@pytest.mark.skip(reason=BACKEND_IMPORTS_PENDING)
+def test_backend_void_trade_twice_is_409() -> None:
+    """§9 v0.2.4：同一笔交易作废两次 → 409。"""
 
 
 def test_snapshot_equals_plan_3_5a_1() -> None:

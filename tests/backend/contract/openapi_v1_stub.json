@@ -1,0 +1,81 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ashare-invest-assistant API（T-T01 契约脚手架桩）",
+    "version": "0.0.0-stub",
+    "description": "从 docs/api-contract.md 手抄的最小子集（§1.3 认证、§2 统一错误格式、§7.10 /health、/me 未登录分支），仅用于在后端落地前演示 schemathesis 流程。后端落地后以 FastAPI 生成的 openapi.json 为准（test_contract_live.py），本桩删除或仅保留作自检。"
+  },
+  "servers": [{"url": "/api/v1"}],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "健康检查（不需要登录、不含细节）",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "headers": {"X-Request-Id": {"schema": {"type": "string"}, "required": true}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Health"}}}
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "operationId": "getMe",
+        "summary": "当前用户；未登录 → 401 AUTH_REQUIRED",
+        "responses": {
+          "200": {"description": "已登录", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Me"}}}},
+          "401": {
+            "description": "未登录",
+            "headers": {"X-Request-Id": {"schema": {"type": "string"}, "required": true}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "db", "redis", "ingest"],
+        "properties": {
+          "status": {"type": "string", "enum": ["ok", "degraded"]},
+          "db": {"type": "string", "enum": ["ok"]},
+          "redis": {"type": "string", "enum": ["ok"]},
+          "ingest": {"type": "string", "enum": ["ok", "stale", "paused"]}
+        }
+      },
+      "Me": {
+        "type": "object",
+        "required": ["id", "username", "display_name", "role", "status"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"},
+          "username": {"type": "string"},
+          "display_name": {"type": "string"},
+          "role": {"type": "string"},
+          "status": {"type": "string"}
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "details", "request_id"],
+            "properties": {
+              "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},
+              "message": {"type": "string"},
+              "details": {"type": "object", "nullable": true},
+              "request_id": {"type": "string"}
+            }
+          }
+        }
+      }
+    }
+  }
+}

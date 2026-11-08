@@ -1,0 +1,21 @@
+schema_version: 1
+password:
+  min_len: 10                   # int，≥ 10（3.6 已定），模型校验下限 10
+  max_len: 128                  # int ◇，上限防止超长输入
+password_hash:                  # argon2id；改参数后新哈希用新参数，旧哈希在下次登录成功时透明升级
+  memory_kib: 65536             # int，64 MiB（3.6）；下限 19456（OWASP 最低配置）
+  time_cost: 3                  # int；下限 2
+  parallelism: 1                # int；下限 1
+  hash_len: 32                  # int ◇；下限 16
+  salt_len: 16                  # int ◇；下限 16
+session:
+  idle_ttl_s: 604800            # int，空闲过期 7 天，每次有效请求续期（契约 §1.3）
+  absolute_ttl_s: 2592000       # int ◇，自登录起 30 天绝对过期，不续期；必须 ≥ idle_ttl_s
+  remember_me: false            # bool，V1 固定 false（模型只接受 false）；不提供“记住我”
+invite:
+  code_bytes: 16                # int，128 位随机（secrets）；下限 16
+  default_ttl_h: 168            # int，默认 7 天过期
+  max_ttl_h: 720                # int，管理员可设的最长有效期 30 天
+  max_uses: 1                   # int，V1 只支持单次使用（模型只接受 1）
+admin:
+  same_ip_highlight_threshold: 3   # int ◇，审核列表中同 IP 注册数超过此值时高亮，只作提示（3.6，T-A05 D8）

@@ -20,3 +20,5 @@ e31ed6c76d48738c14e48148057de20808bab95d:src/backend/selfchecks/test_ta13_featur
 e31ed6c76d48738c14e48148057de20808bab95d:src/backend/selfchecks/test_ta13_feature_metadata.py:generic-api-key:202
 # T-A23：generic-api-key 误报，是 0004_t_b03_auth.py 迁移文件的 sha256 摘要（架构师在该提交里重算一致），不是凭据（T-O24 登记）。
 3b2c8ecc0fa93755b92f1b42b136804c03a16366:tests/backend/milestone/tt21_mainline.json:generic-api-key:7
+# 6fb2f46 docs/strategies/check_p2n01_dimension_mapping.py 第 33 行：因子字段名误报，编排者掩码核对 2026-11-08
+6fb2f46a5560a7a7ba4edc654600154b3f31b327:docs/strategies/check_p2n01_dimension_mapping.py:generic-api-key:33

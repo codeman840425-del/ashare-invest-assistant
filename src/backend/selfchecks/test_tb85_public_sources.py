@@ -79,6 +79,6 @@ def test_real_acquisition_timestamp_not_start_of_day_or_historical_date() -> Non
 )
 def test_invalid_inputs_not_silently_accepted(name: str, status: str) -> None:
     with pytest.raises(
-        ValueError, match="name_required|risk_listing_status_mismatch|unknown_listing_status"
+        ValueError, match=r"name_required|risk_listing_status_mismatch|unknown_listing_status"
     ):
         flags(name, status)

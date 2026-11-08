@@ -3456,6 +3456,12 @@ admin:
   4. `origin=desensitized_main` 的文件（人工脱敏的主样本）：`.secretscan-allow.yaml` 中要有对应条目，写明 `path`、`sha256`、审核人和日期；哈希不一致即失败，需重新人工审核后更新；
   5. 豁免文件中的 S5/S6 命中值必须**全部**属于 `meta.json.fake_identifiers` 列出的虚构值；出现列表外的值仍然阻断。`fake_identifiers` 是 `meta.json` 新增的顶层键（目前没有），由测试在 T-T09 中补上，同时由 `generate.py` 输出，CI 规则上线前必须补齐。
 - `expected.json` 和 `README.md` 不在豁免范围内（它们不应包含股东代码等标识）。
+- **T-A21 存量命中裁定（架构师 2026-11-07）**：去掉全部豁免后共 80 处，都是已登记的 4 个虚构字面量（fixtures 73、扫描配置自引用 6、本文示例 1），无需清理，保留现有允许清单。`expected.json`、`README.md` 中的虚构值只靠 `value_regex` 精确值放行，不做路径豁免；出现登记外的值照常阻断。白名单规则（运维、测试执行）：
+  1. `value_regex` 只能写 `^虚构字面量$`，一条对应一条规则和一个值；禁止通配、整目录豁免、`rule: '*'`。
+  2. 按路径豁免必须同时写精确文件 `path`、`rule`、`sha256`、`reviewer`、`reason`、`added_by`、`added_at`；文件一改哈希就失效，要重新审核。
+  3. gitleaks 误报只用 `.gitleaksignore` 指纹（`提交sha:文件:规则ID:行号`）登记，不改规则、不加 `[allowlist] paths`。T-F28 tree 报告中 1 处 generic-api-key（疑似 `feature_key` 行）由运维用 `gitleaks_run.sh` 复跑定位后按指纹登记。
+  4. 前端：`src/frontend/src/test/wording.test.ts` 只对禁用词检查豁免；`src/frontend/src/mocks/marketFixtures.ts:64` 的假成交额改成带小数的金额消除命中（前端），不登记。
+  5. 新增白名单条目须由架构师或测试负责人评审（CODEOWNERS）；登记前在本机用 `check_real_secrets.sh` 与真实值精确比对为 0 才能登记，不输出取值。
 
 **测试**：`tests/ci/secret_scan/` 下放正反例（全部虚构，且正例文件本身用 `.secretscan-allow.yaml` 按 sha256 登记），保证每条规则至少有一个命中用例和一个不误报用例；规则变更必须同时更新用例。
 

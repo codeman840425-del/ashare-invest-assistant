@@ -8,7 +8,7 @@ import { isTerminalPlan, type Plan, type PlanCondition, type PlanVersion } from 
 import { CursorPager } from '../../components/CursorPager';
 import { ErrorBox, Loading } from '../../components/common';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
-import { PlanFormFields, PlanWriteError } from '../../features/plans/PlanForm';
+import { PlanConditionRules, PlanFormFields, PlanWriteError } from '../../features/plans/PlanForm';
 import { applyPlanErrors, fromVersion, toBody, type PlanFormValues } from '../../features/plans/planFormModel';
 import { ACTION_SHORT, EPISTEMIC, PLAN_CONDITION_KIND } from '../../i18n/labels';
 import { PLAN_CONDITION_TYPE, PLAN_ORIGIN, PLAN_STATUS } from '../../i18n/planAlertLabels';
@@ -116,6 +116,7 @@ export function PlanDetailPage() {
         <div className="panel-head"><span className="panel-title">当前版本（第 {p.current_version.version_no} 版）</span><span className="muted small">{fmtTime(p.current_version.created_at)}</span></div>
         <VersionBody v={p.current_version} />
       </section>
+      <PlanConditionRules />
       <VersionHistory plan={p} />
       <CardDisclaimer />
       {editing ? <NewVersionDrawer plan={p} onClose={() => setEditing(false)} onReload={() => void q.refetch()} /> : null}

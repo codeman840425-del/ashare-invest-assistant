@@ -292,7 +292,7 @@ export interface DailyReportStock {
 }
 export interface RegimePositionRange { min_pct: Decimal; max_pct: Decimal }
 export interface DailyReport extends Omit<DataStatusBlock, 'data_as_of'> {
-  /** 日报完全无来源时，接口明确返回null，不借生成时点伪装新鲜度。 */
+  /** T-A29：实际采用的非空来源时点取最早；全部无来源或旧版缺该键时为null，不借生成时刻。 */
   data_as_of: DateTime | null;
   date: DateStr;
   generated_at: DateTime;
@@ -304,8 +304,8 @@ export interface DailyReport extends Omit<DataStatusBlock, 'data_as_of'> {
     summary: TextWithEvidence[];
   };
   account: {
-    total_assets: Decimal | null;
-    cash: Decimal | null;
+    total_assets: Decimal;
+    cash: Decimal;
     position_pct: Decimal | null;
     pnl_day: Decimal | null;
     position_vs_regime: 'below' | 'within' | 'above' | null;

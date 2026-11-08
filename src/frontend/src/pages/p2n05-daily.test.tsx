@@ -375,9 +375,9 @@ it('不把带凭据的来源URL作为链接或明文输出，不补造来源', (
   render(<DailyDimensions stock={stock} evidence={report.evidence} />); fireEvent.click(screen.getByText('六维事实与缺口（不是策略结论）'));
   expect(screen.queryByRole('link', { name: /查看来源原文/ })).not.toBeInTheDocument(); expect(screen.queryByText(/TEST-PASS/)).not.toBeInTheDocument();
 });
-it('日报顶层时点和账户金额为null时不崩溃、不用生成时点或0回填；旧版六维显示空态', async () => {
+it('日报顶层时点和整个账户为null时不崩溃、不用生成时点或0回填；旧版六维显示空态', async () => {
   const report = structuredClone(DAILY_REPORTS[0]); report.data_as_of = null;
-  if (report.account) { report.account.total_assets = null; report.account.cash = null; }
+  report.account = null; report.gaps.push({ key: 'account', reason: 'user_input_missing', message: '示例数据：当期账户整体无法计算' });
   report.stocks.forEach((stock) => { stock.dimensions = null; stock.analysis_snapshot_id = null; });
   server.use(http.get(`${API}/daily-reports/:date`, () => HttpResponse.json(report)));
   renderAt(`/daily-reports/${REPORT_DATE}`); await screen.findByTestId('daily-report');
@@ -416,5 +416,16 @@ it.skipIf(!process.env.P2N05D_REAL_API)('P2N05d real：真实日报路由→六�
     expect(journal.every((item) => !item.path.includes('/admin/'))).toBe(true);
   } finally {
     globalThis.fetch = nativeFetch; cookies.clear(); const { writeFileSync } = await import('node:fs'); writeFileSync('/workspace/team/reports/P2N-05d/http-journal.json', JSON.stringify(journal, null, 2)); server.listen({ onUnhandledFrame: 'error' });
+  }
+});
+
+// T-A29：金额非空是接口约束，不在前端计算或填充缺失资产。
+it('T-A29 日报顶层来源时点非生成时刻；非空账户资产/现金是非空decimal字符串', () => {
+  const report = DAILY_REPORTS[0]; const asOf: string | null = report.data_as_of;
+  expect(asOf).toBe(`${REPORT_DATE}T15:00:00+08:00`); expect(asOf).not.toBe(report.generated_at); expect(DAILY_REPORTS[1].data_as_of).toBeNull();
+  expect(report.account).not.toBeNull();
+  if (report.account !== null) {
+    const assets: string = report.account.total_assets; const cash: string = report.account.cash;
+    expect(typeof assets).toBe('string'); expect(typeof cash).toBe('string');
   }
 });

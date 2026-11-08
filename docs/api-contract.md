@@ -1084,6 +1084,12 @@ evidence: Evidence[]
 - **`Plan`** = `PlanSummary` + `{current_version: PlanVersion, version_count: int, pending_triggers: [{condition_id: uuid, condition_kind: plan_condition_kind, condition_text: string, triggered_at, alert_id: uuid | null, evidence_ids: string[]}], evidence: Evidence[]}`；`pending_triggers` 为当前版本中已满足、尚未因新建版本或关闭而清空的条件（与 `/today` 的 `TodayPlanTrigger` 同源，字段同名同义），`evidence_ids` 指向本对象的 `evidence`。
 - **`PlanVersion`**（不可变）：`{plan_id, version_no: int, action: action, qty: string(decimal) | null, price: string(decimal) | null, size_pct_of_assets: string(decimal) | null, max_loss_amount: string(decimal) | null, stops: Stops | null, rationale: string, risks: string | null, review_date: string(date) | null, conditions: PlanCondition[], change_reason: string | null（第 1 版为 null）, checklist_answers: [{id, question, answer, note}]（确认草案时的回答；手工计划为 []）, snapshot_id: string | null, created_at}`
 - **`PlanCondition`**：`{id: uuid, kind: plan_condition_kind, type: plan_condition_type, params: object, description: string(1–200), epistemic_type: "hypothesis"}`；`params`：`price_above`/`price_below` → `{price: string(decimal)}`；`pct_change` → `{pct: string(decimal)（带符号，相对前收盘）}`；`date` → `{on: string(date)}`；`custom` → `{}`（只作文字记录，不自动判定）。`description` 是 `TodayPlanTrigger.condition_text` 的来源。
+- **条件判定口径（T-A29，P2N-07）**：
+  1. 价格一律用不复权最新价，须在 `stale_threshold_s` 内；缺价、过期、停牌 → 本次不判，记 unknown + gap，不触发。
+  2. `price_above`：`last ≥ price` 触发；`price_below`：`last ≤ price` 触发（**等于阈值算触发**）。
+  3. `pct_change`：`chg = (last / prev_close − 1) × 100`，Decimal 计算，ROUND_HALF_UP 保留 4 位后再比较；`pct > 0` 时 `chg ≥ pct` 触发，`pct < 0` 时 `chg ≤ pct` 触发（等号算触发）；`prev_close` 取行情自带的昨收（不复权），缺失 → unknown + gap `prev_close`。`pct = 0` 方向不明 → 写入时 `400 invalid`。
+  4. 每个条件在同一计划版本内**只触发一次**（边沿触发），之后不再判；新版本重新布防。价格类条件**不补判**：worker 停机或缺价期间错过的穿越不回看历史价，恢复后只按当时价格判定。
+  5. `date`：`on` 须 ≥ 写入当日（北京时间），否则 `400 invalid`；`on` 为交易日则当日 09:00（北京时间）触发，非交易日顺延到其后第一个交易日 09:00；交易日历缺失 → unknown + gap，不触发。**错过要补**：worker 恢复后发现已过触发时刻且未触发，立即补触发一次，`triggered_at` 记实际时刻，提醒 evidence 记 `scheduled_for`（原定时刻），不重复补发。
 - **`POST /plans` 请求体**：`{security_code, account_id: uuid | null, action: action, qty?, price?, size_pct_of_assets?, max_loss_amount?, stops?, rationale: string(1–2000), risks: string(≤2000) | null, review_date: string(date) | null, conditions: [{kind, type, params, description}]（0–20 条）, candidate_id?: null}`。校验（均为 `400 VALIDATION_ERROR` 的 `fields[]`）：证券不存在 → `unknown_security`，指数 → `not_allowed`；`type` 为 `indicator`/`event` → `not_supported`；`params` 与 `type` 不符 → `invalid`；`candidate_id` 非 null → `not_supported`（本版研究候选不转计划）。同一用户同一证券已有 `active`/`triggered` 且 `action` 相同的计划 → `409 CONFLICT{field:"security_code", existing_id}`（问题 81）。
 - **`POST /plans/{id}/versions` 请求体**：`{base_version_no: int, change_reason: string(1–200), …}`，其余字段同 `POST /plans`，整体替换（省略视为 null 或 []）；`security_code`、`account_id`、`origin` 不可改（带不同值 → `400 not_allowed`）。顺序：`400` → 他人或不存在 `404` → 终态 `409 INVALID_STATE_TRANSITION{from, to: from, allowed:[]}` → `base_version_no` 不是当前版本 `409 VERSION_CONFLICT{current_version_no}`。
 - **`Alert`** = `TodayAlert` 的全部字段 + `{checklist: string[], snapshot_id: string | null, handled_at: string(datetime) | null（最近一次状态变更时刻）, evidence: Evidence[]}`；`evidence_ids` 指向本元素的 `evidence`。与 `/today` 不同，`/alerts` 包含 `origin=plan_condition` 的提醒（`plan_id` 非 null）。
@@ -1159,6 +1165,12 @@ evidence: Evidence[]
 |---|---|---|
 | `analysis_snapshot_id` | `string(uuid) \| null` | 该股六维事实的不可变快照；无快照或旧版日报为 null |
 | `dimensions` | `DailyDimensionAnalysis[] \| null` | 新生成的非 removed 行恰好六项，按 §3 dimension 顺序；旧版日报、removed 行为 null，不伪装成已完成六维分析 |
+
+**日报顶层时点与账户金额（T-A29，P2N-05d）**：
+- 顶层 `data_as_of` = 本份日报实际用到的各部分（`market`、`account` 计价、各 `stocks[]` 与其 `dimensions[]`）中**非 null `data_as_of` 的最早值**（取最旧，保守）；全部为 null 时为 null，`data_status=unavailable`。不取生成时刻 `generated_at` 代替。
+- `account` 为 null：未指定账户且用户没有任何账户/持仓/现金记录，或账户数据整体无法计算（此时 `gaps` 含 `{key:"account", reason}`）。
+- `account` 非 null 时：`total_assets`、`cash` **不为 null**，口径与 §7.2 `/portfolio` 相同（无现金记录 `cash="0.00"` + gap `cash`；无现价按成本估算并使 `data_status=partial`）；`position_pct` 仅在 `total_assets=0` 时为 null；`pnl_day` 在缺上一交易日持仓快照或任一持仓缺昨收时为 null 并记 gap `account.pnl_day`，不填 0。
+- 旧版日报读取投影不回写；旧记录缺顶层 `data_as_of` 时投影为 null。
 
 `DailyDimensionAnalysis`：`{dimension: dimension, facts: TextWithEvidence[], feature_refs: [{feature_key: string, status: "declared"|"verified_doc"|"verified_live"|"gap"|"deprecated"|null, evidence_ids: string[]}], data_status, data_as_of: string(datetime)|null, gaps}`；`data_status`/`gaps` 用 §1.1。
 

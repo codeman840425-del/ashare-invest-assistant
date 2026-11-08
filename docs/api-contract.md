@@ -1234,6 +1234,7 @@ evidence: Evidence[]
 - enabled=false → disabled，可保留 RC1 关闭警示但不施加该项门控；已知触发 → triggered（仍可带部分输入 gap）；所需输入齐全且未触发才 ok；否则 unknown + gap，flags 可为 []。未接通 RC5/RC6 时是 unknown，不冒充 ok 或 disabled。
 - RC3 沿用 F25，不用卡片的 F50 代替；F25 null → “大盘环境未知”、partial、无 RC3 门控。RC2/RC4 缺分母/归属时额度未知（quantity_cap=null），不是无限额度或零额度；不得因此消除其他可执行性原因。未分类不触发 RC4。RC1–RC4 阈值、取整及 buy/add 门控仍按 plan §2.5.6/T-A15/T-R21，绝不改动作或阻止 sell/reduce。
 - 当前评价不能回写历史建议；建议仍读取生成时的风控标记与 gap。实际风控事件由业务作业幂等写入，复用 §7.5 的 RiskEvent，不增加第二套事件状态机。
+- **T-A33（R4）**：`RiskEvaluation` 的 `DataStatusBlock.data_as_of` 取参与判定各输入时点中**最早**的非空值，全空为 null（同 T-A29 日报口径，不取最新、不取 evaluated_at）。
 
 #### 7.11.3 模拟跟踪结果（status: draft；P2N-03/05/08）
 
@@ -1253,6 +1254,18 @@ evidence: Evidence[]
    - 路径中任一交易日缺 qfq 收盘（停牌日沿用无行，不补价）只跳过该日；入场或退出价缺失 → 两项 null + gap。
 2. **聚合 `profit_loss_ratio`**：仅取有效样本中 action ∈ {buy, add, hold} 的 `return_pct`（毛收益）；盈利 = return_pct > 0，亏损 < 0，等于 0 不计。比值 = 盈利样本平均 return_pct ÷ |亏损样本平均 return_pct|。n = 盈利 + 亏损样本数，沿 Stat 规则（n<5 null，n<30 small_sample）；无亏损样本 → null + gap（`no_losing_samples`），有亏损无盈利 → 0。sell/reduce/wait 不进入盈亏比（仍按 plan §2.8 进入 win_rate/方向统计）。
 3. **同一策略版本多个实例**：观测唯一键为 (suggestion_id, strategy_version_id, horizon_days)，一条建议同版本只算一个样本，不按实例重复计数。`instance_id` 取产生该建议的实例；若同版本多个实例同时对应该建议，取 `created_at` 最早者（并列取 id 最小），其余实例不另建观测，在 evidence 中列出其 id。版本统计 `by_horizon` 按此去重；本版不提供实例级统计。
+
+**T-A33 裁定（status: draft；P2N-R08 歧义 084–092 + T-A32 R5）**：交易日一律按交易日历、北京时间；日历缺失时不推进计数、不解除暂停，记 gap。
+
+1. **跟踪结果冻结（R5）**：complete/untradable/excluded 一经写入即冻结；`unavailable` 由盘后作业在到期后 5 个交易日内每日重算，数据补齐即改写为相应状态（版本统计同步重算），满 5 个交易日仍缺则冻结为 unavailable。
+2. **模拟失败（084）**：失败 ⇔ `state=complete` 且 `direction_correct=false`；`true` 为成功并清零计数。范围：本人建议 × 策略版本，跟踪期取 `rc5.sim_fail_horizon_days`（默认 5，见 plan §2.5.6 T-A33 产品项）；观测按 T-A27 第 3 点去重。序列按 `exit_at` 升序（并列按 suggestion_id），pending/unavailable/untradable/excluded 跳过，既不计失败也不清零。连续失败数 = 序列尾部连续失败条数。
+3. **已平仓一笔（085）**：账户 × 证券的一个持仓段：持仓数从 0 变正起，到回到 0 的那笔成交止（部分减仓不结束）。盈亏 = 段内卖出金额 − 买入金额 − 全部费用税（含费用）；< 0 为亏损，> 0 为盈利并清零，= 0（平本）跳过、不清零。按结束成交 `executed_at` 升序，并列按成交 id。段起点早于导入数据（无开仓成交）→ 该段不计入并记 gap。
+4. **暂停期（086/091）**：第 0 天 = 触发时刻所在交易日（非交易日或 15:00 后触发 → 下一交易日）；暂停覆盖第 1..N 个交易日，`paused_until` = 第 N 个交易日 15:00；系统在 `paused_until` 及之后的首次作业恢复（幂等，晚跑不补偿）。触发为**边沿**：亏损笔数/失败数增至 ≥ 阈值的那次、回撤从阈值下方越过阈值的那次；暂停中再次边沿触发 → `paused_until` 取 max(现值, 新计算值)，不叠加。期满时条件仍满足但无新边沿 → 不重新暂停，只保留 RC5 `triggered` 标记。
+5. **系统期满恢复（092）**：期满恢复与用户 resume 做同一检查（§6.0A 第 4 点）；版本不可运行 → 不改为 active，实例保持 paused、`pause_reason_code` 不变、`paused_until` 置 null（不再自动恢复），写 `actor=system` 事件 `detail={expiry_blocked: "STRATEGY_VERSION_NOT_RUNNABLE", lifecycle}` 并发站内通知；用户可归档。不得借期满恢复退役策略。
+6. **RC6 数量超计划（088）**：按同一计划版本**累计**：该版本有效期内同账户、同证券、与计划同方向成交数量之和（被冲正/撤销的成交剔除，冲正后重算），累计 **>** 计划数量才触发（等于不触发）；每计划版本只触发一次。
+7. **RC6 计划边界（089）**：计划版本有效期为半开区间 `[生效时刻, 被替代/关闭时刻)`，与成交 `executed_at` 比较；同刻成交归新版本，关闭同刻已无效。仅有日期的成交以当日 15:00 比较，当日版本有变更 → 该成交 RC6 unknown + gap、不出 flag。同证券多个有效计划：先取与成交同方向的计划判数量；无同方向计划时才判 `opposite_side`；仍多条按生效时刻最新、并列 id 最小取一条。
+8. **健康度缺日（090）**：某交易日缺 `strategy_health_daily` 时，`weight<0.8 连续 5 日` 与 `weight≥0.9 连续 10 日` 两个计数都清零（不跃迁，保守），记 gap；不跳过、不暂停计数。
+9. **内部复验恢复（087）**：内部评估在第三阶段启用（问题 26）；未启用时该条件不参与，`observing→published` 只看权重条件。启用后：恢复 ⇔ 稳健度 ≥ 基线 × `health.internal_recover_ratio`（默认 0.8，可配置）且与权重条件同时连续 10 个交易日成立；0.8 高于降级线 0.7 形成迟滞。
 
 #### 7.11.4 站内提醒与解释（status: draft；P2N-05/06/07/09）
 

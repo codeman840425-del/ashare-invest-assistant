@@ -776,6 +776,8 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
   - **两项都不拦的动作**：`sell`、`reduce`、`hold`、`wait`。做T 的两条腿 MVP 不门控，列入 T-B79。
   - **6.1 原因码的落点**：超出上限按上面写入不可执行原因（gated）；其余情况只是 §2.5.6 的提示或预警 risk_flag。
   - 契约 `gated_actions` 取值：RC3、RC4 为 `["buy", "add"]`。
+- **T-A33 裁定（架构师 2026-11-08）RC5/RC6 判定口径**：模拟失败、已平仓一笔、暂停期起算与再触发、期满恢复、RC6 累计数量与计划边界的可实现口径以契约 §7.11.3 “T-A33 裁定”为准。
+  - 新配置键 `rc5_loss_streak_drawdown.sim_fail_horizon_days`（1/5/20，默认 5）。**产品项（待用户定）**：模拟失败按哪个跟踪期、哪个范围计——选项 A（建议）：固定 5 日、本人建议；B：按策略周期（做T/短线 1 日、波段 5 日、中长线 20 日）、本人；C：固定 5 日、全站匿名。未定前按 A 实现。
 
 #### 2.5.7 模拟跟踪反馈与自动降权
 > 本节公式保留；权重与"健康 / 观察 / 退役"状态合并为**一个机制**，以 2.8.2 为准。`strategy_priority_weights` 改为 `user_strategy_weights` 与 `strategy_health_daily`。
@@ -1294,6 +1296,7 @@ class LLMGateway:
 
 - **用户开关 `auto_downweight`**（默认开）只控制"本人的排序是否乘以权重"。健康度状态和"观察中"标记对所有用户可见，并附 n。
 - **发布基线**：版本发布时自动记录模拟跟踪的基线；若启用内部评估，同时记录 OOS 稳健度基线。基线写入 `strategy_health_baselines`。
+- **T-A33 裁定（2026-11-08）**：缺日清零两个连续计数；内部复验恢复阈值 `health.internal_recover_ratio` 默认 0.8，未启用内部评估时不参与。细则见契约 §7.11.3 “T-A33 裁定”第 8–9 点。
 
 ### 2.9 会员体系预留（不实现支付）
 - 表：`plans`（套餐：code、名称、状态、展示价格文案——**不接支付**）、`plan_entitlements`（plan_id、key、value，如 `watchlist.per_user_cap=100`、`realtime.min_notify_interval_s=60`、`intraday.focus_cap=20`、`llm.daily_explanations=200`、`channels.allowed=[in_app,email]`、`import.monthly_files=50`）、`user_subscriptions`（user_id、plan_id、status `active/expired/cancelled`、`starts_at`、`ends_at`、`source manual_admin/payment(预留)`、备注）、`entitlement_overrides`（管理员对个别用户的覆盖）。
@@ -3015,6 +3018,7 @@ rc5_loss_streak_drawdown:
   strategy_sim_fail_streak: 5   # 某策略模拟跟踪连续失败次数
   pause_on_trigger: true        # 触发即挂 LOSS_STREAK_PAUSE（2.5.9），用户确认恢复或期满解除
   pause_days: 5                 # ◇ 暂停期（交易日）
+  sim_fail_horizon_days: 5      # ◇ 模拟失败计数所用跟踪期（T-A33，产品项待定）
 rc6_plan_violation:
   enabled: true
   checks: [opposite_side, qty_over_plan, held_after_invalidation, buy_without_stop, buy_during_wait]

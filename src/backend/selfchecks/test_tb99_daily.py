@@ -134,6 +134,12 @@ def env(database: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setenv("MAIRUI_SOURCE_LICENCE_ID", str(lid))
     monkeypatch.setattr(daily, "read_grant", lambda: grant)
     monkeypatch.setattr(ingest, "read_grant", lambda: grant)
+    from app.ingest.verification_grants import VerificationGrant
+
+    verification_grant = VerificationGrant(user, lid, uuid.uuid4(), grant.start, grant.end)
+    monkeypatch.setattr(verification, "read_grant", lambda: verification_grant)
+    monkeypatch.setattr(verification, "send_paused", lambda _: False)
+    monkeypatch.setattr(ingest, "send_paused", lambda _: False)
     monkeypatch.setattr(LicenceVault, "from_secrets", classmethod(lambda _: LicenceVault({1: key})))
     monkeypatch.setattr(shared_gate, "time", SimpleNamespace(time=lambda: clock[0].timestamp()))
     calls, waits = [], []
@@ -144,7 +150,9 @@ def env(database: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 
     def wire(path: str, value: str) -> Any:
         assert value == plaintext
-        state = json.loads((root / (str(lid) + ".requests.json")).read_text(encoding="utf-8"))
+        state = json.loads(
+            SharedGate(root, lid, "product_daily").state_path.read_text(encoding="utf-8")
+        )
         assert state["inflight"] is True
         calls.append((path, clock[0]))
         return 200, [{"dm": code[:6], "mc": name} for code, name in NAMES.items()]
@@ -158,6 +166,7 @@ def env(database: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         lid=lid,
         admin=admin,
         grant=grant,
+        verification_grant=verification_grant,
         root=root,
         clock=clock,
         day=day,
@@ -169,6 +178,7 @@ def env(database: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         pause=pause,
         wire=wire,
         plaintext=plaintext,
+        seal_key=key,
     )
     collector.dispose()
     worker.dispose()
@@ -351,7 +361,7 @@ def test_daily_uncertain_transport_preserves_reservation_and_never_retries(env: 
     assert len(calls) == len(attempted(e, bid)) == 1
     assert run(e, bid, upstream=uncertain) == "busy"
     assert (e.root / "single-egress.lease.json").exists()
-    assert (e.root / f"{e.lid}.halt.json").exists()
+    assert shared_gate.bound_halt(e.root, e.lid).exists()
     assert not e.temp.exists()
 
 
@@ -494,7 +504,7 @@ def test_verification_permission_failures_do_not_read_secret(
         egress=forbidden,
         secret_loader=forbidden,
     )
-    assert result in {"closed", "unavailable", "busy_or_closed"}
+    assert result in {"closed", "unavailable", "busy_or_closed", "authorization_unavailable"}
     with e.worker.connect() as conn, pytest.raises(DBAPIError):
         conn.execute(select(user_data_licences.c.ciphertext))
 
@@ -625,7 +635,7 @@ def test_verification_unknown_transport_keeps_log_latch_and_never_falls_back(
     assert verification.tick(e.collector, rds, e.settings) == 0
     assert len(calls) == 1
     assert (e.root / "single-egress.lease.json").exists()
-    assert (e.root / f"{e.lid}.halt.json").exists()
+    assert shared_gate.bound_halt(e.root, e.lid).exists()
     with e.owner.connect() as conn:
         row = conn.execute(select(user_data_licences).where(user_data_licences.c.id == e.lid)).one()
         assert row.last_error_code == "network"

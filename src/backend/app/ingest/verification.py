@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Callable
 
 import redis
-from sqlalchemy import Engine, insert, select, text, update
+from sqlalchemy import Connection, Engine, insert, select, text, update
 
 from app.config import Settings
 from app.db.tables.licences import user_data_licence_status
@@ -16,15 +16,48 @@ from app.db.tables.ops import ingest_request_log
 from app.db.tables.users import users
 from app.ingest.daily_lists import credential, send, wire
 from app.ingest.intents import VerifyIntent, parse_intent
-from app.ingest.live import check_egress, feedback, publish_feedback
+from app.ingest.live import check_egress, feedback, publish_feedback, send_paused
 from app.ingest.shared_gate import GateClosedError, SharedGate, limit_code
 from app.ingest.state import LicenceState, Priority
 from app.ingest.upstream import Signal, classify
+from app.ingest.verification_grants import read_grant
 from app.licences.service import is_held, per_minute_limit
 from app.schemas.enums import DataLicenceStatus, DataLicenceTier
 
 STREAM = "ingest:requests"
 GROUP = "licence-verification-v1"
+
+
+def allowed_before_send(
+    conn: Connection,
+    settings: Settings,
+    intent: VerifyIntent,
+    owner: uuid.UUID,
+    at: dt.datetime,
+) -> bool:
+    row = conn.execute(
+        select(user_data_licence_status)
+        .join(users, users.c.id == user_data_licence_status.c.user_id)
+        .where(
+            user_data_licence_status.c.id == intent.licence_id,
+            user_data_licence_status.c.user_id == owner,
+            user_data_licence_status.c.deleted_at.is_(None),
+            users.c.status == "approved",
+        )
+    ).first()
+    if row is None or is_held(conn, row.user_id):
+        return False
+    state = LicenceState(
+        settings.business.ingest.licences,
+        DataLicenceTier(row.tier),
+        status=DataLicenceStatus(row.status),
+        expires_on=row.expires_on,
+        paused_until=row.paused_until,
+    )
+    if state.status == DataLicenceStatus.INVALID:
+        state.user_reset()
+    state.tick(at)
+    return state.allows(Priority.P0, at, verify=True)
 
 
 def process(
@@ -42,6 +75,11 @@ def process(
         or not settings.data_licence_settings_enabled
     ):
         return "closed"
+    grant = read_grant()
+    if grant is None or not grant.valid(intent.licence_id, clock()):
+        return "authorization_unavailable"
+    if send_paused(settings):
+        return "busy_or_closed"
     try:
         gate = SharedGate.from_environment(intent.licence_id, "product_verify")
         gate.acquire()
@@ -66,7 +104,7 @@ def process(
                             users.c.status == "approved",
                         )
                     ).first()
-                    if row is None or is_held(conn, row.user_id):
+                    if row is None or row.user_id != grant.user_id or is_held(conn, row.user_id):
                         return "unavailable"
                     state = LicenceState(
                         settings.business.ingest.licences,
@@ -80,11 +118,11 @@ def process(
                     state.tick(clock())
                     if not state.allows(Priority.P0, clock(), verify=True):
                         return "unavailable"
-                    dedup = "verify:" + str(intent.verification_id)
+                    dedup = "verify-grant:" + str(grant.receipt_id)
                     if conn.execute(
                         select(ingest_request_log.c.id).where(
-                            ingest_request_log.c.licence_id == row.id,
-                            ingest_request_log.c.dedup_key == dedup,
+                            (ingest_request_log.c.dedup_key == dedup)
+                            | (ingest_request_log.c.id == intent.verification_id),
                         )
                     ).first():
                         return "already_attempted"
@@ -92,7 +130,10 @@ def process(
                 if gate.product_delay(clock().timestamp()) > 0:
                     return "busy_or_closed"
                 gate.confirm_egress(egress())
-                gate.reserve(now=clock().timestamp(), limit=limit)
+                if read_grant() != grant or not grant.valid(intent.licence_id, clock()):
+                    return "authorization_unavailable"
+                if send_paused(settings):
+                    return "busy_or_closed"
                 started = clock()
                 # Reserve before credential load/HTTP; uncertain attempts are never retried.
                 with engine.begin() as conn:
@@ -111,6 +152,24 @@ def process(
                     )
                 gate.check()
                 secret = secret_loader(engine, intent.licence_id)
+                gate.bind_certificate(secret)
+                if (
+                    read_grant() != grant
+                    or not grant.valid(intent.licence_id, clock())
+                    or send_paused(settings)
+                ):
+                    return "failed_no_retry"
+                if gate.product_delay(clock().timestamp()) > 0:
+                    return "failed_no_retry"
+                gate.reserve(now=clock().timestamp(), limit=limit)
+                gate.check()
+                if read_grant() != grant or not grant.valid(intent.licence_id, clock()):
+                    return "failed_no_retry"
+                if send_paused(settings):
+                    return "failed_no_retry"
+                with engine.connect() as conn:
+                    if not allowed_before_send(conn, settings, intent, grant.user_id, clock()):
+                        return "failed_no_retry"
                 try:
                     status, body = send(gate, upstream, f"/tcalendar/list/{started.year}/", secret)
                 except Exception:  # noqa: BLE001 - persist only the fixed network classification
@@ -182,6 +241,9 @@ def tick(engine: Engine, rds: redis.Redis, settings: Settings) -> int:
         or not settings.data_licence_settings_enabled
     ):
         return 0
+    authorization = read_grant()
+    if authorization is None:
+        return 0
     from redis.exceptions import ResponseError
 
     try:
@@ -203,7 +265,7 @@ def tick(engine: Engine, rds: redis.Redis, settings: Settings) -> int:
             rds.xack(STREAM, GROUP, mid)
             return 0
         result = process(engine, settings, intent) if isinstance(intent, VerifyIntent) else "skip"
-        if result != "busy_or_closed":
+        if result not in {"busy_or_closed", "authorization_unavailable"}:
             rds.xack(STREAM, GROUP, mid)
             if isinstance(intent, VerifyIntent):
                 publish_status(engine, rds, intent)
@@ -217,6 +279,7 @@ def tick(engine: Engine, rds: redis.Redis, settings: Settings) -> int:
             select(user_data_licence_status)
             .where(
                 user_data_licence_status.c.status == "pending_verification",
+                user_data_licence_status.c.id == authorization.licence_id,
                 user_data_licence_status.c.deleted_at.is_(None),
                 ~select(ingest_request_log.c.id)
                 .where(
@@ -234,7 +297,7 @@ def tick(engine: Engine, rds: redis.Redis, settings: Settings) -> int:
         token = uuid.uuid5(row.id, "pending:" + row.status_changed_at.isoformat())
         intent = VerifyIntent(row.id, token)
         result = process(engine, settings, intent)
-        if result != "busy_or_closed":
+        if result not in {"busy_or_closed", "authorization_unavailable"}:
             publish_status(engine, rds, intent)
             return 1
     return 0

@@ -28,7 +28,7 @@ from app.db.tables.licences import user_data_licence_status, user_data_licences
 from app.db.tables.market import master_runs, securities
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows
-from app.ingest.live import check_egress, feedback
+from app.ingest.live import check_egress, feedback, send_paused
 from app.ingest.shared_gate import GateClosedError, SharedGate, limit_code
 from app.ingest.upstream import Signal, classify
 from app.ingest.vault import LicenceVault, SealedLicence
@@ -212,6 +212,8 @@ def process(
 
         settings = get_settings()
     policy = settings.business.ingest.licences.product_daily
+    if send_paused(settings):
+        return "busy"
     try:
         gate = SharedGate.from_environment(grant.licence_id, "product_daily")
         gate.acquire()
@@ -285,8 +287,9 @@ def process(
                     select(user_data_licence_status).where(user_data_licence_status.c.id == lid)
                 ).one()
                 minute_limit = per_minute_limit(settings, licence)
-            gate.confirm_egress(egress())
             secret = secret_loader(engine, lid)
+            gate.bind_certificate(secret)
+            gate.confirm_egress(egress())
             identity = temporary(temp, secret)
             all_rows: list[dict[str, Any]] = []
             summaries = []
@@ -300,6 +303,8 @@ def process(
                 gate.check()
                 if stop.exists() or halt.exists():
                     raise DailyHaltError("STOP_or_halt_present")
+                if send_paused(settings):
+                    raise DailyHaltError("global_pause_before_send")
                 # Durable write-ahead reservation: a restarted process never repeats
                 # an uncertain external request, even after a response/commit crash.
                 with engine.begin() as conn:
@@ -311,6 +316,11 @@ def process(
                         current is None
                         or current.digest != grant.digest
                         or clock() >= b.deadline_at
+                        or not dt.time(18)
+                        <= clock().astimezone(BEIJING).time()
+                        < dt.time(23, 59, 59)
+                        or parent.stats.get("trade_date") != str(clock().astimezone(BEIJING).date())
+                        or not covered(conn, clock().astimezone(BEIJING).date())
                         or not eligible(conn, grant, clock())
                     ):
                         raise DailyHaltError("authorization_expired_or_licence_paused")
@@ -327,6 +337,22 @@ def process(
                     raise DailyHaltError("STOP_or_halt_present")
                 gate.reserve(now=clock().timestamp(), limit=minute_limit)
                 gate.check()
+                if send_paused(settings):
+                    raise DailyHaltError("global_pause_before_send")
+                with engine.connect() as conn:
+                    current_time = clock()
+                    day = current_time.astimezone(BEIJING).date()
+                    if (
+                        read_grant() != grant
+                        or current_time >= b.deadline_at
+                        or not dt.time(18)
+                        <= current_time.astimezone(BEIJING).time()
+                        < dt.time(23, 59, 59)
+                        or p.stats.get("trade_date") != str(day)
+                        or not covered(conn, day)
+                        or not eligible(conn, grant, current_time)
+                    ):
+                        raise DailyHaltError("permission_or_window_changed_before_send")
                 try:
                     status, body = send(gate, upstream, PATHS[dataset], secret)
                 except Exception:  # noqa: BLE001 - persist only the fixed network classification

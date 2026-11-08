@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import http.client
 import ipaddress
+import os
 import re
 import uuid
 from collections import deque
@@ -21,7 +22,7 @@ from app.db.tables.licences import data_licence_events, user_data_licence_status
 from app.db.tables.licences import user_data_licences as licences
 from app.db.tables.notify import notifications
 from app.db.tables.users import users
-from app.ingest.shared_gate import GateClosedError, _read
+from app.ingest.shared_gate import GateClosedError, _read, bound_halt, related_licences
 from app.ingest.state import LicenceState
 from app.ingest.upstream import Signal
 from app.licences import service
@@ -49,6 +50,24 @@ def check_egress() -> str:
         conn.close()
 
 
+def send_paused(settings: Settings) -> bool:
+    """Every send re-reads the existing Redis pause key; unavailable Redis stays closed."""
+    if not settings.redis_url:
+        return True
+    client = None
+    try:
+        client = redis.Redis.from_url(
+            settings.redis_url, socket_connect_timeout=1, socket_timeout=1
+        )
+        return bool(client.exists(settings.ingest_paused_key))
+    except (redis.RedisError, ValueError):
+        return True
+    finally:
+        if client is not None:
+            with suppress(redis.RedisError, OSError):
+                client.close()
+
+
 def feedback(
     engine: Engine,
     settings: Settings,
@@ -74,9 +93,34 @@ def feedback(
         if row is None or service.is_held(conn, row.user_id):
             return None
         eid = uuid.uuid5(token, "licence-transition")
-        if conn.execute(
-            select(data_licence_events.c.id).where(data_licence_events.c.id == eid)
-        ).first():
+        prior = conn.execute(
+            select(data_licence_events.c.id, data_licence_events.c.licence_id).where(
+                data_licence_events.c.id == eid
+            )
+        ).first()
+        if prior:
+            if prior.licence_id != lid and signal == Signal.IP_LIMITED:
+                previous_pause = conn.execute(
+                    select(user_data_licence_status.c.paused_until).where(
+                        user_data_licence_status.c.id == prior.licence_id
+                    )
+                ).scalar_one_or_none()
+                conn.execute(
+                    update(licences)
+                    .where(licences.c.id == lid)
+                    .values(
+                        status="ip_limited",
+                        paused_until=previous_pause
+                        or at
+                        + dt.timedelta(
+                            seconds=settings.business.ingest.licences.ip_limited_pause_s
+                        ),
+                        last_error_code=code,
+                        last_error_at=at,
+                        status_changed_at=dt.datetime.now(dt.UTC),
+                        updated_at=dt.datetime.now(dt.UTC),
+                    )
+                )
             return None
         state = LicenceState(
             settings.business.ingest.licences,
@@ -86,11 +130,13 @@ def feedback(
             paused_until=row.paused_until,
             consecutive_failures=row.consecutive_failures,
         )
+        root = os.environ.get("MAIRUI_SHARED_STATE_DIR")
+        identities = related_licences(Path(root), lid) if root else [lid]
         state.ip_limited_hits = deque(
             conn.execute(
                 select(data_licence_events.c.at)
                 .where(
-                    data_licence_events.c.licence_id == lid,
+                    data_licence_events.c.licence_id.in_(identities),
                     data_licence_events.c.event == "ip_limited",
                     data_licence_events.c.at >= at - dt.timedelta(hours=1),
                 )
@@ -192,11 +238,11 @@ def sync_halts(engine: Engine, settings: Settings, rds: redis.Redis, root: Path)
             .all()
         )
     for lid in lids:
-        path = root / (str(lid) + ".halt.json")
+        path = bound_halt(root, lid)
         if not path.exists():
             continue
         obj = _read(path)
-        if obj.get("code") not in {"103", "429"} or obj.get("licence_id") != str(lid):
+        if obj.get("code") not in {"103", "429"}:
             continue
         token = uuid.UUID(obj["id"])
         at = dt.datetime.fromtimestamp(obj["at"], dt.UTC)

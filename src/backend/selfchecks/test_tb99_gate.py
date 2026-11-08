@@ -48,6 +48,7 @@ def test_every_source_halts_other_consumers_and_preserves_probe_counter(
     counter.write_text(json.dumps(original), encoding="utf-8")
     trigger = SharedGate(root, lid, source)
     with trigger:
+        trigger.bind_certificate("synthetic-shared")
         if code == "STOP":
             (root / "STOP").touch()
         else:
@@ -67,10 +68,12 @@ def test_every_source_halts_other_consumers_and_preserves_probe_counter(
 def test_shared_budget_and_crash_reservation_are_not_reset(gate_env: Any) -> None:
     root, lid, _ = gate_env
     with SharedGate(root, lid, "probe_tb05") as first:
+        first.bind_certificate("synthetic-shared")
         first.confirm_egress(IP)
         first.reserve(now=1000)
         first.complete(now=1000)
     with SharedGate(root, lid, "probe_tb86") as second:
+        second.bind_certificate("synthetic-shared")
         second.confirm_egress(IP)
         second.reserve(now=1001)
         second.complete(now=1001)
@@ -78,6 +81,7 @@ def test_shared_budget_and_crash_reservation_are_not_reset(gate_env: Any) -> Non
             second.reserve(now=1002)
     product = SharedGate(root, lid, "product_daily")
     product.acquire()
+    product.bind_certificate("synthetic-shared")
     product.confirm_egress(IP)
     assert product.product_delay(1030) == 31
     product.reserve(now=1061)

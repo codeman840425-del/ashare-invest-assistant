@@ -53,7 +53,7 @@ def run_probes(mods: list) -> bool:
     """在当前进程内顺序 import 并运行探针；熔断即停。返回是否全部未熔断。"""
     for mod in mods:
         if c.ctx().stop_file.exists():
-            print("STOP 文件存在，终止：", c.ctx().stop_file.read_text(encoding="utf-8")[:200])
+            print("STOP 文件存在，终止。")
             return False
         print(f"===== {mod} =====")
         if not c.run_probe(mod, importlib.import_module(mod).main):
@@ -63,12 +63,11 @@ def run_probes(mods: list) -> bool:
 
 # --------------------------------------------------------------------------- 真实运行
 def real_run(args) -> int:
+    if c.map_legacy_stop(c.STOP_FILE):
+        print("results/STOP 已映射为公共 STOP，等待授权运维检查两侧，拒绝调用。")
+        return 2
     if not os.environ.get("MAIRUI_LICENCE"):
         print("MAIRUI_LICENCE 未设置。请按 README 在当前会话中设置后再运行（不要写进脚本）。")
-        return 2
-    if c.STOP_FILE.exists():
-        print("results/STOP 存在，拒绝调用。内容：", c.STOP_FILE.read_text(encoding="utf-8")[:200])
-        print("确认已等待 ≥60 秒、出口 IP 固定、证书未在别处使用后，手动删除 results/STOP 再运行。")
         return 2
     c.cooldown_if_needed()
     ctx = c.init_run(dry_run=False, min_interval=args.min_interval, skip_pro_host=args.skip_pro_host,

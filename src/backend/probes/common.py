@@ -29,7 +29,7 @@ from requests.adapters import HTTPAdapter
 # Direct `python run_all.py` also imports the same packaged standard-library gate.
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app.ingest.shared_gate import SharedGate, limit_code
+from app.ingest.shared_gate import SharedGate, limit_code, map_legacy_stop, write_stop
 
 REAL_BASE = "https://api.mairuiapi.com"
 REAL_PRO_BASE = "https://pro.mairuiapi.com"
@@ -168,8 +168,7 @@ def init_run(*, dry_run: bool = False, base: str | None = None, pro_base: str | 
     )
     if not dry_run:
         _ctx.shared_gate = SharedGate.from_environment(None, "probe_tb05")
-        if STOP_FILE.exists():
-            _ctx.shared_gate.stop.touch(exist_ok=True)
+        map_legacy_stop(STOP_FILE)
         _ctx.shared_gate.acquire()
         _ctx.stop_file = _ctx.shared_gate.stop
     print(f"代理模式：{_ctx.proxy_mode}")
@@ -307,8 +306,7 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
     if not c.dry_run:
         if c.shared_gate is None:
             raise LimitHit("shared gate required before live request")
-        if STOP_FILE.exists():
-            c.shared_gate.stop.touch(exist_ok=True)
+        map_legacy_stop(STOP_FILE)
     if c.stop_file.exists():
         raise LimitHit("STOP present; request refused")
     if c.inflight != 0:
@@ -325,6 +323,7 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
     if c.stop_file.exists():
         raise LimitHit("STOP present before request")
     if c.shared_gate is not None:
+        c.shared_gate.bind_certificate(_licence())
         c.shared_gate.check()
         c.shared_gate.reserve()
     c.inflight += 1
@@ -379,10 +378,9 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
     if is_limit_response(status, text, data):
         if shared_code and c.shared_gate is not None:
             raise LimitHit("shared licence limit latch set")
-        msg = f"{now_iso()} source=probe_tb05 status={status} STOP"
         if not c.stop_file.exists():
             c.stop_file.parent.mkdir(parents=True, exist_ok=True)
-            c.stop_file.write_text(msg + "\n", encoding="utf-8")
+            write_stop(c.stop_file)
         raise LimitHit(f"触发限流/超限：status={status} body={text[:200]}")
     return resp
 

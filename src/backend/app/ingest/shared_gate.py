@@ -8,6 +8,7 @@ STOP, halt or an uncertain lease; this module has no reset/initialization comman
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -115,6 +116,55 @@ def _write(path: Path, obj: dict[str, Any], *, exclusive: bool = False) -> None:
             temporary.unlink()
 
 
+def write_stop(path: Path) -> None:
+    """Latch a fixed diagnostic durably, never read/copy historical STOP contents."""
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        stream.write("operator_review_required\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    _sync_directory(path.parent)
+
+
+def map_legacy_stop(path: Path) -> bool:
+    if not path.exists():
+        return False
+    raw = os.environ.get("MAIRUI_SHARED_STATE_DIR", "")
+    root = Path(raw)
+    if not raw or not root.is_dir() or root.is_symlink():
+        raise GateClosedError("shared_directory_required")
+    if os.name != "nt" and root.stat().st_mode & 0o007:
+        raise GateClosedError("shared_directory_must_be_private")
+    write_stop(root / "STOP")
+    return True
+
+
+def bound_halt(root: Path, licence_id: uuid.UUID) -> Path:
+    binding = root / (str(licence_id) + ".binding.json")
+    if not binding.exists():
+        return root / (str(licence_id) + ".halt.json")
+    key = _read(binding).get("certificate_id")
+    if not isinstance(key, str) or not re.fullmatch(r"certificate-[0-9a-f]{64}", key):
+        raise GateClosedError("shared_certificate_binding_invalid")
+    return root / (key + ".halt.json")
+
+
+def related_licences(root: Path, licence_id: uuid.UUID) -> list[uuid.UUID]:
+    target = bound_halt(root, licence_id).name
+    result = {licence_id}
+    for path in root.glob("*.binding.json"):
+        try:
+            ident = uuid.UUID(path.name.removesuffix(".binding.json"))
+        except ValueError:
+            raise GateClosedError("shared_certificate_binding_invalid") from None
+        if bound_halt(root, ident).name == target:
+            result.add(ident)
+    return list(result)
+
+
 class SharedGate:
     def __init__(self, root: Path, licence_id: uuid.UUID, source: str) -> None:
         if source not in SOURCES or not root.is_dir() or root.is_symlink():
@@ -134,8 +184,11 @@ class SharedGate:
         except (KeyError, TypeError, ValueError):
             raise GateClosedError("shared_licence_policy_missing") from None
         self.stop = root / "STOP"
-        self.halt_path = root / (self.licence_id + ".halt.json")
-        self.state_path = root / (self.licence_id + ".requests.json")
+        self.halt_path = bound_halt(root, licence_id)
+        self.state_path = self.halt_path.with_name(
+            self.halt_path.name.replace(".halt.json", ".requests.json")
+        )
+        self.certificate_confirmed = False
         self.lock_path = root / "single-egress.lease.json"
         self.probe_waiting = root / "probe-waiting.lease.json"
         self.owns_priority = False
@@ -154,11 +207,39 @@ class SharedGate:
             raise GateClosedError("shared_licence_id_required") from None
         return cls(Path(raw), ident, source)
 
+    def bind_certificate(self, secret: str) -> None:
+        if self.token is None or not secret:
+            raise GateClosedError("shared_lease_and_certificate_required")
+        # A private, domain-separated opaque identity survives row replacement and deletion.
+        # It is never returned in API responses/logs; no DB HMAC or master key is read.
+        key = "certificate-" + hashlib.sha256(b"mairui-shared/v1\0" + secret.encode()).hexdigest()
+        binding = self.root / (self.licence_id + ".binding.json")
+        if binding.exists() and _read(binding).get("certificate_id") != key:
+            raise GateClosedError("shared_certificate_binding_changed")
+        if not binding.exists():
+            _write(binding, {"certificate_id": key}, exclusive=True)
+        self.halt_path = self.root / (key + ".halt.json")
+        self.state_path = self.root / (key + ".requests.json")
+        self.certificate_confirmed = True
+        self.check()
+
     def check(self) -> None:
         if self.stop.exists():
             raise GateClosedError("shared_STOP")
         if self.halt_path.exists():
             raise GateClosedError("shared_licence_halted")
+        # An unbound v1 UUID latch cannot be safely attributed after row replacement.
+        # Preserve it and fail closed pending authorized operator migration.
+        if any(
+            re.fullmatch(r"[0-9a-f-]{36}\.halt\.json", path.name)
+            for path in self.root.glob("*.halt.json")
+        ):
+            raise GateClosedError("shared_legacy_licence_halted")
+        for path in self.root.glob("*.requests.json"):
+            if re.fullmatch(r"[0-9a-f-]{36}\.requests\.json", path.name):
+                legacy = _read(path)
+                if legacy.get("inflight") or legacy.get("last_finished", 0) > time.time() - 60:
+                    raise GateClosedError("shared_legacy_budget_requires_review")
         if self.token is not None and _read(self.lock_path).get("token") != self.token:
             raise GateClosedError("shared_lease_replaced")
 
@@ -208,12 +289,14 @@ class SharedGate:
         state = _read(self.state_path)
         if state.get("inflight"):
             raise GateClosedError("shared_prior_request_uncertain")
+        if now < state.get("last_finished", 0):
+            raise GateClosedError("shared_clock_reversed")
         return max(0.0, 60 - (now - state.get("last_finished", 0)))
 
     def reserve(self, *, now: float | None = None, limit: int | None = None) -> None:
         self.check()
-        if self.token is None or not self.egress_confirmed:
-            raise GateClosedError("shared_lease_and_egress_required")
+        if self.token is None or not self.egress_confirmed or not self.certificate_confirmed:
+            raise GateClosedError("shared_lease_egress_and_certificate_required")
         timestamp = time.time() if now is None else now
         state = (
             _read(self.state_path) if self.state_path.exists() else {"calls": [], "inflight": False}

@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from app.ingest.shared_gate import SharedGate, limit_code, public_egress
+from app.ingest.shared_gate import SharedGate, limit_code, map_legacy_stop, public_egress
 from probes.tb86_offline import (
     COUNTER,
     STOP,
@@ -206,7 +206,7 @@ def execute(
     initial_ids: set[str] | None = None
     previous_umask = os.umask(0o077)
     try:
-        if stop.exists():
+        if map_legacy_stop(stop):
             raise HaltError("STOP_present")
         state = inspect_counter(counter)
         result["batch_total"] = state["total"]
@@ -226,6 +226,7 @@ def execute(
             raise HaltError("authorized_environment_missing")
         if len(secret) > 4096 or any(c.isspace() for c in secret):
             raise HaltError("authorized_environment_format_invalid")
+        gate.bind_certificate(secret)
         fd = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         created_inode = os.fstat(fd).st_ino
         result["temporary_secret_created"] = True
@@ -328,6 +329,8 @@ def execute(
         if result["outcome"] == "preflight":
             result["outcome"] = "precondition_or_execution_failure_no_retry"
     finally:
+        with contextlib.suppress(BaseException):
+            map_legacy_stop(stop)
         if connection is not None:
             with contextlib.suppress(BaseException):
                 connection.close()

@@ -1,0 +1,18 @@
+note: T-R22 争议公告（不计入 known_risk_announcements.yaml 验收清单，不可作完整性验收证据）。保留巨潮官方原链接供追溯。
+reason: PDF 正文混有与本公司不符的简称（“信永中和”“纳川股份”等），且正文未出现证券代码，代码仅来自巨潮元数据；不能作为无歧义的 verified 证据。
+acceptance_usable: false
+announcements:
+- security_code: '301030'
+  security_name_at_fetch: 仕净科技
+  title: 董事会关于公司2025年度无法表示意见审计报告的专项说明
+  announcement_date: '2026-04-30'
+  risk_category: audit_opinion
+  official_url: https://static.cninfo.com.cn/finalpage/2026-04-30/1225268790.PDF
+  cninfo_announcement_id: '1225268790'
+  body_quote: 对苏州仕净科技科技股份有限公司……2025年度财务报表进行审计，并出具了无法表示意见《审计报告》
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - audit_opinion
+  evidence_status: 不可作验收；PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文；原文同段出现“信永中和”“纳川股份”等与本公司不符的简称，系原文自身问题；短引只取与本公司一致的部分；PDF 正文未出现证券代码，代码取自巨潮元数据

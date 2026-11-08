@@ -1,0 +1,614 @@
+note: F23 词表 v1 离线正反例；每个关键词至少 2 正 1 反；cninfo 来源为公开标题（巨潮），“虚构”为人工构造的边界例，不是真实公告。期望值由研究员人工判断后写定，不由匹配器生成。
+cases:
+- keyword: 立案告知书
+  title: 关于公司实际控制人收到中国证券监督管理委员会《立案告知书》的公告
+  expect: true
+  source: cninfo 002726 2026-11-07 https://static.cninfo.com.cn/finalpage/2026-11-07/1225661582.PDF
+- keyword: 立案告知书
+  title: 关于收到中国证券监督管理委员会《立案告知书》的公告
+  expect: true
+  source: cninfo 000520 2026-11-07 https://static.cninfo.com.cn/finalpage/2026-11-07/1225661288.PDF
+- keyword: 立案告知书
+  title: 【虚构】关于公司不存在收到立案告知书情形的说明
+  expect: false
+  source: 虚构
+- keyword: 立案调查
+  title: 关于公司实际控制人被中国证券监督管理委员会立案调查的进展公告
+  expect: true
+  source: cninfo 300347 2026-09-12 https://static.cninfo.com.cn/finalpage/2026-09-12/1225560508.PDF
+- keyword: 立案调查
+  title: 关于公司立案调查进展暨退市风险提示公告
+  expect: true
+  source: cninfo 688121 2026-09-10 https://static.cninfo.com.cn/finalpage/2026-09-10/1225556103.PDF
+- keyword: 立案调查
+  title: 【虚构】关于公司立案调查结案的公告
+  expect: false
+  source: 虚构
+- keyword: 被立案
+  title: 九华旅游关于副总经理被立案审查调查并留置的公告
+  expect: true
+  source: cninfo 603199 2026-05-23 https://static.cninfo.com.cn/finalpage/2026-05-23/1225326131.PDF
+- keyword: 被立案
+  title: 关于公司被立案事项的说明公告
+  expect: true
+  source: cninfo 002620 2026-08-08 https://static.cninfo.com.cn/finalpage/2026-08-08/1225464983.PDF
+- keyword: 被立案
+  title: 【虚构】关于公司未被立案的说明
+  expect: false
+  source: 虚构
+- keyword: 退市风险警示
+  title: 清越科技关于公司股票可能被实施重大违法强制退市暨继续实施退市风险警示的公告
+  expect: true
+  source: cninfo 688496 2026-09-02 https://static.cninfo.com.cn/finalpage/2026-09-02/1225542709.PDF
+- keyword: 退市风险警示
+  title: 关于公司股票交易被实施其他风险警示暨可能被实施退市风险警示相关事项的进展公告
+  expect: true
+  source: cninfo 300396 2026-11-04 https://static.cninfo.com.cn/finalpage/2026-11-04/1225657147.PDF
+- keyword: 退市风险警示
+  title: 关于向深圳证券交易所申请撤销退市风险警示及其他风险警示的进展公告
+  expect: false
+  source: cninfo 000615 2026-08-24 https://static.cninfo.com.cn/finalpage/2026-08-24/1225492219.PDF
+- keyword: 被实施退市
+  title: 关于公司股票交易被实施其他风险警示暨可能被实施退市风险警示相关事项的进展公告
+  expect: true
+  source: cninfo 300396 2026-11-04 https://static.cninfo.com.cn/finalpage/2026-11-04/1225657147.PDF
+- keyword: 被实施退市
+  title: 上海龙韵文创科技集团股份有限公司关于公司股票被实施其他风险警示及可能被实施退市风险警示相关事项的进展暨风险提示公告
+  expect: true
+  source: cninfo 603729 2026-10-31 https://static.cninfo.com.cn/finalpage/2026-10-31/1225646860.PDF
+- keyword: 被实施退市
+  title: 【虚构】关于公司股票不会被实施退市风险警示的说明
+  expect: false
+  source: 虚构
+- keyword: 终止上市
+  title: 关于立案调查进展暨未在规定期限内披露定期报告暨股票可能被终止上市的第七次风险提示公告暨股票存在可能因市值被终止上市的第五次风险提示公告
+  expect: true
+  source: cninfo 002731 2026-08-25 https://static.cninfo.com.cn/finalpage/2026-08-25/1225497518.PDF
+- keyword: 终止上市
+  title: 关于立案调查进展暨公司未在规定期限内披露定期报告暨股票可能被终止上市的第六次风险提示公告
+  expect: true
+  source: cninfo 002731 2026-08-18 https://static.cninfo.com.cn/finalpage/2026-08-18/1225476919.PDF
+- keyword: 终止上市
+  title: 【虚构】关于公司不存在可能被终止上市情形的说明
+  expect: false
+  source: 虚构
+- keyword: 强制退市
+  title: 关于公司股票可能存在因市值低于3亿元而终止上市的第十一次风险提示暨公司股票可能被实施重大法强制退市的风险提示公告
+  expect: true
+  source: cninfo 688121 2026-10-28 https://static.cninfo.com.cn/finalpage/2026-10-28/1225631264.PDF
+- keyword: 强制退市
+  title: 关于公司股票可能被实施重大违法强制退市的第六次风险提示公告
+  expect: true
+  source: cninfo 688121 2026-10-23 https://static.cninfo.com.cn/finalpage/2026-10-23/1225616704.PDF
+- keyword: 强制退市
+  title: 【虚构】关于公司未触及重大违法强制退市情形的公告
+  expect: false
+  source: 虚构
+- keyword: 退市整理期
+  title: 关于公司股票进入退市整理期交易的第四次风险提示公告
+  expect: true
+  source: cninfo 002731 2026-11-06 https://static.cninfo.com.cn/finalpage/2026-11-06/1225658976.PDF
+- keyword: 退市整理期
+  title: 关于公司股票进入退市整理期交易的第三次风险提示公告
+  expect: true
+  source: cninfo 002731 2026-11-05 https://static.cninfo.com.cn/finalpage/2026-11-05/1225657031.PDF
+- keyword: 退市整理期
+  title: 【虚构】关于公司股票不会进入退市整理期的说明
+  expect: false
+  source: 虚构
+- keyword: 其他风险警示
+  title: 关于公司涉及违规担保暨公司股票可能被实施其他风险警示的提示性公告
+  expect: true
+  source: cninfo 300290 2026-05-29 https://static.cninfo.com.cn/finalpage/2026-05-29/1225340125.PDF
+- keyword: 其他风险警示
+  title: 关于公司股票交易撤销退市风险警示并继续被实施其他风险警示暨停牌一天的公告
+  expect: true
+  source: cninfo 300472 2026-09-02 https://static.cninfo.com.cn/finalpage/2026-09-02/1225542714.PDF
+- keyword: 其他风险警示
+  title: 北京大成律师事务所关于聆达集团股份有限公司申请撤销因违规担保事项被实施其他风险警示的法律意见书
+  expect: false
+  source: cninfo 300125 2026-03-31 https://static.cninfo.com.cn/finalpage/2026-03-31/1225062908.PDF
+- keyword: 无法表示意见
+  title: 审计委员会关于会计师事务所出具无法表示意见审计报告和否定意见内控审计报告涉及事项的专项说明（1）
+  expect: true
+  source: cninfo 300430 2026-04-30 https://static.cninfo.com.cn/finalpage/2026-04-30/1225272164.pdf
+- keyword: 无法表示意见
+  title: 董事会关于公司2025年度无法表示意见审计报告的专项说明
+  expect: true
+  source: cninfo 301030 2026-04-30 https://static.cninfo.com.cn/finalpage/2026-04-30/1225268790.PDF
+- keyword: 无法表示意见
+  title: 天职国际会计师事务所（特殊普通合伙）关于对卓然股份2025年度财务报表出具无法表示意见审计报告的专项说明
+  expect: false
+  source: cninfo 688121 2026-08-06 https://static.cninfo.com.cn/finalpage/2026-08-06/1225459704.PDF
+- keyword: 否定意见
+  title: 恒天海龙股份有限公司董事会审计委员会关于会计师事务所对公司2025年度出具保留意见审计报告和否定意见内部控制审计报告所涉事项的专项说明
+  expect: true
+  source: cninfo 000677 2026-05-06 https://static.cninfo.com.cn/finalpage/2026-05-06/1225270909.PDF
+- keyword: 否定意见
+  title: 审计委员会关于会计师事务所出具无法表示意见审计报告和否定意见内控审计报告涉及事项的专项说明（1）
+  expect: true
+  source: cninfo 300430 2026-04-30 https://static.cninfo.com.cn/finalpage/2026-04-30/1225272164.pdf
+- keyword: 否定意见
+  title: 广西农投糖业集团股份有限公司出具2025年度内部控制否定意见涉及事项影响已消除的审核报告
+  expect: false
+  source: cninfo 000911 2026-10-09 https://static.cninfo.com.cn/finalpage/2026-10-09/1225598182.PDF
+- keyword: 保留意见
+  title: 洲际油气股份有限公司关于修订会计师事务所出具保留意见涉及事项专项说明的公告
+  expect: true
+  source: cninfo 600759 2026-07-06 https://static.cninfo.com.cn/finalpage/2026-07-06/1225410349.PDF
+- keyword: 保留意见
+  title: 四川金顶（集团）股份有限公司关于修订会计师事务所保留意见专项说明的公告
+  expect: true
+  source: cninfo 600678 2026-06-25 https://static.cninfo.com.cn/finalpage/2026-06-25/1225385562.PDF
+- keyword: 保留意见
+  title: 立信会计师事务所（特殊普通合伙）关于公司2026年半年度财务报表出具带与持续经营相关的重大不确定性部分的无保留意见审计报告的专项说明
+  expect: false
+  source: cninfo 002634 2026-08-29 https://static.cninfo.com.cn/finalpage/2026-08-29/1225526431.PDF
+- keyword: 非标准审计意见
+  title: 关于对2025年度非标准审计意见涉及事项自查进展暨公司股票可能被叠加实施其他风险警示的提示公告
+  expect: true
+  source: cninfo 002082 2026-08-27 https://static.cninfo.com.cn/finalpage/2026-08-27/1225515495.pdf
+- keyword: 非标准审计意见
+  title: 董事会关于非标准审计意见涉及事项的专项说明
+  expect: true
+  source: cninfo 688121 2026-08-06 https://static.cninfo.com.cn/finalpage/2026-08-06/1225459681.PDF
+- keyword: 非标准审计意见
+  title: 大信会计师事务所（特殊普通合伙）关于对嘉必优生物技术（武汉）股份有限公司年度财务报表审计出具非标准审计意见报告的专项说明
+  expect: false
+  source: cninfo 688089 2026-06-25 https://static.cninfo.com.cn/finalpage/2026-06-25/1225385272.PDF
+- keyword: 持续经营重大不确定性
+  title: 董事会及审计委员会对2026年半年度带持续经营重大不确定性段落的无保留意见审计报告涉及事项的专项说明
+  expect: true
+  source: cninfo 002634 2026-08-29 https://static.cninfo.com.cn/finalpage/2026-08-29/1225526428.PDF
+- keyword: 持续经营重大不确定性
+  title: 关于正平股份2025年度带持续经营重大不确定性段落的无保留意见审计报告涉及事项的专项说明（中瑞诚鉴字[2026]第612871号）
+  expect: true
+  source: cninfo 603843 2026-06-06 https://static.cninfo.com.cn/finalpage/2026-06-06/1225355062.PDF
+- keyword: 持续经营重大不确定性
+  title: 【虚构】董事会关于持续经营重大不确定性段落涉及事项影响已消除的专项说明
+  expect: false
+  source: 虚构
+- keyword: 持续经营相关的重大不确定性
+  title: 【虚构】董事会关于审计报告带与持续经营相关的重大不确定性段落的专项说明
+  expect: true
+  source: 虚构
+- keyword: 持续经营相关的重大不确定性
+  title: 【虚构】关于半年度财务报告被出具与持续经营相关的重大不确定性段落的公告
+  expect: true
+  source: 虚构
+- keyword: 持续经营相关的重大不确定性
+  title: 立信会计师事务所（特殊普通合伙）关于公司2026年半年度财务报表出具带与持续经营相关的重大不确定性部分的无保留意见审计报告的专项说明
+  expect: false
+  source: cninfo 002634 2026-08-29 https://static.cninfo.com.cn/finalpage/2026-08-29/1225526431.PDF
+- keyword: 问询函
+  title: 中油工程关于2026年半年度报告的信息披露监管问询函回复公告
+  expect: true
+  source: cninfo 600339 2026-11-07 https://static.cninfo.com.cn/finalpage/2026-11-07/1225662192.PDF
+- keyword: 问询函
+  title: 关于对北京证券交易所2026年半年报问询函的回复公告
+  expect: true
+  source: cninfo 920168 2026-11-05 https://static.cninfo.com.cn/finalpage/2026-11-05/1225659685.PDF
+- keyword: 问询函
+  title: 关于深圳可立克科技股份有限公司申请向特定对象发行股票的审核问询函的回复
+  expect: false
+  source: cninfo 002782 2026-11-07 https://static.cninfo.com.cn/finalpage/2026-11-07/1225660907.PDF
+- keyword: 关注函
+  title: 关于公司立案调查进展暨风险提示公告暨收到深圳证券交易所《关于对公司的关注函》的公告
+  expect: true
+  source: cninfo 002731 2026-08-07 https://static.cninfo.com.cn/finalpage/2026-08-07/1225462595.PDF
+- keyword: 关注函
+  title: 关于对深圳证券交易所关注函回复的公告
+  expect: true
+  source: cninfo 301319 2026-06-08 https://static.cninfo.com.cn/finalpage/2026-06-08/1225356378.PDF
+- keyword: 关注函
+  title: 永信瑞和（深圳）会计师事务所（特殊普通合伙）关于对赛隆药业集团股份有限公司关注函有关事项的回复
+  expect: false
+  source: cninfo 002898 2026-04-30 https://static.cninfo.com.cn/finalpage/2026-04-30/1225274859.PDF
+- keyword: 监管函
+  title: 关于公司及相关当事人收到深圳证券交易所监管函及纪律处分决定的公告
+  expect: true
+  source: cninfo 002038 2026-05-06 https://static.cninfo.com.cn/finalpage/2026-05-06/1225272578.PDF
+- keyword: 监管函
+  title: 【虚构】关于公司收到上海证券交易所监管函的公告
+  expect: true
+  source: 虚构
+- keyword: 监管函
+  title: 中证鹏元关于关注浙江泰坦股份有限公司收到深交所监管函和浙江证监局警示函的公告
+  expect: false
+  source: cninfo 003036 2026-05-27 https://static.cninfo.com.cn/finalpage/2026-05-27/1225331500.PDF
+- keyword: 警示函
+  title: 瑞华泰关于收到深圳证监局对公司采取责令改正并对相关责任人出具警示函措施的公告
+  expect: true
+  source: cninfo 688323 2026-10-17 https://static.cninfo.com.cn/finalpage/2026-10-17/1225608515.PDF
+- keyword: 警示函
+  title: 关于收到深圳证监局对公司采取责令改正并对相关责任人出具警示函措施的公告
+  expect: true
+  source: cninfo 688132 2026-06-01 https://static.cninfo.com.cn/finalpage/2026-06-01/1225340921.PDF
+- keyword: 警示函
+  title: 中证鹏元关于关注天壕能源股份有限公司及相关责任人被出具警示函及通报批评事项的公告
+  expect: false
+  source: cninfo 300332 2026-05-07 https://static.cninfo.com.cn/finalpage/2026-05-07/1225281499.PDF
+- keyword: 监管工作函
+  title: 关于收到上海证券交易所终止上市有关事项的监管工作函的公告
+  expect: true
+  source: cninfo 688121 2026-10-29 https://static.cninfo.com.cn/finalpage/2026-10-29/1225637466.PDF
+- keyword: 监管工作函
+  title: 与关联方资产租赁相关事项的监管工作函的回复公告
+  expect: true
+  source: cninfo 688005 2026-11-07 https://static.cninfo.com.cn/finalpage/2026-11-07/1225661546.PDF
+- keyword: 监管工作函
+  title: 银信资产评估有限公司关于《上海证券交易所关于浙江万盛股份有限公司资产收购相关事项的监管工作函》上证公函【2026】1641号之回复
+  expect: false
+  source: cninfo 603010 2026-11-06 https://static.cninfo.com.cn/finalpage/2026-11-06/1225659686.PDF
+- keyword: 纪律处分
+  title: 关于公司及相关当事人收到深圳证券交易所监管函及纪律处分决定的公告
+  expect: true
+  source: cninfo 002038 2026-05-06 https://static.cninfo.com.cn/finalpage/2026-05-06/1225272578.PDF
+- keyword: 纪律处分
+  title: 关于上海证券交易所纪律处分决定书的整改报告
+  expect: true
+  source: cninfo 603398 2026-04-30 https://static.cninfo.com.cn/finalpage/2026-04-30/1225269209.PDF
+- keyword: 纪律处分
+  title: 关于有关当事人因非本公司事项受到行政处罚及纪律处分的公告
+  expect: false
+  source: cninfo 300096 2026-05-11 https://static.cninfo.com.cn/finalpage/2026-05-11/1225291883.PDF
+- keyword: 公开谴责
+  title: 关于公司股东收到《行政处罚决定书》并受到深圳证券交易所公开谴责的公告
+  expect: true
+  source: cninfo 300209 2026-04-24 https://static.cninfo.com.cn/finalpage/2026-04-24/1225194176.PDF
+- keyword: 公开谴责
+  title: 【虚构】关于公司及控股股东受到上海证券交易所公开谴责的公告
+  expect: true
+  source: 虚构
+- keyword: 公开谴责
+  title: 联合资信评估股份有限公司关于东华能源股份有限公司及相关当事人收到深圳证券交易所公开谴责处分决定的关注公告
+  expect: false
+  source: cninfo 002221 2026-07-07 https://static.cninfo.com.cn/finalpage/2026-07-07/1225412917.PDF
+- keyword: 通报批评
+  title: 【虚构】关于公司及相关责任人受到深圳证券交易所通报批评处分的公告
+  expect: true
+  source: 虚构
+- keyword: 通报批评
+  title: 【虚构】关于董事会秘书被上海证券交易所予以通报批评的公告
+  expect: true
+  source: 虚构
+- keyword: 通报批评
+  title: 中证鹏元关于关注天壕能源股份有限公司及相关责任人被出具警示函及通报批评事项的公告
+  expect: false
+  source: cninfo 300332 2026-05-07 https://static.cninfo.com.cn/finalpage/2026-05-07/1225281499.PDF
+- keyword: 行政处罚事先告知书
+  title: 关于收到《行政处罚事先告知书》的公告
+  expect: true
+  source: cninfo 300169 2026-11-06 https://static.cninfo.com.cn/finalpage/2026-11-06/1225661885.PDF
+- keyword: 行政处罚事先告知书
+  title: 关于控股股东收到行政处罚事先告知书的公告
+  expect: true
+  source: cninfo 603599 2026-10-17 https://static.cninfo.com.cn/finalpage/2026-10-17/1225609809.PDF
+- keyword: 行政处罚事先告知书
+  title: 安迪苏关于公司副总经理因非本公司事项收到行政处罚事先告知书的公告
+  expect: false
+  source: cninfo 600299 2026-08-15 https://static.cninfo.com.cn/finalpage/2026-08-15/1225473886.PDF
+- keyword: 行政处罚决定书
+  title: 关于公司股东收到《行政处罚决定书》并受到深圳证券交易所公开谴责的公告
+  expect: true
+  source: cninfo 300209 2026-04-24 https://static.cninfo.com.cn/finalpage/2026-04-24/1225194176.PDF
+- keyword: 行政处罚决定书
+  title: 关于收到深圳证监局《行政处罚决定书》及深圳证券交易所纪律处分的公告
+  expect: true
+  source: cninfo 300301 2025-06-28 https://static.cninfo.com.cn/finalpage/2025-06-28/1224016420.PDF
+- keyword: 行政处罚决定书
+  title: 【虚构】关于证监会撤销行政处罚决定书的公告
+  expect: false
+  source: 虚构
+- keyword: 市场禁入
+  title: 关于公司及相关当事人收到中国证监会安徽监管局《行政处罚及市场禁入事先告知书》的公告
+  expect: true
+  source: cninfo 002538 2026-03-27 https://static.cninfo.com.cn/finalpage/2026-03-27/1225045526.PDF
+- keyword: 市场禁入
+  title: 关于公司及相关人员收到《行政处罚及市场禁入事先告知书》及重大违法强制退市风险提示的公告
+  expect: true
+  source: cninfo 300344 2025-11-29 https://static.cninfo.com.cn/finalpage/2025-11-29/1224833764.PDF
+- keyword: 市场禁入
+  title: 【虚构】关于撤销市场禁入措施的公告
+  expect: false
+  source: 虚构
+- keyword: 责令改正
+  title: 关于青岛证监局对公司采取责令改正措施决定的整改报告
+  expect: true
+  source: cninfo 600735 2026-10-20 https://static.cninfo.com.cn/finalpage/2026-10-20/1225611492.PDF
+- keyword: 责令改正
+  title: 瑞华泰关于收到深圳证监局对公司采取责令改正并对相关责任人出具警示函措施的公告
+  expect: true
+  source: cninfo 688323 2026-10-17 https://static.cninfo.com.cn/finalpage/2026-10-17/1225608515.PDF
+- keyword: 责令改正
+  title: 【虚构】关于解除责令改正措施的公告
+  expect: false
+  source: 虚构
+- keyword: 违规减持
+  title: 关于持股5%以上股东意外违规减持公司股份致歉并承诺回购的公告
+  expect: true
+  source: cninfo 001216 2026-11-05 https://static.cninfo.com.cn/finalpage/2026-11-05/1225657034.PDF
+- keyword: 违规减持
+  title: 【虚构】关于控股股东违规减持公司股份的致歉公告
+  expect: true
+  source: 虚构
+- keyword: 违规减持
+  title: 【虚构】关于不存在违规减持情形的说明
+  expect: false
+  source: 虚构
+- keyword: 被留置
+  title: 兰石重装关于公司副总经理被留置并立案调查的公告
+  expect: true
+  source: cninfo 603169 2026-02-12 https://static.cninfo.com.cn/finalpage/2026-02-12/1224977429.PDF
+- keyword: 被留置
+  title: 关于公司控股股东、实际控制人之一暨董事被留置并立案的公告
+  expect: true
+  source: cninfo 300637 2025-08-25 https://static.cninfo.com.cn/finalpage/2025-08-25/1224573426.PDF
+- keyword: 被留置
+  title: 【虚构】关于公司董事长被留置事项解除的公告
+  expect: false
+  source: 虚构
+- keyword: 留置
+  title: 九华旅游关于副总经理被立案审查调查并留置的公告
+  expect: true
+  source: cninfo 603199 2026-05-23 https://static.cninfo.com.cn/finalpage/2026-05-23/1225326131.PDF
+- keyword: 留置
+  title: 关于董事长被立案调查和留置的公告
+  expect: true
+  source: cninfo 920370 2026-02-27 https://static.cninfo.com.cn/finalpage/2026-02-27/1224988107.PDF
+- keyword: 留置
+  title: 三安光电股份有限公司关于公司副董事长兼总经理解除留置的公告
+  expect: false
+  source: cninfo 600703 2026-10-08 https://static.cninfo.com.cn/finalpage/2026-10-08/1225595322.PDF
+- keyword: 无法履职
+  title: 关于独立董事无法履职的公告
+  expect: true
+  source: cninfo 002017 2026-10-09 https://static.cninfo.com.cn/finalpage/2026-10-09/1225598022.PDF
+- keyword: 无法履职
+  title: 浙江李子园食品股份有限公司关于独立董事无法履职的公告
+  expect: true
+  source: cninfo 605337 2026-10-09 https://static.cninfo.com.cn/finalpage/2026-10-09/1225597784.PDF
+- keyword: 无法履职
+  title: 【虚构】关于独立董事无法履职情形已消除的公告
+  expect: false
+  source: 虚构
+- keyword: 强制措施
+  title: 三安光电股份有限公司关于公司实际控制人被采取强制措施的进展公告
+  expect: true
+  source: cninfo 600703 2026-10-24 https://static.cninfo.com.cn/finalpage/2026-10-24/1225619689.PDF
+- keyword: 强制措施
+  title: 关于公司原董事长被采取刑事强制措施的公告
+  expect: true
+  source: cninfo 300081 2026-10-20 https://static.cninfo.com.cn/finalpage/2026-10-20/1225611453.pdf
+- keyword: 强制措施
+  title: 关于公司实际控制人解除强制措施的公告
+  expect: false
+  source: cninfo 000520 2026-01-05 https://static.cninfo.com.cn/finalpage/2026-01-05/1224912396.PDF
+- keyword: 刑事拘留
+  title: 关于公司财务总监被刑事拘留的公告
+  expect: true
+  source: cninfo 920469 2026-11-06 https://static.cninfo.com.cn/finalpage/2026-11-06/1225662126.PDF
+- keyword: 刑事拘留
+  title: 安徽华恒生物科技股份有限公司关于公司实际控制人、董事长兼总经理被刑事拘留的公告
+  expect: true
+  source: cninfo 688639 2026-06-25 https://static.cninfo.com.cn/finalpage/2026-06-25/1225386679.PDF
+- keyword: 刑事拘留
+  title: 兴业证券股份有限公司关于安徽华恒生物科技股份有限公司实际控制人、董事长兼总经理被刑事拘留事项的核查意见
+  expect: false
+  source: cninfo 688639 2026-06-27 https://static.cninfo.com.cn/finalpage/2026-06-27/1225390781.PDF
+- keyword: 资金占用
+  title: 公司自查发现违规担保及非经营性资金占用并已解决的公告
+  expect: true
+  source: cninfo 000153 2026-04-29 https://static.cninfo.com.cn/finalpage/2026-04-29/1225248643.PDF
+- keyword: 资金占用
+  title: 亿阳信通关于2025年度非经营性资金占用及违规担保事项的专项说明
+  expect: true
+  source: cninfo 600289 2026-04-28 https://static.cninfo.com.cn/finalpage/2026-04-28/1225221510.PDF
+- keyword: 资金占用
+  title: 湖南省矿产资源集团有限责任公司关于不存在资金占用、违规担保等情形的承诺函
+  expect: false
+  source: cninfo 002155 2026-08-27 https://static.cninfo.com.cn/finalpage/2026-08-27/1225514910.PDF
+- keyword: 违规担保
+  title: 金花企业（集团）股份有限公司关于原实际控制人以公司名义违规担保仲裁案件的进展公告
+  expect: true
+  source: cninfo 600080 2026-10-10 https://static.cninfo.com.cn/finalpage/2026-10-10/1225599349.PDF
+- keyword: 违规担保
+  title: 公司关于违规担保事项的进展公告
+  expect: true
+  source: cninfo 600136 2026-07-14 https://static.cninfo.com.cn/finalpage/2026-07-14/1225420862.PDF
+- keyword: 违规担保
+  title: 关于公司涉及违规担保已解决的公告
+  expect: false
+  source: cninfo 300087 2026-08-29 https://static.cninfo.com.cn/finalpage/2026-08-29/1225530729.PDF
+- keyword: 违规对外担保
+  title: 关于控股子公司违规对外担保解决的进展公告
+  expect: true
+  source: cninfo 000796 2025-07-30 https://static.cninfo.com.cn/finalpage/2025-07-30/1224330513.PDF
+- keyword: 违规对外担保
+  title: 【虚构】关于公司存在违规对外担保的风险提示公告
+  expect: true
+  source: 虚构
+- keyword: 违规对外担保
+  title: 【虚构】关于违规对外担保已解决的公告
+  expect: false
+  source: 虚构
+- keyword: 司法冻结
+  title: 关于控股股东部分股份被司法冻结的公告
+  expect: true
+  source: cninfo 002249 2026-11-07 https://static.cninfo.com.cn/finalpage/2026-11-07/1225661966.PDF
+- keyword: 司法冻结
+  title: 【虚构】关于实际控制人所持股份被司法冻结的公告
+  expect: true
+  source: 虚构
+- keyword: 司法冻结
+  title: 【虚构】关于控股股东股份解除司法冻结的公告
+  expect: false
+  source: 虚构
+- keyword: 司法再冻结
+  title: 关于控股股东部分股份被司法再冻结的公告
+  expect: true
+  source: cninfo 002277 2026-09-19 https://static.cninfo.com.cn/finalpage/2026-09-19/1225571252.PDF
+- keyword: 司法再冻结
+  title: 【虚构】关于实际控制人所持股份被司法再冻结的公告
+  expect: true
+  source: 虚构
+- keyword: 司法再冻结
+  title: 天力锂能集团股份有限公司关于控股股东、实际控制人部分股份被司法变卖完成过户并解除质押、解除司法再冻结暨权益变动触及1%整数倍的提示性公告
+  expect: false
+  source: cninfo 301152 2026-10-19 https://static.cninfo.com.cn/finalpage/2026-10-19/1225610922.PDF
+- keyword: 再冻结
+  title: 关于控股股东部分股份被司法再冻结的公告
+  expect: true
+  source: cninfo 002277 2026-09-19 https://static.cninfo.com.cn/finalpage/2026-09-19/1225571252.PDF
+- keyword: 再冻结
+  title: 【虚构】关于股东所持股份被再冻结的公告
+  expect: true
+  source: 虚构
+- keyword: 再冻结
+  title: 天力锂能集团股份有限公司关于控股股东、实际控制人部分股份被司法变卖完成过户并解除质押、解除司法再冻结暨权益变动触及1%整数倍的提示性公告
+  expect: false
+  source: cninfo 301152 2026-10-19 https://static.cninfo.com.cn/finalpage/2026-10-19/1225610922.PDF
+- keyword: 轮候冻结
+  title: 金鸿顺关于控股股东股份被司法轮候冻结的公告
+  expect: true
+  source: cninfo 603922 2026-11-05 https://static.cninfo.com.cn/finalpage/2026-11-05/1225656967.PDF
+- keyword: 轮候冻结
+  title: 华扬联众数字技术股份有限公司关于持股5%以上股东及其一致行动人股份被司法冻结、轮候冻结的公告
+  expect: true
+  source: cninfo 603825 2026-10-21 https://static.cninfo.com.cn/finalpage/2026-10-21/1225612883.PDF
+- keyword: 轮候冻结
+  title: 【虚构】关于控股股东股份轮候冻结解除的公告
+  expect: false
+  source: 虚构
+- keyword: 司法拍卖
+  title: 关于持股5%以上股东所持部分股份将被司法拍卖暨被动减持的提示性公告
+  expect: true
+  source: cninfo 300163 2026-10-19 https://static.cninfo.com.cn/finalpage/2026-10-19/1225610913.PDF
+- keyword: 司法拍卖
+  title: 关于股东被司法拍卖的股份完成过户暨被动减持的公告
+  expect: true
+  source: cninfo 002742 2026-05-12 https://static.cninfo.com.cn/finalpage/2026-05-12/1225291004.PDF
+- keyword: 司法拍卖
+  title: 【虚构】关于撤销司法拍卖的公告
+  expect: false
+  source: 虚构
+- keyword: 被冻结
+  title: 关于公司主要银行账号被冻结并新增其他风险警示的公告
+  expect: true
+  source: cninfo 300081 2026-11-04 https://static.cninfo.com.cn/finalpage/2026-11-04/1225655120.pdf
+- keyword: 被冻结
+  title: 关于控股股东部分股份被冻结、轮候冻结及司法标记的公告
+  expect: true
+  source: cninfo 603778 2026-10-14 https://static.cninfo.com.cn/finalpage/2026-10-14/1225602722.PDF
+- keyword: 被冻结
+  title: 【虚构】关于银行账户被冻结已解除的公告
+  expect: false
+  source: 虚构
+- keyword: 强制平仓
+  title: 关于控股股东之一致行动人部分股份被强制平仓的公告
+  expect: true
+  source: cninfo 002607 2026-06-03 https://static.cninfo.com.cn/finalpage/2026-06-03/1225347372.PDF
+- keyword: 强制平仓
+  title: 关于持股5%以上股东部分股份被强制平仓导致被动减持风险提示暨权益变动至5%以下及触及1%整数倍的公告
+  expect: true
+  source: cninfo 002731 2026-02-25 https://static.cninfo.com.cn/finalpage/2026-02-25/1224983655.PDF
+- keyword: 强制平仓
+  title: 【虚构】关于控股股东股份不存在被强制平仓风险的说明
+  expect: false
+  source: 虚构
+- keyword: 被动减持
+  title: 关于持股5%以上股东所持部分股份将被司法拍卖暨被动减持的提示性公告
+  expect: true
+  source: cninfo 300163 2026-10-19 https://static.cninfo.com.cn/finalpage/2026-10-19/1225610913.PDF
+- keyword: 被动减持
+  title: 天马科技关于控股股东、实际控制人之一致行动人、持股5%以上股东股份被动减持的预披露公告
+  expect: true
+  source: cninfo 603668 2026-10-14 https://static.cninfo.com.cn/finalpage/2026-10-14/1225603821.PDF
+- keyword: 被动减持
+  title: 【虚构】关于终止被动减持计划的公告
+  expect: false
+  source: 虚构
+- keyword: 破产
+  title: 关于公司破产企业财产处置专用账户部分股份被司法冻结的公告
+  expect: true
+  source: cninfo 000980 2026-10-22 https://static.cninfo.com.cn/finalpage/2026-10-22/1225614317.PDF
+- keyword: 破产
+  title: 【虚构】关于公司被债权人申请破产清算的提示性公告
+  expect: true
+  source: 虚构
+- keyword: 破产
+  title: 【虚构】关于法院驳回破产申请的公告
+  expect: false
+  source: 虚构
+- keyword: 重整
+  title: 关于公司预重整债权申报的公告
+  expect: true
+  source: cninfo 920719 2026-11-06 https://static.cninfo.com.cn/finalpage/2026-11-06/1225662251.PDF
+- keyword: 重整
+  title: 关于法院决定对公司启动预重整并指定临时管理人的公告
+  expect: true
+  source: cninfo 920719 2026-11-05 https://static.cninfo.com.cn/finalpage/2026-11-05/1225659481.PDF
+- keyword: 重整
+  title: 【虚构】关于终止重整的公告
+  expect: false
+  source: 虚构
+- keyword: 预重整
+  title: 关于公司预重整债权申报的公告
+  expect: true
+  source: cninfo 920719 2026-11-06 https://static.cninfo.com.cn/finalpage/2026-11-06/1225662251.PDF
+- keyword: 预重整
+  title: 关于法院决定对公司启动预重整并指定临时管理人的公告
+  expect: true
+  source: cninfo 920719 2026-11-05 https://static.cninfo.com.cn/finalpage/2026-11-05/1225659481.PDF
+- keyword: 预重整
+  title: 【虚构】关于终止预重整的公告
+  expect: false
+  source: 虚构
+- keyword: 债务逾期
+  title: 天马科技关于新增累计诉讼、仲裁及债务逾期的公告
+  expect: true
+  source: cninfo 603668 2026-11-07 https://static.cninfo.com.cn/finalpage/2026-11-07/1225661753.PDF
+- keyword: 债务逾期
+  title: 关于子公司债务逾期暨担保进展的公告
+  expect: true
+  source: cninfo 002036 2026-11-07 https://static.cninfo.com.cn/finalpage/2026-11-07/1225660944.PDF
+- keyword: 债务逾期
+  title: 关于下属公司解除部分债务逾期的公告
+  expect: false
+  source: cninfo 603778 2026-09-19 https://static.cninfo.com.cn/finalpage/2026-09-19/1225572172.PDF
+- keyword: 逾期债务
+  title: 绿地控股关于公司及控股子公司逾期债务和新增诉讼的公告
+  expect: true
+  source: cninfo 600606 2026-10-24 https://static.cninfo.com.cn/finalpage/2026-10-24/1225619125.PDF
+- keyword: 逾期债务
+  title: 【虚构】关于子公司新增逾期债务的公告
+  expect: true
+  source: 虚构
+- keyword: 逾期债务
+  title: 关于控股子公司还款计划调整暨逾期债务已归还的公告
+  expect: false
+  source: cninfo 002630 2026-11-03 https://static.cninfo.com.cn/finalpage/2026-11-03/1225653711.PDF
+- keyword: 债务违约
+  title: 关于公司债务违约的公告
+  expect: true
+  source: cninfo 920090 2026-02-27 https://static.cninfo.com.cn/finalpage/2026-02-27/1224988689.PDF
+- keyword: 债务违约
+  title: 关于公司债务违约的公告
+  expect: true
+  source: cninfo 839680 2025-04-01 https://static.cninfo.com.cn/finalpage/2025-04-01/1222985500.PDF
+- keyword: 债务违约
+  title: 【虚构】关于债务违约已解决的公告
+  expect: false
+  source: 虚构
+- keyword: 减持(控股股东/实控人)
+  title: 天马科技关于控股股东、实际控制人之一致行动人、持股5%以上股东股份被动减持的预披露公告
+  expect: true
+  source: cninfo 603668 2026-10-14 https://static.cninfo.com.cn/finalpage/2026-10-14/1225603821.PDF
+- keyword: 减持(控股股东/实控人)
+  title: 关于实际控制人部分股份拟被法院强制变卖暨股东拟被动减持公司股份的预披露公告
+  expect: true
+  source: cninfo 002596 2026-09-23 https://static.cninfo.com.cn/finalpage/2026-09-23/1225577523.PDF
+- keyword: 减持(控股股东/实控人)
+  title: 关于持股5%以上股东持股比例被动稀释触及1%整数倍及减持进展情况的公告
+  expect: false
+  source: cninfo 301607 2026-05-07 https://static.cninfo.com.cn/finalpage/2026-05-07/1225283002.PDF

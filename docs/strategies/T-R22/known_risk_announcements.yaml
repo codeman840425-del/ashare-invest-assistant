@@ -1,0 +1,172 @@
+note: T-R22 已知风险公告清单（真实、公开），供后端 F23 完整性验证（T-A19：≥10 条，漏 0）。只记录标题、链接和 ≤80 字的短引，不含正文全文。离线命中不等于数据源完整性通过。
+announcements:
+- security_code: '300477'
+  security_name_at_fetch: ST合纵
+  title: 关于收到中国证券监督管理委员会立案告知书的公告
+  announcement_date: '2026-11-02'
+  risk_category: investigation
+  official_url: https://static.cninfo.com.cn/finalpage/2026-11-02/1225650594.PDF
+  cninfo_announcement_id: '1225650594'
+  body_quote: 合纵科技……于2026年10月30日收到……《中国证券监督管理委员会立案告知书》……因公司涉嫌信息披露违法违规
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - investigation
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文
+- security_code: '000520'
+  security_name_at_fetch: 凤凰航运
+  title: 关于收到中国证券监督管理委员会《立案告知书》的公告
+  announcement_date: '2026-11-07'
+  risk_category: investigation
+  official_url: https://static.cninfo.com.cn/finalpage/2026-11-07/1225661288.PDF
+  cninfo_announcement_id: '1225661288'
+  body_quote: 凤凰航运（武汉）股份有限公司……于2026年11月6日收到中国证券监督管理委员会……下发的《立案告知书》……因涉嫌信息披露违法违规
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - investigation
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文
+- security_code: '688130'
+  security_name_at_fetch: 晶华微
+  title: 晶华微关于公司及控股股东收到中国证券监督管理委员会立案告知书暨风险提示的公告
+  announcement_date: '2026-11-03'
+  risk_category: investigation
+  official_url: https://static.cninfo.com.cn/finalpage/2026-11-03/1225654385.PDF
+  cninfo_announcement_id: '1225654385'
+  body_quote: 杭州晶华微电子股份有限公司……及公司控股股东吕汉泉分别于2026年11月2日收到中国证券监督管理委员会……出具的《立案告知书》
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - investigation
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文
+- security_code: '000972'
+  security_name_at_fetch: 中基健康
+  title: 关于法院裁定受理公司及子公司红色番茄重整及指定管理人暨公司股票交易将停牌一天并被实施退市风险警示的公告
+  announcement_date: '2026-11-03'
+  risk_category: delisting_risk
+  official_url: https://static.cninfo.com.cn/finalpage/2026-11-03/1225654160.PDF
+  cninfo_announcement_id: '1225654160'
+  body_quote: 因六师中院依法裁定受理债权人对公司的重整申请……被实施退市风险警示，股票简称变更为“*ST中基”
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - delisting_risk
+    - insolvency
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文（PDF 文本抽取版面错位处已用省略号跳过）
+- security_code: '002598'
+  security_name_at_fetch: ST章鼓
+  title: 关于公司股票交易被叠加实施其他风险警示和可能被实施退市风险警示相关事项的进展公告
+  announcement_date: '2026-10-29'
+  risk_category: other_risk_warning
+  official_url: https://static.cninfo.com.cn/finalpage/2026-10-29/1225632935.PDF
+  cninfo_announcement_id: '1225632935'
+  body_quote: 中审众环会计师事务所（特殊普通合伙）对公司2025年度出具了否定意见的内部控制审计报告
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - delisting_risk
+    - other_risk_warning
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文
+- security_code: '300068'
+  security_name_at_fetch: ST南都
+  title: 关于公司股票被实施其他风险警示相关事项的进展公告
+  announcement_date: '2026-11-06'
+  risk_category: other_risk_warning
+  official_url: https://static.cninfo.com.cn/finalpage/2026-11-06/1225661817.PDF
+  cninfo_announcement_id: '1225661817'
+  body_quote: 公司股票自2026年4月30日起被深圳证券交易所实施其他风险警示
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - other_risk_warning
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文
+- security_code: '002535'
+  security_name_at_fetch: 林州重机
+  title: 关于公司及相关当事人收到《行政处罚事先告知书》的公告
+  announcement_date: '2026-10-15'
+  risk_category: regulatory_action
+  official_url: https://static.cninfo.com.cn/finalpage/2026-10-15/1225604722.PDF
+  cninfo_announcement_id: '1225604722'
+  body_quote: 林州重机集团股份有限公司涉嫌信息披露违法违规一案已由我局调查完毕，我局依法拟对你们作出行政处罚。
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - regulatory_action
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文
+- security_code: '300497'
+  security_name_at_fetch: 富祥股份
+  title: 关于公司控股股东、实际控制人、董事长被留置的公告
+  announcement_date: '2026-10-14'
+  risk_category: control_person_risk
+  official_url: https://static.cninfo.com.cn/finalpage/2026-10-14/1225605728.PDF
+  cninfo_announcement_id: '1225605728'
+  body_quote: 公司控股股东、实际控制人、董事长包建华先生被有关监察机关留置。
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - control_person_risk
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文
+- security_code: '603922'
+  security_name_at_fetch: ST金鸿顺
+  title: 金鸿顺关于控股股东股份被司法轮候冻结的公告
+  announcement_date: '2026-11-05'
+  risk_category: shareholder_pledge_freeze
+  official_url: https://static.cninfo.com.cn/finalpage/2026-11-05/1225656967.PDF
+  cninfo_announcement_id: '1225656967'
+  body_quote: 累计司法轮候冻结447,166,520股
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - shareholder_pledge_freeze
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文
+- security_code: '002898'
+  security_name_at_fetch: 赛隆退
+  title: 关于公司股票进入退市整理期交易的第八次风险提示公告
+  announcement_date: '2026-07-16'
+  risk_category: delisting_risk
+  official_url: https://static.cninfo.com.cn/finalpage/2026-07-16/1225427194.PDF
+  cninfo_announcement_id: '1225427194'
+  body_quote: 公司股票于2026年6月26日复牌并进入退市整理期，退市整理期为十五个交易日
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - delisting_risk
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文
+- security_code: '600606'
+  security_name_at_fetch: 绿地控股
+  title: 绿地控股关于公司及控股子公司逾期债务和新增诉讼的公告
+  announcement_date: '2026-10-24'
+  risk_category: insolvency
+  official_url: https://static.cninfo.com.cn/finalpage/2026-10-24/1225619125.PDF
+  cninfo_announcement_id: '1225619125'
+  body_quote: 新增逾期债务1.56亿元，其中涉及诉讼的逾期债务0.17亿元；累计逾期债务339.91亿元
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - insolvency
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文
+- security_code: '002726'
+  security_name_at_fetch: ST龙大
+  title: 关于公司实际控制人收到中国证券监督管理委员会《立案告知书》的公告
+  announcement_date: '2026-11-07'
+  risk_category: investigation
+  official_url: https://static.cninfo.com.cn/finalpage/2026-11-07/1225661582.PDF
+  cninfo_announcement_id: '1225661582'
+  body_quote: 实际控制人戴学斌先生于近日收到中国证券监督管理委员会……出具的《立案告知书》……因涉嫌操纵证券市场
+  lexicon_v1_match:
+    hit: true
+    categories:
+    - investigation
+  evidence_status: PDF 已下载并抽取正文（2026-11-07，巨潮 static.cninfo.com.cn）；麦蕊是否能取到：未测（待后端 T-A19 第 5 项）
+  quote_note: “……”表示省略；各段均逐字取自 PDF 正文

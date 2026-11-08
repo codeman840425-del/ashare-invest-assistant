@@ -1,0 +1,12 @@
+note: T-R23 F23 词表 v2 规则冻结（研究员 2026-11-07）。冻结后任何改动须新版本号与新哈希；正式验收只能用冻结版本单轮执行。
+version: f23_lexicon_v2
+frozen_at: '2026-11-07 (America/Denver)'
+sha256:
+  f23_lexicon_v2.yaml: 4e98e0d8121aa29b5ae2b9b65146bebeffb186b6801a9ab43cf35ceb81f7c16f
+  match_f23_v2.py: 418d5f9ae0f84c46a5e72d577dd1bd4b5442fe4381d9dd758ce8563450fe1adc
+holdout_acceptance:
+  status: not_executed        # 尚无合规全量样本；F23 保持 declared
+  reserved_dates: ['2026-11-04', '2026-11-05']   # 编排者预留；规则开发未使用这两天的任何公告
+  excluded_dates: ['2026-11-06']                 # T-R22 隔离样本日期，不用于开发或验收
+  sample_source: 待编排者经正常浏览器公开页面导出提供；研究员不自行采集
+  criteria: ['≥1000 条、不按关键词筛的连续交易日全量标题，附来源/总数/分页完整性', '全部命中逐条人工复核，误报 ≤5%', '未命中按固定随机种子抽 100 条逐条独立标注，漏报 0', '与规则开发样本不重叠', '单轮执行，失败即停止，不再迭代']

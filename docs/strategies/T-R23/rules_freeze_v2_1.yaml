@@ -1,0 +1,15 @@
+note: T-R23 F23 词表 v2.1 规则冻结（编排者保守否决裁定后，研究员 2026-11-07）。上一冻结记录 rules_freeze.yaml（v2）及其文件原样保留。
+version: f23_lexicon_v2_1
+supersedes: {version: f23_lexicon_v2, record: rules_freeze.yaml}
+frozen_at: '2026-11-07 (America/Denver)'
+sha256:
+  f23_lexicon_v2_1.yaml: 15bc3fed1327367d5813202a0cbb5d755aed0560579359cc649058f4f7693a1c
+  match_f23_v2_1.py: 68f4a533e6418e0eda06fd8006ef04cbd212e01cadddde1c08783a0320dfcbc0
+holdout_acceptance:
+  status: not_executed        # 尚无合规全量样本；F23 保持 declared
+  reserved_dates: ['2026-11-04', '2026-11-05']
+  excluded_dates: ['2026-11-06']
+  exclude_ids: holdout_exclusion_ids.txt
+  sample_source: 待编排者从正常网页逐页采集提供；研究员不自行采集、不代造
+  labels: ['semantic_truth（语义真风险，人工）与 policy_hit（规则命中）分列；不得以政策命中充当语义真值']
+  criteria: ['≥1000 条不按关键词筛的连续交易日全量标题', '全部命中逐条人工复核；误报率（政策命中但语义非风险）如实报告，不设上限', '未命中固定随机种子抽 100 条逐条独立标注，漏报 0', '与开发样本不重叠', '单轮执行，失败即停止', '另报：样本公告命中率不能替代策略否决率；W-01 若几乎无法买入须上报']

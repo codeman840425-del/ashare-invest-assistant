@@ -1,0 +1,31 @@
+# T-R23 现有样本收口记录
+记录时间：2026-11-07 20:32 MST（America/Denver）。仅现有本地公开保全记录；没有恢复网页采集、日期原因调查或外部发送/提交，未调用麦蕊。
+
+## 范围与来源
+- 按20:30新范围，源链接 `announcementTime` 字面日期 2026-11-03..05；这是来源日期，不是本地运行时区。
+- p4..43 每页30行，共1200行；p3仅12行片段、p1..2零散片段，均不拼入；p44以后未取得。不是预期1230，也不是窗口完整全量。
+- 页面表单显示11-04..05；无已应用标记，实际是否应用筛选未知。仅称“实际已取得页面按链接日期筛选的便利样本”；不承诺代表性，页面1781也不是本样本分母。
+- 代码核对1200条原记录元组及其来源行、代码/ID/日期与hrefTail一致；原标题原样保留，未推造首末ID或缺行。
+- 原日期分布：11-05=59，11-04=891，11-03=250。窗口外0，重复ID0；51开发ID清单中本次实际剔除31条，另20条未出现；保留1169（59/869/241）。排除按ID，日期一律取原链接而非开发清单日期。
+
+## 冻结规则单轮执行（非真实风险效能验收）
+- lexicon SHA256 `15bc3fed1327367d5813202a0cbb5d755aed0560579359cc649058f4f7693a1c`。
+- matcher SHA256 `68f4a533e6418e0eda06fd8006ef04cbd212e01cadddde1c08783a0320dfcbc0`。哈希通过；未调词、未改冻结记录。
+- 保留1169条一次执行：政策命中16，命中率1.3687%；类别计数质押冻结8、控制人权益5、破产重整3、监管1（可交叠，不能相加作公告数）。逐条输出含原链接、标题、类别、flags及冻结规则证据。
+- check_f23_v2_1.py PASS：已知24条全部命中，v1 153例及v2.1 52例一致性通过；52例含预计政策误报10，这是开发用例，不是本次真实误报估计。原check_f23_v2.py也PASS。
+- 没有本次样本的冻结独立人工真值；真实误报率/漏报率不可估计。未做人造“100条人工抽查0漏”，没有额外网页核验，不能把政策命中或DeepSeek类别当事实风险。
+- 此次只完成有限范围机械校验/冻结规则运行；冻结记录中的原正式holdout验收仍not_executed，F23仍declared，不升spec。无W-01策略候选流，可买比例不可估计，不能用公告命中率替代。
+
+## DeepSeek及停止项
+- DeepSeek：用于公开id/code/title机械公告类型、主体原词、动作原词和摘要草稿（产出目录reports/deepseek/T-R23/）。模型deepseek-flash；16次成功800条，2次失败，已记录usage总71878 token；失败请求usage未知，不按0伪报消耗。
+- 实际日志：批17于20:26:22 MST首发URLError（原因未记）；20:28:49 MST按裁定等待超过60秒后唯一重试，SSL UNEXPECTED_EOF_WHILE_READING，再次URLError；20:29:19 MST停止。没有成功恢复100条的记录。本轮不重发、不换路线，也不推断为网络抖动。
+- 800条ID映射无新增/重复，数字子串校验通过；761条全部机械检查通过，39条至少一项未通过（动作非原词21项、主体非原词2项、摘要超20字17项，交叠）。所有草稿仍未核实，机械通过不保证摘要语义。
+- 保留1169中有草稿780、未覆盖389，已列未完成ID；草稿存在不等于校验通过。因连续2次失败停止，初筛未全覆盖，不由本角色代做批量语义整理；初筛未作为规则/风险真值输入。
+
+## 精确产物
+- 本文及README引用；规则文件不变。
+- `/workspace/team/reports/T-R23/`：`closeout_existing.py`、`closeout_summary.json`、`existing_window_sample.jsonl`、`excluded_rows.jsonl`、`frozen_match_results.jsonl`、`deepseek_existing_checks.jsonl`、`deepseek_unfinished_ids.jsonl`、`regression_v2_1.txt`、`regression_v2.txt`；运行依赖`deps/`（PyYAML6.0.3）。
+- `/workspace/team/reports/deepseek/T-R23/closeout_verification.json`；既有call_log/raw_batch/提示词不改。
+- `/workspace/team/reports/T-R23.md`、`/workspace/team/reports/T-R23/public_pages/source_record.md`、`/workspace/team/status/策略研究员.md`。
+
+任务到此收口：停止项如实保留，待父级交付编排者；不再扩展、不额外核验、不发送、不提交。

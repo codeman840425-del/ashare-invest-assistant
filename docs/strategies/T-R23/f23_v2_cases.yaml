@@ -1,0 +1,48 @@
+note: F23 词表 v2 新增规则的独立正反例（T-R23）。期望值由研究员按规则语义人工写定，不由匹配器生成；真实标题来自巨潮公开 PDF（经网页搜索打开的公开页面，日期均避开 2026-11-04/05/06），“【虚构】”为人工构造的边界例。未使用 T-R22 隔离样本或其标签。
+cases:
+# —— regulatory_action 新增 3 词 ——
+- {keyword: 行政监管措施, expect: true, title: 东芯半导体股份有限公司关于收到行政监管措施决定书的公告, source: "688110 2026-10-31 https://static.cninfo.com.cn/finalpage/2026-10-31/1225650284.PDF"}
+- {keyword: 行政监管措施, expect: true, title: 中国核工业建设股份有限公司关于收到行政监管措施决定书的公告, source: "601611 2026-11-02 http://static.cninfo.com.cn/finalpage/2026-11-02/1225650984.PDF"}
+- {keyword: 行政监管措施, expect: false, title: 【虚构】关于撤销行政监管措施决定书的公告, source: 虚构}
+- {keyword: 监管措施决定书, expect: true, title: 关于收到行政监管措施决定书的公告, source: "600818 2026-09-15 http://static.cninfo.com.cn/finalpage/2026-09-15/1225564163.PDF"}
+- {keyword: 监管措施决定书, expect: true, title: 【虚构】关于公司及董事长收到监管措施决定书的公告, source: 虚构}
+- {keyword: 监管措施决定书, expect: false, title: 【虚构】关于公司不存在被采取监管措施决定书情形的说明, source: 虚构}
+- {keyword: 监督管理措施, expect: true, title: 【虚构】关于公司收到证监局采取监督管理措施决定的公告, source: 虚构}
+- {keyword: 监督管理措施, expect: true, title: 【虚构】关于控股子公司被采取监督管理措施的公告, source: 虚构}
+- {keyword: 监督管理措施, expect: false, title: 【虚构】关于解除监督管理措施的公告, source: 虚构}
+# —— control_instability ——
+- {keyword: 变更为无实际控制人, expect: true, title: 关于控股股东、实际控制人一致行动关系到期终止及部分股东重新签订《一致行动协议》暨公司变更为无实际控制人的提示性公告, source: "300338 2026-04-16 http://static.cninfo.com.cn/finalpage/2026-04-16/1225107284.PDF"}
+- {keyword: 变更为无实际控制人, expect: true, title: 【虚构】关于公司控制权变更暨变更为无实际控制人的提示性公告, source: 虚构}
+- {keyword: 变更为无实际控制人, expect: false, title: 【虚构】关于公司未变更为无实际控制人的说明公告, source: 虚构}
+- {keyword: 变更为无控股股东, expect: true, title: 【虚构】关于公司变更为无控股股东、无实际控制人的提示性公告, source: 虚构}
+- {keyword: 变更为无控股股东, expect: true, title: 【虚构】关于表决权委托到期暨公司变更为无控股股东的公告, source: 虚构}
+- {keyword: 变更为无控股股东, expect: false, title: 【虚构】关于公司不会变更为无控股股东的说明, source: 虚构}
+- {keyword: 控制权存在不确定性, expect: true, title: 【虚构】关于控股股东股份被司法冻结及公司控制权存在不确定性的风险提示公告, source: 虚构}
+- {keyword: 控制权存在不确定性, expect: true, title: 【虚构】关于公司控制权存在不确定性的风险提示公告, source: 虚构}
+- {keyword: 控制权存在不确定性, expect: false, title: 【虚构】关于公司控制权不存在不确定性的说明, source: 虚构}
+- {keyword: 控制权不稳定, expect: true, title: 【虚构】关于公司控制权不稳定的风险提示公告, source: 虚构}
+- {keyword: 控制权不稳定, expect: true, title: 【虚构】关于控股股东持股比例下降导致控制权不稳定风险的提示性公告, source: 虚构}
+- {keyword: 控制权不稳定, expect: false, title: 【虚构】关于公司不存在控制权不稳定情形的说明, source: 虚构}
+- {keyword: 解除一致行动(反例), expect: false, title: 关于控股股东、实际控制人与其部分一致行动人解除一致行动关系的提示性公告, source: "688167 2026-05-27 https://static.cninfo.com.cn/finalpage/2026-05-27/1225330558.PDF；正文：控股股东、实控人未变化"}
+# —— controller_equity：询价转让（主体须为控制人） ——
+- {keyword: 询价转让, expect: true, title: 北京指南针科技发展股份有限公司控股股东询价转让计划书, source: "300803 2026-04-15 https://static.cninfo.com.cn/finalpage/2026-04-15/1225106945.PDF"}
+- {keyword: 询价转让, expect: true, title: 【虚构】关于控股股东、实际控制人询价转让结果报告书的公告, source: 虚构}
+- {keyword: 询价转让, expect: false, title: 长沙景嘉微电子股份有限公司股东询价转让计划书, source: "300474 2026-10-30 http://static.cninfo.com.cn/finalpage/2026-10-30/1225649706.PDF；标题无控制人主体 → subject_unknown 不计（正文显示出让方为控股股东、实控人，见 title_insufficient.yaml，待裁定）"}
+- {keyword: 询价转让, expect: false, title: 【虚构】关于控股股东终止询价转让计划的公告, source: 虚构}
+- {keyword: 询价转让, expect: false, title: 【虚构】关于非控股股东询价转让的公告, source: 虚构}
+# —— controller_equity：权益变动方向 ——
+- {keyword: 权益变动-下降, expect: true, title: 【虚构】关于控股股东减持股份暨权益变动触及1%整数倍的公告, source: 虚构}
+- {keyword: 权益变动-下降, expect: true, title: 【虚构】关于控股股东持股比例下降至30%以下暨权益变动的提示性公告, source: 虚构}
+- {keyword: 权益变动-下降, expect: true, title: 【虚构】关于控股股东部分股份被司法变卖暨权益变动的提示性公告, source: 虚构}
+- {keyword: 权益变动-方向未知(保守), expect: true, title: 杭州初灵信息技术股份有限公司关于控股股东权益变动触及1%整数倍的提示性公告, source: "300250 2026-09-07 http://static.cninfo.com.cn/finalpage/2026-09-07/1225550775.PDF；标题无方向，按 conservative_hit 计入（正文为减持）"}
+- {keyword: 权益变动-方向未知(保守), expect: true, title: 上海威贸电子股份有限公司关于控股股东、实际控制人及一致行动人权益变动触及1%整数倍的提示性公告, source: "920346 2026-09-10 http://static.cninfo.com.cn/finalpage/2026-09-10/1225557680.PDF；正文为减持"}
+- {keyword: 权益变动-上升(反例), expect: false, title: 【虚构】关于控股股东增持股份计划实施完成暨权益变动的公告, source: 虚构}
+- {keyword: 权益变动-上升(反例), expect: false, title: 【虚构】关于控股股东及其一致行动人因公司回购注销股东权益被动增加触及1%整数倍的公告, source: 虚构}
+- {keyword: 权益变动-上升(反例), expect: false, title: 【虚构】关于控股股东认购公司向特定对象发行股票暨权益变动的提示性公告, source: 虚构}
+- {keyword: 权益变动-中性(反例), expect: false, title: 关于控股股东、实际控制人解除一致行动人协议暨权益变动触及1%刻度的提示性公告, source: "688172 2026-04-29 https://static.cninfo.com.cn/finalpage/2026-04-29/1225238585.PDF；正文：持股数量不变，控制权稳定"}
+- {keyword: 权益变动-中性(反例), expect: false, title: 航天南湖电子信息技术股份有限公司关于控股股东与其一致行动人解除一致行动关系暨权益变动的提示性公告, source: "688552 2026-05-18 http://dataclouds.cninfo.com.cn/shgonggao/hsomarket/2026/20260518/f89b84f3c872487bbfdfdf40bb58293f.PDF；正文：持股不变"}
+- {keyword: 权益变动-中性(反例), expect: false, title: 【虚构】关于控股股东持股比例被动稀释暨权益变动触及1%整数倍的公告, source: 虚构}
+- {keyword: 权益变动-中性(反例), expect: false, title: 【虚构】关于控股股东国有股份无偿划转暨权益变动的提示性公告, source: 虚构}
+- {keyword: 权益变动-无主体(反例), expect: false, title: 【虚构】关于持股5%以上股东权益变动触及1%整数倍的提示性公告, source: 虚构}
+- {keyword: 权益变动-否定(反例), expect: false, title: 【虚构】关于控股股东承诺不减持且本次权益变动为被动稀释的公告, source: 虚构}
+- {keyword: 承诺不减持(反例), expect: false, title: 【虚构】关于控股股东、实际控制人自愿承诺不减持公司股份的公告, source: 虚构}

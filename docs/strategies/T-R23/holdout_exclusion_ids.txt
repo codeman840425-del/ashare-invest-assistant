@@ -1,0 +1,53 @@
+# 预留验收日 2026-11-04/05 中已在规则开发材料里出现过的巨潮公告 ID；正式验收时须从全量样本剔除（或单列），以保证与开发样本不重叠。
+# 格式：日期 公告ID 来源
+2026-11-04 1225654748 public_titles_cninfo.jsonl
+2026-11-04 1225654868 public_titles_cninfo.jsonl
+2026-11-04 1225655011 public_titles_cninfo.jsonl
+2026-11-04 1225655120 f23_offline_cases.yaml,public_titles_cninfo.jsonl
+2026-11-04 1225655157 public_titles_cninfo.jsonl
+2026-11-04 1225655163 public_titles_cninfo.jsonl
+2026-11-04 1225655447 public_titles_cninfo.jsonl
+2026-11-04 1225655590 public_titles_cninfo.jsonl
+2026-11-04 1225655665 public_titles_cninfo.jsonl
+2026-11-04 1225655805 public_titles_cninfo.jsonl
+2026-11-04 1225655842 public_titles_cninfo.jsonl
+2026-11-04 1225655982 public_titles_cninfo.jsonl
+2026-11-04 1225655985 public_titles_cninfo.jsonl
+2026-11-04 1225656280 public_titles_cninfo.jsonl
+2026-11-04 1225656345 public_titles_cninfo.jsonl
+2026-11-04 1225656400 public_titles_cninfo.jsonl
+2026-11-04 1225656513 public_titles_cninfo.jsonl
+2026-11-04 1225656554 public_titles_cninfo.jsonl
+2026-11-04 1225657005 public_titles_cninfo.jsonl
+2026-11-04 1225657147 f23_offline_cases.yaml,public_titles_cninfo.jsonl
+2026-11-04 1225657525 public_titles_cninfo.jsonl
+2026-11-04 1225657724 public_titles_cninfo.jsonl
+2026-11-04 1225658193 public_titles_cninfo.jsonl
+2026-11-04 1225658351 public_titles_cninfo.jsonl
+2026-11-05 1225656811 public_titles_cninfo.jsonl
+2026-11-05 1225656932 public_titles_cninfo.jsonl
+2026-11-05 1225656967 f23_offline_cases.yaml,known_risk_announcements.yaml,public_titles_cninfo.jsonl
+2026-11-05 1225657031 f23_offline_cases.yaml,public_titles_cninfo.jsonl
+2026-11-05 1225657034 f23_offline_cases.yaml,public_titles_cninfo.jsonl
+2026-11-05 1225657457 public_titles_cninfo.jsonl
+2026-11-05 1225657794 public_titles_cninfo.jsonl
+2026-11-05 1225657821 public_titles_cninfo.jsonl
+2026-11-05 1225657923 public_titles_cninfo.jsonl
+2026-11-05 1225658168 public_titles_cninfo.jsonl
+2026-11-05 1225658226 public_titles_cninfo.jsonl
+2026-11-05 1225658292 public_titles_cninfo.jsonl
+2026-11-05 1225658356 public_titles_cninfo.jsonl
+2026-11-05 1225658367 public_titles_cninfo.jsonl
+2026-11-05 1225658371 public_titles_cninfo.jsonl
+2026-11-05 1225658457 public_titles_cninfo.jsonl
+2026-11-05 1225658567 public_titles_cninfo.jsonl
+2026-11-05 1225658571 public_titles_cninfo.jsonl
+2026-11-05 1225658572 public_titles_cninfo.jsonl
+2026-11-05 1225659481 f23_offline_cases.yaml,public_titles_cninfo.jsonl
+2026-11-05 1225659679 public_titles_cninfo.jsonl
+2026-11-05 1225659685 f23_offline_cases.yaml,public_titles_cninfo.jsonl
+2026-11-05 1225659720 public_titles_cninfo.jsonl
+2026-11-05 1225659948 public_titles_cninfo.jsonl
+2026-11-05 1225660180 public_titles_cninfo.jsonl
+2026-11-05 1225658458 T-R23 搜索结果中出现（天山股份），未使用
+2026-11-05 1225659913 T-R23 搜索结果中出现（金现代），未使用

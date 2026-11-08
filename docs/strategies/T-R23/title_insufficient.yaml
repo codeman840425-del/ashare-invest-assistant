@@ -1,0 +1,7 @@
+note: 正文显示为控制人减持/风险、但标题不足以判定的真实公告（T-R23）。v2 按冻结规则不计（subject_unknown / neutral_change），不进入“已知风险清单”，也不冒充正文可判；是否改为保守计入待裁定（README §4）。来源为网页搜索打开的巨潮公开 PDF，正文要点据该页面文本，未本地下载。
+items:
+- {code: '300474', date: '2026-10-30', title: 长沙景嘉微电子股份有限公司股东询价转让计划书, v2_flag: subject_unknown, body_fact: 出让方为控股股东、实际控制人喻丽丽，拟转让 4.00%, url: http://static.cninfo.com.cn/finalpage/2026-10-30/1225649706.PDF}
+- {code: '688599', date: '2026-08-11', title: 天合光能股份有限公司股东询价转让计划书, v2_flag: subject_unknown, body_fact: 出让方高纪凡为控股股东、实际控制人，合计 1.55%, url: https://static.cninfo.com.cn/finalpage/2026-08-11/1225467029.PDF}
+- {code: '688200', date: '2026-09-08', title: 北京华峰测控技术股份有限公司股东询价转让计划书, v2_flag: subject_unknown, body_fact: 出让方芯华控股为控股股东，1.10%, url: http://static.cninfo.com.cn/finalpage/2026-09-08/1225552080.PDF}
+- {code: '301419', date: '2026-05-18', title: 上海阿莱德实业集团股份有限公司股东询价转让计划书, v2_flag: subject_unknown, body_fact: 出让方含控股股东、实控人张耀华及一致行动人，合计 5%, url: http://static.cninfo.com.cn/finalpage/2026-05-18/1225313437.PDF}
+- {code: '001336', date: '2026-05-28', title: 杭州楚环科技股份有限公司关于控股股东、实际控制人与其一致行动人一致行动协议到期暨权益变动的提示性公告, v2_flag: neutral_change, body_fact: 含控制人一致行动人元一投资减持，合计比例 55.00% → 40.62%（大部分因协议到期不再合并）, url: http://static.cninfo.com.cn/finalpage/2026-05-28/1225332810.PDF}

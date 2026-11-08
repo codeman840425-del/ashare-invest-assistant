@@ -1,0 +1,7 @@
+note: v2.1 裁定要求纳入完整已知真值集的 5 条（原 title_insufficient.yaml，正文判定为控制人/一致行动人减持；语义真风险）。v2.1 以政策规则命中，不是标题语义可判。原文件 title_insufficient.yaml 作为 v2 冻结记录保留不改。
+announcements:
+- {security_code: '300474', announcement_date: '2026-10-30', risk_category: inquiry_transfer_policy, title: 长沙景嘉微电子股份有限公司股东询价转让计划书, official_url: http://static.cninfo.com.cn/finalpage/2026-10-30/1225649706.PDF, body_quote: 本次拟参与询价转让的股东为长沙景嘉微电子股份有限公司（以下简称“公司”）控股股东、实际控制人喻丽丽女士}
+- {security_code: '688599', announcement_date: '2026-08-11', risk_category: inquiry_transfer_policy, title: 天合光能股份有限公司股东询价转让计划书, official_url: https://static.cninfo.com.cn/finalpage/2026-08-11/1225467029.PDF, body_quote: 本次询价转让的出让方高纪凡先生为公司控股股东、实际控制人、董事长、高级管理人员}
+- {security_code: '688200', announcement_date: '2026-09-08', risk_category: inquiry_transfer_policy, title: 北京华峰测控技术股份有限公司股东询价转让计划书, official_url: http://static.cninfo.com.cn/finalpage/2026-09-08/1225552080.PDF, body_quote: 本次询价转让出让方芯华控股为公司控股股东，非公司实际控制人、董事及高级管理人员}
+- {security_code: '301419', announcement_date: '2026-05-18', risk_category: inquiry_transfer_policy, title: 上海阿莱德实业集团股份有限公司股东询价转让计划书, official_url: http://static.cninfo.com.cn/finalpage/2026-05-18/1225313437.PDF, body_quote: 本次询价转让的出让方中，张耀华为公司控股股东、实际控制人、持股5%以上股东和现任董事长}
+- {security_code: '001336', announcement_date: '2026-05-28', risk_category: concert_change_policy, title: 杭州楚环科技股份有限公司关于控股股东、实际控制人与其一致行动人一致行动协议到期暨权益变动的提示性公告, official_url: http://static.cninfo.com.cn/finalpage/2026-05-28/1225332810.PDF, body_quote: 控股股东、实际控制人的一致行动人泰州元一投资咨询合伙企业（有限合伙）（以下简称“元一投资”）减持股份, note: 疑义例：标题不写减持，正文含一致行动人减持；按政策保守命中}

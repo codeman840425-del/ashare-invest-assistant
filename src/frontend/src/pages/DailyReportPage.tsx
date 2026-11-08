@@ -102,7 +102,8 @@ function StockCard({ s, r }: { s: DailyReportStock; r: DailyReport }) {
         ) : (
           <span id={titleId} className="stc-title"><b>{s.name}</b> <span className="mono muted small">{s.security_code}</span></span>
         )}
-        <Tag color={CHANGE[s.change_from_previous].c}>{CHANGE[s.change_from_previous].t}</Tag>
+        {s.change_from_previous === null ? <Tag>无比较基准 · 见数据缺口</Tag> : <Tag color={CHANGE[s.change_from_previous].c}>{CHANGE[s.change_from_previous].t}</Tag>}
+        {s.change_fields?.length ? <span className="muted small">变化：{s.change_fields.join("、")}</span> : null}
         <span className="spacer" />
         {/* v0.2.3 #3：收盘价、涨跌幅、数据状态、最高风险级别 */}
         <span className={`mono small ${pctClass(s.change_pct)}`} data-testid="stc-close">
@@ -113,7 +114,7 @@ function StockCard({ s, r }: { s: DailyReportStock; r: DailyReport }) {
         {s.suggestion ? <ConsensusBadge status={s.suggestion.consensus} /> : null}
       </div>
       {s.suggestion?.actions.length ? (
-        <div className="badges">{s.suggestion.actions.map((x) => <ActionBadge key={x.strategy_key} action={x.action} strategyName={x.strategy_name} tLeg={x.t_leg} />)}</div>
+        <div className="badges">{s.suggestion.actions.map((x) => <ActionBadge key={x.strategy_key} action={x.action} strategyName={x.strategy_name} tLeg={x.t_leg} lifecycle={x.lifecycle} />)}</div>
       ) : <div className="small muted">{s.change_from_previous === 'removed' ? '已移出持仓与自选，本期不再生成策略结论' : '暂无启用的策略实例'}</div>}
       {s.suggestion ? (
         <div className="small muted">
@@ -151,16 +152,16 @@ function AccountPanel({ r }: { r: DailyReport }) {
           <div className="stat-grid">
             <div><label>总资产</label><b className="mono">{fmtNum(a.total_assets)}</b></div>
             <div><label>现金余额</label><b className="mono">{fmtNum(a.cash)}</b></div>
-            <div><label>总仓位</label><b className="mono">{fmtNum(a.position_pct, 1)}%</b></div>
-            <div><label>当日盈亏</label><b className={`mono ${pctClass(a.pnl_day)}`}>{signed(a.pnl_day)}</b></div>
+            <div><label>总仓位</label><b className="mono">{a.position_pct === null ? '—（缺少资产分母）' : `${fmtNum(a.position_pct, 1)}%`}</b></div>
+            <div><label>当日盈亏</label><b className={`mono ${pctClass(a.pnl_day)}`}>{a.pnl_day === null ? '—（缺少计算基准）' : signed(a.pnl_day)}</b></div>
           </div>
           <div className="regime">
             <div className="small">
               大盘环境 <Tag color="blue">{r.market.regime ? REGIME[r.market.regime] : '未知'}</Tag>
               {range ? `参考仓位区间 ${lo}–${hi}%（模板参数，不是指令）` : '参考仓位区间：缺失'}{a.position_vs_regime ? ` · 当前${VS_REGIME[a.position_vs_regime]}` : ''}
             </div>
-            {range ? (
-              <div className="regime-bar" role="img" aria-label={`当前仓位 ${fmtNum(a.position_pct, 1)}%，参考区间 ${lo}–${hi}%`}>
+            {range && a.position_pct !== null ? (
+              <div className="regime-bar" role="img" aria-label={`当前仓位 ${a.position_pct === null ? '—（缺少资产分母）' : `${fmtNum(a.position_pct, 1)}%`}，参考区间 ${lo}–${hi}%`}>
                 <div className="band" style={{ left: `${lo}%`, width: `${Math.max(0, hi - lo)}%` }} />
                 <div className="mark" style={{ left: `${clampPct(Number(a.position_pct))}%` }} />
               </div>

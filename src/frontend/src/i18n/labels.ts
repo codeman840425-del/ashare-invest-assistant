@@ -70,7 +70,7 @@ export const REASON_CODE: Record<ReasonCode, string> = {
   DATA_STALE: '数据过期', KEY_DATA_MISSING: '关键数据缺失', LOW_CONFIDENCE: '置信度偏低', NON_TRADING_TIME: '非交易时段',
   SUSPENDED: '停牌', LIMIT_LOCKED: '一字涨跌停', ST_OR_DELISTING: 'ST/退市整理', NEW_LISTING: '上市不足 N 日',
   INSUFFICIENT_CASH: '可用资金不足', T1_NOT_SELLABLE: 'T+1 不可卖', NO_POSITION: '无持仓', POSITION_CAP_REACHED: '单只仓位已达上限',
-  STRATEGY_BUDGET_EXHAUSTED: '策略预算用尽', SECTOR_EXPOSURE_EXCEEDED: '行业暴露超限', REGIME_MISMATCH: '大盘环境不符',
+  STRATEGY_BUDGET_EXHAUSTED: '策略预算用尽', SECTOR_EXPOSURE_EXCEEDED: '行业暴露超限', REGIME_MISMATCH: '大盘环境或总仓位约束',
   SAME_DIRECTION_PLAN_EXISTS: '已有同向计划', CONFLICTS_CONFIRMED_PLAN: '与已确认计划相反', BLOCKLISTED: '在禁投名单',
   COOLING_OFF: '冷静期', LOSS_STREAK_PAUSE: '连亏暂停', STRATEGY_CONFLICT: '策略方向冲突', USER_MUTED: '已屏蔽',
 };

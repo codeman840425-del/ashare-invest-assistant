@@ -116,7 +116,6 @@ describe('“查看全部”目标页接住参数（页面未实现前用占位�
   it.each([
     // /candidate-signals?tab=released 自 T-F17 起、/plan-drafts?status=pending,stale 自 T-F18 起由真实页面接住，见 t-f17 / t-f18.test.tsx
     ['/risk-controls?tab=events&event=x1', 'tab=events'],
-    ['/suggestions?status=invalidated', 'status=invalidated'],
   ])('%s', async (path, param) => {
     const router = renderAt(path);
     const ph = await screen.findByTestId('placeholder');

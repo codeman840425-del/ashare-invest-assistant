@@ -1,3 +1,4 @@
+import { RiskFlagView } from '../components/RiskFlagView';
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../i18n/horizonCaps';
 import { Alert, Button, Input, Modal, Select, Tag, Tooltip } from 'antd';
 import { useState } from 'react';
@@ -12,7 +13,7 @@ import { EvidenceChips } from '../components/EvidenceChips';
 import { CardDisclaimer } from '../components/RiskDisclosure';
 import {
   ACTION_SHORT, CHECK_ON, DIMENSION, EPISTEMIC, EVAL_STATE, EXECUTABILITY, GAP_REASON, HORIZON, LIFECYCLE, ORIGIN, REASON_CODE,
-  RELEASE_KIND, RISK_CONTROL, RISK_LEVEL, SIGNAL_STATE, SUGGESTION_STATUS, VIEW,
+  RELEASE_KIND, SIGNAL_STATE, SUGGESTION_STATUS, VIEW,
 } from '../i18n/labels';
 import { fmtTime, providerText, ruleCountText } from '../lib/format';
 import { AddToResearch } from '../features/research/AddToResearch';
@@ -56,7 +57,7 @@ function matrixColumns(sg: Suggestion): DataColumn<DimensionMatrixRow>[] {
 const evidenceColumns: DataColumn<Evidence>[] = [
   { key: 'id', header: 'ID', width: 56, value: (e) => e.id },
   { key: 'key', header: '指标 key', width: 220, value: (e) => e.key, render: (e) => <span className="mono">{e.key}</span> },
-  { key: 'value', header: '值', width: 120, sortable: false, render: (e) => <span className="mono">{String(e.value)}{e.unit ? ` ${e.unit}` : ''}</span> },
+  { key: 'value', header: '值', width: 120, sortable: false, render: (e) => <span className="mono">{e.value === null ? '—（缺值，见数据缺口）' : String(e.value)}{e.unit ? ` ${e.unit}` : ''}</span> },
   { key: 'type', header: '类型', width: 70, sortable: false, render: (e) => <Tag color={EPISTEMIC[e.epistemic_type].color}>{EPISTEMIC[e.epistemic_type].text}</Tag> },
   { key: 'src', header: '来源', flex: 1, sortable: false, render: (e) => <span className="mono small">{providerText(e)}</span> },
   { key: 'asof', header: '数据时间', width: 130, value: (e) => e.data_as_of, render: (e) => <span className="mono small">{fmtTime(e.data_as_of)}</span> },
@@ -140,7 +141,7 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
   return (
     <section className="panel strat-card" data-testid="strategy-card">
       <div className="sc-head">
-        <ActionBadge action={s.action} tLeg={s.t_leg} size="lg" />
+        <ActionBadge action={s.action} tLeg={s.t_leg} lifecycle={s.lifecycle} size="lg" />
         <div>
           <div className="sc-name">{s.strategy_name}</div>
           <div className="muted small">{HORIZON[s.horizon]} · v{s.version_no} · {LIFECYCLE[s.lifecycle]} · {EVAL_STATE[s.state]}{s.priority_downweighted ? ` · 优先级权重 ${s.priority_weight}` : ''}</div>
@@ -150,7 +151,8 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
       </div>
       <div className="sc-metrics">
         <div><label>规则满足度</label><b className="mono">{s.score ?? '—'}</b></div>
-        <div><label>置信度</label><ConfidenceTag c={s.confidence} /></div>
+        <div><label>置信度</label><ConfidenceTag c={s.confidence} />
+          <div className="muted small">{s.confidence.components ? `数据完整度 ${s.confidence.components.data_completeness} · 维度一致度 ${s.confidence.components.dimension_agreement ?? '缺少可比较方向'} · 条件余量 ${s.confidence.components.condition_margin ?? '无可计算数值规则'}` : '置信度分项缺失（历史快照）'}</div></div>
         <div><label>止损</label><b className="mono down">{s.stops.stop_loss ?? '—'}</b></div>
         <div><label>止盈</label><b className="mono up">{s.stops.take_profit ?? '—'}</b></div>
         <div><label>时间止损</label><b className="mono">{s.stops.time_stop_days != null ? `${s.stops.time_stop_days} 日` : '—'}</b></div>
@@ -183,7 +185,7 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
         <Tooltip title={!sig ? '本策略没有候选信号，不能拟定计划草案' : canDraft(sig.state) ? '按你的持仓与资金拟定计划草案；草案需你确认，交易由你在券商端自行完成' : `候选信号为“${SIGNAL_STATE[sig.state].text}”，仅“待检查”“可拟定草案”“原因已解除”状态可拟定`}>
           <Button
             size="small"
-            disabled={!sig || !canDraft(sig.state) || sg.status !== 'active'}
+            disabled={!sig || sig.lifecycle === 'simulating' || !canDraft(sig.state) || sg.status !== 'active'}
             loading={create.isPending}
             onClick={() => sig && create.mutate([sig.id], { onSuccess: (d) => nav(`/plan-drafts/${d.id}`) })}
             data-testid={`sg-draft-${s.strategy_key}`}
@@ -255,6 +257,7 @@ export function SuggestionDetailPage() {
       {refresh.isError ? <Alert type="error" showIcon className="div-alert" data-testid="sg-refresh-error" title={errorText(refresh.error)} /> : null}
       {refreshMsg && refreshMsg.id === sg.id ? <Alert type="info" showIcon className="div-alert" data-testid="sg-refresh-msg" title={refreshMsg.text} /> : null}
       <SupersedeInfo sg={sg} />
+      <div className="muted small" data-testid="engine-policy">引擎策略版本：{sg.engine_policy ? `v${sg.engine_policy.version_no} · ${sg.engine_policy.content_sha256}` : sg.engine_policy === null ? '无引擎策略版本（非引擎产物）' : '引擎策略版本字段缺失（历史快照）'}</div>
 
       {sg.divergence.length ? (
         <Alert
@@ -291,12 +294,7 @@ export function SuggestionDetailPage() {
         </section>
         <section className="panel side-panel">
           <div className="panel-head"><span className="panel-title">风控标记</span></div>
-          {sg.risk_flags.length ? sg.risk_flags.map((f, i) => (
-            <div key={i} className={`risk-row lv-${f.level}`}>
-              <Tag color={RISK_LEVEL[f.level].color}>{RISK_LEVEL[f.level].text}</Tag><b>{RISK_CONTROL[f.control]}</b>　{f.message}
-              {f.gated_actions.length ? <div className="muted small">受限动作：{f.gated_actions.map((a) => ACTION_SHORT[a]).join('、')}{f.quantity_cap != null ? ` · 数量上限 ${f.quantity_cap}` : ''}</div> : null}
-            </div>
-          )) : <div className="muted small">无</div>}
+          {sg.risk_flags.length ? sg.risk_flags.map((f, i) => <RiskFlagView key={i} flag={f} evidence={sg.evidence} />) : <div className="muted small">无</div>}
           <div className="panel-head"><span className="panel-title">数据缺口</span></div>
           {sg.gaps.length ? sg.gaps.map((g) => <div key={g.key} className="gap-row small"><Tag>{GAP_REASON[g.reason]}</Tag>{g.message}</div>) : <div className="muted small">无</div>}
           <HorizonPanel sg={sg} />

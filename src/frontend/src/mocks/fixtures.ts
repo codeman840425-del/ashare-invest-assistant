@@ -374,7 +374,7 @@ SPECS.forEach((s, si) => {
       ...(stops.stop_loss ? [{ text: `盘中价格跌破 ${stops.stop_loss}（止损位）`, expr: `price < ${stops.stop_loss}`, evidence_ids: ['E1', 'E12'] }] : []),
       ...(st.key === 'demo_value' ? [{ text: '下一期季报 ROE(TTM) < 8%', expr: 'roe_ttm < 8 at next report', evidence_ids: ['E8'] }] : []),
     ];
-    const confidence = { level: confLevel(st.conf), value: st.conf };
+    const confidence = { level: confLevel(Number((0.5 * st.conf).toFixed(2))), value: Number((0.5 * st.conf).toFixed(2)), components: { data_completeness: st.conf, dimension_agreement: null, condition_margin: null, margin_rules: [] } };
 
     let csId: string | null = null;
     if (isDirectional(st.action)) {
@@ -412,7 +412,7 @@ SPECS.forEach((s, si) => {
       const base: CandidateSignal = {
         id: csId, instance_id: meta.instance_id, strategy_version_id: meta.version_id, strategy_key: st.key, strategy_name: meta.name,
         lifecycle: meta.lifecycle, security_code: s.code, name: s.name, horizon: meta.horizon, state: st.state ?? 'open',
-        proposed_action: st.action, t_leg: st.t_leg ?? null, score: st.score, confidence, stops, rule_refs, evidence: ev,
+        proposed_action: st.action, t_leg: st.t_leg ?? null, score: st.score, confidence: { level: confLevel(st.conf), value: st.conf }, stops, rule_refs, evidence: ev,
         counter_evidence, invalidation, model_refs: [], risk_flags,
         gate_results: [{ gate: 'gate_tradability', passed: !(st.reasons ?? []).includes('SUSPENDED') }, { gate: 'gate_data_fresh', passed: s.data_status === 'fresh' }],
         reason_ids, plan_draft_ids, valid_until: validUntil(meta.horizon), snapshot_id: uid(500 + si), feature_set_version: 'fs_3',
@@ -487,7 +487,7 @@ SPECS.forEach((s, si) => {
   const ACTION_CN: Record<Action, string> = { buy: '买入条件满足', add: '加仓条件满足', hold: '持有条件维持', reduce: '减仓条件满足', sell: '卖出条件满足', wait: '条件未满足，等待' };
   SUGGESTIONS.push({
     id: uid(100 + si), security_code: s.code, name: s.name, created_at: s.data_as_of, status: 'active',
-    origin: s.code === '600000.SH' ? 'intraday_event' : 'daily_batch', snapshot_id: uid(500 + si), feature_set_version: 'fs_3',
+    engine_policy: null, origin: s.code === '600000.SH' ? 'intraday_event' : 'daily_batch', snapshot_id: uid(500 + si), feature_set_version: 'fs_3',
     candidate_signal_ids: csIds,
     executability: {
       status: csIds.length === 0 ? 'not_applicable' : executableIds.length ? 'executable' : 'blocked',
@@ -536,7 +536,7 @@ export function summarize(sg: Suggestion): SuggestionSummary {
   const scores = sg.strategies.map((x) => x.score).filter((x): x is number => x !== null);
   return {
     id: sg.id, created_at: sg.created_at, status: sg.status, consensus: sg.consensus.status,
-    actions: sg.strategies.map((x) => ({ strategy_key: x.strategy_key, strategy_name: x.strategy_name, action: x.action, t_leg: x.t_leg })),
+    actions: sg.strategies.map((x) => ({ strategy_key: x.strategy_key, strategy_name: x.strategy_name, action: x.action, t_leg: x.t_leg, lifecycle: x.lifecycle })),
     executability_status: sg.executability.status,
     divergent_dimensions: sg.dimension_matrix.filter((m) => m.divergent).map((m) => m.dimension),
     top_score: scores.length ? Math.max(...scores) : null,
@@ -751,6 +751,7 @@ export const DAILY_REPORTS: DailyReport[] = [(() => {
       data_status: (s.data_status === 'unavailable' ? 'unavailable' : 'fresh') as DataStatus,
       max_risk_level: sg.risk_flags.reduce<RiskLevel | null>((m, f) => (m === null || LEVEL_RANK[f.level] > LEVEL_RANK[m] ? f.level : m), null),
       suggestion_id: sg.id, suggestion: summarize(sg),
+      change_fields: [],
       change_from_previous: (s.code === '600000.SH' ? 'changed' : s.code === '300001.SZ' ? 'new' : 'unchanged') as 'changed' | 'new' | 'unchanged',
       highlights: [
         { text: `收盘 ${f2(s.prev_close)}，量比 ${ev[4].value}`, expr: null, evidence_ids: [e1, e2] },
@@ -805,7 +806,7 @@ DAILY_REPORTS.push((() => {
   }));
   const removed = {
     security_code: '000003.SZ', name: '示例已移出', close: null, change_pct: null, data_status: 'unavailable' as DataStatus,
-    max_risk_level: null, suggestion_id: null, suggestion: null, change_from_previous: 'removed' as const,
+    max_risk_level: null, suggestion_id: null, suggestion: null, change_from_previous: 'removed' as const, change_fields: [],
     highlights: [], invalidation: [], next_watch: [],
   };
   return {

@@ -20,8 +20,8 @@ export function AccountStrip({ account }: { account: TerminalAccount | null | un
     <div className="acct-strip" data-testid="account-strip">
       <div><label>总资产</label><b className="mono">{fmtNum(account.total_assets, 0)}</b></div>
       <div><label>可用资金</label><b className="mono">{fmtNum(account.cash_available, 0)}</b></div>
-      <div><label>总仓位</label><b className="mono">{fmtNum(account.position_pct, 1)}%</b></div>
-      <div><label>当日盈亏</label><b className={`mono ${pctClass(account.pnl_day)}`}>{signed(account.pnl_day, 0)}</b></div>
+      <div><label>总仓位</label><b className="mono">{account.position_pct === null ? '—（缺少资产分母）' : `${fmtNum(account.position_pct, 1)}%`}</b></div>
+      <div><label>当日盈亏</label><b className={`mono ${pctClass(account.pnl_day)}`}>{account.pnl_day === null ? '—（缺少计算基准）' : signed(account.pnl_day, 0)}</b></div>
       <div>
         <label>大盘环境</label>
         <b>{account.regime ? REGIME[account.regime] : '—'}</b>
@@ -79,7 +79,7 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
     {
       key: 'actions', header: '各策略候选信号', width: 170, sortable: false,
       render: (r) => r.suggestion && r.suggestion.actions.length ? (
-        <div className="badges">{r.suggestion.actions.map((a) => <ActionBadge key={a.strategy_key} action={a.action} strategyName={a.strategy_name} tLeg={a.t_leg} />)}</div>
+        <div className="badges">{r.suggestion.actions.map((a) => <ActionBadge key={a.strategy_key} action={a.action} strategyName={a.strategy_name} tLeg={a.t_leg} lifecycle={a.lifecycle} />)}</div>
       ) : <span className="muted small">无启用实例</span>,
     },
     { key: 'consensus', header: '共识', width: 56, sortable: false, render: (r) => (r.suggestion ? <ConsensusBadge status={r.suggestion.consensus} /> : <ConsensusBadge status="none" />) },

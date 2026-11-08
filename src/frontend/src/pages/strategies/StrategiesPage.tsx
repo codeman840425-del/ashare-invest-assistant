@@ -64,7 +64,7 @@ export function StrategiesPage() {
     <div className="page-scroll" data-testid="strategies-page">
       <div className="page">
         <h2 className="page-title">策略库</h2>
-        <p className="muted">每个模板在主账户上启用后，每日按规则生成规则信号；名称与数据均为示例。</p>
+        <p className="muted">每个模板在主账户上启用后，每日按规则生成候选信号；模拟中的版本仅作模拟跟踪。</p>
         {warnings.length ? <Alert type="warning" showIcon title={warnings.join('；')} style={{ margin: '8px 0' }} data-testid="instance-warnings" /> : null}
         {mutErr ? <ErrorBox error={mutErr} prefix="操作失败" /> : null}
         {/* 评审 m7：账户加载失败或还没有账户时说明开关为何不可用 */}
@@ -88,12 +88,13 @@ export function StrategiesPage() {
                 </span>
               ),
             },
+            { title: '健康度', key: 'health', render: (_, t) => t.health ? `${t.health.state} · n=${t.health.n} · 权重 ${t.health.weight}` : '暂无健康度' },
             { title: '周期', key: 'h', width: 120, render: (_, t) => t.horizons.map((h) => HORIZON[h]).join('、') },
             {
               title: '版本', key: 'v', width: 160,
               render: (_, t) => (
                 <span>
-                  v{t.current_version.version_no} · {LIFECYCLE[t.current_version.lifecycle]}
+                  v{t.current_version.version_no} · {t.current_version.lifecycle === 'simulating' ? '模拟中' : LIFECYCLE[t.current_version.lifecycle]}
                   {!runnable(t) ? <span className="muted small" data-testid={`not-runnable-${t.key}`}>（{t.horizons.length ? '该版本暂不可启用' : '未声明适用周期'}）</span> : null}
                 </span>
               ),

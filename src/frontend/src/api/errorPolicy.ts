@@ -44,6 +44,10 @@ export const ERROR_TEXT: Partial<Record<AnyErrorCode, string>> = {
   // 计划草案（契约 §7.7，T-F18）
   PLAN_REQUIRES_EXPLAINABLE_SIGNAL: '该候选信号缺少可解释的规则依据，不能拟定计划草案',
   SIGNAL_NOT_EXECUTABLE: '该候选信号还有未解除的不可执行原因，暂不能拟定计划草案',
+  STRATEGY_SYSTEM_ONLY: '该策略仅由系统挂载，不能手动创建',
+  CALENDAR_NOT_COVERED: '交易日历尚未覆盖所需日期，暂缺计算基准',
+  PROMOTION_GATES_NOT_MET: '晋级门禁尚未满足，生命周期未改变',
+  COMPLIANCE_LINT_FAILED: '审核文案未通过合规校验，请修改后再提交',
   STRATEGY_VERSION_NOT_RUNNABLE: '该策略版本当前不可运行（如处于模拟期）',
   PLAN_DRAFT_STALE: '生成草案后条件已变化，草案已失效，请重新生成',
   CHECKLIST_INCOMPLETE: '判断清单还有必答项未作答',

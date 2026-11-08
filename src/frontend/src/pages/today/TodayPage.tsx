@@ -50,7 +50,7 @@ const focusColumns: ColumnsType<TerminalRow> = [
     title: '候选信号', key: 'sg', render: (_, r) => (r.suggestion ? (
       <Link to={`/suggestions/${r.suggestion.id}`} className="today-sg">
         <ConsensusBadge status={r.suggestion.consensus} />
-        {r.suggestion.actions.map((a) => <ActionBadge key={a.strategy_key} action={a.action} strategyName={a.strategy_name} tLeg={a.t_leg} />)}
+        {r.suggestion.actions.map((a) => <ActionBadge key={a.strategy_key} action={a.action} strategyName={a.strategy_name} tLeg={a.t_leg} lifecycle={a.lifecycle} />)}
         <Tag color={EXECUTABILITY[r.suggestion.executability_status].color}>{EXECUTABILITY[r.suggestion.executability_status].text}</Tag>
       </Link>
     ) : <span className="muted">无</span>),

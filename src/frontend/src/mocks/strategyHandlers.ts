@@ -14,6 +14,7 @@ const API = '/api/v1';
 const json = (body: unknown, status = 200) => HttpResponse.json(body as Record<string, unknown>, { status });
 
 export const STRATEGY_TEMPLATES: StrategyTemplate[] = [
+  { id: uid(512), key: 'demo_gate_draft', name: '门禁草稿（示例数据）', horizons: ['swing'], current_version: { id: uid(322), version_no: 1, lifecycle: 'draft' }, health: null, risk_level: 'normal' },
   ...Object.values(STRATEGIES).map((s, i): StrategyTemplate => ({
     id: uid(500 + i), key: s.key, name: s.name, horizons: [s.horizon],
     current_version: { id: s.version_id, version_no: s.version_no, lifecycle: s.lifecycle },
@@ -86,7 +87,7 @@ function stat(v: number, n: number, window: string) {
   return { value: n < 5 ? null : v.toFixed(4), n, window, small_sample: n < 30 };
 }
 export function trackingOf(t: StrategyTemplate, scope: 'mine' | 'site') {
-  const base = (TRACK_N[t.key] ?? t.health.n) * (scope === 'site' ? 3 : 1);
+  const base = (TRACK_N[t.key] ?? (t.health?.n ?? 0)) * (scope === 'site' ? 3 : 1);
   return {
     scope,
     by_horizon: ([1, 5, 20] as const).map((d, i) => {

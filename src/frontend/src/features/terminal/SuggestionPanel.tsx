@@ -1,10 +1,11 @@
+import { RiskFlagView } from '../../components/RiskFlagView';
 import { Button, Tag, Tooltip } from 'antd';
 import { useNavigate } from 'react-router';
 import { useCandidateSignals, useSuggestionReasons } from '../../api/queries';
 import type { CandidateSignal, Suggestion, TerminalRow } from '../../api/types';
 import { ActionBadge, ConfidenceTag, ErrorBox, Loading } from '../../components/common';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
-import { ACTION_FULL, ACTION_SHORT, HORIZON, REASON_CODE, RISK_CONTROL, RISK_LEVEL, SIGNAL_STATE } from '../../i18n/labels';
+import { ACTION_FULL, ACTION_SHORT, HORIZON, REASON_CODE, SIGNAL_STATE } from '../../i18n/labels';
 
 const shortAction = (a: keyof typeof ACTION_FULL) => ACTION_FULL[a].replace(/^规则信号：|（候选）$/g, '');
 
@@ -42,7 +43,7 @@ export function SuggestionPanel({ row, suggestion, loading, error }: { row: Term
           return (
             <div key={s.strategy_version_id} className="strat-mini">
               <div className="sm-head">
-                <ActionBadge action={s.action} tLeg={s.t_leg} size="lg" />
+                <ActionBadge action={s.action} tLeg={s.t_leg} lifecycle={s.lifecycle} size="lg" />
                 <span className="sm-name">{s.strategy_name}</span>
                 <span className="muted small">{HORIZON[s.horizon]} · v{s.version_no}</span>
               </div>
@@ -69,7 +70,7 @@ export function SuggestionPanel({ row, suggestion, loading, error }: { row: Term
         {sg.risk_flags.length ? (
           <div className="risk-mini">
             {sg.risk_flags.map((f, i) => (
-              <div key={i} className="small"><Tag color={RISK_LEVEL[f.level].color}>{RISK_CONTROL[f.control]}</Tag>{f.message}</div>
+              <RiskFlagView key={i} flag={f} evidence={sg.evidence} />
             ))}
           </div>
         ) : null}

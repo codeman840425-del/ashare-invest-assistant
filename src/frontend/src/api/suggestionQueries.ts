@@ -3,9 +3,9 @@
  * 只用契约已给出的结构；actions 响应体契约未定，不读取；refresh 按契约 #36 读取响应体。
  */
 import { useEffect } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from './client';
-import type { Stat, Suggestion } from './types';
+import type { Paged, Stat, Suggestion, SuggestionListItem } from './types';
 import { qk } from './queries';
 
 export interface SuggestionTracking { t1: Stat; t5: Stat; t20: Stat }
@@ -69,5 +69,15 @@ export function useRefreshSuggestion() {
         qc.invalidateQueries({ queryKey: ['today'] }),
       ]);
     },
+  });
+}
+
+/** T-F28：真实列表保留 URL 筛选并用服务端游标分页。 */
+export function useSuggestionPages(status: string, securityCode: string, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: ['suggestion-pages', status, securityCode], enabled,
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) => apiGet<Paged<SuggestionListItem>>('/suggestions', { status, security_code: securityCode, cursor: pageParam, limit: 50 }, signal),
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
 }

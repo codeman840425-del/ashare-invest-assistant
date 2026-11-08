@@ -1,3 +1,4 @@
+import { RiskFlagView } from '../../components/RiskFlagView';
 import { isUuid } from '../../lib/uuid';
 import { useState } from 'react';
 import { Alert, Button, Input, Modal, Space, Table, Tag, Timeline, Tooltip, type ButtonProps } from 'antd';
@@ -15,7 +16,7 @@ import { EvidenceChips } from '../../components/EvidenceChips';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
 import { StatValue } from '../../components/StatValue';
 import { CursorPager } from '../../components/CursorPager';
-import { DIMENSION, HORIZON, REASON_CODE, RISK_CONTROL, RISK_LEVEL, RULE_ROLE, SIGNAL_STATE } from '../../i18n/labels';
+import { DIMENSION, HORIZON, REASON_CODE, RULE_ROLE, SIGNAL_STATE } from '../../i18n/labels';
 import { causeText } from '../../i18n/signalLabels';
 import { fmtTime } from '../../lib/format';
 import { canDraft, isTerminal } from '../../lib/signals';
@@ -215,7 +216,7 @@ function TextBlocks({ cs }: { cs: CandidateSignal }) {
       <div className="sc-sec">
         <h4>风险提示</h4>
         {cs.risk_flags.length ? cs.risk_flags.map((f, i) => (
-          <div key={i} className="tw"><Tag color={RISK_LEVEL[f.level].color}>{RISK_LEVEL[f.level].text}</Tag>{RISK_CONTROL[f.control]}：{f.message}</div>
+          <RiskFlagView key={i} flag={f} evidence={cs.evidence} />
         )) : <span className="muted small">无</span>}
       </div>
     </section>
@@ -236,7 +237,7 @@ function Actions({ cs }: { cs: CandidateSignal }) {
         <Tooltip title={canDraft(cs.state) ? '按你的持仓与资金拟定计划草案；草案需你确认，交易由你在券商端自行完成' : '仅“待检查”“可拟定草案”“原因已解除”状态可拟定计划草案'}>
           <Button
             size="small"
-            disabled={!canDraft(cs.state)}
+            disabled={cs.lifecycle === 'simulating' || !canDraft(cs.state)}
             loading={create.isPending}
             onClick={() => create.mutate([cs.id], { onSuccess: (d) => nav(`/plan-drafts/${d.id}`) })}
             data-testid="draft-btn"
@@ -278,7 +279,7 @@ function Tracking({ cs }: { cs: CandidateSignal }) {
   return (
     <section className="panel sig-panel" data-testid="signal-tracking">
       <h4>该策略版本的历史跟踪（我的）</h4>
-      {tpl ? <div className="muted small">策略健康度样本 n={tpl.health.n}{tpl.health.n < 30 ? '（样本少）' : ''}</div> : null}
+      {tpl ? <div className="muted small">{tpl.health ? <>策略健康度样本 n={tpl.health.n}{tpl.health.n < 30 ? '（样本少）' : ''}</> : '暂无健康度'}</div> : null}
       {tpls.isError ? <ErrorBox error={tpls.error} /> : q.isError ? <ErrorBox error={q.error} /> : !q.data ? (tpls.data && !tpl ? <span className="muted small">策略库里没有该策略</span> : <Loading />) : (
         <div className="stat-wrap"><table className="stat-table">
           <thead><tr><th>持有期</th><th>胜率</th><th>平均收益</th><th>平均超额</th><th>盈亏比</th><th>最长连亏</th></tr></thead>

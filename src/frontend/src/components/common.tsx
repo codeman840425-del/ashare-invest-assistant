@@ -3,20 +3,20 @@ import { Empty, Tag, Tooltip } from 'antd';
 import { Link } from 'react-router';
 import { ApiError } from '../api/client';
 import { LICENCE_ERROR_CODES, ROUTE_PENDING_TEXT, errorText, isRoutePending } from '../api/errorPolicy';
-import type { Action, ConsensusStatus, DataStatus, TLeg } from '../api/enums';
+import type { Action, ConsensusStatus, DataStatus, Lifecycle, TLeg } from '../api/enums';
 import type { Confidence, Gap } from '../api/types';
 import { ACTION_COLOR, ACTION_FULL, ACTION_SHORT, CONF_LEVEL, DATA_STATUS, GAP_REASON } from '../i18n/labels';
 import { fmtTime } from '../lib/format';
 import { isNotApplicable } from '../lib/dataGaps';
 
 /** 策略 + 动作徽标。措辞为“规则信号/候选”，不是投资建议 */
-export function ActionBadge({ action, strategyName, tLeg, size = 'sm' }: { action: Action; strategyName?: string; tLeg?: TLeg | null; size?: 'sm' | 'lg' }) {
+export function ActionBadge({ action, strategyName, tLeg, lifecycle, size = 'sm' }: { action: Action; strategyName?: string; tLeg?: TLeg | null; lifecycle?: Lifecycle; size?: 'sm' | 'lg' }) {
   const label = ACTION_SHORT[action] + (tLeg ? (tLeg === 'sell_first' ? '·先卖' : '·先买') : '');
   return (
     <Tooltip title={`${strategyName ? strategyName + '：' : ''}${ACTION_FULL[action]}`}>
       <span className={`action-badge ${size}`} style={{ borderColor: ACTION_COLOR[action], color: ACTION_COLOR[action] }}>
         {strategyName && size === 'sm' ? <i className="sk">{strategyName.slice(0, 2)}</i> : null}
-        {label}
+        {label}{lifecycle === 'simulating' ? <b className="small"> · 模拟中</b> : null}
       </span>
     </Tooltip>
   );

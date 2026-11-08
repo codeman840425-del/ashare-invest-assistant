@@ -44,6 +44,7 @@ export const routes: RouteObject[] = [
       { path: 'portfolio', lazy: lazyPage(() => import('../pages/portfolio/PortfolioPage'), (m) => m.PortfolioPage) },
       { path: 'portfolio/import', lazy: lazyPage(() => import('../pages/portfolio/ImportWizardPage'), (m) => m.ImportWizardPage) },
       { path: 'portfolio/import/:batchId', lazy: lazyPage(() => import('../pages/portfolio/ImportWizardPage'), (m) => m.ImportWizardPage) },
+      { path: 'market/overview', lazy: lazyPage(() => import('../pages/market/MarketPage'), (m) => m.MarketPage) },
       { path: 'market', lazy: lazyPage(() => import('../pages/market/MarketPage'), (m) => m.MarketPage) },
       { path: 'stocks/:code', lazy: lazyPage(() => import('../pages/stock/StockPage'), (m) => m.StockPage) },
       { path: 'settings', element: <Navigate to="/settings/profile" replace /> },
@@ -92,6 +93,7 @@ export const routes: RouteObject[] = [
           return { element: <AdminGate><AdminSecurityReconciliationPage /></AdminGate> };
         },
       },
+      { path: 'admin/strategy-gates', lazy: async () => { const { AdminStrategyGatesPage } = await import('../pages/admin/AdminStrategyGatesPage'); return { Component: () => <AdminGate><AdminStrategyGatesPage /></AdminGate> }; } },
       { path: 'admin/*', element: <AdminGate><PlaceholderPage title="管理后台" /></AdminGate> },
       { path: '*', element: <NotFoundPage /> },
     ],

@@ -1,3 +1,4 @@
+import { promotionHandlers, resetPromotions } from './promotionHandlers';
 /**
  * MSW 处理器：按契约 v0.2.8 §7 的路径与响应结构返回示例数据。只拦截同源 `/api/v1/*`。
  * 未实现的端点统一返回 404 + 契约错误信封（code=NOT_FOUND），便于发现漏接。
@@ -58,6 +59,7 @@ export function resetMockState() {
   resetSuggestions();
   resetSession();
   resetStrategies();
+  resetPromotions();
   resetSignals();
   resetPlanDrafts();
   resetCandidates();
@@ -141,6 +143,7 @@ const routeHandlers = [
   // 证券主数据对账（T-F25，见 reconMock.ts；管理员校验在 accountHandlers 前置处理里）
   ...reconHandlers,
   // 策略库最小模拟（T-F22，见 strategyHandlers.ts）
+  ...promotionHandlers,
   ...strategyHandlers,
   http.get(`${API}/health/ready`, () => HttpResponse.json(HEALTH_READY)),
 

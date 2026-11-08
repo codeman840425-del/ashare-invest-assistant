@@ -31,5 +31,6 @@ export const NAV_ADMIN_INGEST = { path: '/admin/ingest', label: '采集状态（
 export const NAV_ADMIN_LICENCES = { path: '/admin/data-licences', label: '数据证书（管理）' };
 /** T-F25：证券主数据对账差异（前端路由与接口同名 /admin/securities/reconciliation） */
 export const NAV_ADMIN_RECON = { path: '/admin/securities/reconciliation', label: '主数据对账（管理）' };
-export const navMoreFor = (role: string | undefined) => (role === 'admin' ? [...NAV_MORE, NAV_ADMIN, NAV_ADMIN_INGEST, NAV_ADMIN_LICENCES, NAV_ADMIN_RECON] : NAV_MORE);
+export const NAV_ADMIN_GATES = { path: '/admin/strategy-gates', label: '策略门禁（管理）' };
+export const navMoreFor = (role: string | undefined) => (role === 'admin' ? [...NAV_MORE, NAV_ADMIN, NAV_ADMIN_INGEST, NAV_ADMIN_LICENCES, NAV_ADMIN_RECON, NAV_ADMIN_GATES] : NAV_MORE);
 

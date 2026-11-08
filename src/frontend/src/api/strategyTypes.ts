@@ -9,7 +9,7 @@ export interface StrategyTemplate {
   name: string;
   horizons: Horizon[];
   current_version: { id: Uuid; version_no: number; lifecycle: Lifecycle };
-  health: { state: string; weight: Decimal; n: number };
+  health: { state: string; weight: Decimal; n: number } | null;
   /** v0.2.7：取当前版本关联 L1 卡片的值，未关联为 normal */
   risk_level: CardRiskLevel;
 }

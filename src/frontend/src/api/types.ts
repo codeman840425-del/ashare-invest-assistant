@@ -98,6 +98,12 @@ export interface RiskFlag {
 }
 export interface Stops { stop_loss: Decimal | null; take_profit: Decimal | null; time_stop_days: number | null }
 export interface Confidence { level: ConfidenceLevel; value: number }
+export interface ConfidenceComponents {
+  data_completeness: number;
+  dimension_agreement: number | null;
+  condition_margin: number | null;
+  margin_rules: { rule_id: string; value: Decimal; threshold: Decimal; scale: Decimal; scale_kind: 'declared' | 'atr14' | 'abs_threshold'; margin: number; weight: Decimal }[];
+}
 export interface Bar {
   t: DateStr | DateTime;
   open: Decimal;
@@ -149,7 +155,7 @@ export interface Notification {
   name: string | null;
   target: NotificationTarget;
 }
-export interface SuggestionSummaryAction { strategy_key: string; strategy_name: string; action: Action; t_leg: TLeg | null }
+export interface SuggestionSummaryAction { strategy_key: string; strategy_name: string; action: Action; t_leg: TLeg | null; lifecycle: Lifecycle }
 export interface SuggestionSummary {
   id: Uuid;
   created_at: DateTime;
@@ -205,7 +211,7 @@ export interface StrategyConclusion {
   t_leg: TLeg | null;
   candidate_signal_id: Uuid | null;
   score: number | null;
-  confidence: Confidence;
+  confidence: Confidence & { components: ConfidenceComponents };
   rule_refs: RuleRef[];
   model_refs: ModelRef[];
   priority_weight: Decimal;
@@ -245,6 +251,7 @@ export interface Suggestion extends DataStatusBlock {
   origin: SuggestionOrigin;
   snapshot_id: string;
   feature_set_version: string;
+  engine_policy: { version_no: number; content_sha256: string } | null;
   candidate_signal_ids: Uuid[];
   executability: { status: ExecutabilityStatus; reason_ids: Uuid[]; executable_signal_ids: Uuid[]; blocked_signal_ids: Uuid[] };
   plan_draft_ids: Uuid[];
@@ -273,7 +280,8 @@ export interface DailyReportStock {
   max_risk_level: RiskLevel | null;
   suggestion_id: Uuid | null;
   suggestion: SuggestionSummary | null;
-  change_from_previous: 'new' | 'changed' | 'unchanged' | 'removed';
+  change_from_previous: 'new' | 'changed' | 'unchanged' | 'removed' | null;
+  change_fields: ('actions' | 'confidence_level' | 'executability' | 'max_risk_level')[];
   highlights: TextWithEvidence[];
   invalidation: TextWithEvidence[];
   next_watch: TextWithEvidence[];
@@ -292,8 +300,8 @@ export interface DailyReport extends DataStatusBlock {
   account: {
     total_assets: Decimal;
     cash: Decimal;
-    position_pct: Decimal;
-    pnl_day: Decimal;
+    position_pct: Decimal | null;
+    pnl_day: Decimal | null;
     position_vs_regime: 'below' | 'within' | 'above' | null;
   } | null;
   reconciliation: { status: ReconciliationStatus; as_of: DateTime | null; diff_count: number; important_count: number };
@@ -420,8 +428,8 @@ export interface TerminalAccount {
   account_id: Uuid;
   total_assets: Decimal;
   cash_available: Decimal;
-  position_pct: Decimal;
-  pnl_day: Decimal;
+  position_pct: Decimal | null;
+  pnl_day: Decimal | null;
   regime: MarketRegime | null;
   regime_position_range: RegimePositionRange | null;
   data_status: DataStatus;

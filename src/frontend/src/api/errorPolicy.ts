@@ -115,6 +115,11 @@ export function errorText(e: unknown): string {
  * 因此只按“契约里不会返回资源 404 的集合 / 聚合端点”判断：这些路径（不带 id 段）上的 404 只可能是路由不存在。
  * 带 account_id / security_code 的请求可能因归属或证券不存在而 404（契约 §7.2、#27），一律按原文案处理（保守）。
  * 非信封的 404（如 FastAPI 默认 {"detail":"Not Found"} → HTTP_ERROR）在这些路径上同样算路由不存在。
+ *
+ * T-F33（T13 已知问题）：`GET /securities/{code}` 详情路由本版本未实现（后端只注册了 /search 与 /?q= 别名），
+ * 未实现时同样返回 404 NOT_FOUND 信封，与“证券不存在”无法区分。前端在 StockPage 用 404 响应是否有
+ * `details.superseded_by`（契约 §7.3：北交所旧代码→404 带该键）区分：带键的是真实“资源 404”，不带键的按
+ * “功能开发中”展示——搜索命中的证券必然存在（主数据来自交易所列表），裸 404 只可能是路由未实现。
  */
 export const ROUTE_PENDING_PATHS: readonly string[] = [
   '/today', '/daily-reports', '/notifications', '/notifications/unread-count', '/stream', '/suggestions', '/signals',

@@ -1,6 +1,7 @@
-import { Button, Result, Tabs, Tag, Tooltip } from 'antd';
+import { Button, Empty, Result, Tabs, Tag, Tooltip } from 'antd';
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ApiError } from '../../api/client';
+import { ROUTE_PENDING_TEXT } from '../../api/errorPolicy';
 import { ENUMS } from '../../api/enums';
 import { CODE_RE, useBarsOf, useBarsWindow, useQuote, useSecurityProfile } from '../../api/marketQueries';
 import type { SecurityProfile } from '../../api/marketTypes';
@@ -39,11 +40,29 @@ export function StockPage() {
   }
   if (profile.isPending) return <div className="page-scroll" data-testid="stock-page"><Loading /></div>;
   if (profile.isError) {
+    // T-F33（T13 已知问题）：证券详情 GET 路由本版本未实现，404 与“证券不存在”同形无法区分（errorPolicy T-F20 注）。
+    // 北交所旧代码的 404 带 details.superseded_by（契约 §7.3），是真实资源 404，仍显示原文案；其余裸 404 按“功能开发中”展示，不白屏。
     const nf = profile.error instanceof ApiError && profile.error.status === 404;
+    const superseded = nf ? (profile.error as ApiError).details?.superseded_by : undefined;
     return (
       <div className="page-scroll" data-testid="stock-page">
-        {nf ? (
-          <Result status="404" title="未找到该证券" subTitle={<span className="mono">{code}</span>} extra={<Button size="small" onClick={() => navigate('/market')}>去市场概览</Button>} />
+        {nf && !superseded ? (
+          <Empty
+            className="route-pending"
+            data-testid="route-pending"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={<span>{ROUTE_PENDING_TEXT}<br /><span className="muted small">证券档案正在建设中；搜索与行情不受影响，可先在交易终端查看该证券。</span></span>}
+            style={{ margin: '48px auto' }}
+          />
+        ) : nf ? (
+          <Result
+            status="404"
+            title="未找到该证券"
+            subTitle={typeof superseded === 'string'
+              ? <span><span className="mono">{code}</span> · 北交所旧代码，请使用 <span className="mono">{superseded}</span></span>
+              : <span className="mono">{code}</span>}
+            extra={<Button size="small" onClick={() => navigate('/market')}>去市场概览</Button>}
+          />
         ) : <ErrorBox error={profile.error} />}
       </div>
     );

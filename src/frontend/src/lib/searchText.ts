@@ -5,6 +5,22 @@ import { errorText } from '../api/errorPolicy';
 export const QUOTE_MISSING_TEXT = '行情源缺此代码';
 export const QUOTE_MISSING_TIP = '你的数据证书对应的行情源代码表里没有这只证券，行情、K 线可能取不到；档案等公开主数据不受影响';
 
+/**
+ * T-F33：搜索命中高亮。把 text 中第一处 needle（不区分大小写）切成 [前, 命中, 后]；
+ * 没有命中返回 null。toUpperCase 会变长的字符（如 ß→SS）退回原样 indexOf，避免错位。
+ */
+export function splitHighlight(text: string, needle: string): [string, string, string] | null {
+  if (!needle) return null;
+  const t = text.toUpperCase();
+  const n = needle.toUpperCase();
+  if (t.length === text.length && n.length === needle.length) {
+    const i = t.indexOf(n);
+    return i < 0 ? null : [text.slice(0, i), text.slice(i, i + n.length), text.slice(i + n.length)];
+  }
+  const i = text.indexOf(needle);
+  return i < 0 ? null : [text.slice(0, i), text.slice(i, i + needle.length), text.slice(i + needle.length)];
+}
+
 /** 搜索出错时下拉里的提示（契约 §7.3 ⑥：400/401/403/429，网关 414；其余按 errorText 通用规则） */
 export function searchErrorText(e: unknown): string {
   if (e instanceof ApiError) {

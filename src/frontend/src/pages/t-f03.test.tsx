@@ -125,9 +125,9 @@ describe('个股档案 /stocks/:code', () => {
     renderAt('/stocks/abc');
     expect(await screen.findByText('证券代码格式不正确')).toBeInTheDocument();
   });
-  it('不存在的证券 → 404 提示', async () => {
+  it('不存在的证券（mock 404，裸信封）→ 按 T-F33 口径显示「功能开发中」空态（真后端详情路由未实现，404 与不存在同形）', async () => {
     renderAt('/stocks/999999.SH');
-    expect(await screen.findByText('未找到该证券')).toBeInTheDocument();
+    expect(await screen.findByTestId('route-pending')).toHaveTextContent('功能开发中');
   });
 });
 

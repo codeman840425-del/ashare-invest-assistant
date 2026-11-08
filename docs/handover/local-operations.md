@@ -1,6 +1,6 @@
 # 本地部署与检查（默认离线；操作前审批）
 
-> 以下是接班操作说明，本交接任务没有执行启动、迁移、外部调用、建库或部署。现有数据库在通知迁移/回滚门槛修复前不得盲目运行up或upgrade head。
+> 以下是接班操作说明，本交接任务没有执行启动、迁移、外部调用、建库或部署。候选修复已通过，但0027维护窗口复验与用户审批未完成前不得盲目运行up或upgrade head。
 
 ## 1. 前置与版本冻结
 - 从被批准移交的现有工作副本开始；本手册不授权克隆/推送、远程登录或接管另一个账户。
@@ -11,7 +11,7 @@ git status --short
 git rev-parse HEAD
 git log --oneline origin/main..HEAD
 ```
-- origin/main仅是本地跟踪引用，可能陈旧；本命令不联网、不代表远程已经确认。最终SHA填 `<TBD-final-main-sha>`；有他人WIP不清理、不打包、不误作候选。
+- origin/main仅是本地跟踪引用，可能陈旧；本命令不联网、不代表远程已经确认。最终SHA填 `<TBD>`（最终合并hash）；有他人WIP不清理、不打包、不误作候选。
 - 配置模板是deploy/env/.env.example，实际配置在仓库外/被忽略文件；不要输出实际.env、compose完整解析配置、环境变量全集或服务凭据。
 - 默认本地dev叠加层采用MAIRUI_MODE=replay。既有环境覆盖仍须运维私下核实；切换live不是普通启动选项，必须另获审批，保持唯一获准调用方与采集闭锁。
 
@@ -37,26 +37,20 @@ pnpm -C src/frontend exec vitest run src/pages/p2n05-ai.test.tsx
 # 前端typecheck：仅在任务授权时执行，不构建产物
 pnpm -C src/frontend exec tsc --noEmit -p tsconfig.app.json
 ```
-后端selfchecks常依赖独立PostgreSQL/Redis、网络隔离和固定测试身份。未核对fixture/依赖/清理责任时不要运行；获得专用隔离环境后，从src/backend用 `uv run pytest <explicit-test-file> -k <case>` 只跑相关用例。不要连接共享/生产库，不使用真实用户样本。实际通过数、未跑项和SHA由 `<TBD-test-freeze-sha>` 的报告填写；本手册不复用历史数字作新验收。
+后端selfchecks常依赖独立PostgreSQL/Redis、网络隔离和固定测试身份。未核对fixture/依赖/清理责任时不要运行；获得专用隔离环境后，从src/backend用 `uv run pytest <explicit-test-file> -k <case>` 只跑相关用例。不要连接共享/生产库，不使用真实用户样本。已知结果见progress-board/README：T-O33报告7通过，T-A43在5a26d17候选抽2通过；这不是最终合并hash的全量验收。
 
-## 4. 启动与迁移（仅获批的新隔离环境或已完成预检的目标）
-```bash
-# 这些会启动服务、构建镜像或改变数据库，不是纯只读检查
-# 先完成私有前置、备份及0025旧事件/回滚门槛确认
-deploy/scripts/up.sh
-deploy/scripts/compose.sh ps -a
-```
-- up.sh默认带build；服务链含数据库/Redis→migrate（alembic upgrade head）→Timescale策略→db-roles依赖与应用/网关，实际以当前compose为准；任何一次性服务失败要停止排查，不绕过依赖。
-- 现有数据必须先备份，且不能把缺主密钥当全新部署。已有卷缺封装私钥应从可信备份恢复，不重新生成覆盖。
-- 独立核验迁移元数据可在src/backend运行 `uv run alembic heads`、`uv run alembic history`；它们用于核对代码链，不等于数据库升级通过。连接隔离库后，获批才运行 `uv run alembic current`、`uv run alembic upgrade head`。
-- 当前代码末段0020→0022→0023→0024→0025→0026，单一head=0026；0021不在活动链，不为补编号合入暂停迁移。收尾时核对是否有新迁移。
-- 0025旧事件非空拒迁；0025 downgrade尚不可执行，0026降级refs保全待修。不要直接套用通用 `alembic downgrade` 命令回滚有业务数据的库。
-- ACL必须在迁移到其要求的head后执行；旧revision缺列时授权fail-closed是预期。业务worker用aia_api、采集用aia_ingest、删除维护用aia_maint，不能把业务进程改成属主解决报错。
-- `deploy/db/roles/apply-roles.sh`、`verify-roles.sh` 已存在；由运维通过当前compose的db-roles环境执行，禁止手工把口令写命令行。候选closeout.sh/新一键修复属于ops侧枝，必须先确认其已纳入获批提交，不假设main已有。
+## 4. 部署方法与迁移门槛
+- **部署方法：`<TBD>`**，由收口时根据准确目标、最终合并hash及用户审批填写；本文不指定自动启动命令，不授权真实部署。
+- 现有数据先备份；已有主密钥/证书封装私钥必须匹配，不能重新生成替代。
+- 已知候选链0020→0022→0023→0024→0025→0026→0027，单一head=0027；0021仍不在活动链，不合入暂停迁移补编号。
+- T-B92 d5a9a60已实现历史来源证明、unknown排除新投影与保留事实的可逆降级；旧键冲突条件拒绝，0027维护窗口复验仍待。不可直接套通用downgrade处理业务库。
+- T-O33 5a26d17已通过：最小ACL在迁移要求满足后应用；worker=aia_api，采集=aia_ingest，注销=aia_maint，不能改属主绕过失败。正式范围以最新契约T-A43矩阵为准。
+- closeout自检/部署闸门已静态审查，verify路径在db-roles容器；这不是执行部署的批准。此前T-A43没有执行部署脚本或部署开关。
+- B2真实麦蕊调用/采集完成接线待用户批准；默认replay，不因隔离库恢复而开放真实外部调用。
 
 ## 5. 健康、登录与备份
-- 用compose ps核全部应有服务；随后在获准本地网关验证首页/登录/健康端点和实际角色负例，不只看容器启动成功。路径/端口从当前配置取得，使用 `<TBD-local-base-url>`，不硬编码个人地址。
+- 用compose ps核全部应有服务；随后在获准本地网关验证首页/登录/健康端点和实际角色负例，不只看容器启动成功。路径/端口从当前配置取得，目标地址归部署方法/用户审批 `<TBD>`，不硬编码个人地址。
 - 注册默认closed；无本人approved账号时，create-admin是否实现是阻塞，不能按plan中的意图命令假定可用，不能擅自开放注册或转用测试密码。
 - 备份入口 `deploy/scripts/db-backup.sh`；恢复演练见 `deploy/runbooks/database.md`。数据库dump、imports原始文件卷、匹配主密钥/证书封装私钥必须配套；密钥与dump分开、受控离线保存。
 - 恢复会覆盖目标数据，必须选专用恢复库并确认批准；不在交接中执行。不要把 `down.sh -v` 当普通停止命令，它会删除数据卷。
-- 收尾上线仍欠全服务健康、页面/登录、生产来源/ACL、备份恢复、带数据升降级等指定证据，准确范围由 `<TBD-release-gate>` 填写。
+- 收尾上线仍欠全服务健康、页面/登录、生产来源/ACL、备份恢复、带数据升降级等指定证据，准确范围归用户审批 `<TBD>`，不能写成已经上线。

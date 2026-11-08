@@ -1307,6 +1307,29 @@ evidence: Evidence[]
 6. **严重度**：invalidation → important，其余 → attention，按事件定，不因实例数提高。
 
 
+**T-A40 裁定（计划草案数量与实例预算）**：
+
+1. Phase 2 不新增“单笔最大亏损上限”配置；模板 risk_suggestions 仅展示，不作约束。该项未配置时跳过，不报 gap、不拒绝，也不以现金/资产比例自造上限；数量仍取其余现金含费用缓冲、单只上限、实例预算、ST 限额等约束的最小值。草案仍输出 `max_loss_amount = qty_range.max × (price_range.high − stop_loss) + 买卖费用估算`，`max_loss_pct = max_loss_amount / 总资产 × 100`（百分数）。总资产未知时 pct=null 加 gap；没有 stop_loss 且 RC1 关闭时两值均 null 并警示。RC1 关闭但已有有效止损时保留计算值，仅警示不主动监测。
+2. budget_amount=null 时预算不约束、不报 gap、不触发 STRATEGY_BUDGET_EXHAUSTED。非空时，已用额度为本人 active/triggered、buy/add 计划最新版本金额之和：优先 qty×price，缺其一用 size_amount，均缺则 unknown。归属按 plan_versions v1 冻结 candidate_signal_ids→候选 instance_id；多实例计划全额计入每个来源实例，不按持仓/成交反推。结果标 estimate，用户上下文冻结 budget_used、budget_amount、参与 plan_ids；多来源草案取各实例剩余最小值。任一参与金额 unknown 时拒绝 buy/add 并给 gap，不影响 sell/reduce；剩余≤0 触发 STRATEGY_BUDGET_EXHAUSTED，不生成买入/加仓草案。确认须重验预算，偏离确认不能绕过。
+
+**T-A43 裁定（P2N-06 五表角色最小权限与旧事件迁移）**：S/I/U/D 分别为 SELECT/INSERT/UPDATE/DELETE，表均在 app schema；业务 worker 使用 aia_api，采集使用 aia_ingest，注销使用 aia_maint。
+
+| 表 | aia_ingest | aia_api（含 worker） | aia_maint |
+|---|---|---|---|
+| notification_refs | 无 SIUD | S、I；无 U/D | S(notification_id)、D；无 I/U |
+| intraday_candidate_refs | 无 SIUD | S、I；无 U/D | S(instance_id)、D；无 I/U |
+| signal_states | 无 SIUD | S、I、U(last_tick_id,rule_states,state,changed_at)；无 D | S(source_licence_id,id)、D；无 I/U |
+| intraday_universe | 无 SIUD | I、U(computed_at)，S(trade_date,source_licence_id,security_code,computed_at) 仅 UPSERT 所需列；无 D | S(source_licence_id)、D；无 I/U |
+| signal_events | 无 SIUD | S、I；无 U/D | S(id,user_id,source_licence_id)、D；无 I/U，仍受归属保护 |
+
+这是对 T-A38 Part 0 的正式收口；signal_states 维护 SELECT 增加 id，用于删除链依赖，T-A43 逐列差异条件由本裁定解除。未列操作/列不授予，不以表级 SELECT 替代维护谓词列；撤清遗留表级/列级权限及 PUBLIC/继承影响，禁止借此授 DDL/TRUNCATE/REFERENCES/TRIGGER。关联子查询仍依赖既定最小授权。共享事件删除按 source_licence_id→user_data_licences.user_id 判本人，user scope 同时核对 user_id，一致才允许经既有维护注销保护删除；不得撤触发器或改用属主绕过。
+
+旧事件迁移遵守四条：
+1. 仅凭可证明的历史证据（原始快照、明确外键、已核导入映射）回填；不猜归属、不清表。证据不足继续拒迁，由运维先受控隔离 legacy 存档，不擅自改方案。
+2. instance_id/instance_ids 按 T-A34 排序后冻结；缺历史绑定为 unknown，不把 null/[] 当“已证实为空”，不进入新投影，不重跑规则补历史候选。
+3. 通知 refs 只按显式历史关系建立；不补通知、不重置已读、不虚增 merged_count/version。
+4. 降级必须完全可逆；0025 不得固定抛错冒充回滚，0026 降级前保留完整 refs，再升恢复；旧键冲突条件拒绝并保持事务/事实，不静默合并或丢数据。0027 维护窗口升降级复验仍为发布门槛。
+
 ## 8. SSE `GET /stream` 🔒
 - `text/event-stream`；每 15 秒发一次 `heartbeat`；支持 `Last-Event-ID` 续传，服务端保留最近 10 分钟的事件；断线时客户端退回到轮询 `/notifications/unread-count`，终端与首页改为每 ≥ 15 秒带 `If-None-Match` 轮询 `/terminal`、`/today`。
 - 每个事件：`id: <单调递增字符串>`，`event: <type>`，`data: <JSON>`。

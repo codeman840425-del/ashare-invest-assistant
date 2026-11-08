@@ -1,0 +1,146 @@
+[
+  {
+    "index": 0,
+    "offset_seconds": 0,
+    "price": "12.50",
+    "note": "synthetic"
+  },
+  {
+    "index": 1,
+    "offset_seconds": 30,
+    "price": "9.99",
+    "note": "synthetic"
+  },
+  {
+    "index": 2,
+    "offset_seconds": 60,
+    "price": "15.00",
+    "note": "synthetic"
+  },
+  {
+    "index": 3,
+    "offset_seconds": 90,
+    "price": "7.25",
+    "note": "synthetic"
+  },
+  {
+    "index": 4,
+    "offset_seconds": 120,
+    "price": "22.10",
+    "note": "synthetic"
+  },
+  {
+    "index": 5,
+    "offset_seconds": 150,
+    "price": "3.75",
+    "note": "synthetic"
+  },
+  {
+    "index": 6,
+    "offset_seconds": 180,
+    "price": "18.40",
+    "note": "synthetic"
+  },
+  {
+    "index": 7,
+    "offset_seconds": 210,
+    "price": "11.05",
+    "note": "synthetic"
+  },
+  {
+    "index": 8,
+    "offset_seconds": 240,
+    "price": "6.60",
+    "note": "synthetic"
+  },
+  {
+    "index": 9,
+    "offset_seconds": 270,
+    "price": "14.85",
+    "note": "synthetic"
+  },
+  {
+    "index": 10,
+    "offset_seconds": 300,
+    "price": "20.00",
+    "note": "synthetic"
+  },
+  {
+    "index": 11,
+    "offset_seconds": 330,
+    "price": "8.30",
+    "note": "synthetic"
+  },
+  {
+    "index": 12,
+    "offset_seconds": 360,
+    "price": "13.45",
+    "note": "synthetic"
+  },
+  {
+    "index": 13,
+    "offset_seconds": 390,
+    "price": "5.90",
+    "note": "synthetic"
+  },
+  {
+    "index": 14,
+    "offset_seconds": 420,
+    "price": "17.70",
+    "note": "synthetic"
+  },
+  {
+    "index": 15,
+    "offset_seconds": 450,
+    "price": "10.15",
+    "note": "synthetic"
+  },
+  {
+    "index": 16,
+    "offset_seconds": 480,
+    "price": "4.20",
+    "note": "synthetic"
+  },
+  {
+    "index": 17,
+    "offset_seconds": 510,
+    "price": "19.95",
+    "note": "synthetic"
+  },
+  {
+    "index": 18,
+    "offset_seconds": 540,
+    "price": "12.00",
+    "note": "synthetic"
+  },
+  {
+    "index": 19,
+    "offset_seconds": 570,
+    "price": "7.80",
+    "note": "synthetic"
+  },
+  {
+    "index": 20,
+    "offset_seconds": 600,
+    "price": "16.35",
+    "note": "synthetic"
+  },
+  {
+    "index": 21,
+    "offset_seconds": 630,
+    "price": "9.10",
+    "note": "synthetic"
+  },
+  {
+    "index": 22,
+    "offset_seconds": 660,
+    "price": "21.55",
+    "note": "synthetic"
+  },
+  {
+    "index": 23,
+    "offset_seconds": 720,
+    "price": "6.05",
+    "note": "synthetic"
+  }
+]

@@ -76,6 +76,7 @@ TEXT_WITH_EVIDENCE_BAD_ITEM = '@.type() != "object" || !(@.text.type() == "strin
 candidate_signals = Table(
     "candidate_signals",
     metadata,
+    uuid_col("origin_signal_event_id", fk="app.signal_events.id"),
     uuid_col("id", nullable=False, server_default=text("gen_random_uuid()")),
     user_fk(),
     uuid_col("instance_id", fk="app.strategy_instances.id"),

@@ -59,6 +59,8 @@ from sqlalchemy import Engine
 
 from app.config import Settings
 from app.db.engine import engine_for
+from app.intraday.engine import TASK as INTRADAY_UPDATED
+from app.intraday.engine import task as intraday_updated_task
 from app.master.mairui_snapshot import TASK as MAIRUI_SNAPSHOT
 from app.plans.worker import TASK as PLAN_CONDITIONS
 from app.plans.worker import task as plan_conditions_task
@@ -360,6 +362,7 @@ def vendor_sweep_task(settings: Settings) -> int:
 
 #: 任务名 → 实现
 TASKS: Final[dict[str, Task]] = {
+    INTRADAY_UPDATED: intraday_updated_task,
     PLAN_CONDITIONS: plan_conditions_task,
     TRACKING: tracking_task,
     "master.mairui_daily_sweep": mairui_daily_sweep,

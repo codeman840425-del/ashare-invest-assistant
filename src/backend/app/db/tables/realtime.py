@@ -33,6 +33,7 @@ from app.schemas.enums import (
 intraday_universe = Table(
     "intraday_universe",
     metadata,
+    uuid_col("source_licence_id", nullable=False, fk="app.user_data_licences.id"),
     day("trade_date", nullable=False),
     txt("security_code", nullable=False),
     integer("tier", nullable=False),
@@ -40,7 +41,7 @@ intraday_universe = Table(
     integer("watchers_count"),
     integer("focus_users_count"),
     ts("computed_at", nullable=False, default_now=True),
-    PrimaryKeyConstraint("trade_date", "security_code"),
+    PrimaryKeyConstraint("trade_date", "source_licence_id", "security_code"),
     CheckConstraint("tier IN (1, 2, 3)", name="tier"),
     schema=APP,
 )
@@ -48,6 +49,7 @@ intraday_universe = Table(
 signal_states = Table(
     "signal_states",
     metadata,
+    uuid_col("source_licence_id", nullable=False, fk="app.user_data_licences.id"),
     pk_uuid(),
     txt("security_code", nullable=False),
     uuid_col("strategy_version_id", nullable=False, fk="app.strategy_versions.id"),
@@ -56,7 +58,7 @@ signal_states = Table(
     txt("state"),
     txt("last_tick_id"),
     ts("changed_at", nullable=False, default_now=True),
-    UniqueConstraint("security_code", "strategy_version_id", "params_hash"),
+    UniqueConstraint("source_licence_id", "security_code", "strategy_version_id", "params_hash"),
     schema=APP,
     comment="全站共享的当前状态",
 )
@@ -81,8 +83,14 @@ user_signal_states = Table(
 signal_events = Table(
     "signal_events",
     metadata,
+    uuid_col("source_licence_id", nullable=False, fk="app.user_data_licences.id"),
     pk_uuid(),
     txt("tick_id"),
+    uuid_col("input_snapshot_id", fk="app.data_snapshots.id"),
+    uuid_col("engine_policy_id", fk="app.engine_policies.id"),
+    uuid_col("strategy_version_id"),
+    txt("params_hash"),
+    txt("rule_id"),
     txt("scope", nullable=False),
     user_fk(nullable=True),
     txt("security_code", nullable=False),
@@ -92,6 +100,15 @@ signal_events = Table(
     jsonb("detail"),
     ts("quote_ts"),
     created_at(),
+    UniqueConstraint(
+        "source_licence_id",
+        "security_code",
+        "strategy_version_id",
+        "params_hash",
+        "rule_id",
+        "tick_id",
+    ),
+    UniqueConstraint("user_id", "security_code", "trigger_kind", "tick_id"),
     one_of("scope", ["shared", "user"]),
     one_of("trigger_kind", ["flip", "invalidation", "stale", "resume"]),
     CheckConstraint("(scope = 'user') = (user_id IS NOT NULL)", name="scope_user"),
@@ -294,5 +311,15 @@ user_realtime_prefs = Table(
     ts("updated_at", nullable=False, default_now=True),
     PrimaryKeyConstraint("user_id"),
     one_of("notify_cadence", ["realtime", "1m", "3m", "5m"]),
+    schema=APP,
+)
+
+intraday_candidate_refs = Table(
+    "intraday_candidate_refs",
+    metadata,
+    uuid_col("instance_id", nullable=False, fk="app.strategy_instances.id"),
+    uuid_col("event_id", nullable=False, fk="app.signal_events.id"),
+    uuid_col("candidate_id"),
+    PrimaryKeyConstraint("instance_id", "event_id"),
     schema=APP,
 )

@@ -762,6 +762,8 @@ def apply_run(
     now: dt.datetime | None = None,
     raw_root: Path | None,
     force_rebuild: bool = False,
+    rebuild_search_terms: bool = False,
+    initials_max_variants: int = 16,
 ) -> RunResult:
     """写一次 ``master_runs`` 并合并；不 commit。``bootstrap`` 不查行数下降。"""
     now = now or dt.datetime.now(dt.UTC)
@@ -796,6 +798,11 @@ def apply_run(
     status = "ok" if len(oks) == len(snaps) else ("failed" if not oks else "partial")
     if not snaps:
         status = "ok"
+    term_stats = None
+    if rebuild_search_terms:
+        from app.master.terms import rebuild
+
+        term_stats = rebuild(conn, maximum=initials_max_variants)
     st: dict[str, Any] = {
         "trade_date": trade_date.isoformat(),
         "sources": {
@@ -810,6 +817,8 @@ def apply_run(
         "rejected": sorted(s.source for s in snaps.values() if s.status == "rejected"),
         **stats.as_dict(),
     }
+    if term_stats is not None:
+        st["search_terms"] = term_stats
     conn.execute(
         update(master_runs)
         .where(master_runs.c.id == run_id)

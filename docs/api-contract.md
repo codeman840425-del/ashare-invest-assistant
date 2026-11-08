@@ -8,6 +8,9 @@
 
 ## 0. 变更记录
 
+> T-A24：Phase 2 后续接口缺口集中在 §7.11，全部标记 `status: draft`；不表示路由已实现，也不改变现有已生效接口或门禁。
+
+
 ### v0.2.9（2026-11-02，T-A10：处理前端 T-A09、T-F17、T-F18 与 review-fixes 遗留的待定项（报告 `T-A10-pending.md` P01–P21，按建议裁定采纳），并入测试 T-T23 的三项裁定；同版并入 T-A11（研究候选接口，#19–#25，版本号不升）与管理端证书遗留裁定（T-F22 遗留 1–5，#26）；**含不兼容变更**：#6（候选信号事件改为分页包装）、#11（放弃草案的请求体）、#12（`/non-executable-reasons` 默认只返回 `active`）；其余为新增字段、可空性放宽或规则写明）
 > 本版不新增产品功能：只同步已定的裁定、补齐字段语义与校验顺序。不写入任何证书值。
 > T-A11 只把 plan 已有的“研究候选卡”（plan 2.4 能力 2、3.1、3.3）写成接口，不加 plan 之外的功能；需要产品决定的按最保守的默认值执行，登记为 plan 第 9 节问题 66–71；T-F22 遗留的通知为默认执行（问题 74）。逐项裁定见 `reports/T-A11.md`。
@@ -1143,6 +1146,69 @@ evidence: Evidence[]
   - `version` 为契约版本；ETag 由内容哈希得出。
 
 ---
+
+### 7.11 Phase 2 后续最小补充（T-A24；status: draft）
+
+本节是待派单的设计契约，**status: draft** 是文档状态，不是响应字段或新增生命周期枚举。仅新增一个读端点，其余补足既有接口的字段/行为。实施任务须同步 OpenAPI、客户端类型和对应定点测试后再认定交付；没有实现时不得以空壳 200 冒称可用。既有 §1.3 鉴权/CSRF、§5.4 模拟隔离和 G1–G7 均不变；本节不授权任何外部调用。
+
+#### 7.11.1 六维日报（status: draft；P2N-01/04/05）
+
+在 §5.3 `DailyReport.stocks[]` 增加：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `analysis_snapshot_id` | `string(uuid) \| null` | 该股六维事实的不可变快照；无快照或旧版日报为 null |
+| `dimensions` | `DailyDimensionAnalysis[] \| null` | 新生成的非 removed 行恰好六项，按 §3 dimension 顺序；旧版日报、removed 行为 null，不伪装成已完成六维分析 |
+
+`DailyDimensionAnalysis`：`{dimension: dimension, facts: TextWithEvidence[], feature_refs: [{feature_key: string, status: "declared"|"verified_doc"|"verified_live"|"gap"|"deprecated"|null, evidence_ids: string[]}], data_status, data_as_of: string(datetime)|null, gaps}`；`data_status`/`gaps` 用 §1.1。
+
+- `facts` 只描述快照中已知的事实，引用本份日报顶层 `evidence`；同股证据沿用 §5.3 的代码前缀，不能悬空。未知指标的 `Evidence.value=null`，并记对应 gap；完全无来源时 `facts=[]`、`data_status=unavailable`、`data_as_of=null`，不补 0、不判 neutral。`feature_refs.status=null` 表示未登记，不能视为 verified_doc。
+- 六维是**事实覆盖**，不是六个新交易策略：技术/资金/基本面/情绪/板块与大盘/消息各列已知事实或缺口；不为凑满维度发明阈值、分数、看多看空结论。规则观点继续读 §5.2 的 `dimension_matrix`，只含实际启用策略；不把无规则的事实行塞入矩阵或置信度公式。
+- 字段等级与取数完整性独立：有 declared 数据不代表通过 G2；verified_doc 最多支持 simulating。F23 标题展示不等于风险识别验收，公告仍仅标题与原文链接（§5.1），不新增正文/摘要资讯能力。
+- `analysis_snapshot_id` 对应生成时刻的本人数据。历史日报只在读取投影中补 null，不更新旧正文；新输入产生新 revision。一个维度失败不阻断其他维度或整份日报，顶层汇总对应 gaps。
+
+#### 7.11.2 风控设置与可判定性（status: draft；P2N-02/08）
+
+沿用 §7.5 `GET/PUT /risk-controls`（不分页）。GET 返回六项有效设置；PUT 请求项 `{control, enabled: boolean, params: object}`，只覆盖所提交的 control，未提交项保持原值；返回完整六项有效设置（含只读 `source`）。同一 control 重复、未知键或参数类型错误 → `400 VALIDATION_ERROR`；合法类型但超出配置 min/max、区间 min > max → `422 RISK_CONTROL_INVALID_PARAMS`。整次更新原子提交，不部分写入；实际阈值及允许范围以 plan §6.1 配置为准，本节不新设范围。
+
+| control | params 的键（类型） |
+|---|---|
+| `stop_take` | `long_horizon_default_stop_pct: string(decimal)`、`clamp_to_price_limit: boolean` |
+| `position_cap` | `single_position_max_pct: string(decimal)` |
+| `total_exposure` | `regime_ranges: {uptrend: [string(decimal), string(decimal)], range: 同上, downtrend: 同上}`、`regime_confirm_days: int` |
+| `sector_concentration` | `sw_l1_max_pct: string(decimal)`、`concept_max_pct: string(decimal)` |
+| `loss_streak_drawdown` | `closed_loss_streak: int`、`drawdown_from_peak_pct: string(decimal)`、`strategy_sim_fail_streak: int`、`pause_on_trigger: boolean`、`pause_days: int` |
+| `plan_violation` | `checks: string[]`（只取 plan §6.1 已列的五种检查，不接受自定义表达式） |
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/risk-controls/evaluation` 🔒 | **新增**。`?security_code=` 必填，`&account_id=` 可选（默认账户同 T-A12）。只读本人已有缓存/持仓/设置，不拉取、不写事件或建议 → `200 RiskEvaluation`。参数错误 400，证券不存在或账户不存在/他人账户 404。 |
+
+`RiskEvaluation`：`{account_id: uuid|null, security_code, name, snapshot_id: uuid|null, evaluated_at: string(datetime), controls: [{control: risk_control, enabled: boolean, state: "ok"|"triggered"|"unknown"|"disabled", flags: RiskFlag[], gaps}], evidence: Evidence[], DataStatusBlock}`。
+
+- controls 恰好六项，按 RC1–RC6 排列；就所选证券评估单股项并附适用的账户/策略项。`flags[].evidence_ids` 指向本响应 evidence；snapshot_id 是读取依据的快照，完全无数据为 null。
+- enabled=false → disabled，可保留 RC1 关闭警示但不施加该项门控；已知触发 → triggered（仍可带部分输入 gap）；所需输入齐全且未触发才 ok；否则 unknown + gap，flags 可为 []。未接通 RC5/RC6 时是 unknown，不冒充 ok 或 disabled。
+- RC3 沿用 F25，不用卡片的 F50 代替；F25 null → “大盘环境未知”、partial、无 RC3 门控。RC2/RC4 缺分母/归属时额度未知（quantity_cap=null），不是无限额度或零额度；不得因此消除其他可执行性原因。未分类不触发 RC4。RC1–RC4 阈值、取整及 buy/add 门控仍按 plan §2.5.6/T-A15/T-R21，绝不改动作或阻止 sell/reduce。
+- 当前评价不能回写历史建议；建议仍读取生成时的风控标记与 gap。实际风控事件由业务作业幂等写入，复用 §7.5 的 RiskEvent，不增加第二套事件状态机。
+
+#### 7.11.3 模拟跟踪结果（status: draft；P2N-03/05/08）
+
+细化 §7.8 `GET /suggestions/{id}/tracking`：他人/不存在的建议返回 404；本人的建议返回 `200 {t1: Stat, t5: Stat, t20: Stat, results: TrackingResult[], DataStatusBlock}`。无结果 results=[] 并列 gap；GET 不触发行情拉取或补算。
+
+`TrackingResult`：`{strategy_version_id: uuid, instance_id: uuid|null, action: action, horizon_days: 1|5|20, state: "pending"|"complete"|"untradable"|"excluded"|"unavailable", entry_at: datetime|null, entry_price: string(decimal)|null, exit_at: datetime|null, exit_price: string(decimal)|null, benchmark_code: string, benchmark_entry_price: string(decimal)|null, benchmark_exit_price: string(decimal)|null, return_pct: string(decimal)|null, benchmark_return_pct: string(decimal)|null, excess_pct: string(decimal)|null, max_drawdown_pct: string(decimal)|null, max_runup_pct: string(decimal)|null, direction_correct: boolean|null, invalidation_triggered_at: datetime|null, exclusion_reason: string|null, price_basis: "qfq", cost_applied: boolean, evidence: Evidence[], evidence_ids: string[], gaps}`。
+
+- 每策略版本/建议/跟踪期唯一；停牌、一字板、forced_hold、wait 的排除与方向定义按 plan §2.8，不把 sell/reduce 的标的区间收益强行取反；缺基准只把相关结果置 null + gap。pending 表示尚未到期；unavailable 表示到期但缺计算所需数据；untradable/excluded 必有 exclusion_reason，不进入有效样本 n。价格依据列入本条 result 的 evidence，evidence_ids 必须能解析；可成交性使用不复权实际价格，收益及 entry/exit_price 使用同一 as-of 的 qfq 序列，原价与复权价分开留证。分钟线若无可核实的复权衔接依据，该项 unavailable + gap，不混用 raw/qfq 或生成时参考价与模拟入场价。
+- `results` 是**单条观测**，其十进制结果是 §5.1“统计收益使用 Stat”的明确草案例外，不是胜率/业绩聚合；界面必须写“模拟，不代表实际收益”。旧 t1/t5/t20 保留 Stat 约束，不能把 n 虚增到 5 来显示单样本；新前端读 results。策略聚合继续只用 Stat，n<5 为 null、n<30 标 small_sample。
+- §7.4 版本跟踪统计 `by_horizon[]` 追加 `pending_count: int`、`untradable_count: int`、`excluded_count: int`，均非负；有效 n 仍见各 Stat，不以总记录数替代。scope=site 只能返回策略级匿名聚合，results 只走本人建议端点，不随 site 暴露。
+
+#### 7.11.4 站内提醒与解释（status: draft；P2N-05/06/07/09）
+
+- `/signals`、`/notifications`、`/alerts` 列表沿用 §1.2 游标；signals 排序 `at desc, signal_event_id desc`，通知 `created_at desc, id desc`；其他筛选/结构沿用 §7.7B/7.8。所有读取和 SSE 只允许本人证书或本人用户层事件，事件重放不重复生成建议、提醒或通知。
+- 细化现有 `GET/PUT /notification-preferences`（不分页）：本轮补 `intraday_cadence: "realtime"|"1min"|"3min"|"5min"`，默认 1min；PUT `{intraday_cadence}` 仅更新此键，返回生效值；非法值 400 VALIDATION_ERROR。只影响推送合并节奏，不降低采集/求值频率。免打扰/外部 channels 不在本切片改契约或开放发送。
+- SSE 仍用 §8 既有事件；在保留窗口内按 Last-Event-ID 续传；重连后客户端同时重读本人列表/聚合，补偿超过十分钟的缺口并按事件 id 去重，不把保留窗口当完整历史。断线退回既定十五秒轮询，不新增 WebSocket 或第二套动作事件。
+- §5.2 Suggestion 与 §5.3 DailyReport 的既有 `explanation` 追加 `paragraphs: TextWithEvidence[]`、`prompt_version: string|null`、`validation_status: "passed"|"fallback"`；旧存档读投影可缺这些新增键，前端退回既有 text。新记录 paragraphs 中的引用只指本对象 evidence；text 为各段 text 按顺序换行拼接。LLM 成功时 source=llm、validation_status=passed；模板兜底为 source=template、validation_status=fallback（未调用时 llm_call_id=null），模板不标 AI 生成。
+- 解释在不可变正文提交**之前**生成/回退；提交后不异步改正文，必要时生成新建议/日报 revision。任何缺引用、新数字、越权信息、动作词或承诺违规均回退模板；超时/预算/模型故障不影响规则结论。action/score/confidence 与解释路径无关。不得发送密钥、账户/成交标识、个人信息或原始交割单；本切片只用公开/纯合成结构化证据联调，真实私有输入另核隐私门槛。
+- 计划/草案/提醒状态机已在 §7.7/7.7B，P2N-07 直接实现，**不新增候选直接转计划入口**；simulating 禁生草案，G7 仍由用户本人操作。
 
 ## 8. SSE `GET /stream` 🔒
 - `text/event-stream`；每 15 秒发一次 `heartbeat`；支持 `Last-Event-ID` 续传，服务端保留最近 10 分钟的事件；断线时客户端退回到轮询 `/notifications/unread-count`，终端与首页改为每 ≥ 15 秒带 `If-None-Match` 轮询 `/terminal`、`/today`。

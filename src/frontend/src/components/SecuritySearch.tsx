@@ -3,7 +3,7 @@ import { AutoComplete, Input } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
-import { QUOTE_MISSING_TEXT, QUOTE_MISSING_TIP, searchErrorText } from '../lib/searchText';
+import { QUOTE_MISSING_TEXT, QUOTE_MISSING_TIP, searchErrorText, splitHighlight } from '../lib/searchText';
 import { CODE_RE, SEARCH_Q_MAX, searchQLength, useSecuritySearch } from '../api/marketQueries';
 import { LISTING_STATUS, MATCH_KIND, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../i18n/labels';
 
@@ -42,18 +42,24 @@ export function SecuritySearch() {
     setText('');
     navigate(`/stocks/${code}`);
   };
+  // T-F33：命中高亮。代码/简称按当前输入 q 高亮（code_*、name_* 命中时子串就在其中）；
+  // 拼音首字母/曾用名/旧代码命中（matched_text 非空）在命中原文上高亮。匹配用归一化后的 q，展示保留原输入。
+  const hl = (text: string, on: string) => {
+    const parts = splitHighlight(text, on);
+    return parts ? <mark className="search-hl" data-testid="search-hl">{parts[1]}</mark> : null;
+  };
   const options = (res.data?.items ?? []).map((h) => ({
     value: h.security_code,
     label: (
       <span className="search-opt" data-testid={`search-hit-${h.security_code}`} data-match={h.match_kind}>
-        <span className="mono">{h.security_code}</span>
-        <span>{h.name}</span>
+        <span className="mono">{h.security_code}{hl(h.security_code, q)}</span>
+        <span>{h.name}{hl(h.name, q)}</span>
         {/* v0.2.8：默认结果含 ETF（stock > cdr > etf > index），非股票显示类型徽标 */}
         {h.type !== 'stock' ? <span className="search-flag type" data-testid={`search-type-${h.security_code}`}>{SECURITY_TYPE[h.type] ?? h.type}</span> : null}
         {h.risk_flag ? <span className="search-flag" title={SECURITY_RISK_FLAG_TIP[h.risk_flag]} data-testid={`search-risk-${h.security_code}`}>{SECURITY_RISK_FLAG[h.risk_flag] ?? h.risk_flag}</span> : null}
         {h.listing_status && h.listing_status !== 'listed' ? <span className="search-flag">{LISTING_STATUS[h.listing_status] ?? h.listing_status}</span> : null}
         {h.quote_missing === true ? <span className="search-flag" title={QUOTE_MISSING_TIP} data-testid={`search-quote-missing-${h.security_code}`}>{QUOTE_MISSING_TEXT}</span> : null}
-        {h.matched_text ? <span className="muted" data-testid={`search-matched-${h.security_code}`}>{MATCH_KIND[h.match_kind] ?? h.match_kind}：{h.matched_text}</span> : null}
+        {h.matched_text ? <span className="muted" data-testid={`search-matched-${h.security_code}`}>{MATCH_KIND[h.match_kind] ?? h.match_kind}：{h.matched_text}{hl(h.matched_text, q)}</span> : null}
       </span>
     ),
   }));

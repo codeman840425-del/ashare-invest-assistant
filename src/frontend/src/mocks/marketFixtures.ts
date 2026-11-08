@@ -160,7 +160,8 @@ const MATCH_ORDER: SecurityHit['match_kind'][] = ['code_exact', 'name_exact', 'i
 
 /**
  * 契约 §7.3 GET /securities/search?q&types&include_delisted&limit（v0.2.7）：按 security_match_kind 层级排序。
- * 示例数据没有当前简称的拼音，只演示代码/名称的精确、前缀、包含三类命中，以及曾用名（T-F26）。
+ * 示例数据没有当前简称的拼音，只演示代码/名称的精确、前缀、包含三类命中，以及曾用名（T-F26）；
+ * T-F33 补：当前简称拼音首字母精确/前缀命中（initials_exact / initials_prefix），matched_text 为简称原文。
  */
 /**
  * T-F26（契约 v0.2.9 内 #33 ②，§9 v0.2.9 验收 3）：曾用名示例。虚构夹具“示例银行”的曾用名“示例发展”，首字母 SLFZ。
@@ -168,6 +169,11 @@ const MATCH_ORDER: SecurityHit['match_kind'][] = ['code_exact', 'name_exact', 'i
  */
 export const FORMER_NAMES: Record<string, { name: string; initials: string; until: string }[]> = {
   '600000.SH': [{ name: '示例发展', initials: 'SLFZ', until: '2019-06-30' }],
+};
+/** T-F33：当前简称的拼音首字母示例（虚构证券，拼音仅供演示；YHKJ=演示科技、YSYH=示例银行） */
+export const CURRENT_INITIALS: Record<string, string> = {
+  '000001.SZ': 'YHKJ',
+  '600000.SH': 'YSYH',
 };
 /** quote_missing 的取值由调用方按本人证书给（ETF、指数恒为 null，在这里统一处理） */
 export type QuoteMissingOf = (code: string) => boolean | null;
@@ -200,6 +206,12 @@ export function searchSecurities(q: string, opts: { types?: string[]; limit?: nu
     const hit = (match_kind: SecurityHit['match_kind'], matched_text: string | null = null) => ({ match_kind, matched_text });
     if (h.security_code.slice(0, 6) === k) return hit('code_exact');
     if (h.name === raw) return hit('name_exact');
+    // T-F33：当前简称拼音首字母（后端词条表 name_initials；matched_text 为简称原文，契约 §7.3 v0.2.9 #33 ①）
+    const ini = CURRENT_INITIALS[h.security_code];
+    if (ini) {
+      if (ini === up) return hit('initials_exact', h.name);
+      if (ini.startsWith(up)) return hit('initials_prefix', h.name);
+    }
     if (h.security_code.startsWith(k)) return hit('code_prefix');
     if (h.name.startsWith(raw)) return hit('name_prefix');
     if (h.name.includes(raw)) return hit('name_contains');

@@ -304,6 +304,8 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 /* ---------- T-F03 个股档案 / 市场概览 ---------- */
 .dense-table.static .ant-table-tbody > tr { cursor: default; }
 .search-opt { display: flex; gap: 8px; }
+/* T-F33：搜索命中高亮 */
+.search-hl { background: rgba(227, 160, 8, 0.28); color: inherit; padding: 0; border-radius: 1px; }
 .ext-link { display: inline-flex; align-items: center; gap: 3px; }
 .ext-icon { font-size: 10px; opacity: 0.7; }
 .track { position: relative; display: inline-block; height: 6px; background: #1a2230; border-radius: 3px; overflow: hidden; }

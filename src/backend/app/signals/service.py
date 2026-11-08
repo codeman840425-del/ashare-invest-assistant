@@ -216,6 +216,7 @@ def write_candidate(
     content: SignalInput,
     facts: MarketFacts,
     market_rules: MarketRulesConfig,
+    origin_signal_event_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """Trusted producer input, never a public user-authored signal. Caller owns transaction."""
     if (
@@ -501,6 +502,7 @@ def write_candidate(
         locked.execute(
             insert(signals).values(
                 **body,
+                origin_signal_event_id=origin_signal_event_id,
                 id=identifier,
                 user_id=user_id,
                 instance_id=instance_id,
@@ -541,6 +543,9 @@ def write_candidate(
                 from_state=None,
                 to_state=state,
                 cause="executability_check",
+                detail={"signal_event_id": str(origin_signal_event_id)}
+                if origin_signal_event_id
+                else None,
                 at=content.created_at,
             )
         )

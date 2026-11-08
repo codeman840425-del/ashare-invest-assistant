@@ -70,6 +70,7 @@ def conclusion(
     source: Row[Any],
     policy: Row[Any],
     settings: Settings,
+    origin_signal_event_id: uuid.UUID | None = None,
 ) -> Conclusion:
     spec = version.config.get("spec", version.config)
     refs = result["rule_refs"]
@@ -257,7 +258,7 @@ def conclusion(
     identifier = uuid.uuid5(uuid.NAMESPACE_URL, canonical(signature))
     signal = signal.model_copy(update={"snapshot_id": identifier})
     features = frame["features"]
-    price = frame.get("raw_close")
+    price = frame.get("market_price", frame.get("raw_close"))
     facts = MarketFacts(
         price=price,
         is_suspended=features.get("f.is_suspended"),
@@ -283,6 +284,7 @@ def conclusion(
         content=signal,
         facts=facts,
         market_rules=settings.business.market_rules,
+        origin_signal_event_id=origin_signal_event_id,
     )
     if signal.proposed_action not in {"hold", "wait"} and candidate["id"] is None:
         raise ValueError("candidate_not_archivable:" + candidate["diagnostic"])

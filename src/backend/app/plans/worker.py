@@ -44,7 +44,7 @@ def check(
         return {
             "triggered": [],
             "gaps": ["user_not_approved"],
-            "delivery": "disabled_pending_p2n06",
+            "delivery": "persistent_in_app",
         }
     gaps, hits, observations = [], [], []
     if (
@@ -56,7 +56,7 @@ def check(
         return {
             "triggered": [],
             "gaps": ["calendar_not_open_or_not_covered"],
-            "delivery": "disabled_pending_p2n06",
+            "delivery": "persistent_in_app",
         }
     heads = conn.execute(
         select(action_plans)
@@ -261,12 +261,28 @@ def check(
                 {"condition_id": str(c.id), "alert_id": str(identifier)},
                 system=True,
             )
+            from app.notify.service import append
+
+            append(
+                conn,
+                owner=owner,
+                kind="plan_triggered",
+                severity="attention",
+                title="您的计划条件已满足",
+                body=c.description,
+                code=head.security_code,
+                target_type="plan",
+                target_id=str(head.id),
+                ref_type="plan_condition",
+                ref_id=str(c.id),
+                at=at,
+            )
             hits.append(str(identifier))
     return {
         "triggered": hits,
         "observations": observations,
         "gaps": gaps,
-        "delivery": "disabled_pending_p2n06",
+        "delivery": "persistent_in_app",
     }
 
 
@@ -303,4 +319,46 @@ def task(settings: Settings, user_id: str, as_of: str | None = None) -> int:
                     id=identifier, user_id=owner, purpose="plan", hash=digest, items=body
                 )
             )
+    from app.db.tables.notify import notifications
+    from app.notify.transport import enqueue, flush, publish
+    from app.workers.jobs import _redis
+
+    r = _redis(settings)
+    try:
+        with _engine(settings).connect() as conn:
+            notice_ids = (
+                conn.execute(
+                    select(notifications.c.id).where(
+                        notifications.c.user_id == owner,
+                        notifications.c.kind == "plan_triggered",
+                        notifications.c.updated_at == now,
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            rows = conn.execute(
+                select(alerts).where(
+                    alerts.c.id.in_([uuid.UUID(v) for v in result["triggered"]]),
+                    alerts.c.user_id == owner,
+                )
+            ).all()
+        for row in rows:
+            publish(
+                r,
+                owner,
+                "plan_triggered",
+                {
+                    "plan_id": row.what_happened["plan_id"],
+                    "condition": row.what_happened["condition_text"],
+                    "at": row.triggered_at.isoformat(),
+                },
+                now,
+                "plan-triggered:" + str(row.id),
+            )
+        for identifier in notice_ids:
+            enqueue(_engine(settings), r, owner, identifier, now)
+        flush(_engine(settings), r, now)
+    finally:
+        r.close()
     return len(result["triggered"])

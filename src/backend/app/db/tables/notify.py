@@ -7,7 +7,15 @@ wecom_bot/mp_template/serverchan 契约未收录，不建。
 
 from __future__ import annotations
 
-from sqlalchemy import Column, Index, PrimaryKeyConstraint, Table, UniqueConstraint, text
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    Index,
+    PrimaryKeyConstraint,
+    Table,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import BYTEA
 
 from app.db.base import (
@@ -43,6 +51,11 @@ notifications = Table(
     txt("dedup_key"),
     ts("read_at"),
     created_at(),
+    integer("version", nullable=False, server_default=text("1")),
+    CheckConstraint("version >= 1", name="version_positive"),
+    integer("merged_count", nullable=False, server_default=text("1")),
+    ts("updated_at"),
+    jsonb("refs", nullable=False, server_default=text("'[]'::jsonb")),
     one_of("kind", NotificationKind),
     one_of("severity", Severity),
     one_of("target_type", NotificationTargetType),
@@ -108,5 +121,17 @@ notification_deliveries = Table(
     ts("sent_at"),
     one_of("channel", Channel),
     one_of("status", ["queued", "sent", "failed", "retrying", "dropped"]),
+    schema=APP,
+)
+
+notification_refs = Table(
+    "notification_refs",
+    metadata,
+    uuid_col("notification_id", nullable=False, fk="app.notifications.id"),
+    txt("ref_type", nullable=False),
+    CheckConstraint("ref_type IN ('signal', 'plan_condition')", name="ref_type_enum"),
+    txt("ref_id", nullable=False),
+    ts("at", nullable=False),
+    PrimaryKeyConstraint("notification_id", "ref_type", "ref_id"),
     schema=APP,
 )

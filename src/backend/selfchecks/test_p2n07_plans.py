@@ -195,7 +195,7 @@ def receipt(engine: Any, owner: uuid.UUID, price: str, **extra: Any) -> uuid.UUI
     return identifier
 
 
-def test_real_owned_receipt_price_pit_custom_pct_and_no_delivery(env: Any) -> None:
+def test_real_owned_receipt_price_pit_custom_pct_and_in_app_delivery(env: Any) -> None:
     engine, client, other, owner, stranger, settings = env
     calendar(engine)
     body = payload(
@@ -235,7 +235,7 @@ def test_real_owned_receipt_price_pit_custom_pct_and_no_delivery(env: Any) -> No
     assert len(body["pending_triggers"]) == 1
     assert body["evidence"][0]["value"] == "9.99"
     assert other.get("/api/v1/alerts").json()["items"] == []
-    assert client.get("/api/v1/notifications/unread-count").json() == {"count": 0}
+    assert client.get("/api/v1/notifications/unread-count").json() == {"count": 1}
     assert run(settings, owner) == [(TASK, "ok")]
     assert len(client.get("/api/v1/alerts").json()["items"]) == 1
 

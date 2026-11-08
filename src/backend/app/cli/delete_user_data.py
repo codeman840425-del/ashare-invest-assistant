@@ -179,6 +179,10 @@ STEPS: Final[tuple[Step, ...]] = (
         "notification_id IN (SELECT id FROM app.notifications WHERE user_id = :uid) "
         "OR binding_id IN (SELECT id FROM app.notification_channel_bindings WHERE user_id = :uid)",
     ),
+    _d(
+        "app.notification_refs",
+        "notification_id IN (SELECT id FROM app.notifications WHERE user_id = :uid)",
+    ),
     _d("app.notifications"),
     _d("app.notification_channel_bindings"),
     _d("app.notification_preferences"),
@@ -234,6 +238,10 @@ STEPS: Final[tuple[Step, ...]] = (
         "app.strategy_instance_events",
         "instance_id IN (SELECT id FROM app.strategy_instances WHERE user_id = :uid)",
     ),
+    _d(
+        "app.intraday_candidate_refs",
+        "instance_id IN (SELECT id FROM app.strategy_instances WHERE user_id = :uid)",
+    ),
     _d("app.strategy_instances"),
     _d("app.strategy_runs"),
     _d("app.strategy_tracking_stats"),
@@ -244,7 +252,19 @@ STEPS: Final[tuple[Step, ...]] = (
         "reason_id IN (SELECT id FROM app.non_executable_reasons WHERE user_id = :uid)",
     ),
     _d("app.non_executable_reasons"),
-    _d("app.signal_events"),
+    _d(
+        "app.signal_states",
+        "source_licence_id IN (SELECT id FROM app.user_data_licences WHERE user_id = :uid)",
+    ),
+    _d(
+        "app.intraday_universe",
+        "source_licence_id IN (SELECT id FROM app.user_data_licences WHERE user_id = :uid)",
+    ),
+    _d(
+        "app.signal_events",
+        "user_id = :uid OR source_licence_id IN "
+        "(SELECT id FROM app.user_data_licences WHERE user_id = :uid)",
+    ),
     _d("app.claim_links", "claim_id IN (SELECT id FROM app.claims WHERE user_id = :uid)"),
     _d("app.claims"),
     _d(

@@ -246,6 +246,11 @@ class NotificationTargetType(StrEnum):
 # ---------------------------------------------------------------------------
 
 
+class NotificationRefType(StrEnum):
+    SIGNAL = "signal"
+    PLAN_CONDITION = "plan_condition"
+
+
 class NotificationKind(StrEnum):
     SUGGESTION_CHANGE = "suggestion_change"
     INVALIDATION = "invalidation"
@@ -815,6 +820,7 @@ CONTRACT_ENUMS: Final[dict[str, type[StrEnum]]] = {
     "registration_mode": RegistrationMode,
     "notification_target_type": NotificationTargetType,
     "notification_kind": NotificationKind,
+    "notification_ref_type": NotificationRefType,
     "severity": Severity,
     "channel": Channel,
     "data_status": DataStatus,

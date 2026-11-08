@@ -28,6 +28,13 @@ def tt21_integration(
             conn.execute(text("select version_num from public.alembic_version")).scalar_one()
             == expected_main_head(Path(tb70.__file__).resolve().parents[1])
         )
+    # 合成回放也需要已声明的输入元数据；不升级任何真实来源/G2状态。
+    with engine.begin() as conn:
+        for feature, row in synthetic_registry().items():
+            conn.execute(text("INSERT INTO app.feature_catalog (feature_key,unit,adjust,frequency,pit_rule,status,source) "
+                              "VALUES (:k,:u,:a,'daily','{}'::jsonb,'declared','{}'::jsonb) "
+                              "ON CONFLICT (feature_key) DO NOTHING"),
+                         {"k": feature, "u": row["unit"], "a": row["adjust"]})
     settings = Settings(
         _env_file=None,
         database_url=SecretStr(DB),

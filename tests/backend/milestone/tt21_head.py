@@ -10,7 +10,7 @@ def expected_main_head(backend: Path) -> str:
     pinned = json.loads(Path(__file__).with_name('tt21_mainline.json').read_text())
     actual = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
               for p in (backend / 'migrations/versions').glob('*.py')}
-    assert actual == pinned['migration_sha256'], '受测迁移文件不是固定main dcf734d版本图'
+    assert actual == {row['migration_file']: row['sha256_checksum'] for row in pinned['migrations']}, '受测迁移文件不是固定main dcf734d版本图'
     cfg = Config()
     cfg.set_main_option('script_location', str(backend / 'migrations'))
     scripts = ScriptDirectory.from_config(cfg)

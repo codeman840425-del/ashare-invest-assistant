@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 import yaml
-from sqlalchemy import Connection, insert, select
+from sqlalchemy import Connection, insert, select, update
 
 from app.common.errors import AppError, ErrorCode
 from app.config import Settings
@@ -31,7 +31,12 @@ from app.suggestions.risk import RiskContext, evaluate_risk
 
 
 def prepare(
-    conn: Connection, owner: uuid.UUID, card_id: uuid.UUID, settings: Settings
+    conn: Connection,
+    owner: uuid.UUID,
+    card_id: uuid.UUID,
+    settings: Settings,
+    version_id: uuid.UUID | None = None,
+    existing_review_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
     card = conn.execute(select(strategy_cards).where(strategy_cards.c.id == card_id)).first()
     if card is None or card.owner_user_id not in {None, owner}:
@@ -50,6 +55,7 @@ def prepare(
             .join(strategies, strategies.c.id == strategy_versions.c.strategy_id)
             .where(
                 strategy_versions.c.card_version_id == cv.id,
+                *([strategy_versions.c.id == version_id] if version_id is not None else []),
                 (strategies.c.owner_user_id.is_(None) | (strategies.c.owner_user_id == owner)),
             )
             .order_by(strategy_versions.c.version_no.desc())
@@ -91,7 +97,10 @@ def prepare(
             ("validation", validation),
         ]
     )
-    _, errors = preflight([document], registry)
+    try:
+        _, errors = preflight([document], registry)
+    except ValueError:
+        errors = [{"path": "strategy-card", "issue": "invalid_persisted_card_document"}]
     categories: dict[str, list[dict[str, str]]] = {"G1": [], "G2": [], "G3": [], "G4": []}
     for error in errors:
         path, issue = error["path"], error["issue"]
@@ -199,9 +208,21 @@ def prepare(
         **overlap.model_dump(),
         "quota_delta_per_min": 0 if not validation.get("feature_requests") else None,
     }
-    review_id = uuid.uuid4()
+    review_id = existing_review_id or uuid.uuid4()
+    old_lint: dict[str, Any] = {}
+    operation: Any = insert(strategy_promotion_reviews)
+    if existing_review_id is not None:
+        old = conn.execute(
+            select(strategy_promotion_reviews).where(
+                strategy_promotion_reviews.c.id == existing_review_id
+            )
+        ).one()
+        old_lint = old.compliance_lint or {}
+        operation = update(strategy_promotion_reviews).where(
+            strategy_promotion_reviews.c.id == existing_review_id
+        )
     conn.execute(
-        insert(strategy_promotion_reviews).values(
+        operation.values(
             id=review_id,
             card_version_id=cv.id,
             target_strategy_version_id=version.id,
@@ -211,7 +232,7 @@ def prepare(
             ],
             g6_report=report,
             decision="pending",
-            compliance_lint={"status": "pending_human_review"},
+            compliance_lint={**old_lint, "status": "pending_human_review"},
             note="Prepared only; no G7 or lifecycle approval",
         )
     )

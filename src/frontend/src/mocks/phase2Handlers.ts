@@ -44,7 +44,7 @@ export const phase2Handlers = [
       if (!record(item) || Object.keys(item).sort().join(',') !== 'control,enabled,params' || typeof item.control !== 'string' || typeof item.enabled !== 'boolean' || seen.has(item.control) || !validParams(item.control, item.params)) return validation('settings', '重复control、未知键或参数类型错误（示例数据）');
       seen.add(item.control);
       // 运行时按六项模板逐字段验证完毕；source仅由响应生成，不接收客户端写入。
-      updates.push({ ...item, source: 'user' } as RiskControlSetting);
+      updates.push({ ...item, source: 'user', default: structuredClone(EXAMPLE_RISK_SETTINGS.find((entry) => entry.control === item.control)!.default) } as RiskControlSetting);
     }
     const issues = updates.flatMap(validateRiskParams);
     const malformed = issues.filter((issue) => issue.kind === 'type');

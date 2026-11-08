@@ -7,7 +7,7 @@ import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
 import { preloadRoutes } from '../test/preloadRoutes';
-import { EXAMPLE_RISK_SETTINGS } from '../mocks/phase2Fixtures';
+import { EXAMPLE_RISK_SETTINGS, exampleEvaluation } from '../mocks/phase2Fixtures';
 import { server } from '../mocks/server';
 import { apiGet } from '../api/client';
 import { apiFetch } from '../test/apiFetch';
@@ -77,16 +77,104 @@ it('RC3/RC4/RC5输入边界与暂停关闭时的不生效状态', async () => {
   expect(confirmDays).toHaveValue('3');
   fireEvent.click(screen.getByRole('checkbox', { name: '触发时暂停' })); expect(screen.getByLabelText('暂停交易日数')).toBeDisabled();
 });
-it('恢复默认只取GET返回的source=system值，非硬编码表值，不自动写入', async () => {
+it('恢复默认只取GET返回的同形default，非硬编码表值，不自动写入', async () => {
   let writes = 0;
-  const data = EXAMPLE_RISK_SETTINGS.map((s) => s.control === 'position_cap' ? { ...s, params: { single_position_max_pct: '24' } } : s);
+  const data = EXAMPLE_RISK_SETTINGS.map((s) => s.control === 'position_cap' ? { ...s, source: 'user', enabled: false, params: { single_position_max_pct: '30' }, default: { single_position_max_pct: '24' } } : s);
   server.use(http.get(`${API}/risk-controls`, () => HttpResponse.json(data)), http.put(`${API}/risk-controls`, () => { writes++; return HttpResponse.json(data); }));
   renderPage(); const card = await screen.findByTestId('risk-setting-position_cap'); const input = within(card).getByLabelText('单只仓位上限（%）');
   fireEvent.change(input, { target: { value: '30' } }); fireEvent.click(within(card).getByRole('button', { name: /^恢复默认/ }));
   expect(input).toHaveValue(24); expect(writes).toBe(0);
 });
-it('初读只有user覆盖值时不猜系统默认，不拿文档20当服务器默认', async () => {
-  server.use(http.get(`${API}/risk-controls`, () => HttpResponse.json(EXAMPLE_RISK_SETTINGS.map((s) => ({ ...s, source: 'user' })))));
+it('缺失default时不猜系统默认，不拿有效值或文档20冒充', async () => {
+  server.use(http.get(`${API}/risk-controls`, () => HttpResponse.json(EXAMPLE_RISK_SETTINGS.map((s) => ({ ...s, source: 'user', default: null })))));
   renderPage(); const card = await screen.findByTestId('risk-setting-position_cap');
-  expect(within(card).getByRole('button', { name: /^恢复默认/ })).toBeDisabled(); expect(card).toHaveTextContent('本次读取未返回该项系统默认值');
+  expect(within(card).getByRole('button', { name: /^恢复默认/ })).toBeDisabled(); expect(card).toHaveTextContent('响应未提供可信的同形 default');
+});
+
+it('六项default同形只读，覆盖后不改变；PUT夹带default拒绝且不部分更新', async () => {
+  const original = await apiGet<RiskControlSetting[]>('/risk-controls');
+  for (const item of original) expect(Object.keys(item.default).sort()).toEqual(Object.keys(item.params).sort());
+  expect((await put([{ control: 'position_cap', enabled: true, params: { single_position_max_pct: '25' } }])).status).toBe(200);
+  const after = await apiGet<RiskControlSetting[]>('/risk-controls');
+  expect(after.map((s) => s.default)).toEqual(original.map((s) => s.default));
+  expect((await put([{ control: 'position_cap', enabled: true, params: { single_position_max_pct: '30' }, default: { single_position_max_pct: '30' } }])).status).toBe(400);
+  expect(await apiGet('/risk-controls')).toEqual(after);
+});
+it.each([undefined, { single_position_max_pct: 20 }, { single_position_max_pct: '99' }, { alien: '20' }])('不可信default禁用恢复且不退回有效值：%j', async (invalid) => {
+  server.use(http.get(`${API}/risk-controls`, () => HttpResponse.json(EXAMPLE_RISK_SETTINGS.map((s) => ({ ...s, default: s.control === 'position_cap' ? invalid : s.default })))));
+  renderPage(); const card = await screen.findByTestId('risk-setting-position_cap');
+  expect(within(card).getByRole('button', { name: /^恢复默认/ })).toBeDisabled();
+});
+it('恢复同形default覆盖嵌套params并启用默认六项，但需手动保存才PUT', async () => {
+  let payload: unknown;
+  const data = EXAMPLE_RISK_SETTINGS.map((s) => s.control === 'total_exposure' ? { ...s, source: 'user', enabled: false, params: { regime_ranges: { uptrend: ['0', '1'], range: ['1', '2'], downtrend: ['2', '3'] }, regime_confirm_days: 5 } } : s);
+  server.use(http.get(`${API}/risk-controls`, () => HttpResponse.json(data)), http.put(`${API}/risk-controls`, async ({ request }) => { payload = await request.json(); return HttpResponse.json(EXAMPLE_RISK_SETTINGS); }));
+  renderPage(); const card = await screen.findByTestId('risk-setting-total_exposure');
+  fireEvent.click(within(card).getByRole('button', { name: /^恢复默认/ })); expect(payload).toBeUndefined();
+  expect(within(card).getByRole('checkbox', { name: /^启用/ })).toBeChecked();
+  fireEvent.click(within(card).getByRole('button', { name: /^保存/ }));
+  await waitFor(() => expect(payload).toEqual([{ control: 'total_exposure', enabled: true, params: EXAMPLE_RISK_SETTINGS.find((s) => s.control === 'total_exposure')!.default }]));
+});
+it('评价unknown及分项/全局gap如实显示，不把带gap的ok显示成通过', async () => {
+  const evaluation = exampleEvaluation('600000.SH', '示例数据', null, EXAMPLE_RISK_SETTINGS, new Set());
+  const gap = { key: 'test_missing', reason: 'no_source' as const, message: '示例数据：输入缺口' };
+  evaluation.gaps = [gap]; evaluation.controls[0] = { control: 'stop_take', enabled: true, state: 'ok', flags: [], gaps: [gap] };
+  evaluation.controls[1] = { control: 'position_cap', enabled: true, state: 'unknown', flags: [], gaps: [gap] };
+  server.use(http.get(`${API}/risk-controls/evaluation`, () => HttpResponse.json(evaluation)));
+  renderPage(); const input = await screen.findByLabelText('风控评价证券代码'); fireEvent.change(input, { target: { value: '600000.SH' } }); fireEvent.click(screen.getByRole('button', { name: '读取当前评价' }));
+  expect(await screen.findByTestId('risk-evaluation-gaps')).toHaveTextContent('不能视为通过或正常');
+  expect(screen.getByTestId('risk-state-stop_take')).toHaveTextContent('输入存在缺口，不能判为通过');
+  expect(screen.getByTestId('risk-state-stop_take')).not.toHaveTextContent('输入齐全，未触发');
+  expect(screen.getByTestId('risk-state-position_cap')).toHaveTextContent('未知（输入不足）');
+});
+
+it.skipIf(!process.env.P2N05C_REAL_API)('P2N05c real：真实React→Vite→API读取/保存/默认恢复/校验/unknown缺口', async () => {
+  server.close();
+  const nativeFetch = globalThis.fetch;
+  const cookies = new Map<string, string>();
+  const base = 'http://127.0.0.1:15565';
+  const journal: { method: string; path: string; status: number }[] = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const original = new URL(raw, base);
+    if (!['127.0.0.1', 'localhost'].includes(original.hostname)) throw new Error('仅限本地隔离联调');
+    const url = new URL(original.pathname + original.search, base);
+    const headers = new Headers(init.headers); headers.set('Origin', base);
+    if (cookies.size) headers.set('Cookie', [...cookies].map(([key, value]) => key + '=' + value).join('; '));
+    const response = await nativeFetch(url, { ...init, headers });
+    for (const line of response.headers.getSetCookie()) {
+      const first = line.split(';')[0]; const index = first.indexOf('=');
+      cookies.set(first.slice(0, index), first.slice(index + 1));
+      if (first.startsWith('csrf_token=')) document.cookie = first + '; Path=/';
+    }
+    journal.push({ method: init.method ?? 'GET', path: url.pathname, status: response.status });
+    return response;
+  };
+  try {
+    const login = await fetch(base + '/api/v1/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'p2n05c_test', password: process.env.P2N05C_TEST_PASSWORD }) });
+    expect(login.status).toBe(200);
+    renderPage(); const card = await screen.findByTestId('risk-setting-position_cap');
+    expect(card).toHaveTextContent('系统有效值');
+    const input = within(card).getByLabelText('单只仓位上限（%）');
+    fireEvent.change(input, { target: { value: '21.25' } }); fireEvent.click(within(card).getByRole('button', { name: /^保存/ }));
+    await within(card).findByText('设置已保存（以服务端响应为准）');
+    expect(input).toHaveValue(21.25); expect(card).toHaveTextContent('本人覆盖值');
+    fireEvent.click(within(card).getByRole('button', { name: /^恢复默认/ })); expect(input).toHaveValue(20);
+    fireEvent.click(within(card).getByRole('button', { name: /^保存/ })); await within(card).findByText('设置已保存（以服务端响应为准）');
+    const settings = await apiGet<RiskControlSetting[]>('/risk-controls');
+    expect(settings.find((item) => item.control === 'position_cap')?.params).toEqual({ single_position_max_pct: '20' });
+    const bad = await put([{ control: 'position_cap', enabled: true, params: { single_position_max_pct: '99' } }]);
+    expect(bad.status).toBe(422); expect((await bad.json()).error.details.fields.length).toBeGreaterThan(0);
+    const forbidden = await put([{ ...settings[0] }]); expect(forbidden.status).toBe(400);
+    const code = screen.getByLabelText('风控评价证券代码'); fireEvent.change(code, { target: { value: '600000.SH' } }); fireEvent.click(screen.getByRole('button', { name: '读取当前评价' }));
+    expect(await screen.findByTestId('risk-evaluation-gaps')).toHaveTextContent('不能视为通过或正常');
+    expect(screen.getByTestId('risk-state-position_cap')).toHaveTextContent('未知（输入不足）');
+    expect(journal.some((item) => item.path.endsWith('/risk-controls/evaluation') && item.status === 200)).toBe(true);
+  } finally {
+    globalThis.fetch = nativeFetch;
+    cookies.clear();
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync('/workspace/team/reports/P2N-05c/http-journal.json', JSON.stringify(journal, null, 2));
+    server.listen({ onUnhandledFrame: 'error' });
+  }
 });

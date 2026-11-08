@@ -172,3 +172,18 @@ export function assertRiskDefaults(settings: readonly RiskControlSetting[]) {
   const issues = settings.flatMap(validateRiskParams);
   if (issues.length) throw new Error(`风控默认参数不合法：${issues.map((i) => `${i.field} ${i.message}`).join('；')}`);
 }
+
+function sameParamShape(value: unknown, reference: unknown): boolean {
+  if (Array.isArray(reference)) return Array.isArray(value) && value.every((entry, i) => reference.length === 0 ? typeof entry === 'string' : sameParamShape(entry, reference[i] ?? reference[0]));
+  if (isRecord(reference)) return isRecord(value) && Object.keys(value).length === Object.keys(reference).length && Object.keys(reference).every((key) => sameParamShape(value[key], reference[key]));
+  return typeof value === typeof reference && value !== null;
+}
+/** 只信任响应default；缺失、错型、越界不回退到params/文档参考值。 */
+export function restoredRiskDefault(item: RiskControlSetting): RiskControlSetting | null {
+  if (!item.default || !sameParamShape(item.default, item.params)) return null;
+  // control对应params与default同形已由上方运行时校验及契约映射类型保证。
+  const next = { ...item, enabled: true, params: structuredClone(item.default) } as RiskControlSetting;
+  if (validateRiskParams(next).length) return null;
+  if (next.control === 'plan_violation' && !next.params.checks.every((key) => ['opposite_side', 'qty_over_plan', 'held_after_invalidation', 'buy_without_stop', 'buy_during_wait'].includes(key))) return null;
+  return next;
+}

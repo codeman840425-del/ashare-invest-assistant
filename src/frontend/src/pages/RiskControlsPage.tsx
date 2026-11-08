@@ -1,4 +1,4 @@
-import { numericRiskRule, validateRiskParams } from '../lib/riskControlParams';
+import { numericRiskRule, restoredRiskDefault, validateRiskParams } from '../lib/riskControlParams';
 import { useState, useEffect } from 'react';
 import { Alert, Button, Checkbox, Input, InputNumber, Select, Tabs, Tag } from 'antd';
 import { Link, useSearchParams } from 'react-router';
@@ -41,8 +41,8 @@ function SettingCard({ item }: { item: RiskControlSetting }) {
   const [draft, setDraft] = useState(item);
   const save = useSaveRiskSettings();
   const issues = validateRiskParams(draft);
-  const [systemDefault, setSystemDefault] = useState<RiskControlSetting | null>(() => item.source === 'system' ? structuredClone(item) : null);
-  useEffect(() => { setDraft(item); if (item.source === 'system') setSystemDefault(structuredClone(item)); }, [item]);
+  const systemDefault = restoredRiskDefault(item);
+  useEffect(() => { setDraft(item); }, [item]);
   const edit = (next: RiskControlSetting) => { save.reset(); setDraft(next); };
   return <section className="panel" style={{ padding: 16 }} data-testid={`risk-setting-${item.control}`}>
     <h3>{RISK_CONTROL[item.control]} <Tag>{item.source === 'system' ? '系统有效值' : '本人覆盖值'}</Tag></h3>
@@ -52,7 +52,7 @@ function SettingCard({ item }: { item: RiskControlSetting }) {
       <SettingFields value={draft} change={edit} />
       <Button loading={save.isPending} disabled={issues.length > 0} onClick={() => { if (!issues.length) save.mutate(draft); }}>保存 {RISK_CONTROL[item.control]}</Button>
       <Button disabled={systemDefault === null} onClick={() => { if (systemDefault) edit(structuredClone(systemDefault)); }}>恢复默认 {RISK_CONTROL[item.control]}</Button>
-      {systemDefault === null ? <p className="muted small">本次读取未返回该项系统默认值，无法恢复；不以契约参考值冒充当前系统值。</p> : null}
+      {systemDefault === null ? <p className="muted small">响应未提供可信的同形 default，无法恢复；不以有效值或契约参考值冒充系统默认值。</p> : null}
       {issues.length ? <div role="alert" data-testid={`risk-param-errors-${item.control}`}>{issues.map((issue) => <p key={issue.field + issue.kind}><code>{issue.field}</code>：{issue.message}</p>)}</div> : null}
     </fieldset>
     {save.isError ? <ErrorBox error={save.error} prefix="设置未保存" /> : null}
@@ -76,7 +76,8 @@ function EvaluationPanel({ initialCode }: { initialCode: string }) {
     <Button onClick={() => { const next = draft.trim().toUpperCase(); if (next === code) void q.refetch(); else setCode(next); }} disabled={!draft.trim()}>读取当前评价</Button>
     {q.isFetching ? <Loading /> : null}{q.isError ? <ErrorBox error={q.error} /> : null}
     {q.data && !q.isError ? <><p>{q.data.name} · {q.data.security_code} · 评价时间 {fmtTime(q.data.evaluated_at)} · 快照 {q.data.snapshot_id ?? '—（完全无数据）'}</p><DataStatusTag status={q.data.data_status} />
-      {q.data.controls.map((c) => <div className="stc-sec" key={c.control} data-testid={`risk-state-${c.control}`}><b>{RISK_CONTROL[c.control]}</b> · {STATE[c.state]}
+      {q.data.gaps.length > 0 ? <div role="alert" data-testid="risk-evaluation-gaps"><p>当前评价存在缺口，不能视为通过或正常；请核实候选信号与计划条件。</p>{q.data.gaps.map((g, i) => <p key={`${g.key}-${i}`}>缺口 · {GAP_REASON[g.reason]}：{g.message}</p>)}</div> : null}
+      {q.data.controls.map((c) => <div className="stc-sec" key={c.control} data-testid={`risk-state-${c.control}`}><b>{RISK_CONTROL[c.control]}</b> · {c.state === 'ok' && c.gaps.length > 0 ? '输入存在缺口，不能判为通过' : STATE[c.state]}
         {c.control === 'total_exposure' && c.state === 'unknown' ? <p>大盘环境未知；不以卡片指数环境替代，不施加 RC3 门控。</p> : null}
         {c.flags.map((flag, i) => <RiskFlagView key={i} flag={flag} evidence={q.data?.evidence ?? []} />)}
         {(['position_cap', 'sector_concentration'] as const).some((key) => key === c.control) && (c.state === 'unknown' || c.flags.some((f) => f.quantity_cap === null)) ? <p>可新增数量：—（额度未知，不代表0或无限额度）</p> : null}
@@ -114,7 +115,7 @@ export function RiskControlsPage() {
   const [params, setParams] = useSearchParams(); const tab = params.get('tab') === 'events' ? 'events' : 'settings';
   return <div className="page-scroll"><div className="page" data-testid="risk-controls-page">
     <h2 className="page-title">风控设置与事件</h2>
-    {IS_MOCK ? <Alert type="info" title="示例数据 · mock 阶段，未联调后端；合成评价不进行真实风控求值" /> : null}
+    {IS_MOCK ? <Alert type="info" title="示例数据 · 合成评价不进行真实风控求值" /> : <Alert type="info" title="真实接口 · 可读取和保存本人风控设置；评价只用缓存，不拉取外部行情；缺口不代表通过。" />}
     <CardDisclaimer />
     <Tabs activeKey={tab} onChange={(next) => { const updated = new URLSearchParams(params); updated.set('tab', next); setParams(updated); }} items={[
       { key: 'settings', label: '有效设置与当前评价', children: <><SettingsPanel /><EvaluationPanel initialCode={params.get('security_code') ?? ''} /></> },

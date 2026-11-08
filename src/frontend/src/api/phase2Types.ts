@@ -15,66 +15,52 @@ export interface DailyDimensionAnalysis extends Omit<DataStatusBlock, 'data_as_o
   gaps: Gap[];
 }
 
-export type RiskControlSetting =
-  | {
-      control: 'stop_take';
-      enabled: boolean;
-      source: 'system' | 'user';
-      params: {
-        long_horizon_default_stop_pct: string;
-        clamp_to_price_limit: boolean;
-      };
-    }
-  | {
-      control: 'position_cap';
-      enabled: boolean;
-      source: 'system' | 'user';
-      params: {
-        single_position_max_pct: string;
-      };
-    }
-  | {
-      control: 'total_exposure';
-      enabled: boolean;
-      source: 'system' | 'user';
-      params: {
-        regime_ranges: {
-          uptrend: [string, string];
-          range: [string, string];
-          downtrend: [string, string];
-        };
-        regime_confirm_days: number;
-      };
-    }
-  | {
-      control: 'sector_concentration';
-      enabled: boolean;
-      source: 'system' | 'user';
-      params: {
-        sw_l1_max_pct: string;
-        concept_max_pct: string;
-      };
-    }
-  | {
-      control: 'loss_streak_drawdown';
-      enabled: boolean;
-      source: 'system' | 'user';
-      params: {
-        closed_loss_streak: number;
-        drawdown_from_peak_pct: string;
-        strategy_sim_fail_streak: number;
-        pause_on_trigger: boolean;
-        pause_days: number;
-      };
-    }
-  | {
-      control: 'plan_violation';
-      enabled: boolean;
-      source: 'system' | 'user';
-      params: {
-        checks: string[];
-      };
+export type RiskControlParamsMap = {
+  stop_take: {
+    long_horizon_default_stop_pct: string;
+    clamp_to_price_limit: boolean;
+  };
+  position_cap: {
+    single_position_max_pct: string;
+  };
+  total_exposure: {
+    regime_ranges: {
+      uptrend: [string, string];
+      range: [string, string];
+      downtrend: [string, string];
     };
+    regime_confirm_days: number;
+  };
+  sector_concentration: {
+    sw_l1_max_pct: string;
+    concept_max_pct: string;
+  };
+  loss_streak_drawdown: {
+    closed_loss_streak: number;
+    drawdown_from_peak_pct: string;
+    strategy_sim_fail_streak: number;
+    pause_on_trigger: boolean;
+    pause_days: number;
+  };
+  plan_violation: {
+    checks: string[];
+  };
+};
+
+/** GET/PUT响应：default只读，和对应params严格同形。 */
+export type RiskControlSetting = {
+  [K in RiskControl]: {
+    control: K;
+    enabled: boolean;
+    source: 'system' | 'user';
+    params: RiskControlParamsMap[K];
+    readonly default: RiskControlParamsMap[K];
+  };
+}[RiskControl];
+/** PUT请求不能包含source/default。 */
+export type RiskControlSettingPut = {
+  [K in RiskControl]: { control: K; enabled: boolean; params: RiskControlParamsMap[K] };
+}[RiskControl];
 
 export interface RiskEvaluation extends DataStatusBlock {
   account_id: string | null;

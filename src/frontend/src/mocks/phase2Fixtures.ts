@@ -38,12 +38,12 @@ export function withDailyDimensions(input: DailyReport): DailyReport {
 }
 
 export const EXAMPLE_RISK_SETTINGS: RiskControlSetting[] = [
-  { control: 'stop_take', enabled: true, source: 'system', params: { long_horizon_default_stop_pct: '-20', clamp_to_price_limit: true } },
-  { control: 'position_cap', enabled: true, source: 'system', params: { single_position_max_pct: '20' } },
-  { control: 'total_exposure', enabled: true, source: 'system', params: { regime_ranges: { uptrend: ['60', '90'], range: ['40', '60'], downtrend: ['0', '30'] }, regime_confirm_days: 2 } },
-  { control: 'sector_concentration', enabled: true, source: 'system', params: { sw_l1_max_pct: '40', concept_max_pct: '50' } },
-  { control: 'loss_streak_drawdown', enabled: true, source: 'system', params: { closed_loss_streak: 3, drawdown_from_peak_pct: '10', strategy_sim_fail_streak: 5, pause_on_trigger: true, pause_days: 5 } },
-  { control: 'plan_violation', enabled: false, source: 'user', params: { checks: ['opposite_side', 'qty_over_plan', 'held_after_invalidation', 'buy_without_stop', 'buy_during_wait'] } },
+  { control: 'stop_take', enabled: true, source: 'system', params: { long_horizon_default_stop_pct: '-20', clamp_to_price_limit: true }, default: { long_horizon_default_stop_pct: '-20', clamp_to_price_limit: true } },
+  { control: 'position_cap', enabled: true, source: 'system', params: { single_position_max_pct: '20' }, default: { single_position_max_pct: '20' } },
+  { control: 'total_exposure', enabled: true, source: 'system', params: { regime_ranges: { uptrend: ['60', '90'], range: ['40', '60'], downtrend: ['0', '30'] }, regime_confirm_days: 2 }, default: { regime_ranges: { uptrend: ['60', '90'], range: ['40', '60'], downtrend: ['0', '30'] }, regime_confirm_days: 2 } },
+  { control: 'sector_concentration', enabled: true, source: 'system', params: { sw_l1_max_pct: '40', concept_max_pct: '50' }, default: { sw_l1_max_pct: '40', concept_max_pct: '50' } },
+  { control: 'loss_streak_drawdown', enabled: true, source: 'system', params: { closed_loss_streak: 3, drawdown_from_peak_pct: '10', strategy_sim_fail_streak: 5, pause_on_trigger: true, pause_days: 5 }, default: { closed_loss_streak: 3, drawdown_from_peak_pct: '10', strategy_sim_fail_streak: 5, pause_on_trigger: true, pause_days: 5 } },
+  { control: 'plan_violation', enabled: false, source: 'user', params: { checks: ['opposite_side', 'qty_over_plan', 'held_after_invalidation', 'buy_without_stop', 'buy_during_wait'] }, default: { checks: ['opposite_side', 'qty_over_plan', 'held_after_invalidation', 'buy_without_stop', 'buy_during_wait'] } },
 ];
 assertRiskDefaults(EXAMPLE_RISK_SETTINGS);
 

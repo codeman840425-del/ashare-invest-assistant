@@ -1,0 +1,1904 @@
+{
+  "task": "P2N-R10",
+  "schema_notice": "document audit only; horizons is existing card/spec field; horizon is nullable audit projection of an explicitly unique declaration, not new API/config/default",
+  "legal_horizons": [
+    "intraday_t",
+    "short",
+    "swing",
+    "long"
+  ],
+  "scope_snapshot": [
+    {
+      "path": "docs/strategies/T-R16/L-01_lt_value.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/L-02_lt_quality_growth.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/L-03_lt_dividend.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/L-04_lt_low_vol.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/S-01_st_pullback_ma.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/S-02_st_oversold_rebound.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/S-03_st_limitup_relay.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/S-04_st_broken_board.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/T-01_t_vwap_revert.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/T-02_t_spike_fade.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/T-03_t_open_gap.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/T-04_t_boll_revert.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/W-02_sw_breakout.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/W-03_sw_main_inflow.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/W-04_sw_ind_rotation.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/W-05_sw_earnings_drift.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/T-R16/candidates.md",
+      "scope_role": "research_index_already_enumerated_individual_cards"
+    },
+    {
+      "path": "docs/strategies/T-R16/engine_gaps.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R18_source_matrix.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R19_mvp_closure.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R21/check_T-R21.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R21_derived_features.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R22/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R22/check_f23.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R22/disputed_announcements.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R22/f23_lexicon_v1.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R22/f23_offline_cases.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R22/known_risk_announcements.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R22/match_f23.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R22/public_titles_cninfo.jsonl",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/__pycache__/match_f23_v2.cpython-312.pyc",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/__pycache__/match_f23_v2_1.cpython-312.pyc",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/acceptance_existing_sample.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/check_f23_v2.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/check_f23_v2_1.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/engine_gaps_f23.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/f23_lexicon_v2.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/f23_lexicon_v2_1.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/f23_v2_1_cases.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/f23_v2_cases.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/holdout_exclusion_ids.txt",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/known_risk_v1_reused.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/known_risk_v2_1_added.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/known_risk_v2_new.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/match_f23_v2.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/match_f23_v2_1.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/rules_freeze.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/rules_freeze_v2_1.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R23/title_insufficient.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/_template.md",
+      "scope_role": "teaching_example_not_formal_card"
+    },
+    {
+      "path": "docs/strategies/calendar/build_trading_calendar_2026.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/calendar/trading_calendar_2026.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/calendar/trading_calendar_2026_sources.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/cards/history/hold_risk_monitor.v1.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v1.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/cards/hold_risk_monitor.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/catalog.md",
+      "scope_role": "enumerated_identity_source"
+    },
+    {
+      "path": "docs/strategies/check_p2n01_dimension_mapping.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/compliance/disclaimer.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/compliance/risk_questionnaire.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/compliance/risk_questionnaire.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/compliance/versioning.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/feature_catalog_meta.yaml",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/feature_spec.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/golden/P2N-R08_README.md",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/P2N-R08_golden.json",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/P2N-R09_README.md",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/P2N-R09_golden.json",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/T-R15_golden.json",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/__pycache__/check_P2N-R09.cpython-313.pyc",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/check_P2N-R08.py",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/check_P2N-R09.py",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/check_T-R15.py",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/check_exdiv_T-R15.py",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/gen_T-R15.py",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/history/T-R15_golden.v1.json",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/hold_risk_monitor.card.tmpl",
+      "scope_role": "render_source_mirror_not_extra_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/hold_risk_monitor.validation.yaml",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/render_T-R15.py",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/sw_ma_trend_pullback.card.tmpl",
+      "scope_role": "render_source_mirror_not_extra_strategy"
+    },
+    {
+      "path": "docs/strategies/golden/sw_ma_trend_pullback.validation.yaml",
+      "scope_role": "synthetic_golden_or_helper_not_strategy"
+    },
+    {
+      "path": "docs/strategies/horizon_classifier.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/market_rules_T-R10.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/market_rules_check.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/phase2_daily_dimensions.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/security_master.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/system_components_T-R15.md",
+      "scope_role": "system_policy_component_not_strategy_version"
+    },
+    {
+      "path": "docs/strategies/validation.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    }
+  ],
+  "records": [
+    {
+      "record_id": "hold_risk_monitor@1:historical_frozen",
+      "path": "docs/strategies/cards/history/hold_risk_monitor.v1.md",
+      "key": "hold_risk_monitor",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "historical_frozen",
+      "horizons": [
+        "intraday_t",
+        "short",
+        "swing",
+        "long"
+      ],
+      "horizon": null,
+      "classification": "explicit_multi_no_unique_fallback",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级",
+      "rc5_consume": "frozen_snapshot_not_default_template",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/history/hold_risk_monitor.v1.md",
+          "line": 27,
+          "quote": "version_no: 1"
+        },
+        {
+          "path": "docs/strategies/cards/history/hold_risk_monitor.v1.md",
+          "line": 30,
+          "quote": "horizons: [intraday_t, short, swing, long]"
+        },
+        {
+          "path": "docs/strategies/cards/hold_risk_monitor.md",
+          "line": 26,
+          "quote": "v1 原文冻结在 `cards/history/hold_risk_monitor.v1.md`"
+        }
+      ],
+      "gap_reason": "四周期通用持仓风控，无唯一版本周期；具体建议的该版本结论horizon缺失时不得猜",
+      "release_condition": "结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则"
+    },
+    {
+      "record_id": "sw_ma_trend_pullback@1:historical_frozen",
+      "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v1.md",
+      "key": "sw_ma_trend_pullback",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "historical_frozen",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级",
+      "rc5_consume": "frozen_snapshot_not_default_template",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v1.md",
+          "line": 27,
+          "quote": "version_no: 1"
+        },
+        {
+          "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v1.md",
+          "line": 30,
+          "quote": "horizons: [swing]"
+        },
+        {
+          "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
+          "line": 26,
+          "quote": "v1 原文冻结在 `cards/history/sw_ma_trend_pullback.v1.md`"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "hold_risk_monitor@2:current_formal_L1_with_L2_spec",
+      "path": "docs/strategies/cards/hold_risk_monitor.md",
+      "key": "hold_risk_monitor",
+      "version_no": 2,
+      "document_version": "v2",
+      "scope": "current_formal_L1_with_L2_spec",
+      "horizons": [
+        "intraday_t",
+        "short",
+        "swing",
+        "long"
+      ],
+      "horizon": null,
+      "classification": "explicit_multi_no_unique_fallback",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级",
+      "rc5_consume": "only_actual_conclusion_horizon_then_unique_version_horizon",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/hold_risk_monitor.md",
+          "line": 32,
+          "quote": "version_no: 2"
+        },
+        {
+          "path": "docs/strategies/cards/hold_risk_monitor.md",
+          "line": 35,
+          "quote": "horizons: [intraday_t, short, swing, long]"
+        },
+        {
+          "path": "docs/strategies/cards/hold_risk_monitor.md",
+          "line": 3,
+          "quote": "> 正式卡"
+        }
+      ],
+      "gap_reason": "四周期通用持仓风控，无唯一版本周期；具体建议的该版本结论horizon缺失时不得猜",
+      "release_condition": "结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则"
+    },
+    {
+      "record_id": "sw_ma_trend_pullback@2:current_formal_L1_with_L2_spec",
+      "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
+      "key": "sw_ma_trend_pullback",
+      "version_no": 2,
+      "document_version": "v2",
+      "scope": "current_formal_L1_with_L2_spec",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级",
+      "rc5_consume": "only_actual_conclusion_horizon_then_unique_version_horizon",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
+          "line": 33,
+          "quote": "version_no: 2"
+        },
+        {
+          "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
+          "line": 36,
+          "quote": "horizons: [swing]"
+        },
+        {
+          "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
+          "line": 3,
+          "quote": "> 正式卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "lt_value@1:research:L-01_lt_value",
+      "path": "docs/strategies/T-R16/L-01_lt_value.md",
+      "key": "lt_value",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "long"
+      ],
+      "horizon": "long",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/L-01_lt_value.md",
+          "line": 1,
+          "quote": "# L-01 低估值+质量护栏 `lt_value` — 知识卡 v1（T-R16 首批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/L-01_lt_value.md",
+          "line": 8,
+          "quote": "key `lt_value`；category `value`；horizons `[long]`（月度再平衡，持有 ≥ 3 个月）。"
+        },
+        {
+          "path": "docs/strategies/T-R16/L-01_lt_value.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除",
+      "semantic_flags": [
+        {
+          "issue": "holding_range_not_equivalent_to_typical_long_definition",
+          "evidence": "身份行显式horizons [long]，并写持有≥3个月；plan §2.5.1典型long为半年以上",
+          "handling": "保留显式long，不按3个月下界重分类；此卡已不可导入，未构造阈值或持有期",
+          "release_condition": "若未来解除不可导入，作者/架构师先澄清持有区间与周期定义，再按不可变版本规则处理"
+        }
+      ]
+    },
+    {
+      "record_id": "lt_quality_growth@1:research:L-02_lt_quality_growth",
+      "path": "docs/strategies/T-R16/L-02_lt_quality_growth.md",
+      "key": "lt_quality_growth",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "long"
+      ],
+      "horizon": "long",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/L-02_lt_quality_growth.md",
+          "line": 1,
+          "quote": "# L-02 质量成长 `lt_quality_growth` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/L-02_lt_quality_growth.md",
+          "line": 7,
+          "quote": "key `lt_quality_growth`；category `quality`；horizons `[long]`；risk_level `normal`。"
+        },
+        {
+          "path": "docs/strategies/T-R16/L-02_lt_quality_growth.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "lt_dividend@1:research:L-03_lt_dividend",
+      "path": "docs/strategies/T-R16/L-03_lt_dividend.md",
+      "key": "lt_dividend",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "long"
+      ],
+      "horizon": "long",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/L-03_lt_dividend.md",
+          "line": 1,
+          "quote": "# L-03 红利低估 `lt_dividend` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/L-03_lt_dividend.md",
+          "line": 7,
+          "quote": "key `lt_dividend`；category `dividend`；horizons `[long]`；risk_level `normal`。"
+        },
+        {
+          "path": "docs/strategies/T-R16/L-03_lt_dividend.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "lt_low_vol@1:research:L-04_lt_low_vol",
+      "path": "docs/strategies/T-R16/L-04_lt_low_vol.md",
+      "key": "lt_low_vol",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "long"
+      ],
+      "horizon": "long",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/L-04_lt_low_vol.md",
+          "line": 1,
+          "quote": "# L-04 低波动 `lt_low_vol` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/L-04_lt_low_vol.md",
+          "line": 7,
+          "quote": "key `lt_low_vol`；category `low_vol`；horizons `[long]`；risk_level `normal`。"
+        },
+        {
+          "path": "docs/strategies/T-R16/L-04_lt_low_vol.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "st_pullback_ma@1:research:S-01_st_pullback_ma",
+      "path": "docs/strategies/T-R16/S-01_st_pullback_ma.md",
+      "key": "st_pullback_ma",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/S-01_st_pullback_ma.md",
+          "line": 1,
+          "quote": "# S-01 强势股短线回踩 `st_pullback_ma` — 知识卡 v1（T-R16 首批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/S-01_st_pullback_ma.md",
+          "line": 9,
+          "quote": "key `st_pullback_ma`；category `momentum`；horizons `[short]`（持有 1–5 个交易日，信号有效 1 个交易日）。"
+        },
+        {
+          "path": "docs/strategies/T-R16/S-01_st_pullback_ma.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "st_oversold_rebound@1:research:S-02_st_oversold_rebound",
+      "path": "docs/strategies/T-R16/S-02_st_oversold_rebound.md",
+      "key": "st_oversold_rebound",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/S-02_st_oversold_rebound.md",
+          "line": 1,
+          "quote": "# S-02 超跌反弹 `st_oversold_rebound` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/S-02_st_oversold_rebound.md",
+          "line": 7,
+          "quote": "key `st_oversold_rebound`；category `reversal`；horizons `[short]`；risk_level `normal`。"
+        },
+        {
+          "path": "docs/strategies/T-R16/S-02_st_oversold_rebound.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "st_limitup_relay@1:research:S-03_st_limitup_relay",
+      "path": "docs/strategies/T-R16/S-03_st_limitup_relay.md",
+      "key": "st_limitup_relay",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/S-03_st_limitup_relay.md",
+          "line": 1,
+          "quote": "# S-03 涨停接力 `st_limitup_relay` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/S-03_st_limitup_relay.md",
+          "line": 7,
+          "quote": "key `st_limitup_relay`；category `momentum`；horizons `[short]`；risk_level `high`。plan 2.5.11 中的同类高风险模板 key 为 `st_strong_momo`（默认不启用、不被分类器推荐），**key 是否统一待定**；本卡沿用 risk_level high 与默认不启用。"
+        },
+        {
+          "path": "docs/strategies/T-R16/S-03_st_limitup_relay.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "st_broken_board@1:research:S-04_st_broken_board",
+      "path": "docs/strategies/T-R16/S-04_st_broken_board.md",
+      "key": "st_broken_board",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/S-04_st_broken_board.md",
+          "line": 1,
+          "quote": "# S-04 断板反包 `st_broken_board` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/S-04_st_broken_board.md",
+          "line": 7,
+          "quote": "key `st_broken_board`；category `momentum`；horizons `[short]`；risk_level `high`。"
+        },
+        {
+          "path": "docs/strategies/T-R16/S-04_st_broken_board.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "t_vwap_revert@1:research:T-01_t_vwap_revert",
+      "path": "docs/strategies/T-R16/T-01_t_vwap_revert.md",
+      "key": "t_vwap_revert",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "intraday_t"
+      ],
+      "horizon": "intraday_t",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/T-01_t_vwap_revert.md",
+          "line": 1,
+          "quote": "# T-01 均价偏离回归做T `t_vwap_revert` — 知识卡 v1（T-R16 首批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/T-01_t_vwap_revert.md",
+          "line": 9,
+          "quote": "key `t_vwap_revert`；category `intraday_t`；horizons `[intraday_t]`；risk_level `normal`。"
+        },
+        {
+          "path": "docs/strategies/T-R16/T-01_t_vwap_revert.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "t_spike_fade@1:research:T-02_t_spike_fade",
+      "path": "docs/strategies/T-R16/T-02_t_spike_fade.md",
+      "key": "t_spike_fade",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "intraday_t"
+      ],
+      "horizon": "intraday_t",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/T-02_t_spike_fade.md",
+          "line": 1,
+          "quote": "# T-02 分时急拉回落减仓T `t_spike_fade` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/T-02_t_spike_fade.md",
+          "line": 7,
+          "quote": "key `t_spike_fade`；category `intraday_t`；horizons `[intraday_t]`；risk_level `normal`。"
+        },
+        {
+          "path": "docs/strategies/T-R16/T-02_t_spike_fade.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "t_open_gap@1:research:T-03_t_open_gap",
+      "path": "docs/strategies/T-R16/T-03_t_open_gap.md",
+      "key": "t_open_gap",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "intraday_t"
+      ],
+      "horizon": "intraday_t",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/T-03_t_open_gap.md",
+          "line": 1,
+          "quote": "# T-03 开盘缺口回补T `t_open_gap` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/T-03_t_open_gap.md",
+          "line": 7,
+          "quote": "key `t_open_gap`；category `intraday_t`；horizons `[intraday_t]`；risk_level `normal`。"
+        },
+        {
+          "path": "docs/strategies/T-R16/T-03_t_open_gap.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "t_boll_revert@1:research:T-04_t_boll_revert",
+      "path": "docs/strategies/T-R16/T-04_t_boll_revert.md",
+      "key": "t_boll_revert",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "intraday_t"
+      ],
+      "horizon": "intraday_t",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/T-04_t_boll_revert.md",
+          "line": 1,
+          "quote": "# T-04 布林外轨回归T `t_boll_revert` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/T-04_t_boll_revert.md",
+          "line": 7,
+          "quote": "key `t_boll_revert`；category `intraday_t`；horizons `[intraday_t]`；risk_level `normal`。"
+        },
+        {
+          "path": "docs/strategies/T-R16/T-04_t_boll_revert.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "sw_breakout@1:research:W-02_sw_breakout",
+      "path": "docs/strategies/T-R16/W-02_sw_breakout.md",
+      "key": "sw_breakout",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/W-02_sw_breakout.md",
+          "line": 1,
+          "quote": "# W-02 收敛放量突破 `sw_breakout` — 知识卡 v1（T-R16 首批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/W-02_sw_breakout.md",
+          "line": 8,
+          "quote": "key `sw_breakout`；category `momentum`；horizons `[swing]`（观察窗 3–10 日，最长持有 `p.max_hold` 日）。"
+        },
+        {
+          "path": "docs/strategies/T-R16/W-02_sw_breakout.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "sw_main_inflow@1:research:W-03_sw_main_inflow",
+      "path": "docs/strategies/T-R16/W-03_sw_main_inflow.md",
+      "key": "sw_main_inflow",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/W-03_sw_main_inflow.md",
+          "line": 1,
+          "quote": "# W-03 主力净流入 `sw_main_inflow` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/W-03_sw_main_inflow.md",
+          "line": 7,
+          "quote": "key `sw_main_inflow`；category `trend`；horizons `[swing]`；risk_level `normal`。（资金流类在 category 枚举中没有对应取值，暂用 trend，是否新增取值**待定**，需提给架构师）"
+        },
+        {
+          "path": "docs/strategies/T-R16/W-03_sw_main_inflow.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "sw_ind_rotation@1:research:W-04_sw_ind_rotation",
+      "path": "docs/strategies/T-R16/W-04_sw_ind_rotation.md",
+      "key": "sw_ind_rotation",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/W-04_sw_ind_rotation.md",
+          "line": 1,
+          "quote": "# W-04 行业相对强度轮动 `sw_ind_rotation` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/W-04_sw_ind_rotation.md",
+          "line": 7,
+          "quote": "key `sw_ind_rotation`；category `momentum`；horizons `[swing]`；risk_level `normal`。（行业轮动在 category 枚举中没有对应取值，暂用 momentum，是否新增取值**待定**）"
+        },
+        {
+          "path": "docs/strategies/T-R16/W-04_sw_ind_rotation.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "sw_earnings_drift@1:research:W-05_sw_earnings_drift",
+      "path": "docs/strategies/T-R16/W-05_sw_earnings_drift.md",
+      "key": "sw_earnings_drift",
+      "version_no": 1,
+      "document_version": "v1",
+      "scope": "research_blocked_not_importable",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "当前状态：不可导入（83a66cd）；未来潜力非当前可运行状态",
+      "rc5_consume": "excluded_research_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/T-R16/W-05_sw_earnings_drift.md",
+          "line": 1,
+          "quote": "# W-05 业绩预告漂移 `sw_earnings_drift` — 知识卡 v1（T-R16 第二批）"
+        },
+        {
+          "path": "docs/strategies/T-R16/W-05_sw_earnings_drift.md",
+          "line": 7,
+          "quote": "key `sw_earnings_drift`；category `event`；horizons `[swing]`；risk_level `normal`。"
+        },
+        {
+          "path": "docs/strategies/T-R16/W-05_sw_earnings_drift.md",
+          "line": 3,
+          "quote": "> **当前状态：不可导入**"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
+    },
+    {
+      "record_id": "catalog:0.3.8:G-01:gate_tradability",
+      "path": "docs/strategies/catalog.md",
+      "key": "gate_tradability",
+      "card_id": "G-01",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "intraday_t",
+        "short",
+        "swing",
+        "long"
+      ],
+      "horizon": null,
+      "classification": "explicit_multi_no_unique_fallback",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=可；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 39,
+          "quote": "| G-01 | gate_tradability | 可交易性闸门（系统组件，挂所有模板） | 全部 | 技术/状态 | 可 | **P0** |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": "通用/跨周期研究条目，没有单一策略版本周期；不以标题、触发频率或观察窗替代",
+      "release_condition": "若另派制成正式卡，先由权威规格明确版本周期/结论绑定及生命周期；本轮不新建策略"
+    },
+    {
+      "record_id": "catalog:0.3.8:G-02:ctx_market_regime",
+      "path": "docs/strategies/catalog.md",
+      "key": "ctx_market_regime",
+      "card_id": "G-02",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "intraday_t",
+        "short",
+        "swing",
+        "long"
+      ],
+      "horizon": null,
+      "classification": "explicit_multi_no_unique_fallback",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=可（情绪周期部分有条件）；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 40,
+          "quote": "| G-02 | ctx_market_regime | 大盘环境与情绪周期（系统组件，上下文） | 全部 | 板块大盘/情绪 | 可（情绪周期部分有条件） | **P0** |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": "通用/跨周期研究条目，没有单一策略版本周期；不以标题、触发频率或观察窗替代",
+      "release_condition": "若另派制成正式卡，先由权威规格明确版本周期/结论绑定及生命周期；本轮不新建策略"
+    },
+    {
+      "record_id": "catalog:0.3.8:H-01:hold_risk_monitor",
+      "path": "docs/strategies/catalog.md",
+      "key": "hold_risk_monitor",
+      "card_id": "H-01",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "intraday_t",
+        "short",
+        "swing",
+        "long"
+      ],
+      "horizon": null,
+      "classification": "explicit_multi_no_unique_fallback",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=可（盘中部分依赖快照）；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 41,
+          "quote": "| H-01 | hold_risk_monitor | 持仓风险体检（系统组件，默认挂全部持仓） | 全部 | 技术 | 可（盘中部分依赖快照） | **P0** |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": "通用/跨周期研究条目，没有单一策略版本周期；不以标题、触发频率或观察窗替代",
+      "release_condition": "若另派制成正式卡，先由权威规格明确版本周期/结论绑定及生命周期；本轮不新建策略"
+    },
+    {
+      "record_id": "catalog:0.3.8:N-01:veto_risk_announcement",
+      "path": "docs/strategies/catalog.md",
+      "key": "veto_risk_announcement",
+      "card_id": "N-01",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "intraday_t",
+        "short",
+        "swing",
+        "long"
+      ],
+      "horizon": null,
+      "classification": "explicit_multi_no_unique_fallback",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件（盘后、次日生效；缺失即阻断买入草案）；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 42,
+          "quote": "| N-01 | veto_risk_announcement | 风险公告否决（系统组件） | 全部 | 消息 | 有条件（盘后、次日生效；缺失即阻断买入草案） | **P0** |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": "通用/跨周期研究条目，没有单一策略版本周期；不以标题、触发频率或观察窗替代",
+      "release_condition": "若另派制成正式卡，先由权威规格明确版本周期/结论绑定及生命周期；本轮不新建策略"
+    },
+    {
+      "record_id": "catalog:0.3.8:T-01:t_vwap_revert",
+      "path": "docs/strategies/catalog.md",
+      "key": "t_vwap_revert",
+      "card_id": "T-01",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "intraday_t"
+      ],
+      "horizon": "intraday_t",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件（延迟实测前只做盘后统计）；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 43,
+          "quote": "| T-01 | t_vwap_revert | 均价偏离回归做T | 日内做T | 技术 | 有条件（延迟实测前只做盘后统计） | **P0** |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:T-02:t_intraday_surge",
+      "path": "docs/strategies/catalog.md",
+      "key": "t_intraday_surge",
+      "card_id": "T-02",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "intraday_t"
+      ],
+      "horizon": "intraday_t",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 44,
+          "quote": "| T-02 | t_intraday_surge | 分时急拉冲高回落做T | 日内做T | 技术 | 有条件 | P1 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:T-03:t_open_gap",
+      "path": "docs/strategies/catalog.md",
+      "key": "t_open_gap",
+      "card_id": "T-03",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "intraday_t"
+      ],
+      "horizon": "intraday_t",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=缺口部分有条件；竞价量部分暂不可盘中；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 45,
+          "quote": "| T-03 | t_open_gap | 开盘缺口做T（竞价量部分暂不可） | 日内做T | 技术/情绪 | 缺口部分有条件；竞价量部分暂不可盘中 | P2 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:S-01:st_pullback_ma",
+      "path": "docs/strategies/catalog.md",
+      "key": "st_pullback_ma",
+      "card_id": "S-01",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=可；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 46,
+          "quote": "| S-01 | st_pullback_ma | 强势股短线回踩 | 短线 | 技术 | 可 | **P0** |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:S-02:st_oversold_rebound",
+      "path": "docs/strategies/catalog.md",
+      "key": "st_oversold_rebound",
+      "card_id": "S-02",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=可；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 47,
+          "quote": "| S-02 | st_oversold_rebound | 超跌反弹 | 短线 | 技术 | 可 | P1 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:S-03:st_strong_momo",
+      "path": "docs/strategies/catalog.md",
+      "key": "st_strong_momo",
+      "card_id": "S-03",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件（股池历史约 30 天）；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 48,
+          "quote": "| S-03 | st_strong_momo | 涨停强势情绪接力（`risk_level: high`） | 短线 | 情绪 | 有条件（股池历史约 30 天） | P2（随附模板，默认不启用） |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:S-04:st_broken_board_recovery",
+      "path": "docs/strategies/catalog.md",
+      "key": "st_broken_board_recovery",
+      "card_id": "S-04",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=可；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 49,
+          "quote": "| S-04 | st_broken_board_recovery | 断板反包 | 短线 | 技术/情绪 | 可 | P2 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:S-05:st_lhb_inst_buy",
+      "path": "docs/strategies/catalog.md",
+      "key": "st_lhb_inst_buy",
+      "card_id": "S-05",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件（20:00 发布，次日用）；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 50,
+          "quote": "| S-05 | st_lhb_inst_buy | 龙虎榜机构净买 | 短线 | 资金 | 有条件（20:00 发布，次日用） | P2 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:W-01:sw_ma_trend_pullback",
+      "path": "docs/strategies/catalog.md",
+      "key": "sw_ma_trend_pullback",
+      "card_id": "W-01",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=可（资金/财务/公告辅助有条件）；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 51,
+          "quote": "| W-01 | sw_ma_trend_pullback | 均线趋势回踩（含 sw_trend_follow 变体） | 波段 | 技术 | 可（资金/财务/公告辅助有条件） | **P0** |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:W-02:sw_breakout",
+      "path": "docs/strategies/catalog.md",
+      "key": "sw_breakout",
+      "card_id": "W-02",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=可；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 52,
+          "quote": "| W-02 | sw_breakout | 收敛放量突破 | 波段 | 技术 | 可 | **P0** |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:W-03:sw_capital_persist",
+      "path": "docs/strategies/catalog.md",
+      "key": "sw_capital_persist",
+      "card_id": "W-03",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 53,
+          "quote": "| W-03 | sw_capital_persist | 主力资金持续净流入 | 波段 | 资金 | 有条件 | P1 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:W-04:sw_sector_rs",
+      "path": "docs/strategies/catalog.md",
+      "key": "sw_sector_rs",
+      "card_id": "W-04",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件（成分周更、无历史成分）；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 54,
+          "quote": "| W-04 | sw_sector_rs | 行业相对强度轮动 | 波段 | 板块大盘 | 有条件（成分周更、无历史成分） | P1 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:W-05:sw_earnings_preannounce",
+      "path": "docs/strategies/catalog.md",
+      "key": "sw_earnings_preannounce",
+      "card_id": "W-05",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 55,
+          "quote": "| W-05 | sw_earnings_preannounce | 业绩预告预增后漂移 | 波段 | 基本面/消息 | 有条件 | P1 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:L-01:lt_value",
+      "path": "docs/strategies/catalog.md",
+      "key": "lt_value",
+      "card_id": "L-01",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "long"
+      ],
+      "horizon": "long",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 56,
+          "quote": "| L-01 | lt_value | 低估值 + 质量护栏 | 中长线 | 基本面 | 有条件 | **P0** |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:L-02:lt_quality_growth",
+      "path": "docs/strategies/catalog.md",
+      "key": "lt_quality_growth",
+      "card_id": "L-02",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "long"
+      ],
+      "horizon": "long",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 57,
+          "quote": "| L-02 | lt_quality_growth | 质量成长 | 中长线 | 基本面 | 有条件 | P1 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:L-03:lt_dividend",
+      "path": "docs/strategies/catalog.md",
+      "key": "lt_dividend",
+      "card_id": "L-03",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "long"
+      ],
+      "horizon": "long",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件（分红因子文档标\"试用\"）；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 58,
+          "quote": "| L-03 | lt_dividend | 红利 | 中长线 | 基本面 | 有条件（分红因子文档标\"试用\"） | P1 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:L-04:lt_low_vol",
+      "path": "docs/strategies/catalog.md",
+      "key": "lt_low_vol",
+      "card_id": "L-04",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "long"
+      ],
+      "horizon": "long",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=可；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 59,
+          "quote": "| L-04 | lt_low_vol | 低波动 | 中长线 | 技术 | 可 | P1 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "catalog:0.3.8:N-02:veto_unlock_soon",
+      "path": "docs/strategies/catalog.md",
+      "key": "veto_unlock_soon",
+      "card_id": "N-02",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "swing",
+        "long"
+      ],
+      "horizon": null,
+      "classification": "explicit_multi_no_unique_fallback",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=有条件；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 60,
+          "quote": "| N-02 | veto_unlock_soon | 限售解禁临近反证 | 波段/中长线 | 消息 | 有条件 | P1 |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": "通用/跨周期研究条目，没有单一策略版本周期；不以标题、触发频率或观察窗替代",
+      "release_condition": "若另派制成正式卡，先由权威规格明确版本周期/结论绑定及生命周期；本轮不新建策略"
+    },
+    {
+      "record_id": "catalog:0.3.8:N-03:news_sentiment",
+      "path": "docs/strategies/catalog.md",
+      "key": "news_sentiment",
+      "card_id": "N-03",
+      "version_no": null,
+      "document_version": "0.3.8",
+      "scope": "catalog_research_not_formal_card",
+      "horizons": [
+        "intraday_t",
+        "short",
+        "swing",
+        "long"
+      ],
+      "horizon": null,
+      "classification": "explicit_multi_no_unique_fallback",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "目录可运行初判=**暂不可**（无新闻接口）；仅研究判断，不是策略版本生命周期",
+      "rc5_consume": "excluded_catalog_no_runtime_version",
+      "evidence": [
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 61,
+          "quote": "| N-03 | news_sentiment | 新闻舆情 | 全部 | 消息/情绪 | **暂不可**（无新闻接口） | P2（L1 卡片，不可运行） |"
+        },
+        {
+          "path": "docs/strategies/catalog.md",
+          "line": 3,
+          "quote": "不是正式策略卡"
+        }
+      ],
+      "gap_reason": "通用/跨周期研究条目，没有单一策略版本周期；不以标题、触发频率或观察窗替代",
+      "release_condition": "若另派制成正式卡，先由权威规格明确版本周期/结论绑定及生命周期；本轮不新建策略"
+    }
+  ],
+  "excluded_render_mirrors": [
+    {
+      "path": "docs/strategies/golden/hold_risk_monitor.card.tmpl",
+      "key": "hold_risk_monitor",
+      "version_no": 2,
+      "horizons": [
+        "intraday_t",
+        "short",
+        "swing",
+        "long"
+      ],
+      "current_source": "docs/strategies/cards/hold_risk_monitor.md",
+      "reason": "golden/render_T-R15.py line12 reads tmpl and line16 writes cards; no independent strategy/version"
+    },
+    {
+      "path": "docs/strategies/golden/sw_ma_trend_pullback.card.tmpl",
+      "key": "sw_ma_trend_pullback",
+      "version_no": 2,
+      "horizons": [
+        "swing"
+      ],
+      "current_source": "docs/strategies/cards/sw_ma_trend_pullback.md",
+      "reason": "golden/render_T-R15.py line12 reads tmpl and line16 writes cards; no independent strategy/version"
+    }
+  ],
+  "authorities": [
+    {
+      "path": "docs/plan.md",
+      "section": "2.5.14 A/B",
+      "quote": "导入不等于启用"
+    },
+    {
+      "path": "docs/plan.md",
+      "section": "2.5.1",
+      "quote": "`intraday_t`（日内做T）、`short`（短线 1–5 天）、`swing`（波段 数周–数月）、`long`（中长线 半年以上）"
+    },
+    {
+      "path": "docs/plan.md",
+      "section": "2.5.14 A",
+      "quote": "幂等键**是 `key + version_no`"
+    },
+    {
+      "path": "docs/api-contract.md",
+      "section": "7.11.3 T-A36/T-A37",
+      "quote": "`intraday_t`→1、`short`→5、`swing`→20、`long`→20"
+    },
+    {
+      "path": "docs/api-contract.md",
+      "section": "7.11.3 T-A36",
+      "quote": "仍不清楚 → 该观测跳过（不计失败、不清零）并记 gap `sim_fail_horizon_unknown`，不默认 5 日"
+    },
+    {
+      "path": "docs/api-contract.md",
+      "section": "6.0A / errors",
+      "quote": "模板版本不是 `published`/`observing`"
+    }
+  ],
+  "stats": {
+    "identity_records": 43,
+    "source_identity_files": 21,
+    "scope_counts": {
+      "historical_frozen": 2,
+      "current_formal_L1_with_L2_spec": 2,
+      "research_blocked_not_importable": 16,
+      "catalog_research_not_formal_card": 23
+    },
+    "explicit_single_distribution": {
+      "swing": 11,
+      "long": 8,
+      "short": 9,
+      "intraday_t": 7
+    },
+    "multi_records": 8,
+    "source_field_repairs": 0,
+    "missing_horizons": 0
+  },
+  "rc5_boundary": {
+    "horizon_days_mapping": {
+      "intraday_t": 1,
+      "short": 5,
+      "swing": 20,
+      "long": 20
+    },
+    "selection": "suggestion conclusion of that version horizon, then unambiguous version declaration; unknown skips+gap, never fixed5",
+    "this_audit_changes_runtime": false
+  },
+  "deepseek_notice": "1 official synthetic-only 24-slot layout draft, 1302 tokens; real names/paths/document text not sent; actual inventory and all judgments independently local"
+}

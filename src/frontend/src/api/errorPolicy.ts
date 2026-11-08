@@ -138,6 +138,8 @@ export type GlobalErrorAction = 'login' | 'csrf' | 'log' | 'none';
  */
 export function globalErrorAction(e: unknown): GlobalErrorAction {
   if (!(e instanceof ApiError)) return 'none';
+  // 本次密码复核失败不是会话失效；仅由发起操作的弹窗提示。
+  if (e.code === 'REAUTH_FAILED') return 'none';
   if (e.status === 401 && e.code === 'AUTH_REQUIRED') return 'login';
   if (e.status === 403 && e.code === 'CSRF_FAILED') return 'csrf';
   if (e.status === 405 || e.code === 'METHOD_NOT_ALLOWED') return 'log';

@@ -3,7 +3,7 @@ import { uid } from './fixtures';
 import type { PromotionReport } from '../api/promotionTypes';
 export const EXAMPLE_PROMOTION_REPORT: PromotionReport = {
   review_id: uid(940), card_id: uid(512), version_id: uid(322), version_no: 1,
-  content_sha256: 'abcdef'.repeat(10) + 'abcd', stale: false,
+  content_sha256: 'abcdef'.repeat(10) + 'abcd', stale: false, stale_reason: null,
   submitted_by: uid(3), submitted_at: '2026-11-01T08:00:00+08:00', reviewer_id: null, decided_at: null,
   decision: "pending",
   gate_results: [

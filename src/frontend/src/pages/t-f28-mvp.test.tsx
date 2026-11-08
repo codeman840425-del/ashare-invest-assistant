@@ -15,6 +15,7 @@ import { promotionRows } from './admin/AdminStrategyGatesPage';
 import { RiskFlagView } from '../components/RiskFlagView';
 import { ActionBadge } from '../components/common';
 import { NAV_ADMIN_GATES, navMoreFor } from '../app/nav';
+import { confirmMockPromotion } from '../test/confirmMockPromotion';
 import { apiFetch } from '../test/apiFetch';
 
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -69,8 +70,9 @@ describe('T-F28 门禁', () => {
     fireEvent.change(screen.getByLabelText('G7 审核意见'), { target: { value: '本人已核对示例数据警告' } });
     fireEvent.click(screen.getByRole('checkbox', { name: '本人已核实并确认 G6 警告' }));
     fireEvent.click(button);
+    await confirmMockPromotion('decision');
     await waitFor(() => expect(decisions).toBe(1));
-    expect(body).toEqual({ decision: 'approved', comment: '本人已核对示例数据警告', ack_warn_gates: ['G6'] });
+    expect(body).toEqual({ decision: 'approved', comment: '本人已核对示例数据警告', ack_warn_gates: ['G6'], password: 'x'.repeat(10) });
     expect(lifecycle).toBe(0);
   });
   it('403 明确说明未完成，不重试、不自动晋级', async () => {
@@ -81,6 +83,7 @@ describe('T-F28 门禁', () => {
     fireEvent.change(screen.getByLabelText('G7 审核意见'), { target: { value: '本人核对' } });
     fireEvent.click(screen.getByRole('checkbox', { name: '本人已核实并确认 G6 警告' }));
     fireEvent.click(screen.getByTestId('approve-g7'));
+    await confirmMockPromotion('decision');
     await screen.findByText(/没有审批权限（403）/);
     expect(writes).toBe(1);
     expect(screen.queryByText('所选版本已转入模拟中')).not.toBeInTheDocument();
@@ -109,7 +112,8 @@ describe('T-F28 门禁', () => {
     fireEvent.change(screen.getByLabelText('生命周期变更原因'), { target: { value: '本人检查完毕' } });
     expect(writes).toHaveLength(0);
     fireEvent.click(screen.getByTestId('to-simulating'));
-    await waitFor(() => expect(writes).toEqual([{ id: uid(512), vid: uid(322), body: { to: 'simulating', reason: '本人检查完毕', review_id: DEMO_REVIEW_ID } }]));
+    await confirmMockPromotion('lifecycle');
+    await waitFor(() => expect(writes).toEqual([{ id: uid(512), vid: uid(322), body: { to: 'simulating', reason: '本人检查完毕', review_id: DEMO_REVIEW_ID, password: 'x'.repeat(10) } }]));
   });
   it('示例管理写端点拒绝普通用户', async () => {
     mockLoginAs('demo_user');

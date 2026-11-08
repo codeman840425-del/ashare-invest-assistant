@@ -31,13 +31,15 @@ export interface G6Report {
 
 /** T-F29：DeepSeek 机械草稿逐字段核对 §7.4；修正草稿未引用的 G1..G6 类型。 */
 export type AutomaticGateId = Exclude<GateId, 'G7'>;
+export type PromotionStaleReason = 'new_version' | 'content_changed' | 'legacy_unbound';
 export interface PromotionBinding {
   review_id: string;
   card_id: string;
-  version_id: string;
+  version_id: string | null;
   version_no: number;
-  content_sha256: string;
+  content_sha256: string | null;
   stale: boolean;
+  stale_reason: PromotionStaleReason | null;
   submitted_by: string;
   submitted_at: string;
   reviewer_id: string | null;

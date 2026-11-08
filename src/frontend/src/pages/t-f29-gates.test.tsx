@@ -11,6 +11,7 @@ import { currentUser, mockLoginAs } from '../mocks/session';
 import { EXAMPLE_PROMOTION_REPORT } from '../mocks/promotionFixtures';
 import { DEMO_REVIEW_ID } from '../mocks/promotionHandlers';
 import { apiGet, apiPost } from '../api/client';
+import { confirmMockPromotion } from '../test/confirmMockPromotion';
 import { uid } from '../mocks/fixtures';
 import type { PromotionSummary } from '../api/promotionTypes';
 import type { Paged } from '../api/types';
@@ -44,7 +45,8 @@ it('警告默认不勾；意见不足以放行，确认后才发送 ack_warn_gat
   expect(body).toBeUndefined();
   fireEvent.click(checkbox);
   fireEvent.click(screen.getByTestId('approve-g7'));
-  await waitFor(() => expect(body).toEqual({ decision: 'approved', comment: '本人已核对示例数据', ack_warn_gates: ['G6'] }));
+  await confirmMockPromotion('decision');
+  await waitFor(() => expect(body).toEqual({ decision: 'approved', comment: '本人已核对示例数据', ack_warn_gates: ['G6'], password: 'x'.repeat(10) }));
 });
 it('非管理员直达不可见且不请求审核列表和报告', async () => {
   mockLoginAs('demo_user');
@@ -96,7 +98,8 @@ it('生命周期必须先有 approved 报告，另行点击并发送 review_id',
   await fillLifecycle();
   expect(body).toBeUndefined();
   fireEvent.click(screen.getByTestId('to-simulating'));
-  await waitFor(() => expect(body).toEqual({ to: 'simulating', reason: '本人已核对绑定版本', review_id: DEMO_REVIEW_ID }));
+  await confirmMockPromotion('lifecycle');
+  await waitFor(() => expect(body).toEqual({ to: 'simulating', reason: '本人已核对绑定版本', review_id: DEMO_REVIEW_ID, password: 'x'.repeat(10) }));
 });
 it('pending 和 stale 审核不可晋级，stale 不可批准', async () => {
   server.use(http.get(`${API}/promotion-requests/:id`, () => HttpResponse.json({ ...EXAMPLE_PROMOTION_REPORT, stale: true })));
@@ -119,7 +122,8 @@ for (const operation of ['decision', 'lifecycle']) {
         await fillApproval();
         fireEvent.click(screen.getByRole('checkbox', { name: '本人已核实并确认 G6 警告' }));
         fireEvent.click(screen.getByTestId('approve-g7'));
-      } else { await fillLifecycle(); fireEvent.click(screen.getByTestId('to-simulating')); }
+        await confirmMockPromotion('decision');
+      } else { await fillLifecycle(); fireEvent.click(screen.getByTestId('to-simulating')); await confirmMockPromotion('lifecycle'); }
       await screen.findByText(text);
       expect(writes).toBe(1);
       expect(screen.getByTestId(operation === 'decision' ? 'approve-g7' : 'to-simulating')).toBeDisabled();
@@ -127,6 +131,6 @@ for (const operation of ['decision', 'lifecycle']) {
   }
 }
 it('示例接口拒绝未确认警告和缺审核晋级', async () => {
-  await expect(apiPost(`/admin/promotions/${DEMO_REVIEW_ID}/decision`, { decision: 'approved', comment: '示例数据', ack_warn_gates: [] })).rejects.toMatchObject({ code: 'PROMOTION_WARN_UNACKNOWLEDGED' });
-  await expect(apiPost(`/admin/strategies/${uid(512)}/versions/${uid(322)}/lifecycle`, { to: 'simulating', reason: '示例数据', review_id: null })).rejects.toMatchObject({ code: 'PROMOTION_GATES_NOT_MET' });
+  await expect(apiPost(`/admin/promotions/${DEMO_REVIEW_ID}/decision`, { decision: 'approved', comment: '示例数据', ack_warn_gates: [], password: 'x'.repeat(10) })).rejects.toMatchObject({ code: 'PROMOTION_WARN_UNACKNOWLEDGED' });
+  await expect(apiPost(`/admin/strategies/${uid(512)}/versions/${uid(322)}/lifecycle`, { to: 'simulating', reason: '示例数据', review_id: null, password: 'x'.repeat(10) })).rejects.toMatchObject({ code: 'PROMOTION_GATES_NOT_MET' });
 });

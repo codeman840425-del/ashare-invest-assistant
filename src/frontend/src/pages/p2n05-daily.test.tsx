@@ -106,7 +106,7 @@ it.each([422, 500])('设置失败不展示成功（%s），不修改服务端已
   fireEvent.click(within(card).getByRole('button', { name: /保存/ }));
   await within(card).findByText(/设置未保存/);
   expect(within(card).queryByText('设置已保存（以服务端响应为准）')).not.toBeInTheDocument();
-  expect(within(card).getByLabelText('单只仓位上限（%）')).toHaveValue('31');
+  expect(within(card).getByLabelText('单只仓位上限（%）')).toHaveValue(31);
   expect(await readSettings()).toEqual(EXAMPLE_RISK_SETTINGS);
 });
 it('重复设置原子拒绝，合法项也不部分写入；source只读', async () => {

@@ -1,3 +1,4 @@
+import { assertRiskDefaults } from '../lib/riskControlParams';
 /** P2N-05a 示例数据：由 DeepSeek 状态草稿逐项复核生成；不调用行情、不执行真实求值。 */
 import type { DailyReport, Evidence, Gap, Stat, Suggestion } from '../api/types';
 import type { RiskControlSetting, RiskEvaluation, SuggestionTracking, TrackingResult } from '../api/phase2Types';
@@ -44,6 +45,8 @@ export const EXAMPLE_RISK_SETTINGS: RiskControlSetting[] = [
   { control: 'loss_streak_drawdown', enabled: true, source: 'system', params: { closed_loss_streak: 3, drawdown_from_peak_pct: '10', strategy_sim_fail_streak: 5, pause_on_trigger: true, pause_days: 5 } },
   { control: 'plan_violation', enabled: false, source: 'user', params: { checks: ['opposite_side', 'qty_over_plan', 'held_after_invalidation', 'buy_without_stop', 'buy_during_wait'] } },
 ];
+assertRiskDefaults(EXAMPLE_RISK_SETTINGS);
+
 export function exampleEvaluation(code: string, name: string, accountId: string | null, settings: RiskControlSetting[], changed: ReadonlySet<string>): RiskEvaluation {
   const at = '2026-10-30T17:30:00+08:00';
   const controls = PHASE2_STATES.filter((s) => s.kind === 'evaluation').map((sample): RiskEvaluation['controls'][number] => {

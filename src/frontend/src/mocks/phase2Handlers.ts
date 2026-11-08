@@ -1,3 +1,4 @@
+import { validateRiskParams } from '../lib/riskControlParams';
 /** 示例数据；统一鉴权/CSRF由 accountHandlers 前置处理，设置按用户隔离且原子更新。 */
 import { http, HttpResponse } from 'msw';
 import { isUuid } from '../lib/uuid';
@@ -32,11 +33,6 @@ function validParams(control: string, params: unknown): boolean {
   return true;
 }
 const EXAMPLE_CHECKS = ['opposite_side', 'qty_over_plan', 'held_after_invalidation', 'buy_without_stop', 'buy_during_wait'];
-function invalidRange(setting: RiskControlSetting) {
-  if (setting.control === 'position_cap') return Number(setting.params.single_position_max_pct) < 5 || Number(setting.params.single_position_max_pct) > 50;
-  if (setting.control === 'total_exposure') return Object.values(setting.params.regime_ranges).some(([lo, hi]) => Number(lo) > Number(hi));
-  return false; // 未明确的 min/max 不自造，报告列为契约待补。
-}
 export const phase2Handlers = [
   http.get(`${API}/risk-controls`, () => HttpResponse.json(currentSettings())),
   http.put(`${API}/risk-controls`, async ({ request }) => {
@@ -50,7 +46,10 @@ export const phase2Handlers = [
       // 运行时按六项模板逐字段验证完毕；source仅由响应生成，不接收客户端写入。
       updates.push({ ...item, source: 'user' } as RiskControlSetting);
     }
-    if (updates.some(invalidRange)) return HttpResponse.json(errorBody('RISK_CONTROL_INVALID_PARAMS', '参数超出已明确范围或区间倒置（示例数据）'), { status: 422 });
+    const issues = updates.flatMap(validateRiskParams);
+    const malformed = issues.filter((issue) => issue.kind === 'type');
+    if (malformed.length) return HttpResponse.json(errorBody('VALIDATION_ERROR', '参数类型错误（示例数据）', { fields: malformed.map((issue) => ({ field: issue.field, issue: issue.message })) }), { status: 400 });
+    if (issues.length) return HttpResponse.json(errorBody('RISK_CONTROL_INVALID_PARAMS', '参数超出范围、精度或区间倒置（示例数据）', { fields: issues.map((issue) => ({ field: issue.field, issue: issue.message })) }), { status: 422 });
     const next = currentSettings().map((old) => updates.find((item) => item.control === old.control) ?? old);
     const userId = currentUser()!.id;
     settings.set(userId, next);

@@ -8,7 +8,7 @@ T-B94（b4092f3）+ T-O42 三件套（日历 seed 365 行、三所首导 securit
 3. ~~市场概览、今日关注 503~~ 已修复（复测 200，data_status/gaps 如实）。
 4. 阻塞 43 项：多数为界面层（44 项用户手测）与样本前置（T49/T54 主数据已解除但写入正例待派单）；G7 和麦蕊实时请求未测。
 5. G7 缺策略卡和版本，且正常 HTTP 没有创建入口；
-6. ~~风控没有清除覆盖的接口~~ 接口已落地（T-B95 716cda3，隔离 5 passed），真库 T63 五点终验待 T-T31。
+6. ~~风控没有清除覆盖的接口~~ 接口已落地并复验（T-B95 716cda3 + T-T31 真库五点全过：覆盖→DELETE→回 system/默认、幂等零副作用、system 变体 404、审计 risk_control.reset 本人、负例 401/404；隔离 N1–N10 5 passed）。T63 已转通过；RV-01 两项阻断风险（0028 降级裸删列、实例创建未滤 override_active）待架构师裁定后才算本项完全收口。
 7. 界面层 44 项需要用户机上可操作的浏览器才能测。
 8. 残留已知：T13 证券详情 GET 路由未实现、ETF 主数据样本缺（首导仅 stock+cdr）。
 明细：team/reports/T-T23.md、T-T23-check-results.md（四态已更新）、T-T24.md、T-T30.md、T-T32.md、T-O42.md；清单 team/tasks/T-T23-checklist.md。

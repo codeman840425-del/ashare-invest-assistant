@@ -1,0 +1,90 @@
+{
+  "baseline": "dcf734d",
+  "purpose": "T-T21 test-only mainline migration checksums",
+  "migrations": [
+    {
+      "migration_file": "0001_baseline.py",
+      "sha256_checksum": "c6913130aacf79771d285678e5b590b9ade53728be23d0b5b05f6578809810d9"
+    },
+    {
+      "migration_file": "0002_contract_v022.py",
+      "sha256_checksum": "cac448798afcfa513032a044e3caa235f4ce2f61d5622515c72e49a4644e317d"
+    },
+    {
+      "migration_file": "0003_t_b02a_contract_v023.py",
+      "sha256_checksum": "3fdb0061d0fa279fe786fe50b6f7a0e0752ea3994ef5d98095f189298935f192"
+    },
+    {
+      "migration_file": "0004_t_b03_auth.py",
+      "sha256_checksum": "38202bce8727256b3520f8ddcfee589bb557509c031dec334c47b8211d346d4f"
+    },
+    {
+      "migration_file": "0005_t_b16_contract_v025.py",
+      "sha256_checksum": "48bc10bf372cb0c9b26d611a13811d6fdb92e56a2217cad3bb8a288c84822ef0"
+    },
+    {
+      "migration_file": "0006_t006e_caps_kind.py",
+      "sha256_checksum": "b5e216d7aa5566d4d777c0870f0ac7ea6f6d997cbf0dbcfbb19b0118a7cdecaa"
+    },
+    {
+      "migration_file": "0007_t_b45_data_licences.py",
+      "sha256_checksum": "aec0357617abe6d8803b3b95a3a61266211cbc2081e7d235e4c4c849f2ad8b59"
+    },
+    {
+      "migration_file": "0008_t_b03c_invite_codes.py",
+      "sha256_checksum": "25ce4c29ee38620b862c8d1d7adae6620c0956b8aa874518dbf6cfcbfc37cb3b"
+    },
+    {
+      "migration_file": "0009_t_b02y_contract_v027.py",
+      "sha256_checksum": "608053c6fdb381bc86a3e31943ac1ff697be5a31c457aec04067b8ae692050af"
+    },
+    {
+      "migration_file": "0010_t_b03d_licence_holds.py",
+      "sha256_checksum": "fa8eeae68662dd0de736a6b47624fc1451513f82c3178db9c5bdb3f2844382fe"
+    },
+    {
+      "migration_file": "0011_t_b16_purge_user.py",
+      "sha256_checksum": "ffe737282dd28885166b5fca31995dd7b2ff731ccd04da819f90b8adeea15d02"
+    },
+    {
+      "migration_file": "0012_t_b03e_licence_cooldowns.py",
+      "sha256_checksum": "a0684df22fcb650c7609476df5197ad2ea1a55025e3d297bb8f939c53edf9bc7"
+    },
+    {
+      "migration_file": "0013_t_b16_core_r2.py",
+      "sha256_checksum": "e060a7d882c86325d303a9f95e309f2e4a752bc4c77238e18542336b2070ade3"
+    },
+    {
+      "migration_file": "0014_t_b46_imports_trades.py",
+      "sha256_checksum": "a5d021f21cf6271c9c6917f06257ab6137d7980ed1c64835e9f16a498d2e3418"
+    },
+    {
+      "migration_file": "0015_t_b03f_review_fixes.py",
+      "sha256_checksum": "abe5103adcb9896554f229167c6176c730f475568be1663c0a2e1927070c084a"
+    },
+    {
+      "migration_file": "0016_t_b10_research_candidates.py",
+      "sha256_checksum": "47d5e93399a6780d60768c9c5a58943887cd6b7e04082e4a86826e9744b1eaf6"
+    },
+    {
+      "migration_file": "0017_t_b49_snapshot_purpose.py",
+      "sha256_checksum": "1a7e3813662ed284fd0767bc23a978d74030c126a8682bce2fa887afdec415ed"
+    },
+    {
+      "migration_file": "0018_t_b49_horizon_trigger_on_demand.py",
+      "sha256_checksum": "c3cb92a52d71afd388c2605f2f91a22ebc4c996f6afcfb61f53e711e452754ff"
+    },
+    {
+      "migration_file": "0019_t_b51_security_master.py",
+      "sha256_checksum": "8350067b1da404f7813ab3bd57dd9896354f3b64693ab1a5c0a1bdee065390a4"
+    },
+    {
+      "migration_file": "0020_t_b61_vendor_batches.py",
+      "sha256_checksum": "a06f82c8c0ad42282382991e7e4a00f46155bdf256a7a664958e844a909484e0"
+    },
+    {
+      "migration_file": "0022_t_a13_feature_metadata.py",
+      "sha256_checksum": "82b101caae857b04cd14551183e63814a89211e995f346a077b7716c44726b81"
+    }
+  ]
+}

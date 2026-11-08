@@ -32,11 +32,12 @@
 ``SET beat:slot:<task>:<日期>:<HHMM> NX EX 2d`` 去重，钟点后 15 分钟内有效）：
 
 - T-A22：``master.mairui_risk_snapshot`` 仅交易日北京时间 18:00 排一次；
-  完整名单输入默认关闭（待核实日常授权与安全投递），不含任何网络采集。
+  T-B90：可信运维授权回执 → DB outbox → ingest 三名单 → apply/PIT；
+  缺回执无采集，部署/首次实采仍须核实本人授权。
   旧交易所直拉/07:30 补拉/月度代码表不再由 beat 排程，手动旧抓取同样安全拒绝。
 
 
-旧主数据任务带 ``args``（``{"trigger": ...}``）与 ``attempt``；执行时持 Redis 锁 ``lock:<task>``；失败
+旧主数据任务带 ``args``（``{"trigger": ...}``）与 ``attempt``；执行时持 Redis 锁；失败
 时第 1、2 次进 ``jobs:delayed``（10 分钟后由 beat 放回队列），第 3 次仍失败则写一条
 ``master_runs.status='failed'``。``master.sync_exchange_lists`` 由 beat 触发且成功时，若
 ``master.reconcile_vendor`` 已注册（T-B53）则接着排它；首次导入（CLI）从不触发。
@@ -59,7 +60,6 @@ from sqlalchemy import Engine
 from app.config import Settings
 from app.db.engine import engine_for
 from app.master.mairui_snapshot import TASK as MAIRUI_SNAPSHOT
-from app.master.mairui_snapshot import DailyNames
 from app.workers.daily import (
     ANALYZE,
     RECOVER,
@@ -221,31 +221,49 @@ def _master_run(settings: Settings, trigger: str, sources: list[str] | None) -> 
     return MasterCount(len(res.snaps), res.run_id)
 
 
-def _mairui_delivery(settings: Settings, trade_date: dt.date) -> DailyNames | None:
-    """Closed intake port until DAILY authorization/routine + secure ingest exists.
-
-    Does not read any certificate, environment licence or B86 budget/approval.
-    Only an explicitly authorized future ingest adapter may supply DailyNames.
-    """
-    return None
-
-
 def mairui_snapshot_task(settings: Settings, trade_date: str) -> int:
-    from app.master.mairui_snapshot import apply_delivery
     from app.master.sync import BEIJING
 
     now = _now()
     day = dt.date.fromisoformat(trade_date)
     if now.astimezone(BEIJING).date() != day:
         raise ValueError("snapshot_slot_expired")
-    delivery = _mairui_delivery(settings, day)
-    if delivery is None:
-        log.warning("mairui_list daily authorization/delivery unavailable; no live request")
+    from app.master.daily_delivery import publish_pending, read_grant, request
+
+    grant = read_grant()
+    if grant is None:
+        log.warning("mairui daily authorization unavailable; no ingest request")
+        return 0
     with _engine(settings).begin() as conn:
-        return apply_delivery(
+        bid = request(conn, grant, now)
+    rds = _redis(settings)
+    try:
+        publish_pending(_engine(settings), rds)
+    finally:
+        rds.close()
+    return int(bid is not None)
+
+
+def mairui_daily_sweep(settings: Settings) -> int:
+    from app.master.daily_delivery import publish_pending
+
+    rds = _redis(settings)
+    try:
+        return publish_pending(_engine(settings), rds)
+    finally:
+        rds.close()
+
+
+def mairui_daily_apply(settings: Settings, batch_id: str) -> int:
+    import uuid
+
+    from app.master.daily_delivery import apply_batch
+
+    with _engine(settings).begin() as conn:
+        return apply_batch(
             conn,
-            delivery,
-            now=now,
+            uuid.UUID(batch_id),
+            now=_now(),
             cfg=settings.business.securities.master,
             root=_master_root(settings),
         )
@@ -338,6 +356,8 @@ def vendor_sweep_task(settings: Settings) -> int:
 
 #: 任务名 → 实现
 TASKS: Final[dict[str, Task]] = {
+    "master.mairui_daily_sweep": mairui_daily_sweep,
+    "master.mairui_daily_apply": mairui_daily_apply,
     MAIRUI_SNAPSHOT: mairui_snapshot_task,
     ANALYZE: analysis_task,
     REPORT: report_task,
@@ -380,6 +400,7 @@ LOCKED_TASKS: Final = frozenset(
 def schedule(settings: Settings) -> dict[str, int]:
     """任务名 → 间隔秒数（beat 排程表；间隔来自配置）。"""
     return {
+        "master.mairui_daily_sweep": 60,
         PURGE_COOLDOWNS: settings.cooldown_purge_interval_s,
         PURGE_IMPORT_ROWS: settings.import_rows_purge_interval_s,
         PURGE_RAW_FILES: settings.import_raw_purge_interval_s,
@@ -475,6 +496,17 @@ def beat_slots(
     queued: list[str] = []
     try:
         for task, slot, args in slot_jobs(settings, now):
+            if task == MAIRUI_SNAPSHOT:
+                from app.master.daily_delivery import read_grant, request
+
+                grant = read_grant()
+                if grant is None:
+                    continue
+                # Durable intent BEFORE the Redis slot flag: a beat crash after
+                # SET NX but before LPUSH cannot lose this day's delivery.
+                with _engine(settings).begin() as conn:
+                    if request(conn, grant, now) is None:
+                        continue
             if task in {ANALYZE, REPORT}:
                 record_intent(settings, task, str(args["trade_date"]))
             if r.set(f"{SLOT_PREFIX}{task}:{slot}", 1, nx=True, ex=SLOT_TTL_S):

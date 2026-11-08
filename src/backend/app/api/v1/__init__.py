@@ -19,6 +19,7 @@ from app.api.v1 import (
     instances,
     me,
     meta,
+    notifications,
     portfolio,
     promotions,
     strategy_cards,
@@ -27,6 +28,7 @@ from app.api.v1 import (
 )
 
 router = APIRouter()
+router.include_router(notifications.router)
 router.include_router(health.router)
 router.include_router(meta.router)
 router.include_router(auth.router)

@@ -93,12 +93,15 @@ def apply_delivery(
     now: dt.datetime,
     cfg: SecuritiesMaster,
     root: Path,
+    snapshot_day: dt.date | None = None,
 ) -> int:
     if now.tzinfo is None:
         raise ValueError("timezone_required")
     bj = now.astimezone(BEIJING)
-    day = bj.date()
-    if bj.time() < dt.time(18):
+    day = snapshot_day or bj.date()
+    if day > bj.date():
+        raise ValueError("snapshot_day_in_future")
+    if day == bj.date() and bj.time() < dt.time(18):
         raise ValueError("before_beijing_1800")
     is_open = conn.execute(
         select(trading_calendar.c.is_open).where(trading_calendar.c.date == day)

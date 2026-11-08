@@ -83,6 +83,27 @@ def write_heartbeat(settings: Settings) -> None:
     )
     try:
         client.set(settings.ingest_heartbeat_key, heartbeat_payload(), ex=hb.ttl_s)
+        from app.db.engine import engine_for
+        from app.ingest.daily_lists import tick
+
+        # No live I/O is possible without the operator receipt; absent receipt
+        # does not load the HPKE vault. Existing heartbeat remains available.
+        def heartbeat_wait(seconds: float) -> None:
+            import time
+
+            remaining = seconds
+            while remaining > 0:
+                client.set(settings.ingest_heartbeat_key, heartbeat_payload(), ex=hb.ttl_s)
+                duration = min(1, remaining)
+                time.sleep(duration)
+                remaining -= duration
+
+        if settings.database_url is not None and not client.exists(settings.ingest_paused_key):
+            engine = engine_for(settings.database_url.get_secret_value())
+            try:
+                tick(engine, client, pause=heartbeat_wait)
+            finally:
+                engine.dispose()
     finally:
         client.close()
 

@@ -349,15 +349,24 @@ def apply_batch(
 
 
 def sweep_batches(conn: Connection, *, now: dt.datetime) -> list[UUID]:
+    # Daily snapshots have their own durable apply outbox, not the legacy
+    # reconciliation/retry policy. Never send a delayed daily batch to it.
+    legacy = ~batches.c.master_run_id.in_(
+        select(master_runs.c.id).where(
+            master_runs.c.stats["task"].astext == "mairui_daily_snapshot"
+        )
+    )
     conn.execute(
         update(batches)
-        .where(batches.c.status == "requested", batches.c.deadline_at <= now)
+        .where(legacy, batches.c.status == "requested", batches.c.deadline_at <= now)
         .values(status="expired", error_code="deadline_exceeded")
     )
     return list(
         conn.execute(
             select(batches.c.id).where(
-                batches.c.status == "fetched", batches.c.fetched_at < now - dt.timedelta(minutes=30)
+                legacy,
+                batches.c.status == "fetched",
+                batches.c.fetched_at < now - dt.timedelta(minutes=30),
             )
         ).scalars()
     )

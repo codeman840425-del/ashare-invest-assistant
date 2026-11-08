@@ -20,7 +20,10 @@ from app.db.tables.accounts import accounts
 from app.db.tables.market import daily_bars, minute_bars, trading_calendar
 from app.db.tables.realtime import suggestion_tracking, suggestions
 from app.db.tables.reviews import data_snapshots
-from app.tracking.engine import BEIJING, close_at, due_date, evaluate, gap
+from app.db.tables.strategy import strategy_instances
+from app.schemas.enums import DataProvider, EpistemicType
+from app.signals.models import Evidence, Gap
+from app.tracking.engine import BEIJING, close_at, due_date, evaluate, gap, rounded
 from app.tracking.models import Result, Stat
 
 SCHEMA = "p2n03-tracking-v1"
@@ -132,6 +135,66 @@ def minutes(conn: Connection, code: str, day: dt.date, cutoff: dt.datetime) -> l
     ]
 
 
+def bind_instances(
+    conn: Connection, owner: uuid.UUID, conclusions: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], dict[str, list[Any]]]:
+    """Choose only generation-bound instances; never discover new/mutable votes."""
+    ids = {uuid.UUID(str(c["instance_id"])) for c in conclusions}
+    rows = conn.execute(
+        select(strategy_instances.c.id, strategy_instances.c.created_at)
+        .join(accounts, accounts.c.id == strategy_instances.c.account_id)
+        .where(
+            strategy_instances.c.id.in_(ids),
+            strategy_instances.c.user_id == owner,
+            accounts.c.user_id == owner,
+        )
+    ).all()
+    instances = {str(row.id): row for row in rows}
+    if set(instances) != {str(i) for i in ids}:
+        raise ValueError("tracking_instance_binding_unavailable")
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for c in conclusions:
+        groups.setdefault(str(c["strategy_version_id"]), []).append(c)
+    selected, bindings = [], {}
+    for version, group in sorted(groups.items()):
+        group.sort(
+            key=lambda c: (
+                instances[str(c["instance_id"])].created_at,
+                uuid.UUID(str(c["instance_id"])),
+            )
+        )
+        selected.append(group[0])
+        bindings[version] = [instances[str(c["instance_id"])] for c in group]
+    return selected, bindings
+
+
+def profit_loss(results: list[Result], window: str) -> tuple[Stat, list[Gap]]:
+    values = [
+        r.return_pct
+        for r in results
+        if r.state == "complete"
+        and r.action in {"buy", "add", "hold"}
+        and r.return_pct is not None
+        and r.return_pct != 0
+    ]
+    wins = [v for v in values if v > 0]
+    losses = [v for v in values if v < 0]
+    n = len(values)
+    value = None
+    if losses and n >= 5:
+        with localcontext() as ctx:
+            ctx.prec = 64
+            value = (
+                (sum(wins, Decimal(0)) / len(wins)) / abs(sum(losses, Decimal(0)) / len(losses))
+                if wins
+                else Decimal(0)
+            )
+            value = rounded(value)
+    return Stat(value=value, n=n, window=window, small_sample=n < 30), (
+        [] if losses else [gap("no_losing_samples")]
+    )
+
+
 def run_one(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, at: dt.datetime) -> int:
     row = owned(conn, owner, identifier)
     conn.execute(
@@ -152,10 +215,7 @@ def run_one(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, at: dt.da
     if digest(body) != generation.hash:
         raise ValueError("tracking_generation_snapshot_hash_conflict")
     original = body["input"]
-    conclusions = original["conclusions"]
-    versions = [c["strategy_version_id"] for c in conclusions]
-    if len(versions) != len(set(versions)):
-        raise ValueError("tracking_duplicate_version_instances_need_contract")
+    conclusions, bindings = bind_instances(conn, owner, original["conclusions"])
     days = calendar(conn)
     count = 0
     for period in PERIODS:
@@ -267,10 +327,25 @@ def run_one(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, at: dt.da
                 now=at,
                 minutes=minute_inputs,
             )
+            bound_instances = bindings[str(conclusion["strategy_version_id"])]
+            for index, instance in enumerate(bound_instances):
+                evidence = Evidence(
+                    id="tracking:instance_binding:" + str(instance.id),
+                    key="selected_instance" if index == 0 else "other_instance",
+                    value=str(instance.id),
+                    unit=None,
+                    provider=DataProvider.SYSTEM,
+                    endpoint="tracking:immutable-generation:" + str(generation.id),
+                    data_as_of=instance.created_at,
+                    fetched_at=at,
+                    epistemic_type=EpistemicType.FACT,
+                )
+                result.evidence.append(evidence)
+                result.evidence_ids.append(evidence.id)
             results.append(result.model_dump(mode="json"))
         snapshot_body = {
             "schema_version": SCHEMA,
-            "algorithm_version": "p2n03-deterministic-v1",
+            "algorithm_version": "p2n03-deterministic-ta27-v2",
             "generation_hash": generation.hash,
             "results": results,
             "suggestion_snapshot_id": str(row.snapshot_id),
@@ -358,7 +433,7 @@ def stat(values: list[Decimal], window: str) -> Stat:
     with localcontext() as ctx:
         ctx.prec = 64
         return Stat(
-            value=sum(values, Decimal(0)) / n if n >= 5 else None,
+            value=rounded(sum(values, Decimal(0)) / n) if n >= 5 else None,
             n=n,
             window=window,
             small_sample=n < 30,

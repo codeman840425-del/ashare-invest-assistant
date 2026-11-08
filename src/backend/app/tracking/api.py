@@ -13,9 +13,8 @@ from app.common.errors import AppError, ErrorCode
 from app.db.tables.realtime import suggestion_tracking, suggestions
 from app.db.tables.reviews import data_snapshots
 from app.db.tables.strategy import strategies, strategy_versions
-from app.tracking.engine import gap
 from app.tracking.models import Result, SuggestionTracking
-from app.tracking.service import SCHEMA, digest, stat, view
+from app.tracking.service import SCHEMA, digest, profit_loss, stat, view
 
 router = APIRouter(tags=["tracking"])
 
@@ -54,7 +53,9 @@ def strategy_tracking_view(
         if version is None:
             raise AppError(ErrorCode.NOT_FOUND)
         query = (
-            select(data_snapshots)
+            select(
+                data_snapshots, suggestion_tracking.c.suggestion_id.label("tracking_suggestion_id")
+            )
             .join(suggestion_tracking, suggestion_tracking.c.snapshot_id == data_snapshots.c.id)
             .join(suggestions, suggestions.c.id == suggestion_tracking.c.suggestion_id)
             .where(data_snapshots.c.user_id == suggestions.c.user_id)
@@ -68,6 +69,7 @@ def strategy_tracking_view(
         ).all()
         results: list[Result] = []
         stamps = []
+        seen: set[tuple[uuid.UUID, uuid.UUID, int]] = set()
         for row in rows:
             body = row._mapping["items"]
             if body.get("schema_version") != SCHEMA:
@@ -80,9 +82,18 @@ def strategy_tracking_view(
                 if v["strategy_version_id"] == str(version_id)
             ]
             if selected:
-                results.extend(selected)
+                for result in selected:
+                    key = (
+                        row.tracking_suggestion_id,
+                        result.strategy_version_id,
+                        result.horizon_days,
+                    )
+                    if key not in seen:
+                        seen.add(key)
+                        results.append(result)
                 stamps.append(dt.datetime.fromisoformat(body["as_of"]))
     by_horizon = []
+    gaps = {}
     for period in [1, 5, 20]:
         subset = [r for r in results if r.horizon_days == period]
         complete = [r for r in subset if r.state == "complete"]
@@ -93,6 +104,9 @@ def strategy_tracking_view(
             Decimal(int(r.direction_correct)) for r in complete if r.direction_correct is not None
         ]
         excess = [r.excess_pct for r in complete if r.excess_pct is not None]
+        ratio, ratio_gaps = profit_loss(subset, window)
+        for missing in ratio_gaps:
+            gaps[missing.key] = missing
         streak = longest = 0
         for result in complete:
             if result.return_pct is not None:
@@ -104,7 +118,7 @@ def strategy_tracking_view(
                 "win_rate": stat(decisions, window).model_dump(mode="json"),
                 "avg_return_pct": stat(returns, window).model_dump(mode="json"),
                 "avg_excess_pct": stat(excess, window).model_dump(mode="json"),
-                "profit_loss_ratio": stat([], window).model_dump(mode="json"),
+                "profit_loss_ratio": ratio.model_dump(mode="json"),
                 "max_loss_streak": longest,
                 "pending_count": sum(r.state == "pending" for r in subset),
                 "untradable_count": sum(r.state == "untradable" for r in subset),
@@ -117,5 +131,5 @@ def strategy_tracking_view(
         "by_horizon": by_horizon,
         "data_status": "partial" if results else "unavailable",
         "data_as_of": max(stamps, default=None),
-        "gaps": [gap("profit_loss_ratio_formula_not_defined").model_dump(mode="json")],
+        "gaps": [g.model_dump(mode="json") for g in gaps.values()],
     }

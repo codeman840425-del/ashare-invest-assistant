@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from decimal import Decimal, localcontext
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -50,6 +50,27 @@ def interval_return(start: Decimal, end: Decimal) -> Decimal:
     with localcontext() as precision:
         precision.prec = 64
         return (end / start - 1) * 100
+
+
+def rounded(value: Decimal) -> Decimal:
+    with localcontext() as ctx:
+        ctx.prec = max(64, len(value.as_tuple().digits) + abs(value.adjusted()) + 8)
+        return value.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
+def path_metrics(prices: list[Decimal]) -> tuple[Decimal, Decimal]:
+    """T-A27: raw direction-independent, same-as-of qfq close path."""
+    if not prices or any(not p.is_finite() or p <= 0 for p in prices):
+        raise ValueError("invalid_tracking_path_prices")
+    with localcontext() as ctx:
+        ctx.prec = 64
+        peak = prices[0]
+        drawdown = runup = Decimal(0)
+        for price in prices:
+            peak = max(peak, price)
+            drawdown = min(drawdown, (price / peak - 1) * 100)
+            runup = max(runup, (price / prices[0] - 1) * 100)
+        return rounded(drawdown), rounded(runup)
 
 
 def direction(action: str, excess: Decimal | None, period: int) -> bool | None:
@@ -268,8 +289,36 @@ def _evaluate(
             "index_points",
         )
         proof("benchmark_exit", result.benchmark_exit_price, result.exit_at, "index_points")
-        # Schema does not resolve close-only vs intraday path, nor ratio conventions.
-        missing.extend(["drawdown_runup_path_definition", "invalidation_monitor_not_connected"])
+        if result.entry_price is not None and result.exit_price is not None:
+            path = [result.entry_price]
+            skipped = []
+            # T+1 has only entry/exit. Otherwise use each available session CLOSE,
+            # including the entry session, never high/low or forward-filled prices.
+            for path_date in sessions if period != 1 else []:
+                index = lookup.get(path_date)
+                price = closes[index] if index is not None else None
+                if path_date == due.isoformat():
+                    price = result.exit_price
+                if price is None:
+                    skipped.append(path_date)
+                    continue
+                path.append(price)
+                proof(
+                    "path_qfq:" + path_date,
+                    price,
+                    close_at(dt.date.fromisoformat(path_date)),
+                    "CNY/share",
+                )
+            if period == 1:
+                path.append(result.exit_price)
+                proof("path_qfq:" + due.isoformat(), result.exit_price, result.exit_at, "CNY/share")
+            result.max_drawdown_pct, result.max_runup_pct = path_metrics(path)
+            if skipped:
+                proof("path_skipped_sessions", ",".join(skipped), result.exit_at)
+                missing.append("qfq_path_missing_sessions")
+        else:
+            missing.append("qfq_path_endpoints")
+        missing.append("invalidation_monitor_not_connected")
     if excluded is not None:
         result.state, result.exclusion_reason = "excluded", excluded
     elif untradable is not None:
@@ -279,6 +328,16 @@ def _evaluate(
     ):
         result.state = "complete"
         result.direction_correct = direction(action, result.excess_pct, period)
+    for field in (
+        "return_pct",
+        "benchmark_return_pct",
+        "excess_pct",
+        "max_drawdown_pct",
+        "max_runup_pct",
+    ):
+        value = getattr(result, field)
+        if value is not None:
+            setattr(result, field, rounded(value))
     result.evidence = evidence
     result.evidence_ids = [e.id for e in evidence]
     result.gaps = [gap(k) for k in sorted(set(missing))]

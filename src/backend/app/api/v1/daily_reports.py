@@ -91,35 +91,50 @@ def detail(date: dt.date, auth: AuthDep, engine: EngineDep) -> dict[str, Any]:
                 *body.get("gaps", []),
                 {"key": "account", "reason": "no_source", "message": "旧快照账户估值不可计算。"},
             ]
-        if body["data_as_of"] is None:
-            # Legacy bug repair is a read projection only: use frozen component
-            # clocks, never generated_at, current quotes, or mutable live inputs.
-            times = []
-            components = [body.get("market"), body.get("account")]
-            for stock in body.get("stocks", []):
-                if stock.get("change_from_previous") == "removed":
-                    continue
-                components.append(stock)
-                components.extend(d for d in stock.get("dimensions") or [] if d.get("facts"))
-            for component in components:
-                value = component.get("data_as_of") if component else None
-                if not isinstance(value, str):
-                    continue
-                try:
-                    stamp = dt.datetime.fromisoformat(value)
-                except ValueError:
-                    continue
-                if stamp.tzinfo is not None and stamp <= row.generated_at:
-                    times.append(stamp)
-            body["data_as_of"] = min(times) if times else None
-            body["data_status"] = "partial" if times else "unavailable"
-            if times:
-                body["gaps"] = [
-                    *body.get("gaps", []),
-                    {
-                        "key": "legacy_aggregate_timestamp",
-                        "reason": "no_source",
-                        "message": "旧快照顶层时点缺失；仅从已冻结的已知组件时点投影，未重写存档。",
-                    },
-                ]
-        return body
+        return project_component_clock(body, row.generated_at)
+
+
+def project_component_clock(body: dict[str, Any], generated_at: dt.datetime) -> dict[str, Any]:
+    """Read-only repair from frozen component clocks; never query live evidence."""
+    body = dict(body)
+    times: list[dt.datetime] = []
+    components = [body.get("market"), body.get("account")]
+    for stock in body.get("stocks", []):
+        if stock.get("change_from_previous") == "removed":
+            continue
+        components.append(stock)
+        components.extend(stock.get("dimensions") or [])
+    for component in components:
+        value = component.get("data_as_of") if component else None
+        if not isinstance(value, (str, dt.datetime)):
+            continue
+        try:
+            stamp = dt.datetime.fromisoformat(value) if isinstance(value, str) else value
+        except ValueError:
+            continue
+        if stamp.tzinfo is not None and stamp <= generated_at:
+            times.append(stamp)
+    known = min(times) if times else None
+    previous = body.get("data_as_of")
+    if isinstance(previous, str):
+        try:
+            previous = dt.datetime.fromisoformat(previous)
+        except ValueError:
+            previous = None
+    # Non-null legacy aggregates can also be wrong (e.g. unrelated archived
+    # suggestion evidence). The previous null-only repair missed that case.
+    if known is not None and previous != known:
+        body["data_as_of"] = known
+        body["data_status"] = "partial"
+        body["gaps"] = [
+            *body.get("gaps", []),
+            {
+                "key": "legacy_aggregate_timestamp",
+                "reason": "no_source",
+                "message": "旧快照顶层时点缺失或不一致；仅投影已冻结组件时点，未重写存档。",
+            },
+        ]
+    elif previous is None:
+        body["data_as_of"] = None
+        body["data_status"] = "unavailable"
+    return body

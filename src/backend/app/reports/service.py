@@ -200,6 +200,7 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
                     account_times.append(estimate_at)
             if not account_times and ledger_at is not None:
                 account_times.append(ledger_at)
+            report_account["data_as_of"] = min(account_times).isoformat() if account_times else None
             used_times.extend(account_times)
             gaps.append(_gap("account.pnl_day", "缺上日持仓/前收净值；日盈亏保持null。"))
     if report_account is None:
@@ -294,14 +295,10 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
             if isinstance(d["data_as_of"], str)
             else d["data_as_of"]
             for d in dimensions
-            if d["facts"] and d["data_as_of"] is not None
+            if d["data_as_of"] is not None
         )
-        if suggestion is not None:
-            used_times.extend(
-                dt.datetime.fromisoformat(e["data_as_of"])
-                for e in (suggestion.evidence or [])
-                if e.get("data_as_of")
-            )
+        # Evidence retained for traceability is not itself a report component.
+        # Its unused/older clocks must not override the frozen component clocks.
         stocks.append(
             {
                 "security_code": code,

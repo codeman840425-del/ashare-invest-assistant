@@ -15,6 +15,6 @@
 - 原始日志：F:/workspace/team/reports/T-B99b-{guards-tests,posix-tests,windows-gate-tests,secret-scan}.log；lint基线比较脚本同目录。
 - 运维说明已同步：验证回执独立挂载；共享原生POSIX目录的写入者必须同UID（文件0600）；绑定/分钟账不能删来重置。
 - 旧UUID格式halt保留并保守闭锁，旧未知在途/最近一分钟账也闭锁；须授权运维核清迁移，未提供自动清闩/清计数命令。
-- 请Chief转RV-06；通过前不放行实跑。任务分支/工作树保留供复核；专用测试PG/Redis完成后清理。
-- T-B100已按插单保留：1227b65仅本地；三卡已入本人本地库draft、G1–G6已跑，G7 untouched；详见其独立工作树报告，随后恢复收口。
-申请新任务：转RV-06；恢复已派T-B100收口，不代做G7。
+- 请Chief转RV-06；通过前不放行实跑。任务分支/工作树保留供复核；专用测试PG/Redis已核标签清理。
+- T-B100已恢复收口：代码1227b65、本地team-b合并09e54f2；三卡已入本地库draft、G1–G6已跑，G7 untouched；详见main的T-B100报告。
+申请新任务：转RV-06；T-B100转定点验收，不代做G7。

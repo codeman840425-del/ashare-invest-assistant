@@ -27,7 +27,16 @@ from app.db.tables.market import master_runs, securities
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows
 from app.ingest.vault import LicenceVault, SealedLicence
-from app.master.daily_delivery import APPLY, KIND, LISTS, STREAM, Grant, eligible, read_grant
+from app.master.daily_delivery import (
+    APPLY,
+    KIND,
+    LISTS,
+    STREAM,
+    Grant,
+    eligible,
+    live_budget_issue,
+    read_grant,
+)
 
 HOST = "api.mairuiapi.com"
 PATHS = dict(zip(LISTS, ("/hslt/list/", "/bj/list/all/", "/kc/list/all/"), strict=True))
@@ -42,6 +51,8 @@ class DailyHaltError(RuntimeError):
 
 
 def wire(path: str, secret: str) -> tuple[int, object]:
+    if live_budget_issue():
+        raise DailyHaltError("daily_http_budget_unresolved")
     conn = http.client.HTTPSConnection(HOST, timeout=20)
     conn.set_debuglevel(0)
     try:
@@ -164,6 +175,8 @@ def process(
     halt: Path = HALT,
     pause: Callable[[float], None] = time.sleep,
 ) -> str:
+    if live_budget_issue():
+        return "budget_contract_unresolved"
     identity = None
     secret = None
     # Session lock spans reservation commits and every HTTP request. No retry.
@@ -334,6 +347,8 @@ def tick(
     pause: Callable[[float], None] = time.sleep,
 ) -> int:
     """Own consumer group on existing stream; other intent consumers unaffected."""
+    if live_budget_issue():
+        return 0
     from redis.exceptions import ResponseError
 
     try:

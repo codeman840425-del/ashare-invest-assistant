@@ -35,6 +35,15 @@ KIND = "mairui_daily_snapshot"
 APPLY = "master.mairui_daily_apply"
 SWEEP = "master.mairui_daily_sweep"
 LISTS = ("hslt_list", "bj_list", "kc_list")
+# T-B90 correction: one scheduling slot is NOT one external HTTP request.
+# The current complete-source plan requires three distinct HTTP requests, while
+# the assigned authorization permits only one. No receipt/env/client flag may
+# widen this cap. Keep collection blocked pending an explicit contract ruling.
+DAILY_HTTP_LIMIT = 1
+
+
+def live_budget_issue() -> str | None:
+    return "daily_http_budget_unresolved" if len(LISTS) > DAILY_HTTP_LIMIT else None
 
 
 @dataclass(frozen=True)
@@ -122,6 +131,8 @@ def eligible(conn: Connection, grant: Grant, now: dt.datetime) -> bool:
 
 
 def request(conn: Connection, grant: Grant, now: dt.datetime) -> uuid.UUID | None:
+    if live_budget_issue():
+        return None
     day = now.astimezone(BEIJING).date()
     if (
         now.astimezone(BEIJING).time() < dt.time(18)
@@ -173,6 +184,8 @@ def request(conn: Connection, grant: Grant, now: dt.datetime) -> uuid.UUID | Non
 
 def publish_pending(engine: Engine, rds: Any) -> int:  # noqa: ANN401
     """Durable DB outbox replay also repairs commit->Redis and fetched->apply gaps."""
+    if live_budget_issue():
+        return 0
     with engine.connect() as conn:
         pending = conn.execute(
             select(batches.c.id, batches.c.status)

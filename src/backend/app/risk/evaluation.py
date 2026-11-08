@@ -107,6 +107,8 @@ class Inputs:
     owner_id: uuid.UUID | None = None
     security_code: str | None = None
     rc6: RC6Facts | None = None
+    rc6_source_evidence: tuple[Evidence, ...] = ()
+    rc6_source_gaps: tuple[str, ...] = ()
 
 
 def inputs(
@@ -293,6 +295,9 @@ def _inputs(
         if (segment is not None and security.board in {"main_board", "star", "chinext", "bse"})
         else None
     )
+    from app.feedback.plan_source import load as load_plan_source
+
+    plan_source = load_plan_source(conn, owner, aid, code, at=at)
     return Inputs(
         aid,
         RiskContext(
@@ -310,6 +315,9 @@ def _inputs(
         missing,
         owner_id=owner,
         security_code=code,
+        rc6=plan_source.facts,
+        rc6_source_evidence=plan_source.evidence,
+        rc6_source_gaps=plan_source.gaps,
     )
 
 
@@ -360,6 +368,8 @@ def assessed(
         )
         evidence.update({e.id: e for e in rc_evidence})
         extra.update(rc_gaps)
+    if config.rc6_plan_violation.enabled:
+        extra.update(source.rc6_source_gaps)
     if config.rc6_plan_violation.enabled and source.rc6 is not None:
         from app.feedback.plans import assess as assess_rc6
 
@@ -393,6 +403,7 @@ def assessed(
         ):
             extra.add("plan_owner_or_account_unresolved")
         else:
+            evidence.update({e.id: e for e in source.rc6_source_evidence})
             plan_result = assess_rc6(
                 source.rc6, at=at, checks=tuple(config.rc6_plan_violation.checks)
             )

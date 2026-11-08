@@ -203,7 +203,11 @@ def test_existing_evaluation_adapter_bindings_disabled_and_partial_not_ok() -> N
     ids = {e.id for e in result.evidence}
     assert all(set(f.evidence_ids) <= ids for f in result.flags)
     assert not result.pause_required
-    _, controls = evaluate(replace(source, owner_id=OTHER))
+    foreign_evidence = observation("plan_foreign", "synthetic", AT, "synthetic")
+    rejected, controls = evaluate(
+        replace(source, owner_id=OTHER, rc6_source_evidence=(foreign_evidence,))
+    )
+    assert foreign_evidence.id not in {e.id for e in rejected.evidence}
     assert controls[-1]["state"] == "unknown"
     assert not controls[-1]["flags"]
     _, controls = evaluate(replace(source, security_code="688073.SH"))

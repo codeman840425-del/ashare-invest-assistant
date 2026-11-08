@@ -1233,6 +1233,15 @@ evidence: Evidence[]
 - `results` 是**单条观测**，其十进制结果是 §5.1“统计收益使用 Stat”的明确草案例外，不是胜率/业绩聚合；界面必须写“模拟，不代表实际收益”。旧 t1/t5/t20 保留 Stat 约束，不能把 n 虚增到 5 来显示单样本；新前端读 results。策略聚合继续只用 Stat，n<5 为 null、n<30 标 small_sample。
 - §7.4 版本跟踪统计 `by_horizon[]` 追加 `pending_count: int`、`untradable_count: int`、`excluded_count: int`，均非负；有效 n 仍见各 Stat，不以总记录数替代。scope=site 只能返回策略级匿名聚合，results 只走本人建议端点，不随 site 暴露。
 
+**T-A27 裁定（status: draft；P2N-03 缺口）**：百分数沿 §3（12 = 12%），存 4 位小数、ROUND_HALF_UP，展示 2 位。
+
+1. **单条观测的 `max_drawdown_pct` / `max_runup_pct`**：路径 = 入场价 + 持有期内各交易日 qfq **收盘价**（最后一点为 exit_price；T+1 只有入场与退出两点），按证券本身价格计算，不随 action 取反，不用盘中高低价。
+   - `max_drawdown_pct` = min_t(P_t / max_{s≤t} P_s − 1) × 100，≤ 0（峰谷回撤，起始峰为入场价）。
+   - `max_runup_pct` = max(0, max_t P_t / entry_price − 1) × 100，≥ 0（相对入场的最大有利幅度）。
+   - 路径中任一交易日缺 qfq 收盘（停牌日沿用无行，不补价）只跳过该日；入场或退出价缺失 → 两项 null + gap。
+2. **聚合 `profit_loss_ratio`**：仅取有效样本中 action ∈ {buy, add, hold} 的 `return_pct`（毛收益）；盈利 = return_pct > 0，亏损 < 0，等于 0 不计。比值 = 盈利样本平均 return_pct ÷ |亏损样本平均 return_pct|。n = 盈利 + 亏损样本数，沿 Stat 规则（n<5 null，n<30 small_sample）；无亏损样本 → null + gap（`no_losing_samples`），有亏损无盈利 → 0。sell/reduce/wait 不进入盈亏比（仍按 plan §2.8 进入 win_rate/方向统计）。
+3. **同一策略版本多个实例**：观测唯一键为 (suggestion_id, strategy_version_id, horizon_days)，一条建议同版本只算一个样本，不按实例重复计数。`instance_id` 取产生该建议的实例；若同版本多个实例同时对应该建议，取 `created_at` 最早者（并列取 id 最小），其余实例不另建观测，在 evidence 中列出其 id。版本统计 `by_horizon` 按此去重；本版不提供实例级统计。
+
 #### 7.11.4 站内提醒与解释（status: draft；P2N-05/06/07/09）
 
 - `/signals`、`/notifications`、`/alerts` 列表沿用 §1.2 游标；signals 排序 `at desc, signal_event_id desc`，通知 `created_at desc, id desc`；其他筛选/结构沿用 §7.7B/7.8。所有读取和 SSE 只允许本人证书或本人用户层事件，事件重放不重复生成建议、提醒或通知。

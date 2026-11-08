@@ -15,3 +15,8 @@ ccf7cbab6ad23471089bca76328ad2e165fad656:src/backend/probes/common.py:S1-mairui-
 3e5e28896d05a15952f10252c2f77fb1440ad3f5:src/backend/selfchecks/tb46x.py:S5-sh-holder-code:372
 # T-A21：generic-api-key 误报，匹配 feature_key 字段名，不是密钥（T-O23）。
 4f3ce14596a9d2122feb277478f1c058bc6291ed:docs/strategies/feature_catalog_meta.yaml:generic-api-key:12
+# T-A23：generic-api-key 误报，两行都是 feature_key == "f.xxx" 特征键字面量，与 4f3ce14 同类（架构师核对，T-O24 登记）。
+e31ed6c76d48738c14e48148057de20808bab95d:src/backend/selfchecks/test_ta13_feature_metadata.py:generic-api-key:150
+e31ed6c76d48738c14e48148057de20808bab95d:src/backend/selfchecks/test_ta13_feature_metadata.py:generic-api-key:202
+# T-A23：generic-api-key 误报，是 0004_t_b03_auth.py 迁移文件的 sha256 摘要（架构师在该提交里重算一致），不是凭据（T-O24 登记）。
+3b2c8ecc0fa93755b92f1b42b136804c03a16366:tests/backend/milestone/tt21_mainline.json:generic-api-key:7

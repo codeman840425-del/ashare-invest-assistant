@@ -63,7 +63,7 @@ for (const kind of ['decision', 'lifecycle'] as const) {
     const { modal, input, confirm } = await openDialog(kind);
     expect(input).toHaveValue('');
     expect(input).toHaveAttribute('type', 'password');
-    expect(input).toHaveAttribute('autocomplete', 'current-password');
+    expect(input).toHaveAttribute('autocomplete', 'off');
     expect(confirm).toBeDisabled();
     expect(writes).toBe(0);
     fireEvent.change(input, { target: { value: fakeValue } });

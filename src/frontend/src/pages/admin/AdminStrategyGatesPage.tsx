@@ -157,7 +157,7 @@ function ReportContent({ id }: { id: string }) {
       onCancel={() => { if (!approve.isPending) { decisionPassword.clear(); setDialog(null); } }}
       onOk={() => approve.mutate({ comment: comment.trim(), ack_warn_gates: warnings.filter((g) => ack.includes(g)) }, { onSuccess: () => setDialog(null), onSettled: decisionPassword.clear })}>
       <p>请管理员本人重新输入密码并确认。审核意见：{comment}</p>
-      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={decisionPassword.ref} aria-label="审核复核密码" autoComplete="current-password" onChange={decisionPassword.onChange} disabled={approve.isPending} />
+      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={decisionPassword.ref} aria-label="审核复核密码" autoComplete="off" onChange={decisionPassword.onChange} disabled={approve.isPending} />
       <WriteError error={approve.error} />
     </Modal>
     <Modal title="晋级 · 本人密码复核" open={dialog === 'lifecycle'} destroyOnHidden confirmLoading={lifecycle.isPending} closable={!lifecycle.isPending} mask={{ closable: !lifecycle.isPending }}
@@ -165,7 +165,7 @@ function ReportContent({ id }: { id: string }) {
       onCancel={() => { if (!lifecycle.isPending) { lifecyclePassword.clear(); setDialog(null); } }}
       onOk={() => template && lifecycle.mutate({ id: template.id, vid: template.current_version.id, reason: reason.trim(), review_id: id }, { onSuccess: () => setDialog(null), onSettled: lifecyclePassword.clear })}>
       <p>请管理员本人重新输入密码。目标：{template?.name}；审核编号：{id}。此操作独立于 G7 批准。</p>
-      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={lifecyclePassword.ref} aria-label="晋级复核密码" autoComplete="current-password" onChange={lifecyclePassword.onChange} disabled={lifecycle.isPending} />
+      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={lifecyclePassword.ref} aria-label="晋级复核密码" autoComplete="off" onChange={lifecyclePassword.onChange} disabled={lifecycle.isPending} />
       <WriteError error={lifecycle.error} />
     </Modal>
   </>;

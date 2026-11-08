@@ -13,3 +13,5 @@ ccf7cbab6ad23471089bca76328ad2e165fad656:src/backend/probes/common.py:S1-mairui-
 3e5e28896d05a15952f10252c2f77fb1440ad3f5:src/backend/selfchecks/tb46x.py:S5-sh-holder-code:336
 3e5e28896d05a15952f10252c2f77fb1440ad3f5:src/backend/selfchecks/tb46x.py:S5-sh-holder-code:353
 3e5e28896d05a15952f10252c2f77fb1440ad3f5:src/backend/selfchecks/tb46x.py:S5-sh-holder-code:372
+# T-A21：generic-api-key 误报，匹配 feature_key 字段名，不是密钥（T-O23）。
+4f3ce14596a9d2122feb277478f1c058bc6291ed:docs/strategies/feature_catalog_meta.yaml:generic-api-key:12

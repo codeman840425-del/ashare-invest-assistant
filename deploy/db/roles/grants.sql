@@ -850,3 +850,80 @@ BEGIN
   RAISE NOTICE 'db-roles: T-O29 最小依赖已声明（未缩改更宽的既有授权，未授 ALL）';
 END
 $o29$;
+
+-- T-O30 / T-A30：收窄 aia_ingest 的旧宽授权。每次部署重撤。
+-- market.master_runs 只留 SELECT 与 UPDATE(stats)。
+-- app.action_plans / alert_rules / alerts 全部撤回。
+-- 表不存在只警告。不改 aia_api、不改 aia_maint 清单、不放宽密文禁读。
+DO $ingest_narrow$
+DECLARE
+  rel text;
+  part regclass;
+  col text;
+BEGIN
+  FOREACH rel IN ARRAY ARRAY[
+    'market.master_runs', 'app.action_plans', 'app.alert_rules', 'app.alerts']
+  LOOP
+    IF to_regclass(rel) IS NULL THEN
+      RAISE WARNING 'db-roles: T-O30 表 % 不存在（迁移未到？），跳过 aia_ingest 收窄', rel;
+      CONTINUE;
+    END IF;
+    IF rel = 'market.master_runs' THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute a
+         WHERE a.attrelid = to_regclass(rel) AND a.attname = 'stats'
+           AND a.attnum > 0 AND NOT a.attisdropped) THEN
+        RAISE EXCEPTION 'db-roles: T-O30 market.master_runs 缺少 stats，不退成表级 UPDATE';
+      END IF;
+      EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE %s FROM aia_ingest', to_regclass(rel));
+      EXECUTE format('GRANT SELECT ON TABLE %s TO aia_ingest', to_regclass(rel));
+      EXECUTE format('GRANT UPDATE (stats) ON TABLE %s TO aia_ingest', to_regclass(rel));
+      FOR part IN SELECT inhrelid FROM pg_inherits WHERE inhparent = to_regclass(rel) LOOP
+        EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE %s FROM aia_ingest', part);
+        EXECUTE format('GRANT SELECT ON TABLE %s TO aia_ingest', part);
+        EXECUTE format('GRANT UPDATE (stats) ON TABLE %s TO aia_ingest', part);
+      END LOOP;
+      IF NOT has_table_privilege('aia_ingest', rel, 'SELECT')
+         OR NOT has_column_privilege('aia_ingest', rel, 'stats', 'UPDATE')
+         OR has_table_privilege('aia_ingest', rel, 'INSERT')
+         OR has_table_privilege('aia_ingest', rel, 'UPDATE')
+         OR has_table_privilege('aia_ingest', rel, 'DELETE')
+         OR has_table_privilege('aia_ingest', rel, 'TRUNCATE') THEN
+        RAISE EXCEPTION 'db-roles: T-O30 aia_ingest 对 market.master_runs 不是仅 SELECT + UPDATE(stats)';
+      END IF;
+      FOR col IN
+        SELECT a.attname FROM pg_attribute a
+         WHERE a.attrelid = to_regclass(rel) AND a.attnum > 0 AND NOT a.attisdropped AND a.attname <> 'stats'
+      LOOP
+        IF has_column_privilege('aia_ingest', rel, col, 'UPDATE') THEN
+          RAISE EXCEPTION 'db-roles: T-O30 aia_ingest 仍可 UPDATE market.master_runs.%', col;
+        END IF;
+      END LOOP;
+    ELSE
+      EXECUTE format('REVOKE ALL ON TABLE %s FROM aia_ingest', to_regclass(rel));
+      FOR part IN SELECT inhrelid FROM pg_inherits WHERE inhparent = to_regclass(rel) LOOP
+        EXECUTE format('REVOKE ALL ON TABLE %s FROM aia_ingest', part);
+      END LOOP;
+      IF has_table_privilege('aia_ingest', rel, 'SELECT')
+         OR has_table_privilege('aia_ingest', rel, 'INSERT')
+         OR has_table_privilege('aia_ingest', rel, 'UPDATE')
+         OR has_table_privilege('aia_ingest', rel, 'DELETE')
+         OR has_table_privilege('aia_ingest', rel, 'TRUNCATE')
+         OR has_any_column_privilege('aia_ingest', rel, 'SELECT')
+         OR has_any_column_privilege('aia_ingest', rel, 'INSERT')
+         OR has_any_column_privilege('aia_ingest', rel, 'UPDATE') THEN
+        RAISE EXCEPTION 'db-roles: T-O30 aia_ingest 对 % 仍有权限', rel;
+      END IF;
+    END IF;
+  END LOOP;
+  IF to_regclass('app.user_data_licences') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM pg_attribute a
+        WHERE a.attrelid = 'app.user_data_licences'::regclass AND a.attname = 'ciphertext'
+          AND a.attnum > 0 AND NOT a.attisdropped)
+     AND has_column_privilege('aia_api', 'app.user_data_licences', 'ciphertext', 'SELECT') THEN
+    RAISE EXCEPTION 'db-roles: T-O30 不得让 aia_api 读取证书密文';
+  END IF;
+  RAISE NOTICE 'db-roles: T-O30 已收窄 aia_ingest（master_runs 仅 SELECT+UPDATE(stats)；计划/提醒表无权限）';
+END
+$ingest_narrow$;

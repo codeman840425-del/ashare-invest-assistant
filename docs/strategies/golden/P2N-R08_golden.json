@@ -1,0 +1,4309 @@
+{
+  "task": "P2N-R08",
+  "schema_version": "1.0.0",
+  "fictitious": true,
+  "note": "纯合成单元级oracle；不是HTTP响应或真实账户数据。ready与blocked严格分离。",
+  "source_registry": {
+    "rc5": {
+      "file": "docs/plan.md",
+      "section": "2.5.6",
+      "quote": "已平仓交易连续亏损 ≥ 3 笔；账户净值自高点回撤 ≥ 10%；某策略模拟跟踪连续 5 次失败"
+    },
+    "rc6": {
+      "file": "docs/plan.md",
+      "section": "2.5.6",
+      "quote": "方向相反、数量超计划、失效条件触发后仍持有、未设止损即买入、在\"等待\"计划期间买入"
+    },
+    "defaults": {
+      "file": "docs/plan.md",
+      "section": "6.1",
+      "quote": "checks: [opposite_side, qty_over_plan, held_after_invalidation, buy_without_stop, buy_during_wait]"
+    },
+    "weight": {
+      "file": "docs/plan.md",
+      "section": "2.5.7",
+      "quote": "最终 `weight = clamp(raw, 0.3, 1.2)`；n < 20 时 `weight = 1`"
+    },
+    "health": {
+      "file": "docs/plan.md",
+      "section": "2.8.2",
+      "quote": "全站 `weight < 0.8` 连续 5 个交易日"
+    },
+    "recover": {
+      "file": "docs/plan.md",
+      "section": "2.8.2",
+      "quote": "`weight ≥ 0.9` 连续 10 个交易日，且内部复验恢复"
+    },
+    "retire": {
+      "file": "docs/plan.md",
+      "section": "2.8.2",
+      "quote": "**只能由管理员确认**，并写审计"
+    },
+    "invariant": {
+      "file": "docs/plan.md",
+      "section": "2.5.7",
+      "quote": "**不改变任何策略的动作、分数与止损**"
+    },
+    "llm": {
+      "file": "docs/plan.md",
+      "section": "2.7",
+      "quote": "所有动作/分数/置信度由规则引擎决定"
+    },
+    "state": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.2",
+      "quote": "已知触发 → triggered（仍可带部分输入 gap）"
+    },
+    "missing": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.2",
+      "quote": "否则 unknown + gap"
+    },
+    "idem": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.2",
+      "quote": "实际风控事件由业务作业幂等写入"
+    },
+    "asof": {
+      "file": "docs/plan-phase2-next.md",
+      "section": "P2N-08",
+      "quote": "导入后按成交时点有效计划比对"
+    },
+    "correction": {
+      "file": "docs/plan-phase2-next.md",
+      "section": "P2N-08",
+      "quote": "冲正重算"
+    },
+    "pause": {
+      "file": "docs/plan.md",
+      "section": "6.1",
+      "quote": "触发即挂 LOSS_STREAK_PAUSE（2.5.9），用户确认恢复或期满解除"
+    },
+    "resume": {
+      "file": "docs/api-contract.md",
+      "section": "6.0A",
+      "quote": "清空暂停字段"
+    },
+    "user_pause": {
+      "file": "docs/api-contract.md",
+      "section": "6.0A",
+      "quote": "用户暂停的实例不会被系统自动恢复"
+    },
+    "not_runnable": {
+      "file": "docs/api-contract.md",
+      "section": "6.0A",
+      "quote": "返回 `409 STRATEGY_VERSION_NOT_RUNNABLE{lifecycle}`，状态不变"
+    },
+    "lifecycle": {
+      "file": "docs/plan.md",
+      "section": "2.8.2",
+      "quote": "只在 `published` 与 `observing` 之间自动切换"
+    }
+  },
+  "cases": [
+    {
+      "id": "P2N-R08-001",
+      "desc": "【纯虚构】rc5_closed",
+      "case_status": "ready",
+      "kind": "rc5_closed",
+      "input": {
+        "pnl": [
+          "5",
+          "-2",
+          "-3"
+        ],
+        "all_closed": true,
+        "complete": true,
+        "pause_on_trigger": false
+      },
+      "steps": [
+        "只读按结束时刻排序且已平仓、归集完毕的损益输入",
+        "尾部负数逐笔计数=2",
+        "2 >= 3 -> false"
+      ],
+      "expected": {
+        "trailing_losses": 2,
+        "triggered": false
+      },
+      "source_refs": [
+        "rc5"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 1
+    },
+    {
+      "id": "P2N-R08-002",
+      "desc": "【纯虚构】rc5_closed",
+      "case_status": "ready",
+      "kind": "rc5_closed",
+      "input": {
+        "pnl": [
+          "4",
+          "-1",
+          "-2",
+          "-3"
+        ],
+        "all_closed": true,
+        "complete": true,
+        "pause_on_trigger": false
+      },
+      "steps": [
+        "只读按结束时刻排序且已平仓、归集完毕的损益输入",
+        "尾部负数逐笔计数=3",
+        "3 >= 3 -> true"
+      ],
+      "expected": {
+        "trailing_losses": 3,
+        "triggered": true
+      },
+      "source_refs": [
+        "rc5"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 2
+    },
+    {
+      "id": "P2N-R08-003",
+      "desc": "【纯虚构】rc5_closed",
+      "case_status": "ready",
+      "kind": "rc5_closed",
+      "input": {
+        "pnl": [
+          "7",
+          "-2",
+          "-4",
+          "-5",
+          "-6"
+        ],
+        "all_closed": true,
+        "complete": true,
+        "pause_on_trigger": false
+      },
+      "steps": [
+        "只读按结束时刻排序且已平仓、归集完毕的损益输入",
+        "尾部负数逐笔计数=4",
+        "4 >= 3 -> true"
+      ],
+      "expected": {
+        "trailing_losses": 4,
+        "triggered": true
+      },
+      "source_refs": [
+        "rc5"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 3
+    },
+    {
+      "id": "P2N-R08-004",
+      "desc": "【纯虚构】rc5_closed",
+      "case_status": "ready",
+      "kind": "rc5_closed",
+      "input": {
+        "pnl": [
+          "3",
+          "2",
+          "1"
+        ],
+        "all_closed": true,
+        "complete": true,
+        "pause_on_trigger": false
+      },
+      "steps": [
+        "只读按结束时刻排序且已平仓、归集完毕的损益输入",
+        "尾部负数逐笔计数=0",
+        "0 >= 3 -> false"
+      ],
+      "expected": {
+        "trailing_losses": 0,
+        "triggered": false
+      },
+      "source_refs": [
+        "rc5"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 4
+    },
+    {
+      "id": "P2N-R08-005",
+      "desc": "【纯虚构】rc5_closed",
+      "case_status": "ready",
+      "kind": "rc5_closed",
+      "input": {
+        "pnl": [
+          "6",
+          "-1"
+        ],
+        "all_closed": true,
+        "complete": true,
+        "pause_on_trigger": false
+      },
+      "steps": [
+        "只读按结束时刻排序且已平仓、归集完毕的损益输入",
+        "尾部负数逐笔计数=1",
+        "1 >= 3 -> false"
+      ],
+      "expected": {
+        "trailing_losses": 1,
+        "triggered": false
+      },
+      "source_refs": [
+        "rc5"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 5
+    },
+    {
+      "id": "P2N-R08-006",
+      "desc": "【纯虚构】rc5_closed",
+      "case_status": "ready",
+      "kind": "rc5_closed",
+      "input": {
+        "pnl": [
+          "8",
+          "-2",
+          "-3",
+          "-4"
+        ],
+        "all_closed": true,
+        "complete": true,
+        "pause_on_trigger": false
+      },
+      "steps": [
+        "只读按结束时刻排序且已平仓、归集完毕的损益输入",
+        "尾部负数逐笔计数=3",
+        "3 >= 3 -> true"
+      ],
+      "expected": {
+        "trailing_losses": 3,
+        "triggered": true
+      },
+      "source_refs": [
+        "rc5"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 6
+    },
+    {
+      "id": "P2N-R08-007",
+      "desc": "【纯虚构】rc5_nav",
+      "case_status": "ready",
+      "kind": "rc5_nav",
+      "input": {
+        "path": [
+          "1000",
+          "950",
+          "900.1"
+        ]
+      },
+      "steps": [
+        "路径前段峰值=1000",
+        "(1000-current)/1000*100；current缺失则null，不用0或950顶替",
+        "回撤=9.99；比较符>=10"
+      ],
+      "expected": {
+        "drawdown_pct": "9.99",
+        "state": "ok"
+      },
+      "source_refs": [
+        "rc5",
+        "missing"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 7
+    },
+    {
+      "id": "P2N-R08-008",
+      "desc": "【纯虚构】rc5_nav",
+      "case_status": "ready",
+      "kind": "rc5_nav",
+      "input": {
+        "path": [
+          "1000",
+          "940",
+          "900"
+        ]
+      },
+      "steps": [
+        "路径前段峰值=1000",
+        "(1000-current)/1000*100；current缺失则null，不用0或950顶替",
+        "回撤=10；比较符>=10"
+      ],
+      "expected": {
+        "drawdown_pct": "10",
+        "state": "triggered"
+      },
+      "source_refs": [
+        "rc5",
+        "missing"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 8
+    },
+    {
+      "id": "P2N-R08-009",
+      "desc": "【纯虚构】rc5_nav",
+      "case_status": "ready",
+      "kind": "rc5_nav",
+      "input": {
+        "path": [
+          "1000",
+          "930",
+          "899.9"
+        ]
+      },
+      "steps": [
+        "路径前段峰值=1000",
+        "(1000-current)/1000*100；current缺失则null，不用0或950顶替",
+        "回撤=10.01；比较符>=10"
+      ],
+      "expected": {
+        "drawdown_pct": "10.01",
+        "state": "triggered"
+      },
+      "source_refs": [
+        "rc5",
+        "missing"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 9
+    },
+    {
+      "id": "P2N-R08-010",
+      "desc": "【纯虚构】rc5_nav",
+      "case_status": "ready",
+      "kind": "rc5_nav",
+      "input": {
+        "path": [
+          "1000",
+          "950",
+          null
+        ]
+      },
+      "steps": [
+        "路径前段峰值=1000",
+        "(1000-current)/1000*100；current缺失则null，不用0或950顶替",
+        "回撤=None；比较符>=10"
+      ],
+      "expected": {
+        "drawdown_pct": null,
+        "state": "unknown"
+      },
+      "source_refs": [
+        "rc5",
+        "missing"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 10
+    },
+    {
+      "id": "P2N-R08-011",
+      "desc": "【纯虚构】rc5_sim",
+      "case_status": "ready",
+      "kind": "rc5_sim",
+      "input": {
+        "failures": [
+          false,
+          true,
+          true,
+          true,
+          true
+        ],
+        "failure_labels_preclassified": true
+      },
+      "steps": [
+        "尾部已分类失败true连续数=4",
+        "4 >= 5"
+      ],
+      "expected": {
+        "trailing_failures": 4,
+        "triggered": false
+      },
+      "source_refs": [
+        "rc5"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 11,
+      "scope": "仅预分类失败序列计数，不定义失败与TrackingResult的映射"
+    },
+    {
+      "id": "P2N-R08-012",
+      "desc": "【纯虚构】rc5_sim",
+      "case_status": "ready",
+      "kind": "rc5_sim",
+      "input": {
+        "failures": [
+          false,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "failure_labels_preclassified": true
+      },
+      "steps": [
+        "尾部已分类失败true连续数=5",
+        "5 >= 5"
+      ],
+      "expected": {
+        "trailing_failures": 5,
+        "triggered": true
+      },
+      "source_refs": [
+        "rc5"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 12,
+      "scope": "仅预分类失败序列计数，不定义失败与TrackingResult的映射"
+    },
+    {
+      "id": "P2N-R08-013",
+      "desc": "【纯虚构】rc5_sim",
+      "case_status": "ready",
+      "kind": "rc5_sim",
+      "input": {
+        "failures": [
+          false,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "failure_labels_preclassified": true
+      },
+      "steps": [
+        "尾部已分类失败true连续数=6",
+        "6 >= 5"
+      ],
+      "expected": {
+        "trailing_failures": 6,
+        "triggered": true
+      },
+      "source_refs": [
+        "rc5"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 13,
+      "scope": "仅预分类失败序列计数，不定义失败与TrackingResult的映射"
+    },
+    {
+      "id": "P2N-R08-014",
+      "desc": "【纯虚构】rc5_sim",
+      "case_status": "ready",
+      "kind": "rc5_sim",
+      "input": {
+        "failures": [
+          false,
+          false,
+          false
+        ],
+        "failure_labels_preclassified": true
+      },
+      "steps": [
+        "尾部已分类失败true连续数=0",
+        "0 >= 5"
+      ],
+      "expected": {
+        "trailing_failures": 0,
+        "triggered": false
+      },
+      "source_refs": [
+        "rc5"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 14,
+      "scope": "仅预分类失败序列计数，不定义失败与TrackingResult的映射"
+    },
+    {
+      "id": "P2N-R08-015",
+      "desc": "【纯虚构】rc6_plan",
+      "case_status": "ready",
+      "kind": "rc6_plan",
+      "input": {
+        "plan_side": "buy",
+        "trade_side": "buy",
+        "planned_qty": "100",
+        "trade_qty": "100",
+        "stop_loss": "9",
+        "invalidated": false,
+        "held_qty": "100",
+        "check": "opposite_side",
+        "plan_resolved_at_trade": true,
+        "plan_version": "fictional-v1",
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "invalidated_at": null
+      },
+      "steps": [
+        "仅检查input.check指定的一项，其他四项不据此判定",
+        "buy与sell相反；buy与buy同向",
+        "结果=false"
+      ],
+      "expected": {
+        "check": "opposite_side",
+        "violated": false
+      },
+      "source_refs": [
+        "rc6",
+        "defaults",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 15
+    },
+    {
+      "id": "P2N-R08-016",
+      "desc": "【纯虚构】rc6_plan",
+      "case_status": "ready",
+      "kind": "rc6_plan",
+      "input": {
+        "plan_side": "buy",
+        "trade_side": "sell",
+        "planned_qty": "100",
+        "trade_qty": "100",
+        "stop_loss": "9",
+        "invalidated": false,
+        "held_qty": "100",
+        "check": "opposite_side",
+        "plan_resolved_at_trade": true,
+        "plan_version": "fictional-v1",
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "invalidated_at": null
+      },
+      "steps": [
+        "仅检查input.check指定的一项，其他四项不据此判定",
+        "buy与sell相反；buy与buy同向",
+        "结果=true"
+      ],
+      "expected": {
+        "check": "opposite_side",
+        "violated": true
+      },
+      "source_refs": [
+        "rc6",
+        "defaults",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 16
+    },
+    {
+      "id": "P2N-R08-017",
+      "desc": "【纯虚构】rc6_plan",
+      "case_status": "ready",
+      "kind": "rc6_plan",
+      "input": {
+        "plan_side": "buy",
+        "trade_side": "buy",
+        "planned_qty": "100",
+        "trade_qty": "100",
+        "stop_loss": "9",
+        "invalidated": false,
+        "held_qty": "100",
+        "check": "qty_over_plan",
+        "plan_resolved_at_trade": true,
+        "plan_version": "fictional-v1",
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "invalidated_at": null
+      },
+      "steps": [
+        "仅检查input.check指定的一项，其他四项不据此判定",
+        "trade_qty > planned_qty；100==100不超，101>100超",
+        "结果=false"
+      ],
+      "expected": {
+        "check": "qty_over_plan",
+        "violated": false
+      },
+      "source_refs": [
+        "rc6",
+        "defaults",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 17
+    },
+    {
+      "id": "P2N-R08-018",
+      "desc": "【纯虚构】rc6_plan",
+      "case_status": "ready",
+      "kind": "rc6_plan",
+      "input": {
+        "plan_side": "buy",
+        "trade_side": "buy",
+        "planned_qty": "100",
+        "trade_qty": "101",
+        "stop_loss": "9",
+        "invalidated": false,
+        "held_qty": "100",
+        "check": "qty_over_plan",
+        "plan_resolved_at_trade": true,
+        "plan_version": "fictional-v1",
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "invalidated_at": null
+      },
+      "steps": [
+        "仅检查input.check指定的一项，其他四项不据此判定",
+        "trade_qty > planned_qty；100==100不超，101>100超",
+        "结果=true"
+      ],
+      "expected": {
+        "check": "qty_over_plan",
+        "violated": true
+      },
+      "source_refs": [
+        "rc6",
+        "defaults",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 18
+    },
+    {
+      "id": "P2N-R08-019",
+      "desc": "【纯虚构】rc6_plan",
+      "case_status": "ready",
+      "kind": "rc6_plan",
+      "input": {
+        "plan_side": "buy",
+        "trade_side": "buy",
+        "planned_qty": "100",
+        "trade_qty": "100",
+        "stop_loss": "9",
+        "invalidated": true,
+        "held_qty": "0",
+        "check": "held_after_invalidation",
+        "plan_resolved_at_trade": true,
+        "plan_version": "fictional-v1",
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "invalidated_at": "2026-11-02T09:59:00+08:00"
+      },
+      "steps": [
+        "仅检查input.check指定的一项，其他四项不据此判定",
+        "失效时刻严格早于评价，held_qty > 0；0不持有，1仍持有",
+        "结果=false"
+      ],
+      "expected": {
+        "check": "held_after_invalidation",
+        "violated": false
+      },
+      "source_refs": [
+        "rc6",
+        "defaults",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 19
+    },
+    {
+      "id": "P2N-R08-020",
+      "desc": "【纯虚构】rc6_plan",
+      "case_status": "ready",
+      "kind": "rc6_plan",
+      "input": {
+        "plan_side": "buy",
+        "trade_side": "buy",
+        "planned_qty": "100",
+        "trade_qty": "100",
+        "stop_loss": "9",
+        "invalidated": true,
+        "held_qty": "1",
+        "check": "held_after_invalidation",
+        "plan_resolved_at_trade": true,
+        "plan_version": "fictional-v1",
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "invalidated_at": "2026-11-02T09:59:00+08:00"
+      },
+      "steps": [
+        "仅检查input.check指定的一项，其他四项不据此判定",
+        "失效时刻严格早于评价，held_qty > 0；0不持有，1仍持有",
+        "结果=true"
+      ],
+      "expected": {
+        "check": "held_after_invalidation",
+        "violated": true
+      },
+      "source_refs": [
+        "rc6",
+        "defaults",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 20
+    },
+    {
+      "id": "P2N-R08-021",
+      "desc": "【纯虚构】rc6_plan",
+      "case_status": "ready",
+      "kind": "rc6_plan",
+      "input": {
+        "plan_side": "buy",
+        "trade_side": "buy",
+        "planned_qty": "100",
+        "trade_qty": "100",
+        "stop_loss": "9",
+        "invalidated": false,
+        "held_qty": "100",
+        "check": "buy_without_stop",
+        "plan_resolved_at_trade": true,
+        "plan_version": "fictional-v1",
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "invalidated_at": null
+      },
+      "steps": [
+        "仅检查input.check指定的一项，其他四项不据此判定",
+        "trade_side==buy 且 stop_loss is null；未设与数值0不混",
+        "结果=false"
+      ],
+      "expected": {
+        "check": "buy_without_stop",
+        "violated": false
+      },
+      "source_refs": [
+        "rc6",
+        "defaults",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 21
+    },
+    {
+      "id": "P2N-R08-022",
+      "desc": "【纯虚构】rc6_plan",
+      "case_status": "ready",
+      "kind": "rc6_plan",
+      "input": {
+        "plan_side": "buy",
+        "trade_side": "buy",
+        "planned_qty": "100",
+        "trade_qty": "100",
+        "stop_loss": null,
+        "invalidated": false,
+        "held_qty": "100",
+        "check": "buy_without_stop",
+        "plan_resolved_at_trade": true,
+        "plan_version": "fictional-v1",
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "invalidated_at": null
+      },
+      "steps": [
+        "仅检查input.check指定的一项，其他四项不据此判定",
+        "trade_side==buy 且 stop_loss is null；未设与数值0不混",
+        "结果=true"
+      ],
+      "expected": {
+        "check": "buy_without_stop",
+        "violated": true
+      },
+      "source_refs": [
+        "rc6",
+        "defaults",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 22
+    },
+    {
+      "id": "P2N-R08-023",
+      "desc": "【纯虚构】rc6_plan",
+      "case_status": "ready",
+      "kind": "rc6_plan",
+      "input": {
+        "plan_side": "wait",
+        "trade_side": "sell",
+        "planned_qty": "100",
+        "trade_qty": "100",
+        "stop_loss": "9",
+        "invalidated": false,
+        "held_qty": "100",
+        "check": "buy_during_wait",
+        "plan_resolved_at_trade": true,
+        "plan_version": "fictional-v1",
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "invalidated_at": null
+      },
+      "steps": [
+        "仅检查input.check指定的一项，其他四项不据此判定",
+        "plan_side==wait 且 trade_side==buy",
+        "结果=false"
+      ],
+      "expected": {
+        "check": "buy_during_wait",
+        "violated": false
+      },
+      "source_refs": [
+        "rc6",
+        "defaults",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 23
+    },
+    {
+      "id": "P2N-R08-024",
+      "desc": "【纯虚构】rc6_plan",
+      "case_status": "ready",
+      "kind": "rc6_plan",
+      "input": {
+        "plan_side": "wait",
+        "trade_side": "buy",
+        "planned_qty": "100",
+        "trade_qty": "100",
+        "stop_loss": "9",
+        "invalidated": false,
+        "held_qty": "100",
+        "check": "buy_during_wait",
+        "plan_resolved_at_trade": true,
+        "plan_version": "fictional-v1",
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "invalidated_at": null
+      },
+      "steps": [
+        "仅检查input.check指定的一项，其他四项不据此判定",
+        "plan_side==wait 且 trade_side==buy",
+        "结果=true"
+      ],
+      "expected": {
+        "check": "buy_during_wait",
+        "violated": true
+      },
+      "source_refs": [
+        "rc6",
+        "defaults",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "draft_seed_id": 24
+    },
+    {
+      "id": "P2N-R08-025",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 19,
+        "wins": 0,
+        "avg_excess_pct": "-5",
+        "auto_downweight": true
+      },
+      "steps": [
+        "n < 20 -> weight=1；不使用缺失/占位平均超额计算，不改变状态"
+      ],
+      "expected": {
+        "computed_weight": "1",
+        "applied_weight": "1"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 25
+    },
+    {
+      "id": "P2N-R08-026",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 20,
+        "wins": 0,
+        "avg_excess_pct": "0",
+        "auto_downweight": true
+      },
+      "steps": [
+        "w_tilde=(0+5)/(20+10)=0.166666666667",
+        "x=0/5=0; tanh(x)=0.000000000000",
+        "raw=1+1.2*(w_tilde-0.5)+0.4*e=0.600000000000",
+        "max(0.3,min(1.2,raw))=0.600000000000"
+      ],
+      "expected": {
+        "smoothed_win_rate": "0.166666666667",
+        "excess_term": "0.000000000000",
+        "raw": "0.600000000000",
+        "computed_weight": "0.600000000000",
+        "applied_weight": "0.600000000000"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 26
+    },
+    {
+      "id": "P2N-R08-027",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 20,
+        "wins": 10,
+        "avg_excess_pct": "0",
+        "auto_downweight": true
+      },
+      "steps": [
+        "w_tilde=(10+5)/(20+10)=0.500000000000",
+        "x=0/5=0; tanh(x)=0.000000000000",
+        "raw=1+1.2*(w_tilde-0.5)+0.4*e=1.000000000000",
+        "max(0.3,min(1.2,raw))=1.000000000000"
+      ],
+      "expected": {
+        "smoothed_win_rate": "0.500000000000",
+        "excess_term": "0.000000000000",
+        "raw": "1.000000000000",
+        "computed_weight": "1.000000000000",
+        "applied_weight": "1.000000000000"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 27
+    },
+    {
+      "id": "P2N-R08-028",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 20,
+        "wins": 20,
+        "avg_excess_pct": "0",
+        "auto_downweight": true
+      },
+      "steps": [
+        "w_tilde=(20+5)/(20+10)=0.833333333333",
+        "x=0/5=0; tanh(x)=0.000000000000",
+        "raw=1+1.2*(w_tilde-0.5)+0.4*e=1.400000000000",
+        "max(0.3,min(1.2,raw))=1.200000000000"
+      ],
+      "expected": {
+        "smoothed_win_rate": "0.833333333333",
+        "excess_term": "0.000000000000",
+        "raw": "1.400000000000",
+        "computed_weight": "1.200000000000",
+        "applied_weight": "1.200000000000"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 28
+    },
+    {
+      "id": "P2N-R08-029",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 20,
+        "wins": 0,
+        "avg_excess_pct": "-5",
+        "auto_downweight": true
+      },
+      "steps": [
+        "w_tilde=(0+5)/(20+10)=0.166666666667",
+        "x=-5/5=-1; tanh(x)=-0.761594155956",
+        "raw=1+1.2*(w_tilde-0.5)+0.4*e=0.295362337618",
+        "max(0.3,min(1.2,raw))=0.300000000000"
+      ],
+      "expected": {
+        "smoothed_win_rate": "0.166666666667",
+        "excess_term": "-0.761594155956",
+        "raw": "0.295362337618",
+        "computed_weight": "0.300000000000",
+        "applied_weight": "0.300000000000"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 29
+    },
+    {
+      "id": "P2N-R08-030",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 20,
+        "wins": 20,
+        "avg_excess_pct": "5",
+        "auto_downweight": true
+      },
+      "steps": [
+        "w_tilde=(20+5)/(20+10)=0.833333333333",
+        "x=5/5=1; tanh(x)=0.761594155956",
+        "raw=1+1.2*(w_tilde-0.5)+0.4*e=1.704637662382",
+        "max(0.3,min(1.2,raw))=1.200000000000"
+      ],
+      "expected": {
+        "smoothed_win_rate": "0.833333333333",
+        "excess_term": "0.761594155956",
+        "raw": "1.704637662382",
+        "computed_weight": "1.200000000000",
+        "applied_weight": "1.200000000000"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 30
+    },
+    {
+      "id": "P2N-R08-031",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 100,
+        "wins": 0,
+        "avg_excess_pct": "-50",
+        "auto_downweight": true
+      },
+      "steps": [
+        "w_tilde=(0+5)/(100+10)=0.045454545455",
+        "x=-50/5=-10; tanh(x)=-0.999999995878",
+        "raw=1+1.2*(w_tilde-0.5)+0.4*e=0.054545456194",
+        "max(0.3,min(1.2,raw))=0.300000000000"
+      ],
+      "expected": {
+        "smoothed_win_rate": "0.045454545455",
+        "excess_term": "-0.999999995878",
+        "raw": "0.054545456194",
+        "computed_weight": "0.300000000000",
+        "applied_weight": "0.300000000000"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 31
+    },
+    {
+      "id": "P2N-R08-032",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 100,
+        "wins": 100,
+        "avg_excess_pct": "50",
+        "auto_downweight": true
+      },
+      "steps": [
+        "w_tilde=(100+5)/(100+10)=0.954545454545",
+        "x=50/5=10; tanh(x)=0.999999995878",
+        "raw=1+1.2*(w_tilde-0.5)+0.4*e=1.945454543806",
+        "max(0.3,min(1.2,raw))=1.200000000000"
+      ],
+      "expected": {
+        "smoothed_win_rate": "0.954545454545",
+        "excess_term": "0.999999995878",
+        "raw": "1.945454543806",
+        "computed_weight": "1.200000000000",
+        "applied_weight": "1.200000000000"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 32
+    },
+    {
+      "id": "P2N-R08-033",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 20,
+        "wins": 15,
+        "avg_excess_pct": "0",
+        "auto_downweight": true
+      },
+      "steps": [
+        "w_tilde=(15+5)/(20+10)=0.666666666667",
+        "x=0/5=0; tanh(x)=0.000000000000",
+        "raw=1+1.2*(w_tilde-0.5)+0.4*e=1.200000000000",
+        "max(0.3,min(1.2,raw))=1.200000000000"
+      ],
+      "expected": {
+        "smoothed_win_rate": "0.666666666667",
+        "excess_term": "0.000000000000",
+        "raw": "1.200000000000",
+        "computed_weight": "1.200000000000",
+        "applied_weight": "1.200000000000"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 33
+    },
+    {
+      "id": "P2N-R08-034",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 20,
+        "wins": 5,
+        "avg_excess_pct": "0",
+        "auto_downweight": true
+      },
+      "steps": [
+        "w_tilde=(5+5)/(20+10)=0.333333333333",
+        "x=0/5=0; tanh(x)=0.000000000000",
+        "raw=1+1.2*(w_tilde-0.5)+0.4*e=0.800000000000",
+        "max(0.3,min(1.2,raw))=0.800000000000"
+      ],
+      "expected": {
+        "smoothed_win_rate": "0.333333333333",
+        "excess_term": "0.000000000000",
+        "raw": "0.800000000000",
+        "computed_weight": "0.800000000000",
+        "applied_weight": "0.800000000000"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 34
+    },
+    {
+      "id": "P2N-R08-035",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 0,
+        "wins": 0,
+        "avg_excess_pct": null,
+        "auto_downweight": true
+      },
+      "steps": [
+        "n < 20 -> weight=1；不使用缺失/占位平均超额计算，不改变状态"
+      ],
+      "expected": {
+        "computed_weight": "1",
+        "applied_weight": "1"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 35
+    },
+    {
+      "id": "P2N-R08-036",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 30,
+        "wins": 15,
+        "avg_excess_pct": "0",
+        "auto_downweight": true
+      },
+      "steps": [
+        "w_tilde=(15+5)/(30+10)=0.500000000000",
+        "x=0/5=0; tanh(x)=0.000000000000",
+        "raw=1+1.2*(w_tilde-0.5)+0.4*e=1.000000000000",
+        "max(0.3,min(1.2,raw))=1.000000000000"
+      ],
+      "expected": {
+        "smoothed_win_rate": "0.500000000000",
+        "excess_term": "0.000000000000",
+        "raw": "1.000000000000",
+        "computed_weight": "1.000000000000",
+        "applied_weight": "1.000000000000"
+      },
+      "source_refs": [
+        "weight",
+        "invariant"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "unspecified; expected numbers are 12-place test references, not persisted business rounding"
+      },
+      "draft_seed_id": 36
+    },
+    {
+      "id": "P2N-R08-037",
+      "desc": "【纯虚构】weight",
+      "case_status": "ready",
+      "kind": "weight",
+      "input": {
+        "n": 20,
+        "wins": 0,
+        "avg_excess_pct": "0",
+        "auto_downweight": false
+      },
+      "steps": [
+        "(0+5)/(20+10)=1/6",
+        "raw=1+1.2*(1/6-1/2)=0.6",
+        "本人排序开关关闭仅applied_weight=1；全站健康不关闭"
+      ],
+      "expected": {
+        "smoothed_win_rate": "0.166666666667",
+        "excess_term": "0",
+        "raw": "0.6",
+        "computed_weight": "0.6",
+        "applied_weight": "1"
+      },
+      "source_refs": [
+        "weight",
+        "health"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0.000000000001",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-038",
+      "desc": "【纯虚构】clamp",
+      "case_status": "ready",
+      "kind": "clamp",
+      "input": {
+        "raw": ".299"
+      },
+      "steps": [
+        "min(1.2,.299)后max(0.3,...)=.3"
+      ],
+      "expected": {
+        "weight": ".3"
+      },
+      "source_refs": [
+        "weight"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "scope": "clamp纯算子边界；不声称这些raw必来自某个可达n/wins/超额组合"
+    },
+    {
+      "id": "P2N-R08-039",
+      "desc": "【纯虚构】clamp",
+      "case_status": "ready",
+      "kind": "clamp",
+      "input": {
+        "raw": ".3"
+      },
+      "steps": [
+        "min(1.2,.3)后max(0.3,...)=.3"
+      ],
+      "expected": {
+        "weight": ".3"
+      },
+      "source_refs": [
+        "weight"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "scope": "clamp纯算子边界；不声称这些raw必来自某个可达n/wins/超额组合"
+    },
+    {
+      "id": "P2N-R08-040",
+      "desc": "【纯虚构】clamp",
+      "case_status": "ready",
+      "kind": "clamp",
+      "input": {
+        "raw": ".301"
+      },
+      "steps": [
+        "min(1.2,.301)后max(0.3,...)=.301"
+      ],
+      "expected": {
+        "weight": ".301"
+      },
+      "source_refs": [
+        "weight"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "scope": "clamp纯算子边界；不声称这些raw必来自某个可达n/wins/超额组合"
+    },
+    {
+      "id": "P2N-R08-041",
+      "desc": "【纯虚构】clamp",
+      "case_status": "ready",
+      "kind": "clamp",
+      "input": {
+        "raw": "1.199"
+      },
+      "steps": [
+        "min(1.2,1.199)后max(0.3,...)=1.199"
+      ],
+      "expected": {
+        "weight": "1.199"
+      },
+      "source_refs": [
+        "weight"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "scope": "clamp纯算子边界；不声称这些raw必来自某个可达n/wins/超额组合"
+    },
+    {
+      "id": "P2N-R08-042",
+      "desc": "【纯虚构】clamp",
+      "case_status": "ready",
+      "kind": "clamp",
+      "input": {
+        "raw": "1.2"
+      },
+      "steps": [
+        "min(1.2,1.2)后max(0.3,...)=1.2"
+      ],
+      "expected": {
+        "weight": "1.2"
+      },
+      "source_refs": [
+        "weight"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "scope": "clamp纯算子边界；不声称这些raw必来自某个可达n/wins/超额组合"
+    },
+    {
+      "id": "P2N-R08-043",
+      "desc": "【纯虚构】clamp",
+      "case_status": "ready",
+      "kind": "clamp",
+      "input": {
+        "raw": "1.201"
+      },
+      "steps": [
+        "min(1.2,1.201)后max(0.3,...)=1.2"
+      ],
+      "expected": {
+        "weight": "1.2"
+      },
+      "source_refs": [
+        "weight"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "scope": "clamp纯算子边界；不声称这些raw必来自某个可达n/wins/超额组合"
+    },
+    {
+      "id": "P2N-R08-044",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "published",
+        "n": 20,
+        "site_daily_weights": [
+          ".79",
+          ".79",
+          ".79",
+          ".79"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "published -> published；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "published",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-045",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "published",
+        "n": 20,
+        "site_daily_weights": [
+          ".79",
+          ".79",
+          ".79",
+          ".79",
+          ".79"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "published -> observing；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "observing",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-046",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "published",
+        "n": 20,
+        "site_daily_weights": [
+          ".8",
+          ".8",
+          ".8",
+          ".8",
+          ".8"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "published -> published；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "published",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-047",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "published",
+        "n": 20,
+        "site_daily_weights": [
+          ".79",
+          ".79",
+          ".79",
+          ".79",
+          ".8",
+          ".79",
+          ".79",
+          ".79",
+          ".79"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "published -> published；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "published",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-048",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "observing",
+        "n": 20,
+        "site_daily_weights": [
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "observing -> observing；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "observing",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-049",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "observing",
+        "n": 20,
+        "site_daily_weights": [
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "observing -> published；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "published",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-050",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "observing",
+        "n": 20,
+        "site_daily_weights": [
+          ".899",
+          ".899",
+          ".899",
+          ".899",
+          ".899",
+          ".899",
+          ".899",
+          ".899",
+          ".899",
+          ".899"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "observing -> observing；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "observing",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-051",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "observing",
+        "n": 20,
+        "site_daily_weights": [
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".899",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "observing -> observing；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "observing",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-052",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "observing",
+        "n": 20,
+        "site_daily_weights": [
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6",
+          ".6"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "observing -> observing；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "observing",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-053",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "observing",
+        "n": 20,
+        "site_daily_weights": [
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "observing -> observing；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "observing",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-054",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "observing",
+        "n": 20,
+        "site_daily_weights": [
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59",
+          ".59"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "observing -> observing；notify_admin_review=true"
+      ],
+      "expected": {
+        "state": "observing",
+        "notify_admin_review": true,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-055",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "published",
+        "n": 19,
+        "site_daily_weights": [
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1",
+          ".1"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "published -> published；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "published",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-056",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "observing",
+        "n": 19,
+        "site_daily_weights": [
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "observing -> observing；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "observing",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-057",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "draft",
+        "n": 30,
+        "site_daily_weights": [
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "draft -> draft；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "draft",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-058",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "simulating",
+        "n": 30,
+        "site_daily_weights": [
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "simulating -> simulating；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "simulating",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-059",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "retired",
+        "n": 30,
+        "site_daily_weights": [
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2",
+          "1.2"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": true
+      },
+      "steps": [
+        "输入为明确连续交易日的已计算全站weight，未使用本人排序开关替代",
+        "n<20状态不变；draft/simulating/retired不由健康度自动晋级或恢复",
+        "published仅<0.8连续5日转observing；observing仅>=0.9连续10日恢复；<0.6连续20日仅提醒",
+        "retired -> retired；notify_admin_review=false"
+      ],
+      "expected": {
+        "state": "retired",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health",
+        "recover",
+        "retire",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-060",
+      "desc": "【纯虚构】health_internal_entry",
+      "case_status": "ready",
+      "kind": "health_internal_entry",
+      "input": {
+        "state": "published",
+        "n": 20,
+        "robustness": "69.900",
+        "baseline_robustness": "100",
+        "internal_evaluation_enabled": true
+      },
+      "steps": [
+        "robustness / baseline=.699",
+        ".699 < 0.70 -> observing"
+      ],
+      "expected": {
+        "state": "observing"
+      },
+      "source_refs": [
+        "health"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-061",
+      "desc": "【纯虚构】health_internal_entry",
+      "case_status": "ready",
+      "kind": "health_internal_entry",
+      "input": {
+        "state": "published",
+        "n": 20,
+        "robustness": "70.0",
+        "baseline_robustness": "100",
+        "internal_evaluation_enabled": true
+      },
+      "steps": [
+        "robustness / baseline=.7",
+        ".7 < 0.70 -> published"
+      ],
+      "expected": {
+        "state": "published"
+      },
+      "source_refs": [
+        "health"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-062",
+      "desc": "【纯虚构】evaluation_state",
+      "case_status": "ready",
+      "kind": "evaluation_state",
+      "input": {
+        "enabled": true,
+        "known_trigger": true,
+        "all_required_inputs_complete": false
+      },
+      "steps": [
+        "disabled优先；其次已知triggered；无命中且完整才ok；否则unknown+gap"
+      ],
+      "expected": {
+        "state": "triggered"
+      },
+      "source_refs": [
+        "state",
+        "missing"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-063",
+      "desc": "【纯虚构】evaluation_state",
+      "case_status": "ready",
+      "kind": "evaluation_state",
+      "input": {
+        "enabled": true,
+        "known_trigger": false,
+        "all_required_inputs_complete": false
+      },
+      "steps": [
+        "disabled优先；其次已知triggered；无命中且完整才ok；否则unknown+gap"
+      ],
+      "expected": {
+        "state": "unknown"
+      },
+      "source_refs": [
+        "state",
+        "missing"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-064",
+      "desc": "【纯虚构】evaluation_state",
+      "case_status": "ready",
+      "kind": "evaluation_state",
+      "input": {
+        "enabled": false,
+        "known_trigger": true,
+        "all_required_inputs_complete": false
+      },
+      "steps": [
+        "disabled优先；其次已知triggered；无命中且完整才ok；否则unknown+gap"
+      ],
+      "expected": {
+        "state": "disabled"
+      },
+      "source_refs": [
+        "state",
+        "missing"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-065",
+      "desc": "【纯虚构】evaluation_state",
+      "case_status": "ready",
+      "kind": "evaluation_state",
+      "input": {
+        "enabled": true,
+        "known_trigger": false,
+        "all_required_inputs_complete": true
+      },
+      "steps": [
+        "disabled优先；其次已知triggered；无命中且完整才ok；否则unknown+gap"
+      ],
+      "expected": {
+        "state": "ok"
+      },
+      "source_refs": [
+        "state",
+        "missing"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-066",
+      "desc": "【纯虚构】rc5_correction",
+      "case_status": "ready",
+      "kind": "rc5_correction",
+      "input": {
+        "before_pnl": [
+          "-1",
+          "-2",
+          "-3"
+        ],
+        "after_void_effective_pnl": [
+          "-1",
+          "-2"
+        ],
+        "all_closed": true
+      },
+      "steps": [
+        "冲正后的有效集合重算3->2，不按旧缓存连亏数触发",
+        "当前不再触发不等于已暂停实例自动恢复；解除仍需用户确认或期满"
+      ],
+      "expected": {
+        "before_losses": 3,
+        "after_losses": 2,
+        "after_triggered": false,
+        "auto_resume_instance": false
+      },
+      "source_refs": [
+        "rc5",
+        "correction",
+        "pause"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-067",
+      "desc": "【纯虚构】rc6_asof",
+      "case_status": "ready",
+      "kind": "rc6_asof",
+      "input": {
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "versions": [
+          {
+            "id": "fictional-v1",
+            "created_at": "2026-11-02T09:00:00+08:00",
+            "side": "buy"
+          },
+          {
+            "id": "fictional-v2",
+            "created_at": "2026-11-02T11:00:00+08:00",
+            "side": "sell"
+          }
+        ],
+        "resolved_version_at_trade": "fictional-v1",
+        "trade_side": "buy"
+      },
+      "steps": [
+        "v2在成交后不可回填；取已明确有效的v1",
+        "buy==buy，不方向相反"
+      ],
+      "expected": {
+        "selected_plan_version": "fictional-v1",
+        "opposite_side": false
+      },
+      "source_refs": [
+        "asof",
+        "rc6"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-068",
+      "desc": "【纯虚构】rc6_replay",
+      "case_status": "ready",
+      "kind": "rc6_replay",
+      "input": {
+        "logical_event_key": "fictional-trade-A|fictional-plan-v1|buy_without_stop",
+        "deliveries": [
+          "same_import",
+          "same_import"
+        ],
+        "violation_precomputed": true
+      },
+      "steps": [
+        "同一逻辑检查事件重放两次仅一条",
+        "logical_event_key仅测试标签，不新增数据库键规范"
+      ],
+      "expected": {
+        "logical_risk_events": 1
+      },
+      "source_refs": [
+        "idem",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-069",
+      "desc": "【纯虚构】rc6_missing_plan",
+      "case_status": "ready",
+      "kind": "rc6_missing_plan",
+      "input": {
+        "effective_plan_at_trade": null,
+        "trade_side": "buy"
+      },
+      "steps": [
+        "有效计划不足不能判无违规，也不能推断未设止损违规"
+      ],
+      "expected": {
+        "state": "unknown",
+        "gap": true,
+        "violation": null
+      },
+      "source_refs": [
+        "missing",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-070",
+      "desc": "【纯虚构】pause_release",
+      "case_status": "ready",
+      "kind": "pause_release",
+      "input": {
+        "status": "paused",
+        "operation": "user_resume",
+        "paused_by": "system",
+        "pause_reason_code": "LOSS_STREAK_PAUSE",
+        "lifecycle": "published",
+        "now": "2026-11-02T10:00:00+08:00",
+        "paused_until": "2026-11-09T10:00:00+08:00"
+      },
+      "steps": [
+        "使用已存paused_until，不在本例推算5交易日到期时刻",
+        "系统暂停：用户resume或已过到期；用户暂停不能系统解除；不可运行版本用户resume拒绝"
+      ],
+      "expected": {
+        "status": "active",
+        "pause_fields_cleared": true,
+        "released_reason_code": "LOSS_STREAK_PAUSE",
+        "paused_by": null,
+        "pause_reason_code": null,
+        "paused_until": null
+      },
+      "source_refs": [
+        "pause",
+        "resume",
+        "user_pause",
+        "not_runnable"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-071",
+      "desc": "【纯虚构】pause_release",
+      "case_status": "ready",
+      "kind": "pause_release",
+      "input": {
+        "status": "paused",
+        "operation": "schedule",
+        "paused_by": "system",
+        "pause_reason_code": "LOSS_STREAK_PAUSE",
+        "lifecycle": "published",
+        "now": "2026-11-09T10:01:00+08:00",
+        "paused_until": "2026-11-09T10:00:00+08:00"
+      },
+      "steps": [
+        "使用已存paused_until，不在本例推算5交易日到期时刻",
+        "系统暂停：用户resume或已过到期；用户暂停不能系统解除；不可运行版本用户resume拒绝"
+      ],
+      "expected": {
+        "status": "active",
+        "pause_fields_cleared": true,
+        "paused_by": null,
+        "pause_reason_code": null,
+        "paused_until": null
+      },
+      "source_refs": [
+        "pause",
+        "resume",
+        "user_pause",
+        "not_runnable"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-072",
+      "desc": "【纯虚构】pause_release",
+      "case_status": "ready",
+      "kind": "pause_release",
+      "input": {
+        "status": "paused",
+        "operation": "schedule",
+        "paused_by": "system",
+        "pause_reason_code": "LOSS_STREAK_PAUSE",
+        "lifecycle": "published",
+        "now": "2026-11-09T09:59:00+08:00",
+        "paused_until": "2026-11-09T10:00:00+08:00"
+      },
+      "steps": [
+        "使用已存paused_until，不在本例推算5交易日到期时刻",
+        "系统暂停：用户resume或已过到期；用户暂停不能系统解除；不可运行版本用户resume拒绝"
+      ],
+      "expected": {
+        "status": "paused",
+        "pause_fields_cleared": false,
+        "paused_by": "system",
+        "pause_reason_code": "LOSS_STREAK_PAUSE",
+        "paused_until": "2026-11-09T10:00:00+08:00"
+      },
+      "source_refs": [
+        "pause",
+        "resume",
+        "user_pause",
+        "not_runnable"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-073",
+      "desc": "【纯虚构】pause_release",
+      "case_status": "ready",
+      "kind": "pause_release",
+      "input": {
+        "status": "paused",
+        "operation": "schedule",
+        "paused_by": "user",
+        "pause_reason_code": null,
+        "lifecycle": "published",
+        "now": "2026-11-10T10:00:00+08:00",
+        "paused_until": null
+      },
+      "steps": [
+        "使用已存paused_until，不在本例推算5交易日到期时刻",
+        "系统暂停：用户resume或已过到期；用户暂停不能系统解除；不可运行版本用户resume拒绝"
+      ],
+      "expected": {
+        "status": "paused",
+        "pause_fields_cleared": false,
+        "paused_by": "user",
+        "pause_reason_code": null,
+        "paused_until": null
+      },
+      "source_refs": [
+        "pause",
+        "resume",
+        "user_pause",
+        "not_runnable"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-074",
+      "desc": "【纯虚构】pause_release",
+      "case_status": "ready",
+      "kind": "pause_release",
+      "input": {
+        "status": "paused",
+        "operation": "user_resume",
+        "paused_by": "system",
+        "pause_reason_code": "LOSS_STREAK_PAUSE",
+        "lifecycle": "simulating",
+        "now": "2026-11-02T10:00:00+08:00",
+        "paused_until": "2026-11-09T10:00:00+08:00"
+      },
+      "steps": [
+        "使用已存paused_until，不在本例推算5交易日到期时刻",
+        "系统暂停：用户resume或已过到期；用户暂停不能系统解除；不可运行版本用户resume拒绝"
+      ],
+      "expected": {
+        "status": "paused",
+        "pause_fields_cleared": false,
+        "error": "STRATEGY_VERSION_NOT_RUNNABLE",
+        "http": 409,
+        "paused_by": "system",
+        "pause_reason_code": "LOSS_STREAK_PAUSE",
+        "paused_until": "2026-11-09T10:00:00+08:00"
+      },
+      "source_refs": [
+        "pause",
+        "resume",
+        "user_pause",
+        "not_runnable"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-075",
+      "desc": "【纯虚构】pause_release",
+      "case_status": "ready",
+      "kind": "pause_release",
+      "input": {
+        "status": "paused",
+        "operation": "user_resume",
+        "paused_by": "system",
+        "pause_reason_code": "LOSS_STREAK_PAUSE",
+        "lifecycle": "retired",
+        "now": "2026-11-02T10:00:00+08:00",
+        "paused_until": "2026-11-09T10:00:00+08:00"
+      },
+      "steps": [
+        "使用已存paused_until，不在本例推算5交易日到期时刻",
+        "系统暂停：用户resume或已过到期；用户暂停不能系统解除；不可运行版本用户resume拒绝"
+      ],
+      "expected": {
+        "status": "paused",
+        "pause_fields_cleared": false,
+        "error": "STRATEGY_VERSION_NOT_RUNNABLE",
+        "http": 409,
+        "paused_by": "system",
+        "pause_reason_code": "LOSS_STREAK_PAUSE",
+        "paused_until": "2026-11-09T10:00:00+08:00"
+      },
+      "source_refs": [
+        "pause",
+        "resume",
+        "user_pause",
+        "not_runnable"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-076",
+      "desc": "【纯虚构】pause_trigger",
+      "case_status": "ready",
+      "kind": "pause_trigger",
+      "input": {
+        "enabled": true,
+        "known_trigger": true,
+        "pause_on_trigger": true,
+        "instance_status": "active",
+        "pause_days": 5
+      },
+      "steps": [
+        "已知触发产生预警",
+        "仅pause_on_trigger=true挂系统暂停；不推算未裁定到期时刻"
+      ],
+      "expected": {
+        "risk_state": "triggered",
+        "instance_status": "paused",
+        "pause_reason_code": "LOSS_STREAK_PAUSE"
+      },
+      "source_refs": [
+        "pause",
+        "state"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-077",
+      "desc": "【纯虚构】pause_trigger",
+      "case_status": "ready",
+      "kind": "pause_trigger",
+      "input": {
+        "enabled": true,
+        "known_trigger": true,
+        "pause_on_trigger": false,
+        "instance_status": "active",
+        "pause_days": 5
+      },
+      "steps": [
+        "已知触发产生预警",
+        "仅pause_on_trigger=true挂系统暂停；不推算未裁定到期时刻"
+      ],
+      "expected": {
+        "risk_state": "triggered",
+        "instance_status": "active",
+        "pause_reason_code": null
+      },
+      "source_refs": [
+        "pause",
+        "state"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-078",
+      "desc": "【纯虚构】health_internal_entry",
+      "case_status": "ready",
+      "kind": "health_internal_entry",
+      "input": {
+        "state": "published",
+        "n": 19,
+        "robustness": "10",
+        "baseline_robustness": "100",
+        "internal_evaluation_enabled": true
+      },
+      "steps": [
+        "n=19<20，先保持状态；不因内部复验差而绕过样本门槛"
+      ],
+      "expected": {
+        "state": "published"
+      },
+      "source_refs": [
+        "health"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-079",
+      "desc": "【纯虚构】health",
+      "case_status": "ready",
+      "kind": "health",
+      "input": {
+        "state": "published",
+        "n": 20,
+        "site_daily_weights": [
+          ".79",
+          ".79",
+          ".79",
+          ".79",
+          ".79"
+        ],
+        "consecutive_trading_days": true,
+        "prior_streaks": {
+          "below_08": 0,
+          "above_eq_09": 0,
+          "below_06": 0
+        },
+        "internal_evaluation_enabled": false,
+        "auto_downweight": false
+      },
+      "steps": [
+        "用户开关关闭本人排序，不关闭全站健康状态；.79<.8连续5日"
+      ],
+      "expected": {
+        "state": "observing",
+        "notify_admin_review": false,
+        "auto_retired": false
+      },
+      "source_refs": [
+        "health"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-080",
+      "desc": "【纯虚构】ranking_only",
+      "case_status": "ready",
+      "kind": "ranking_only",
+      "input": {
+        "lifecycle": "draft",
+        "weight": "0.3",
+        "auto_downweight": true,
+        "rule_payload": {
+          "action": "sell",
+          "score": 37,
+          "confidence": "0.61",
+          "stops": {
+            "stop_loss": "9.50",
+            "take_profit": null
+          }
+        }
+      },
+      "steps": [
+        "排序乘权重，不经G7晋级、不改动作/分数/置信度/止损、不创建交易"
+      ],
+      "expected": {
+        "lifecycle": "draft",
+        "rule_payload": {
+          "action": "sell",
+          "score": 37,
+          "confidence": "0.61",
+          "stops": {
+            "stop_loss": "9.50",
+            "take_profit": null
+          }
+        },
+        "ranking_weight": "0.3"
+      },
+      "source_refs": [
+        "weight",
+        "invariant",
+        "llm",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-081",
+      "desc": "【纯虚构】ranking_only",
+      "case_status": "ready",
+      "kind": "ranking_only",
+      "input": {
+        "lifecycle": "simulating",
+        "weight": "0.3",
+        "auto_downweight": true,
+        "rule_payload": {
+          "action": "sell",
+          "score": 37,
+          "confidence": "0.61",
+          "stops": {
+            "stop_loss": "9.50",
+            "take_profit": null
+          }
+        }
+      },
+      "steps": [
+        "排序乘权重，不经G7晋级、不改动作/分数/置信度/止损、不创建交易"
+      ],
+      "expected": {
+        "lifecycle": "simulating",
+        "rule_payload": {
+          "action": "sell",
+          "score": 37,
+          "confidence": "0.61",
+          "stops": {
+            "stop_loss": "9.50",
+            "take_profit": null
+          }
+        },
+        "ranking_weight": "0.3"
+      },
+      "source_refs": [
+        "weight",
+        "invariant",
+        "llm",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-082",
+      "desc": "【纯虚构】ranking_only",
+      "case_status": "ready",
+      "kind": "ranking_only",
+      "input": {
+        "lifecycle": "published",
+        "weight": "0.3",
+        "auto_downweight": true,
+        "rule_payload": {
+          "action": "sell",
+          "score": 37,
+          "confidence": "0.61",
+          "stops": {
+            "stop_loss": "9.50",
+            "take_profit": null
+          }
+        }
+      },
+      "steps": [
+        "排序乘权重，不经G7晋级、不改动作/分数/置信度/止损、不创建交易"
+      ],
+      "expected": {
+        "lifecycle": "published",
+        "rule_payload": {
+          "action": "sell",
+          "score": 37,
+          "confidence": "0.61",
+          "stops": {
+            "stop_loss": "9.50",
+            "take_profit": null
+          }
+        },
+        "ranking_weight": "0.3"
+      },
+      "source_refs": [
+        "weight",
+        "invariant",
+        "llm",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-083",
+      "desc": "【纯虚构】ranking_only",
+      "case_status": "ready",
+      "kind": "ranking_only",
+      "input": {
+        "lifecycle": "observing",
+        "weight": "0.3",
+        "auto_downweight": true,
+        "rule_payload": {
+          "action": "sell",
+          "score": 37,
+          "confidence": "0.61",
+          "stops": {
+            "stop_loss": "9.50",
+            "take_profit": null
+          }
+        }
+      },
+      "steps": [
+        "排序乘权重，不经G7晋级、不改动作/分数/置信度/止损、不创建交易"
+      ],
+      "expected": {
+        "lifecycle": "observing",
+        "rule_payload": {
+          "action": "sell",
+          "score": 37,
+          "confidence": "0.61",
+          "stops": {
+            "stop_loss": "9.50",
+            "take_profit": null
+          }
+        },
+        "ranking_weight": "0.3"
+      },
+      "source_refs": [
+        "weight",
+        "invariant",
+        "llm",
+        "lifecycle"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      }
+    },
+    {
+      "id": "P2N-R08-084",
+      "desc": "【纯虚构】spec_ambiguity",
+      "case_status": "blocked",
+      "kind": "spec_ambiguity",
+      "input": {
+        "tracking_results": [
+          {
+            "action": "buy",
+            "direction_correct": false,
+            "return_pct": "2",
+            "excess_pct": "-1"
+          }
+        ]
+      },
+      "steps": [
+        "未确定期望；不计入ready金标准"
+      ],
+      "expected": null,
+      "source_refs": [
+        "rc5",
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "topic": "sim_failure_mapping",
+      "block_reason": "spec_ambiguity",
+      "question": "模拟失败究竟按direction_correct、绝对亏损、失效触发还是其他标志？跟踪期/排序/去重范围需明确；本包只验证上游预分类失败数列。"
+    },
+    {
+      "id": "P2N-R08-085",
+      "desc": "【纯虚构】spec_ambiguity",
+      "case_status": "blocked",
+      "kind": "spec_ambiguity",
+      "input": {
+        "fills": [
+          {
+            "side": "buy",
+            "qty": "200"
+          },
+          {
+            "side": "sell",
+            "qty": "100"
+          },
+          {
+            "side": "sell",
+            "qty": "100"
+          }
+        ]
+      },
+      "steps": [
+        "未确定期望；不计入ready金标准"
+      ],
+      "expected": null,
+      "source_refs": [
+        "rc5"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "topic": "closed_trade_grouping",
+      "block_reason": "spec_ambiguity",
+      "question": "已平仓一笔按往返持仓段、成交、匹配批次还是其他？费用/平本是否中断/跳过及并列结束时刻排序需裁定。"
+    },
+    {
+      "id": "P2N-R08-086",
+      "desc": "【纯虚构】spec_ambiguity",
+      "case_status": "blocked",
+      "kind": "spec_ambiguity",
+      "input": {
+        "trigger_at": "2026-11-02T10:00:00+08:00",
+        "pause_days": 5
+      },
+      "steps": [
+        "未确定期望；不计入ready金标准"
+      ],
+      "expected": null,
+      "source_refs": [
+        "pause"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "topic": "pause_expiry_origin",
+      "block_reason": "spec_ambiguity",
+      "question": "5交易日起点是否第0天、到期盘前/收盘/原时刻未定；不能把RC1时间止损起点裁定移用于RC5。"
+    },
+    {
+      "id": "P2N-R08-087",
+      "desc": "【纯虚构】spec_ambiguity",
+      "case_status": "blocked",
+      "kind": "spec_ambiguity",
+      "input": {
+        "state": "observing",
+        "n": 20,
+        "site_daily_weights": [
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9",
+          ".9"
+        ],
+        "internal_evaluation_enabled": true,
+        "baseline_robustness": "100",
+        "robustness": "70"
+      },
+      "steps": [
+        "未确定期望；不计入ready金标准"
+      ],
+      "expected": null,
+      "source_refs": [
+        "recover"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "topic": "internal_recovery",
+      "block_reason": "spec_ambiguity",
+      "question": "内部复验恢复没有明确数值条件；不得擅设>=70%或>=100%。"
+    },
+    {
+      "id": "P2N-R08-088",
+      "desc": "【纯虚构】spec_ambiguity",
+      "case_status": "blocked",
+      "kind": "spec_ambiguity",
+      "input": {
+        "planned_qty": "100",
+        "trades": [
+          "60",
+          "60"
+        ]
+      },
+      "steps": [
+        "未确定期望；不计入ready金标准"
+      ],
+      "expected": null,
+      "source_refs": [
+        "rc6"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "topic": "rc6_cumulative_qty",
+      "block_reason": "spec_ambiguity",
+      "question": "数量超计划按单笔还是累计、冲正后累积范围未定；本包只验单笔明显边界。"
+    },
+    {
+      "id": "P2N-R08-089",
+      "desc": "【纯虚构】spec_ambiguity",
+      "case_status": "blocked",
+      "kind": "spec_ambiguity",
+      "input": {
+        "trade_at": "2026-11-02T10:00:00+08:00",
+        "plan_new_version_at": "2026-11-02T10:00:00+08:00"
+      },
+      "steps": [
+        "未确定期望；不计入ready金标准"
+      ],
+      "expected": null,
+      "source_refs": [
+        "asof"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "topic": "rc6_plan_boundary",
+      "block_reason": "spec_ambiguity",
+      "question": "同一时刻版本生效/关闭与成交先后及多计划选择无明确顺序，不猜半开区间。"
+    },
+    {
+      "id": "P2N-R08-090",
+      "desc": "【纯虚构】spec_ambiguity",
+      "case_status": "blocked",
+      "kind": "spec_ambiguity",
+      "input": {
+        "n": 20,
+        "site_daily_weights": [
+          ".79",
+          null,
+          ".79"
+        ]
+      },
+      "steps": [
+        "未确定期望；不计入ready金标准"
+      ],
+      "expected": null,
+      "source_refs": [
+        "health"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "topic": "health_day_gap",
+      "block_reason": "spec_ambiguity",
+      "question": "交易日缺统计时连续计数重置还是暂停未明；本包健康案例均明确连续且齐全。"
+    },
+    {
+      "id": "P2N-R08-091",
+      "desc": "【纯虚构】spec_ambiguity",
+      "case_status": "blocked",
+      "kind": "spec_ambiguity",
+      "input": {
+        "status": "paused",
+        "known_trigger": true,
+        "existing_paused_until": "2026-11-09T10:00:00+08:00"
+      },
+      "steps": [
+        "未确定期望；不计入ready金标准"
+      ],
+      "expected": null,
+      "source_refs": [
+        "pause"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "topic": "pause_retrigger",
+      "block_reason": "spec_ambiguity",
+      "question": "重复触发是否延长/覆盖暂停期、期满但风险仍在是否立即重挂未明确。"
+    },
+    {
+      "id": "P2N-R08-092",
+      "desc": "【纯虚构】spec_ambiguity",
+      "case_status": "blocked",
+      "kind": "spec_ambiguity",
+      "input": {
+        "operation": "schedule",
+        "lifecycle": "retired",
+        "status": "paused"
+      },
+      "steps": [
+        "未确定期望；不计入ready金标准"
+      ],
+      "expected": null,
+      "source_refs": [
+        "not_runnable",
+        "pause"
+      ],
+      "units": {
+        "pnl": "CNY",
+        "nav": "CNY",
+        "qty": "shares",
+        "weight": "ratio",
+        "avg_excess_pct": "pct",
+        "time": "Asia/Shanghai UTC+8"
+      },
+      "precision": {
+        "decimal_input": "strings",
+        "oracle_abs_tolerance": "0",
+        "business_rounding": "not_added"
+      },
+      "topic": "schedule_not_runnable",
+      "block_reason": "spec_ambiguity",
+      "question": "用户resume的不可运行版本拒绝明确，系统期满恢复是否同样检查需明确；不能借此恢复退役策略。"
+    }
+  ]
+}

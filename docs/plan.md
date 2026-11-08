@@ -777,7 +777,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
   - **6.1 原因码的落点**：超出上限按上面写入不可执行原因（gated）；其余情况只是 §2.5.6 的提示或预警 risk_flag。
   - 契约 `gated_actions` 取值：RC3、RC4 为 `["buy", "add"]`。
 - **T-A33 裁定（架构师 2026-11-08）RC5/RC6 判定口径**：模拟失败、已平仓一笔、暂停期起算与再触发、期满恢复、RC6 累计数量与计划边界的可实现口径以契约 §7.11.3 “T-A33 裁定”为准。
-  - **产品项已定（用户 2026-11-08 选 B，T-A36）**：模拟失败按策略自身周期取跟踪期（`intraday_t`/`short` → T+1，`swing` → 5 日，`long` → 20 日），只算本人建议；周期不清楚的观测跳过并记 gap。配置键 `rc5_loss_streak_drawdown.sim_fail_horizon_by_horizon`（取代原 `sim_fail_horizon_days`），细则见契约 §7.11.3 T-A33 第 2 点。
+  - **产品项已定（用户 2026-11-08 选 B，T-A36）**：模拟失败按策略自身周期取跟踪期（T-A37 修正：`intraday_t` → T+1，`short` → 5 日，`swing`/`long` → 20 日；RC5 仅为早期预警，暂停可由用户恢复，策略终评由 §2.5.7 跟踪统计与 §2.8.2 健康度/管理员复审负责），只算本人建议；周期不清楚的观测跳过并记 gap。配置键 `rc5_loss_streak_drawdown.sim_fail_horizon_by_horizon`（取代原 `sim_fail_horizon_days`），细则见契约 §7.11.3 T-A33 第 2 点。
 
 #### 2.5.7 模拟跟踪反馈与自动降权
 > 本节公式保留；权重与"健康 / 观察 / 退役"状态合并为**一个机制**，以 2.8.2 为准。`strategy_priority_weights` 改为 `user_strategy_weights` 与 `strategy_health_daily`。
@@ -3020,8 +3020,8 @@ rc5_loss_streak_drawdown:
   pause_days: 5                 # ◇ 暂停期（交易日）
   sim_fail_horizon_by_horizon:  # ◇ 模拟失败计数所用跟踪期（T-A36，用户选 B：按策略周期，仅本人）
     intraday_t: 1
-    short: 1
-    swing: 5
+    short: 5
+    swing: 20
     long: 20
 rc6_plan_violation:
   enabled: true

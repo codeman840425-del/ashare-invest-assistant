@@ -1,6 +1,6 @@
 /** 策略库类型（契约 v0.2.7 §5.1 StrategyInstance、§6.0A、§7.4 /strategies、§7.5 /strategy-instances） */
 import type { CardRiskLevel, Horizon, InstanceEventKind, InstanceOrigin, InstanceStatus, Lifecycle, ReasonCode } from './enums';
-import type { DateTime, Decimal, Stat, Uuid } from './types';
+import type { DataStatusBlock, DateTime, Decimal, Stat, Uuid } from './types';
 
 /** GET /strategies 元素 */
 export interface StrategyTemplate {
@@ -77,5 +77,12 @@ export interface StrategyTrackingRow {
   avg_excess_pct: Stat;
   profit_loss_ratio: Stat;
   max_loss_streak: number;
+  pending_count: number;
+  untradable_count: number;
+  excluded_count: number;
 }
-export interface StrategyTracking { scope: 'mine' | 'site'; by_horizon: StrategyTrackingRow[] }
+
+export interface StrategyTracking extends DataStatusBlock {
+  scope: 'mine' | 'site';
+  by_horizon: StrategyTrackingRow[];
+}

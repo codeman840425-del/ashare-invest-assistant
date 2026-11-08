@@ -4,7 +4,7 @@
  */
 import { http, HttpResponse } from 'msw';
 import { ENUMS, type Horizon } from '../api/enums';
-import type { StrategyInstance, StrategyInstanceCreate, StrategyTemplate } from '../api/strategyTypes';
+import type { StrategyInstance, StrategyInstanceCreate, StrategyTemplate, StrategyTracking } from '../api/strategyTypes';
 import { errorBody, page } from './handlerUtils';
 import { ACCOUNT_ID, STRATEGIES, uid } from './fixtures';
 import { HORIZON } from '../i18n/labels';
@@ -86,16 +86,18 @@ const TRACK_N: Record<string, number> = { demo_trend: 64, demo_value: 26, demo_t
 function stat(v: number, n: number, window: string) {
   return { value: n < 5 ? null : v.toFixed(4), n, window, small_sample: n < 30 };
 }
-export function trackingOf(t: StrategyTemplate, scope: 'mine' | 'site') {
+export function trackingOf(t: StrategyTemplate, scope: 'mine' | 'site'): StrategyTracking {
   const base = (TRACK_N[t.key] ?? (t.health?.n ?? 0)) * (scope === 'site' ? 3 : 1);
   return {
-    scope,
+    scope, data_status: 'partial', data_as_of: '2026-11-06T15:00:00+08:00',
+    gaps: t.key === 'demo_reversal' ? [{ key: 'no_losing_samples', reason: 'no_source', message: '示例数据：无亏损样本，盈亏比未知' }] : [{ key: 'example_tracking', reason: 'no_source', message: '示例数据：合成策略版本统计，不代表实际收益' }],
     by_horizon: ([1, 5, 20] as const).map((d, i) => {
       const n = Math.max(0, Math.round(base / (1 + i * 0.6)));
       const w = `${d}d`;
       return {
-        horizon_days: d, win_rate: stat(0.52 + i * 0.02, n, w), avg_return_pct: stat(0.004 * (i + 1), n, w),
-        avg_excess_pct: stat(0.001 * (i + 1), n, w), profit_loss_ratio: stat(1.2 + i * 0.1, n, w), max_loss_streak: 2 + i,
+        horizon_days: d, win_rate: stat(0.52 + i * 0.02, n, w), avg_return_pct: stat(0.4 * (i + 1), n, w),
+        avg_excess_pct: stat(0.1 * (i + 1), n, w), profit_loss_ratio: t.key === 'demo_reversal' ? { ...stat(1, n, w), value: null } : stat(1.2 + i * 0.1, n, w), max_loss_streak: 2 + i,
+        pending_count: i + 1, untradable_count: i === 0 ? 1 : 0, excluded_count: 1,
       };
     }),
   };
@@ -104,7 +106,7 @@ export function trackingOf(t: StrategyTemplate, scope: 'mine' | 'site') {
 export const strategyHandlers = [
   http.get(`${API}/strategies/:id/versions/:vid/tracking`, ({ params, request }) => {
     const t = STRATEGY_TEMPLATES.find((x) => x.id === params.id);
-    if (!t) return json(errorBody('NOT_FOUND', '策略模板不存在（示例数据）'), 404);
+    if (!t || t.current_version.id !== params.vid) return json(errorBody('NOT_FOUND', '策略模板或版本不存在（示例数据）'), 404);
     // v0.2.9 #10：scope 默认 mine，只收 mine|site，其他 → 400
     const raw = new URL(request.url).searchParams.get('scope');
     if (raw !== null && raw !== 'mine' && raw !== 'site') return json(errorBody('VALIDATION_ERROR', 'scope 取值 mine|site', { fields: [{ field: 'scope', issue: 'scope 取值 mine|site' }] }), 400);

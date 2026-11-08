@@ -14,7 +14,7 @@ import type { CandidateSignal, Evidence, NonExecutableReason, RuleRef } from '..
 import { ActionBadge, ConfidenceTag, DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/common';
 import { EvidenceChips } from '../../components/EvidenceChips';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
-import { StatValue } from '../../components/StatValue';
+import { StrategyTrackingStats } from '../../components/TrackingStats';
 import { CursorPager } from '../../components/CursorPager';
 import { DIMENSION, HORIZON, REASON_CODE, RULE_ROLE, SIGNAL_STATE } from '../../i18n/labels';
 import { causeText } from '../../i18n/signalLabels';
@@ -281,21 +281,7 @@ function Tracking({ cs }: { cs: CandidateSignal }) {
       <h4>该策略版本的历史跟踪（我的）</h4>
       {tpl ? <div className="muted small">{tpl.health ? <>策略健康度样本 n={tpl.health.n}{tpl.health.n < 30 ? '（样本少）' : ''}</> : '暂无健康度'}</div> : null}
       {tpls.isError ? <ErrorBox error={tpls.error} /> : q.isError ? <ErrorBox error={q.error} /> : !q.data ? (tpls.data && !tpl ? <span className="muted small">策略库里没有该策略</span> : <Loading />) : (
-        <div className="stat-wrap"><table className="stat-table">
-          <thead><tr><th>持有期</th><th>胜率</th><th>平均收益</th><th>平均超额</th><th>盈亏比</th><th>最长连亏</th></tr></thead>
-          <tbody>
-            {q.data.by_horizon.map((h) => (
-              <tr key={h.horizon_days} data-testid={`track-${h.horizon_days}`}>
-                <td>{h.horizon_days} 日</td>
-                <td><StatValue s={h.win_rate} /></td>
-                <td><StatValue s={h.avg_return_pct} /></td>
-                <td><StatValue s={h.avg_excess_pct} /></td>
-                <td><StatValue s={h.profit_loss_ratio} kind="ratio" /></td>
-                <td className="mono">{h.max_loss_streak}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table></div>
+        <StrategyTrackingStats data={q.data} />
       )}
       <div className="muted small">历史统计不代表未来表现。</div>
     </section>

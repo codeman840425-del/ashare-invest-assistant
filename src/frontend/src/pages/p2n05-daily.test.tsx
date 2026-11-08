@@ -18,6 +18,11 @@ import { ENUMS } from '../api/enums';
 import type { DailyReport, Paged } from '../api/types';
 import type { RiskControlSetting, RiskEvaluation, RiskEvent, SuggestionTracking } from '../api/phase2Types';
 import { TrackingResults } from '../components/TrackingResults';
+import { StrategyTrackingStats, TrackingStatValue, SuggestionStrategyTracking, trackingDecimal } from '../components/TrackingStats';
+import { STRATEGY_TEMPLATES, trackingOf } from '../mocks/strategyHandlers';
+import type { StrategyTracking } from '../api/strategyTypes';
+import { useSuggestionTracking } from '../api/suggestionQueries';
+import { useStrategyTracking } from '../api/signalQueries';
 import { apiFetch } from '../test/apiFetch';
 
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div /> }));
@@ -196,7 +201,7 @@ it('模拟五种状态与缺基准：单条收益不冒充聚合收益，不填0
   const tracking = await screen.findByTestId('tracking-results');
   expect(tracking).toHaveTextContent('模拟，不代表实际收益'); expect(tracking).toHaveTextContent('1.25%');
   expect(screen.getByTestId('tracking-counts')).toHaveTextContent('不可成交 1 · 排除 1');
-  expect(screen.getByTestId('tracking-complete')).toHaveTextContent('超额：—（缺数据）');
+  expect(screen.getByTestId('tracking-complete')).toHaveTextContent('超额：—（缺口：缺数据）');
   expect(screen.getByTestId('tracking-untradable')).toHaveTextContent('排除原因');
   expect(screen.getByTestId('tracking-unavailable')).toHaveTextContent('到期但数据不足');
 });
@@ -252,4 +257,86 @@ it('日报F25未知不沿用range/仓位区间或声称震荡，不给缺收盘�
   const account = await screen.findByTestId('report-account'); expect(within(account).queryByRole('img')).not.toBeInTheDocument();
   expect(account).toHaveTextContent('参考仓位区间：缺失');
   for (const stock of data.stocks.filter((s) => s.close === null)) expect(stock.highlights.every((h) => !h.text.includes('收盘 '))).toBe(true);
+});
+
+// P2N-05c模拟增量：逐条与版本聚合分开，不在前端重算n或盈亏比。
+it.each([['12.3450', '12.35'], ['-2.3450', '-2.35'], ['1.0050', '1.01'], ['-0.0050', '-0.01'], ['0.0000', '0.00'], ['12', '12.00']])('跟踪decimal %s按HALF_UP显示%s，不把_pct再乘百', (input, expected) => {
+  expect(trackingDecimal(input)).toBe(expected);
+});
+it('聚合盈亏比null且n足够时显示缺口而非0/样本不足，保留原始n与不可成交计数', () => {
+  const data = trackingOf(STRATEGY_TEMPLATES[1], 'mine');
+  data.by_horizon = [{ ...data.by_horizon[0], profit_loss_ratio: { value: null, n: 40, window: '1d', small_sample: false }, avg_return_pct: { value: '12.3450', n: 40, window: '1d', small_sample: false }, pending_count: 2, untradable_count: 3, excluded_count: 4 }];
+  data.gaps = [{ key: 'no_losing_samples', reason: 'no_source', message: '示例数据：无亏损样本' }];
+  render(<StrategyTrackingStats data={data} />);
+  const row = screen.getByTestId('track-1'); expect(row).toHaveTextContent('12.35%'); expect(row).not.toHaveTextContent('1234.50%');
+  expect(row).toHaveTextContent('缺口：值未提供'); expect(row).toHaveTextContent('n=40'); expect(row).not.toHaveTextContent('样本不足');
+  const cells = within(row).getAllByRole('cell'); expect(cells.slice(-3).map((cell) => cell.textContent)).toEqual(['2', '3', '4']);
+  expect(screen.getByTestId('strategy-tracking-stats')).toHaveTextContent('模拟非实际收益'); expect(screen.getByText(/no_losing_samples/)).toBeInTheDocument();
+});
+it('有亏损无盈利的真实0盈亏比可显示；小样本null必须显示缺口与n，不能擅自填5', () => {
+  const { rerender } = render(<TrackingStatValue stat={{ value: '0.0000', n: 5, window: '1d', small_sample: true }} kind="ratio" />);
+  expect(screen.getByText('0.00')).toBeInTheDocument(); expect(screen.getByText(/n=5/)).toBeInTheDocument();
+  rerender(<TrackingStatValue stat={{ value: null, n: 1, window: '1d', small_sample: true }} />);
+  expect(screen.getByText(/缺口：样本不足/)).toBeInTheDocument(); expect(screen.getByText(/n=1/)).toBeInTheDocument(); expect(screen.queryByText('0.00')).not.toBeInTheDocument();
+});
+it('逐条回撤/runup为空必须显示缺口，保留已知零与两位百分数，标注模拟非实际收益', () => {
+  const data = exampleTracking(bank); const result = data.results.find((row) => row.state === 'complete')!;
+  result.max_drawdown_pct = null; result.max_runup_pct = '0.0000';
+  render(<TrackingResults data={data} />);
+  const row = screen.getByTestId('tracking-complete'); expect(row).toHaveTextContent('最大回撤 —（缺口：缺数据）'); expect(row).toHaveTextContent('最大上行 0.00%');
+  expect(screen.getByTestId('tracking-results')).toHaveTextContent('模拟非实际收益');
+});
+it('mock版本统计补齐三计数/DataStatus/gaps；site无逐条结果，错版本404', async () => {
+  const template = STRATEGY_TEMPLATES[1]; const base = `/strategies/${template.id}/versions/${template.current_version.id}/tracking`;
+  for (const scope of ['mine', 'site']) {
+    const data = await apiGet<StrategyTracking>(base, { scope });
+    expect(data.scope).toBe(scope); expect(data.gaps[0].message).toContain('示例数据'); expect(data).toHaveProperty('data_status'); expect(data).not.toHaveProperty('results');
+    for (const row of data.by_horizon) for (const key of ['pending_count', 'untradable_count', 'excluded_count'] as const) expect(row[key]).toBeGreaterThanOrEqual(0);
+  }
+  expect((await apiFetch(`${API}/strategies/${template.id}/versions/${uid(999)}/tracking`)).status).toBe(404);
+});
+it('同版本多实例只显示一份策略聚合；请求scope=mine，不从观测数伪造n', async () => {
+  const template = STRATEGY_TEMPLATES.find((item) => item.key === bank.strategies[0].strategy_key)!;
+  let requests = 0;
+  server.use(http.get(`${API}/strategies/:id/versions/:vid/tracking`, ({ request }) => { requests++; expect(new URL(request.url).searchParams.get('scope')).toBe('mine'); return HttpResponse.json(trackingOf(template, 'mine')); }));
+  const duplicated = { ...bank.strategies[0], instance_id: uid(999) };
+  render(<AppProviders client={makeQueryClient(true)}><SuggestionStrategyTracking strategies={[bank.strategies[0], duplicated]} /></AppProviders>);
+  expect(await screen.findByTestId(`version-tracking-${duplicated.strategy_version_id}`)).toBeInTheDocument();
+  await screen.findByTestId('strategy-tracking-stats'); expect(screen.getAllByTestId('strategy-tracking-stats')).toHaveLength(1); expect(requests).toBe(1);
+});
+
+function RealSimProbe() {
+  const tracking = useSuggestionTracking(process.env.P2N05C_SIM_SUGGESTION_ID);
+  const aggregate = useStrategyTracking(process.env.P2N05C_SIM_STRATEGY_ID, process.env.P2N05C_SIM_VERSION_ID!);
+  return <>{tracking.data ? <><TrackingStatValue stat={tracking.data.t1} testId="real-card-n" /><TrackingResults data={tracking.data} /></> : null}{aggregate.data ? <StrategyTrackingStats data={aggregate.data} /> : null}</>;
+}
+it.skipIf(!process.env.P2N05C_SIM_REAL_API)('P2N05c sim real：真实React查询→Vite→逐条与版本聚合，n/计数/盈亏比/回撤/gap/隔离', async () => {
+  server.close(); const nativeFetch = globalThis.fetch; const cookies = new Map<string, string>();
+  const base = 'http://127.0.0.1:15566'; const journal: { method: string; path: string; status: number }[] = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url; const original = new URL(raw, base);
+    if (!['127.0.0.1', 'localhost'].includes(original.hostname)) throw new Error('仅限本任务回环联调');
+    const url = new URL(original.pathname + original.search, base); const headers = new Headers(init.headers); headers.set('Origin', base);
+    if (cookies.size) headers.set('Cookie', [...cookies].map(([key, value]) => key + '=' + value).join('; '));
+    const response = await nativeFetch(url, { ...init, headers });
+    for (const line of response.headers.getSetCookie()) { const first = line.split(';')[0]; const index = first.indexOf('='); cookies.set(first.slice(0, index), first.slice(index + 1)); if (first.startsWith('csrf_token=')) document.cookie = first + '; Path=/'; }
+    journal.push({ method: init.method ?? 'GET', path: url.pathname, status: response.status }); return response;
+  };
+  try {
+    const login = await fetch(base + '/api/v1/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'p2n05c_sim_test', password: process.env.P2N05C_TEST_PASSWORD }) }); expect(login.status).toBe(200);
+    render(<AppProviders client={makeQueryClient(true)}><RealSimProbe /></AppProviders>);
+    const aggregate = await screen.findByTestId('strategy-tracking-stats');
+    const row = within(aggregate).getByTestId('track-1'); expect(row).toHaveTextContent('n=5'); expect(row).toHaveTextContent('1.20%'); expect(row).toHaveTextContent('1.33');
+    const cells = within(row).getAllByRole('cell'); expect(cells.slice(-3).map((cell) => cell.textContent)).toEqual(['1', '1', '1']);
+    expect(await screen.findByTestId('real-card-n')).toHaveTextContent('n=1'); expect(screen.getByTestId('real-card-n')).toHaveTextContent('缺口：样本不足');
+    const results = screen.getByTestId('tracking-results'); expect(results).toHaveTextContent('最大回撤 -4.55%'); expect(results).toHaveTextContent('最大上行 10.00%'); expect(results).toHaveTextContent('模拟非实际收益');
+    const pending = within(results).getByTestId('tracking-pending'); expect(pending).toHaveTextContent('最大回撤 —（缺口：缺数据）');
+    const site = await apiGet<StrategyTracking>(`/strategies/${process.env.P2N05C_SIM_STRATEGY_ID}/versions/${process.env.P2N05C_SIM_VERSION_ID}/tracking`, { scope: 'site' }); expect(site).not.toHaveProperty('results'); expect(site).not.toHaveProperty('security_code');
+    expect((await apiFetch(`${API}/suggestions/${process.env.P2N05C_SIM_FOREIGN_ID}/tracking`)).status).toBe(404);
+    expect(journal.every((item) => !item.path.includes('/admin/'))).toBe(true);
+  } finally {
+    globalThis.fetch = nativeFetch; cookies.clear();
+    const { writeFileSync } = await import('node:fs'); writeFileSync('/workspace/team/reports/P2N-05c/sim/http-journal.json', JSON.stringify(journal, null, 2));
+    server.listen({ onUnhandledFrame: 'error' });
+  }
 });

@@ -83,7 +83,7 @@ export function exampleTracking(suggestion: Suggestion): SuggestionTracking {
       exit_at: complete ? at : null, exit_price: complete ? '10.125' : null,
       benchmark_code: '000300.SH', benchmark_entry_price: null, benchmark_exit_price: null,
       return_pct: sample.return_pct, benchmark_return_pct: sample.benchmark_return_pct, excess_pct: sample.excess_pct,
-      max_drawdown_pct: complete ? '-0.25' : null, max_runup_pct: complete ? '1.50' : null,
+      max_drawdown_pct: complete ? '0.0000' : null, max_runup_pct: complete ? '1.2500' : null,
       direction_correct: null, invalidation_triggered_at: null, exclusion_reason: sample.exclusion_reason, price_basis: 'qfq', cost_applied: false,
       evidence: priceEvidence, evidence_ids: priceEvidence.map((e) => e.id), gaps: [missing(complete ? 'benchmark' : sample.state, complete ? '示例数据：基准行情缺失，基准收益及超额收益未知' : `示例数据：${sample.exclusion_reason ?? (sample.state === 'pending' ? '尚未到期' : '计算输入缺失')}`)] }];
   });

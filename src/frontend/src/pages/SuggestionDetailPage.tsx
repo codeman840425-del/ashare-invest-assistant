@@ -23,7 +23,7 @@ import { useMarkViewed, useRefreshSuggestion, useSuggestionAction, useSuggestion
 import { canDraft } from '../lib/signals';
 import { stateErrorText } from '../lib/stateTransition';
 import { errorText } from '../api/errorPolicy';
-import { StatValue } from '../components/StatValue';
+import { SuggestionStrategyTracking, TrackingStatValue } from '../components/TrackingStats';
 import { PendingContract } from '../components/PendingContract';
 import { RuleRefs } from './signals/CandidateSignalDetailPage';
 
@@ -356,12 +356,12 @@ function FollowUp({ sg }: { sg: Suggestion }) {
         {tr.isLoading ? <div className="muted small">加载中…</div> : tr.isError || !tr.data ? <div className="muted small">跟踪统计暂不可用</div> : (
           <div className="sg-track-grid">
             {(['t1', 't5', 't20'] as const).map((k) => (
-              <div key={k}><label>{k === 't1' ? '1 日后' : k === 't5' ? '5 日后' : '20 日后'}</label><StatValue s={tr.data[k]} kind="raw" testId={`sg-track-${k}`} /></div>
+              <div key={k}><label>{k === 't1' ? '1 日后' : k === 't5' ? '5 日后' : '20 日后'}</label><TrackingStatValue stat={tr.data[k]} testId={`sg-track-${k}`} /></div>
             ))}
           </div>
         )}
-        <div className="muted small">数值按服务端原值显示（单位与口径待契约）；窗口：{tr.data?.t1.window ?? '—'}</div>
-        {tr.data ? <TrackingResults data={tr.data} /> : null}
+        <div className="muted small">收益百分数按契约展示两位，12表示12%；窗口：{tr.data?.t1.window ?? '—'}</div>
+        {tr.data ? <><TrackingResults data={tr.data} /><SuggestionStrategyTracking strategies={sg.strategies} /></> : null}
       </section>
       <section className="panel" data-testid="sg-actions">
         <div className="panel-head"><span className="panel-title">我的处理</span></div>

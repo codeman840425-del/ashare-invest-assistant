@@ -61,8 +61,8 @@ describe('m1：跟踪收益按服务端原值显示', () => {
       t20: { value: null, n: 3, window, small_sample: true },
     })));
     renderAt(`/suggestions/${sgBank.id}`);
-    expect(await screen.findByTestId('sg-track-t1')).toHaveTextContent(/^0\.003/);
-    expect(screen.getByTestId('sg-track-t5')).toHaveTextContent(/^-0\.0125/);
+    expect(await screen.findByTestId('sg-track-t1')).toHaveTextContent('0.00%');
+    expect(screen.getByTestId('sg-track-t5')).toHaveTextContent('-0.01%');
     expect(screen.getByTestId('sg-track-t20')).toHaveTextContent('样本不足');
   });
 });

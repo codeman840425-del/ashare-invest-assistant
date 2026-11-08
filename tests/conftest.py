@@ -63,9 +63,8 @@ def fixtures_dir() -> Path:
 # hypothesis 示例库放在 tests/.hypothesis（已 .gitignore），不污染仓库根目录
 try:
     from hypothesis import settings as _hyp_settings
-    from hypothesis.database import DirectoryBasedExampleDatabase as _HypDB
 
-    _hyp_settings.register_profile("aia", database=_HypDB(str(TESTS_DIR / ".hypothesis" / "examples")))
+    _hyp_settings.register_profile("aia", derandomize=True, database=None)
     _hyp_settings.load_profile("aia")
 except ImportError:  # pragma: no cover
     pass

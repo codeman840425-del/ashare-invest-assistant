@@ -1,0 +1,5 @@
+import { defineConfig } from 'playwright/test';
+import { resolve } from 'node:path';
+const target = new URL(process.env.P2N10_BASE_URL ?? 'http://127.0.0.1:15580');
+if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1') throw new Error('Local TEST framework only');
+export default defineConfig({ testDir: '.', testMatch: 'p2n10-mainline.spec.ts', retries: 0, workers: 1, timeout: 90_000, expect: { timeout: 15_000 }, reporter: 'list', outputDir: resolve(process.env.P2N10_ARTIFACTS!, 'playwright-results'), use: { baseURL: target.origin, viewport: { width: 1440, height: 900 }, headless: true, serviceWorkers: 'block', trace: 'off', screenshot: 'off', video: 'off', launchOptions: { proxy: { server: 'http://127.0.0.1:15582', bypass: '<-loopback>' }, args: ['--disable-background-networking', '--disable-component-update', '--disable-domain-reliability', '--disable-sync', '--no-first-run', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', '--disable-features=MediaRouter,OptimizationHints,AutofillServerCommunication'] } } });

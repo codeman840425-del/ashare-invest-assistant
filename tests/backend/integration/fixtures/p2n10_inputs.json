@@ -1,0 +1,146 @@
+[
+  {
+    "dimension": "technical",
+    "state": "present",
+    "operand": "11",
+    "label": "TEST-technical-present"
+  },
+  {
+    "dimension": "technical",
+    "state": "missing",
+    "operand": "12",
+    "label": "TEST-technical-missing"
+  },
+  {
+    "dimension": "technical",
+    "state": "stale",
+    "operand": "13",
+    "label": "TEST-technical-stale"
+  },
+  {
+    "dimension": "technical",
+    "state": "future",
+    "operand": "14",
+    "label": "TEST-technical-future"
+  },
+  {
+    "dimension": "capital",
+    "state": "present",
+    "operand": "15",
+    "label": "TEST-capital-present"
+  },
+  {
+    "dimension": "capital",
+    "state": "missing",
+    "operand": "16",
+    "label": "TEST-capital-missing"
+  },
+  {
+    "dimension": "capital",
+    "state": "stale",
+    "operand": "17",
+    "label": "TEST-capital-stale"
+  },
+  {
+    "dimension": "capital",
+    "state": "future",
+    "operand": "18",
+    "label": "TEST-capital-future"
+  },
+  {
+    "dimension": "fundamental",
+    "state": "present",
+    "operand": "19",
+    "label": "TEST-fundamental-present"
+  },
+  {
+    "dimension": "fundamental",
+    "state": "missing",
+    "operand": "20",
+    "label": "TEST-fundamental-missing"
+  },
+  {
+    "dimension": "fundamental",
+    "state": "stale",
+    "operand": "21",
+    "label": "TEST-fundamental-stale"
+  },
+  {
+    "dimension": "fundamental",
+    "state": "future",
+    "operand": "22",
+    "label": "TEST-fundamental-future"
+  },
+  {
+    "dimension": "sentiment",
+    "state": "present",
+    "operand": "23",
+    "label": "TEST-sentiment-present"
+  },
+  {
+    "dimension": "sentiment",
+    "state": "missing",
+    "operand": "24",
+    "label": "TEST-sentiment-missing"
+  },
+  {
+    "dimension": "sentiment",
+    "state": "stale",
+    "operand": "25",
+    "label": "TEST-sentiment-stale"
+  },
+  {
+    "dimension": "sentiment",
+    "state": "future",
+    "operand": "26",
+    "label": "TEST-sentiment-future"
+  },
+  {
+    "dimension": "sector_market",
+    "state": "present",
+    "operand": "27",
+    "label": "TEST-sector_market-present"
+  },
+  {
+    "dimension": "sector_market",
+    "state": "missing",
+    "operand": "28",
+    "label": "TEST-sector_market-missing"
+  },
+  {
+    "dimension": "sector_market",
+    "state": "stale",
+    "operand": "29",
+    "label": "TEST-sector_market-stale"
+  },
+  {
+    "dimension": "sector_market",
+    "state": "future",
+    "operand": "30",
+    "label": "TEST-sector_market-future"
+  },
+  {
+    "dimension": "news",
+    "state": "present",
+    "operand": "31",
+    "label": "TEST-news-present"
+  },
+  {
+    "dimension": "news",
+    "state": "missing",
+    "operand": "32",
+    "label": "TEST-news-missing"
+  },
+  {
+    "dimension": "news",
+    "state": "stale",
+    "operand": "33",
+    "label": "TEST-news-stale"
+  },
+  {
+    "dimension": "news",
+    "state": "future",
+    "operand": "34",
+    "label": "TEST-news-future"
+  }
+]

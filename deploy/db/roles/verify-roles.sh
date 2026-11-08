@@ -426,6 +426,16 @@ if o33_has market.master_vendor_batches; then
   expect_denied aia_maint "SELECT * FROM market.master_vendor_batches WHERE false"
 fi
 
+# T-O42：0028 override_active。aia_api 走既有表级 DML（无需新授权）；aia_maint 列级清单仍只含 id,user_id。
+if [ "$(own -c "SELECT to_regclass('app.risk_control_settings') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='app.risk_control_settings'::regclass AND attname='override_active' AND attnum>0 AND NOT attisdropped)")" = t ]; then
+  expect_ok     aia_api   "SELECT override_active FROM app.risk_control_settings WHERE false"
+  expect_ok     aia_api   "UPDATE app.risk_control_settings SET override_active = override_active WHERE false"
+  expect_denied aia_maint "SELECT override_active FROM app.risk_control_settings WHERE false"
+  expect_denied aia_maint "UPDATE app.risk_control_settings SET override_active = override_active WHERE false"
+else
+  echo "SKIP T-O42：app.risk_control_settings.override_active 未迁移"
+fi
+
 [ "$(own -c "SELECT count(*) FROM app.users WHERE username LIKE 't\_o11\_%'")" = 0 ] \
   || { echo "FAIL 仍有 t_o11_ 探针用户残留"; fail=1; }
 exit "$fail"

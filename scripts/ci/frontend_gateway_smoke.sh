@@ -50,8 +50,12 @@ body "http://127.0.0.1:$port/"
 grep -q 'id="root"' "$work/b" && ! grep -q 'frontend not built yet' "$work/b" && ok "/ 是前端页面" || bad "/ 不是前端页面：$(head -c 120 "$work/b")"
 body "http://127.0.0.1:$port/research/notes"
 grep -q '^HTTP/1.1 200' "$work/h" && grep -q 'id="root"' "$work/b" && ok "深链 /research/notes 回退 index.html" || bad "深链：$(head -1 "$work/h")"
-code="$(curl -sS -o "$work/miss" -w '%{http_code}' "http://127.0.0.1:$port/assets/no-such-asset.js")"
-[ "$code" = 404 ] && ! grep -q 'id="root"' "$work/miss" && ok "缺失的 /assets 是 404" || bad "缺失资源 HTTP $code"
+code="$(curl -sS -D "$work/mh" -o "$work/miss" -w '%{http_code}' "http://127.0.0.1:$port/assets/no-such-asset.js")"
+if [ "$code" = 404 ] && ! grep -qi 'id="root"\|<html\|nginx' "$work/miss"; then
+  ok "缺失的 /assets 是 404，正文无默认页"
+else
+  bad "缺失资源 HTTP $code 正文：$(head -c 120 "$work/miss")"
+fi
 if [ "$mode" = config ]; then
   cc="$(curl -sS -D - -o /dev/null "http://127.0.0.1:$port/assets/probe.js" | tr -d '\r' | tr 'A-Z' 'a-z')"
   grep -q 'cache-control: public, max-age=31536000, immutable' <<<"$cc" && ok "哈希资源长期缓存" || bad "Cache-Control：$cc"

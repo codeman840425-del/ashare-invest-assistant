@@ -111,3 +111,17 @@ def test_location_root_override_rejected(tmp_path: Path) -> None:
          "location / {\n      root /tmp/not-the-image;\n      try_files $uri /index.html;")
     errs = cfd.check(repo)
     assert any("location / 不得另行指定 root" in e for e in errs), errs
+
+
+def test_asset_404_must_not_use_default_page(tmp_path: Path) -> None:
+    repo = _tree(tmp_path)
+    _sub(repo, "deploy/nginx/nginx.conf", "      error_page 404 @assets_missing;\n", "")
+    errs = cfd.check(repo)
+    assert any("@assets_missing" in e for e in errs), errs
+
+
+def test_asset_404_body_must_stay_empty(tmp_path: Path) -> None:
+    repo = _tree(tmp_path)
+    _sub(repo, "deploy/nginx/nginx.conf", 'return 404 "not found\\n";', 'return 404 "<html>nginx</html>";')
+    errs = cfd.check(repo)
+    assert any("404 正文" in e for e in errs), errs

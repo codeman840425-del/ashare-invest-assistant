@@ -45,6 +45,14 @@ def check(repo: Path) -> list[str]:
     assets = _block(conf, "location /assets/ {", "location / {")
     if "try_files $uri =404;" not in assets or "try_files $uri /index.html" in assets:
         errs.append("location /assets/ 必须 try_files $uri =404，且不能回退 index.html")
+    if "error_page 404 @assets_missing;" not in assets:
+        errs.append("location /assets/ 必须用 error_page 404 @assets_missing，不能回 nginx 默认错误页")
+    missing = _block(conf, "location @assets_missing {", "location / {")
+    missing_code = "\n".join(line.split("#", 1)[0] for line in missing.splitlines())
+    if 'return 404 "not found\\n";' not in missing_code:
+        errs.append("缺失静态资源必须 return 404 固定短正文，不能用空 return（会落回内置 HTML 页）")
+    if "<html" in missing_code.lower() or "nginx" in missing_code.lower():
+        errs.append("缺失静态资源的 404 正文不得含 nginx 或 HTML")
     spa = _block(conf, "location / {", "\n  }\n")
     if "try_files $uri /index.html;" not in spa:
         errs.append("location / 必须 try_files $uri /index.html（SPA 深链）")

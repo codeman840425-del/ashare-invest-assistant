@@ -1269,6 +1269,12 @@ evidence: Evidence[]
   4. **已读**：一行一个未读单位，`unread-count` = 本人 `read_at IS NULL` 行数；标已读即整行（含全部 refs）已读。已读后同一窗口又来新事件：同行 `read_at` 置回 `null`（重新未读）并更新计数，不新建行；下一窗口另建新行。
   5. **推送节奏**（`intraday_cadence`，只作用于 SSE `notification` 事件；`signal`、`quote` 等不受影响）：`realtime` 每次 upsert 立即推；`1min/3min/5min` 按北京时间整 N 分钟对齐分桶，桶结束时对桶内变化过的每个通知 id 只推一次最新完整 `Notification`。`severity=important` 一律立即推。待推缓冲只在内存/Redis，丢失不补推——通知行是唯一事实来源。
   6. **断线补读**：SSE 事件进 §8 的 600 秒续传缓冲；重连带 `Last-Event-ID` 补发窗口内事件；超窗或无 ID 时客户端重读 `/notifications?unread=true` 与 `unread-count`。客户端按通知 `id` 去重，取 `updated_at` 较新者覆盖，不重复计未读。
+- **提醒流细则（T-A31，补 T-A28；P2N-05f/06）**：
+  1. **重连与超时**：服务端每次建流先发 `retry: 3000`。客户端断线后按 3s 起、每次失败翻倍、上限 60s 退避，每次 ±20% 抖动；连接保持 ≥ 60s 后退避归零。45s（3 个心跳周期）没收到任何字节视为断线，主动关闭重连。连续 3 次建流失败即开始 §8 的 15s 轮询，同时继续按上限退避尝试 SSE，连上后停止轮询。
+  2. **去重容量与持久化**：客户端在内存里保留最近 1024 个事件 id（先进先出）和每个通知 id 的最新 `version`；**不跨刷新持久化**（不写 localStorage/IndexedDB）。页面加载或首次建流不带 `Last-Event-ID`，一律重读未读列表与 `unread-count`。
+  3. **`refs[].type`**：新增枚举 `notification_ref_type` = `signal`（`id` = `signal_events.id`）、`plan_condition`（`id` = `plan_conditions.id`），进 `/meta/enums`；`id` 一律小写带连字符的 uuid 字符串；新类型须先改契约。每个 ref 加 `route: string | null`，由服务端生成：`plan_condition` → `/plans/{plan_id}`；`signal` → `null`（V1 无单事件页，前端用 `/signals?security_code=&since=` 按 `at` 定位）。前端不得自拼路由。
+  4. **版本冲突**：`Notification` 追加 `version: int`（≥1），通知行每次变化（合并、改正文、标已读、全部已读、重新未读）都在同一事务内 `+1`。客户端只保留 `version` 大者；`version` 相同视为同一内容，直接丢弃后到者，不比较 `updated_at` 或正文。旧记录投影 `version=1`。
+  5. **超窗/未知 `Last-Event-ID`**：事件 id 为每用户单调递增的十进制字符串。带了 `Last-Event-ID` 但它不是十进制、大于当前序号、或早于 600s 保留窗时，服务端在流开头先发控制事件 `event: reset`，`data: {reason: "expired" | "unknown", latest_event_id: string | null}`，随后照常推实时事件；客户端收到后清空事件 id 缓存并全量重读。不带 `Last-Event-ID` 不发 `reset`。HTTP 状态仍为 200。
 - 计划/草案/提醒状态机已在 §7.7/7.7B，P2N-07 直接实现，**不新增候选直接转计划入口**；simulating 禁生草案，G7 仍由用户本人操作。
 
 ## 8. SSE `GET /stream` 🔒
@@ -1288,6 +1294,7 @@ evidence: Evidence[]
 | `notification` | `Notification`（§5.1） | |
 | `report` | `{date}` | 日报已生成 |
 | `data_status` | `{dataset, data_status, data_as_of}` | 数据变旧或恢复（例如采集暂停） |
+| `reset` | `{reason: "expired" \| "unknown", latest_event_id: string \| null}` | 续传点超窗或无法识别，客户端须全量重读（T-A31，§7.11.4） |
 | `data_licence` | `{status: data_licence_status, verification_id: uuid \| null, last_error_code: string \| null, at: datetime}` | 本人证书状态变化或验证完成（v0.2.6；不含证书值） |
 
 研究候选（v0.2.9 T-A11，§7.7A）没有 SSE 事件。

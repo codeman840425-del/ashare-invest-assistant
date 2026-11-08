@@ -10,7 +10,7 @@ T-B94（b4092f3）+ T-O42 三件套（日历 seed 365 行、三所首导 securit
 5. G7 缺策略卡和版本，且正常 HTTP 没有创建入口；
 6. ~~风控没有清除覆盖的接口~~ 接口已落地并复验（T-B95 716cda3 + T-T31 真库五点全过：覆盖→DELETE→回 system/默认、幂等零副作用、system 变体 404、审计 risk_control.reset 本人、负例 401/404；隔离 N1–N10 5 passed）。T63 已转通过；RV-01 两项阻断风险（0028 降级裸删列、实例创建未滤 override_active）待架构师裁定后才算本项完全收口。
 7. 界面层 44 项需要用户机上可操作的浏览器才能测。
-8. 残留已知：T13 证券详情 GET 路由未实现、ETF 主数据样本缺（首导仅 stock+cdr）。
+8. 残留已知（T-T33 复核后）：~~T13 证券详情 GET 路由未实现~~ 已修复（T-B100，复测 200，纯数字无后缀 404 为契约口径）；ETF 主数据样本仍缺（首导仅 stock+cdr，主数据覆盖责任）。三卡门禁：W-01 G2 fail=f.main_net_20d 无 verified 数据（factor_values 0 行）、G6 warn=无真实 120 日历史，均数据前置待麦蕊红线解除；卡侧无需改，draft 态维持，G7 未碰。
 明细：team/reports/T-T23.md、T-T23-check-results.md（四态已更新）、T-T24.md、T-T30.md、T-T32.md、T-O42.md；清单 team/tasks/T-T23-checklist.md。
 
 ## 1. 阶段完成度：按能力与门槛，不填无依据百分比

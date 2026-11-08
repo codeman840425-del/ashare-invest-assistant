@@ -55,7 +55,7 @@ from typing import Any, Final, Self
 
 import redis
 from redis.typing import EncodableT
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 
 from app.config import Settings
 from app.db.engine import engine_for
@@ -64,6 +64,8 @@ from app.intraday.engine import task as intraday_updated_task
 from app.master.mairui_snapshot import TASK as MAIRUI_SNAPSHOT
 from app.plans.worker import TASK as PLAN_CONDITIONS
 from app.plans.worker import task as plan_conditions_task
+from app.risk.worker import TASK as RC1_CHECKS
+from app.risk.worker import task as rc1_checks_task
 from app.tracking.worker import TASK as TRACKING
 from app.tracking.worker import tracking_task
 from app.workers.daily import (
@@ -360,10 +362,33 @@ def vendor_sweep_task(settings: Settings) -> int:
     return len(batches)
 
 
+def plan_conditions_sweep_task(settings: Settings) -> int:
+    from app.db.tables.research import action_plans
+    from app.db.tables.users import users
+    from app.plans.worker import task
+
+    with _engine(settings).connect() as conn:
+        owners = (
+            conn.execute(
+                select(action_plans.c.user_id)
+                .join(users, users.c.id == action_plans.c.user_id)
+                .where(
+                    action_plans.c.status.in_(["active", "triggered"]), users.c.status == "approved"
+                )
+                .distinct()
+            )
+            .scalars()
+            .all()
+        )
+    return sum(task(settings, str(owner), as_of=_now().isoformat()) for owner in owners)
+
+
 #: 任务名 → 实现
 TASKS: Final[dict[str, Task]] = {
     INTRADAY_UPDATED: intraday_updated_task,
     PLAN_CONDITIONS: plan_conditions_task,
+    "plans.conditions_sweep": plan_conditions_sweep_task,
+    RC1_CHECKS: rc1_checks_task,
     TRACKING: tracking_task,
     "master.mairui_daily_sweep": mairui_daily_sweep,
     "master.mairui_daily_apply": mairui_daily_apply,
@@ -410,6 +435,8 @@ LOCKED_TASKS: Final = frozenset(
 def schedule(settings: Settings) -> dict[str, int]:
     """任务名 → 间隔秒数（beat 排程表；间隔来自配置）。"""
     return {
+        RC1_CHECKS: settings.business.realtime.intervals.quote_interval_s,
+        "plans.conditions_sweep": settings.business.realtime.intervals.quote_interval_s,
         "master.mairui_daily_sweep": 60,
         PURGE_COOLDOWNS: settings.cooldown_purge_interval_s,
         PURGE_IMPORT_ROWS: settings.import_rows_purge_interval_s,

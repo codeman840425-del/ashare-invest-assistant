@@ -67,6 +67,7 @@ def record(
                 checked = [e for e in evidence if e["key"] in {"rc1.price_check", "rc1.time_check"}]
                 if not checked:
                     continue
+                checked += [e for e in evidence if e["key"].startswith("rc1.price_basis:")]
                 combined = {e["id"]: e for e in [*prior["evidence"], *checked]}
                 payload.update(evidence=list(combined.values()), evidence_ids=sorted(combined))
         else:

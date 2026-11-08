@@ -34,8 +34,8 @@ class Market(Model):
 
 
 class Account(Model):
-    total_assets: Money | None
-    cash: Money | None
+    total_assets: Money
+    cash: Money
     position_pct: Money | None
     pnl_day: Money | None
     position_vs_regime: Literal["below", "within", "above"] | None

@@ -56,7 +56,7 @@ class Condition(Body):
                 or not re.fullmatch(r"-?[0-9]+(?:\.[0-9]{1,4})?", p["pct"])
             ):
                 raise ValueError("invalid_params")
-            if abs(Decimal(p["pct"])) >= Decimal("100000000000000"):
+            if Decimal(p["pct"]) == 0 or abs(Decimal(p["pct"])) >= Decimal("100000000000000"):
                 raise ValueError("invalid_params")
         elif self.type == "date":
             if set(p) != {"on"} or not isinstance(p["on"], str):

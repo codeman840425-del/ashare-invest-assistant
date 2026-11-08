@@ -8,6 +8,7 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
+from fractions import Fraction
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -36,6 +37,7 @@ class Facts:
     start: dt.date | None = None
     calendar: dict[dt.date, bool] = field(default_factory=dict)
     endpoint: str = "rc1:missing-source"
+    basis_evidence: list[Evidence] = field(default_factory=list)
 
 
 def positive(value: Decimal | None) -> bool:
@@ -71,6 +73,93 @@ def segment(
     return start if qty == quantity and quantity > 0 else None
 
 
+def price_basis(
+    conn: Connection,
+    code: str,
+    stops_at: dt.datetime,
+    at: dt.datetime,
+    calendar: dict[dt.date, bool],
+) -> tuple[bool | None, list[Evidence]]:
+    """Conservative PIT proof, NOT an inferred default of no corporate actions.
+
+    All open days since the original raw stops need comparable none/qfq OHLC.
+    Constant *exact* rational scale proves continuity; changed scale invalidates
+    the stops. Missing/rounded/inconsistent/in-progress unmatched pairs are unknown.
+    No new data source, factor=1, fill-forward, or future-adjusted row is invented.
+    """
+    from app.risk.evaluation import observation
+
+    first, last = stops_at.astimezone(SH).date(), at.astimezone(SH).date()
+    if stops_at > at or first not in calendar:
+        return None, []
+    while calendar.get(first) is False:
+        first -= dt.timedelta(days=1)
+    if calendar.get(first) is not True:
+        return None, []
+    dates = []
+    cursor = first
+    while cursor <= last:
+        if cursor not in calendar:
+            return None, []
+        if calendar[cursor]:
+            dates.append(cursor)
+        cursor += dt.timedelta(days=1)
+    rows = {
+        (r.trade_date, r.adj_type): r
+        for r in conn.execute(
+            select(daily_bars).where(
+                daily_bars.c.code == code,
+                daily_bars.c.trade_date.between(first, last),
+                daily_bars.c.adj_type.in_(["none", "qfq"]),
+                daily_bars.c.fetched_at <= at,
+            )
+        )
+    }
+    ratios, proof = [], []
+    for day in dates:
+        raw, adjusted = rows.get((day, "none")), rows.get((day, "qfq"))
+        if raw is None or adjusted is None:
+            return None, []
+        close = dt.datetime.combine(day, dt.time(15), SH)
+        if at < close:
+            # Forming OHLC must describe the exact same in-progress observation.
+            if raw.fetched_at != adjusted.fetched_at:
+                return None, []
+        elif min(raw.fetched_at, adjusted.fetched_at) < close:
+            return None, []
+        for row in (raw, adjusted):
+            if any(not positive(getattr(row, key)) for key in ("open", "high", "low", "close")):
+                return None, []
+            if not row.low <= min(row.open, row.close) <= max(row.open, row.close) <= row.high:
+                return None, []
+        pair_ratios = {
+            Fraction(getattr(adjusted, k)) / Fraction(getattr(raw, k))
+            for k in ("open", "high", "low", "close")
+        }
+        if len(pair_ratios) != 1:
+            return None, []
+        ratio = pair_ratios.pop()
+        ratios.append(ratio)
+        item = observation(
+            "rc1.price_basis:" + str(day),
+            {
+                "code": code,
+                "trade_date": str(day),
+                "scale_fraction": str(ratio),
+                "none": {k: str(getattr(raw, k)) for k in ("open", "high", "low", "close")},
+                "qfq": {k: str(getattr(adjusted, k)) for k in ("open", "high", "low", "close")},
+                "none_fetched_at": raw.fetched_at.isoformat(),
+                "qfq_fetched_at": adjusted.fetched_at.isoformat(),
+            },
+            min(close, max(raw.fetched_at, adjusted.fetched_at)),
+            "market.daily_bars:none+qfq",
+        )
+        proof.append(
+            item.model_copy(update={"fetched_at": max(raw.fetched_at, adjusted.fetched_at)})
+        )
+    return (len(set(ratios)) > 1, proof) if ratios else (None, [])
+
+
 def load(
     conn: Connection,
     owner: uuid.UUID,
@@ -88,8 +177,8 @@ def load(
     facts = Facts(
         stale_seconds=settings.business.realtime.intervals.effective_stale_threshold_s,
         calendar={r.date: r.is_open for r in conn.execute(select(trading_calendar))},
-        ex_rights=False if stops_at == at else None,
     )
+    facts.ex_rights, facts.basis_evidence = price_basis(conn, code, stops_at, at, facts.calendar)
     if position_known and account is not None:
         # Caller already checked account ownership; recheck before ANY ledger query.
         from app.db.tables.accounts import accounts
@@ -184,12 +273,17 @@ def assess(
 
     facts = facts or Facts()
     flags: list[RiskFlag] = []
-    evidence: list[Evidence] = []
+    evidence: list[Evidence] = list(facts.basis_evidence)
     gaps: set[str] = set()
 
     def flag(reason: str, point: dt.datetime, values: dict[str, Any]) -> None:
         check_key = "rc1.time_check" if reason == "time_stop" else "rc1.price_check"
-        used = [e.id for e in evidence if e.key == check_key]
+        used = [
+            e.id
+            for e in evidence
+            if e.key == check_key
+            or (reason != "time_stop" and e.key.startswith("rc1.price_basis:"))
+        ]
         for key, value in {**values, "event_at:" + reason: point.isoformat()}.items():
             item = observation(
                 "rc1." + key,

@@ -6,15 +6,15 @@ import datetime as dt
 import hashlib
 import json
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from sqlalchemy import Connection, func, insert, or_, select, text, update
 
 from app.aggregates.service import select_account
-from app.api.v1.portfolio import _account
+from app.api.v1.portfolio import _account, _ledger_as_of
 from app.common.errors import AppError, ErrorCode
-from app.db.tables.market import securities, trading_calendar
+from app.db.tables.market import daily_bars, securities, trading_calendar
 from app.db.tables.realtime import daily_report_items, daily_reports, pipeline_runs, suggestions
 from app.db.tables.research import watchlist_items
 from app.db.tables.signals import non_executable_reasons, plan_drafts
@@ -63,6 +63,14 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
     )
     identifier = select_account(conn, user_id, None)
     account = _account(conn, identifier, date) if identifier else None
+    account_ledger_at = _ledger_as_of(conn, [identifier]) if identifier else None
+    if account is not None and (
+        (account.price_at is not None and account.price_at > now)
+        or (account_ledger_at is not None and account_ledger_at > now)
+    ):
+        # Current projections cannot reconstruct an older account view. Refuse
+        # the whole account instead of leaking future quantities/cash into stocks.
+        account = None
     positions = account.positions if account else {}
     watches = set(
         conn.execute(
@@ -108,33 +116,94 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
             for issue in own_analysis.get("issues", [])
         )
     report_account = None
-    if account:
-        priced = all(
-            p.price is not None
-            and p.price_at is not None
-            and p.price_at.astimezone(dt.timezone(dt.timedelta(hours=8))).date() == date
-            for p in positions.values()
-        )
-        value = (
-            sum((p.qty * p.price for p in positions.values() if p.price is not None), Decimal(0))
-            if priced
-            else None
-        )
-        total = value + account.cash if value is not None and account.cash is not None else None
-        report_account = {
-            "total_assets": str(total) if total is not None else None,
-            "cash": str(account.cash) if account.cash is not None else None,
-            "position_pct": str(value / total * 100)
-            if value is not None and total is not None and total > 0
-            else None,
-            "pnl_day": None,
-            "position_vs_regime": None,
-        }
-        gaps.append(_gap("account.pnl_day", "缺上日净值；未计算日盈亏或以成本代替市值。"))
-        if total is None:
-            gaps.append(
-                _gap("account.total_assets", "缺行情估值或重建现金，净资产与仓位不可计算。")
+    used_times: list[dt.datetime] = []
+    if account and (positions or account.cash is not None):
+        # Same daily-close > broker-reference > cost valuation as /portfolio,
+        # bounded by the immutable report's actual knowledge time.
+        values: list[Decimal] = []
+        account_times: list[dt.datetime] = []
+        computable = True
+        used_cost_estimate = False
+        price: Decimal | None
+        price_at: dt.datetime | None
+        for code, position in positions.items():
+            bar = (
+                conn.execute(
+                    select(daily_bars)
+                    .where(
+                        daily_bars.c.code == code,
+                        daily_bars.c.adj_type == "none",
+                        daily_bars.c.trade_date <= date,
+                        daily_bars.c.fetched_at <= now,
+                        daily_bars.c.close > 0,
+                    )
+                    .order_by(daily_bars.c.trade_date.desc())
+                    .limit(1)
+                ).first()
+                if code in master
+                else None
             )
+            close_at = (
+                dt.datetime.combine(bar.trade_date, dt.time(15), dt.timezone(dt.timedelta(hours=8)))
+                if bar
+                else None
+            )
+            if bar and close_at is not None and close_at <= now:
+                price, price_at = Decimal(bar.close), close_at
+            else:
+                price, price_at = position.price, position.price_at
+            if price_at is not None and price_at > now:
+                price = None
+            if price is not None and code in master:
+                values.append(position.qty * price)
+                if price_at is not None:
+                    account_times.append(price_at)
+            elif position.cost_known:
+                used_cost_estimate = True
+                values.append(position.cost_total)
+                gaps.append(
+                    _gap("account." + code + ".price", "缺现价，按已知成本估值（非实时市值）。")
+                )
+            else:
+                computable = False
+        ledger_at = account_ledger_at
+        if ledger_at is not None and ledger_at > now:
+            computable = False
+        if account.price_at is not None and account.price_at > now:
+            computable = False
+        if computable:
+            cash = account.cash if account.cash is not None else Decimal("0.00")
+            if account.cash is None:
+                gaps.append(
+                    {
+                        "key": "cash",
+                        "reason": "user_input_missing",
+                        "message": "未录入现金，按portfolio约定展示0.00，不代表已核实资金。",
+                    }
+                )
+            value = sum(values, Decimal(0))
+            total = value + cash
+            report_account = {
+                "total_assets": format(
+                    total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f"
+                ),
+                "cash": format(cash.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f"),
+                "position_pct": str(value / total * 100) if total != 0 else None,
+                "pnl_day": None,
+                "position_vs_regime": None,
+            }
+            if account.cash is not None and account.price_at is not None:
+                account_times.append(account.price_at)
+            if used_cost_estimate:
+                estimate_at = account.price_at or ledger_at
+                if estimate_at is not None:
+                    account_times.append(estimate_at)
+            if not account_times and ledger_at is not None:
+                account_times.append(ledger_at)
+            used_times.extend(account_times)
+            gaps.append(_gap("account.pnl_day", "缺上日持仓/前收净值；日盈亏保持null。"))
+    if report_account is None:
+        gaps.append(_gap("account", "无账户/持仓现金数据，或估值整体不可计算。"))
     from app.aggregates.reconciliation import read as read_reconciliation
 
     recon = read_reconciliation(conn, identifier, now)
@@ -220,6 +289,19 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
             for d in dimensions
             for g in d["gaps"]
         )
+        used_times.extend(
+            dt.datetime.fromisoformat(d["data_as_of"])
+            if isinstance(d["data_as_of"], str)
+            else d["data_as_of"]
+            for d in dimensions
+            if d["facts"] and d["data_as_of"] is not None
+        )
+        if suggestion is not None:
+            used_times.extend(
+                dt.datetime.fromisoformat(e["data_as_of"])
+                for e in (suggestion.evidence or [])
+                if e.get("data_as_of")
+            )
         stocks.append(
             {
                 "security_code": code,
@@ -228,7 +310,9 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
                 "name": master[code].name if code in master else code,
                 "close": None,
                 "change_pct": None,
-                "data_status": "partial",
+                "data_status": "partial"
+                if suggestion or any(d["facts"] for d in dimensions)
+                else "unavailable",
                 "max_risk_level": max(
                     (f["level"] for f in (suggestion.risk_flags or [])),
                     key={"info": 0, "warning": 1, "critical": 2}.__getitem__,
@@ -279,8 +363,8 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
             "llm_call_id": None,
         },
         "evidence": report_evidence,
-        "data_status": "partial",
-        "data_as_of": None,
+        "data_status": "partial" if used_times else "unavailable",
+        "data_as_of": min(used_times) if used_times else None,
         "gaps": gaps,
     }
     if not apply_comparison(conn, user_id, date, stocks):

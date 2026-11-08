@@ -81,4 +81,14 @@ def detail(date: dt.date, auth: AuthDep, engine: EngineDep) -> dict[str, Any]:
         row = latest(conn, auth.user_id, date)
         if row is None:
             raise AppError(ErrorCode.NOT_FOUND)
-        return dict(row.body)
+        body = dict(row.body)
+        body.setdefault("data_as_of", None)
+        # Read-only legacy projection, never overwrite archived report snapshots.
+        account = body.get("account")
+        if account is not None and any(account.get(k) is None for k in ("total_assets", "cash")):
+            body["account"] = None
+            body["gaps"] = [
+                *body.get("gaps", []),
+                {"key": "account", "reason": "no_source", "message": "旧快照账户估值不可计算。"},
+            ]
+        return body

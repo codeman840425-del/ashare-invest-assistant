@@ -73,6 +73,12 @@ def owned(
 
 
 def validate(conn: Connection, owner: uuid.UUID, body: PlanInput) -> Row[Any]:
+    from zoneinfo import ZoneInfo
+
+    today = dt.datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    for condition in body.conditions:
+        if condition.type == "date" and dt.date.fromisoformat(condition.params["on"]) < today:
+            invalid("conditions.params.on")
     sec = conn.execute(select(securities).where(securities.c.code == body.security_code)).first()
     if sec is None:
         invalid("security_code", "unknown_security")

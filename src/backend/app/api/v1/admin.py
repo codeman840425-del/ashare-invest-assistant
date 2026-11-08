@@ -12,7 +12,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import or_, select, tuple_
+from sqlalchemy import func, or_, select, tuple_
 
 from app.api.v1.auth import RESERVED_USERNAMES, USERNAME_RE
 from app.auth import invites, service
@@ -27,8 +27,9 @@ from app.auth.deps import (
 )
 from app.common.errors import AppError, ErrorCode
 from app.common.pagination import Page, PageParams, build_page, decode_cursor, page_params
-from app.db.tables.users import invite_codes
+from app.db.tables.users import account_reviews, audit_logs, invite_codes, login_attempts, users
 from app.licences import ingest_status
+from app.schemas.enums import AccountStatus
 
 # include_in_schema=False：/admin/* 不进公开 openapi.json（契约 §1.3，见 T-B04a 报告）
 router = APIRouter(
@@ -142,6 +143,119 @@ def create_invite(
         bound_username=row.bound_username,
         note=row.note,
     )
+
+
+@router.get("/users")
+def list_users(
+    admin: AdminDep,
+    settings: SettingsDep,
+    engine: EngineDep,
+    page: Annotated[PageParams, Depends(page_params)],
+    status: AccountStatus | None = None,
+    q: str | None = None,
+) -> dict[str, Any]:
+    """契约 §7.9：只读审核列表；仅投影公开管理字段，审计 IP 摘要不出库。"""
+    del admin
+    query = (q or "").strip()
+    scope = f"admin:users:{status or ''}:{query}"
+    c = users.c
+    # 注册审计只用于同 IP 提示；没有地域事实时保持 null，不推断地域。
+    registrations = (
+        select(audit_logs.c.actor_id, audit_logs.c.ip_hash)
+        .where(audit_logs.c.action == "auth.register", audit_logs.c.actor_id.is_not(None))
+        .distinct(audit_logs.c.actor_id)
+        .order_by(audit_logs.c.actor_id, audit_logs.c.at.asc(), audit_logs.c.id.asc())
+        .subquery()
+    )
+    ip_counts = (
+        select(registrations.c.ip_hash, func.count().label("registrations"))
+        .where(registrations.c.ip_hash.is_not(None))
+        .group_by(registrations.c.ip_hash)
+        .subquery()
+    )
+    last_login = (
+        select(func.max(login_attempts.c.at))
+        .where(login_attempts.c.user_id == c.id, login_attempts.c.success)
+        .correlate(users)
+        .scalar_subquery()
+    )
+    review_reason = (
+        select(account_reviews.c.reason)
+        .where(
+            account_reviews.c.user_id == c.id,
+            account_reviews.c.action.in_(["approve", "reject", "disable", "enable"]),
+        )
+        .order_by(account_reviews.c.created_at.desc(), account_reviews.c.id.desc())
+        .limit(1)
+        .correlate(users)
+        .scalar_subquery()
+    )
+    stmt = (
+        select(
+            c.id,
+            c.username,
+            c.display_name,
+            c.status,
+            c.role,
+            c.apply_note,
+            c.created_at,
+            c.reviewed_at,
+            last_login.label("last_login_at"),
+            review_reason.label("review_reason"),
+            func.coalesce(ip_counts.c.registrations, 0).label("same_ip_registrations"),
+        )
+        .select_from(
+            users.outerjoin(registrations, registrations.c.actor_id == c.id).outerjoin(
+                ip_counts, ip_counts.c.ip_hash == registrations.c.ip_hash
+            )
+        )
+        .where(c.deleted_at.is_(None), c.status.in_([s.value for s in AccountStatus]))
+    )
+    if status is not None:
+        stmt = stmt.where(c.status == status)
+    if query:
+        stmt = stmt.where(
+            or_(
+                c.username.icontains(query, autoescape=True),
+                c.display_name.icontains(query, autoescape=True),
+            )
+        )
+    if page.cursor:
+        keys = decode_cursor(page.cursor, scope=scope, settings=settings)
+        try:
+            if len(keys) != 2:
+                raise ValueError
+            at, ident = dt.datetime.fromisoformat(str(keys[0])), uuid.UUID(str(keys[1]))
+            if at.tzinfo is None:
+                raise ValueError
+        except (ValueError, TypeError) as exc:
+            raise AppError(ErrorCode.INVALID_CURSOR) from exc
+        stmt = stmt.where(tuple_(c.created_at, c.id) < tuple_(at, ident))
+    with engine.connect() as conn:
+        rows = conn.execute(
+            stmt.order_by(c.created_at.desc(), c.id.desc()).limit(page.limit + 1)
+        ).all()
+    raw = build_page(
+        rows,
+        limit=page.limit,
+        key=lambda row: [row.created_at.isoformat(), str(row.id)],
+        scope=scope,
+        settings=settings,
+    )
+    items = []
+    for row in raw.items:
+        item = dict(row._mapping)
+        item.update(
+            id=str(row.id),
+            created_at=_bj(row.created_at),
+            reviewed_at=service.bj(row.reviewed_at),
+            last_login_at=service.bj(row.last_login_at),
+            register_ip_region=None,
+            same_ip_flag=row.same_ip_registrations
+            > settings.business.auth.admin.same_ip_highlight_threshold,
+        )
+        items.append(item)
+    return {"items": items, "next_cursor": raw.next_cursor}
 
 
 @router.get("/invites")

@@ -416,6 +416,12 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
 
 7. **`MAIRUI_LICENCE` 的去留**：生产和预发**不再使用**；`ingest` 发现它非空即拒绝启动。用户本人的证书也和朋友一样，在网页中录入。只有 T-B05 等本机实测脚本可在用户本人电脑的 shell 中**临时**设置它，绝不写入 compose、`.env` 或仓库。
 
+8. **T-A53 提前接入裁定（最小日级视图与探针共存，详见 `docs/reviews/T-A53-mairui-early-daily-ruling.md`）**：
+   - **名单预算**：T-A22 的每日名单任务 = 1 个逻辑批次、固定三端点共 **3 HTTP/交易日**；仅 18:00 后、上一请求结束至下一请求开始 ≥60 秒、失败/STOP 不重试、当日不跨日补打。`DAILY_HTTP_LIMIT=3` 只适用该名单链，不是日 K 或探针额度；T-B05/T-B86 的 128 次不变。
+   - **错峰互斥**：产品名单、产品日 K、T-B05、T-B86 共用 `ingest:single-egress` 互斥与逐请求检查；探针运行/持锁/在途不确定时产品不发起，反向同理，重叠时探针优先。目标配置归 `config/ingest.yaml` 的 `licences.product_daily`（`not_before=18:00`、`deadline=23:59:59`、`list_max_http_per_day=3`、`min_interval_s=60`、`upstream_retry=0`）；后端实现时同步实际 YAML 与 pydantic 校验，不支持前不得只写运行配置。
+   - **共用停机**：公共 STOP 停全部证书；任一侧遇 103/HTTP 429，停该证书产品+探针并锁存当批，原台账计次。保留既有 `ip_limited/paused_until` 展示，但错峰期持久 halted 闩锁不自动恢复，须授权人员确认另一侧停止、最后请求后 ≥60 秒且出口唯一后按指令双侧解闩。通知复用 `data_licence` 站内通知与管理端 IP 告警，按证书状态跃迁去重，不新增外发通道。
+   - **最小行情**：只读本人证书的日级 `adj_type=none` 数据，范围与字段映射见契约 §7.3 T-A53；日 K 走既有盘后 P1 队列和证书令牌桶、按实际请求另记产品日账，不能占名单 3 次或探针 128 次，真实执行次数仍须当次授权。
+
 ### 2.2 后端模块（与五种能力映射）
 
 | 模块（包名） | 职责 | 服务的能力 |
@@ -981,7 +987,7 @@ class RuleTemplateStrategy(ScreenerStrategy, TimingStrategy):
    - **T-A19 裁定（架构师 2026-11-07，G2 缺口收口）**：
      - **F14/F15（MVP 用“当前状态 + 上线日起每日差分”）**：来源只用交易所公开证券列表（T-A04 主数据同步，不调麦蕊）。每个交易日 18:00 拉一次快照，按简称规则（security_master §5）算 `risk_flag`、`listing_status`，与上一快照比较，变化即关闭旧区间、开新区间。必需字段：`security_code, name, board, risk_flag, listing_status, snapshot_date, source, fetched_at`；历史表 `security_risk_flag_history(security_code, risk_flag, listing_status, valid_from, valid_to, source)`。H-01/W-01 只在评估日 d 用到 is_st/is_delisting_period，不回看历史，所以不需要回填。d 日盘后求值取 d 日 18:00 快照，快照没到就等，超时记 null。**失效条件**（任一成立时该值为 null，不猜）：① 评估日早于上线日；② 当日快照缺失或拉取失败（同时告警）；③ 列表格式变化导致解析失败；④ 某条规则需要 d 日之前的 is_st（如回测、跨日窗口），且那天在上线日之前或历史有缺口。主数据同步连续跑满 1 个交易日、历史表有数据后，可记 `verified_doc`；verified_live 等 T-B05。
      - **T-A22 裁定（架构师 2026-11-07，T-B85 官方导出被拒后）**：
-       - **来源（MVP）**：交易所官方导出接口返回 `success=false`，不再直连、不补请求头、不换路径；T-B85 的“来源未验证即拒绝”门槛保留。MVP 期间 F14/F15 改用麦蕊证券列表（`/hslt/list`、`/bj/list/all`、`/kc/list/all`）的简称字段，按 security_master §5 同一套前缀规则推出 `risk_flag` 和“简称带‘退’→ `delisting_period`”；快照 `master_snapshots.source = mairui_list`，`field_sources` 记 `mairui_list`。麦蕊仍不得新建证券、不得写 `delisted` 或 `missing_from_list`（4.6.1 不变）；代码不在麦蕊列表中 → F14/F15 为 null。每个交易日 18:00（北京时间）取 1 次，计入麦蕊调用预算，须编排者找用户本人授权后才能实调。
+       - **来源（MVP）**：交易所官方导出接口返回 `success=false`，不再直连、不补请求头、不换路径；T-B85 的“来源未验证即拒绝”门槛保留。MVP 期间 F14/F15 改用麦蕊证券列表（`/hslt/list`、`/bj/list/all`、`/kc/list/all`）的简称字段，按 security_master §5 同一套前缀规则推出 `risk_flag` 和“简称带‘退’→ `delisting_period`”；快照 `master_snapshots.source = mairui_list`，`field_sources` 记 `mairui_list`。麦蕊仍不得新建证券、不得写 `delisted` 或 `missing_from_list`（4.6.1 不变）；代码不在麦蕊列表中 → F14/F15 为 null。每个交易日 18:00（北京时间）取 **1 个逻辑批次 = 3 个独立 HTTP**（每端点一次，T-A53 修订原“取 1 次”表述），计入麦蕊调用预算，须编排者找用户本人授权后才能实调。
        - **verified_doc 验收**：① 麦蕊文档写明简称字段含义；② 研究员用交易所公开网页（正常浏览，不调接口）人工核对一个交易日：当日全部 ST、*ST、退市整理期证券，加 20 只非风险证券抽样，与推导结果 0 不一致。通过后 F14/F15 可写 verified_doc（只到 simulating）。
        - **回切**：以后研究员找到有文档、可正常下载的官方名单，或用户本人在官网手动导出文件放进 `data/master/inbox/`，按 4.6.1 恢复交易所为权威来源；麦蕊转回对账方，历史区间不改写，只从切换日起开新区间。
        - **PIT 兼容**：不建 T-A19 文中的合并表，沿用 4.6.2 已有的 `security_risk_flag_history`（F14）和 `security_listing_status_history`（F15）两张半开区间表，`snapshot_id` 指向带 `source` 的快照。d 日 F14/F15 = 区间覆盖 d 的那一行，且该行快照 `fetched_at` 不晚于求值时刻（d 日 18:00 快照，d+1 起可见）。首个成功快照日之前没有行 → null，不回填；某日快照失败 → 该日 null 并告警，旧区间不延长也不关闭，下次成功快照再比较。旧表结构不改，不需要新迁移；只在 `master_snapshots.source` 的取值里加 `mairui_list`（文档/代码常量，不动已用迁移）。

@@ -37,6 +37,8 @@ def tanh_series(x):
         return sinh / cosh
 
 def evaluate(c):
+    if c["kind"].startswith("t33_"):
+        return {"results":[evaluate_t33(c["kind"],v) for v in c["input"]["scenarios"]]}
     i = c['input']; kind = c['kind']
     if kind == 'rc5_closed':
         assert i['all_closed'] and i['complete']
@@ -192,7 +194,7 @@ def run():
         except AssertionError as exc:
             raise AssertionError(c['id']) from exc
         ready+=1
-    assert ready>=20 and blocked==9
+    assert ready==92 and blocked==0
     matrix=Counter(c['kind'] for c in data['cases'] if c['case_status']=='ready')
     assert matrix['rc6_plan']==10 and matrix['clamp']==6
     checks={c['input']['check'] for c in data['cases'] if c['kind']=='rc6_plan'}
@@ -206,5 +208,134 @@ def run():
     assert rejected==4
     print(json.dumps({'ready_pass':ready,'blocked_not_run':blocked,'negative_oracles_rejected':rejected,'coverage':matrix},ensure_ascii=False))
 
+
+# R08b unit projections, not complete HTTP/event payloads. Independent input-only
+# oracles: do not read expected, model draft, or application implementation.
+def expiry(v):
+    from datetime import datetime, time
+    t=datetime.fromisoformat(v['trigger_at']); days=v['calendar']
+    start=next((j for j,day in enumerate(days) if day>t.date().isoformat() or (day==t.date().isoformat() and t.time()<=time(15))),None)
+    if start is None or start+v['pause_days']>=len(days):
+        return {'day0':None,'paused_until':None,'gap':True}
+    return {'day0':days[start],'paused_until':days[start+v['pause_days']]+'T15:00:00+08:00','gap':False}
+
+def evaluate_t33(kind,v):
+    if kind=='t33_sim':
+        mapping={'intraday_t':1,'short':5,'swing':20,'long':20}
+        picked={};gap=set()
+        for o in v['observations']:
+            if o['owner']!='self' or o['strategy_version']!=v['strategy_version']:continue
+            horizon=o['horizon'] or v['version_horizon']
+            if horizon not in mapping:
+                gap.add('sim_fail_horizon_unknown');continue
+            if o['horizon_days']!=mapping[horizon]:continue
+            key=(o['suggestion_id'],o['strategy_version'],o['horizon_days'])
+            old=picked.get(key)
+            if old is None or (o['instance_created_at'],o['instance_id'])<(old['instance_created_at'],old['instance_id']):picked[key]=o
+        n=0
+        for o in sorted(picked.values(),key=lambda x:(x['exit_at'],x['suggestion_id'])):
+            if o['state']=='complete':
+                assert type(o['direction_correct']) is bool
+                n=0 if o['direction_correct'] else n+1
+        return {'trailing_failures':n,'triggered':n>=5,'gap_codes':sorted(gap)}
+    if kind=='t33_closed':
+        accounts={};closed=[];gap=False
+        for f in sorted(v['fills'],key=lambda x:(x['executed_at'],x['id'])):
+            key=(f['account'],f['security']);q,cost=accounts.get(key,(D(0),D(0)))
+            qty,price,fee=map(D,(f['qty'],f['price'],f['fee']))
+            if q==0 and f['side']=='sell':gap=True;continue
+            if f['side']=='buy':q+=qty;cost-=qty*price+fee
+            else:q-=qty;cost+=qty*price-fee
+            assert q>=0
+            accounts[key]=(q,cost)
+            if q==0:
+                closed.append((f['executed_at'],f['id'],cost));accounts[key]=(D(0),D(0))
+        closed.sort();n=0
+        for _,_,profit in closed:
+            if profit<0:n+=1
+            elif profit>0:n=0
+        return {'closed_pnl':[format(x[2].normalize(),'f') for x in closed],'trailing_losses':n,'triggered':n>=3,'gap':gap}
+    if kind=='t33_expiry':return expiry(v)
+    if kind=='t33_recovery':
+        n=0;state=v['state']
+        for w,r in zip(v['weights'],v['robustness']):
+            ok=v['n']>=20 and D(w)>=D('.9') and (not v['enabled'] or D(r)>=D(v['baseline'])*D(v['recover_ratio']))
+            n=n+1 if ok else 0
+            if n>=10 and state=='observing':state='published'
+        return {'state':state,'joint_streak':n}
+    if kind=='t33_qty':
+        p=v['plan'];q=D(0)
+        for f in v['trades']:
+            if not f['voided'] and all(f[k]==p[k] for k in ['account','security','side']) and f['plan_version']==p['id'] and p['from']<=f['executed_at']<p['until']:q+=D(f['qty'])
+        return {'cumulative_qty':format(q,'f'),'triggered':q>D(p['qty']),'logical_events':int(q>D(p['qty']))}
+    if kind=='t33_version':
+        unknown={'selected':None,'state':'unknown','opposite_side':None,'gap':True}
+        if 'trade_date' in v:
+            day=v['trade_date']
+            if any(any(t and t[:10]==day for t in (p['from'],p['until'])) for p in v['versions']):return unknown
+            at=day+'T15:00:00+08:00'
+        else:at=v['trade_at']
+        eligible=[p for p in v['versions'] if p['from']<=at and (p['until'] is None or at<p['until'])]
+        if not eligible:return unknown
+        same=[p for p in eligible if p['side']==v['trade_side']]
+        choices=same or eligible;latest=max(p['from'] for p in choices)
+        chosen=min((p for p in choices if p['from']==latest),key=lambda x:x['id'])
+        return {'selected':chosen['id'],'state':'ok','opposite_side':not bool(same),'gap':False}
+    if kind=='t33_gap':
+        low=high=0;state=v['state'];gap=False
+        for w in v['weights']:
+            if w is None:low=high=0;gap=True;continue
+            if v['n']<20:continue
+            low=low+1 if D(w)<D('.8') else 0
+            high=high+1 if D(w)>=D('.9') else 0
+            if state=='published' and low>=5:state='observing'
+            elif state=='observing' and high>=10:state='published'
+        return {'state':state,'low_streak':low,'high_streak':high,'gap':gap}
+    if kind=='t33_edge':
+        edge=D(v['before'])<D(v['threshold'])<=D(v['after']);until=v['existing_until'];status='paused'
+        if edge:
+            new=expiry(v);assert not new['gap'];until=max(until,new['paused_until'])
+        elif v['at_expiry'] and v['trigger_at']>=until:until=None;status='active'
+        return {'edge':edge,'paused_until':until,'status':status,'risk_triggered':D(v['after'])>=D(v['threshold'])}
+    if kind=='t33_resume':
+        out={'status':'paused','paused_until':v['paused_until'],'reason':v['reason'],'expiry_blocked':False,'system_event_detail':None,'blocked_notification_required':False,'gap':not v['calendar_available'],'expiry_blocked_actor':None}
+        if not v['calendar_available'] or v['now']<v['paused_until']:return out
+        out['paused_until']=None
+        if v['lifecycle'] in ['published','observing']:
+            out.update(status='active',reason=None)
+        else:
+            out.update(expiry_blocked_actor='system',expiry_blocked=True,system_event_detail={'expiry_blocked':'STRATEGY_VERSION_NOT_RUNNABLE','lifecycle':v['lifecycle']},blocked_notification_required=True)
+        return out
+    raise AssertionError(kind)
+
+def run_r08b():
+    import hashlib,copy
+    data=json.loads(FILE.read_text(),parse_float=lambda s:(_ for _ in ()).throw(AssertionError('binary float forbidden')))
+    baseline=hashlib.sha256(json.dumps(data['cases'][:83],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    assert baseline==data['r08b']['baseline_first83_sha256']
+    cases=data['cases'][83:];assert len(cases)==9
+    refs={r for c in cases for r in c['source_refs']}
+    for r in refs:
+        src=data['source_registry'][r];assert norm(src['quote']) in norm((ROOT/src['file']).read_text()),r
+    rejected=0;vectors=0
+    for c in cases:
+        assert c['case_status']=='ready' and c['steps']
+        raw=json.dumps(c['input']['scenarios'],sort_keys=True,ensure_ascii=False).encode()
+        assert hashlib.sha256(raw).hexdigest()==c['review']['reviewed_input_sha256']
+        actual=evaluate(c);equal(actual,c['expected'],D(0));vectors+=len(c['input']['scenarios'])
+        wrong=copy.deepcopy(c['expected']);wrong['results'][0]['ORACLE_MUTATION']=True
+        try:equal(actual,wrong,D(0))
+        except AssertionError:rejected+=1
+    # Semantic input mutations: keep expected fixed; oracle must respond to facts.
+    mutations=[(0,lambda v:v.update(observations=[])),(1,lambda v:v.update(fills=[])),(2,lambda v:v.update(pause_days=1)),(3,lambda v:v.update(robustness=['79']*10)),(4,lambda v:v['plan'].update(qty='120')),(5,lambda v:v.update(trade_side='buy')),(6,lambda v:v.update(weights=['.79']*5)),(7,lambda v:v.update(before='3')),(8,lambda v:v.update(lifecycle='published'))]
+    input_rejected=0
+    for index,mutate in mutations:
+        c=copy.deepcopy(cases[index]);mutate(c['input']['scenarios'][0])
+        try:equal(evaluate(c),cases[index]['expected'],D(0))
+        except AssertionError:input_rejected+=1
+    assert rejected==9 and input_rejected==9
+    print(json.dumps({'r08b_ready':9,'vectors_pass':vectors,'original83_hash_preserved':True,'expected_mutations_rejected':rejected,'input_mutations_rejected':input_rejected,'scope':'084-092 only; unit specification, not E2E'},ensure_ascii=False))
+
 if __name__=='__main__':
-    run()
+    import sys
+    run_r08b() if '--r08b' in sys.argv else run()

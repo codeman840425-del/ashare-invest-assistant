@@ -242,6 +242,7 @@ STEPS: Final[tuple[Step, ...]] = (
         "app.intraday_candidate_refs",
         "instance_id IN (SELECT id FROM app.strategy_instances WHERE user_id = :uid)",
     ),
+    _d("app.signal_event_projections"),
     _d("app.strategy_instances"),
     _d("app.strategy_runs"),
     _d("app.strategy_tracking_stats"),
@@ -380,7 +381,7 @@ HANDLED_FK: Final[frozenset[str]] = frozenset(
                 "app.alert_rules", "app.risk_events", "app.suggestion_user_actions",
                 "app.alerts", "app.user_data_licences", "ops.data_licence_events",
                 "app.user_data_licence_holds", "app.user_data_licence_cooldowns",
-                "app.data_snapshots",
+                "app.data_snapshots", "app.signal_event_projections",
             )
         ),
         "app.users.reviewed_by", "app.account_reviews.admin_id", "app.invite_codes.created_by",
@@ -483,6 +484,16 @@ TRIGGER_ALLOWLIST: Final[frozenset[tuple[str, str, str]]] = frozenset(
         ),
         ("app.risk_events", "trg_risk_events_immutable", "app.reject_mutation"),
         ("app.signal_events", "trg_signal_events_immutable", "app.reject_mutation"),
+        (
+            "app.signal_event_projections",
+            "signal_event_projection_owner",
+            "app.validate_signal_event_projection",
+        ),
+        (
+            "app.signal_event_projections",
+            "signal_event_projection_immutable",
+            "app.reject_mutation",
+        ),
         (
             "app.strategy_instance_events",
             "trg_strategy_instance_events_immutable",

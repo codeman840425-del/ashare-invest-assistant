@@ -26,6 +26,7 @@ from app.db.tables.market import securities, trading_calendar
 from app.db.tables.realtime import (
     intraday_candidate_refs,
     intraday_universe,
+    signal_event_projections,
     signal_events,
     signal_states,
     user_realtime_prefs,
@@ -453,177 +454,236 @@ def compute(settings: Settings, message: Updated) -> list[uuid.UUID]:
     return events
 
 
+def matching(conn: Connection, event: Row[Any], holder: Row[Any, Any, Any]) -> list[Row[Any]]:
+    src = conn.execute(
+        select(data_snapshots).where(
+            data_snapshots.c.id == event.input_snapshot_id,
+            data_snapshots.c.user_id == holder.user_id,
+            data_snapshots.c.licence_id == holder.id,
+        )
+    ).one_or_none()
+    ver = conn.execute(
+        select(strategy_versions).where(strategy_versions.c.id == event.strategy_version_id)
+    ).one_or_none()
+    if src is None or ver is None or not runnable(ver.lifecycle, holder.role):
+        return []
+    result = []
+    for inst in conn.execute(
+        select(strategy_instances)
+        .where(
+            strategy_instances.c.user_id == holder.user_id, strategy_instances.c.status == "active"
+        )
+        .order_by(strategy_instances.c.created_at, strategy_instances.c.id)
+        .with_for_update()
+    ):
+        if (
+            inst.derived_strategy_version_id or inst.strategy_version_id
+        ) != event.strategy_version_id:
+            continue
+        if inst.scope not in {"security", "account"}:
+            continue
+        if inst.scope == "security" and inst.security_code != event.security_code:
+            continue
+        if src.items.get("account_id") != (str(inst.account_id) if inst.account_id else None):
+            continue
+        if (
+            inst.account_id
+            and conn.execute(
+                select(accounts.c.id).where(
+                    accounts.c.id == inst.account_id,
+                    accounts.c.user_id == holder.user_id,
+                    accounts.c.archived_at.is_(None),
+                )
+            ).first()
+            is None
+        ):
+            continue
+        params = {
+            k: v["default"] for k, v in ver.config.get("spec", ver.config)["params_schema"].items()
+        }
+        params.update(inst.param_overrides or {})
+        if hashlib.sha256(canonical(params).encode()).hexdigest() == event.params_hash:
+            result.append(inst)
+    return result
+
+
+def primary_instance(
+    instances: list[Row[Any]], candidates: dict[uuid.UUID, uuid.UUID]
+) -> Row[Any] | None:
+    """Input is the historically matched, created_at/id ordered set."""
+    return next((i for i in instances if i.id in candidates), instances[0] if instances else None)
+
+
 def handoff(settings: Settings, event_id: uuid.UUID, r: redis.Redis) -> int:
+    from app.db.tables.realtime import suggestion_threads, suggestions
+    from app.suggestions.models import Conclusion
+    from app.suggestions.service import summary
     from app.workers.jobs import _engine
 
     if settings.app_env != "test":
         return 0
     engine = _engine(settings)
-    delivered = 0
-    with engine.connect() as conn:
-        event = conn.execute(select(signal_events).where(signal_events.c.id == event_id)).one()
-        holder = scope(conn, event.source_licence_id)
-        if holder is None:
-            return 0
-        instances = (
+    try:
+        with engine.begin() as conn:
+            require_isolated(conn, app_env=settings.app_env)
+            event = conn.execute(select(signal_events).where(signal_events.c.id == event_id)).one()
+            if event.legacy_binding_unknown:
+                return 0
+            holder = scope(conn, event.source_licence_id)
+            if holder is None:
+                return 0
             conn.execute(
-                select(strategy_instances.c.id).where(
-                    strategy_instances.c.user_id == holder.user_id,
-                    strategy_instances.c.status == "active",
-                )
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:owner,74))"),
+                {"owner": str(holder.user_id)},
             )
-            .scalars()
-            .all()
-        )
-    for iid in instances:
-        try:
-            changed = []
-            with engine.begin() as conn:
-                require_isolated(conn, app_env=settings.app_env)
-                conn.execute(
-                    text("SELECT pg_advisory_xact_lock(hashtextextended(:owner,74))"),
-                    {"owner": str(holder.user_id)},
+            if conn.execute(
+                select(signal_event_projections.c.event_id).where(
+                    signal_event_projections.c.event_id == event.id,
+                    signal_event_projections.c.user_id == holder.user_id,
                 )
-                inst = conn.execute(
-                    select(strategy_instances)
-                    .where(
-                        strategy_instances.c.id == iid,
-                        strategy_instances.c.user_id == holder.user_id,
-                    )
-                    .with_for_update()
-                ).one()
-                if (
-                    inst.derived_strategy_version_id or inst.strategy_version_id
-                ) != event.strategy_version_id:
-                    continue
-                if inst.scope == "security" and inst.security_code != event.security_code:
-                    continue
-                if conn.execute(
-                    select(intraday_candidate_refs).where(
-                        intraday_candidate_refs.c.instance_id == iid,
-                        intraday_candidate_refs.c.event_id == event_id,
-                    )
-                ).first():
-                    continue
-                if event.trigger_kind not in {"flip", "invalidation"}:
-                    continue
+            ).first():
+                return 0
+            instances = matching(conn, event, holder)
+            rows = []
+            policy = conn.execute(
+                select(engine_policies).where(engine_policies.c.id == event.engine_policy_id)
+            ).one_or_none()
+            if instances and event.trigger_kind in {"flip", "invalidation"}:
+                if policy is None:
+                    return 0
                 src = conn.execute(
-                    select(data_snapshots).where(
-                        data_snapshots.c.id == event.input_snapshot_id,
-                        data_snapshots.c.user_id == holder.user_id,
-                        data_snapshots.c.licence_id == holder.id,
-                    )
+                    select(data_snapshots).where(data_snapshots.c.id == event.input_snapshot_id)
                 ).one()
-                if (
-                    inst.account_id is not None
-                    and conn.execute(
-                        select(accounts.c.id).where(
-                            accounts.c.id == inst.account_id,
-                            accounts.c.user_id == holder.user_id,
-                            accounts.c.archived_at.is_(None),
-                        )
-                    ).first()
-                    is None
-                ):
-                    continue
-                if src.items.get("account_id") != (
-                    str(inst.account_id) if inst.account_id else None
-                ):
-                    continue
                 ver = conn.execute(
                     select(strategy_versions).where(
                         strategy_versions.c.id == event.strategy_version_id
                     )
                 ).one()
-                if not runnable(ver.lifecycle, holder.role):
-                    continue
-                params = {
-                    k: v["default"]
-                    for k, v in ver.config.get("spec", ver.config)["params_schema"].items()
-                }
-                params.update(inst.param_overrides or {})
-                if hashlib.sha256(canonical(params).encode()).hexdigest() != event.params_hash:
-                    continue
-                result, _spec, registry = evaluate(
-                    conn, settings, holder.user_id, inst, ver, src, event.created_at
-                )
-                policy = conn.execute(
-                    select(engine_policies).where(engine_policies.c.id == event.engine_policy_id)
-                ).one_or_none()
-                if policy is None:
-                    continue
                 strategy = conn.execute(
                     select(strategies).where(strategies.c.id == ver.strategy_id)
                 ).one()
-                row = conclusion(
-                    conn,
-                    owner=holder.user_id,
-                    instance=inst,
-                    version=ver,
-                    strategy=strategy,
-                    result=result,
-                    registry=registry,
-                    source=src,
-                    policy=policy,
-                    settings=settings,
-                    origin_signal_event_id=event.id,
-                )
-                archived = archive_conclusions(
-                    conn, holder.user_id, event.security_code, [row], policy
-                )
-                sid = archived["suggestion"]["id"]
-                conn.execute(
-                    insert(intraday_candidate_refs).values(
-                        instance_id=iid, event_id=event.id, candidate_id=row.candidate_signal_id
+                for inst in instances:
+                    result, _, registry = evaluate(
+                        conn, settings, holder.user_id, inst, ver, src, event.created_at
                     )
-                )
-                nid, new = append(
-                    conn,
-                    owner=holder.user_id,
-                    kind="invalidation"
-                    if event.trigger_kind == "invalidation"
-                    else "suggestion_change",
-                    severity="important" if event.trigger_kind == "invalidation" else "attention",
-                    title="规则状态已变化",
-                    body="请查看规则证据与当前建议。",
-                    code=event.security_code,
-                    target_type="suggestion",
-                    target_id=str(sid),
-                    ref_type="signal",
-                    ref_id=str(event.id),
-                    at=event.created_at,
-                )
-                if new:
-                    changed.append(nid)
-            if archived["changed"]:
-                from app.db.tables.realtime import suggestions as suggestion_table
-                from app.suggestions.service import summary
-
-                with engine.connect() as conn:
-                    sr = conn.execute(
-                        select(suggestion_table).where(
-                            suggestion_table.c.id == uuid.UUID(sid),
-                            suggestion_table.c.user_id == holder.user_id,
+                    row = conclusion(
+                        conn,
+                        owner=holder.user_id,
+                        instance=inst,
+                        version=ver,
+                        strategy=strategy,
+                        result=result,
+                        registry=registry,
+                        source=src,
+                        policy=policy,
+                        settings=settings,
+                        origin_signal_event_id=event.id,
+                    )
+                    rows.append(row)
+                    conn.execute(
+                        insert(intraday_candidate_refs).values(
+                            instance_id=inst.id,
+                            event_id=event.id,
+                            candidate_id=row.candidate_signal_id,
                         )
-                    ).one()
-                    summary_data = summary(sr)
-                publish(
-                    r,
-                    holder.user_id,
-                    "suggestion",
-                    {
-                        "id": sid,
-                        "security_code": event.security_code,
-                        "name": archived["suggestion"]["name"],
-                        "supersedes_id": archived["superseded_id"],
-                        "summary": summary_data,
-                    },
-                    event.created_at,
-                    "suggestion:" + sid,
+                    )
+            candidate_by_instance = {
+                row.instance_id: row.candidate_signal_id for row in rows if row.candidate_signal_id
+            }
+            selected = primary_instance(instances, candidate_by_instance)
+            conn.execute(
+                insert(signal_event_projections).values(
+                    event_id=event.id,
+                    user_id=holder.user_id,
+                    instance_id=selected.id if selected else None,
+                    instance_ids=[i.id for i in instances[:20]],
+                    candidate_signal_id=candidate_by_instance.get(selected.id)
+                    if selected
+                    else None,
                 )
-            if row.candidate_signal_id:
-                from app.db.tables.signals import candidate_signals
+            )
+            if not rows:
+                return 0
+            # Preserve frozen unaffected conclusions, not a current-state recomputation.
+            prior = conn.execute(
+                select(data_snapshots.c.id, data_snapshots.c["items"])
+                .join(suggestions, suggestions.c.snapshot_id == data_snapshots.c.id)
+                .join(
+                    suggestion_threads,
+                    suggestion_threads.c.current_suggestion_id == suggestions.c.id,
+                )
+                .where(
+                    suggestion_threads.c.user_id == holder.user_id,
+                    suggestion_threads.c.security_code == event.security_code,
+                    suggestions.c.user_id == holder.user_id,
+                    data_snapshots.c.user_id == holder.user_id,
+                    suggestions.c.security_code == event.security_code,
+                )
+                .order_by(suggestions.c.created_at.desc(), suggestions.c.id.desc())
+                .limit(1)
+            ).first()
+            affected = {row.instance_id for row in rows}
+            carried = [
+                Conclusion.model_validate(raw)
+                for raw in (prior._mapping["items"] if prior else {})
+                .get("input", {})
+                .get("conclusions", [])
+                if uuid.UUID(str(raw["instance_id"])) not in affected
+            ]
+            if policy is None:
+                raise ValueError("frozen_policy_missing")
+            archived = archive_conclusions(
+                conn,
+                holder.user_id,
+                event.security_code,
+                rows + carried,
+                policy,
+                carry_from_snapshot_id=prior.id if prior and carried else None,
+            )
+            sid = archived["suggestion"]["id"]
+            nid, new = append(
+                conn,
+                owner=holder.user_id,
+                kind="invalidation"
+                if event.trigger_kind == "invalidation"
+                else "suggestion_change",
+                severity="important" if event.trigger_kind == "invalidation" else "attention",
+                title="规则状态已变化",
+                body="请查看规则证据与当前建议。",
+                code=event.security_code,
+                target_type="suggestion",
+                target_id=str(sid),
+                ref_type="signal",
+                ref_id=str(event.id),
+                at=event.created_at,
+            )
+        # Only committed products are published. HTTP remains durable fallback.
+        if archived["changed"]:
+            with engine.connect() as conn:
+                sr = conn.execute(
+                    select(suggestions).where(
+                        suggestions.c.id == uuid.UUID(sid), suggestions.c.user_id == holder.user_id
+                    )
+                ).one()
+                data = summary(sr)
+            publish(
+                r,
+                holder.user_id,
+                "suggestion",
+                {
+                    "id": sid,
+                    "security_code": event.security_code,
+                    "name": archived["suggestion"]["name"],
+                    "supersedes_id": archived["superseded_id"],
+                    "summary": data,
+                },
+                event.created_at,
+                "suggestion:" + sid,
+            )
+        from app.db.tables.signals import candidate_signals
 
+        for row in rows:
+            if row.candidate_signal_id:
                 with engine.connect() as conn:
                     cr = conn.execute(
                         select(candidate_signals).where(
@@ -647,16 +707,14 @@ def handoff(settings: Settings, event_id: uuid.UUID, r: redis.Redis) -> int:
                     event.created_at,
                     "candidate:" + str(cr.id) + ":" + cr.state,
                 )
-            # Never publish uncommitted DB outputs. Lost transient push is repaired by HTTP facts.
-            for nid in changed:
-                enqueue(engine, r, holder.user_id, nid, event.created_at)
-                delivered += 1
-        except Exception as exc:  # noqa: BLE001 - isolate transaction; log class only
-            import logging
+        if new:
+            enqueue(engine, r, holder.user_id, nid, event.created_at)
+        return int(new)
+    except Exception as exc:  # noqa: BLE001 - all fanout rolls back, recover retries committed source
+        import logging
 
-            logging.getLogger(__name__).warning("intraday_handoff_failed:%s", type(exc).__name__)
-            continue
-    return delivered
+        logging.getLogger(__name__).warning("intraday_handoff_failed:%s", type(exc).__name__)
+        return 0
 
 
 def task(settings: Settings, event: dict[str, Any]) -> int:
@@ -667,13 +725,19 @@ def task(settings: Settings, event: dict[str, Any]) -> int:
     r = _redis(settings)
     try:
         for identifier in ids:
+            handoff(settings, identifier, r)
             with _engine(settings).connect() as conn:
                 ev = conn.execute(
                     select(signal_events).where(signal_events.c.id == identifier)
                 ).one()
                 h = scope(conn, message.licence_id)
-                data = event_view(conn, ev)
-            if h:
+                frozen = conn.execute(
+                    select(signal_event_projections.c.event_id).where(
+                        signal_event_projections.c.event_id == ev.id
+                    )
+                ).first()
+                data = event_view(conn, ev) if frozen else None
+            if h and data:
                 publish(r, h.user_id, "signal", data, ev.created_at, "signal:" + str(ev.id))
         recover(settings, message.licence_id, r, message.published_at)
         flush(

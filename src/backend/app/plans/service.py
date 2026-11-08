@@ -73,6 +73,12 @@ def owned(
 
 
 def validate(conn: Connection, owner: uuid.UUID, body: PlanInput) -> Row[Any]:
+    from zoneinfo import ZoneInfo
+
+    today = dt.datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    for condition in body.conditions:
+        if condition.type == "date" and dt.date.fromisoformat(condition.params["on"]) < today:
+            invalid("conditions.params.on")
     sec = conn.execute(select(securities).where(securities.c.code == body.security_code)).first()
     if sec is None:
         invalid("security_code", "unknown_security")
@@ -124,6 +130,8 @@ def version(
     identifier = uuid.uuid4()
     payload = body.model_dump(mode="json", exclude={"base_version_no", "origin"})
     payload["checklist_answers"] = answers or []
+    if n == 1:
+        payload["candidate_signal_ids"] = [str(i) for i in (head.candidate_signal_ids or [])]
     payload["name"] = conn.execute(
         select(securities.c.name).where(securities.c.code == head.security_code)
     ).scalar_one()

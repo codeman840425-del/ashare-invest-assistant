@@ -1,3 +1,4 @@
+import { ExplanationView } from '../components/ExplanationView';
 import { DailyDimensions } from '../features/daily/DailyDimensions';
 import { IS_MOCK } from '../lib/env';
 import { Alert, Button, Segmented, Select, Tag } from 'antd';
@@ -129,6 +130,7 @@ function StockCard({ s, r }: { s: DailyReportStock; r: DailyReport }) {
       <div className="stc-sec stc-inv"><b className="small">失效条件</b><Lines items={s.invalidation} r={r} /></div>
       <div className="stc-sec"><b className="small">次日关注</b><Lines items={s.next_watch} r={r} /></div>
       <DailyDimensions stock={s} evidence={r.evidence} />
+      {s.explanation ? <details onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} data-testid={`stock-explanation-${s.security_code}`}><summary>本股解释</summary><ExplanationView explanation={s.explanation} evidence={r.evidence.filter((e) => e.id.startsWith(`${s.security_code}:`))} testId={`report-stock-explanation-${s.security_code}`} title="本股解释" /></details> : null}
       <div className="small" onClick={(e) => e.stopPropagation()}><Link to={`/risk-controls?security_code=${encodeURIComponent(s.security_code)}`}>查看当前风控设置与事件</Link>{to ? <> · <Link to={to + "#sg-tracking"}>查看候选信号模拟结果</Link></> : null}</div>
     </section>
   );
@@ -214,9 +216,9 @@ export function DailyReportPage() {
         <DataStatusTag status={r.data_status} asOf={r.data_as_of} gaps={r.gaps} />
         <span className="muted small">生成于 {fmtTime(r.generated_at)} · 数据截至 {r.data_as_of === null ? '—（无来源）' : fmtTime(r.data_as_of)} · 说明来源：{r.explanation.source === 'template' ? '模板' : 'LLM'}</span>
       </div>
-      <p className="muted small">SSE 盘中变化与 AI 解释增量暂未接入；当前保留原有说明，不标为新增 AI 解释。</p>
+      <p className="muted small">解释增量为契约 mock 阶段；真实接口仅显示已存档字段。逐股与分歧仅读取本项已冻结解释，缺失不补造、不借用整体解释。</p>
       {IS_MOCK ? <Alert type="info" title="示例数据 · 日报六维事实与缺口均为合成示例" /> : <Alert type="info" title="真实日报接口 · 仅读取已生成的本人不可变快照；缺数据不补算、不当中性。" />}
-      <div className="report-summary">{r.explanation.text}</div>
+      <div className="report-summary"><ExplanationView explanation={r.explanation} evidence={r.evidence} testId="report-explanation" title="日报整体解释" /></div>
       <CardDisclaimer />
       {r.gaps.length ? (
         <Alert

@@ -56,7 +56,7 @@ class Condition(Body):
                 or not re.fullmatch(r"-?[0-9]+(?:\.[0-9]{1,4})?", p["pct"])
             ):
                 raise ValueError("invalid_params")
-            if abs(Decimal(p["pct"])) >= Decimal("100000000000000"):
+            if Decimal(p["pct"]) == 0 or abs(Decimal(p["pct"])) >= Decimal("100000000000000"):
                 raise ValueError("invalid_params")
         elif self.type == "date":
             if set(p) != {"on"} or not isinstance(p["on"], str):
@@ -294,10 +294,10 @@ class PlanDraft(Body):
     qty_range: QuantityRange
     price_range: PriceRange
     stops: Stops
-    max_loss_amount: str
-    max_loss_pct: str
+    max_loss_amount: str | None
+    max_loss_pct: str | None
     fee_estimate: FeeEstimate
-    user_context_snapshot: dict[str, str | None]
+    user_context_snapshot: dict[str, Any]
     risk_flags: list[dict[str, Any]]
     judgment_checklist: list[Question]
     valid_until: dt.datetime

@@ -1,3 +1,4 @@
+import type { ExplanationFallbackReason } from './enums';
 /**
  * API 类型，逐字段对齐 docs/api-contract.md v0.2.2（§1 通用约定、§5 共享对象、§7 端点）。
  * 约定：键名 snake_case；金额/价格/数量/比例为十进制字符串（Decimal）；`score` 为 0–100 整数或 null；
@@ -139,6 +140,8 @@ export interface SignalEvent {
   message: string;
   strategy_key: string | null;
   instance_id: Uuid | null;
+  /** T-A34：本人匹配实例冻结投影，服务端排序，最多20个；不在读取时重算。 */
+  instance_ids: Uuid[];
   rule_id: string | null;
   price: Decimal | null;
   candidate_signal_id: Uuid | null;
@@ -244,11 +247,23 @@ export interface DimensionCell {
 }
 export interface DimensionMatrixRow { dimension: Dimension; divergent: boolean; cells: DimensionCell[] }
 export interface Divergence {
+  /** T-A36：本项冻结解释；旧档可缺，null/缺键不借用顶层。 */
+  explanation?: Explanation | null;
   dimensions: Dimension[];
   summary: string;
   resolving_info: { description: string; subscribable: boolean }[];
 }
-export interface Explanation { source: 'template' | 'llm'; text: string; llm_call_id: string | null }
+/** §7.11.4：三新增键仅旧存档可缺；引用只在所属对象evidence解析。 */
+export interface Explanation {
+  source: 'template' | 'llm';
+  text: string;
+  llm_call_id: string | null;
+  paragraphs?: TextWithEvidence[];
+  prompt_version?: string | null;
+  validation_status?: 'passed' | 'fallback';
+  /** T-A36：仅旧档可缺；passed为null，fallback为服务端原因。 */
+  fallback_reason?: ExplanationFallbackReason | null;
+}
 export interface Suggestion extends DataStatusBlock {
   id: Uuid;
   security_code: string;
@@ -278,6 +293,8 @@ export interface SuggestionListItem extends SuggestionSummary { security_code: s
 
 // ---------- §5.3 ----------
 export interface DailyReportStock {
+  /** T-A36：只引用本证券前缀的日报证据；旧档可缺。 */
+  explanation?: Explanation | null;
   /** §7.11.1：旧日报及移出行投影为 null，不补造快照。 */
   analysis_snapshot_id: Uuid | null;
   dimensions: DailyDimensionAnalysis[] | null;

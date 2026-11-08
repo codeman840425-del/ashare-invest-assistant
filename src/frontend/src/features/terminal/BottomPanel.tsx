@@ -1,3 +1,4 @@
+import { additionalSignalInstances } from '../../lib/signalEvents';
 import { Tabs, Tag } from 'antd';
 import { useNavigate } from 'react-router';
 import { useDailyReports, useMarkNotificationRead, useNotifications, useSignals } from '../../api/queries';
@@ -29,6 +30,7 @@ export function BottomPanel({ selected, onSelect }: { selected: string | null; o
                     <span className="ev-name">{e.name}</span>
                     <Tag className="ev-kind">{SIGNAL_KIND[e.kind]}</Tag>
                     <span className="ev-text">{e.message}</span>
+                    {additionalSignalInstances(e) ? <Tag data-testid={`signal-instances-${e.signal_event_id}`}>{additionalSignalInstances(e)}</Tag> : null}
                     {e.price ? <span className="mono muted">@ {e.price}</span> : null}
                   </div>
                 ))}

@@ -1,3 +1,4 @@
+import { ExplanationView } from '../components/ExplanationView';
 import { TrackingResults } from '../components/TrackingResults';
 import { RiskFlagView } from '../components/RiskFlagView';
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../i18n/horizonCaps';
@@ -270,6 +271,7 @@ export function SuggestionDetailPage() {
                 <div key={i}>
                   <Tag color="orange">{d.dimensions.map((x) => DIMENSION[x]).join(' / ')}</Tag>{d.summary}
                   <span className="muted">　能化解分歧的信息：</span>{d.resolving_info.map((r) => r.description).join('；')}
+                  {d.explanation ? <details data-testid={`divergence-explanation-${i}`}><summary>本项分歧解释</summary><ExplanationView explanation={d.explanation} evidence={sg.evidence} testId={`sg-divergence-explanation-${i}`} title="本项分歧解释" /></details> : null}
                 </div>
               ))}
             </div>
@@ -299,11 +301,7 @@ export function SuggestionDetailPage() {
           <div className="panel-head"><span className="panel-title">数据缺口</span></div>
           {sg.gaps.length ? sg.gaps.map((g) => <div key={g.key} className="gap-row small"><Tag>{GAP_REASON[g.reason]}</Tag>{g.message}</div>) : <div className="muted small">无</div>}
           <HorizonPanel sg={sg} />
-          <div className="panel-head"><span className="panel-title">说明（{sg.explanation.source === 'template' ? '模板生成' : 'LLM 生成'}）</span></div>
-          <div className="small explain">{sg.explanation.text}</div>
-          {sg.explanation.source === 'llm' && sg.explanation.llm_call_id ? (
-            <div className="muted small" data-testid="sg-llm-call">LLM 调用记录 <span className="mono">{sg.explanation.llm_call_id}</span>（仅改写已有证据；引用格式待契约）</div>
-          ) : null}
+          <ExplanationView explanation={sg.explanation} evidence={sg.evidence} testId="sg-explanation" callTestId="sg-llm-call" />
         </section>
       </div>
 

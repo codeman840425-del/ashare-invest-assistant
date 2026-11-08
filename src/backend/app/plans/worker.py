@@ -1,25 +1,23 @@
-"""Owner plan condition checks from immutable owned receipts. No IO/provider/push.
-
-Price comparisons are strict. Signed pct comparator/catch-up date semantics await
-explicit ruling; no implicit >= convention or catch-up to a later market date.
-"""
+"""T-A29 owner conditions: signed rounded pct, inclusive price, calendar catch-up."""
 
 from __future__ import annotations
 
 import datetime as dt
 import hashlib
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import Connection, insert, select, update
 
 from app.config import Settings
+from app.db.tables.licences import user_data_licences
 from app.db.tables.market import trading_calendar
 from app.db.tables.research import action_plans, alert_rules, alerts, plan_conditions, plan_versions
 from app.db.tables.reviews import data_snapshots
 from app.db.tables.users import users
+from app.ingest.owned_quotes import SCHEMA as OWNED_SCHEMA
 from app.plans.models import number
 from app.plans.service import OPEN, audit, owner_lock
 from app.replay.baseline import require_isolated
@@ -47,17 +45,9 @@ def check(
             "delivery": "persistent_in_app",
         }
     gaps, hits, observations = [], [], []
-    if (
-        conn.execute(
-            select(trading_calendar.c.is_open).where(trading_calendar.c.date == day)
-        ).scalar_one_or_none()
-        is not True
-    ):
-        return {
-            "triggered": [],
-            "gaps": ["calendar_not_open_or_not_covered"],
-            "delivery": "persistent_in_app",
-        }
+    is_open = conn.execute(
+        select(trading_calendar.c.is_open).where(trading_calendar.c.date == day)
+    ).scalar_one_or_none()
     heads = conn.execute(
         select(action_plans)
         .where(
@@ -96,32 +86,44 @@ def check(
             ).first():
                 continue
             refs, evidence, snapshot, source_at = [], [], None, at
+            value: Any
             if c.type == "custom":
-                continue
-            if c.type == "pct_change":
-                gaps.append(str(c.id) + ":signed_pct_comparator_undefined")
                 continue
             if c.type == "date":
                 target = dt.date.fromisoformat(c.params["on"])
-                if day > target:
-                    gaps.append(str(c.id) + ":date_catch_up_undefined")
+                calendar = dict(
+                    conn.execute(
+                        select(trading_calendar.c.date, trading_calendar.c.is_open)
+                        .where(trading_calendar.c.date >= target)
+                        .order_by(trading_calendar.c.date)
+                    ).all()
+                )
+                due = target
+                while calendar.get(due) is False:
+                    due += dt.timedelta(days=1)
+                if calendar.get(due) is not True:
+                    gaps.append(str(c.id) + ":calendar_not_covered")
                     continue
-                passed = day == target
-                value, key, unit = day.isoformat(), "plan.observed_date", None
+                scheduled = dt.datetime.combine(due, dt.time(9), TZ)
+                observation["scheduled_for"] = scheduled.isoformat()
+                passed = at >= scheduled
+                value = {"observed_date": str(day), "scheduled_for": scheduled.isoformat()}
+                key, unit = "plan.observed_date", None
             else:
-                local = at.astimezone(TZ).time().replace(tzinfo=None)
-                if not (
-                    dt.time(9, 30) <= local < dt.time(11, 30) or dt.time(13) <= local < dt.time(15)
-                ):
-                    gaps.append(str(c.id) + ":outside_continuous_session")
+                if is_open is not True:
+                    gaps.append(str(c.id) + ":calendar_not_open_or_not_covered")
                     continue
+                # T-A29 price rules use a same-day fresh raw quote. Do not drop
+                # the valid 11:30/15:00 closing tick via an extra half-open session.
                 rows = conn.execute(
                     select(data_snapshots)
                     .where(
                         data_snapshots.c.user_id == owner,
                         data_snapshots.c.purpose == "signal",
                         data_snapshots.c.created_at <= at,
-                        data_snapshots.c["items"]["schema_version"].astext == SCHEMA,
+                        data_snapshots.c["items"]["schema_version"].astext.in_(
+                            [SCHEMA, OWNED_SCHEMA]
+                        ),
                     )
                     .order_by(data_snapshots.c.created_at.desc(), data_snapshots.c.id.desc())
                 ).all()
@@ -130,8 +132,11 @@ def check(
                         r
                         for r in rows
                         if r.items.get("security_code") == head.security_code
-                        and r.items.get("account_id")
-                        == (str(head.account_id) if head.account_id else None)
+                        and (
+                            r.items.get("schema_version") == OWNED_SCHEMA
+                            or r.items.get("account_id")
+                            == (str(head.account_id) if head.account_id else None)
+                        )
                     ),
                     None,
                 )
@@ -142,16 +147,24 @@ def check(
                 if hashlib.sha256(canonical(raw).encode()).hexdigest() != source.hash:
                     gaps.append(str(c.id) + ":source_hash_invalid")
                     continue
-                # This normalized schema is isolated synthetic replay only until the
-                # production source/expiry/license adapter is independently accepted.
-
-                if app_env != "test":
-                    gaps.append(str(c.id) + ":production_quote_adapter_missing")
-                    continue
-                require_isolated(conn, app_env=app_env)
-                if raw.get("synthetic") is not True:
-                    gaps.append(str(c.id) + ":production_quote_adapter_missing")
-                    continue
+                if raw.get("schema_version") == OWNED_SCHEMA:
+                    licensed = conn.execute(
+                        select(user_data_licences.c.id).where(
+                            user_data_licences.c.id == source.licence_id,
+                            user_data_licences.c.user_id == owner,
+                            user_data_licences.c.status == "active",
+                            user_data_licences.c.deleted_at.is_(None),
+                            user_data_licences.c.created_at <= at,
+                        )
+                    ).first()
+                    if not licensed or raw.get("adj_type") != "none":
+                        gaps.append(str(c.id) + ":owned_quote_licence_unavailable")
+                        continue
+                else:
+                    if app_env != "test" or raw.get("synthetic") is not True:
+                        gaps.append(str(c.id) + ":production_quote_adapter_missing")
+                        continue
+                    require_isolated(conn, app_env=app_env)
                 try:
                     source_at = dt.datetime.fromisoformat(raw["data_as_of"])
                     available = dt.datetime.fromisoformat(raw["available_at"])
@@ -162,7 +175,10 @@ def check(
                     continue
                 if (
                     any(t.tzinfo is None for t in [source_at, available, expires])
-                    or not source_at <= available <= at < expires
+                    or not source_at <= available <= at
+                    or (
+                        at > expires if raw.get("schema_version") == OWNED_SCHEMA else at >= expires
+                    )
                     or source_at.astimezone(TZ).date() != day
                     or raw.get("data_status") != "fresh"
                     or raw.get("is_suspended") is not False
@@ -172,9 +188,30 @@ def check(
                 if not price.is_finite() or price <= 0:
                     gaps.append(str(c.id) + ":invalid_price")
                     continue
-                threshold = Decimal(c.params["price"])
-                passed = price > threshold if c.type == "price_above" else price < threshold
-                value, key, unit = str(price), "quote.price", "CNY_per_share"
+                if c.type == "pct_change":
+                    try:
+                        previous = Decimal(number(raw["prev_close"], positive=True))
+                    except (ValueError, KeyError, TypeError, ArithmeticError):
+                        gaps.append(str(c.id) + ":prev_close")
+                        continue
+                    change = ((price / previous - 1) * 100).quantize(
+                        Decimal("0.0001"), rounding=ROUND_HALF_UP
+                    )
+                    threshold = Decimal(c.params["pct"])
+                    if threshold == 0:
+                        gaps.append(str(c.id) + ":invalid_zero_pct")
+                        continue
+                    passed = change >= threshold if threshold > 0 else change <= threshold
+                    value, key, unit = str(change), "quote.pct_change", "pct"
+                    observation["operands"] = {
+                        "last": str(price),
+                        "prev_close": str(previous),
+                        "rounding": "HALF_UP:4",
+                    }
+                else:
+                    threshold = Decimal(c.params["price"])
+                    passed = price >= threshold if c.type == "price_above" else price <= threshold
+                    value, key, unit = str(price), "quote.price", "CNY_per_share"
                 snapshot = source.id
                 observation["source_snapshot_id"] = str(source.id)
                 observation["source_hash"] = source.hash
@@ -196,6 +233,18 @@ def check(
                     "epistemic_type": "fact",
                 }
             )
+            if c.type == "pct_change":
+                operand_id = eid + ":operands"
+                refs.append(operand_id)
+                evidence.append(
+                    {
+                        **evidence[0],
+                        "id": operand_id,
+                        "key": "quote.pct_operands",
+                        "value": observation["operands"],
+                        "unit": None,
+                    }
+                )
             rule = uuid.uuid5(c.id, "alert_rule")
             if (
                 conn.execute(select(alert_rules.c.id).where(alert_rules.c.id == rule)).first()

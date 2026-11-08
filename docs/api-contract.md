@@ -611,7 +611,7 @@
 | `ImportFinding` | `{id: string, code: string(IMPORT_*，§4.1), severity: import_severity, scope: import_scope, row_no: int \| null, field: string \| null, message: string, params: object, needs_action: boolean, resolution_choices: string[]（按 §4.1“处理选项”表，v0.2.4）, default_resolution: string \| null（= `resolution_choices[0]`，为空时 null）, resolution: {choice: string, reason: string \| null, by: string(uuid), at: string(datetime)} \| null}`。`row_no` 为文件物理行号（从 1 起），文件级为 `null`；`params`/`message` 中的股东代码、资金账号先掩码 |
 | `Bar` | `{t: string(date) \| string(datetime), open, high, low, close: string(decimal), pre_close: string(decimal) \| null, volume: string(decimal), amount: string(decimal), avg_price: string(decimal) \| null}`。`t`：日/周线为交易日（周线取该周最后一个**有成交**的交易日，口径见 §6.2，v0.2.7）；`1m` 为该分钟 bar 的**结束**时刻【口径待 T003/T-B05 实测上游后确认】。`volume` 单位为**股**、`amount` 单位为**元**（上游若以“手”返回，由 ingest 换算；上游单位【待 T003 核实】）。`avg_price` 只在 `1m` 给出（分时均价 = 当日累计成交额 / 累计成交量），日/周线为 `null`。v0.2.7 加 `is_final: boolean`：日 K 当日收盘并入库后为 `true`，盘中返回的当日 bar 为 `false`；周 K 见 §6.2；`1m` 正在形成的那一分钟若返回则为 `false`【待 T003 补测：麦蕊分钟线是否返回未完成的那一分钟】 |
 | `WatchlistItem` | `{security_code, name, focus: boolean, group: string \| null, note: string \| null, added_at: string(datetime), refresh_tier: "tier1" \| "tier2" \| null}`。`refresh_tier` 由系统按重点关注与配额分配（只读；分层规则见 plan 0A.3，数值【待 T003】） |
-| `SignalEvent` | `{signal_event_id: string, security_code, name, kind: signal_kind, at: string(datetime), message: string, strategy_key: string \| null, instance_id: string(uuid) \| null, rule_id: string \| null, price: string(decimal) \| null, candidate_signal_id: string(uuid) \| null}`。规则事件，**不含动作建议**；`message` 须通过禁用词校验 |
+| `SignalEvent` | `{signal_event_id: string, security_code, name, kind: signal_kind, at: string(datetime), message: string, strategy_key: string \| null, instance_id: string(uuid) \| null, instance_ids: string(uuid)[]（T-A34，§7.11.4）, rule_id: string \| null, price: string(decimal) \| null, candidate_signal_id: string(uuid) \| null}`。规则事件，**不含动作建议**；`message` 须通过禁用词校验 |
 | `Notification` | `{id, kind: notification_kind, severity, title: string, body: string \| null, created_at: string(datetime), read_at: string(datetime) \| null, security_code: string \| null, name: string \| null, target: {type: notification_target_type, id: string \| null, route: string \| null}}`。`target.route` 是前端路由（如 `/suggestions/{id}`、`/daily-reports/2026-11-02`），`type=none` 时 `id` 与 `route` 为 `null`。`route` 由服务端生成，前端直接跳转（v0.2.3）：`suggestion` → `/suggestions/{id}`；`candidate_signal` → `/candidate-signals/{id}`；`plan_draft` → `/plan-drafts/{id}`；`plan` → `/plans/{id}`；`daily_report` → `/daily-reports/{date}`（`id` 为日期）；`import_batch` → `/portfolio/import?batch={id}`；`reconciliation` → `/portfolio?tab=reconciliation&account_id={id}`；`strategy_version` → `/strategies/{strategy_id}?version={id}`（`id` 为版本 id） |
 | `TerminalRow` | `{security_code, name, in_watchlist: boolean, focus: boolean, quote: {price, change_pct, amount: string(decimal), t: string(datetime)} \| null, holding: {qty: string(decimal), sellable_qty: string(decimal), cost_price: string(decimal), weight_pct: string(decimal), pnl: string(decimal) \| null, pnl_pct: string(decimal) \| null, security_type: security_type \| null, estimated: boolean} \| null, suggestion: SuggestionSummary \| null, active_reason_count: int, max_risk_level: risk_level \| null, data_status: data_status, data_as_of: string(datetime) \| null}`。`cost_price` 为摊薄成本（plan 3.5A）；`holding` 的 `security_type`、`estimated` 与 `pnl`/`pnl_pct` 的可空性同 `/portfolio` 持仓行（v0.2.9 #1–#3）；`data_as_of` 为该行行情与建议中较旧者的数据时点，完全无数据时为 `null`（v0.2.3） |
 | `SuggestionSummary` | `{id, created_at, status: suggestion_status, consensus: consensus_status, actions: [{strategy_key, strategy_name, action, t_leg: t_leg \| null}], executability_status: executability_status, divergent_dimensions: dimension[], top_score: int \| null}`。终端表格的动作徽标与分歧标记只读这里，不再逐只请求 `/suggestions/{id}`。T-A16：`actions[]` 元素加 `lifecycle: lifecycle`，为 `simulating` 时前端标“模拟中”；`top_score` = 各策略 `score` 的最大非 null 值，全为 null 时为 `null` |
@@ -1234,6 +1234,7 @@ evidence: Evidence[]
 - enabled=false → disabled，可保留 RC1 关闭警示但不施加该项门控；已知触发 → triggered（仍可带部分输入 gap）；所需输入齐全且未触发才 ok；否则 unknown + gap，flags 可为 []。未接通 RC5/RC6 时是 unknown，不冒充 ok 或 disabled。
 - RC3 沿用 F25，不用卡片的 F50 代替；F25 null → “大盘环境未知”、partial、无 RC3 门控。RC2/RC4 缺分母/归属时额度未知（quantity_cap=null），不是无限额度或零额度；不得因此消除其他可执行性原因。未分类不触发 RC4。RC1–RC4 阈值、取整及 buy/add 门控仍按 plan §2.5.6/T-A15/T-R21，绝不改动作或阻止 sell/reduce。
 - 当前评价不能回写历史建议；建议仍读取生成时的风控标记与 gap。实际风控事件由业务作业幂等写入，复用 §7.5 的 RiskEvent，不增加第二套事件状态机。
+- **T-A33（R4）**：`RiskEvaluation` 的 `DataStatusBlock.data_as_of` 取参与判定各输入时点中**最早**的非空值，全空为 null（同 T-A29 日报口径，不取最新、不取 evaluated_at）。
 
 #### 7.11.3 模拟跟踪结果（status: draft；P2N-03/05/08）
 
@@ -1254,12 +1255,31 @@ evidence: Evidence[]
 2. **聚合 `profit_loss_ratio`**：仅取有效样本中 action ∈ {buy, add, hold} 的 `return_pct`（毛收益）；盈利 = return_pct > 0，亏损 < 0，等于 0 不计。比值 = 盈利样本平均 return_pct ÷ |亏损样本平均 return_pct|。n = 盈利 + 亏损样本数，沿 Stat 规则（n<5 null，n<30 small_sample）；无亏损样本 → null + gap（`no_losing_samples`），有亏损无盈利 → 0。sell/reduce/wait 不进入盈亏比（仍按 plan §2.8 进入 win_rate/方向统计）。
 3. **同一策略版本多个实例**：观测唯一键为 (suggestion_id, strategy_version_id, horizon_days)，一条建议同版本只算一个样本，不按实例重复计数。`instance_id` 取产生该建议的实例；若同版本多个实例同时对应该建议，取 `created_at` 最早者（并列取 id 最小），其余实例不另建观测，在 evidence 中列出其 id。版本统计 `by_horizon` 按此去重；本版不提供实例级统计。
 
+**T-A33 裁定（status: draft；P2N-R08 歧义 084–092 + T-A32 R5）**：交易日一律按交易日历、北京时间；日历缺失时不推进计数、不解除暂停，记 gap。
+
+1. **跟踪结果冻结（R5）**：complete/untradable/excluded 一经写入即冻结；`unavailable` 由盘后作业在到期后 5 个交易日内每日重算，数据补齐即改写为相应状态（版本统计同步重算），满 5 个交易日仍缺则冻结为 unavailable。
+2. **模拟失败（084）**：失败 ⇔ `state=complete` 且 `direction_correct=false`；`true` 为成功并清零计数。范围：**本人**建议 × 策略版本；跟踪期按**策略自身周期**取（T-A36，用户已定选项 B）：`intraday_t`→1、`short`→5、`swing`→20、`long`→20（T-A37 修正：取不短于典型持有期的最长可用跟踪期，跟踪期只有 1/5/20；RC5 此项只是早期预警，终评见 plan §2.5.7/§2.8.2），周期取该观测所属建议中该版本结论的 `horizon`，缺失时取策略版本声明的周期；仍不清楚 → 该观测跳过（不计失败、不清零）并记 gap `sim_fail_horizon_unknown`，不默认 5 日。映射配置键 `rc5_loss_streak_drawdown.sim_fail_horizon_by_horizon`（取代 `sim_fail_horizon_days`）；观测按 T-A27 第 3 点去重。序列按 `exit_at` 升序（并列按 suggestion_id），pending/unavailable/untradable/excluded 跳过，既不计失败也不清零。连续失败数 = 序列尾部连续失败条数。
+3. **已平仓一笔（085）**：账户 × 证券的一个持仓段：持仓数从 0 变正起，到回到 0 的那笔成交止（部分减仓不结束）。盈亏 = 段内卖出金额 − 买入金额 − 全部费用税（含费用）；< 0 为亏损，> 0 为盈利并清零，= 0（平本）跳过、不清零。按结束成交 `executed_at` 升序，并列按成交 id。段起点早于导入数据（无开仓成交）→ 该段不计入并记 gap。
+4. **暂停期（086/091）**：第 0 天 = 触发时刻所在交易日（非交易日或 15:00 后触发 → 下一交易日）；暂停覆盖第 1..N 个交易日，`paused_until` = 第 N 个交易日 15:00；系统在 `paused_until` 及之后的首次作业恢复（幂等，晚跑不补偿）。触发为**边沿**：亏损笔数/失败数增至 ≥ 阈值的那次、回撤从阈值下方越过阈值的那次；暂停中再次边沿触发 → `paused_until` 取 max(现值, 新计算值)，不叠加。期满时条件仍满足但无新边沿 → 不重新暂停，只保留 RC5 `triggered` 标记。
+5. **系统期满恢复（092）**：期满恢复与用户 resume 做同一检查（§6.0A 第 4 点）；版本不可运行 → 不改为 active，实例保持 paused、`pause_reason_code` 不变、`paused_until` 置 null（不再自动恢复），写 `actor=system` 事件 `detail={expiry_blocked: "STRATEGY_VERSION_NOT_RUNNABLE", lifecycle}` 并发站内通知；用户可归档。不得借期满恢复退役策略。
+6. **RC6 数量超计划（088）**：按同一计划版本**累计**：该版本有效期内同账户、同证券、与计划同方向成交数量之和（被冲正/撤销的成交剔除，冲正后重算），累计 **>** 计划数量才触发（等于不触发）；每计划版本只触发一次。
+7. **RC6 计划边界（089）**：计划版本有效期为半开区间 `[生效时刻, 被替代/关闭时刻)`，与成交 `executed_at` 比较；同刻成交归新版本，关闭同刻已无效。仅有日期的成交以当日 15:00 比较，当日版本有变更 → 该成交 RC6 unknown + gap、不出 flag。同证券多个有效计划：先取与成交同方向的计划判数量；无同方向计划时才判 `opposite_side`；仍多条按生效时刻最新、并列 id 最小取一条。
+8. **健康度缺日（090）**：某交易日缺 `strategy_health_daily` 时，`weight<0.8 连续 5 日` 与 `weight≥0.9 连续 10 日` 两个计数都清零（不跃迁，保守），记 gap；不跳过、不暂停计数。
+9. **内部复验恢复（087）**：内部评估在第三阶段启用（问题 26）；未启用时该条件不参与，`observing→published` 只看权重条件。启用后：恢复 ⇔ 稳健度 ≥ 基线 × `health.internal_recover_ratio`（默认 0.8，可配置）且与权重条件同时连续 10 个交易日成立；0.8 高于降级线 0.7 形成迟滞。
+
 #### 7.11.4 站内提醒与解释（status: draft；P2N-05/06/07/09）
 
 - `/signals`、`/notifications`、`/alerts` 列表沿用 §1.2 游标；signals 排序 `at desc, signal_event_id desc`，通知 `created_at desc, id desc`；其他筛选/结构沿用 §7.7B/7.8。所有读取和 SSE 只允许本人证书或本人用户层事件，事件重放不重复生成建议、提醒或通知。
 - 细化现有 `GET/PUT /notification-preferences`（不分页）：本轮补 `intraday_cadence: "realtime"|"1min"|"3min"|"5min"`，默认 1min；PUT `{intraday_cadence}` 仅更新此键，返回生效值；非法值 400 VALIDATION_ERROR。只影响推送合并节奏，不降低采集/求值频率。免打扰/外部 channels 不在本切片改契约或开放发送。
 - SSE 仍用 §8 既有事件；在保留窗口内按 Last-Event-ID 续传；重连后客户端同时重读本人列表/聚合，补偿超过十分钟的缺口并按事件 id 去重，不把保留窗口当完整历史。断线退回既定十五秒轮询，不新增 WebSocket 或第二套动作事件。
 - §5.2 Suggestion 与 §5.3 DailyReport 的既有 `explanation` 追加 `paragraphs: TextWithEvidence[]`、`prompt_version: string|null`、`validation_status: "passed"|"fallback"`；旧存档读投影可缺这些新增键，前端退回既有 text。新记录 paragraphs 中的引用只指本对象 evidence；text 为各段 text 按顺序换行拼接。LLM 成功时 source=llm、validation_status=passed；模板兜底为 source=template、validation_status=fallback（未调用时 llm_call_id=null），模板不标 AI 生成。
+- **T-A36 裁定（P2N-05i 待定 ①–③，与 P2N-09 对齐）**：
+  1. **逐股/分歧绑定**：`DailyReport.stocks[]` 每项追加 `explanation: Explanation | null`（llm_task `daily_report_stock`），`Suggestion.divergence[]` 每项追加 `explanation: Explanation | null`（llm_task `strategy_divergence`）；结构同上（含 paragraphs/prompt_version/validation_status/fallback_reason）。引用只指本项对象：逐股只引该证券代码前缀的日报证据，分歧只引本建议证据且限于该项 `dimensions` 相关证据。为 null 或键缺失 → 该位置**不显示解释**，前端不再复用或筛选顶层整体解释，不按证据推断归属。
+  2. **回退原因**：`explanation` 追加 `fallback_reason: explanation_fallback_reason | null`，枚举（进 `/meta/enums`）= `not_enabled`（未启用/未配置路由，未调用）| `budget_exceeded` | `timeout` | `provider_error` | `validation_failed`（守卫拒绝）。`validation_status=passed` 时必为 null，`fallback` 时必非空；`not_enabled`/`budget_exceeded` 时 `llm_call_id=null`，其余有调用记录则非空。旧存档缺键 → 前端只显示“模板兜底”，不猜原因。
+  3. **调用记录深链**：`llm_call_id` 只对管理员有意义；`GET /admin/llm/usage` 🛡 追加 `?call_id=` 过滤，返回该条记录（不含原始 prompt 中的个人信息、不含 key）。前端：仅管理员且已有 `/admin/llm/usage` 页时显示链接 `/admin/llm/usage?call_id={id}`，否则管理员只读显示 id；非管理员不显示 `llm_call_id`。
+  4. **数字约定（P2N-R09-065）**：解释中的数字 N 写成 d 位小数时，须等于证据值按 ROUND_HALF_UP 取 d 位的结果，单位一致；百分数/价格 d ≥ min(证据小数位, 2)，计数类须与证据精确相等；只允许 万/亿 的精确换算（÷10⁴/÷10⁸ 后按同一规则）。“约/近/超过”等字样**不放宽容差**。配置键 `explain_guard.min_decimals`（默认 2）。不满足 → `validation_failed`。
+  5. **动作转述（066）**：**无白名单**。LLM 文本中出现任何动作词（含对规则动作的事实性转述，如“规则给出买入”）一律拒绝回落模板；动作只由界面从 `action` 等规则字段展示。
+  6. **否定/引用中的禁用词（067）**：**无例外**。LLM 文本出现禁用词即拒绝，不论否定式、引号或免责语境；固定免责由系统在 LLM 文本之外追加（不经 LLM、不计入守卫），LLM 不得自写免责声明。
 - 解释在不可变正文提交**之前**生成/回退；提交后不异步改正文，必要时生成新建议/日报 revision。任何缺引用、新数字、越权信息、动作词或承诺违规均回退模板；超时/预算/模型故障不影响规则结论。action/score/confidence 与解释路径无关。不得发送密钥、账户/成交标识、个人信息或原始交割单；本切片只用公开/纯合成结构化证据联调，真实私有输入另核隐私门槛。
 - **证书外键（T-A28）**：本切片所有 `source_licence_id` 均 FK → `app.user_data_licences.id`（plan §0A.3 第 5 条旧称 `ops.data_licences` 已更正）；不新建证书表，不按其他标识猜映射。
 - **通知合并与推送节奏（T-A28，最简方案）**：
@@ -1276,6 +1296,16 @@ evidence: Evidence[]
   4. **版本冲突**：`Notification` 追加 `version: int`（≥1），通知行每次变化（合并、改正文、标已读、全部已读、重新未读）都在同一事务内 `+1`。客户端只保留 `version` 大者；`version` 相同视为同一内容，直接丢弃后到者，不比较 `updated_at` 或正文。旧记录投影 `version=1`。
   5. **超窗/未知 `Last-Event-ID`**：事件 id 为每用户单调递增的十进制字符串。带了 `Last-Event-ID` 但它不是十进制、大于当前序号、或早于 600s 保留窗时，服务端在流开头先发控制事件 `event: reset`，`data: {reason: "expired" | "unknown", latest_event_id: string | null}`，随后照常推实时事件；客户端收到后清空事件 id 缓存并全量重读。不带 `Last-Event-ID` 不发 `reset`。HTTP 状态仍为 200。
 - 计划/草案/提醒状态机已在 §7.7/7.7B，P2N-07 直接实现，**不新增候选直接转计划入口**；simulating 禁生草案，G7 仍由用户本人操作。
+
+**T-A34 裁定（status: draft；P2N-06 多实例）**：一条 `signal_events` 行按（策略版本 × params_hash × 证券 × 快照）共享，可扇出到同一用户的多个实例；以下口径按“本人投影”写入时**冻结**，读取时不重算。
+
+1. **匹配实例集合**：本人下同时满足 P2N-06 现有绑定检查的实例（运行版本 = 事件版本、scope/证券匹配、账户匹配且未归档、版本可运行、params_hash 一致），排序 `created_at asc, id asc`（同 T-A27 第 3 点）。
+2. **`SignalEvent.instance_id`**：取集合中**已由该事件生成候选**（`intraday_candidate_refs` 有行）的第一个；都未生成候选（如 stale/resume 类事件）时取集合第一个；集合为空才为 null。`candidate_signal_id` 取所选实例由该事件生成的候选，没有则 null。不得随实例后续暂停/归档改写。
+3. **新增字段** `SignalEvent.instance_ids: string(uuid)[]`：集合全部实例，同序，最多 20 个，空集合为 `[]`（加性字段，旧客户端可忽略）。
+4. **建议归档**：同一用户同一事件只归档**一条**建议：先收集全部匹配实例的结论再一次调用归档；未受事件影响的实例结论沿用该证券最新建议中的原结论（不重算、不丢弃）。通知 `target` 指这条建议。
+5. **通知与 refs**：一个事件对同一用户只 append **一次**通知（不按实例重复）；ref 按事件计：`{type: "signal", id: signal_events.id}`，与实例数无关。`merged_count` 只在子表**新插入**一行 ref 时 +1，重复 ref（含多实例扇出、重放）不增 `merged_count` 也不增 `version`。同一事件的多个候选不另写 ref，从 `/signals` 的 `instance_ids`/`candidate_signal_id` 取得。
+6. **严重度**：invalidation → important，其余 → attention，按事件定，不因实例数提高。
+
 
 ## 8. SSE `GET /stream` 🔒
 - `text/event-stream`；每 15 秒发一次 `heartbeat`；支持 `Last-Event-ID` 续传，服务端保留最近 10 分钟的事件；断线时客户端退回到轮询 `/notifications/unread-count`，终端与首页改为每 ≥ 15 秒带 `If-None-Match` 轮询 `/terminal`、`/today`。

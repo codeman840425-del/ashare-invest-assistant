@@ -1,0 +1,146 @@
+[
+  {
+    "index": 0,
+    "last": "12.34",
+    "prev_close": "11.90",
+    "tag": "synthetic"
+  },
+  {
+    "index": 1,
+    "last": "45.67",
+    "prev_close": "46.10",
+    "tag": "synthetic"
+  },
+  {
+    "index": 2,
+    "last": "8.90",
+    "prev_close": "8.90",
+    "tag": "synthetic"
+  },
+  {
+    "index": 3,
+    "last": "23.45",
+    "prev_close": "22.10",
+    "tag": "synthetic"
+  },
+  {
+    "index": 4,
+    "last": "67.89",
+    "prev_close": "68.50",
+    "tag": "synthetic"
+  },
+  {
+    "index": 5,
+    "last": "5.60",
+    "prev_close": "5.60",
+    "tag": "synthetic"
+  },
+  {
+    "index": 6,
+    "last": "91.20",
+    "prev_close": "89.75",
+    "tag": "synthetic"
+  },
+  {
+    "index": 7,
+    "last": "34.56",
+    "prev_close": "35.00",
+    "tag": "synthetic"
+  },
+  {
+    "index": 8,
+    "last": "2.30",
+    "prev_close": "2.30",
+    "tag": "synthetic"
+  },
+  {
+    "index": 9,
+    "last": "78.10",
+    "prev_close": "76.40",
+    "tag": "synthetic"
+  },
+  {
+    "index": 10,
+    "last": "19.99",
+    "prev_close": "20.50",
+    "tag": "synthetic"
+  },
+  {
+    "index": 11,
+    "last": "55.55",
+    "prev_close": "55.55",
+    "tag": "synthetic"
+  },
+  {
+    "index": 12,
+    "last": "3.14",
+    "prev_close": "3.00",
+    "tag": "synthetic"
+  },
+  {
+    "index": 13,
+    "last": "88.88",
+    "prev_close": "89.90",
+    "tag": "synthetic"
+  },
+  {
+    "index": 14,
+    "last": "7.77",
+    "prev_close": "7.77",
+    "tag": "synthetic"
+  },
+  {
+    "index": 15,
+    "last": "42.00",
+    "prev_close": "41.25",
+    "tag": "synthetic"
+  },
+  {
+    "index": 16,
+    "last": "60.10",
+    "prev_close": "61.00",
+    "tag": "synthetic"
+  },
+  {
+    "index": 17,
+    "last": "15.15",
+    "prev_close": "15.15",
+    "tag": "synthetic"
+  },
+  {
+    "index": 18,
+    "last": "29.30",
+    "prev_close": "28.80",
+    "tag": "synthetic"
+  },
+  {
+    "index": 19,
+    "last": "71.40",
+    "prev_close": "72.20",
+    "tag": "synthetic"
+  },
+  {
+    "index": 20,
+    "last": "9.09",
+    "prev_close": "9.09",
+    "tag": "synthetic"
+  },
+  {
+    "index": 21,
+    "last": "50.50",
+    "prev_close": "49.99",
+    "tag": "synthetic"
+  },
+  {
+    "index": 22,
+    "last": "33.33",
+    "prev_close": "34.00",
+    "tag": "synthetic"
+  },
+  {
+    "index": 23,
+    "last": "11.11",
+    "prev_close": "11.11",
+    "tag": "synthetic"
+  }
+]

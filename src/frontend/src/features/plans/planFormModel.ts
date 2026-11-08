@@ -19,6 +19,22 @@ export interface PlanFormValues {
 
 const blank = (s?: string) => (s ?? '').trim() === '';
 
+/** T-A32 R6：只做写入前边界提示；北京时间固定UTC+8，不依赖浏览器所在时区。 */
+export function beijingPlanDate(now = Date.now()): string {
+  return new Date(now + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+export function planConditionValueIssue(type: PlanConditionType | undefined, value: unknown, now = Date.now()): string | null {
+  const text = typeof value === 'string' ? value.trim() : value === 0 ? '0' : '';
+  // 按十进制字面识别零，避免用Number误把极小非零阈值下溢成零。
+  if (type === 'pct_change' && /^[+-]?(?:0+(?:\.0*)?|\.0+)(?:[eE][+-]?\d+)?$/.test(text)) {
+    return '涨跌幅 pct = 0 方向不明，不可写入；请填写非零的正或负阈值。';
+  }
+  if (type === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(text) && text < beijingPlanDate(now)) {
+    return `日期不得早于写入当日（北京时间 ${beijingPlanDate(now)}），过去日期不可写入。`;
+  }
+  return null; // 其他格式及业务限制仍以服务端400为准，不在浏览器判交易日。
+}
+
 export function toParams(type: PlanConditionType, value?: string): PlanConditionParams {
   const v = (value ?? '').trim();
   if (type === 'price_above' || type === 'price_below') return { price: v };

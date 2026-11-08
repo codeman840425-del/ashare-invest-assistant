@@ -81,4 +81,45 @@ def detail(date: dt.date, auth: AuthDep, engine: EngineDep) -> dict[str, Any]:
         row = latest(conn, auth.user_id, date)
         if row is None:
             raise AppError(ErrorCode.NOT_FOUND)
-        return dict(row.body)
+        body = dict(row.body)
+        body.setdefault("data_as_of", None)
+        # Read-only legacy projection, never overwrite archived report snapshots.
+        account = body.get("account")
+        if account is not None and any(account.get(k) is None for k in ("total_assets", "cash")):
+            body["account"] = None
+            body["gaps"] = [
+                *body.get("gaps", []),
+                {"key": "account", "reason": "no_source", "message": "旧快照账户估值不可计算。"},
+            ]
+        if body["data_as_of"] is None:
+            # Legacy bug repair is a read projection only: use frozen component
+            # clocks, never generated_at, current quotes, or mutable live inputs.
+            times = []
+            components = [body.get("market"), body.get("account")]
+            for stock in body.get("stocks", []):
+                if stock.get("change_from_previous") == "removed":
+                    continue
+                components.append(stock)
+                components.extend(d for d in stock.get("dimensions") or [] if d.get("facts"))
+            for component in components:
+                value = component.get("data_as_of") if component else None
+                if not isinstance(value, str):
+                    continue
+                try:
+                    stamp = dt.datetime.fromisoformat(value)
+                except ValueError:
+                    continue
+                if stamp.tzinfo is not None and stamp <= row.generated_at:
+                    times.append(stamp)
+            body["data_as_of"] = min(times) if times else None
+            body["data_status"] = "partial" if times else "unavailable"
+            if times:
+                body["gaps"] = [
+                    *body.get("gaps", []),
+                    {
+                        "key": "legacy_aggregate_timestamp",
+                        "reason": "no_source",
+                        "message": "旧快照顶层时点缺失；仅从已冻结的已知组件时点投影，未重写存档。",
+                    },
+                ]
+        return body

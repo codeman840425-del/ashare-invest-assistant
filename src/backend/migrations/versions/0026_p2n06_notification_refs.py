@@ -10,6 +10,9 @@ branch_labels = depends_on = None
 
 
 def upgrade() -> None:
+    if sa.inspect(op.get_bind()).has_table("notification_refs_rollback", schema="app"):
+        op.rename_table("notification_refs_rollback", "notification_refs", schema="app")
+        return
     op.create_table(
         "notification_refs",
         sa.Column(
@@ -28,4 +31,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("notification_refs", schema="app")
+    op.rename_table("notification_refs", "notification_refs_rollback", schema="app")

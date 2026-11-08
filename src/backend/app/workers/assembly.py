@@ -310,7 +310,13 @@ def conclusion(
 
 
 def archive_conclusions(
-    conn: Connection, owner: uuid.UUID, code: str, rows: list[Conclusion], policy: Row[Any]
+    conn: Connection,
+    owner: uuid.UUID,
+    code: str,
+    rows: list[Conclusion],
+    policy: Row[Any],
+    *,
+    carry_from_snapshot_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     at = max(r.signal.created_at for r in rows)
     raw = {
@@ -327,11 +333,27 @@ def archive_conclusions(
         "created_at": at,
     }
     content = SuggestionInput.model_validate(raw)
-    identifier = uuid.uuid5(uuid.NAMESPACE_URL, canonical(content.model_dump(mode="json")))
+    identity: Any = content.model_dump(mode="json")
+    if carry_from_snapshot_id is not None:
+        identity = {"input": identity, "carried_from_snapshot_id": str(carry_from_snapshot_id)}
+    identifier = uuid.uuid5(uuid.NAMESPACE_URL, canonical(identity))
     content = content.model_copy(update={"snapshot_id": identifier})
-    persist(conn, owner, identifier, suggestion_items(content), at)
-    archived = archive(conn, user_id=owner, content=content)
+    from app.suggestions.service import verified_carried
+
+    prior = verified_carried(conn, owner, code, carry_from_snapshot_id, at)
+    retained = {
+        row.instance_id for row in rows if prior.get(row.instance_id) == row.model_dump(mode="json")
+    }
+    payload = suggestion_items(content)
+    if carry_from_snapshot_id is not None:
+        payload["carried_from_snapshot_id"] = str(carry_from_snapshot_id)
+    persist(conn, owner, identifier, payload, at)
+    archived = archive(
+        conn, user_id=owner, content=content, carry_from_snapshot_id=carry_from_snapshot_id
+    )
     for row in rows:
+        if row.instance_id in retained:
+            continue
         snapshot = conn.execute(
             select(data_snapshots).where(
                 data_snapshots.c.id == row.signal.snapshot_id,

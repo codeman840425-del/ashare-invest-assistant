@@ -86,6 +86,7 @@ signal_events = Table(
     uuid_col("source_licence_id", nullable=False, fk="app.user_data_licences.id"),
     pk_uuid(),
     txt("tick_id"),
+    boolean("legacy_binding_unknown", nullable=False, server_default=text("false")),
     uuid_col("input_snapshot_id", fk="app.data_snapshots.id"),
     uuid_col("engine_policy_id", fk="app.engine_policies.id"),
     uuid_col("strategy_version_id"),
@@ -100,20 +101,32 @@ signal_events = Table(
     jsonb("detail"),
     ts("quote_ts"),
     created_at(),
-    UniqueConstraint(
-        "source_licence_id",
-        "security_code",
-        "strategy_version_id",
-        "params_hash",
-        "rule_id",
-        "tick_id",
-    ),
-    UniqueConstraint("user_id", "security_code", "trigger_kind", "tick_id"),
     one_of("scope", ["shared", "user"]),
     one_of("trigger_kind", ["flip", "invalidation", "stale", "resume"]),
     CheckConstraint("(scope = 'user') = (user_id IS NOT NULL)", name="scope_user"),
     schema=APP,
     comment="只追加（触发器）",
+)
+
+Index(
+    "uq_signal_events_shared_tick",
+    signal_events.c.source_licence_id,
+    signal_events.c.security_code,
+    signal_events.c.strategy_version_id,
+    signal_events.c.params_hash,
+    signal_events.c.rule_id,
+    signal_events.c.tick_id,
+    unique=True,
+    postgresql_where=text("NOT legacy_binding_unknown"),
+)
+Index(
+    "uq_signal_events_user_tick",
+    signal_events.c.user_id,
+    signal_events.c.security_code,
+    signal_events.c.trigger_kind,
+    signal_events.c.tick_id,
+    unique=True,
+    postgresql_where=text("NOT legacy_binding_unknown"),
 )
 
 suggestion_threads = Table(
@@ -321,5 +334,19 @@ intraday_candidate_refs = Table(
     uuid_col("event_id", nullable=False, fk="app.signal_events.id"),
     uuid_col("candidate_id"),
     PrimaryKeyConstraint("instance_id", "event_id"),
+    schema=APP,
+)
+
+
+signal_event_projections = Table(
+    "signal_event_projections",
+    metadata,
+    uuid_col("event_id", nullable=False, fk="app.signal_events.id"),
+    user_fk(),
+    uuid_col("instance_id", fk="app.strategy_instances.id"),
+    uuid_array("instance_ids", nullable=False),
+    uuid_col("candidate_signal_id"),
+    created_at(),
+    PrimaryKeyConstraint("event_id", "user_id"),
     schema=APP,
 )

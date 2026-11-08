@@ -1,3 +1,4 @@
+import { withExampleSuggestionExplanation } from './explanationFixtures';
 import { currentUser } from './session';
 import { exampleTracking } from './phase2Fixtures';
 /**
@@ -38,7 +39,7 @@ let seq = 0;
 export const actionLog: { suggestion_id: string; kind: string; trade_id: string | null; note: string | null }[] = [];
 
 export function resetSuggestions() {
-  cards = [...SUGGESTIONS.map((s) => ({ ...s })), ...seedSuperseded()];
+  cards = [...SUGGESTIONS.map(withExampleSuggestionExplanation), ...seedSuperseded()];
   lastRefresh = new Map();
   seq = 0;
   actionLog.length = 0;
@@ -75,7 +76,7 @@ export const suggestionHandlers = [
     const next: Suggestion = {
       ...cur, id: uid(1200 + seq), status: 'active', origin: 'manual_refresh', supersedes_id: cur.id, superseded_by_id: null,
       created_at: new Date(now).toISOString(),
-      explanation: { ...cur.explanation, text: `${cur.name}：手动刷新后按缓存数据重算的候选信号卡（示例数据）` },
+      explanation: { source: 'template', text: `${cur.name}：手动刷新后按缓存数据重算的候选信号卡（示例数据）`, llm_call_id: null, prompt_version: null, validation_status: 'fallback', fallback_reason: 'not_enabled', paragraphs: [{ text: `${cur.name}：手动刷新后按缓存数据重算的候选信号卡（示例数据）`, expr: null, evidence_ids: [] }] },
     };
     cards = cards.map((s) => (s.id === cur.id ? { ...s, status: 'superseded', superseded_by_id: next.id } : s));
     cards.push(next);

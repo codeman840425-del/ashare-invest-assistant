@@ -63,6 +63,12 @@ def record(
             ):
                 continue
             payload = {**prior, "status": "cleared", "cleared_at": at.isoformat()}
+            if control["control"] == "stop_take":
+                checked = [e for e in evidence if e["key"] in {"rc1.price_check", "rc1.time_check"}]
+                if not checked:
+                    continue
+                combined = {e["id"]: e for e in [*prior["evidence"], *checked]}
+                payload.update(evidence=list(combined.values()), evidence_ids=sorted(combined))
         else:
             ids = sorted({i for f in flags for i in f["evidence_ids"]})
             used = [e for e in evidence if e["id"] in ids]
@@ -101,7 +107,15 @@ def record(
             if prior is not None and prior["status"] == "active":
                 payload.update(id=prior["id"], triggered_at=prior["triggered_at"])
             else:
-                payload.update(id=str(uuid.uuid4()), triggered_at=at.isoformat())
+                times = [
+                    dt.datetime.fromisoformat(str(e["value"]))
+                    for e in used
+                    if e["key"].startswith("rc1.event_at:")
+                ]
+                point = min(times) if times else at
+                if point.tzinfo is None or point > at:
+                    raise ValueError("risk_event_time_invalid")
+                payload.update(id=str(uuid.uuid4()), triggered_at=point.isoformat())
         conn.execute(
             insert(risk_events).values(
                 id=uuid.uuid4(),

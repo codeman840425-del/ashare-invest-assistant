@@ -361,7 +361,7 @@ def test_rc1_prices_clamp_null_time_stop_gap_and_rc4_hundred() -> None:
         10,
     )
     assert controls[0]["state"] == "unknown"
-    assert "time_stop_clock_undefined" in {g["key"] for g in controls[0]["gaps"]}
+    assert "rc1.holding_segment_start" in {g["key"] for g in controls[0]["gaps"]}
     del ctx.observations["limit_up_price"]
     assert (
         "limit_up_price"

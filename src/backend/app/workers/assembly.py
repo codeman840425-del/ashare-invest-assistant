@@ -217,6 +217,18 @@ def conclusion(
         at,
         feature_set_version=result["feature_set_version"],
     )
+    from app.risk.rc1 import load as load_rc1
+
+    owned_risk.rc1 = load_rc1(
+        conn,
+        owner,
+        owned_risk.account_id,
+        result["security_code"],
+        settings,
+        at,
+        stops_at=at,
+        position_known=owned_risk.position_known,
+    )
     risk, risk_controls = assessed(
         effective_config(conn, owner, settings.business.risk_controls),
         owned_risk,

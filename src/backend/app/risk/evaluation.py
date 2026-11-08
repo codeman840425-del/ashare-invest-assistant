@@ -24,6 +24,7 @@ from app.db.tables.reviews import data_snapshots
 from app.db.tables.strategy import feature_catalog, strategy_instances
 from app.importing.pipeline import live_snapshots
 from app.market_rules.lots import LotSpec, lot_spec
+from app.risk.rc1 import Facts as RC1Facts
 from app.risk.settings import canonical
 from app.schemas.enums import (
     Action,
@@ -101,6 +102,7 @@ class Inputs:
     lot: LotSpec | None
     position_known: bool
     gaps: list[str]
+    rc1: RC1Facts | None = None
 
 
 def inputs(
@@ -344,11 +346,14 @@ def assessed(
             for v in [result.stops.stop_loss, result.stops.take_profit, result.stops.time_stop_days]
         ):
             extra.add("strategy_stops")
-        if result.stops.time_stop_days is not None:
-            # A day count must not be inferred from an arbitrary latest buy/snapshot.
-            extra.add("time_stop_clock_undefined")
-        # The draft defines Stops output, not a new intraday stop event operator.
-        extra.add("stop_trigger_semantics_undefined")
+        from app.risk.rc1 import assess as assess_rc1
+
+        rc_flags, rc_evidence, rc_gaps = assess_rc1(result.stops, source.rc1, at)
+        flags.extend(
+            f.model_copy(update={"evidence_ids": [*f.evidence_ids, policy.id]}) for f in rc_flags
+        )
+        evidence.update({e.id: e for e in rc_evidence})
+        extra.update(rc_gaps)
     result = result.model_copy(
         update={
             "flags": flags,
@@ -423,6 +428,18 @@ def current(
         settings,
         at,
         feature_set_version=suggestion.feature_set_version if suggestion is not None else None,
+    )
+    from app.risk.rc1 import load as load_rc1
+
+    source.rc1 = load_rc1(
+        conn,
+        owner,
+        source.account_id,
+        code,
+        settings,
+        at,
+        stops_at=suggestion.created_at if suggestion is not None else at,
+        position_known=source.position_known,
     )
     name = conn.execute(select(securities.c.name).where(securities.c.code == code)).scalar_one()
     strategies: list[dict[str, Any]] = []

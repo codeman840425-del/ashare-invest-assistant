@@ -1,0 +1,102 @@
+[
+  {
+    "label": "Asterly Point",
+    "observed": "45.20",
+    "boundary": "45.20"
+  },
+  {
+    "label": "Bramblewick Gate",
+    "observed": "78.31",
+    "boundary": "78.30"
+  },
+  {
+    "label": "Cindervale Rest",
+    "observed": "112.49",
+    "boundary": "112.50"
+  },
+  {
+    "label": "Dappleford Quay",
+    "observed": "19.99",
+    "boundary": "19.99"
+  },
+  {
+    "label": "Elderwyn Mill",
+    "observed": "63.75",
+    "boundary": "63.74"
+  },
+  {
+    "label": "Fennimore Watch",
+    "observed": "150.01",
+    "boundary": "150.02"
+  },
+  {
+    "label": "Glistenreach",
+    "observed": "88.88",
+    "boundary": "88.88"
+  },
+  {
+    "label": "Hollowbrook Line",
+    "observed": "27.64",
+    "boundary": "27.63"
+  },
+  {
+    "label": "Ivycross Marker",
+    "observed": "101.10",
+    "boundary": "101.11"
+  },
+  {
+    "label": "Juniper Hollow",
+    "observed": "5.55",
+    "boundary": "5.55"
+  },
+  {
+    "label": "Kestrel Bend",
+    "observed": "174.92",
+    "boundary": "174.91"
+  },
+  {
+    "label": "Larkspur Rise",
+    "observed": "132.70",
+    "boundary": "132.71"
+  },
+  {
+    "label": "Morrowgate",
+    "observed": "66.66",
+    "boundary": "66.66"
+  },
+  {
+    "label": "Nettlecombe Edge",
+    "observed": "91.23",
+    "boundary": "91.22"
+  },
+  {
+    "label": "Orrinshaw Span",
+    "observed": "47.58",
+    "boundary": "47.59"
+  },
+  {
+    "label": "Pellmoor Post",
+    "observed": "199.99",
+    "boundary": "199.99"
+  },
+  {
+    "label": "Quillford Nook",
+    "observed": "13.14",
+    "boundary": "13.13"
+  },
+  {
+    "label": "Ravenhold Sill",
+    "observed": "156.80",
+    "boundary": "156.81"
+  },
+  {
+    "label": "Sablewick Turn",
+    "observed": "72.45",
+    "boundary": "72.45"
+  },
+  {
+    "label": "Thornbury Limit",
+    "observed": "38.06",
+    "boundary": "38.05"
+  }
+]

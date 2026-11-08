@@ -118,6 +118,26 @@
       "file": "docs/api-contract.md",
       "section": "5.4",
       "quote": "证据用既有 `provider=system`、`epistemic_type=hypothesis/estimate`"
+    },
+    "ta36_numeric": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.4 T-A36 point4",
+      "quote": "百分数/价格 d ≥ min(证据小数位, 2)，计数类须与证据精确相等"
+    },
+    "ta36_action": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.4 T-A36 point5",
+      "quote": "LLM 文本中出现任何动作词（含对规则动作的事实性转述，如“规则给出买入”）一律拒绝回落模板"
+    },
+    "ta36_banned": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.4 T-A36 point6",
+      "quote": "LLM 文本出现禁用词即拒绝，不论否定式、引号或免责语境"
+    },
+    "ta36_fallback": {
+      "file": "docs/api-contract.md",
+      "section": "7.11.4 T-A36 point2",
+      "quote": "`validation_status=passed` 时必为 null，`fallback` 时必非空"
     }
   },
   "finding_source_map": {
@@ -147,7 +167,9 @@
     "immutable_snapshot": "immutable",
     "inactive_strategy": "scope",
     "cross_snapshot_citation": "cite",
-    "fact_explanation_confused": "claim"
+    "fact_explanation_confused": "claim",
+    "numeric_precision": "ta36_numeric",
+    "action_word": "ta36_action"
   },
   "cases": [
     {
@@ -19311,8 +19333,8 @@
     },
     {
       "id": "P2N-R09-065",
-      "desc": "【纯合成】待明确：rounding_without_agreement",
-      "case_status": "blocked",
+      "desc": "【纯合成】数字显示精度不足，约字不放宽",
+      "case_status": "ready",
       "input": {
         "snapshot_id": "00000000-0000-4000-8000-000000000901",
         "security_code": "999001.SZ",
@@ -19559,7 +19581,27 @@
           "asserted_passed": null
         }
       ],
-      "expected": null,
+      "expected": {
+        "verdict": "rejected",
+        "findings": [
+          "numeric_precision"
+        ],
+        "explanation_projection": {
+          "source": "template",
+          "validation_status": "fallback",
+          "fallback_reason": "validation_failed"
+        },
+        "protected_result": {
+          "action": "reduce",
+          "score": null,
+          "confidence": "0.61",
+          "stops": {
+            "stop_loss": "9.50",
+            "take_profit": null,
+            "time_stop_days": null
+          }
+        }
+      },
       "source_refs": [
         "cite",
         "numeric",
@@ -19567,29 +19609,169 @@
         "invariant",
         "persist",
         "scope",
-        "synthetic"
+        "synthetic",
+        "ta36_numeric",
+        "ta36_fallback"
       ],
       "audit_steps": [
         "确认本对象/快照证据ID、每句内联引用与cites一致",
         "只从该句所引证据核对主体、原数字及单位；不借其他维度的同值蒙混",
         "逐项核对protected_result及实际启用策略/规则快照；不由模型重算动作",
         "逐句人工式审阅未知/PIT/单位/分歧/承诺等语义；记录绑定文本哈希",
-        "合格候选映射为TextWithEvidence；不合格按既有模板fallback，不改规则正文"
+        "合格候选映射为TextWithEvidence；不合格按既有模板fallback，不改规则正文",
+        "证据E_T=12.40元/股，小数位2；候选12元/股，小数位d=0；ROUND_HALF_UP(12.40,0)=12虽等值，但0<min(2,2)=2，仍拒绝。约字不放宽容差。",
+        "仅单元投影：fallback_reason=validation_failed；不伪造reject_reason枚举，不改action/score/confidence/stops"
       ],
       "semantic_review": {
         "method": "researcher_finite_text_review_not_general_classifier",
-        "findings": [],
-        "note": "未确定接受标签，不计通过。",
-        "text_sha256": "6352210aa0e81275ab9b3b45c5aec034d93940aa0956e3158800ce7f71781b41"
+        "findings": [
+          "numeric_precision"
+        ],
+        "note": "证据E_T=12.40元/股，小数位2；候选12元/股，小数位d=0；ROUND_HALF_UP(12.40,0)=12虽等值，但0<min(2,2)=2，仍拒绝。约字不放宽容差。",
+        "text_sha256": "6352210aa0e81275ab9b3b45c5aec034d93940aa0956e3158800ce7f71781b41",
+        "sentence_reviews": [
+          {
+            "index": 0,
+            "text": "模拟回放：虚构甲收盘约为12元/股[E_T]。",
+            "evidence_ids": [
+              "E_T"
+            ],
+            "rule_fields_unchanged": true,
+            "authority": "ta36_numeric",
+            "decision": "reject",
+            "reason": "证据E_T=12.40元/股，小数位2；候选12元/股，小数位d=0；ROUND_HALF_UP(12.40,0)=12虽等值，但0<min(2,2)=2，仍拒绝。约字不放宽容差。"
+          }
+        ],
+        "binding_sha256": "ad2ca768b34f705a647c942f55e89cac0b162be53cea8f128e870cfdcf7be460"
       },
-      "block_reason": "spec_ambiguity",
-      "topic": "rounding_without_agreement",
-      "question": "计划允许按约定四舍五入，但本输入没有约定；数值展示精度/约字容差如何配置需明确。"
+      "authority_revision": "T-A36",
+      "numeric_calculation": {
+        "evidence_id": "E_T",
+        "evidence_value": "12.40",
+        "evidence_unit": "CNY_per_share",
+        "display_token": "12",
+        "display_unit": "元/股",
+        "display_decimals": 0,
+        "evidence_decimals": 2,
+        "configured_min_decimals": 2,
+        "required_min_decimals": 2,
+        "rounding": "ROUND_HALF_UP",
+        "rounded_value": "12",
+        "equality_pass": true,
+        "precision_pass": false,
+        "result": "rejected"
+      },
+      "numeric_probes": [
+        {
+          "evidence_value": "12.40",
+          "evidence_unit": "CNY_per_share",
+          "display_token": "12",
+          "display_unit": "元/股",
+          "expected_valid": false,
+          "expected_reason": "precision"
+        },
+        {
+          "evidence_value": "12.40",
+          "evidence_unit": "CNY_per_share",
+          "display_token": "12.40",
+          "display_unit": "元/股",
+          "expected_valid": true,
+          "expected_reason": null
+        },
+        {
+          "evidence_value": "12.345",
+          "evidence_unit": "CNY_per_share",
+          "display_token": "12.35",
+          "display_unit": "元/股",
+          "expected_valid": true,
+          "expected_reason": null
+        },
+        {
+          "evidence_value": "12.345",
+          "evidence_unit": "CNY_per_share",
+          "display_token": "12.34",
+          "display_unit": "元/股",
+          "expected_valid": false,
+          "expected_reason": "value"
+        },
+        {
+          "evidence_value": "12.345",
+          "evidence_unit": "pct",
+          "display_token": "12.35",
+          "display_unit": "%",
+          "expected_valid": true,
+          "expected_reason": null
+        },
+        {
+          "evidence_value": "12.40",
+          "evidence_unit": "pct",
+          "display_token": "12.4",
+          "display_unit": "%",
+          "expected_valid": false,
+          "expected_reason": "precision"
+        },
+        {
+          "evidence_value": "6",
+          "evidence_unit": "pct",
+          "display_token": "6",
+          "display_unit": "%",
+          "expected_valid": true,
+          "expected_reason": null
+        },
+        {
+          "evidence_value": "2",
+          "evidence_unit": "count",
+          "display_token": "2",
+          "display_unit": "次",
+          "expected_valid": true,
+          "expected_reason": null
+        },
+        {
+          "evidence_value": "2",
+          "evidence_unit": "count",
+          "display_token": "2.1",
+          "display_unit": "次",
+          "expected_valid": false,
+          "expected_reason": "value"
+        },
+        {
+          "evidence_value": "8000",
+          "evidence_unit": "CNY",
+          "display_token": "0.80",
+          "display_unit": "万元",
+          "expected_valid": true,
+          "expected_reason": null
+        },
+        {
+          "evidence_value": "123500000",
+          "evidence_unit": "CNY",
+          "display_token": "1.24",
+          "display_unit": "亿元",
+          "expected_valid": true,
+          "expected_reason": null
+        },
+        {
+          "evidence_value": "8000",
+          "evidence_unit": "CNY",
+          "display_token": "8",
+          "display_unit": "千元",
+          "expected_valid": false,
+          "expected_reason": "unit"
+        },
+        {
+          "evidence_value": "12.40",
+          "evidence_unit": "CNY_per_share",
+          "display_token": "12.40",
+          "display_unit": "%",
+          "expected_valid": false,
+          "expected_reason": "unit"
+        }
+      ]
     },
     {
       "id": "P2N-R09-066",
-      "desc": "【纯合成】待明确：action_word_factual_quote",
-      "case_status": "blocked",
+      "desc": "【纯合成】规则动作事实转述也拒绝",
+      "case_status": "ready",
       "input": {
         "snapshot_id": "00000000-0000-4000-8000-000000000901",
         "security_code": "999001.SZ",
@@ -19836,7 +20018,27 @@
           "asserted_passed": null
         }
       ],
-      "expected": null,
+      "expected": {
+        "verdict": "rejected",
+        "findings": [
+          "action_word"
+        ],
+        "explanation_projection": {
+          "source": "template",
+          "validation_status": "fallback",
+          "fallback_reason": "validation_failed"
+        },
+        "protected_result": {
+          "action": "reduce",
+          "score": null,
+          "confidence": "0.61",
+          "stops": {
+            "stop_loss": "9.50",
+            "take_profit": null,
+            "time_stop_days": null
+          }
+        }
+      },
       "source_refs": [
         "cite",
         "numeric",
@@ -19844,29 +20046,47 @@
         "invariant",
         "persist",
         "scope",
-        "synthetic"
+        "synthetic",
+        "ta36_action",
+        "ta36_fallback"
       ],
       "audit_steps": [
         "确认本对象/快照证据ID、每句内联引用与cites一致",
         "只从该句所引证据核对主体、原数字及单位；不借其他维度的同值蒙混",
         "逐项核对protected_result及实际启用策略/规则快照；不由模型重算动作",
         "逐句人工式审阅未知/PIT/单位/分歧/承诺等语义；记录绑定文本哈希",
-        "合格候选映射为TextWithEvidence；不合格按既有模板fallback，不改规则正文"
+        "合格候选映射为TextWithEvidence；不合格按既有模板fallback，不改规则正文",
+        "句子“系统原判定文字为减仓”确实转述protected_result.action=reduce；但“减仓”为动作词，正式条款无事实转述白名单，因此拒绝。",
+        "仅单元投影：fallback_reason=validation_failed；不伪造reject_reason枚举，不改action/score/confidence/stops"
       ],
       "semantic_review": {
         "method": "researcher_finite_text_review_not_general_classifier",
-        "findings": [],
-        "note": "未确定接受标签，不计通过。",
-        "text_sha256": "f32f1f1e0f0927cc0a161fe4fc8f5b1940a6b917e58bc7540a042a13c1ae793b"
+        "findings": [
+          "action_word"
+        ],
+        "note": "句子“系统原判定文字为减仓”确实转述protected_result.action=reduce；但“减仓”为动作词，正式条款无事实转述白名单，因此拒绝。",
+        "text_sha256": "f32f1f1e0f0927cc0a161fe4fc8f5b1940a6b917e58bc7540a042a13c1ae793b",
+        "sentence_reviews": [
+          {
+            "index": 0,
+            "text": "模拟回放：系统原判定文字为减仓[E_T]。",
+            "evidence_ids": [
+              "E_T"
+            ],
+            "rule_fields_unchanged": true,
+            "authority": "ta36_action",
+            "decision": "reject",
+            "reason": "句子“系统原判定文字为减仓”确实转述protected_result.action=reduce；但“减仓”为动作词，正式条款无事实转述白名单，因此拒绝。"
+          }
+        ],
+        "binding_sha256": "6793beb346b0c8d58e80cf69556095bd57ebcac459868c89ac6cae1c99fe71f7"
       },
-      "block_reason": "spec_ambiguity",
-      "topic": "action_word_factual_quote",
-      "question": "规则动作可见与LLM不允许动作词之间，事实性转述动作是否有白名单？未裁定不自行放行。"
+      "authority_revision": "T-A36"
     },
     {
       "id": "P2N-R09-067",
-      "desc": "【纯合成】待明确：negated_banned_word",
-      "case_status": "blocked",
+      "desc": "【纯合成】否定免责中的禁用词也拒绝",
+      "case_status": "ready",
       "input": {
         "snapshot_id": "00000000-0000-4000-8000-000000000901",
         "security_code": "999001.SZ",
@@ -20113,7 +20333,27 @@
           "asserted_passed": null
         }
       ],
-      "expected": null,
+      "expected": {
+        "verdict": "rejected",
+        "findings": [
+          "prohibited_term"
+        ],
+        "explanation_projection": {
+          "source": "template",
+          "validation_status": "fallback",
+          "fallback_reason": "validation_failed"
+        },
+        "protected_result": {
+          "action": "reduce",
+          "score": null,
+          "confidence": "0.61",
+          "stops": {
+            "stop_loss": "9.50",
+            "take_profit": null,
+            "time_stop_days": null
+          }
+        }
+      },
       "source_refs": [
         "cite",
         "numeric",
@@ -20121,24 +20361,49 @@
         "invariant",
         "persist",
         "scope",
-        "synthetic"
+        "synthetic",
+        "ta36_banned",
+        "ta36_fallback"
       ],
       "audit_steps": [
         "确认本对象/快照证据ID、每句内联引用与cites一致",
         "只从该句所引证据核对主体、原数字及单位；不借其他维度的同值蒙混",
         "逐项核对protected_result及实际启用策略/规则快照；不由模型重算动作",
         "逐句人工式审阅未知/PIT/单位/分歧/承诺等语义；记录绑定文本哈希",
-        "合格候选映射为TextWithEvidence；不合格按既有模板fallback，不改规则正文"
+        "合格候选映射为TextWithEvidence；不合格按既有模板fallback，不改规则正文",
+        "“不保证收益”是否定式，但仍出现禁用词“保证”；T-A36明确否定/引用/免责无例外。固定免责在LLM文本之外由系统追加，本句不得自写。",
+        "仅单元投影：fallback_reason=validation_failed；不伪造reject_reason枚举，不改action/score/confidence/stops"
       ],
       "semantic_review": {
         "method": "researcher_finite_text_review_not_general_classifier",
-        "findings": [],
-        "note": "未确定接受标签，不计通过。",
-        "text_sha256": "0d00bcf6311f4b9ea3b6498e075da10952966fbfae7f4f2cf45547209b7b22a0"
+        "findings": [
+          "prohibited_term"
+        ],
+        "note": "“不保证收益”是否定式，但仍出现禁用词“保证”；T-A36明确否定/引用/免责无例外。固定免责在LLM文本之外由系统追加，本句不得自写。",
+        "text_sha256": "0d00bcf6311f4b9ea3b6498e075da10952966fbfae7f4f2cf45547209b7b22a0",
+        "sentence_reviews": [
+          {
+            "index": 0,
+            "text": "模拟回放：本工具不保证收益[E_T]。",
+            "evidence_ids": [
+              "E_T"
+            ],
+            "rule_fields_unchanged": true,
+            "authority": "ta36_banned",
+            "decision": "reject",
+            "reason": "“不保证收益”是否定式，但仍出现禁用词“保证”；T-A36明确否定/引用/免责无例外。固定免责在LLM文本之外由系统追加，本句不得自写。"
+          }
+        ],
+        "binding_sha256": "c2011171ec6fefa88b143106376c7eec74f66a1d122d46e900c6a8001bd0de45"
       },
-      "block_reason": "spec_ambiguity",
-      "topic": "negated_banned_word",
-      "question": "禁用词在否定式免责声明/引用中是否存在明确例外？不靠词命中判定所有中文语义。"
+      "authority_revision": "T-A36"
     }
-  ]
+  ],
+  "r09b": {
+    "tracking_name": "P2N-R09b (internal only; not a new assigned task number)",
+    "authority": "T-A36 78cd872 / api-contract §7.11.4 points4-6",
+    "original64_sha256": "5f0dd1fb32089848f9d54ab07525e221a3705b01cd5cb6612602711e743adeef",
+    "new_calls": 0,
+    "new_tokens": 0
+  }
 }

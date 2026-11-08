@@ -192,6 +192,66 @@ def test_missing_authorized_environment_no_fallback(
     assert not context["secret_path"].exists()
 
 
+def test_preflight_only_does_not_read_credential_or_dispatch(
+    context: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Forbidden(dict):
+        def get(self, key: str, default: object = None) -> object:
+            if key == "MAIRUI_LICENCE":
+                pytest.fail("offline preflight must not read credentials")
+            return super().get(key, default)
+
+    monkeypatch.setattr(probe.os, "environ", Forbidden())
+    monkeypatch.setattr(probe, "STOP", context["stop"])
+    monkeypatch.setattr(probe, "execute", lambda **_: pytest.fail("offline preflight dispatched"))
+    before = context["counter"].read_bytes()
+    assert (
+        probe.main(
+            [
+                "--preflight-only",
+                "--counter",
+                str(context["counter"]),
+                "--secret-path",
+                str(context["secret_path"]),
+            ]
+        )
+        == 0
+    )
+    assert context["counter"].read_bytes() == before
+    assert not context["secret_path"].exists()
+    context["counter"].chmod(0o644)
+    assert (
+        probe.main(
+            [
+                "--preflight-only",
+                "--counter",
+                str(context["counter"]),
+                "--secret-path",
+                str(context["secret_path"]),
+            ]
+        )
+        == 2
+    )
+    assert context["counter"].read_bytes() == before
+
+
+def test_cli_runtime_paths_still_require_explicit_authorization_flag(
+    context: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = []
+
+    def execute(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return {"outcome": "completed_history_collection_only", "temporary_secret_deleted": True}
+
+    monkeypatch.setattr(probe, "execute", execute)
+    paths = ["--counter", str(context["counter"]), "--secret-path", str(context["secret_path"])]
+    assert probe.main(paths) == 2
+    assert calls == []
+    assert probe.main(["--execute-authorized-history", *paths]) == 0
+    assert calls == [{"counter": context["counter"], "secret_path": context["secret_path"]}]
+
+
 def test_connection_never_reconnects() -> None:
     connection = probe.SingleConnection()
     connection.connect_attempts = 1

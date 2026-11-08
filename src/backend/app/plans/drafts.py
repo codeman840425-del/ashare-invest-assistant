@@ -69,6 +69,15 @@ def candidates(conn: Connection, owner: uuid.UUID, ids: list[uuid.UUID]) -> list
         ).scalar_one_or_none()
         if life not in {"published", "observing"} or stored not in {"published", "observing"}:
             raise AppError(E.STRATEGY_VERSION_NOT_RUNNABLE, details={"lifecycle": life or stored})
+    from app.plans.budgets import refresh_reasons
+
+    refresh_reasons(conn, owner, list(rows), dt.datetime.now(dt.UTC))
+    rows = conn.execute(
+        select(candidate_signals)
+        .where(candidate_signals.c.user_id == owner, candidate_signals.c.id.in_(ids))
+        .order_by(candidate_signals.c.id)
+        .with_for_update()
+    ).all()
     for r in rows:
         if r.valid_until is not None and r.valid_until <= dt.datetime.now(dt.UTC):
             s.transition("expired", "drafted", [])
@@ -108,8 +117,17 @@ def generate(
         from app.plans.generation import generate as assemble
 
         signals = candidates(conn, auth.user_id, body.signal_ids)
-        identifier = assemble(conn, auth.user_id, signals, cfg, dt.datetime.now(dt.UTC))
-        return output(conn, own(conn, auth.user_id, identifier))
+        from app.plans.budgets import BudgetExhaustedError, block
+
+        now = dt.datetime.now(dt.UTC)
+        try:
+            identifier = assemble(conn, auth.user_id, signals, cfg, now)
+        except BudgetExhaustedError as exc:
+            reasons = block(conn, auth.user_id, signals, exc.allocations, now)
+        else:
+            return output(conn, own(conn, auth.user_id, identifier))
+    # Commit the rejected executability facts, never a partial draft.
+    raise AppError(E.SIGNAL_NOT_EXECUTABLE, details={"reason_ids": reasons})
 
 
 def own(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, lock: bool = False) -> Row[Any]:
@@ -312,6 +330,35 @@ def confirm(
             or Decimal(body.chosen_qty) > Decimal(ctx["quantity_cap"])
         ):
             s.invalid("chosen_qty", "quantity_cap_unavailable_or_exceeded")
+        if d.action in {"buy", "add"}:
+            from app.plans.budgets import (
+                BudgetExhaustedError,
+                BudgetUnknownError,
+                allocations,
+                remaining,
+            )
+
+            live_instances = conn.execute(
+                select(strategy_instances)
+                .where(
+                    strategy_instances.c.id.in_([r.instance_id for r in validated_signals]),
+                    strategy_instances.c.user_id == auth.user_id,
+                    strategy_instances.c.status == "active",
+                )
+                .with_for_update()
+            ).all()
+            try:
+                budget_now = allocations(conn, auth.user_id, live_instances, now)
+                budget_left = remaining(budget_now)
+            except (BudgetExhaustedError, BudgetUnknownError):
+                raise AppError(E.PLAN_DRAFT_STALE, details={"status": "stale"}) from None
+            if budget_now != ctx.get("budget_allocations"):
+                raise AppError(E.PLAN_DRAFT_STALE, details={"status": "stale"})
+            if (
+                budget_left is not None
+                and Decimal(body.chosen_qty) * Decimal(body.chosen_price) > budget_left
+            ):
+                s.invalid("chosen_qty", "strategy_budget_exceeded")
         fields = []
         if (
             not Decimal(d.qty_range["min"])

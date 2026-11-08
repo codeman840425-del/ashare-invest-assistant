@@ -8,7 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, NoReturn
 
 from sqlalchemy import Connection, insert, select
@@ -25,10 +25,12 @@ from app.db.tables.strategy import market_rule_versions, strategy_instances, str
 from app.ingest.owned_quotes import SCHEMA
 from app.market_rules.lots import lot_spec
 from app.plans import service
+from app.plans.budgets import BudgetUnknownError, allocations, remaining
 from app.plans.models import number
 from app.risk.evaluation import inputs
 from app.signals.models import Stops
 from app.signals.service import transition
+from app.suggestions.risk import effective_config
 from app.workers.assembly import canonical
 
 
@@ -71,7 +73,7 @@ def generate(
     day = now.astimezone(dt.timezone(dt.timedelta(hours=8))).date()
     account = _account(conn, aid, day)
     pos = account.positions.get(code)
-    context = {
+    context: dict[str, Any] = {
         "holding_qty": str(pos.qty if pos else 0),
         "sellable_qty": str(pos.sellable if pos else 0),
         "cash": str(account.cash) if account.cash is not None else None,
@@ -135,15 +137,22 @@ def generate(
         conn, owner, code, aid, settings, now, feature_set_version=signals[0].feature_set_version
     )
     observations = source.context.observations
-    if any(k not in observations for k in ("limit_down_price", "limit_up_price", "total_assets")):
-        missing("limit_prices_or_total_assets")
-    assets = Decimal(str(observations["total_assets"].value))
-    if assets <= 0:
+    if any(k not in observations for k in ("limit_down_price", "limit_up_price")):
+        missing("limit_prices")
+    cfg = effective_config(conn, owner, settings.business.risk_controls)
+    assets = (
+        Decimal(str(observations["total_assets"].value)) if "total_assets" in observations else None
+    )
+    if assets is not None and assets <= 0:
         missing("positive_total_assets")
     if len({canonical(r.stops) for r in signals}) != 1:
         missing("distinct_strategy_stops_no_cross_strategy_synthesis")
     stops = Stops.model_validate(signals[0].stops)
-    if stops.stop_loss is None or stops.stop_loss <= 0 or price <= stops.stop_loss:
+    stop_disabled = not cfg.rc1_stop_take.enabled
+    if stops.stop_loss is None:
+        if not stop_disabled:
+            missing("positive_per_share_stop_distance")
+    elif stops.stop_loss <= 0 or price <= stops.stop_loss:
         missing("positive_per_share_stop_distance")
     rate = segment.fees.commission_rate_default_pct
     fee_source = "market_rule_versions:" + str(rules.id)
@@ -168,15 +177,6 @@ def generate(
         fee_source = "app.trades:" + str(previous_fee.id)
     if rate is None:
         missing("commission_rate")
-    # No contract defines a per-trade loss setting or attribution of used budget
-    # across multiple instances. Refuse that input, do not spend all available cash.
-    if action in {"buy", "add"}:
-        missing("per_trade_max_loss_input", "strategy_budget_remaining_attribution")
-    upper = min(Decimal(str(context["sellable_qty"])), Decimal(lot.max_qty))
-    upper = Decimal(lot.min_buy) + ((upper - lot.min_buy) // lot.step) * lot.step
-    if upper < lot.min_buy:
-        missing("sellable_minimum_or_odd_lot_draft_range")
-    lower = max(Decimal(lot.min_buy), (upper / 2 // lot.step) * lot.step)
     slips = set()
     for instance in instances:
         version = conn.execute(
@@ -202,17 +202,117 @@ def generate(
     high = min(price * (1 + slip), Decimal(str(observations["limit_up_price"].value)))
     if low > high:
         missing("price_range_outside_limits")
-    amount = upper * price
-    fee = max(amount * rate / 100, segment.fees.commission_min_yuan)
-    fee += amount * (segment.fees.transfer_fee_pct + segment.fees.stamp_duty_sell_pct) / 100
-    loss = upper * (price - stops.stop_loss)
+
+    def fees(qty: Decimal, entry: Decimal, exit_price: Decimal | None = None) -> Decimal:
+        amount = qty * entry
+        value = max(amount * rate / 100, segment.fees.commission_min_yuan)
+        value += amount * segment.fees.transfer_fee_pct / 100
+        if exit_price is None:
+            value += amount * segment.fees.stamp_duty_sell_pct / 100
+        else:
+            out = qty * exit_price
+            value += max(out * rate / 100, segment.fees.commission_min_yuan)
+            value += out * (segment.fees.transfer_fee_pct + segment.fees.stamp_duty_sell_pct) / 100
+        return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    budget_rows = []
+    if action in {"buy", "add"}:
+        try:
+            budget_rows = allocations(conn, owner, instances, now)
+            budget_left = remaining(budget_rows)
+        except BudgetUnknownError as exc:
+            missing(str(exc))
+        cap = Decimal(lot.max_qty)
+        for signal in signals:
+            for flag in signal.risk_flags or []:
+                if flag.get("quantity_cap") is not None:
+                    cap = min(cap, Decimal(str(flag["quantity_cap"])))
+        if cfg.rc2_position_cap.enabled:
+            if assets is None or "security_value" not in observations:
+                missing("single_position_cap_inputs")
+            room = assets * cfg.rc2_position_cap.single_position_max_pct / 100 - Decimal(
+                str(observations["security_value"].value)
+            )
+            cap = min(cap, max(Decimal(0), room) / price)
+        if budget_left is not None:
+            cap = min(cap, budget_left / high)
+        if (
+            security.risk_flag in {"st", "star_st"}
+            and security.board in segment.risk_warning.applies_to_boards
+        ):
+            bought = (
+                conn.execute(
+                    select(trades.c.quantity).where(
+                        trades.c.user_id == owner,
+                        trades.c.security_code == code,
+                        trades.c.side == "buy",
+                        trades.c.voided_at.is_(None),
+                        trades.c.created_at <= now,
+                        trades.c.traded_at
+                        >= dt.datetime.combine(
+                            day,
+                            dt.time(),
+                            now.astimezone(dt.timezone(dt.timedelta(hours=8))).tzinfo,
+                        ),
+                        trades.c.traded_at <= now,
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            cap = min(
+                cap,
+                max(
+                    Decimal(0),
+                    Decimal(segment.risk_warning.daily_buy_cap_shares) - sum(bought, Decimal(0)),
+                ),
+            )
+        # Monotone integer search respects minimum commissions and never spends
+        # future proceeds. A round-trip estimate is retained as the fee buffer.
+        left, right = 0, (int((cap - lot.min_buy) // lot.step) + 1 if cap >= lot.min_buy else 0)
+        exit_reference = stops.stop_loss if stops.stop_loss is not None else high
+        while left < right:
+            middle = (left + right + 1) // 2
+            qty = Decimal(lot.min_buy + (middle - 1) * lot.step)
+            if qty * high + fees(qty, high, exit_reference) <= account.cash:
+                left = middle
+            else:
+                right = middle - 1
+        if left == 0:
+            missing("cash_or_quantity_cap_below_minimum")
+        upper = Decimal(lot.min_buy + (left - 1) * lot.step)
+        fee = fees(upper, high, exit_reference)
+        context.update(
+            budget_allocations=budget_rows,
+            budget_used=budget_rows[0]["budget_used"] if len(budget_rows) == 1 else None,
+            budget_amount=budget_rows[0]["budget_amount"] if len(budget_rows) == 1 else None,
+            plan_ids=sorted({p for r in budget_rows for p in r["plan_ids"]}),
+        )
+    else:
+        upper = min(Decimal(str(context["sellable_qty"])), Decimal(lot.max_qty))
+        upper = Decimal(lot.min_buy) + ((upper - lot.min_buy) // lot.step) * lot.step
+        if upper < lot.min_buy:
+            missing("sellable_minimum_or_odd_lot_draft_range")
+        fee = fees(upper, price)
+    lower = max(Decimal(lot.min_buy), (upper / 2 // lot.step) * lot.step)
+    loss = None if stops.stop_loss is None else upper * (high - stops.stop_loss) + fee
+    warnings = []
+    if stop_disabled:
+        warnings.append({"key": "max_loss_amount", "reason": "rc1_disabled"})
+    if assets is None:
+        warnings.append({"key": "max_loss_pct", "reason": "no_source"})
+    context["gaps"] = warnings
     untils = [r.valid_until for r in signals if r.valid_until is not None]
     if len(untils) != len(signals) or min(untils) <= now:
         missing("signal_valid_until")
     identifier, snapshot = uuid.uuid4(), uuid.uuid4()
     payload = {
         "schema_version": "p2n07-draft-input-v1",
-        "plan_draft_context": {"account_id": str(aid), "quantity_cap": str(upper)},
+        "plan_draft_context": {
+            "account_id": str(aid),
+            "quantity_cap": str(upper),
+            "budget_allocations": budget_rows,
+        },
         "fee_inputs": {
             "source": fee_source,
             "commission_rate_pct": str(rate),
@@ -246,13 +346,27 @@ def generate(
             price_range={"low": str(low), "high": str(high)},
             stops=stops.model_dump(mode="json"),
             max_loss_amount=loss,
-            max_loss_pct=loss / assets * 100,
+            max_loss_pct=loss / assets * 100 if loss is not None and assets is not None else None,
             fee_estimate={
                 "amount": str(fee.quantize(Decimal("0.01"))),
                 "epistemic_type": "estimate",
             },
             user_context_snapshot=context,
-            risk_flags=[f for r in signals for f in (r.risk_flags or [])],
+            risk_flags=[f for r in signals for f in (r.risk_flags or [])]
+            + (
+                [
+                    {
+                        "control": "stop_take",
+                        "level": "attention",
+                        "message": "RC1已关闭，最大亏损无法计算。",
+                        "gated_actions": [],
+                        "quantity_cap": None,
+                        "evidence_ids": [],
+                    }
+                ]
+                if stop_disabled
+                else []
+            ),
             judgment_checklist=[
                 {
                     "id": "risk_announcements",

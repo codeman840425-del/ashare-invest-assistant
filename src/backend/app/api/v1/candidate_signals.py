@@ -7,6 +7,7 @@ import datetime as dt
 import hashlib
 import json
 import uuid
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -157,7 +158,12 @@ def signal_out(conn: Connection, row: Any) -> dict[str, Any]:
         "strategy_name": strategy.name,
         "lifecycle": version.lifecycle,
         "name": name or row.security_code,
-        "confidence": {"level": row.confidence_level, "value": row.confidence},
+        "confidence": {
+            "level": row.confidence_level,
+            "value": float(
+                Decimal(row.confidence).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            ),
+        },
         "reason_ids": conn.execute(
             select(reasons.c.id)
             .where(reasons.c.signal_id == row.id, reasons.c.user_id == row.user_id)

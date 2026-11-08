@@ -130,6 +130,8 @@ def version(
     identifier = uuid.uuid4()
     payload = body.model_dump(mode="json", exclude={"base_version_no", "origin"})
     payload["checklist_answers"] = answers or []
+    if n == 1:
+        payload["candidate_signal_ids"] = [str(i) for i in (head.candidate_signal_ids or [])]
     payload["name"] = conn.execute(
         select(securities.c.name).where(securities.c.code == head.security_code)
     ).scalar_one()

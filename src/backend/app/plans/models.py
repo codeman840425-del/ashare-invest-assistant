@@ -294,10 +294,10 @@ class PlanDraft(Body):
     qty_range: QuantityRange
     price_range: PriceRange
     stops: Stops
-    max_loss_amount: str
-    max_loss_pct: str
+    max_loss_amount: str | None
+    max_loss_pct: str | None
     fee_estimate: FeeEstimate
-    user_context_snapshot: dict[str, str | None]
+    user_context_snapshot: dict[str, Any]
     risk_flags: list[dict[str, Any]]
     judgment_checklist: list[Question]
     valid_until: dt.datetime

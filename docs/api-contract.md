@@ -1249,6 +1249,14 @@ evidence: Evidence[]
 - SSE 仍用 §8 既有事件；在保留窗口内按 Last-Event-ID 续传；重连后客户端同时重读本人列表/聚合，补偿超过十分钟的缺口并按事件 id 去重，不把保留窗口当完整历史。断线退回既定十五秒轮询，不新增 WebSocket 或第二套动作事件。
 - §5.2 Suggestion 与 §5.3 DailyReport 的既有 `explanation` 追加 `paragraphs: TextWithEvidence[]`、`prompt_version: string|null`、`validation_status: "passed"|"fallback"`；旧存档读投影可缺这些新增键，前端退回既有 text。新记录 paragraphs 中的引用只指本对象 evidence；text 为各段 text 按顺序换行拼接。LLM 成功时 source=llm、validation_status=passed；模板兜底为 source=template、validation_status=fallback（未调用时 llm_call_id=null），模板不标 AI 生成。
 - 解释在不可变正文提交**之前**生成/回退；提交后不异步改正文，必要时生成新建议/日报 revision。任何缺引用、新数字、越权信息、动作词或承诺违规均回退模板；超时/预算/模型故障不影响规则结论。action/score/confidence 与解释路径无关。不得发送密钥、账户/成交标识、个人信息或原始交割单；本切片只用公开/纯合成结构化证据联调，真实私有输入另核隐私门槛。
+- **证书外键（T-A28）**：本切片所有 `source_licence_id` 均 FK → `app.user_data_licences.id`（plan §0A.3 第 5 条旧称 `ops.data_licences` 已更正）；不新建证书表，不按其他标识猜映射。
+- **通知合并与推送节奏（T-A28，最简方案）**：
+  1. **事件不合并**：每条 `signal_events`/建议变化照常逐条持久化，`/signals` 能查到全部；合并只作用于站内 `notifications` 记录与推送。
+  2. **合并窗口**：只合并 `security_code` 非空的盘中通知；键 `dedup_key = "{security_code}|{notification_kind}|{bucket}"`，`bucket` = 北京时间按 10 分钟取整的窗口起点（`[hh:m0, hh:m0+10min)`，左闭右开，固定对齐，不随首条滑动）；`(user_id, dedup_key)` 唯一，写入用 upsert，并发安全。日报、导入、系统等无证券通知不合并。
+  3. **持久化**：首条事件建通知（`created_at`=首条时间）；窗口内后续事件 upsert 同一行：`merged_count += 1`、`updated_at`=最新事件时间、`title/body/severity` 取最新（severity 取窗口内最高）、`target` 指最新对象；每个被合并的引用写子表 `notification_refs(notification_id, ref_type, ref_id, at)`，唯一 `(notification_id, ref_type, ref_id)` 保证重放幂等。`Notification` 追加 `merged_count: int`（≥1）、`updated_at: datetime`、`refs: [{type, id, at}]`（按 `at desc` 最多 20 条，全部见子表与 `/signals`）；旧记录投影 `merged_count=1`、`refs=[]`、`updated_at=created_at`。
+  4. **已读**：一行一个未读单位，`unread-count` = 本人 `read_at IS NULL` 行数；标已读即整行（含全部 refs）已读。已读后同一窗口又来新事件：同行 `read_at` 置回 `null`（重新未读）并更新计数，不新建行；下一窗口另建新行。
+  5. **推送节奏**（`intraday_cadence`，只作用于 SSE `notification` 事件；`signal`、`quote` 等不受影响）：`realtime` 每次 upsert 立即推；`1min/3min/5min` 按北京时间整 N 分钟对齐分桶，桶结束时对桶内变化过的每个通知 id 只推一次最新完整 `Notification`。`severity=important` 一律立即推。待推缓冲只在内存/Redis，丢失不补推——通知行是唯一事实来源。
+  6. **断线补读**：SSE 事件进 §8 的 600 秒续传缓冲；重连带 `Last-Event-ID` 补发窗口内事件；超窗或无 ID 时客户端重读 `/notifications?unread=true` 与 `unread-count`。客户端按通知 `id` 去重，取 `updated_at` 较新者覆盖，不重复计未读。
 - 计划/草案/提醒状态机已在 §7.7/7.7B，P2N-07 直接实现，**不新增候选直接转计划入口**；simulating 禁生草案，G7 仍由用户本人操作。
 
 ## 8. SSE `GET /stream` 🔒

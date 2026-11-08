@@ -1,0 +1,16 @@
+# T-T26-rebase：本地整合完成
+- 已读 token-rules 与 review-d5dd1f8；工作树起止干净，未碰共享 main 工作树、未 stash、未推送。
+- fetch origin 全部分支后核查：34 个待重写提交在远端可达数为 0；日志 T-T26-rebase-logs/fetch.log。
+- 备份：backup/test-T-T01-before-T-T26-rebase-20261107 → 5c0fec5。
+- 执行：git rebase d5dd1f8；新 tip 8cfa952db76701d95f651d67ad0b1d65e4fcf536（test/T-T01，33 个重放提交，重复改动被折叠）。
+- 冲突逐项：test_expected_json.py 的 add/add 合并 T-T26 断言与原后端占位；后续头注/quantity_match 冲突保留完整校验。
+- 额外冲突：test_fixtures_fmt_a.py 保留 fake/CR/名称断言；fmt_a README/meta 保留最新登记；expected 保留后缀规范化；generate 保留复现及 quantity_match 校验。
+- 最终 tests/ 树相对备份仅 test_expected_json 模块说明不同，AST 核对可执行语义完全一致，没有整文件 ours/theirs 丢失断言。
+- 相关测试：241 passed / 0 failed / 8 skipped；8 项为原分支既有后端占位，未新增跳过；T-T26 原 241 项均通过。
+- 命令：uv run --no-project -q --with pytest==9.2.0 --with pyyaml==6.0.3 python -m pytest -c tests/pytest.ini tests/backend/unit/test_expected_json.py tests/backend/unit/test_fixtures_fmt_a.py --tb=short
+- 命令：python3 tests/fixtures/broker_statements/fmt_a/generate.py --check → 0 差异。
+- 命令：uv run --no-project -q --with pyyaml==6.0.3 python scripts/ci/check_fixtures.py → 0 失败，46 码覆盖。
+- 命令：uv run --no-project -q --with pyyaml==6.0.3 python scripts/ci/secret_scan.py range d5dd1f8..HEAD → 178 文件版本，阻断 0 / 警告 0；范围全部 tests/。
+- 日志根目录：/workspace/team/reports/T-T26-rebase-logs/；rebase.log、pytest.log、generate.log、fixtures.log、secret-scan.log、semantic.log。
+- 未双基线全量，未连接 live/真实行情；原后端占位保留不代表后端接口验收通过。
+- 谁做什么：编排者/架构师评审新 tip；如后续需全量验收另行安排，推送仍须用户批准。

@@ -1,0 +1,21 @@
+# 复审 c30ac58（T-O17：plan 4.6.5A 第 9 条，收窄 aia_ingest 对两张对账表的权限）：可推（单独推即可），但 T-B61 迁移落地前要先修 M1
+- 评审人：项目架构师；2026-11-07 MST（America/Denver）；本机 Shell，临时库 rv5-pg 用后已删，只读，没有推送。
+- 最小权限：做法是先单独撤销 aia_ingest 在两表、子表和序列上的全部权限，再逐项授权。
+  - master_vendor_batches 只给 SELECT，加上 status、fetched_at、datasets、error_code 四列的 UPDATE；
+  - master_vendor_list_rows 只给 INSERT；
+  - 两张表都从 aia_maint 按 source_licence_id 获得 DELETE 的范围里排除。
+  - 自检会拒绝：表级的 INSERT/UPDATE/DELETE/TRUNCATE、非点名列的 UPDATE、对行表的列级 SELECT/UPDATE。与第 9 条一致，没有多给。
+- 负例断言齐全，全部会被拒：
+  - aia_ingest：批次表的 INSERT、DELETE、TRUNCATE，非点名列逐列 UPDATE；行表的 SELECT、DELETE、TRUNCATE，逐列 UPDATE；
+  - aia_maint：两表都没有 DML，也没有列级 SELECT；
+  - aia_api：仍然读不到 licence 密文。
+  - 正例：aia_api 对两表有完整 DML。
+- 实测：
+  - 当前迁移里两张表还不存在：apply 成功，verify 71 OK，第 9 条按设计跳过；
+  - 手工模拟建出两张表：apply 跑两次都成功，verify 102 OK、0 FAIL。
+- 第一段的 m 已关闭（94cddd8）：aia_maint 的 3 条拒读断言都在，grants.sql:16 的过时注释已改。
+- **M1（运维，需后端确认表结构）**：撤权段把这两张表相关序列的 USAGE 也收回了。
+  - 如果 T-B61 的 list_rows 主键用 bigserial，aia_ingest 实际插入会报 permission denied for sequence（已实测）。
+  - verify 用的是 INSERT … WHERE false，不会调用 nextval，所以测不出这个问题。
+  - 要求二选一：后端主键改用 IDENTITY 或 uuid 默认值；或者 grants.sql 给 aia_ingest 授予行表自带序列的 USAGE。
+  - 同时 verify 要改成在事务里真插入一行再回滚，用实际写入来断言。

@@ -1,0 +1,13 @@
+# T-A15 后端落地
+- 2026-11-07 16:12 MST；7cc864a，6个显式后端/合成夹具路径，本地提交未推送。
+- 按6cf8468、plan§2.5.6与RiskFlag：删除rc3_gate_scope/rc4_gate_scope占位缺口，不新增投资规则。
+- RC3/RC4仅buy/add；已达/超过上限gated；RC3原因REGIME_MISMATCH且cause=total_exposure_at_cap，RC4为SECTOR_EXPOSURE_EXCEEDED。
+- 本笔拟超限按明确LotSpec起买量/步长/单笔上限向下取整quantity_cap；达到起买量只限量，不gated；不足起买量才gated。
+- sell/reduce/hold/wait以及两种T腿不被RC3/4门控；环境下限只提示，不合成买入或改写动作。
+- RC4要求明确且带证据的本人证券归属；非所属超限行业不门控，“未分类”不触发；环境/归属/数值/手数缺失返回gap，apply_risk降partial。
+- 公开RiskFlag字段不变；内部risk_details传递cause/行业/当前值/上限与证据，存入既有候选运行时gate_results；空字段不序列化，兼容旧快照。
+- 29项相关用例分批通过：等号/超限/拟超限、科创与创业手数、所属/他属/未分类/缺失、四种非增仓动作、两种T腿、真实隔离候选落库及detail可追溯。
+- 相关3源码mypy、ruff/diff通过；6文件显式暂存扫描阻断0/警告0；未跑全量。
+- DeepSeek仅4只指定代码的固定虚构价格/数量，逐字段确定性复核；元数据reports/deepseek/T-A15/。代码/规则/安全/验收未外包。
+- T-B76真实行情缓存、完整P1/候选→建议装配阻塞仍在，本项单元与局部存储链不冒充正式卡全闭环。
+- 无私密/密钥文件/麦蕊/STOP/共享生产写入；未修改docs/tests/frontend/deploy/CI或策略生成配置。

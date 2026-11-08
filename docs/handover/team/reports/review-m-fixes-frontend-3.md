@@ -1,0 +1,14 @@
+# 前端 m 级修复（第 3 轮）：review-787e453 / d9c045f / 7f46681 — 提交 1a86cb9（本地，未 push）
+- 787e453 m1：删掉 planDraft.ts 写死的整手参数（isStarCode、lotParams）。买入只看草案的 qty_range.lot；服务端返回 400 lot_rule 后（读 fields[] 里 chosen_qty 那一项的 min_buy、step），买入、卖出都按它提示。没收到 lot_rule 时，卖出只校验不超过可卖数量。
+- 787e453 m2：冲突 evidence 的 id 先过 uuid 正则（新增 lib/uuid.ts），不合格的只显示文本，不生成链接。
+- 787e453 m3：useIdemMutation 只在 4xx 时换 Idempotency-Key；网络错误和 5xx（包括 502、504）保留原键。
+- d9c045f：评审没有提问题，无改动。
+- 7f46681 m1（心跳）、m2（days_left 为 null）：5a06d0a 已按 #38、#40 覆盖，本次不改。
+- 7f46681 m3：mock 里不在固定表的 key 排到同级最后（之前是 -1，会排到最前）；master.* 已经在 5a06d0a 里按 #39 排序。页面照后端下发的顺序显示，不重排。
+- 7f46681 m4：mock 中 errors.* 的子排序从 localeCompare 改为码点升序。
+- 测试：新增 review-m-fixes-3.test.tsx，改了 t-f18、t-f23-rulings 里的整手用例（参数改为由服务端 lot_rule 传入）。
+- 工作区：tsc 0；eslint 0（--max-warnings 0）；vitest 706 例通过。
+- 扫描（暂存区）：secret_scan 阻断 0、警告 0；gitleaks no leaks；禁用词和连续 11 位数字 0 命中。没有加任何豁免。
+- 干净检出（git archive 1a86cb9）：install --frozen-lockfile、eslint、tsc、vitest（705 通过、1 跳过）、audit 都通过，rc=0。
+- 只暂存了自己的 9 个文件，没有碰别人未提交的改动。
+- 待办：运维 push；架构师复审。

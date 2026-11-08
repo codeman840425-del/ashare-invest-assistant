@@ -1,0 +1,16 @@
+# T-B83b｜T-A20可信会话与逐次重认证
+- 依据：1f8e455 / reports/T-A20.md；本地提交5a960e2457fe9375b92e919a69f41ce488ab79e2（未推送）。
+- 文件：auth/{sessions,reauth}.py、api/v1/{auth,promotions}.py、common/errors.py、strategy/reviews.py及两份tb83*自检。
+- origin仅服务端登录/改密写password_login；旧会话、Bearer、自报header/body来源不授信，Cookie+CSRF校验保留。
+- 两写入口逐次验证当前密码；错密401 REAUTH_FAILED并计入原锁定，已锁403 ACCOUNT_LOCKED；reviewer仅可信会话。
+- 用户行/策略版本/审核行加锁；决定、生命周期、无密码成功审计同事务；重复决定409，无重复事件。
+- 绑定版本与内容哈希；stale_reason=new_version/content_changed/legacy_unbound；legacy返回200只读，不回填历史绑定。
+- 接通审核、原文六词合规检查、warn确认及approved有效review约束，draft→simulating须独立再次重认证。
+- 正链：虚构用户真实登录→虚构键导入→实际G1–G6及11个golden→决定持久化→再认证→simulating（隔离PG/Redis、真实HTTP路由）。
+- 负例：来源伪造/CSRF/错密锁定/轮换旧密码、门禁失败/未确认warn/禁词、未批准或拒绝review、legacy及新版本/内容变化。
+- 并发仅一决定成功；版本竞态409；审核与生命周期审计失败均回滚；响应/审计/日志无虚构密码明文。
+- 分批定向案例共26通过（新增21、适配历史5）；8文件ruff/mypy通过，契约文档检查及diff检查通过。
+- 显式8文件暂存秘密扫描：阻断0、警告0；未修改配置/docs/tests/frontend/deploy/CI及他人WIP。
+- 隔离库核对：两正式卡approved审核为0、v2仍draft；未操作真实身份或正式G7/晋级，专用PG/Redis已停回原态。
+- 边界：simulating→published缺现有发布证明链，继续422安全拒绝，未宣称发布正链验收；后续发布任务须接入样本/verified_live证明。
+- 本轮无麦蕊/证书/私密样本读取、无共享/生产库访问、无外发；T-B82/T-B85与暂停队列未动。

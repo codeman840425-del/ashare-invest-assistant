@@ -1,0 +1,12 @@
+# P2N-06 worker 最小权限清单（仅说明，未改deploy/CI/生产ACL）
+- 真实隔离连接角色 aia_api，复用原 deploy/db/roles/grants.sql，未新增worker角色/提权。生产现状未连接核查。
+- app.notification_refs（新增）：SELECT/INSERT；按通知查询/唯一引用追加。维护删除另需DELETE，业务worker不需。
+- app.intraday_candidate_refs（新增）：SELECT/INSERT；跨分区实例×事件幂等。维护删除另需DELETE，业务worker不需。
+- app.signal_states、app.intraday_universe（已有表新增证书归属）：SELECT/INSERT/UPDATE；状态CAS/本人证券池。
+- app.signal_events（已有表新增来源/版本/输入/policy列）：SELECT/INSERT；追加规则事实，不需UPDATE/DELETE。
+- app.notifications：SELECT/INSERT/UPDATE；合并、version、标读与未读计数。
+- app.user_realtime_prefs：SELECT/INSERT/UPDATE；只更新notify_cadence，保留其他偏好。
+- app.user_data_licences：只用id/user_id/status/deleted_at元数据；不读ciphertext/HMAC。
+- app.users/accounts/持仓重建、watchlist、策略/来源目录、engine_policy、data_snapshots及既有P1候选/建议写链沿用现有权限，未改授权脚本。
+- 新增两表均UUID，无新增sequence授权需要；schema USAGE沿用既有。
+- 隔离原样grants真实DML检查通过不代表生产ACL现状；上线由运维核查最小操作，后端未操作共享库。

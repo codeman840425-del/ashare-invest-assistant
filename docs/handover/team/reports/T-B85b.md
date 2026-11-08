@@ -1,0 +1,16 @@
+# T-B85b｜T-A22 mairui_list离线实现
+- 本地提交a305d14，7个后端文件，未推送；当前工作区干净。
+- 依据当前plan T-A22/4.6与feature_spec F14/F15；team/reports/T-A22.md仍未提供，以plan明确裁定实现。
+- mairui_snapshot：完整三名单规范化交付、source/field_sources、不可变日期哈希快照与本地600证据文件、日差分、同日幂等、拒收告警；证据是规范化名单，不冒充HTTP原始响应。
+- 双history沿用半开区间，保留来源切换；首成功前不回填、d18快照d+1可见、fetched_at<=as_of；缺日/失败/缺代码返回null+gap，不用旧成功冒充当天。
+- 麦蕊不建证券、不写delisted/missing_from_list、不复活；格式/空/缺键阈值/骤降/冲突失败保留旧版。
+- 接线：北京时间交易日18:00 beat_slots→真实Redis队列→worker→PostgreSQL快照/双history→PIT→horizon输入；旧官网直拉/07:30及月度直拉默认停止且抓取拒绝。
+- 交付入口默认安全关闭：_mairui_delivery无网络/凭据/授权自报入口；测试仅给该输入端口合成完整名单，未mock调度、存储、差分或PIT产物。
+- 新0023仅扩source/reason CHECK，0023→0022→0020唯一head；旧迁移/0021未改；隔离库验证升级/回退及有来源证据时禁止破坏性回退。
+- worker表操作清单：读trading_calendar/securities/master_runs/master_snapshots/双history；写后五者；沿用已有主数据权限，无aia_api提权或新表。
+- 定向自检20过：实际离线链、幂等/差分、PIT/切源、坏名单保留、告警、日历覆盖/缺洞、过期槽、拒绝复活及迁移；仅指定4代码，其余名字/日期/状态均合成。
+- 7文件ruff/format、mypy通过；契约文档对照与唯一head自检通过；暂存秘密扫描阻断0/警告0。
+- DeepSeek：用于4标的纯合成名单/场景机械初稿（reports/deepseek/T-B85b/），已本地改为显式虚构并复核；规则/安全/验收未外包。
+- 未上线/未实采：0官网/麦蕊调用，不读secret/私密，不建/启用bot routine或生产调度；B86未触碰，隔离PG/Redis已停。
+- 上线前：本人日常列表授权或真实保存routine须核实，再接具备安全预算/许可的ingest交付适配器并由运维部署迁移；本次不提供可绕过授权的采集开关。
+- 研究员还需同一交易日人工比对全部ST/*ST/退+20正常且零差异并说明简称字段，才可按裁定处理来源等级；本次matrix/G2/G7均未升级。

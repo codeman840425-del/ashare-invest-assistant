@@ -1,0 +1,14 @@
+# push-seg2 推送前核验（未推送任何 ref）
+- origin/main（ls-remote）= 934648b36031edcd8cb174bd6e51ca2681cc0eb9
+- 待推 1c8d2fd94c4bc3eca92038927163b3dc11193f93：在 934648b 上 merge --no-edit 9ad51b8f367962261ca63ed313512fc478d4ccfa，无冲突
+  - worktree /workspace/wt-ops-seg1，分支 ops/seg1-merge；父 = 934648b + 9ad51b8，可从远端快进
+- 范围 934648b..1c8d2fd：21 个提交（20 个普通提交 + 1 个 merge）；本段 9 个代码提交都在
+- 排除证明（祖先检查）：e6ca937、ef123be、1af8543、20fe5d3、9059bfb、7c0548a、f6c36ec、ac6c710、1a86cb9、8cfa952 都不是 1c8d2fd 的祖先
+  - 9ad51b8 是 e6ca937 的祖先，e6ca937..9ad51b8 = 0 个提交
+- T-T01 业务测试不在本段树里：tests/backend 只有 d5dd1f8 的 4 个文件；8cfa952 有 62 个（差 59 个文件、+12553 行）
+  - 所以覆盖率不能指望本段恢复，backend CI 预计仍红
+- gitleaks 隔离扫描（源目录指向 .git，配置用目标自身的，ignore 6 条，配置与 934648b 相同）：20 个提交，不用 ignore 0，用 ignore 0
+- secret_scan range：87 个文件版本，阻断 0；check_real_secrets：FOUND 0
+- 结论：0 命中，不需要任何豁免
+- aia-t01（只读）：api、nginx、postgres、redis 4 个服务 healthy。这是 T-O15 有意的最小部署（禁止麦蕊采集），worker、beat、ingest 从未启动，不是丢失
+- 日志：reports/.preflight-seg2/（700/600）

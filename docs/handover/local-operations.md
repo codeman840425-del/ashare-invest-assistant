@@ -11,7 +11,7 @@ git status --short
 git rev-parse HEAD
 git log --oneline origin/main..HEAD
 ```
-- origin/main仅是本地跟踪引用，可能陈旧；本命令不联网、不代表远程已经确认。最终SHA填 `<TBD>`（最终合并hash）；有他人WIP不清理、不打包、不误作候选。
+- T-O35及本次交接已确认合并/推送基线7e167f7，origin/main与用户电脑一致，迁移head=0027。本手册的新文档提交不在该已推送基线内；他人WIP不清理、不打包。
 - 配置模板是deploy/env/.env.example，实际配置在仓库外/被忽略文件；不要输出实际.env、compose完整解析配置、环境变量全集或服务凭据。
 - 默认本地dev叠加层采用MAIRUI_MODE=replay。既有环境覆盖仍须运维私下核实；切换live不是普通启动选项，必须另获审批，保持唯一获准调用方与采集闭锁。
 
@@ -40,7 +40,18 @@ pnpm -C src/frontend exec tsc --noEmit -p tsconfig.app.json
 后端selfchecks常依赖独立PostgreSQL/Redis、网络隔离和固定测试身份。未核对fixture/依赖/清理责任时不要运行；获得专用隔离环境后，从src/backend用 `uv run pytest <explicit-test-file> -k <case>` 只跑相关用例。不要连接共享/生产库，不使用真实用户样本。已知结果见progress-board/README：T-O33报告7通过，T-A43在5a26d17候选抽2通过；这不是最终合并hash的全量验收。
 
 ## 4. 部署方法与迁移门槛
-- **部署方法：`<TBD>`**，由收口时根据准确目标、最终合并hash及用户审批填写；本文不指定自动启动命令，不授权真实部署。
+- **绝不 down -v：不得删除数据卷。** 部署方法按T-O35命令摘要记录；以下仅供接班者在获准目标执行，本任务没有执行。
+```bash
+# 先确认工作区无待保护变更，不覆盖他人WIP；在main分支执行
+ git fetch origin
+ git merge --ff-only origin/main
+ deploy/scripts/db-backup.sh
+ # 将<backup.dump>替换为刚生成备份，恢复到新的校验库，不覆盖业务库
+ deploy/scripts/db-restore.sh <backup.dump> --db aia_restore_check
+ # 核对恢复库版本、用户数、表数，校验失败即停；成功才继续
+ AIA_CLOSEOUT_DEPLOY=1 deploy/scripts/closeout.sh deploy
+```
+- 目标基线7e167f7；部署前先备份，失败按已验证备份恢复方案回滚，禁止自动删卷/破坏现有数据。closeout本身还会再备份，并顺序执行up、容器内角色校验、nginx/HTTP及服务健康检查。
 - 现有数据先备份；已有主密钥/证书封装私钥必须匹配，不能重新生成替代。
 - 已知候选链0020→0022→0023→0024→0025→0026→0027，单一head=0027；0021仍不在活动链，不合入暂停迁移补编号。
 - T-B92 d5a9a60已实现历史来源证明、unknown排除新投影与保留事实的可逆降级；旧键冲突条件拒绝，0027维护窗口复验仍待。不可直接套通用downgrade处理业务库。
@@ -49,8 +60,8 @@ pnpm -C src/frontend exec tsc --noEmit -p tsconfig.app.json
 - B2真实麦蕊调用/采集完成接线待用户批准；默认replay，不因隔离库恢复而开放真实外部调用。
 
 ## 5. 健康、登录与备份
-- 用compose ps核全部应有服务；随后在获准本地网关验证首页/登录/健康端点和实际角色负例，不只看容器启动成功。路径/端口从当前配置取得，目标地址归部署方法/用户审批 `<TBD>`，不硬编码个人地址。
+- 用compose ps核全部应有服务；随后在获准本地网关验证首页/登录/健康端点和实际角色负例，不只看容器启动成功。路径/端口从当前配置取得，目标地址从获准本机配置读取，不在公开交接中记录主机/IP或隧道地址。
 - 注册默认closed；无本人approved账号时，create-admin是否实现是阻塞，不能按plan中的意图命令假定可用，不能擅自开放注册或转用测试密码。
 - 备份入口 `deploy/scripts/db-backup.sh`；恢复演练见 `deploy/runbooks/database.md`。数据库dump、imports原始文件卷、匹配主密钥/证书封装私钥必须配套；密钥与dump分开、受控离线保存。
 - 恢复会覆盖目标数据，必须选专用恢复库并确认批准；不在交接中执行。不要把 `down.sh -v` 当普通停止命令，它会删除数据卷。
-- 收尾上线仍欠全服务健康、页面/登录、生产来源/ACL、备份恢复、带数据升降级等指定证据，准确范围归用户审批 `<TBD>`，不能写成已经上线。
+- T-O35报告已完成备份恢复校验、0027升级、ACL211项通过、8服务健康及页面/登录页/健康HTTP；未登录验证、未调用麦蕊。G7待用户本人测试审批；真实来源与交易时段提醒实测、带数据降级/再升仍待，不能宣称全部产品验收。

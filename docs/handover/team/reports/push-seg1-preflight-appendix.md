@@ -1,0 +1,22 @@
+# push-seg1 推送前核验（未推送任何 ref）
+- origin/main（ls-remote）= d5dd1f84f9d4517835641d638301ce1f9a7d917f
+- 28b0cf8 不等价：其父含 1af8543（seg2），弃用
+- 新合并：独立 worktree /workspace/wt-ops-seg1，本地分支 ops/seg1-merge，基于 d5dd1f8 执行 git merge --no-edit 1c62952，无冲突
+- 待推 hash = 934648b36031edcd8cb174bd6e51ca2681cc0eb9，父 = d5dd1f8 + 1c629526a72cc224437bd6ce1b1b28a8be37a572
+- 范围 d5dd1f8..934648b：21 个提交（含 1 个 merge）；含 3e5e288/b3aab3c/2954b6c；不含 1a86cb9/ef123be/1af8543/6b44d87/ac6c710
+- 除 tests/ 外，合并树与 1c62952 完全相同
+- gitleaks 8.30.1（目标树配置，ignore 6 条）：用 ignore 0；不用 ignore 也是 0
+- secret_scan.sh range：76 个文件版本，阻断 0，警告 0
+- check_real_secrets.sh range：FOUND 0
+- 受限日志：reports/.preflight-seg1/（700/600）
+- 共享 main、他人 index、test/T-T01（8cfa952）都未动
+- 推送命令（父代理执行）：git push origin 934648b36031edcd8cb174bd6e51ca2681cc0eb9:refs/heads/main（快进）
+- 推完 backend 仍红（领域覆盖率不足，后端 M），不是本段引入
+## 覆盖疑点复核（13:4x）
+- 原因：gitleaks git 模式会自动读取被扫目录根下的 .gitleaksignore（工作树里就是目标自身那 6 条），--gitleaks-ignore-path /dev/null 关不掉，所以之前"不用 ignore 0"的结论无效
+- 隔离复扫：把源目录指向 .git 公共目录（根下没有 .gitleaksignore），配置用目标 934648b 自身的 .gitleaks.toml
+  - 3e5e288 单提交：不用 ignore 4 处（tb46x.py 336×2/353/372，S5-sh-holder-code）；用目标 ignore 0
+  - 范围 d5dd1f8..934648b：扫了 20 个提交（21 个里 1 个是 merge，没有自身 diff）；不用 ignore 4 处（同上）；用 ignore 0
+  - 目标可达全部历史：174 个提交；不用 ignore 7 处（以上 4 处 + ccf7cba 已登记 3 处）；用 ignore 0
+- 规则验证：stdin/dir 模式扫 3e5e288 的 tb46x.py，S5 命中 4 处，规则生效
+- 所有命中都在已评 .gitleaksignore 的精确指纹内（3e5e288 的 3 个指纹覆盖 4 处），没有未知命中；未改 ignore，未推送

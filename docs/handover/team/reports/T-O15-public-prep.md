@@ -1,0 +1,14 @@
+# T-O15 公开前安全准备（2026-11-07 13:31 MST）
+- 已将runtime API SESSION_COOKIE_SECURE显式设true；只用--no-deps重建api，其余容器未重建。
+- 运行容器窄查询Secure=true；本地/login200、ready200、未登录/imports401；四服务healthy且四端口仍仅127.0.0.1。
+- 版本仍61b0edf，迁移仍0018；未改业务源码、主compose/CI，未创建或审批账号，未启动隧道。
+- PUBLIC_BASE_URL目前仍为本地值，待真实quick URL出现后更新，绝不预填猜测地址。
+- 更正：本版本compose虽传PUBLIC_BASE_URL，但backend Settings没有public_base_url字段、应用也无引用；不能声称后端标准已强制校验HTTPS。
+- 已由runtime set-public-url.py强制精确http<path>
+- 更新命令先扫描后原子改JSON，显式保持Secure=true，仅重建api并检查ready200/imports401；父代理还需另验外部HTTPS。
+- stop-preview.py现核对专用PID+starttime_ticks+boot_id+UID+exe+cwd+完整argv，pidfd避免PID复用误杀，TERM3秒后必要时KILL。
+- 身份不符绝不发信号，但仍停止本地网关/栈阻断公开内容；无元数据不盲杀；并发关闭加文件锁，运行服务未停则不删配置。
+- 22:55 MST原guard PID89409仍在，starttime_ticks244649，命令身份核验通过；guard无需重启即可调用新版关闭入口。
+- 精确官方命令/cwd/日志位置/记录PID及取得URL后的更新命令见reports/T-O15-public-commands.md（16行）。
+- 身份自测8/8、恶意/非精确URL拒绝5/5；runtime配置及脚本gitleaks0命中；日志600。
+- 当前无公网URL/隧道PID/真实启动时间；父代理启动后立即record-tunnel.py，元数据会记录记录时间与内核starttime，不读全量环境。

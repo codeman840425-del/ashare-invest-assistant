@@ -1,0 +1,18 @@
+# T-F28 MVP 前端对接
+- 状态：实现已暂存，尚未提交或推送；全工作树无豁免扫描不满足 0 命中，按安全门槛停在 commit 前。
+- 范围：28 个 src/frontend 文件；未改 docs、后端、tests、deploy、CI；未改团队状态文件，请父代理更新为阻塞。
+- 既有 /terminal、/today、/market 及日报/候选详情继续走同源真实 API；新增 /market/overview 路由别名。
+- /suggestions 从首卡跳转/筛选占位改成真实列表，支持 status、security_code、游标分页及详情入口。
+- 摘要、终端、今日及日报徽标传递 lifecycle，模拟版本标“模拟中”；模拟信号不开放草案按钮。
+- 统一风控展示 gated_actions、独立 quantity_cap 与 evidence；RC3/RC4 不在前端重算；RC3 原因标签兼容总仓位约束。
+- 展示 engine_policy、置信度分项；日报比较基准 null、change_fields、账户空值及 health=null 如实显示，不填伪 0。
+- /admin/strategy-gates：输入 review UUID 读报告，G1–G6 逐项展示；G6 null+原因记 warn，保留实际 fail。
+- G7 必填本人意见后点击才 POST decision；生命周期需另选 draft 版本和原因后独立点击；无默认勾选或自动提交；403 明确未完成。
+- 契约不清：GET /admin/promotions 列表响应未定义；审核与策略版本关联未定义，因此不猜列表、不自动关联晋级。
+- 后端缺口：当前 app/api 未注册 promotion-requests、admin/promotions/decision 与策略 lifecycle 路由；服务函数不等于真实端到端可用。
+- DeepSeek 类型/夹具草稿已复核，删除其额外 Stat.null_reason 并修正夹具/G6 矛盾；记录 reports/deepseek/T-F28/。
+- 最终 typecheck、生产 build 通过；单轮全测 728/730，修复新增空列表断言及契约错误码缺项后，仅复测相关 31/31 通过，未重复全量。
+- 暂存完整内容：secret_scan 0/0，gitleaks 0，禁用词 0，连续 11 位数字 0；全部无豁免。详见 T-F28-mvp-*staged* 日志。
+- 全工作树：secret_scan 阻断 80/警告 0；gitleaks 1；禁用词 11；连续 11 位数字 277。范围外存量命中未擅改，详见 *tree* 与 scan-summary.json。
+- 截图待补：本执行器没有浏览器/桌面子代理工具，未用 Shell 绕过浏览器边界；请父代理补 1440×900 至 reports/T-F28-mvp/。
+- 需编排者协调安全角色清理范围外扫描基线、后端补门禁路由并明确关联；父代理补截图及状态，门槛满足后再本地提交，运维负责推送。

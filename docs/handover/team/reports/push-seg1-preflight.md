@@ -1,0 +1,14 @@
+# push-seg1 推送前核验（整理版；完整原始记录见 push-seg1-preflight-appendix.md）
+- 推送前 origin/main = d5dd1f84f9d4517835641d638301ce1f9a7d917f
+- 28b0cf8 不等价（父提交含 seg2 的 1af8543），不使用
+- 待推 934648b36031edcd8cb174bd6e51ca2681cc0eb9 = 在 d5dd1f8 上 merge --no-edit 1c62952 的结果，无冲突
+  - worktree /workspace/wt-ops-seg1，分支 ops/seg1-merge，保留作证据
+- 范围 21 个提交（20 个普通提交 + 1 个 merge）；不含 1a86cb9/ef123be/1af8543/6b44d87；除 tests/ 外合并树与 1c62952 相同
+- 纠正：此前"不用 ignore 也是 0"无效。gitleaks 会自动读取被扫目录根下的 .gitleaksignore，--gitleaks-ignore-path /dev/null 关不掉
+- 隔离复扫（源目录指向 .git，配置用目标自身 .gitleaks.toml）：
+  - 范围：20 个提交；不用 ignore 4 处，全部是 3e5e288 tb46x.py S5 已知假值；用目标 ignore 0
+  - 全部可达历史：174 个提交；不用 ignore 7 处（以上 4 处 + ccf7cba 已登记 3 处）；用 ignore 0
+  - stdin/dir 模式验证 S5 规则生效（4 处）
+- secret_scan range：76 个文件版本，阻断 0；check_real_secrets：FOUND 0
+- 结论：只按已评的精确指纹豁免，未知命中 0；未改 ignore
+- 日志：reports/.preflight-seg1/（700/600）

@@ -1,0 +1,11 @@
+# push-d5dd1f8 结果（2026-11-07 13:18 MST）
+- origin/main = d5dd1f84f9d4517835641d638301ce1f9a7d917f
+- 本地 merge：**未执行（阻塞）**。本地 main HEAD 847f41e020be2779990f672e41600467732f5f53 不变
+  - 原因：工作区有他人未提交变更（修改 src/backend/probes/p13_analyze.py；未跟踪 src/backend/selfchecks/tb58.py，像是后端的）
+  - 需要：后端提交或确认这两处文件后，再执行 git merge origin/main
+- ci 42409932602：failure — <url>
+  - backend：pytest 已能运行，但整体覆盖率 0% < 80%，app/importing/ 覆盖 0% < 90%
+  - gateway-limits：上游删除后返回 504（应为 502），等 T-O14
+- secret-scan 42409932608：success — <url>
+- 安全公告：1 个 moderate Dependabot 告警（未处理）— <url>
+- 未重跑 CI，未推送，未改代码

@@ -1,0 +1,19 @@
+# T-T22｜2026-11-07新派单完成（限定范围，非全量）
+- 旧同号报告先完整留档reports/T-T22-before-20261107-2029.md，进程内摘要核对一致，没有覆盖丢失。
+- 固定受测产品SHA：9635f121690a4055bc43579ca0b468f2ffe9097c（T-B88交付信号后锁定，不随main漂移）。
+- 最终分批定点去重19过/0败/0错/0跳：原16故障中10例通过，核心非空闭环2例通过，T-B88新增定向7例通过；未重跑全量/前端。
+- 其余原故障6例明确未执行、非阻塞：4项Git环境、2项正式卡保护；逐项见pending.md，不解除保护、不把未执行计通过。
+- policy两个基准从受控参考load(CONFIG)取当前2，非DB任意值；替代版本=current+1，保留幂等、同版内容冲突、不可重绑定等负例。
+- 200/503按契约T-A16明确规则校准：不再因未接线503，仅保留日历越界503；新增strict JSON结构、持仓/归属/缺口校验，不裁定旧alert映射细节。
+- worker卡补counter/invalidation、time_stop_days与原合法模板阈值/期限；用既有合成源最后30日新副本+原factor，真实MA60=None、反证/失效=False，真实P1建议行与日报关联通过。
+- 未填造价格/延长历史，不改原文件/原取证或模块全局/业务函数；只为原生测试数据helper注入独立payload工厂。T-B88原非法卡仍验证安全失败，未放宽解释完整性。
+- tt21_mainline.json顶层purpose注明“sha256 of migration file”；合法JSON，21项摘要未改且与9635f12一致，真实读取方已验证兼容，无非法注释。
+- 原始首批17过2败及后续仅受影响用例修正均保留；两处测试接入问题/合法fixture补全经过见fixture-diagnostic.md，最终去重证据results.json，不伪称一次全量全过。
+- 最终暂存3文件secret_scan阻断0/警告0；当前7文件目录gitleaks 0；无新增豁免，未宣称3b历史扫描全过。
+- 本地提交97e9f7f→d0a6644；只改tests，不推送。净补丁：reports/T-T22-logs/T-T22-tests-only.patch（仅新适配/清单+T-T21元数据说明单行）。
+- 在9635f12独立tests树先净应用T-T21补丁，再T-T22 apply --check退出0；保留T-T21边界，不整链合入3b历史，准备期补丁另留T-T22-before-B88.patch。
+- 依赖沿用本机只读Python3.12.16/uv离线缓存、专用PG/Redis；ID/独卷/network=none/无端口见isolation.json；结束已停回原态，无共享库/live/正式卡/行情/证书操作。
+- coverage超时、离线runner13专项本次均未执行/非阻塞，保留待办；TR18三例与Git清单重叠不相加，未擅自修环境。
+- DeepSeek：用于两批匿名合成骨架/合法fixture与报告初稿（产出目录reports/deepseek/T-T22/及b88/；API返回deepseek-flash）；已确定性复核，未发送源码/原日志/秘密，契约/安全/验收未外包。
+- 实际命令与原日志：reports/T-T22-logs/commands.md、run-command.sh/targeted.xml、retest-command.sh/fixture-retest.xml、worker-short-command.sh/worker-short.xml、secret-scan-final.log/gitleaks-final.json。
+- 需做：编排者按T-T21→T-T22净补丁顺序整合；运维/测试保留pending.md非阻塞待办；本次无业务代码修复请求，不扩大验收。

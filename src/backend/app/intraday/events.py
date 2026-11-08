@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import uuid
 from typing import Any
 
@@ -11,18 +9,23 @@ from sqlalchemy import Connection, Row, Select, and_, or_, select
 
 from app.db.tables.licences import user_data_licences
 from app.db.tables.market import securities
-from app.db.tables.realtime import signal_events
-from app.db.tables.strategy import strategy_instances, strategy_versions
+from app.db.tables.realtime import signal_event_projections, signal_events
 from app.schemas.enums import SignalKind
 from app.strategy.reviews import lint
 
 
-def owned(owner: uuid.UUID) -> Select:
+def owned(owner: uuid.UUID) -> Select[Any]:
     return (
         select(signal_events)
         .join(user_data_licences, user_data_licences.c.id == signal_events.c.source_licence_id)
         .where(
             user_data_licences.c.user_id == owner,
+            select(signal_event_projections.c.event_id)
+            .where(
+                signal_event_projections.c.event_id == signal_events.c.id,
+                signal_event_projections.c.user_id == owner,
+            )
+            .exists(),
             or_(
                 signal_events.c.scope == "shared",
                 and_(signal_events.c.scope == "user", signal_events.c.user_id == owner),
@@ -32,6 +35,16 @@ def owned(owner: uuid.UUID) -> Select:
 
 
 def project(conn: Connection, row: Row[Any]) -> dict[str, Any]:
+    frozen = conn.execute(
+        select(signal_event_projections)
+        .join(
+            user_data_licences, user_data_licences.c.user_id == signal_event_projections.c.user_id
+        )
+        .where(
+            signal_event_projections.c.event_id == row.id,
+            user_data_licences.c.id == row.source_licence_id,
+        )
+    ).one()
     d = row.detail
     kind = SignalKind(d["kind"])
     messages = {k.value: "规则状态已变化，请查看证据。" for k in SignalKind}
@@ -49,51 +62,20 @@ def project(conn: Connection, row: Row[Any]) -> dict[str, Any]:
         "at": row.created_at.isoformat(),
         "message": message,
         "strategy_key": d.get("strategy_key"),
-        "instance_id": instance_ref(conn, row),
+        "instance_id": str(frozen.instance_id) if frozen.instance_id else None,
+        "instance_ids": [str(i) for i in frozen.instance_ids],
         "rule_id": d.get("rule_id"),
         "price": d.get("price"),
-        "candidate_signal_id": d.get("candidate_signal_id"),
+        "candidate_signal_id": str(frozen.candidate_signal_id)
+        if frozen.candidate_signal_id
+        else None,
     }
 
 
 def instance_ref(conn: Connection, event: Row[Any]) -> str | None:
-    """Only unambiguous current owned binding; never guess among multiple instances."""
-    owner = conn.execute(
-        select(user_data_licences.c.user_id).where(
-            user_data_licences.c.id == event.source_licence_id
+    row = conn.execute(
+        select(signal_event_projections.c.instance_id).where(
+            signal_event_projections.c.event_id == event.id
         )
     ).scalar_one_or_none()
-    ver = conn.execute(
-        select(strategy_versions).where(strategy_versions.c.id == event.strategy_version_id)
-    ).one_or_none()
-    if owner is None or ver is None:
-        return None
-    q = select(strategy_instances).where(
-        strategy_instances.c.user_id == owner,
-        or_(
-            strategy_instances.c.derived_strategy_version_id == ver.id,
-            and_(
-                strategy_instances.c.derived_strategy_version_id.is_(None),
-                strategy_instances.c.strategy_version_id == ver.id,
-            ),
-        ),
-        or_(
-            strategy_instances.c.scope == "account",
-            and_(
-                strategy_instances.c.scope == "security",
-                strategy_instances.c.security_code == event.security_code,
-            ),
-        ),
-    )
-    matches = []
-    for inst in conn.execute(q):
-        params = {
-            k: v["default"] for k, v in ver.config.get("spec", ver.config)["params_schema"].items()
-        }
-        params.update(inst.param_overrides or {})
-        body = json.dumps(
-            params, sort_keys=True, ensure_ascii=False, default=str, separators=(",", ":")
-        )
-        if hashlib.sha256(body.encode()).hexdigest() == event.params_hash:
-            matches.append(inst.id)
-    return str(matches[0]) if len(matches) == 1 else None
+    return str(row) if row else None

@@ -23,7 +23,7 @@ from app.db.tables.strategy import strategies, strategy_instances, strategy_vers
 from app.db.tables.users import users
 from app.signals.service import TERMINAL
 from app.suggestions.aggregate import assemble
-from app.suggestions.models import SuggestionInput
+from app.suggestions.models import Conclusion, SuggestionInput
 
 SCHEMA = "tb75-suggestion-input-v1"
 
@@ -99,8 +99,107 @@ def owned_snapshot(conn: Connection, user_id: uuid.UUID, identifier: uuid.UUID) 
     return row
 
 
+def verified_carried(
+    conn: Connection, owner: uuid.UUID, code: str, snapshot: uuid.UUID | None, at: dt.datetime
+) -> dict[uuid.UUID, dict[str, Any]]:
+    """Only literal conclusions from the current owned immutable archive may carry.
+
+    This is an evidence reference, not a caller-controlled exemption from validation.
+    No current rule evaluation, mutable version/weight or lifecycle is substituted.
+    """
+    if snapshot is None:
+        return {}
+    previous = conn.execute(
+        select(suggestions)
+        .join(threads, threads.c.current_suggestion_id == suggestions.c.id)
+        .where(
+            threads.c.user_id == owner,
+            threads.c.security_code == code,
+            suggestions.c.user_id == owner,
+            suggestions.c.security_code == code,
+            suggestions.c.snapshot_id == snapshot,
+            suggestions.c.created_at <= at,
+        )
+    ).one_or_none()
+    if previous is None:
+        raise ValueError("carried_archive_not_owned_current")
+    source = owned_snapshot(conn, owner, snapshot)
+    digest = hashlib.sha256(
+        json.dumps(
+            source.items, sort_keys=True, ensure_ascii=False, default=str, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    if (
+        source.hash != digest
+        or source.items.get("schema_version") != SCHEMA
+        or source.created_at > at
+    ):
+        raise ValueError("carried_archive_integrity")
+    prior = SuggestionInput.model_validate(source.items["input"])
+    if prior.security_code != code:
+        raise ValueError("carried_archive_security")
+    return {c.instance_id: c.model_dump(mode="json") for c in prior.conclusions}
+
+
+def carried_candidate(
+    conn: Connection, owner: uuid.UUID, item: Conclusion, instance: Any
+) -> dict[str, Any] | None:
+    """Keep the historical conclusion; current execution gates remain conservative."""
+    if item.candidate_signal_id is None:
+        return None
+    row = conn.execute(
+        select(candidate_signals).where(
+            candidate_signals.c.id == item.candidate_signal_id, candidate_signals.c.user_id == owner
+        )
+    ).one_or_none()
+    if row is None or (
+        row.instance_id,
+        row.strategy_version_id,
+        row.snapshot_id,
+        row.security_code,
+    ) != (
+        item.instance_id,
+        item.strategy_version_id,
+        item.signal.snapshot_id,
+        item.signal.security_code,
+    ):
+        raise ValueError("carried_candidate_binding")
+    reasons = list(
+        conn.execute(
+            select(non_executable_reasons.c.id).where(
+                non_executable_reasons.c.signal_id == row.id,
+                non_executable_reasons.c.user_id == owner,
+                non_executable_reasons.c.status == "active",
+            )
+        ).scalars()
+    )
+    version = conn.execute(
+        select(strategy_versions.c.lifecycle).where(
+            strategy_versions.c.id == item.strategy_version_id
+        )
+    ).scalar_one()
+    from app.strategy.runtime import runnable
+
+    role = conn.execute(select(users.c.role).where(users.c.id == owner)).scalar_one()
+    return {
+        "blocked": bool(reasons)
+        or row.state in TERMINAL
+        or row.state == "blocked"
+        or instance.status != "active"
+        or (instance.derived_strategy_version_id or instance.strategy_version_id)
+        != item.strategy_version_id
+        or not runnable(version, role),
+        "reason_ids": [str(r) for r in reasons],
+    }
+
+
 def archive(
-    conn: Connection, *, user_id: uuid.UUID, content: SuggestionInput, origin: str = "daily_batch"
+    conn: Connection,
+    *,
+    user_id: uuid.UUID,
+    content: SuggestionInput,
+    origin: str = "daily_batch",
+    carry_from_snapshot_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:owner,74))"), {"owner": str(user_id)}
@@ -110,13 +209,20 @@ def archive(
         raise AppError(ErrorCode.ACCOUNT_NOT_APPROVED)
     # Same lock order as T-B74: owner first, then instance/version/account.
     joint = owned_snapshot(conn, user_id, content.snapshot_id)
-    if joint.items != snapshot_items(content) or joint.created_at > content.created_at:
+    expected = snapshot_items(content)
+    if carry_from_snapshot_id is not None:
+        expected["carried_from_snapshot_id"] = str(carry_from_snapshot_id)
+    if joint.items != expected or joint.created_at > content.created_at:
         raise ValueError("suggestion_snapshot_input_mismatch")
     market = conn.execute(
         select(securities).where(securities.c.code == content.security_code).with_for_update()
     ).one_or_none()
     if market is None or market.type != "stock" or market.listing_status != "listed":
         raise ValueError("suggestion_security_not_supported")
+    carried = verified_carried(
+        conn, user_id, content.security_code, carry_from_snapshot_id, content.created_at
+    )
+    retained = set()
     candidates: dict[str, dict[str, Any]] = {}
     for conclusion in sorted(
         content.conclusions, key=lambda c: (str(c.strategy_version_id), str(c.instance_id))
@@ -131,6 +237,12 @@ def archive(
         ).one_or_none()
         if instance is None:
             raise AppError(ErrorCode.NOT_FOUND)
+        if carried.get(conclusion.instance_id) == conclusion.model_dump(mode="json"):
+            retained.add(conclusion.instance_id)
+            state = carried_candidate(conn, user_id, conclusion, instance)
+            if state is not None:
+                candidates[str(conclusion.candidate_signal_id)] = state
+            continue
         if (
             instance.status != "active"
             or (instance.derived_strategy_version_id or instance.strategy_version_id)
@@ -270,6 +382,8 @@ def archive(
             select(engine_policies).where(engine_policies.c.id == content.engine_policy_id)
         ).one()
         for conclusion in content.conclusions:
+            if conclusion.instance_id in retained:
+                continue
             ConfidenceComponents.model_validate(conclusion.confidence_components)
             source = owned_snapshot(conn, user_id, conclusion.signal.snapshot_id)
             if (

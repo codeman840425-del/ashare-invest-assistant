@@ -7,7 +7,7 @@ import datetime as dt
 import json
 import uuid
 from collections.abc import AsyncIterator
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Header, Request, Response
 from fastapi.responses import StreamingResponse
@@ -96,7 +96,7 @@ def listing(
     pp: Paging,
     unread: bool | None = None,
     kind: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     from app.schemas.enums import NotificationKind
 
     if kind is not None and kind not in {x.value for x in NotificationKind}:
@@ -159,7 +159,7 @@ def read_one(identifier: uuid.UUID, auth: AuthDep, engine: EngineDep) -> Respons
     return Response(status_code=204)
 
 
-def sse_message(identifier: str, kind: str, data: dict) -> str:
+def sse_message(identifier: str, kind: str, data: dict[str, Any]) -> str:
     return (
         f"id: {identifier}\nevent: {kind}\ndata: "
         + json.dumps(data, ensure_ascii=False, separators=(",", ":"))
@@ -176,13 +176,29 @@ async def stream(
     store: StoreDep,
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
 ) -> StreamingResponse:
+    def live() -> bool:
+        session = store.get(request.cookies.get(SESSION_COOKIE))
+        user = load_user(engine, str(auth.user_id))
+        return bool(
+            session is not None
+            and session.user_id == str(auth.user_id)
+            and user is not None
+            and user.status == "approved"
+        )
+
     async def generate() -> AsyncIterator[str]:
+        if not live():
+            return
         now = dt.datetime.now(dt.UTC)
         raw_cursor = rds.get("p2n06:sse:" + str(auth.user_id) + ":seq") or b"0"
         cursor = raw_cursor.decode() if isinstance(raw_cursor, bytes) else str(raw_cursor)
+        if not live():
+            return
         yield "retry: 3000\n\n"
         reason = reset_reason(rds, auth.user_id, last_event_id, now, cursor)
         if reason:
+            if not live():
+                return
             yield (
                 "event: reset\ndata: "
                 + json.dumps(
@@ -192,25 +208,24 @@ async def stream(
             )
         initial = [] if reason else replay(rds, auth.user_id, last_event_id, now)
         for event in initial:
+            if not live():
+                return
             cursor = str(max(int(cursor), int(event["id"])))
             yield sse_message(event["id"], event["event"], event["data"])
         last_heartbeat = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=15)
         while not await request.is_disconnected():
-            session = store.get(request.cookies.get(SESSION_COOKIE))
-            user = load_user(engine, str(auth.user_id))
-            if (
-                session is None
-                or session.user_id != str(auth.user_id)
-                or user is None
-                or user.status != "approved"
-            ):
+            if not live():
                 return
             now = dt.datetime.now(dt.UTC)
             flush(engine, rds, now)
             for event in replay(rds, auth.user_id, cursor, now, require_anchor=False):
+                if not live():
+                    return
                 cursor = event["id"]
                 yield sse_message(cursor, event["event"], event["data"])
             if (now - last_heartbeat).total_seconds() >= 15:
+                if not live():
+                    return
                 yield "event: heartbeat\ndata: " + json.dumps({"at": now.isoformat()}) + "\n\n"
                 last_heartbeat = now
             await asyncio.sleep(1)

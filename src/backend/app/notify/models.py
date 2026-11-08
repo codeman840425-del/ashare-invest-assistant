@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,6 +59,7 @@ class SignalEvent(Strict):
     message: str
     strategy_key: str | None
     instance_id: str | None
+    instance_ids: list[uuid.UUID] = Field(max_length=20)
     rule_id: str | None
     price: str | None
     candidate_signal_id: str | None

@@ -1,6 +1,6 @@
 {
   "baseline": "dcf734d",
-  "purpose": "T-T21 test-only mainline migration checksums",
+  "purpose": "sha256 of migration file; T-T21 test-only mainline migration checksums",
   "migrations": [
     {
       "migration_file": "0001_baseline.py",

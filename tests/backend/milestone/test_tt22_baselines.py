@@ -1,13 +1,14 @@
-"""T-T22安全适配：仅校准3个陈旧基准，其余原断言与真实helper保留。
+"""T-T22安全适配：校准3个陈旧基准及1个合法合成worker夹具，其余原断言与真实helper保留。
 
 来源为T-T21固定e6eaeb2的同名selfchecks；使用 -p tt21_plugin 与同一审计入口。
-不执行正式卡/共享库；等待T-B88交付通知后才运行这3例。
+不执行正式卡/共享库；T-B88已交付，按固定9635f12运行这4例。
 """
 from __future__ import annotations
 
 from selfchecks import test_ta16_policy_confidence as _policy
 from selfchecks import test_tb76_assembly as _assembly
 from selfchecks import test_tb77_aggregates as _aggregates
+from selfchecks import test_tb76_daily as _daily
 from selfchecks.test_tb70_replay import integration, no_network  # noqa: F401
 from selfchecks.test_tb74_candidates import setup  # noqa: F401
 
@@ -135,7 +136,7 @@ def test_routes_real_ownership_unread_and_imported_holdings(integration: _aggreg
     nonempty = client.get('/api/v1/terminal', params={'account_id': account_id})
     assert nonempty.status_code == 200
     actual = nonempty.json()
-    _aggregates.Terminal.model_validate(actual)
+    _aggregates.Terminal.model_validate_json(nonempty.content)
     assert actual['account_id'] == account_id
     assert actual['data_status'] in {'partial', 'unavailable'}
     assert actual['gaps']
@@ -146,3 +147,69 @@ def test_routes_real_ownership_unread_and_imported_holdings(integration: _aggreg
     with TestClient(client.app) as anonymous:
         assert anonymous.get('/api/v1/terminal').status_code == 401
     assert no_network == []
+
+
+def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: _daily.Any) -> None:
+    engine, client, _, owner, _, account, *_ = setup
+    # 复用既有合成缓存及factor元数据，不延长MA60历史；暂停helper附带的另一实例。
+    import types as fixture_types
+    def short_synthetic_payload():
+        source = _assembly.payload()
+        assert source['simulation'] is True
+        assert len(source['sessions']) >= 60
+        source['sessions'] = source['sessions'][-30:]
+        sessions = set(source['sessions'])
+        for instrument in source['instruments']:
+            instrument['bars'] = [bar for bar in instrument['bars'] if bar['trade_date'] in sessions]
+            instrument['gaps'] = [gap for gap in instrument['gaps'] if gap['trade_date'] in sessions]
+        assert len(source['sessions']) == 30
+        return source
+    # 仅为原生测试数据工厂传入30日副本；不修改模块全局或任何业务函数。
+    short_prepare = fixture_types.FunctionType(
+        _assembly.prepare.__code__, {**_assembly.prepare.__globals__, 'payload': short_synthetic_payload},
+        'tt22_prepare_short_synthetic', _assembly.prepare.__defaults__, _assembly.prepare.__closure__,
+    )
+    prepared_instance = short_prepare(setup)
+    assert client.post('/api/v1/strategy-instances/' + str(prepared_instance) + '/pause').status_code == 200
+    with engine.connect() as conn:
+        prepared_spec = conn.execute(_assembly.select(_assembly.strategy_versions.c.config).join(
+            _assembly.strategy_instances,
+            _assembly.strategy_instances.c.strategy_version_id == _assembly.strategy_versions.c.id,
+        ).where(_assembly.strategy_instances.c.id == prepared_instance)).scalar_one()
+    card, cardversion, strategy, version, instance = [_daily.uuid.uuid4() for _ in range(5)]
+    spec = {'params_schema': {}, 'rules': [{'id': 'fictional_only', 'dimension': 'technical', 'role': 'entry', 'expr': 'ma(f.close_qfq,60) > 0', 'eval_time': 'daily_close', 'weight': 1}], 'action_map': {'entry_all_core_pass': 'buy', 'else': 'wait'}, 'stops': {'stop_loss': None, 'take_profit': None, 'time_stop_days': 5}}
+    spec['dimension_view_thresholds'] = prepared_spec['dimension_view_thresholds']
+    spec['valid_until'] = prepared_spec['valid_until']
+    spec['rules'].extend([{'id': 'fictional_counter', 'dimension': 'technical', 'role': 'counter', 'expr': 'f.close_qfq < 0', 'eval_time': 'daily_close', 'weight': 1}, {'id': 'fictional_invalidation', 'dimension': 'technical', 'role': 'invalidation', 'expr': 'f.close_qfq < 0', 'eval_time': 'daily_close', 'weight': 1}])
+    from app.engine_policies import load as load_reference_policy, seed as seed_reference_policy
+    from app.db.tables.realtime import suggestions as generated_suggestions
+    with engine.begin() as conn:
+        seed_reference_policy(conn, load_reference_policy(_assembly.ROOT / 'config'))
+        conn.execute(_daily.insert(_daily.strategy_cards).values(id=card, key='tb76_fiction_' + card.hex, title='明确虚构非正式卡', source_kind='user', owner_user_id=owner))
+        conn.execute(_daily.insert(_daily.strategy_card_versions).values(id=cardversion, card_id=card, version_no=1, fields={'mount_policy': 'user'}))
+        conn.execute(_daily.insert(_daily.strategies).values(id=strategy, key='tb76_fiction_' + strategy.hex, name='明确虚构非正式卡', owner_user_id=owner, horizons=['swing']))
+        conn.execute(_daily.insert(_daily.strategy_versions).values(id=version, strategy_id=strategy, card_version_id=cardversion, version_no=1, config=spec, config_hash=version.hex, param_hash=version.hex, lifecycle='published'))
+        conn.execute(_daily.insert(_daily.strategy_instances).values(id=instance, user_id=owner, strategy_version_id=version, scope='account', account_id=account, status='active', origin='user', horizon='swing'))
+    assert _daily.enqueue(_daily.ANALYZE, owner) == [(_daily.ANALYZE, 'ok')]
+    with engine.connect() as conn:
+        runs = conn.execute(_daily.select(_daily.pipeline_runs).where(_daily.pipeline_runs.c.step == 'tb76.' + _daily.ANALYZE).order_by(_daily.pipeline_runs.c.started_at.desc())).first()
+        outcome = runs.stats['users'][str(owner)]
+        assert outcome['evaluations'][0]['state'] == 'hold_ok'
+        assert outcome['evaluations'][0]['rule_refs']
+        assert outcome['evaluations'][0]['simulation'] is True
+        assert 'evaluated_input_gaps:688018.SH' in outcome['issues']
+        assert not any(('p1_conclusion_assembler_missing' in issue for issue in outcome['issues']))
+        refs = outcome['evaluations'][0]['rule_refs']
+        assert {r['role'] for r in refs} == {'entry', 'counter', 'invalidation'}
+        assert all((r['passed'] is False for r in refs if r['role'] != 'entry'))
+        generated = conn.execute(_daily.select(generated_suggestions).where(generated_suggestions.c.user_id == owner, generated_suggestions.c.security_code == '688018.SH')).one()
+        assert str(generated.id) in outcome['suggestion_ids']
+        assert outcome['evaluations'][0]['rule_refs'][0]['passed'] is None
+    assert _daily.enqueue(_daily.REPORT, owner) == [(_daily.REPORT, 'ok')]
+    response = client.get('/api/v1/daily-reports/2026-10-30')
+    assert response.status_code == 200
+    report = response.json()
+    assert not any(('p1_conclusion_assembler_missing' in g['key'] for g in report['gaps']))
+    assert report['gaps']
+    stock = next((row for row in report['stocks'] if row['security_code'] == '688018.SH'))
+    assert stock['suggestion_id'] == str(generated.id)

@@ -1,7 +1,7 @@
 {
   "task": "T-T22-new-20261107",
-  "final_product_sha": null,
-  "wait_for": "编排者明确通知T-B88交付，再固定最新包含交付提交的产品SHA；不轮询、不提前执行业务用例",
+  "final_product_sha": "9635f121690a4055bc43579ca0b468f2ffe9097c",
+  "wait_for": "交付信号已于2026-11-07 20:35 MST收到，固定9635f12，不随main前移",
   "prerequisite": "T-T21独立净补丁及tt21_plugin/正式卡审计入口；不能合并3b旧历史链",
   "cases": [
     {
@@ -66,7 +66,7 @@
     },
     {
       "original_nodeid": "src/backend/selfchecks/test_tb76_daily.py::test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions",
-      "prepared_nodeid": "src/backend/selfchecks/test_tb76_daily.py::test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions",
+      "prepared_nodeid": "tests/backend/milestone/test_tt22_baselines.py::test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions",
       "execute_after_tb88_signal": true,
       "deferred_reason": ""
     },
@@ -116,5 +116,7 @@
   "other_not_run": [
     "coverage超时",
     "离线runner13专项"
-  ]
+  ],
+  "directed_added": "src/backend/selfchecks/test_tb88_projections.py",
+  "directed_expected_cases": 7
 }

@@ -209,9 +209,22 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
             gaps.append(
                 _gap("stocks." + code, "没有可用的本人建议；正式卡运行门禁或结论装配尚待完成。")
             )
+        from app.reports.dimensions import build as build_dimensions
+
+        snapshot, dimensions, dimension_evidence = build_dimensions(
+            conn, user_id, identifier, code, date, now
+        )
+        report_evidence.extend(dimension_evidence)
+        gaps.extend(
+            dict(g, key="stocks." + code + "." + d["dimension"] + "." + g["key"])
+            for d in dimensions
+            for g in d["gaps"]
+        )
         stocks.append(
             {
                 "security_code": code,
+                "analysis_snapshot_id": str(snapshot),
+                "dimensions": dimensions,
                 "name": master[code].name if code in master else code,
                 "close": None,
                 "change_pct": None,

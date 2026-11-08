@@ -104,6 +104,8 @@ def apply(conn: Connection, owner: uuid.UUID, date: dt.date, stocks: list[dict[s
                 "highlights": [],
                 "invalidation": [],
                 "next_watch": [],
+                "analysis_snapshot_id": None,
+                "dimensions": None,
             }
         )
     return True

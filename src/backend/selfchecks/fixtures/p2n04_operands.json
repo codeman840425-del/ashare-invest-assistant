@@ -1,0 +1,122 @@
+[
+  {
+    "group": 1,
+    "case": "present",
+    "value": "23.45"
+  },
+  {
+    "group": 1,
+    "case": "missing",
+    "value": null
+  },
+  {
+    "group": 1,
+    "case": "stale",
+    "value": "67.89"
+  },
+  {
+    "group": 1,
+    "case": "future",
+    "value": "12.01"
+  },
+  {
+    "group": 2,
+    "case": "present",
+    "value": "34.56"
+  },
+  {
+    "group": 2,
+    "case": "missing",
+    "value": null
+  },
+  {
+    "group": 2,
+    "case": "stale",
+    "value": "78.90"
+  },
+  {
+    "group": 2,
+    "case": "future",
+    "value": "5.67"
+  },
+  {
+    "group": 3,
+    "case": "present",
+    "value": "45.67"
+  },
+  {
+    "group": 3,
+    "case": "missing",
+    "value": null
+  },
+  {
+    "group": 3,
+    "case": "stale",
+    "value": "89.01"
+  },
+  {
+    "group": 3,
+    "case": "future",
+    "value": "7.89"
+  },
+  {
+    "group": 4,
+    "case": "present",
+    "value": "56.78"
+  },
+  {
+    "group": 4,
+    "case": "missing",
+    "value": null
+  },
+  {
+    "group": 4,
+    "case": "stale",
+    "value": "90.12"
+  },
+  {
+    "group": 4,
+    "case": "future",
+    "value": "8.90"
+  },
+  {
+    "group": 5,
+    "case": "present",
+    "value": "6.54"
+  },
+  {
+    "group": 5,
+    "case": "missing",
+    "value": null
+  },
+  {
+    "group": 5,
+    "case": "stale",
+    "value": "13.57"
+  },
+  {
+    "group": 5,
+    "case": "future",
+    "value": "9.12"
+  },
+  {
+    "group": 6,
+    "case": "present",
+    "value": "71.23"
+  },
+  {
+    "group": 6,
+    "case": "missing",
+    "value": null
+  },
+  {
+    "group": 6,
+    "case": "stale",
+    "value": "24.68"
+  },
+  {
+    "group": 6,
+    "case": "future",
+    "value": "10.23"
+  }
+]

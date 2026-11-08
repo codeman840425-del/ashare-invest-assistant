@@ -314,10 +314,12 @@ DECLARE
     'app.notification_refs|DELETE|',
     'app.intraday_candidate_refs|SELECT|instance_id',
     'app.intraday_candidate_refs|DELETE|',
-    'app.signal_states|SELECT|source_licence_id',
+    'app.signal_states|SELECT|id,source_licence_id',
     'app.signal_states|DELETE|',
     'app.intraday_universe|SELECT|source_licence_id',
     'app.intraday_universe|DELETE|',
+    'app.signal_event_projections|SELECT|user_id',
+    'app.signal_event_projections|DELETE|',
     'app.opening_positions|SELECT|account_id',
     'app.opening_positions|DELETE|',
     'app.plan_conditions|SELECT|plan_version_id',
@@ -936,9 +938,9 @@ BEGIN
 END
 $ingest_narrow$;
 
--- P2N-06：aia_api 的最小依赖（worker/api 实际语句）。不授 ALL，不授 DELETE 给业务角色，
--- 不把密文列授给 aia_api。表未落地只警告。点名列缺失则失败，不退成表级 UPDATE。
--- $grants$ 里已有的更宽表级权限不在这里撤销（没有新的收窄裁定）。
+-- P2N-06：aia_api 的语句依赖。不授 ALL，不把密文列授给 aia_api。
+-- 表未落地只警告。点名列缺失则失败，不退成表级 UPDATE。
+-- $grants$ 带上的更宽权限由文件末尾 $o33$ 按 T-A38/T-B92 收回。
 DO $p2n06$
 DECLARE
   spec text[] := ARRAY[
@@ -1004,3 +1006,188 @@ BEGIN
   RAISE NOTICE 'db-roles: P2N-06 aia_api 最小依赖已声明（未授 ALL，未改 T-O30 收窄）';
 END
 $p2n06$;
+
+-- T-O33：T-A38 ① 与 T-B92-evidence 的最小矩阵。先收回基线表级/列级，再按矩阵授予。
+-- 重复执行仍是这一结果。缺表不建。密文与 licence_hmac 不新授。maint 不授表级 SELECT / DDL。
+-- 共享事件归属触发器仍由后端负责。d5a9a60 不是已验收收口。
+DO $o33$
+DECLARE
+  rel text;
+  col text;
+  missing text;
+  five text[] := ARRAY[
+    'app.notification_refs', 'app.intraday_candidate_refs', 'app.signal_events',
+    'app.signal_states', 'app.intraday_universe'];
+  state_upd text[] := ARRAY['last_tick_id', 'rule_states', 'state', 'changed_at'];
+  uni_sel text[] := ARRAY['trade_date', 'source_licence_id', 'security_code', 'computed_at'];
+  rollbacks text[] := ARRAY[
+    'app.p2n06_rollback_0025', 'app.notification_refs_rollback',
+    'app.intraday_candidate_refs_rollback', 'app.signal_event_projections_rollback'];
+BEGIN
+  FOREACH rel IN ARRAY five LOOP
+    IF to_regclass(rel) IS NULL THEN
+      RAISE EXCEPTION 'db-roles: T-O33 % 不存在，迁移未完成。不建表。', rel;
+    END IF;
+    EXECUTE format('REVOKE ALL ON TABLE %s FROM aia_ingest, aia_api, aia_maint, PUBLIC', to_regclass(rel));
+  END LOOP;
+  SELECT string_agg(c, ',' ORDER BY c) INTO missing FROM unnest(state_upd) AS u(c)
+   WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a
+     WHERE a.attrelid = 'app.signal_states'::regclass AND a.attname = c AND a.attnum > 0 AND NOT a.attisdropped);
+  IF missing IS NOT NULL THEN
+    RAISE EXCEPTION 'db-roles: T-O33 app.signal_states 缺少列（%），不退成表级 UPDATE', missing;
+  END IF;
+  SELECT string_agg(c, ',' ORDER BY c) INTO missing FROM unnest(uni_sel) AS u(c)
+   WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a
+     WHERE a.attrelid = 'app.intraday_universe'::regclass AND a.attname = c AND a.attnum > 0 AND NOT a.attisdropped);
+  IF missing IS NOT NULL THEN
+    RAISE EXCEPTION 'db-roles: T-O33 app.intraday_universe 缺少列（%），不退成表级 SELECT', missing;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'app.signal_events'::regclass
+       AND a.attname IN ('id', 'user_id', 'source_licence_id') AND a.attnum > 0 AND NOT a.attisdropped
+       GROUP BY a.attrelid HAVING count(*) = 3) THEN
+    RAISE EXCEPTION 'db-roles: T-O33 app.signal_events 缺少 id/user_id/source_licence_id，不退成表级 SELECT';
+  END IF;
+
+  EXECUTE 'GRANT SELECT, INSERT ON TABLE app.notification_refs TO aia_api';
+  EXECUTE 'GRANT SELECT, INSERT ON TABLE app.intraday_candidate_refs TO aia_api';
+  EXECUTE 'GRANT SELECT, INSERT ON TABLE app.signal_events TO aia_api';
+  EXECUTE 'GRANT SELECT, INSERT ON TABLE app.signal_states TO aia_api';
+  EXECUTE format('GRANT UPDATE (%s) ON TABLE app.signal_states TO aia_api',
+    (SELECT string_agg(quote_ident(c), ', ') FROM unnest(state_upd) AS u(c)));
+  EXECUTE 'GRANT INSERT ON TABLE app.intraday_universe TO aia_api';
+  EXECUTE format('GRANT SELECT (%s) ON TABLE app.intraday_universe TO aia_api',
+    (SELECT string_agg(quote_ident(c), ', ') FROM unnest(uni_sel) AS u(c)));
+  EXECUTE 'GRANT UPDATE (computed_at) ON TABLE app.intraday_universe TO aia_api';
+
+  EXECUTE 'GRANT SELECT (notification_id), DELETE ON TABLE app.notification_refs TO aia_maint';
+  EXECUTE 'GRANT SELECT (instance_id), DELETE ON TABLE app.intraday_candidate_refs TO aia_maint';
+  EXECUTE 'GRANT SELECT (id, source_licence_id), DELETE ON TABLE app.signal_states TO aia_maint';
+  EXECUTE 'GRANT SELECT (source_licence_id), DELETE ON TABLE app.intraday_universe TO aia_maint';
+  EXECUTE 'GRANT SELECT (id, user_id, source_licence_id), DELETE ON TABLE app.signal_events TO aia_maint';
+
+  IF to_regclass('app.signal_event_projections') IS NULL THEN
+    RAISE NOTICE 'db-roles: T-O33 app.signal_event_projections 未迁移，不建表。T-B92 非正式收口。';
+  ELSE
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'app.signal_event_projections'::regclass
+         AND a.attname = 'user_id' AND a.attnum > 0 AND NOT a.attisdropped) THEN
+      RAISE EXCEPTION 'db-roles: T-O33 app.signal_event_projections 缺少 user_id，不退成表级 SELECT';
+    END IF;
+    EXECUTE 'REVOKE ALL ON TABLE app.signal_event_projections FROM aia_ingest, aia_api, aia_maint, PUBLIC';
+    EXECUTE 'GRANT SELECT, INSERT ON TABLE app.signal_event_projections TO aia_api';
+    EXECUTE 'GRANT SELECT (user_id), DELETE ON TABLE app.signal_event_projections TO aia_maint';
+  END IF;
+
+  IF to_regclass('market.master_vendor_batches') IS NULL THEN
+    RAISE NOTICE 'db-roles: T-O33 market.master_vendor_batches 不存在，不建表。';
+  ELSE
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'market.master_vendor_batches'::regclass
+         AND a.attname = 'source_licence_id' AND a.attnum > 0 AND NOT a.attisdropped) THEN
+      RAISE EXCEPTION 'db-roles: T-O33 market.master_vendor_batches 缺少 source_licence_id，不退成表级 SELECT';
+    END IF;
+    EXECUTE 'REVOKE ALL ON TABLE market.master_vendor_batches FROM aia_maint';
+    EXECUTE 'GRANT SELECT (source_licence_id), DELETE ON TABLE market.master_vendor_batches TO aia_maint';
+  END IF;
+
+  FOREACH rel IN ARRAY rollbacks LOOP
+    IF to_regclass(rel) IS NOT NULL THEN
+      EXECUTE format('REVOKE ALL ON TABLE %s FROM aia_api, aia_ingest, aia_maint, PUBLIC', to_regclass(rel));
+    END IF;
+  END LOOP;
+
+  FOREACH rel IN ARRAY five LOOP
+    IF has_table_privilege('aia_ingest', rel, 'SELECT') OR has_table_privilege('aia_ingest', rel, 'INSERT')
+       OR has_table_privilege('aia_ingest', rel, 'UPDATE') OR has_table_privilege('aia_ingest', rel, 'DELETE')
+       OR has_table_privilege('aia_ingest', rel, 'TRUNCATE') OR has_table_privilege('aia_ingest', rel, 'REFERENCES')
+       OR has_table_privilege('aia_ingest', rel, 'TRIGGER')
+       OR has_any_column_privilege('aia_ingest', rel, 'SELECT')
+       OR has_any_column_privilege('aia_ingest', rel, 'INSERT')
+       OR has_any_column_privilege('aia_ingest', rel, 'UPDATE') THEN
+      RAISE EXCEPTION 'db-roles: T-O33 aia_ingest 对 % 仍有权限', rel;
+    END IF;
+  END LOOP;
+  IF NOT has_table_privilege('aia_api', 'app.notification_refs', 'SELECT')
+     OR NOT has_table_privilege('aia_api', 'app.notification_refs', 'INSERT')
+     OR has_table_privilege('aia_api', 'app.notification_refs', 'UPDATE')
+     OR has_table_privilege('aia_api', 'app.notification_refs', 'DELETE')
+     OR NOT has_table_privilege('aia_api', 'app.intraday_candidate_refs', 'SELECT')
+     OR NOT has_table_privilege('aia_api', 'app.intraday_candidate_refs', 'INSERT')
+     OR has_table_privilege('aia_api', 'app.intraday_candidate_refs', 'DELETE')
+     OR NOT has_table_privilege('aia_api', 'app.signal_events', 'SELECT')
+     OR NOT has_table_privilege('aia_api', 'app.signal_events', 'INSERT')
+     OR has_table_privilege('aia_api', 'app.signal_events', 'UPDATE')
+     OR has_table_privilege('aia_api', 'app.signal_events', 'DELETE')
+     OR NOT has_table_privilege('aia_api', 'app.signal_states', 'SELECT')
+     OR NOT has_table_privilege('aia_api', 'app.signal_states', 'INSERT')
+     OR has_table_privilege('aia_api', 'app.signal_states', 'UPDATE')
+     OR has_table_privilege('aia_api', 'app.signal_states', 'DELETE')
+     OR NOT has_table_privilege('aia_api', 'app.intraday_universe', 'INSERT')
+     OR has_table_privilege('aia_api', 'app.intraday_universe', 'SELECT')
+     OR has_table_privilege('aia_api', 'app.intraday_universe', 'UPDATE')
+     OR has_table_privilege('aia_api', 'app.intraday_universe', 'DELETE') THEN
+    RAISE EXCEPTION 'db-roles: T-O33 aia_api 五表表级权限与矩阵不一致';
+  END IF;
+  FOREACH col IN ARRAY state_upd LOOP
+    IF NOT has_column_privilege('aia_api', 'app.signal_states', col, 'UPDATE') THEN
+      RAISE EXCEPTION 'db-roles: T-O33 aia_api 缺少 signal_states.% UPDATE', col;
+    END IF;
+  END LOOP;
+  FOR col IN SELECT a.attname FROM pg_attribute a
+    WHERE a.attrelid = 'app.signal_states'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+      AND a.attname <> ALL (state_upd) LOOP
+    IF has_column_privilege('aia_api', 'app.signal_states', col, 'UPDATE') THEN
+      RAISE EXCEPTION 'db-roles: T-O33 aia_api 仍可 UPDATE signal_states.%', col;
+    END IF;
+  END LOOP;
+  FOREACH col IN ARRAY uni_sel LOOP
+    IF NOT has_column_privilege('aia_api', 'app.intraday_universe', col, 'SELECT') THEN
+      RAISE EXCEPTION 'db-roles: T-O33 aia_api 缺少 intraday_universe.% SELECT', col;
+    END IF;
+  END LOOP;
+  IF NOT has_column_privilege('aia_api', 'app.intraday_universe', 'computed_at', 'UPDATE') THEN
+    RAISE EXCEPTION 'db-roles: T-O33 aia_api 缺少 intraday_universe.computed_at UPDATE';
+  END IF;
+  FOR col IN SELECT a.attname FROM pg_attribute a
+    WHERE a.attrelid = 'app.intraday_universe'::regclass AND a.attnum > 0 AND NOT a.attisdropped LOOP
+    IF col <> 'computed_at' AND has_column_privilege('aia_api', 'app.intraday_universe', col, 'UPDATE') THEN
+      RAISE EXCEPTION 'db-roles: T-O33 aia_api 仍可 UPDATE intraday_universe.%', col;
+    END IF;
+    IF NOT (col = ANY (uni_sel)) AND has_column_privilege('aia_api', 'app.intraday_universe', col, 'SELECT') THEN
+      RAISE EXCEPTION 'db-roles: T-O33 aia_api 仍可 SELECT intraday_universe.%', col;
+    END IF;
+  END LOOP;
+  IF has_table_privilege('aia_maint', 'app.notification_refs', 'SELECT')
+     OR has_table_privilege('aia_maint', 'app.signal_states', 'SELECT')
+     OR has_table_privilege('aia_maint', 'app.signal_events', 'SELECT')
+     OR NOT has_column_privilege('aia_maint', 'app.notification_refs', 'notification_id', 'SELECT')
+     OR NOT has_column_privilege('aia_maint', 'app.signal_states', 'id', 'SELECT')
+     OR NOT has_column_privilege('aia_maint', 'app.signal_states', 'source_licence_id', 'SELECT')
+     OR NOT has_column_privilege('aia_maint', 'app.signal_events', 'id', 'SELECT')
+     OR NOT has_column_privilege('aia_maint', 'app.signal_events', 'user_id', 'SELECT')
+     OR NOT has_column_privilege('aia_maint', 'app.signal_events', 'source_licence_id', 'SELECT')
+     OR NOT has_table_privilege('aia_maint', 'app.signal_events', 'DELETE') THEN
+    RAISE EXCEPTION 'db-roles: T-O33 aia_maint 列级权限与注销谓词不一致';
+  END IF;
+  IF to_regclass('app.user_data_licences') IS NOT NULL
+     AND has_column_privilege('aia_maint', 'app.user_data_licences', 'ciphertext', 'SELECT') THEN
+    RAISE EXCEPTION 'db-roles: T-O33 aia_maint 不得读取证书密文';
+  END IF;
+  IF to_regclass('app.user_data_licences') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'app.user_data_licences'::regclass
+          AND a.attname = 'licence_hmac' AND a.attnum > 0 AND NOT a.attisdropped)
+     AND has_column_privilege('aia_maint', 'app.user_data_licences', 'licence_hmac', 'SELECT') THEN
+    RAISE EXCEPTION 'db-roles: T-O33 aia_maint 不得读取 licence_hmac';
+  END IF;
+  IF to_regclass('app.signal_event_projections') IS NOT NULL
+     AND (NOT has_table_privilege('aia_api', 'app.signal_event_projections', 'SELECT')
+       OR NOT has_table_privilege('aia_api', 'app.signal_event_projections', 'INSERT')
+       OR has_table_privilege('aia_api', 'app.signal_event_projections', 'UPDATE')
+       OR has_table_privilege('aia_api', 'app.signal_event_projections', 'DELETE')
+       OR has_table_privilege('aia_ingest', 'app.signal_event_projections', 'SELECT')
+       OR NOT has_column_privilege('aia_maint', 'app.signal_event_projections', 'user_id', 'SELECT')
+       OR NOT has_table_privilege('aia_maint', 'app.signal_event_projections', 'DELETE')
+       OR has_table_privilege('aia_maint', 'app.signal_event_projections', 'SELECT')) THEN
+    RAISE EXCEPTION 'db-roles: T-O33 signal_event_projections 权限与矩阵不一致';
+  END IF;
+  RAISE NOTICE 'db-roles: T-O33 矩阵已收窄（重复执行保持最小；未建表；未改归属触发器）';
+END
+$o33$;

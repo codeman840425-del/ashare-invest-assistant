@@ -104,7 +104,7 @@ cmd_plan() {
   echo "顺序：0023、合成旧通知、备份、非空旧事件门、alembic head、与 heads 对照、timescale、apply-roles 与 verify-roles 各两遍、保留校验。"
   echo "signal_events 非 0 则停。不升级、不删行。T-B92 没有已验收交付。"
   echo "rehearse-neg：另一库插入两条合法旧事件，期望升级失败且版本与计数不变。退出 2 表示阻塞仍在，不是升级成功。"
-  echo "deploy 需要 AIA_CLOSEOUT_DEPLOY=1。up.sh 已含迁移、timescale-apply、db-roles 和 --wait；之后才是 verify-roles、nginx -t、HTTP 与 8 服务状态。不重复迁移。"
+  echo "deploy 需要 AIA_CLOSEOUT_DEPLOY=1。self-check 即使继承该开关也只模拟。up.sh 已含迁移、timescale-apply、db-roles 和 --wait；之后才是 db-roles 容器内 verify-roles、nginx -t、HTTP 与 8 服务状态。失败即停。不重复迁移。"
 }
 
 cmd_merge() {
@@ -413,18 +413,43 @@ check_services() {
   done
 }
 
+run_backup() {
+  if [ "${AIA_CLOSEOUT_SELF_CHECK:-}" = 1 ]; then
+    if [ -n "${AIA_CLOSEOUT_REAL_MARK:-}" ]; then printf '%s\n' backup >> "$AIA_CLOSEOUT_REAL_MARK"; fi
+    die "self-check 禁止真实备份"
+  fi
+  "$HERE/db-backup.sh"
+}
+run_up() {
+  if [ "${AIA_CLOSEOUT_SELF_CHECK:-}" = 1 ]; then
+    if [ -n "${AIA_CLOSEOUT_REAL_MARK:-}" ]; then printf '%s\n' up >> "$AIA_CLOSEOUT_REAL_MARK"; fi
+    die "self-check 禁止真实启动"
+  fi
+  "$HERE/up.sh"
+}
+verify_in_db_roles() {
+  if [ "${AIA_CLOSEOUT_SELF_CHECK:-}" = 1 ]; then
+    if [ -n "${AIA_CLOSEOUT_REAL_MARK:-}" ]; then printf '%s\n' verify >> "$AIA_CLOSEOUT_REAL_MARK"; fi
+    die "self-check 禁止真实校验"
+  fi
+  "$HERE/compose.sh" run --no-deps --rm --entrypoint bash db-roles /aia/deploy/db/roles/verify-roles.sh
+}
 cmd_deploy() {
+  if [ "${AIA_CLOSEOUT_SELF_CHECK:-}" = 1 ] && [ "${AIA_CLOSEOUT_SIMULATE:-}" != 1 ]; then
+    die "self-check 禁止真实部署"
+  fi
   [ "${AIA_CLOSEOUT_DEPLOY:-}" = 1 ] || die "真实部署被拒绝。设置 AIA_CLOSEOUT_DEPLOY=1 才会调用 up.sh。默认不做。"
-  echo "closeout deploy：up.sh 已包含迁移、timescale-apply 和 db-roles。这里不重复迁移。" >&2
-  step backup "$HERE/db-backup.sh"
-  step up "$HERE/up.sh"
-  step verify-roles "$HERE/../db/roles/verify-roles.sh"
+  echo "closeout deploy：up.sh 已包含迁移、timescale-apply 和 db-roles。校验在 db-roles 容器内执行。失败即停，不重复迁移。" >&2
+  step backup run_backup
+  step up run_up
+  step verify-roles verify_in_db_roles
   step nginx-t "$HERE/compose.sh" exec -T nginx nginx -t
   step http check_http
   step services check_services
 }
 
 cmd_self_check() {
+  export AIA_CLOSEOUT_SELF_CHECK=1
   bash -n "$0"
   if grep -E 'alembic[[:space:]]+downgrade|compose[[:space:]].*[[:space:]]down[[:space:]]' "$0" >/dev/null; then
     die "脚本含降级或 down"
@@ -479,6 +504,17 @@ cmd_self_check() {
   set -e
   [ "$rc" != 0 ] || die "未授权的 deploy 应当失败"
   [ ! -s "$log" ] || die "未授权的 deploy 不应记录步骤"
+  mark="$tmp/real-exec"
+  : > "$mark"
+  : > "$log"
+  set +e
+  out="$(AIA_CLOSEOUT_DEPLOY=1 AIA_CLOSEOUT_SELF_CHECK=1 AIA_CLOSEOUT_REAL_MARK="$mark" AIA_CLOSEOUT_STEPLOG="$log" "$0" deploy 2>&1)"
+  rc=$?
+  set -e
+  [ "$rc" != 0 ] || die "继承部署开关时 self-check 仍应拒绝"
+  [ ! -s "$log" ] || die "继承部署开关时不应记录步骤"
+  [ ! -s "$mark" ] || die "继承部署开关时调用了真实执行器"
+  printf '%s\n' "$out" | grep -q '禁止真实部署' || die "未拒绝真实部署"
   : > "$log"
   set +e
   AIA_CLOSEOUT_DEPLOY=1 AIA_CLOSEOUT_SIMULATE=1 AIA_CLOSEOUT_STEPLOG="$log" AIA_CLOSEOUT_FAIL_AT=verify-roles "$0" deploy >/dev/null 2>&1

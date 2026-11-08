@@ -6,7 +6,26 @@
 BASE|shared-main|96a4b683a658bfecb2d2446f2b71120832e5c872|T-O32 盘点：当时共享 main，前端/契约；最终 head 以合并结果的 alembic heads 为准
 MERGE|test|d0a6644|T-T01|试合顺序第 1 步，只改 tests，合并提交 9cd2672437ebbb6450b7424adf9b8d0b828a4fbe 无冲突
 MERGE|ops|f0785823c8ba4bbd7102fa9b35cd21ed02b69e96|T-O31-cache|本机 13/0 后提交；试合顺序第 2 步，合并提交 03df03be873373511eebbd749db7085c8768d163
-MERGE|ops|9b5ab113ab0488ea739eb914935c588f005978ab|P2N-R08-T-A32-05h|链上 6d096cd、fb6f971、9b5ab11；试合无冲突，合并提交 b7e5aeb828b560c0d294867cc7aebf31044c205a
-MERGE|backend|be685b1d1257329cb675aa124b813e2c90dea676|P2N-06|已验收，含 0025/0026。试合无冲突，合并后分支 4ccc859249dfd97c57732804c65777f49246e345
-# 未纳入：462057c T-A33，看板上没有通过记录。
-# 未纳入：任何未写在本文件里的分支 tip。
+MERGE|research|6d096cd|P2N-R08|链上研究来源。试合无冲突后并入 b7e5aeb828b560c0d294867cc7aebf31044c205a
+MERGE|architect|fb6f971|T-A32|链上架构来源。不是 ops
+MERGE|frontend|9b5ab113ab0488ea739eb914935c588f005978ab|05h|前端来源。原清单误标 ops
+MERGE|backend|be685b1d1257329cb675aa124b813e2c90dea676|P2N-06|已验收，含 0025/0026。历史试合快照 4ccc859249dfd97c57732804c65777f49246e345
+MERGE|architect|462057c|T-A33|编排者确认纳入。验收来源 board/reports
+MERGE|architect|93df55a|P2N-07-review|旧评审不通过记录。问题后由 T-B91、T-A41、T-A42 复审。纳入文档，不是当时的通过结论
+MERGE|frontend|0c20834|05i|3 项由 05j 修。编排者确认纳入
+MERGE|frontend|6c419b1|05j|T-A41 通过
+MERGE|architect|78cd872|T-A36|编排者确认纳入
+MERGE|architect|37f8d65|T-A37|文档。编排者确认纳入
+MERGE|architect|3b36b74|T-A37|文档。编排者确认纳入
+MERGE|research|fd2e707|R08b|编排者确认纳入
+MERGE|research|c3c6c5e|R09b|编排者确认纳入。R09 以该提交为准
+MERGE|research|0d50b48|R10|编排者确认纳入
+MERGE|architect|373b680|T-A39|交接草稿可合入。含占位，待收尾，不是已完成部署
+MERGE|backend|0289388|T-B91|T-A42：代码层 N-I1/N-S1/N-S2 关闭。7 个定点用例因隔离 PG 拒绝未跑，不记动态通过
+# O2：4ccc859 只是历史试合快照。c2353bf 是当时的运维交付。当前 ops 基线是 175b98e1f4db20ddf8379afb4e7ad45329348fdb。
+# 条件评审 afccd5e3cbad48affbce9b95fcda5c32a388cbb5 = merge(175b98e, 3fcb354)，无冲突，head 0027。不是正式收口，不推部署。
+# O3 门槛保留，没有删掉：
+# d5a9a60 与 0027 只是隔离评审候选。ACL 写在 deploy 末尾，正式收口须父端 network none + unix socket 复验。不把 T-B92 验收设为真。
+# B1 的维护窗口动态复验仍待，不在本清单标完成。
+# 3fcb354 的全量 main 历史不是已验收集合。没有写进 MERGE 的 hash 不纳入。
+# 未纳入：任何未写在 MERGE 行里的分支 tip。

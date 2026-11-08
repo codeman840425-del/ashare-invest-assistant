@@ -447,7 +447,8 @@ def effective_config(
                 (risk_control_settings.c.scope == "system")
                 & risk_control_settings.c.user_id.is_(None),
                 (risk_control_settings.c.scope == "user")
-                & (risk_control_settings.c.user_id == user_id),
+                & (risk_control_settings.c.user_id == user_id)
+                & risk_control_settings.c.override_active,
             )
         )
         .order_by(risk_control_settings.c.scope)

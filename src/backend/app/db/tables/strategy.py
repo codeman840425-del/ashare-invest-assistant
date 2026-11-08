@@ -219,6 +219,7 @@ risk_control_settings = Table(
     txt("control", nullable=False),
     boolean("enabled", nullable=False, server_default=text("true")),
     jsonb("params"),
+    boolean("override_active", nullable=False, server_default=text("true")),
     ts("updated_at", nullable=False, default_now=True),
     one_of("scope", ["system", "user"]),
     one_of("control", RiskControl),

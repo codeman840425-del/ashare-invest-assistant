@@ -9,7 +9,7 @@ import { http, HttpResponse } from 'msw';
 import type { StreamEventMap, StreamEventType } from '../api/streamTypes';
 import type { Notification } from '../api/types';
 import { errorBody } from './handlerUtils';
-import { uid } from './fixtures';
+import { exampleNotificationVersion } from './notificationStreamFixtures';
 import { addMockNotification } from './notificationStore';
 import { currentUser } from './session';
 
@@ -17,8 +17,8 @@ const API = '/api/v1';
 export const STREAM_RETENTION_MS = 10 * 60_000;
 export const HEARTBEAT_MS = 15_000;
 
-interface LoggedEvent { id: string; type: StreamEventType; data: unknown; at: number }
-interface Conn { send: (chunk: string) => void; close: () => void }
+interface LoggedEvent { owner: string; id: string; type: StreamEventType; data: unknown; at: number }
+interface Conn { owner: string; send: (chunk: string) => void; close: () => void }
 
 let seq = 0;
 let log: LoggedEvent[] = [];
@@ -26,6 +26,7 @@ const conns = new Set<Conn>();
 /** 收到的每次连接的 Last-Event-ID（测试断言续传用） */
 export const streamRequests: (string | null)[] = [];
 let demoPushed = false;
+const demoTimers = new Set<ReturnType<typeof setTimeout>>();
 
 const enc = new TextEncoder();
 const frame = (e: { id?: string; type: string; data: unknown }) =>
@@ -36,13 +37,14 @@ function prune(now = Date.now()) {
 }
 
 /** 推一条业务事件给所有连接（并写入日志供续传）；notification 事件同时写入通知列表 */
-export function pushStreamEvent<K extends StreamEventType>(type: K, data: StreamEventMap[K]): string {
+export function pushStreamEvent<K extends StreamEventType>(type: K, data: StreamEventMap[K], ownerId = currentUser()?.id): string {
+  if (!ownerId) throw new Error('示例事件必须属于已登录用户');
   seq += 1;
-  const e: LoggedEvent = { id: String(seq), type, data, at: Date.now() };
+  const e: LoggedEvent = { owner: ownerId, id: String(seq), type, data, at: Date.now() };
   log.push(e);
   prune();
-  if (type === 'notification') addMockNotification(data as Notification);
-  for (const c of conns) c.send(frame(e));
+  if (type === 'notification') addMockNotification(data as Notification, ownerId);
+  for (const c of conns) if (c.owner === ownerId) c.send(frame(e));
   return e.id;
 }
 
@@ -59,20 +61,16 @@ export function resetStreamMock() {
   log = [];
   streamRequests.length = 0;
   demoPushed = false;
+  for (const timer of demoTimers) clearTimeout(timer); demoTimers.clear();
 }
 
 const isDemo = () => typeof window !== 'undefined' && import.meta.env.MODE !== 'test';
 
-function demoNotification(): Notification {
-  return {
-    id: uid(950), kind: 'system', severity: 'info', title: '实时推送已连接（示例）：新通知会即时出现在这里', body: '这是一条由本地示例数据推送的通知，用于演示实时推送。',
-    created_at: new Date().toISOString(), read_at: null, security_code: null, name: null, target: { type: 'none', id: null, route: null },
-  };
-}
 
 export const streamHandlers = [
   http.get(`${API}/stream`, ({ request }) => {
-    if (!currentUser()) return HttpResponse.json(errorBody('AUTH_REQUIRED', '请先登录'), { status: 401 });
+    const owner = currentUser()?.id;
+    if (!owner) return HttpResponse.json(errorBody('AUTH_REQUIRED', '请先登录'), { status: 401 });
     const last = request.headers.get('Last-Event-ID');
     streamRequests.push(last);
     prune();
@@ -87,6 +85,7 @@ export const streamHandlers = [
       start(controller) {
         let open = true;
         conn = {
+          owner,
           send: (chunk) => {
             if (!open) return;
             try {
@@ -111,13 +110,16 @@ export const streamHandlers = [
         const c = conn;
         // 续传：只补发保留期内 id 大于 Last-Event-ID 的事件
         const after = last !== null && /^\d+$/.test(last) ? Number(last) : null;
-        if (after !== null) for (const e of log) if (Number(e.id) > after) c.send(frame(e));
+        if (after !== null) for (const e of log) if (e.owner === owner && Number(e.id) > after) c.send(frame(e));
         c.send(': connected\n\n');
         hb = setInterval(() => c.send(frame({ type: 'heartbeat', data: { at: new Date().toISOString() } })), HEARTBEAT_MS);
         request.signal.addEventListener('abort', () => c.close(), { once: true });
         if (isDemo() && !demoPushed) {
           demoPushed = true;
-          setTimeout(() => pushStreamEvent('notification', demoNotification()), 6_000);
+          for (const [index, version] of ([1, 2] as const).entries()) {
+            const timer = setTimeout(() => { demoTimers.delete(timer); pushStreamEvent('notification', exampleNotificationVersion(version), owner); }, 6_000 + index * 3_000);
+            demoTimers.add(timer);
+          }
         }
       },
       cancel() {

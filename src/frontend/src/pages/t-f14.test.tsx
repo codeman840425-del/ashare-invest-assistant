@@ -43,6 +43,7 @@ const fixtureUnread = NOTIFICATIONS.filter((n) => n.read_at === null).length;
 function sampleNotification(n: number, over: Partial<Notification> = {}): Notification {
   return {
     id: uid(n), kind: 'invalidation', severity: 'important', title: `演示证券触及失效条件（示例 ${n}）`, body: null,
+    merged_count: 1, updated_at: '2026-11-02T10:40:00+08:00', refs: [],
     created_at: '2026-11-02T10:40:00+08:00', read_at: null, security_code: '600002.SH', name: '演示医药',
     target: { type: 'candidate_signal', id: uid(n + 1), route: `/candidate-signals/${uid(n + 1)}` }, ...over,
   };
@@ -263,7 +264,7 @@ describe('SSE /stream 客户端（§8）', () => {
       dropStreamConnections();
     });
     await waitFor(() => expect(screen.getByTestId('stream-status').getAttribute('data-state')).toBe('retrying'));
-    expect(qc.getQueryCache().find({ queryKey: ['notifications', 'unread-count'] })!.observers[0].options.refetchInterval).toBe(30_000);
+    expect(qc.getQueryCache().find({ queryKey: ['notifications', 'unread-count'] })!.observers[0].options.refetchInterval).toBe(15_000);
     const missed = sampleNotification(970);
     act(() => void pushStreamEvent('notification', missed));
     await waitFor(() => expect(screen.getByTestId('stream-status').getAttribute('data-state')).toBe('open'), { timeout: 3_000 });

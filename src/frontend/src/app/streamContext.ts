@@ -1,3 +1,4 @@
+import { IS_MOCK } from '../lib/env';
 import { createContext, useContext } from 'react';
 import type { StreamState } from '../lib/eventStream';
 
@@ -16,8 +17,13 @@ export const useStreamLive = () => useContext(StreamStatusContext) === 'open';
  * T-F14 的测试里显式打开并把重连间隔调小。
  */
 export const streamConfig = {
-  enabled: import.meta.env.MODE !== 'test',
+  enabled: IS_MOCK && import.meta.env.MODE !== 'test',
   retryMs: undefined as number | undefined,
   maxRetryMs: undefined as number | undefined,
   idleTimeoutMs: undefined as number | undefined,
 };
+
+/** 补读独立于TCP连通：失败不能宣称离线数据已经补齐。 */
+export type NotificationSyncState = 'idle' | 'loading' | 'ready' | 'error';
+export const NotificationSyncContext = createContext<NotificationSyncState>('idle');
+export const useNotificationSync = () => useContext(NotificationSyncContext);

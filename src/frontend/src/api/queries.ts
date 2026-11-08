@@ -115,7 +115,7 @@ export const useNotifications = () =>
   useQuery({ queryKey: qk.notifications, queryFn: ({ signal }) => apiGet<Paged<Notification>>('/notifications', { limit: 50 }, signal) });
 
 /** 契约 §8：SSE 连上时未读数随 notification 事件刷新；断线（或未启用）时退回轮询 /notifications/unread-count */
-export const UNREAD_POLL_MS = 30_000;
+export const UNREAD_POLL_MS = 15_000;
 export const useUnreadCount = () => {
   const live = useStreamLive();
   const pending = isRoutePending(useQueryClient().getQueryState(qk.unread)?.error);

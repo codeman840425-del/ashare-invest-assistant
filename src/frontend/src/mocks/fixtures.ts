@@ -1,3 +1,4 @@
+import { projectNotification, type NotificationInput } from '../lib/notifications';
 import { withDailyDimensions } from './phase2Fixtures';
 /**
  * 示例数据（全部虚构）—— 按契约 v0.2.2 结构生成，仅供开发与测试（MSW）使用。
@@ -713,7 +714,7 @@ export const SIGNAL_EVENTS: SignalEvent[] = [
 
 // ---------------- 通知 ----------------
 const sgId = (code: string) => suggestionOf(code)!.id;
-export const NOTIFICATIONS: Notification[] = [
+export const NOTIFICATIONS: Notification[] = ([
   { id: uid(901), kind: 'suggestion_change', severity: 'important', title: '示例银行：各策略结论出现分歧（买入 / 等待 / 减仓）', body: '各策略并列展示，系统不合并为单一结论。', created_at: '2026-11-02T10:31:00+08:00', read_at: null, security_code: '600000.SH', name: '示例银行', target: { type: 'suggestion', id: sgId('600000.SH'), route: `/suggestions/${sgId('600000.SH')}` } },
   { id: uid(902), kind: 'plan_draft_ready', severity: 'attention', title: '演示电子：按您的持仓和资金拟定的计划草案待确认', body: null, created_at: '2026-11-02T10:12:30+08:00', read_at: null, security_code: '300001.SZ', name: '演示电子', target: { type: 'plan_draft', id: suggestionOf('300001.SZ')!.plan_draft_ids[0], route: `/plan-drafts/${suggestionOf('300001.SZ')!.plan_draft_ids[0]}` } },
   { id: uid(903), kind: 'invalidation', severity: 'important', title: '演示医药：接近失效条件（止损位）', body: '请核对候选信号卡中的失效条件。', created_at: '2026-11-02T10:05:00+08:00', read_at: null, security_code: '600002.SH', name: '演示医药', target: { type: 'suggestion', id: sgId('600002.SH'), route: `/suggestions/${sgId('600002.SH')}` } },
@@ -725,7 +726,7 @@ export const NOTIFICATIONS: Notification[] = [
   { id: uid(909), kind: 'import', severity: 'attention', title: '对账发现 2 处重要差异：主账户（示例）', body: null, created_at: '2026-11-01T20:33:00+08:00', read_at: null, security_code: null, name: null, target: { type: 'reconciliation', id: ACCOUNT_ID, route: `/portfolio?tab=reconciliation&account_id=${ACCOUNT_ID}` } },
   { id: uid(906), kind: 'daily_report', severity: 'info', title: `${REPORT_DATE} 盘后日报已生成`, body: null, created_at: '2026-10-30T17:42:00+08:00', read_at: '2026-10-30T18:02:00+08:00', security_code: null, name: null, target: { type: 'daily_report', id: REPORT_DATE, route: `/daily-reports/${REPORT_DATE}` } },
   { id: uid(907), kind: 'system', severity: 'info', title: '系统维护提示：周六 22:00 起暂停采集 30 分钟（示例）', body: null, created_at: '2026-10-29T09:00:00+08:00', read_at: '2026-10-29T09:10:00+08:00', security_code: null, name: null, target: { type: 'none', id: null, route: null } },
-];
+] satisfies NotificationInput[]).map(projectNotification);
 
 // ---------------- 盘后日报 ----------------
 export const DAILY_REPORTS: DailyReport[] = [(() => {

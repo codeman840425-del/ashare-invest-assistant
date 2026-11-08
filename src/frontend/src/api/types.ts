@@ -144,6 +144,8 @@ export interface SignalEvent {
   candidate_signal_id: Uuid | null;
 }
 export interface NotificationTarget { type: NotificationTargetType; id: string | null; route: string | null }
+/** refs.type枚举/单引用深链未冻结，保留原值，不推断路由。 */
+export interface NotificationRef { type: string; id: string; at: DateTime }
 export interface Notification {
   id: Uuid;
   kind: NotificationKind;
@@ -155,6 +157,9 @@ export interface Notification {
   security_code: string | null;
   name: string | null;
   target: NotificationTarget;
+  merged_count: number;
+  updated_at: DateTime;
+  refs: NotificationRef[];
 }
 export interface SuggestionSummaryAction { strategy_key: string; strategy_name: string; action: Action; t_leg: TLeg | null; lifecycle: Lifecycle }
 export interface SuggestionSummary {

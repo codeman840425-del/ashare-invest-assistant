@@ -1,5 +1,6 @@
+import { compareNotificationTime, latestNotifications, projectNotification, type NotificationInput } from '../lib/notifications';
 import type { Notification } from '../api/types';
-import { NOTIFICATIONS, NOW } from './fixtures';
+import { NOTIFICATIONS, NOW, uid } from './fixtures';
 
 /**
  * 示例通知的会话内状态（T-F14）：已读时间 + SSE mock 推送新增的通知。
@@ -16,7 +17,7 @@ export function setNotificationViewer(fn: () => string | null) {
 }
 
 export const allNotifications = (): Notification[] =>
-  [...pushed, ...NOTIFICATIONS]
+  latestNotifications([...pushed, ...NOTIFICATIONS.filter(() => viewer() === uid(2))])
     .filter((n) => !owners.has(n.id) || owners.get(n.id) === viewer())
     .map((n) => ({ ...n, read_at: n.read_at ?? readAt.get(n.id) ?? null }));
 
@@ -32,9 +33,15 @@ export function markAllNotificationsRead(at = NOW) {
 }
 
 /** SSE mock 推送 notification 事件时同步写入列表（最新在前） */
-export function addMockNotification(n: Notification, ownerId?: string) {
+export function addMockNotification(input: NotificationInput, ownerId?: string) {
+  const n = projectNotification(input);
+  const old = [...pushed, ...NOTIFICATIONS].find((x) => x.id === n.id);
+  if (old && compareNotificationTime(n.updated_at, old.updated_at) <= 0) return;
+  // 只有确实较新的事件才能把整行重新未读；重放旧/相同版本不清除已读。
+  readAt.delete(n.id);
   pushed = [n, ...pushed.filter((x) => x.id !== n.id)];
-  if (ownerId) owners.set(n.id, ownerId);
+  const owner = ownerId ?? viewer();
+  if (owner) owners.set(n.id, owner);
 }
 
 export function resetNotificationStore() {

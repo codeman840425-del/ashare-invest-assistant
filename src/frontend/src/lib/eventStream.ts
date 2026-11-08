@@ -34,6 +34,7 @@ export interface EventStreamOptions {
   fetchImpl?: typeof fetch;
 }
 
+/** 待架构冻结：复用既有客户端退避/心跳超时策略，集中可注入，非新增服务端契约。 */
 export const STREAM_DEFAULTS = { retryMs: 3_000, maxRetryMs: 60_000, idleTimeoutMs: 45_000 } as const;
 
 export interface EventStreamHandle {

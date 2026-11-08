@@ -1,10 +1,14 @@
+import { useEffect } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { resyncAfterReconnect } from '../app/streamEvents';
+import { IS_MOCK } from '../lib/env';
 import { Alert, Button, Segmented, Select, Space, Tabs, Tag } from 'antd';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ENUMS, type NotificationKind } from '../api/enums';
 import { useMarkAllNotificationsRead, useNotificationPages, type NotificationFilter } from '../api/notificationQueries';
 import { useMarkNotificationRead, useUnreadCount } from '../api/queries';
 import type { Notification } from '../api/types';
-import { useStreamStatus, type StreamStatus } from '../app/streamContext';
+import { useNotificationSync, useStreamStatus, type StreamStatus } from '../app/streamContext';
 import { CursorPager } from '../components/CursorPager';
 import { ErrorBox } from '../components/common';
 import { CardDisclaimer } from '../components/RiskDisclosure';
@@ -17,16 +21,26 @@ const parseKind = (v: string | null): NotificationKind | null => (v && (KINDS as
 
 const STREAM_TEXT: Record<StreamStatus, { text: string; color: string; tip: string }> = {
   open: { text: '实时推送已连接', color: 'green', tip: '新通知通过 SSE 推送，未读数实时更新' },
-  connecting: { text: '正在连接实时推送', color: 'blue', tip: '连接建立前按 30 秒间隔轮询未读数' },
-  retrying: { text: '实时推送已断开，正在重连', color: 'orange', tip: '重连期间按 30 秒间隔轮询未读数；重连时带上最后收到的事件 id 补发漏掉的事件' },
-  closed: { text: '实时推送已停止', color: 'default', tip: '会话失效或已退出；未读数按 30 秒间隔轮询' },
-  off: { text: '实时推送未启用', color: 'default', tip: '未读数按 30 秒间隔轮询' },
+  connecting: { text: '正在连接实时推送', color: 'blue', tip: '连接建立前按 15 秒间隔轮询未读数' },
+  retrying: { text: '实时推送已断开，正在重连', color: 'orange', tip: '重连期间按 15 秒间隔轮询未读数；重连时带上最后收到的事件 id 补发漏掉的事件' },
+  closed: { text: '实时推送已停止', color: 'default', tip: '会话失效、接口未实现或已停止；未读数按 15 秒间隔轮询' },
+  off: { text: '实时推送未启用', color: 'default', tip: '未读数按 15 秒间隔轮询' },
 };
 
 function StreamBadge() {
   const s = useStreamStatus();
   const x = STREAM_TEXT[s];
   return <Tag color={x.color} title={x.tip} data-testid="stream-status" data-state={s}>{x.text}</Tag>;
+}
+
+function NotificationRecovery() {
+  const sync = useNotificationSync(); const qc = useQueryClient();
+  const retry = useMutation({ mutationFn: () => resyncAfterReconnect(qc) }); const { reset } = retry;
+  useEffect(() => { reset(); }, [sync, reset]);
+  const failed = (sync === 'error' && !retry.isSuccess) || retry.isError;
+  return <div data-testid="notification-recovery" className="small" style={{ marginBottom: 8 }}>
+    {failed ? <Alert type="warning" title="离线补读失败，数据可能不完整" action={<Button size="small" loading={retry.isPending} onClick={() => retry.mutate()}>重新补读</Button>} /> : <span className="muted">{sync === 'loading' || retry.isPending ? '正在补读本人未读列表及权威未读数…' : sync === 'ready' || retry.isSuccess ? '已补读本人未读列表及未读数；一行一个未读单位，不按合并次数累加。' : '尚未完成离线补读；未读数来自 /notifications/unread-count。'}</span>}
+  </div>;
 }
 
 function NotificationRow({ n }: { n: Notification }) {
@@ -46,12 +60,19 @@ function NotificationRow({ n }: { n: Notification }) {
           {!n.read_at ? <span className="nc-dot" aria-label="未读" /> : null}
           <Tag color={SEVERITY[n.severity]}>{SEVERITY_TEXT[n.severity]}</Tag>
           <Tag>{NOTIFY_KIND[n.kind]}</Tag>
+          <Tag data-testid={`nc-merged-${n.id}`}>合并 {n.merged_count} 次变化</Tag>
           {n.name ? <span>{n.name} <span className="mono muted">{n.security_code}</span></span> : null}
           <span className="spacer" />
           <span className="mono muted small">{fmtTime(n.created_at)}</span>
         </div>
         <div className="nc-title">{n.title}</div>
+        <div className="muted small" data-testid={`nc-updated-${n.id}`}>最近更新 {fmtTime(n.updated_at)}（北京时间）</div>
         {n.body ? <div className="muted small nc-body">{n.body}</div> : null}
+        <details className="small" data-testid={`nc-refs-${n.id}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <summary>合并引用（{n.refs.length} 条，最多20条）</summary>
+          {n.refs.length ? <ul>{n.refs.slice(0, 20).map((ref) => <li key={`${ref.type}:${ref.id}`}>{ref.type} · <code>{ref.id}</code> · {fmtTime(ref.at)}</li>)}</ul> : <p>旧记录或本条通知未附引用；不补造出处。</p>}
+          <span className="muted">引用类型枚举与单条深链待契约，当前只展示接口原值。 </span><Link to="/signals">查看完整盘中规则事件</Link>
+        </details>
         <div className="small nc-target">
           {route ? <span className="link" data-testid={`nc-go-${n.id}`}>查看{TARGET_TYPE[n.target.type]} ›</span>
             : n.target.type === 'none' ? null : <span className="muted" data-testid={`nc-noroute-${n.id}`}>{TARGET_TYPE[n.target.type]}（链接不可用）</span>}
@@ -77,7 +98,7 @@ function NotificationList() {
   const list = useNotificationPages(f);
   const unread = useUnreadCount();
   const readAll = useMarkAllNotificationsRead();
-  const count = unread.data?.count ?? 0;
+  const count = unread.data?.count;
   return (
     <div data-testid="nc-list">
       <Space wrap style={{ marginBottom: 12 }}>
@@ -85,7 +106,7 @@ function NotificationList() {
           size="small"
           value={f.unread ? 'unread' : 'all'}
           onChange={(v) => setParam('unread', v === 'unread' ? '1' : '')}
-          options={[{ value: 'all', label: '全部' }, { value: 'unread', label: `未读（${count}）` }]}
+          options={[{ value: 'all', label: '全部' }, { value: 'unread', label: `未读（${count ?? '—'}）` }]}
           data-testid="nc-filter-unread"
         />
         <Select<NotificationKind>
@@ -98,9 +119,10 @@ function NotificationList() {
           options={KINDS.map((k) => ({ value: k, label: NOTIFY_KIND[k] }))}
           data-testid="nc-filter-kind"
         />
-        <Button size="small" disabled={count === 0} loading={readAll.isPending} onClick={() => readAll.mutate()} data-testid="nc-read-all">全部标为已读</Button>
+        <Button size="small" disabled={count === undefined || count === 0} loading={readAll.isPending} onClick={() => readAll.mutate()} data-testid="nc-read-all">全部标为已读</Button>
         {readAll.isError ? <span className="error-text small" role="alert">操作失败，请稍后重试</span> : null}
       </Space>
+      {unread.isError ? <ErrorBox error={unread.error} /> : null}
       {list.isError ? <ErrorBox error={list.error} /> : null}
       {list.isPending ? <div className="muted small">加载中…</div> : !list.items.length && !list.isError ? (
         <div className="muted small" data-testid="nc-empty">{f.unread || f.kind ? '没有符合条件的通知' : '暂无通知'}</div>
@@ -121,7 +143,7 @@ function PendingContract({ title, path, lines, testId }: { title: string; path: 
         title={<span>{title} <Tag color="gold">待契约</Tag></span>}
         description={
           <div className="small">
-            <div>契约 §7.8 只列出了 <code>{path}</code>（“渠道与免打扰设置”），没有给出请求 / 响应结构；为避免与后端不一致，前端暂不调用该接口，也不保存任何设置。</div>
+            <div>免打扰与渠道绑定的完整请求 / 响应结构尚未冻结（<code>{path}</code>）；已定的 intraday_cadence 只影响盘中推送节奏，本轮未提供设置入口，也不保存任何偏好。</div>
             <div style={{ marginTop: 6 }}>结构确定后这里将提供：</div>
             <ul style={{ margin: '4px 0 0 18px' }}>{lines.map((l) => <li key={l}>{l}</li>)}</ul>
           </div>
@@ -149,6 +171,8 @@ export function NotificationsPage() {
       <div className="muted small" style={{ marginBottom: 8 }}>
         候选信号变化、失效条件、计划条件、日报与系统消息都汇总在这里；点击通知跳到对应页面并标为已读。通知内容只是规则信号的提示，不替你做决定。
       </div>
+      <Alert type="info" style={{ marginBottom: 8 }} title={IS_MOCK ? '示例数据 · 提醒流仅为MSW模拟，非真实通知' : '提醒流尚未真实联调，SSE仅在示例模式启用'} description="事件名、Last-Event-ID、600秒续传及未读数来源已定；重连退避/空闲超时参数、引用类型枚举/深链与同更新时间冲突裁定待契约。本轮不提供外部渠道。" />
+      <NotificationRecovery />
       <Tabs
         activeKey={tab}
         onChange={setTab}

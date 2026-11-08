@@ -1,6 +1,6 @@
 /**
- * 契约 §4 错误码表（HTTP 错误码，62 个；v0.2.6 加 DATA_LICENCE_*；v0.2.9 #34 加 URI_TOO_LONG）。运行时以 `/meta/enums.error_codes` 为准；
- * 本表由契约逐行抄录，`errors.test.ts` 解析 docs/api-contract.md 校验一致。
+ * 契约 §4 错误码表（HTTP 错误码；v0.2.6 加 DATA_LICENCE_*；v0.2.9 #34 加 URI_TOO_LONG）。运行时以 `/meta/enums.error_codes` 为准；
+ * 本表由契约逐行抄录，`review-fixes.test.ts` 解析 docs/api-contract.md 校验一致。
  */
 export const ERROR_CODES = {
   VALIDATION_ERROR: 400,
@@ -43,6 +43,9 @@ export const ERROR_CODES = {
   STRATEGY_PARAM_OUT_OF_RANGE: 422,
   INSTANCE_SCOPE_INVALID: 422,
   PROMOTION_GATES_NOT_MET: 422,
+  PROMOTION_WARN_UNACKNOWLEDGED: 422,
+  PROMOTION_STALE: 409,
+  HUMAN_SESSION_REQUIRED: 403,
   CARD_IMPORT_INVALID: 422,
   COMPLIANCE_LINT_FAILED: 422,
   SIGNAL_NOT_EXPLAINABLE: 500,

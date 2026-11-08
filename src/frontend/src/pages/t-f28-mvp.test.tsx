@@ -67,9 +67,10 @@ describe('T-F28 门禁', () => {
     expect(button).toBeDisabled();
     expect(decisions).toBe(0);
     fireEvent.change(screen.getByLabelText('G7 审核意见'), { target: { value: '本人已核对示例数据警告' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '本人已核实并确认 G6 警告' }));
     fireEvent.click(button);
     await waitFor(() => expect(decisions).toBe(1));
-    expect(body).toEqual({ decision: 'approved', comment: '本人已核对示例数据警告' });
+    expect(body).toEqual({ decision: 'approved', comment: '本人已核对示例数据警告', ack_warn_gates: ['G6'] });
     expect(lifecycle).toBe(0);
   });
   it('403 明确说明未完成，不重试、不自动晋级', async () => {
@@ -78,6 +79,7 @@ describe('T-F28 门禁', () => {
     renderAt(pagePath);
     await screen.findByTestId('approve-g7');
     fireEvent.change(screen.getByLabelText('G7 审核意见'), { target: { value: '本人核对' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '本人已核实并确认 G6 警告' }));
     fireEvent.click(screen.getByTestId('approve-g7'));
     await screen.findByText(/没有审批权限（403）/);
     expect(writes).toBe(1);
@@ -98,15 +100,16 @@ describe('T-F28 门禁', () => {
       writes.push({ id: params.id, vid: params.vid, body: await request.json() });
       return HttpResponse.json({ from: 'draft', to: 'simulating' });
     }));
+    server.use(http.get(`${API}/promotion-requests/:id`, () => HttpResponse.json({ ...EXAMPLE_PROMOTION_REPORT, decision: 'approved' })));
     renderAt(pagePath);
-    await screen.findByTestId('strategy-gates-page');
+    await screen.findByTestId('approve-g7');
     expect(screen.getByTestId('to-simulating')).toBeDisabled();
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '目标策略版本' }));
     fireEvent.click(await screen.findByText('门禁草稿（示例数据） · v1', { selector: '.ant-select-item-option-content' }));
     fireEvent.change(screen.getByLabelText('生命周期变更原因'), { target: { value: '本人检查完毕' } });
     expect(writes).toHaveLength(0);
     fireEvent.click(screen.getByTestId('to-simulating'));
-    await waitFor(() => expect(writes).toEqual([{ id: uid(512), vid: uid(322), body: { to: 'simulating', reason: '本人检查完毕' } }]));
+    await waitFor(() => expect(writes).toEqual([{ id: uid(512), vid: uid(322), body: { to: 'simulating', reason: '本人检查完毕', review_id: DEMO_REVIEW_ID } }]));
   });
   it('示例管理写端点拒绝普通用户', async () => {
     mockLoginAs('demo_user');

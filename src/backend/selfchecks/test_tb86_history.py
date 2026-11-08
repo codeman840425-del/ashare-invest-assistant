@@ -20,7 +20,29 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 
     monkeypatch.setattr(socket.socket, "connect", deny)
     monkeypatch.setattr(socket, "getaddrinfo", deny)
-    monkeypatch.setattr(probe.os, "environ", {"MAIRUI_LICENCE": "synthetic_" + uuid.uuid4().hex})
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o700)
+    lid = uuid.uuid4()
+    (shared / "policy.json").write_text(
+        json.dumps(
+            {
+                "schema": "mairui-shared/v1",
+                "egress_ip": "192.0.2.10",
+                "licences": {str(lid): {"per_minute_limit": 150}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        probe.os,
+        "environ",
+        {
+            "MAIRUI_LICENCE": "synthetic_" + uuid.uuid4().hex,
+            "MAIRUI_SHARED_STATE_DIR": str(shared),
+            "MAIRUI_SOURCE_LICENCE_ID": str(lid),
+        },
+    )
+    monkeypatch.setattr(probe, "public_egress", lambda: "192.0.2.10")
     monkeypatch.setattr(probe.time, "sleep", lambda *_: None)
     monkeypatch.setattr(probe.logging, "disable", lambda *_: None)
     counter = tmp_path / "synthetic.count"
@@ -185,7 +207,7 @@ def test_missing_authorized_environment_no_fallback(
     context: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     enable_synthetic(monkeypatch)
-    monkeypatch.setattr(probe.os, "environ", {})
+    monkeypatch.delitem(probe.os.environ, "MAIRUI_LICENCE")
     result = probe.execute(**context)
     assert result["outcome"] == "authorized_environment_missing"
     assert result["new_reserved_calls"] == 0
@@ -286,3 +308,21 @@ def test_http_limit_stops_before_response_body_read(
     assert result["outcome"] == "rate_limit_103_or_429"
     assert result["temporary_secret_deleted"]
     assert FakeConnection.calls == 1
+    from app.ingest.shared_gate import GateClosedError, SharedGate
+
+    with pytest.raises(GateClosedError, match="halted"):
+        SharedGate.from_environment(None, "product_daily").acquire()
+
+
+def test_product_shared_lease_prevents_history_reservation_or_secret_file(
+    context: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.ingest.shared_gate import SharedGate
+
+    enable_synthetic(monkeypatch)
+    with SharedGate.from_environment(None, "product_daily"):
+        result = probe.execute(**context)
+        assert result["new_reserved_calls"] == 0
+        assert FakeConnection.calls == 0
+        assert not context["secret_path"].exists()
+    assert json.loads(context["counter"].read_text())["total"] == 0

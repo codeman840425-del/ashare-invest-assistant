@@ -26,6 +26,11 @@ from urllib.parse import urlencode, urlsplit
 import requests
 from requests.adapters import HTTPAdapter
 
+# Direct `python run_all.py` also imports the same packaged standard-library gate.
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app.ingest.shared_gate import SharedGate, limit_code
+
 REAL_BASE = "https://api.mairuiapi.com"
 REAL_PRO_BASE = "https://pro.mairuiapi.com"
 HERE = Path(__file__).resolve().parent
@@ -91,6 +96,7 @@ class RunCtx:
     egress_url: str = ""
     egress: Optional[dict] = None
     session: Optional[requests.Session] = None
+    shared_gate: Any = None
     last_call: float = 0.0
     inflight: int = 0
     n_calls: int = 0
@@ -160,6 +166,12 @@ def init_run(*, dry_run: bool = False, base: str | None = None, pro_base: str | 
         egress_url=egress_url or EGRESS_URL,
         session=make_session(no_env_proxy=no_env_proxy),
     )
+    if not dry_run:
+        _ctx.shared_gate = SharedGate.from_environment(None, "probe_tb05")
+        if STOP_FILE.exists():
+            _ctx.shared_gate.stop.touch(exist_ok=True)
+        _ctx.shared_gate.acquire()
+        _ctx.stop_file = _ctx.shared_gate.stop
     print(f"代理模式：{_ctx.proxy_mode}")
     if dry_run:
         for b in (_ctx.base, _ctx.pro_base):
@@ -182,6 +194,8 @@ def close_run() -> dict:
                "stop_file_exists": c.stop_file.exists(), "finished_at": now_iso()}
     if c.session is not None:
         c.session.close()
+    if c.shared_gate is not None:
+        c.shared_gate.release()
     write_new(c.run_dir / "summary.json", _safe_json(summary))
     return summary
 
@@ -282,15 +296,21 @@ def is_limit_response(status: Optional[int], text: str, data: Any) -> bool:
     data_err_503 = status == 503 and any(k in text for k in ("redis history", "history miss", "cold fallback"))
     body = text.strip()
     code_hit = isinstance(data, dict) and str(data.get("code", "")) in ("101", "103")
-    return (status == 429 or (status == 503 and not data_err_503) or code_hit
+    return (limit_code(status, data) is not None or limit_code(status, text) is not None
+            or status == 429 or (status == 503 and not data_err_503) or code_hit
             or body.startswith("103") or body.startswith("101") or "最多允许2个不同IP" in body)
 
 
 def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", json_body: Any = None,
          **params) -> Resp:
     c = ctx()
+    if not c.dry_run:
+        if c.shared_gate is None:
+            raise LimitHit("shared gate required before live request")
+        if STOP_FILE.exists():
+            c.shared_gate.stop.touch(exist_ok=True)
     if c.stop_file.exists():
-        raise LimitHit(f"STOP 文件存在（{c.stop_file.read_text(encoding='utf-8').strip()[:200]}），拒绝继续调用")
+        raise LimitHit("STOP present; request refused")
     if c.inflight != 0:
         raise RuntimeError("检测到并发调用，探针必须串行")
     if pro and c.skip_pro_host:
@@ -302,11 +322,16 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
     wait = c.min_interval - (time.monotonic() - c.last_call)
     if wait > 0:
         time.sleep(wait)
+    if c.stop_file.exists():
+        raise LimitHit("STOP present before request")
+    if c.shared_gate is not None:
+        c.shared_gate.check()
+        c.shared_gate.reserve()
     c.inflight += 1
     t0 = time.monotonic()
     status, text, err, hdr, redirected = None, "", None, {}, False
     try:
-        r = c.session.request(method, url, json=json_body, timeout=TIMEOUT, allow_redirects=True)
+        r = c.session.request(method, url, json=json_body, timeout=TIMEOUT, allow_redirects=False)
         status, text, redirected = r.status_code, r.text, bool(r.history)
         hdr = {k: v for k, v in r.headers.items() if k.lower() in (
             "content-type", "x-ratelimit-limit", "x-ratelimit-remaining", "retry-after", "date", "last-modified",
@@ -325,6 +350,12 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
             data = json.loads(text)
         except ValueError:
             data = None
+    shared_code = limit_code(status, data) or limit_code(status, text)
+    if c.shared_gate is not None:
+        if shared_code:
+            c.shared_gate.trip(shared_code)
+        if status is not None:
+            c.shared_gate.complete()
     resp = Resp(name, red, status, round(ms, 1), len(text.encode("utf-8")), data, text, err, hdr)
     conns = connection_stats()
     for host, v in conns.items():
@@ -346,7 +377,9 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
     if redirected:
         print("   注意：发生重定向，可能新建了到另一主机的连接")
     if is_limit_response(status, text, data):
-        msg = f"{now_iso()} {name} status={status} body={text[:200]}"
+        if shared_code and c.shared_gate is not None:
+            raise LimitHit("shared licence limit latch set")
+        msg = f"{now_iso()} source=probe_tb05 status={status} STOP"
         if not c.stop_file.exists():
             c.stop_file.parent.mkdir(parents=True, exist_ok=True)
             c.stop_file.write_text(msg + "\n", encoding="utf-8")
@@ -455,6 +488,8 @@ def check_egress_stable(rounds: int = 3) -> tuple:
             time.sleep(1.0)
     stable = all(ips) and len(set(ips)) == 1
     c.egress = {"url": c.egress_url, "rounds": rounds, "ips": ips, "stable": bool(stable)}
+    if stable and c.shared_gate is not None:
+        c.shared_gate.confirm_egress(ips[0])
     return bool(stable), ips
 
 

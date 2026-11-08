@@ -210,7 +210,20 @@ def _policy_only(stem: str, data: Mapping[str, Any], hit: str) -> bool:
     top = hit.split(".", 1)[0]
     if top not in _POLICY_ONLY_PATHS.get(stem, frozenset()):
         return False
-    return _policy_leaves_only(data.get(top), tokens=stem in _POLICY_TOKEN_STEMS)
+    section = data.get(top)
+    if stem == "ingest" and top == "licences" and isinstance(section, Mapping):
+        product = section.get("product_daily")
+        if product is not None:
+            from app.config_files import IngestProductDaily
+
+            try:
+                IngestProductDaily.model_validate(product)
+            except ValueError:
+                return False
+            # Only the exact typed T-A53 schema may contain its long lock/dataset literals.
+            # Other licence policy leaves retain the original secret-rejection rules.
+            section = {key: value for key, value in section.items() if key != "product_daily"}
+    return _policy_leaves_only(section, tokens=stem in _POLICY_TOKEN_STEMS)
 
 
 def load_yaml_dir(config_dir: Path) -> dict[str, Any]:

@@ -1,10 +1,9 @@
 """行情采集 ingest 入口（占位）：``python -m app.workers.ingest``。
 
-占位实现**不发任何外部请求**（不调用麦蕊，不读取 licence），只按契约 v0.2 §7.10 每
-``ingest.yaml`` 的 ``heartbeat.interval_s``（默认 15 秒）写一次 Redis 心跳：
-``SET <heartbeat.key> <json> EX <heartbeat.ttl_s>``，JSON 为
-``{"ts", "instance_id", "leader", "version", "budget_used_last_minute", "queue_depth"}``。
-键名可由环境变量 ``INGEST_HEARTBEAT_KEY`` 覆盖（与 /health/ready 读取同一个设置）。
+按契约写 Redis 心跳；replay 或管理员暂停时不调麦蕊。T-B99 的 live 接线复用本循环：
+本人验证意图需设置开关、有效本人证书及共享门禁；每日名单另需原服务端授权回执。
+名单与验证共用单出口互斥、逐证书预算和持久停机，等待时仍续心跳。
+心跳键由 ``INGEST_HEARTBEAT_KEY`` 覆盖（与 /health/ready 使用同一设置）。
 
 T-A07（plan §2.1B 第 7 点、契约 v0.2.6）：生产与预发**不再使用**全站 ``MAIRUI_LICENCE``，
 每位用户的证书以 HPKE 密文存库。``ingest`` 发现环境变量 ``MAIRUI_LICENCE`` 非空即**拒绝启动**
@@ -85,9 +84,11 @@ def write_heartbeat(settings: Settings) -> None:
         client.set(settings.ingest_heartbeat_key, heartbeat_payload(), ex=hb.ttl_s)
         from app.db.engine import engine_for
         from app.ingest.daily_lists import tick
+        from app.ingest.live import sync_halts
+        from app.ingest.verification import tick as verify_tick
 
-        # No live I/O is possible without the operator receipt; absent receipt
-        # does not load the HPKE vault. Existing heartbeat remains available.
+        # Live verification uses owned intents and its settings gate; daily lists
+        # additionally require the operator receipt. Replay keeps both paths closed.
         def heartbeat_wait(seconds: float) -> None:
             import time
 
@@ -101,7 +102,14 @@ def write_heartbeat(settings: Settings) -> None:
         if settings.database_url is not None and not client.exists(settings.ingest_paused_key):
             engine = engine_for(settings.database_url.get_secret_value())
             try:
-                tick(engine, client, pause=heartbeat_wait)
+                shared_root = os.environ.get("MAIRUI_SHARED_STATE_DIR")
+                if shared_root:
+                    from pathlib import Path
+
+                    sync_halts(engine, settings, client, Path(shared_root))
+                if os.environ.get("MAIRUI_MODE", "replay") == "live":
+                    verify_tick(engine, client, settings)
+                    tick(engine, client, pause=heartbeat_wait, settings=settings)
             finally:
                 engine.dispose()
     finally:

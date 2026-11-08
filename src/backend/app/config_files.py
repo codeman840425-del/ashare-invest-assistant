@@ -251,6 +251,22 @@ class IngestLiveProfile(_Strict):
     focus_interval_s: PosInt
 
 
+class IngestProductDaily(_Strict):
+    """T-A53 hard limits for the existing list outbox, not a daily-bar allowance."""
+
+    not_before: Literal["18:00"] = "18:00"
+    deadline: Literal["23:59:59"] = "23:59:59"
+    list_datasets: tuple[Literal["hslt_list"], Literal["bj_list_all"], Literal["kc_list_all"]] = (
+        "hslt_list",
+        "bj_list_all",
+        "kc_list_all",
+    )
+    list_max_http_per_day: Literal[3] = 3
+    min_interval_s: Annotated[StrictInt, Field(ge=60)] = 60
+    upstream_retry: Literal[0] = 0
+    exclusive_lock: Literal["ingest:single-egress"] = "ingest:single-egress"
+
+
 class IngestLicences(_Strict):
     """``licences``（plan §2.1B / §6.1，T-A07）：每用户证书的限额、调度与状态机参数。"""
 
@@ -268,6 +284,7 @@ class IngestLicences(_Strict):
     verify_rate_limit_per_hour: PosInt
     live_profile: IngestLiveProfile
     eod_scope: Literal["user_universe"]
+    product_daily: IngestProductDaily = Field(default_factory=IngestProductDaily)
 
     @model_validator(mode="after")
     def _check(self) -> IngestLicences:

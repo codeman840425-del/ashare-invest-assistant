@@ -177,6 +177,16 @@ def test_repo_header_limits_ok(gw_repo: Path) -> None:
     assert cgl.check_header_limits(gw_repo) == []
 
 
+def test_forwarded_host_keeps_browser_port(gw_repo: Path) -> None:
+    assert cgl.check_forwarded_host(gw_repo) == []
+
+
+def test_forwarded_host_rejects_portless_host(gw_repo: Path) -> None:
+    _sub(gw_repo, cgl.NGINX_CONF, "proxy_set_header Host $http_host;", "proxy_set_header Host $host;")
+    errs = cgl.check_forwarded_host(gw_repo)
+    assert any("$http_host" in e for e in errs), errs
+
+
 @pytest.mark.parametrize("rel,old,new,needle", [
     (cgl.NGINX_CONF, "    large_client_header_buffers 4 8k;\n", "", "large_client_header_buffers"),
     (cgl.NGINX_CONF, "large_client_header_buffers 4 8k;", "large_client_header_buffers 4 16k;", "不一致"),

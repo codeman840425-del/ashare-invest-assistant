@@ -617,13 +617,31 @@ def check_search(repo: Path) -> list[str]:
     return errors
 
 
+def check_forwarded_host(repo: Path) -> list[str]:
+    """反代 Host 必须保留浏览器端口。$host 无端口，8080 上同源登录会被判 CSRF。"""
+    conf_path = repo / NGINX_CONF
+    if not conf_path.is_file():
+        return [f"{NGINX_CONF} 不存在"]
+    conf = strip_comments(conf_path.read_text(encoding="utf-8"))
+    hosts = [h.strip() for h in re.findall(r"proxy_set_header\s+Host\s+([^;]+);", conf)]
+    if len(hosts) < 6:
+        return [f"{NGINX_CONF}: proxy_set_header Host 应有 6 处，实际 {len(hosts)}"]
+    errors = []
+    for h in hosts:
+        if h != "$http_host":
+            errors.append(f"{NGINX_CONF}: proxy_set_header Host 必须是 $http_host（保留端口），实际 {h}")
+    if "map $host " not in conf:
+        errors.append(f"{NGINX_CONF}: 上游 map 仍须使用 $host，不能改成带端口的变量")
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo", type=Path, default=Path.cwd())
     args = ap.parse_args(argv)
     repo = args.repo.resolve()
     errors = (check(repo) + check_rate_limits(repo) + check_dynamic_upstream(repo) + check_header_limits(repo) + check_search(repo)
-              + check_connect_timeout(repo))
+              + check_connect_timeout(repo) + check_forwarded_host(repo))
     for e in errors:
         print(f"::error title=gateway-limits::{e}")
     print(f"check_gateway_limits: {len(errors)} 个问题")

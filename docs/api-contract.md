@@ -1258,7 +1258,7 @@ evidence: Evidence[]
 **T-A33 裁定（status: draft；P2N-R08 歧义 084–092 + T-A32 R5）**：交易日一律按交易日历、北京时间；日历缺失时不推进计数、不解除暂停，记 gap。
 
 1. **跟踪结果冻结（R5）**：complete/untradable/excluded 一经写入即冻结；`unavailable` 由盘后作业在到期后 5 个交易日内每日重算，数据补齐即改写为相应状态（版本统计同步重算），满 5 个交易日仍缺则冻结为 unavailable。
-2. **模拟失败（084）**：失败 ⇔ `state=complete` 且 `direction_correct=false`；`true` 为成功并清零计数。范围：本人建议 × 策略版本，跟踪期取 `rc5.sim_fail_horizon_days`（默认 5，见 plan §2.5.6 T-A33 产品项）；观测按 T-A27 第 3 点去重。序列按 `exit_at` 升序（并列按 suggestion_id），pending/unavailable/untradable/excluded 跳过，既不计失败也不清零。连续失败数 = 序列尾部连续失败条数。
+2. **模拟失败（084）**：失败 ⇔ `state=complete` 且 `direction_correct=false`；`true` 为成功并清零计数。范围：**本人**建议 × 策略版本；跟踪期按**策略自身周期**取（T-A36，用户已定选项 B）：`intraday_t`→1、`short`→1、`swing`→5、`long`→20，周期取该观测所属建议中该版本结论的 `horizon`，缺失时取策略版本声明的周期；仍不清楚 → 该观测跳过（不计失败、不清零）并记 gap `sim_fail_horizon_unknown`，不默认 5 日。映射配置键 `rc5_loss_streak_drawdown.sim_fail_horizon_by_horizon`（取代 `sim_fail_horizon_days`）；观测按 T-A27 第 3 点去重。序列按 `exit_at` 升序（并列按 suggestion_id），pending/unavailable/untradable/excluded 跳过，既不计失败也不清零。连续失败数 = 序列尾部连续失败条数。
 3. **已平仓一笔（085）**：账户 × 证券的一个持仓段：持仓数从 0 变正起，到回到 0 的那笔成交止（部分减仓不结束）。盈亏 = 段内卖出金额 − 买入金额 − 全部费用税（含费用）；< 0 为亏损，> 0 为盈利并清零，= 0（平本）跳过、不清零。按结束成交 `executed_at` 升序，并列按成交 id。段起点早于导入数据（无开仓成交）→ 该段不计入并记 gap。
 4. **暂停期（086/091）**：第 0 天 = 触发时刻所在交易日（非交易日或 15:00 后触发 → 下一交易日）；暂停覆盖第 1..N 个交易日，`paused_until` = 第 N 个交易日 15:00；系统在 `paused_until` 及之后的首次作业恢复（幂等，晚跑不补偿）。触发为**边沿**：亏损笔数/失败数增至 ≥ 阈值的那次、回撤从阈值下方越过阈值的那次；暂停中再次边沿触发 → `paused_until` 取 max(现值, 新计算值)，不叠加。期满时条件仍满足但无新边沿 → 不重新暂停，只保留 RC5 `triggered` 标记。
 5. **系统期满恢复（092）**：期满恢复与用户 resume 做同一检查（§6.0A 第 4 点）；版本不可运行 → 不改为 active，实例保持 paused、`pause_reason_code` 不变、`paused_until` 置 null（不再自动恢复），写 `actor=system` 事件 `detail={expiry_blocked: "STRATEGY_VERSION_NOT_RUNNABLE", lifecycle}` 并发站内通知；用户可归档。不得借期满恢复退役策略。
@@ -1273,6 +1273,13 @@ evidence: Evidence[]
 - 细化现有 `GET/PUT /notification-preferences`（不分页）：本轮补 `intraday_cadence: "realtime"|"1min"|"3min"|"5min"`，默认 1min；PUT `{intraday_cadence}` 仅更新此键，返回生效值；非法值 400 VALIDATION_ERROR。只影响推送合并节奏，不降低采集/求值频率。免打扰/外部 channels 不在本切片改契约或开放发送。
 - SSE 仍用 §8 既有事件；在保留窗口内按 Last-Event-ID 续传；重连后客户端同时重读本人列表/聚合，补偿超过十分钟的缺口并按事件 id 去重，不把保留窗口当完整历史。断线退回既定十五秒轮询，不新增 WebSocket 或第二套动作事件。
 - §5.2 Suggestion 与 §5.3 DailyReport 的既有 `explanation` 追加 `paragraphs: TextWithEvidence[]`、`prompt_version: string|null`、`validation_status: "passed"|"fallback"`；旧存档读投影可缺这些新增键，前端退回既有 text。新记录 paragraphs 中的引用只指本对象 evidence；text 为各段 text 按顺序换行拼接。LLM 成功时 source=llm、validation_status=passed；模板兜底为 source=template、validation_status=fallback（未调用时 llm_call_id=null），模板不标 AI 生成。
+- **T-A36 裁定（P2N-05i 待定 ①–③，与 P2N-09 对齐）**：
+  1. **逐股/分歧绑定**：`DailyReport.stocks[]` 每项追加 `explanation: Explanation | null`（llm_task `daily_report_stock`），`Suggestion.divergence[]` 每项追加 `explanation: Explanation | null`（llm_task `strategy_divergence`）；结构同上（含 paragraphs/prompt_version/validation_status/fallback_reason）。引用只指本项对象：逐股只引该证券代码前缀的日报证据，分歧只引本建议证据且限于该项 `dimensions` 相关证据。为 null 或键缺失 → 该位置**不显示解释**，前端不再复用或筛选顶层整体解释，不按证据推断归属。
+  2. **回退原因**：`explanation` 追加 `fallback_reason: explanation_fallback_reason | null`，枚举（进 `/meta/enums`）= `not_enabled`（未启用/未配置路由，未调用）| `budget_exceeded` | `timeout` | `provider_error` | `validation_failed`（守卫拒绝）。`validation_status=passed` 时必为 null，`fallback` 时必非空；`not_enabled`/`budget_exceeded` 时 `llm_call_id=null`，其余有调用记录则非空。旧存档缺键 → 前端只显示“模板兜底”，不猜原因。
+  3. **调用记录深链**：`llm_call_id` 只对管理员有意义；`GET /admin/llm/usage` 🛡 追加 `?call_id=` 过滤，返回该条记录（不含原始 prompt 中的个人信息、不含 key）。前端：仅管理员且已有 `/admin/llm/usage` 页时显示链接 `/admin/llm/usage?call_id={id}`，否则管理员只读显示 id；非管理员不显示 `llm_call_id`。
+  4. **数字约定（P2N-R09-065）**：解释中的数字 N 写成 d 位小数时，须等于证据值按 ROUND_HALF_UP 取 d 位的结果，单位一致；百分数/价格 d ≥ min(证据小数位, 2)，计数类须与证据精确相等；只允许 万/亿 的精确换算（÷10⁴/÷10⁸ 后按同一规则）。“约/近/超过”等字样**不放宽容差**。配置键 `explain_guard.min_decimals`（默认 2）。不满足 → `validation_failed`。
+  5. **动作转述（066）**：**无白名单**。LLM 文本中出现任何动作词（含对规则动作的事实性转述，如“规则给出买入”）一律拒绝回落模板；动作只由界面从 `action` 等规则字段展示。
+  6. **否定/引用中的禁用词（067）**：**无例外**。LLM 文本出现禁用词即拒绝，不论否定式、引号或免责语境；固定免责由系统在 LLM 文本之外追加（不经 LLM、不计入守卫），LLM 不得自写免责声明。
 - 解释在不可变正文提交**之前**生成/回退；提交后不异步改正文，必要时生成新建议/日报 revision。任何缺引用、新数字、越权信息、动作词或承诺违规均回退模板；超时/预算/模型故障不影响规则结论。action/score/confidence 与解释路径无关。不得发送密钥、账户/成交标识、个人信息或原始交割单；本切片只用公开/纯合成结构化证据联调，真实私有输入另核隐私门槛。
 - **证书外键（T-A28）**：本切片所有 `source_licence_id` 均 FK → `app.user_data_licences.id`（plan §0A.3 第 5 条旧称 `ops.data_licences` 已更正）；不新建证书表，不按其他标识猜映射。
 - **通知合并与推送节奏（T-A28，最简方案）**：

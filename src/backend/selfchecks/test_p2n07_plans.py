@@ -308,6 +308,13 @@ def draft_seed(env: Any) -> Any:
     signal_id = uuid.UUID(persisted["id"])
     with engine.begin() as conn:
         now = dt.datetime.now(dt.UTC)
+        from app.db.tables.signals import candidate_signals
+        from app.signals.service import transition
+
+        signal_row = conn.execute(
+            select(candidate_signals).where(candidate_signals.c.id == signal_id)
+        ).one()
+        transition(conn, signal_row, "drafted", "user", now)
         account = setup[5]
         a = _account(conn, account, now.astimezone(AT.tzinfo).date())
         p = a.positions["688018.SH"]
@@ -385,7 +392,7 @@ def test_synthetic_confirmation_atomic_idempotent_lot_cap_checklist_and_freeze(
 ) -> None:
     from app.db.tables.signals import plan_draft_confirmations
 
-    (engine, client, other, _owner, *_), _setup, identifier, _signal_id, answer = draft_seed
+    (engine, client, other, _owner, *_), _setup, identifier, signal_id, answer = draft_seed
     url = "/api/v1/plan-drafts/" + str(identifier)
     original = client.get(url).json()
     assert other.get(url).status_code == 404
@@ -418,6 +425,27 @@ def test_synthetic_confirmation_atomic_idempotent_lot_cap_checklist_and_freeze(
     saved = client.get(url).json()
     saved["status"] = original["status"]
     assert saved == original
+
+    from app.db.tables.signals import candidate_signal_events, candidate_signals
+
+    with engine.connect() as conn:
+        assert (
+            conn.execute(
+                select(candidate_signals.c.state).where(candidate_signals.c.id == signal_id)
+            ).scalar_one()
+            == "confirmed"
+        )
+        assert (
+            conn.execute(
+                select(func.count())
+                .select_from(candidate_signal_events)
+                .where(
+                    candidate_signal_events.c.signal_id == signal_id,
+                    candidate_signal_events.c.to_state == "confirmed",
+                )
+            ).scalar_one()
+            == 1
+        )
 
 
 def test_draft_candidate_priority_simulating_before_block_and_ownership_first(

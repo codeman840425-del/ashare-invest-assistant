@@ -29,6 +29,7 @@ from app.market_rules.lots import check_qty
 from app.plans import service as s
 from app.plans.api import Paging, page, statuses
 from app.plans.models import Confirm, Confirmed, DraftInput, PlanDraft, PlanInput
+from app.signals.service import transition as signal_transition
 
 router = APIRouter(tags=["plan-drafts"])
 
@@ -218,7 +219,10 @@ def confirm(
             )
         if d.status != "pending":
             s.transition(d.status, "confirmed", [])
-        candidates(conn, auth.user_id, d.signal_ids)
+        validated_signals = candidates(conn, auth.user_id, d.signal_ids)
+        for signal in validated_signals:
+            if signal.state != "drafted":
+                s.transition(signal.state, "confirmed", [])
         answers = {a.id: a for a in body.checklist_answers}
         if len(answers) != len(body.checklist_answers) or set(answers) - {
             q["id"] for q in d.judgment_checklist
@@ -362,6 +366,15 @@ def confirm(
             .where(plan_drafts.c.id == d.id)
             .values(status="confirmed", status_changed_at=now)
         )
+        for signal in validated_signals:
+            signal_transition(
+                conn,
+                signal,
+                "confirmed",
+                "user",
+                now,
+                {"plan_id": plan["id"], "plan_draft_id": str(identifier)},
+            )
         s.audit(conn, auth.user_id, "plan_draft.confirmed", identifier, {"plan_id": plan["id"]})
         return {"plan_id": plan["id"], "plan_version_no": 1}
 

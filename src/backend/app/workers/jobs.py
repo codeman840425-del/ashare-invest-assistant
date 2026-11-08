@@ -59,6 +59,8 @@ from sqlalchemy import Engine, select
 
 from app.config import Settings
 from app.db.engine import engine_for
+from app.feedback.worker import TASK as RC5_EXPIRY
+from app.feedback.worker import task as rc5_expiry_task
 from app.intraday.engine import TASK as INTRADAY_UPDATED
 from app.intraday.engine import task as intraday_updated_task
 from app.master.mairui_snapshot import TASK as MAIRUI_SNAPSHOT
@@ -389,6 +391,7 @@ TASKS: Final[dict[str, Task]] = {
     PLAN_CONDITIONS: plan_conditions_task,
     "plans.conditions_sweep": plan_conditions_sweep_task,
     RC1_CHECKS: rc1_checks_task,
+    RC5_EXPIRY: rc5_expiry_task,
     TRACKING: tracking_task,
     "master.mairui_daily_sweep": mairui_daily_sweep,
     "master.mairui_daily_apply": mairui_daily_apply,
@@ -436,6 +439,7 @@ def schedule(settings: Settings) -> dict[str, int]:
     """任务名 → 间隔秒数（beat 排程表；间隔来自配置）。"""
     return {
         RC1_CHECKS: settings.business.realtime.intervals.quote_interval_s,
+        RC5_EXPIRY: settings.business.realtime.intervals.quote_interval_s,
         "plans.conditions_sweep": settings.business.realtime.intervals.quote_interval_s,
         "master.mairui_daily_sweep": 60,
         PURGE_COOLDOWNS: settings.cooldown_purge_interval_s,

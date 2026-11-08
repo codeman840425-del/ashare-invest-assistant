@@ -271,7 +271,7 @@ export function SuggestionDetailPage() {
                 <div key={i}>
                   <Tag color="orange">{d.dimensions.map((x) => DIMENSION[x]).join(' / ')}</Tag>{d.summary}
                   <span className="muted">　能化解分歧的信息：</span>{d.resolving_info.map((r) => r.description).join('；')}
-                  <details data-testid={`divergence-explanation-${i}`}><summary>本卡整体解释（非该分歧专属）</summary><ExplanationView explanation={sg.explanation} evidence={sg.evidence} testId={`sg-divergence-explanation-${i}`} title="本卡整体解释（非该分歧专属）" /></details>
+                  {d.explanation ? <details data-testid={`divergence-explanation-${i}`}><summary>本项分歧解释</summary><ExplanationView explanation={d.explanation} evidence={sg.evidence} testId={`sg-divergence-explanation-${i}`} title="本项分歧解释" /></details> : null}
                 </div>
               ))}
             </div>

@@ -1,3 +1,5 @@
+import { useMe } from '../api/queries';
+import { hasAdminLlmUsagePage, adminLlmUsageHref, explanationFallbackText } from '../lib/explanations';
 import { useId, useRef } from 'react';
 import type { Evidence, Explanation } from '../api/types';
 import { EPISTEMIC } from '../i18n/labels';
@@ -7,6 +9,9 @@ import { fmtTime, providerText } from '../lib/format';
 export function ExplanationView({ explanation, evidence, testId, title = '中文解释', callTestId }: {
   explanation: Explanation; evidence: Evidence[]; testId: string; title?: string; callTestId?: string;
 }) {
+  const me = useMe();
+  const admin = me.isSuccess && me.data?.role === 'admin';
+  const usageHref = adminLlmUsageHref(admin ? 'admin' : undefined, explanation.llm_call_id, hasAdminLlmUsagePage());
   const prefix = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const details = useRef<HTMLDetailsElement>(null);
   const paragraphs = explanation.paragraphs?.length ? explanation.paragraphs : [{ text: explanation.text, expr: null, evidence_ids: [] }];
@@ -19,7 +24,7 @@ export function ExplanationView({ explanation, evidence, testId, title = '中文
   return <section className="stc-sec small" data-testid={testId} aria-label={title} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
     <h4>{title} · {inconsistent ? '解释来源待确认' : template ? '模板解释（非 AI 生成）' : 'AI 中文解释'}</h4>
     <div className="muted">提示词版本：{explanation.prompt_version ?? '未提供'} · 验证状态：{status}</div>
-    {template && explanation.validation_status === 'fallback' ? <p className="muted">模型未启用或失败时使用模板兜底；接口未提供本次具体回退原因。</p> : null}
+    {template || explanation.validation_status === 'fallback' ? <p className="muted" data-testid={`${testId}-fallback`}>{explanation.fallback_reason ? `模板兜底 · ${explanationFallbackText(explanation.fallback_reason)}` : '模板兜底'}</p> : null}
     <p className="muted">仅解释已有证据；候选信号/计划条件仍按规则区展示，不改动作、满足度或置信度。</p>
     {paragraphs.map((p, index) => <div key={index}>
       <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{p.text || '解释正文未提供'}</p>
@@ -31,7 +36,7 @@ export function ExplanationView({ explanation, evidence, testId, title = '中文
         }}>证据 {id}</a>;
       }) : <span className="muted">未附段落引用；不补造出处。</span>}
     </div>)}
-    {explanation.llm_call_id ? <div className="muted" data-testid={callTestId}>LLM 调用记录 <span className="mono">{explanation.llm_call_id}</span>（只读，未约定调用记录跳转路由）</div> : null}
+    {admin && explanation.llm_call_id ? <div className="muted" data-testid={callTestId}>LLM 调用记录 {usageHref ? <a href={usageHref}>{explanation.llm_call_id}</a> : <span className="mono">{explanation.llm_call_id}（只读，调用记录页面尚未接入）</span>}</div> : null}
     {records.length ? <details ref={details}>
       <summary>解释引用证据（{records.length} 项；仅本对象）</summary>
       {records.map((e, index) => <div id={anchor(index)} key={e.id} tabIndex={-1} className="stc-sec" data-testid={`${testId}-evidence-${e.id}`}>

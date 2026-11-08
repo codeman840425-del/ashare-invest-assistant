@@ -145,11 +145,11 @@ describe('候选信号卡详情页补全', () => {
     expect(await screen.findByTestId('sg-refresh-error', undefined, W)).toHaveTextContent(/刷新过于频繁，请 \d+ 秒后再试/);
   });
 
-  it('LLM 说明：显示 llm_call_id', async () => {
+  it('LLM说明：普通用户不渲染llm_call_id（T-A36）', async () => {
     const llm = { ...sgBank, explanation: { source: 'llm' as const, text: '示例：LLM 改写的说明', llm_call_id: uid(77) } };
     server.use(http.get(`${API}/suggestions/:id`, () => HttpResponse.json(llm)));
     renderAt(`/suggestions/${sgBank.id}`);
-    expect(await screen.findByTestId('sg-llm-call')).toHaveTextContent(uid(77));
+    await screen.findByText('示例：LLM 改写的说明'); expect(screen.queryByTestId('sg-llm-call')).not.toBeInTheDocument(); expect(document.body.textContent).not.toContain(uid(77));
   });
 
   it('示例数据：所有卡都在 mock 列表中', () => {

@@ -76,7 +76,7 @@ export const suggestionHandlers = [
     const next: Suggestion = {
       ...cur, id: uid(1200 + seq), status: 'active', origin: 'manual_refresh', supersedes_id: cur.id, superseded_by_id: null,
       created_at: new Date(now).toISOString(),
-      explanation: { source: 'template', text: `${cur.name}：手动刷新后按缓存数据重算的候选信号卡（示例数据）`, llm_call_id: null, prompt_version: null, validation_status: 'fallback', paragraphs: [{ text: `${cur.name}：手动刷新后按缓存数据重算的候选信号卡（示例数据）`, expr: null, evidence_ids: [] }] },
+      explanation: { source: 'template', text: `${cur.name}：手动刷新后按缓存数据重算的候选信号卡（示例数据）`, llm_call_id: null, prompt_version: null, validation_status: 'fallback', fallback_reason: 'not_enabled', paragraphs: [{ text: `${cur.name}：手动刷新后按缓存数据重算的候选信号卡（示例数据）`, expr: null, evidence_ids: [] }] },
     };
     cards = cards.map((s) => (s.id === cur.id ? { ...s, status: 'superseded', superseded_by_id: next.id } : s));
     cards.push(next);

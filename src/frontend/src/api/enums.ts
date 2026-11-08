@@ -37,6 +37,7 @@ export const ENUMS = {
     'suggestion', 'candidate_signal', 'plan_draft', 'plan', 'daily_report', 'import_batch', 'reconciliation', 'strategy_version', 'none',
   ],
   notification_ref_type: ['signal', 'plan_condition'],
+  explanation_fallback_reason: ['not_enabled', 'budget_exceeded', 'timeout', 'provider_error', 'validation_failed'],
   notification_kind: [
     'suggestion_change', 'invalidation', 'daily_report', 'alert', 'import', 'system', 'reason_released', 'plan_draft_ready',
     'plan_triggered', 'strategy_health', 'data_licence',
@@ -191,3 +192,6 @@ export type SecurityReconciliationSource = E<'security_reconciliation_source'>;
 export type ReasonCode = (typeof REASON_CODES)[number];
 
 export type NotificationRefType = E<'notification_ref_type'>;
+
+/** T-A36 §7.11.4 */
+export type ExplanationFallbackReason = E<'explanation_fallback_reason'>;

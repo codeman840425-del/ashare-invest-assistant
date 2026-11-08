@@ -1,3 +1,4 @@
+import { planConditionValueIssue } from './planFormModel';
 /**
  * T-F23 裁定跟进：操作计划表单（契约 v0.2.9 §7.7B）。新建（POST /plans）与新建版本（POST /plans/{id}/versions）共用。
  * 条件类型只给可写的 5 种（indicator、event 本版 → 400 not_supported，不提供入口）。条件都是“计划条件”（hypothesis），不是预测。
@@ -84,7 +85,7 @@ export function PlanFormFields({ create, versioning }: { create?: boolean; versi
                     const t = f.getFieldValue(['conditions', r.name, 'type']) as PlanConditionType | undefined;
                     const lab = t ? PARAM_LABEL[t] : undefined;
                     return lab ? (
-                      <Form.Item name={[r.name, 'value']} rules={[{ required: true, message: `请填写${lab}` }]}>
+                      <Form.Item name={[r.name, 'value']} dependencies={[["conditions", r.name, "type"]]} rules={[{ required: true, message: `请填写${lab}` }, { validator: async (_rule, value: unknown) => { const issue = planConditionValueIssue(t, value); if (issue) throw new Error(issue); } }]}>
                         <Input style={{ width: 150 }} placeholder={lab} />
                       </Form.Item>
                     ) : null;

@@ -139,6 +139,8 @@ export interface SignalEvent {
   message: string;
   strategy_key: string | null;
   instance_id: Uuid | null;
+  /** T-A34：本人匹配实例冻结投影，服务端排序，最多20个；不在读取时重算。 */
+  instance_ids: Uuid[];
   rule_id: string | null;
   price: Decimal | null;
   candidate_signal_id: Uuid | null;

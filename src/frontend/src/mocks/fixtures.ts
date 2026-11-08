@@ -706,9 +706,12 @@ export const SIGNAL_EVENTS: SignalEvent[] = [
   { signal_event_id: 'se_1', security_code: '830001.BJ', kind: 'suspended', at: '2026-11-02T09:25:00+08:00', message: '停牌，相关候选信号暂不可执行（复牌后自动重评）', strategy_key: null, rule_id: null, price: null },
 ].map((e) => {
   const cs = e.strategy_key ? csOf(e.security_code, e.strategy_key) : undefined;
+  const primary = e.strategy_key ? STRATEGIES[e.strategy_key].instance_id : null;
+  // T-A34示例数据：首事件冻结为三个虚构匹配实例，仍只是一条事件，不按实例重复通知。
   return {
     ...e, kind: e.kind as SignalEvent['kind'], name: nameOf(e.security_code),
-    instance_id: e.strategy_key ? STRATEGIES[e.strategy_key].instance_id : null, candidate_signal_id: cs?.id ?? null,
+    message: e.signal_event_id === 'se_7' ? `${e.message}（示例数据 · 多实例）` : e.message,
+    instance_id: primary, instance_ids: primary ? (e.signal_event_id === 'se_7' ? [primary, uid(280), uid(281)] : [primary]) : [], candidate_signal_id: cs?.id ?? null,
   };
 });
 

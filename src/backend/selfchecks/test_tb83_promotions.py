@@ -191,6 +191,13 @@ def test_new_version_stale_409_and_lifecycle_state(context: Any) -> None:
 def test_g7_rejects_unattested_credentials_and_never_mutates(context: Any, credential: str) -> None:
     engine, client, _, owner, _, _, strategy, version = context
     review = submit(context)
+    from app.auth.deps import get_session_store
+    from app.auth.sessions import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE
+
+    sid, session = get_session_store(client.app.state.settings).create(str(owner))
+    client.cookies.set(SESSION_COOKIE, sid)
+    client.cookies.set(CSRF_COOKIE, session.csrf_token)
+    client.headers[CSRF_HEADER] = session.csrf_token
     headers = (
         {"Authorization": "Bearer synthetic_not_real"}
         if credential == "bearer"
@@ -277,10 +284,11 @@ def test_pure_binding_and_gate_validation_no_g7() -> None:
     with pytest.raises(AppError) as error:
         service.require_current(binding, version, "b" * 64)
     assert error.value.code == ErrorCode.PROMOTION_STALE
-    # Legacy approvals with no original digest may not be silently rebound.
+    # T-A20: legacy is readable but never rebound or valid for promotion.
+    assert service.binding_of(SimpleNamespace(compliance_lint={}, decision="approved")) == {}
     with pytest.raises(AppError) as error:
-        service.binding_of(SimpleNamespace(compliance_lint={}, decision="approved"))
-    assert error.value.code == ErrorCode.MAINTENANCE
+        service.require_current({}, version, "a" * 64)
+    assert error.value.code == ErrorCode.PROMOTION_STALE
 
 
 def test_page_tie_breaker_missing_review_and_legacy_rejection(context: Any) -> None:
@@ -323,8 +331,10 @@ def test_page_tie_breaker_missing_review_and_legacy_rejection(context: Any) -> N
     with engine.begin() as conn:
         conn.execute(update(reviews).where(reviews.c.id == identifier).values(compliance_lint={}))
     response = client.get(f"/api/v1/promotion-requests/{identifier}")
-    assert response.status_code == 503
-    assert response.json()["error"]["details"]["issue"] == "legacy_review_binding_missing"
+    assert response.status_code == 200
+    assert response.json()["stale_reason"] == "legacy_unbound"
+    assert response.json()["version_id"] is None
+    assert response.json()["content_sha256"] is None
     with engine.connect() as conn:
         row = conn.execute(select(reviews).where(reviews.c.id == identifier)).one()
         assert row.compliance_lint == {}

@@ -1,22 +1,30 @@
-"""T-A18 read/request routes and fail-closed G7 boundary.
-
-Existing password sessions carry no server-attested human/credential provenance.
-Cookies, CSRF and browser-looking headers are not proof of a human interaction.
-Do not add a client opt-in, environment switch, or token-to-human conversion here.
-"""
+"""T-A18/T-A20 promotion reviews: trusted origin, CSRF and request-local password proof."""
 
 from __future__ import annotations
 
 import datetime as dt
 import uuid
-from typing import Annotated, Any, Literal, NoReturn
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy import select
 
-from app.auth.deps import AdminDep, AuthDep, EngineDep, SettingsDep, StoreDep, current_admin
+from app.auth.deps import (
+    AdminDep,
+    AuthContext,
+    AuthDep,
+    EngineDep,
+    PasswordsDep,
+    RedisDep,
+    SettingsDep,
+    StoreDep,
+    client_ip,
+    current_admin,
+)
+from app.auth.reauth import transaction
 from app.auth.service import audit
+from app.auth.sessions import SESSION_COOKIE
 from app.common.errors import AppError, ErrorCode
 from app.common.pagination import Page, PageParams, build_page, decode_cursor, page_params
 from app.db.tables.strategy import strategy_promotion_reviews as reviews
@@ -35,30 +43,47 @@ class DecisionRequest(BaseModel):
     decision: Literal["approved", "rejected", "changes_requested"]
     comment: str = Field(min_length=1, max_length=500)
     ack_warn_gates: list[Gate]
+    password: SecretStr = Field(repr=False, exclude=True)
 
 
 class LifecycleRequest(BaseModel):
     to: Literal["draft", "simulating", "published", "observing", "retired"]
     reason: str
     review_id: uuid.UUID | None = None
+    password: SecretStr | None = Field(default=None, repr=False, exclude=True)
 
 
-def human_admin(request: Request, engine: EngineDep, store: StoreDep) -> NoReturn:
+def human_admin(request: Request, engine: EngineDep, store: StoreDep) -> AuthContext:
     if request.headers.get("authorization"):
         raise AppError(ErrorCode.HUMAN_SESSION_REQUIRED)
     auth = current_admin(request, engine, store)
-    # Genuine admin session + CSRF still cannot establish human provenance in this
-    # repository. Audit denial, then stop before any decision/lifecycle DB mutation.
-    with engine.begin() as conn:
-        audit(
-            conn,
-            action="promotion.human_session_required",
-            actor_id=auth.user_id,
-            actor_role="admin",
-            target_type="promotion",
-            detail={"issue": "trusted_interaction_provenance_unavailable"},
+    if auth.session.origin != "password_login":
+        with engine.begin() as conn:
+            audit(
+                conn,
+                action="promotion.human_session_required",
+                actor_id=auth.user_id,
+                actor_role="admin",
+                target_type="promotion",
+                detail={"issue": "untrusted_session_origin"},
+            )
+        raise AppError(ErrorCode.HUMAN_SESSION_REQUIRED)
+    return auth
+
+
+HumanDep = Annotated[AuthContext, Depends(human_admin)]
+
+
+def coarse_ip(request: Request, settings: SettingsDep) -> str | None:
+    import ipaddress
+
+    try:
+        address = ipaddress.ip_address(client_ip(request, settings))
+        return str(
+            ipaddress.ip_network(f"{address}/{24 if address.version == 4 else 64}", strict=False)
         )
-    raise AppError(ErrorCode.HUMAN_SESSION_REQUIRED)
+    except ValueError:
+        return None
 
 
 @router.post("/strategy-cards/{card_id}/promotion-requests", status_code=202)
@@ -149,21 +174,69 @@ def promotion_list(
     )
 
 
-@router.post(
-    "/admin/promotions/{review_id}/decision",
-    dependencies=[Depends(human_admin)],
-    response_model=None,
-)
-def decision(review_id: uuid.UUID, body: DecisionRequest) -> NoReturn:
-    # No trusted interaction mechanism exists yet. Even dependency overrides may
-    # not turn this scaffold into a live approval route.
-    raise AppError(ErrorCode.HUMAN_SESSION_REQUIRED)
+@router.post("/admin/promotions/{review_id}/decision")
+def decision(
+    review_id: uuid.UUID,
+    body: DecisionRequest,
+    request: Request,
+    auth: HumanDep,
+    engine: EngineDep,
+    store: StoreDep,
+    settings: SettingsDep,
+    passwords: PasswordsDep,
+    rds: RedisDep,
+) -> dict[str, Any]:
+    with transaction(
+        engine,
+        auth,
+        store,
+        body.password,
+        passwords,
+        rds,
+        settings,
+        request.cookies.get(SESSION_COOKIE),
+    ) as conn:
+        return service.decide(
+            conn,
+            auth.user_id,
+            review_id,
+            body.decision,
+            body.comment,
+            list(body.ack_warn_gates),
+            coarse_ip(request, settings),
+        )
 
 
-@router.post(
-    "/admin/strategies/{strategy_id}/versions/{version_id}/lifecycle",
-    dependencies=[Depends(human_admin)],
-    response_model=None,
-)
-def lifecycle(strategy_id: uuid.UUID, version_id: uuid.UUID, body: LifecycleRequest) -> NoReturn:
-    raise AppError(ErrorCode.HUMAN_SESSION_REQUIRED)
+@router.post("/admin/strategies/{strategy_id}/versions/{version_id}/lifecycle")
+def lifecycle(
+    strategy_id: uuid.UUID,
+    version_id: uuid.UUID,
+    body: LifecycleRequest,
+    request: Request,
+    auth: HumanDep,
+    engine: EngineDep,
+    store: StoreDep,
+    settings: SettingsDep,
+    passwords: PasswordsDep,
+    rds: RedisDep,
+) -> dict[str, str]:
+    with transaction(
+        engine,
+        auth,
+        store,
+        body.password,
+        passwords,
+        rds,
+        settings,
+        request.cookies.get(SESSION_COOKIE),
+    ) as conn:
+        return service.change_lifecycle(
+            conn,
+            auth.user_id,
+            strategy_id,
+            version_id,
+            body.to,
+            body.reason,
+            body.review_id,
+            coarse_ip(request, settings),
+        )

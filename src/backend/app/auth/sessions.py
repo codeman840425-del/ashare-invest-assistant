@@ -22,7 +22,7 @@ import hmac
 import json
 import secrets
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Literal
 
 import redis
 
@@ -44,6 +44,7 @@ class Session:
     user_id: str
     csrf_token: str
     created_at: str
+    origin: Literal["password_login"] | None = None
 
     def csrf_ok(self, header: str | None, cookie: str | None) -> bool:
         """双提交：请求头、Cookie 与会话令牌三者一致才通过（两次比较都做，避免短路时序差）。"""
@@ -68,7 +69,9 @@ class SessionStore:
         left = self._abs - (now - created_at).total_seconds()
         return min(self._ttl, int(left))
 
-    def create(self, user_id: str) -> tuple[str, Session]:
+    def create(
+        self, user_id: str, *, origin: Literal["password_login"] | None = None
+    ) -> tuple[str, Session]:
         """新建会话，返回 ``(sid 明文, Session)``；明文只写进 Cookie，不落 Redis。"""
         sid = secrets.token_urlsafe(32)
         session = Session(
@@ -76,12 +79,14 @@ class SessionStore:
             user_id=user_id,
             csrf_token=secrets.token_urlsafe(32),
             created_at=dt.datetime.now(dt.UTC).isoformat(),
+            origin=origin,
         )
         payload = json.dumps(
             {
                 "user_id": session.user_id,
                 "csrf_token": session.csrf_token,
                 "created_at": session.created_at,
+                "origin": session.origin,
             }
         )
         pipe = self._r.pipeline()
@@ -106,6 +111,7 @@ class SessionStore:
                 user_id=str(data["user_id"]),
                 csrf_token=str(data["csrf_token"]),
                 created_at=str(data["created_at"]),
+                origin="password_login" if data.get("origin") == "password_login" else None,
             )
             created = dt.datetime.fromisoformat(session.created_at)
             if created.tzinfo is None:

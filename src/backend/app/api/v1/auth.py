@@ -429,7 +429,7 @@ def login(
     old = store.get(request.cookies.get(SESSION_COOKIE))
     if old is not None:
         store.delete(old)
-    sid, session = store.create(str(user.id))
+    sid, session = store.create(str(user.id), origin="password_login")
 
     with engine.begin() as conn:
         # argon2 参数改了（auth.yaml password_hash）→ 旧哈希透明升级
@@ -511,7 +511,7 @@ def change_password(
         )
     # review-T-B03 S3 / 契约 v0.2.3 #25：吊销全部会话（含当前），新建会话并下发新 sid / csrf_token
     store.revoke_user(str(auth.user_id))
-    sid, session = store.create(str(auth.user_id))
+    sid, session = store.create(str(auth.user_id), origin="password_login")
     response = Response(status_code=204)
     _set_auth_cookies(response, settings, sid, session.csrf_token)
     return response

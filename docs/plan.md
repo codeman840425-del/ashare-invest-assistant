@@ -3467,6 +3467,9 @@ admin:
   3. gitleaks 误报只用 `.gitleaksignore` 指纹（`提交sha:文件:规则ID:行号`）登记，不改规则、不加 `[allowlist] paths`。T-F28 tree 报告中 1 处 generic-api-key（疑似 `feature_key` 行）由运维用 `gitleaks_run.sh` 复跑定位后按指纹登记。
   4. 前端：`src/frontend/src/test/wording.test.ts` 只对禁用词检查豁免；`src/frontend/src/mocks/marketFixtures.ts:64` 的假成交额改成带小数的金额消除命中（前端），不登记。
   5. 新增白名单条目须由架构师或测试负责人评审（CODEOWNERS）；登记前在本机用 `check_real_secrets.sh` 与真实值精确比对为 0 才能登记，不输出取值。
+- **T-A23 推送前历史命中裁定（架构师 2026-11-07）**：不改写历史、不 force-push，三处都按 `.gitleaksignore` 指纹登记放行，一处一行，注释写明确认方式，不加路径或规则豁免。
+  1. `e31ed6c` 第 150、202 行 generic-api-key：在 `src/backend/selfchecks/test_ta13_feature_metadata.py` 中，这两行都是 `feature_key == "f.xxx"` 的特征键字面量，和 4f3ce14 是同一类误报。运维登记前先核对 gitleaks 报告里的文件名就是这个文件：如果是同一提交里其他文件的同行号（如 `persistence.py`），先报架构师复核，不登记。
+  2. `3b2c8ec:tests/backend/milestone/tt21_mainline.json:generic-api-key:7`：值是 `src/backend/migrations/versions/0004_t_b03_auth.py` 在该提交时文件内容的 SHA256，架构师已重算一致，不是凭据，放行。今后这类迁移摘要清单由测试在文件头注明“sha256 of migration file”，并由自检重算；新增命中仍按指纹逐条登记。
 
 **测试**：`tests/ci/secret_scan/` 下放正反例（全部虚构，且正例文件本身用 `.secretscan-allow.yaml` 按 sha256 登记），保证每条规则至少有一个命中用例和一个不误报用例；规则变更必须同时更新用例。
 

@@ -11,6 +11,7 @@ from pydantic import Field, JsonValue
 
 from app.config_files import MarketRulesConfig
 from app.market_rules.lots import lot_spec
+from app.strategy.cards.applicability import evaluate as evaluate_applicability
 from app.strategy.cards.dsl import Interpreter, parse
 from app.strategy.cards.models import ContractModel
 
@@ -37,6 +38,7 @@ class FixtureRun(ContractModel):
     lot_rule: dict[str, JsonValue] | None
     rule_traces: list[RuleTrace]
     inputs_missing: list[str] = Field(default_factory=list)
+    applicability: dict[str, JsonValue] | None = None
 
 
 def json_values(value: Any) -> Any:
@@ -174,6 +176,7 @@ def calculate(
         if odd:
             lot["sell_qty"] = sellable
     return {
+        "applicability": evaluate_applicability(card, spec, features),
         "state": state,
         "action": action,
         "rule_ids_passed": [trace.rule_id for trace in traces if trace.passed is True],

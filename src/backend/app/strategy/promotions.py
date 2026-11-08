@@ -72,7 +72,14 @@ def prepare(
         {
             k: v
             for k, v in config.items()
-            if k not in {"mount_policy", "source_hash", "validation", "gates_missing"}
+            if k
+            not in {
+                "mount_policy",
+                "source_hash",
+                "validation",
+                "gates_missing",
+                "applicability_eval_source",
+            }
         },
     )
     fields = {k: v for k, v in cv.fields.items() if k not in {"narrative", "source_hash"}}

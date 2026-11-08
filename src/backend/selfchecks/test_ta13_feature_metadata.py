@@ -22,21 +22,24 @@ from app.strategy.cards.persistence import import_batch
 from app.strategy.cards.preflight import feature_registry
 from selfchecks.test_tb70_replay import DB, integration, no_network  # noqa: F401
 from selfchecks.test_tb71_import import (
+    formal_catalog,
+)
+from selfchecks.test_tb71_import import (
     test_formal_import_idempotence_generation_queries as legacy_check,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
-CATALOG = (ROOT / "docs/strategies/feature_spec.md").read_text()
+CATALOG = formal_catalog()
 REGISTRY = feature_registry(CATALOG)
 SOURCE = (ROOT / "docs/strategies/feature_catalog_meta.yaml").read_text()
 
 
 def test_source_and_reviewed_synthetic_shapes() -> None:
     rows = load_metadata(SOURCE, CATALOG, REGISTRY)
-    assert len(rows) == 19
+    assert len(rows) == 20
     assert (
         sum(v is None for row in rows for k, v in row.model_dump().items() if k != "feature_key")
-        == 16
+        == 17
     )
     synthetic = json.loads((Path(__file__).parent / "fixtures/ta13_metadata.json").read_text())
     for row in synthetic:
@@ -108,9 +111,15 @@ def test_real_add_columns_import_idempotence_and_queries(
                 ).scalar_one()
                 == 0
             )
+        pinned_catalog = tmp_path / "feature_spec.md"
+        pinned_catalog.write_text(CATALOG)
         args = [
             "--catalog",
-            str(ROOT / "docs/strategies/feature_spec.md"),
+            str(pinned_catalog),
+            "--source-matrix",
+            str(ROOT / "docs/strategies/T-R18_source_matrix.yaml"),
+            "--feature-meta",
+            str(ROOT / "docs/strategies/feature_catalog_meta.yaml"),
             "--market-rules",
             str(ROOT / "config/market_rules.yaml"),
             "--apply",
@@ -138,8 +147,8 @@ def test_real_add_columns_import_idempotence_and_queries(
         with engine.begin() as conn:
             conn.execute(
                 update(feature_catalog)
-                .where(feature_catalog.c.feature_key == "f.rsi14")
-                .values(status="verified_live")
+                .where(feature_catalog.c.feature_key == "f.ann_risk_count_10d")
+                .values(status="gap")
             )
         with engine.begin() as conn:
             import_batch(
@@ -151,7 +160,7 @@ def test_real_add_columns_import_idempotence_and_queries(
             )
         second = state()
         assert all(first[k]["updated_at"] == second[k]["updated_at"] for k in keys)
-        assert second["f.rsi14"]["status"] == "verified_live"
+        assert second["f.ann_risk_count_10d"]["status"] == "gap"
         assert all(second[k]["pit_rule"] == v for k, v in old_pit.items() if k in second)
         result = client.get("/api/v1/feature-catalog")
         assert result.status_code == 200
@@ -187,6 +196,12 @@ def test_real_add_columns_import_idempotence_and_queries(
                 REGISTRY,
             )
         assert state() == baseline
+        with engine.begin() as conn:
+            conn.execute(
+                update(feature_catalog)
+                .where(feature_catalog.c.feature_key == "f.ann_risk_count_10d")
+                .values(status=first["f.ann_risk_count_10d"]["status"])
+            )
         legacy_check(integration, tmp_path, no_network)
         assert no_network == []
     finally:

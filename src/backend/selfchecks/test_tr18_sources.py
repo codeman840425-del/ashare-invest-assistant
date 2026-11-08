@@ -17,6 +17,7 @@ from app.strategy.cards.preflight import feature_registry
 from app.strategy.cards.source_reviews import (
     DECLARED_KEYS,
     DOC_KEYS,
+    INDEX_KEYS,
     load_reviews,
     persist_reviews,
     required_features,
@@ -24,13 +25,14 @@ from app.strategy.cards.source_reviews import (
 )
 from app.workers.daily import ANALYZE
 from selfchecks.test_tb70_replay import integration, no_network  # noqa: F401
+from selfchecks.test_tb71_import import formal_catalog
 from selfchecks.test_tb74_candidates import ROOT
 from selfchecks.test_tb78_acceptance import chain, mount, run  # noqa: F401
 
 
 @pytest.fixture
 def inputs() -> Any:
-    document = (ROOT / "docs/strategies/feature_spec.md").read_text()
+    document = formal_catalog()
     registry = feature_registry(document)
     matrix = (ROOT / "docs/strategies/T-R18_source_matrix.yaml").read_text()
     return registry, matrix
@@ -39,7 +41,7 @@ def inputs() -> Any:
 def test_reviewed_provenance_and_canonical_visibility(inputs: Any) -> None:
     registry, matrix = inputs
     reviews = load_reviews(registry, matrix)
-    assert set(reviews) == DOC_KEYS | DECLARED_KEYS
+    assert set(reviews) == DOC_KEYS | DECLARED_KEYS | INDEX_KEYS
     assert all(
         reviews[k].status == "verified_doc" and reviews[k].ceiling == "simulating" for k in DOC_KEYS
     )
@@ -53,13 +55,31 @@ def test_reviewed_provenance_and_canonical_visibility(inputs: Any) -> None:
 
 
 @pytest.mark.parametrize(
-    "mutation", ["missing", "unknown", "duplicate", "upgrade", "ceiling", "visibility", "reference"]
+    "mutation",
+    [
+        "missing",
+        "unknown",
+        "duplicate",
+        "upgrade",
+        "ceiling",
+        "visibility",
+        "reference",
+        "derived_upgrade",
+        "derived_ceiling",
+        "matrix_status",
+    ],
 )
 def test_source_input_rejection(inputs: Any, mutation: str) -> None:
     registry, matrix = inputs
     registry = copy.deepcopy(registry)
     parsed = yaml.safe_load(matrix)
-    if mutation == "unknown":
+    if mutation == "derived_upgrade":
+        registry["f.rsi14"]["status"] = "verified_live"
+    elif mutation == "derived_ceiling":
+        registry["f.rsi14"]["status_basis"]["ceiling"] = "published"
+    elif mutation == "matrix_status":
+        parsed["features"][0]["current_status"] = "declared"
+    elif mutation == "unknown":
         parsed["features"][0]["feature_key"] = "f.unknown"
     elif mutation == "duplicate":
         parsed["features"].append(parsed["features"][0])
@@ -86,7 +106,7 @@ def catalog(conn: Any) -> dict[str, dict[str, Any]]:
     }
 
 
-def test_real_import_is_idempotent_five_scoped_four_declared_and_formal_g2_fails(
+def test_real_import_is_idempotent_v2_scoped_sources_and_formal_g2_fails(
     integration: Any, inputs: Any
 ) -> None:
     engine, *_ = integration
@@ -100,8 +120,8 @@ def test_real_import_is_idempotent_five_scoped_four_declared_and_formal_g2_fails
         assert import_batch(conn, documents, registry, source_matrix=matrix) == first
         assert catalog(conn) == before
         assert not source_issues(before, set(DOC_KEYS), "simulating")
-        assert len(source_issues(before, set(DOC_KEYS), "published")) == 5
-        assert len(source_issues(before, set(DECLARED_KEYS), "simulating")) == 4
+        assert len(source_issues(before, set(DOC_KEYS), "published")) == len(DOC_KEYS)
+        assert len(source_issues(before, set(DECLARED_KEYS), "simulating")) == len(DECLARED_KEYS)
         for item in first:
             version = conn.execute(
                 select(strategy_versions).where(strategy_versions.c.id == item["version_id"])
@@ -120,8 +140,12 @@ def test_real_import_is_idempotent_five_scoped_four_declared_and_formal_g2_fails
                 )
             ).scalar_one()
             issues = source_issues(before, required_features(spec, fields), "simulating")
-            assert issues
-            assert {r["path"] for r in issues} <= DECLARED_KEYS
+            assert {r["path"] for r in issues} == (
+                set() if card.key == "hold_risk_monitor" else {"f.main_net_20d"}
+            )
+            assert all(
+                before.get(r["path"], {}).get("status", "declared") == "declared" for r in issues
+            )
         tampered = copy.deepcopy(before)
         tampered["f.amount"]["status"] = "verified_live"
         assert (
@@ -132,7 +156,7 @@ def test_real_import_is_idempotent_five_scoped_four_declared_and_formal_g2_fails
 
 
 @pytest.mark.parametrize(
-    ("lifecycle", "feature"), [("published", "f.close_qfq"), ("simulating", "f.amount")]
+    ("lifecycle", "feature"), [("published", "f.close_qfq"), ("simulating", "f.main_net_20d")]
 )
 def test_actual_worker_refuses_formal_like_fictional_source_bypass(
     chain: Any, inputs: Any, lifecycle: str, feature: str

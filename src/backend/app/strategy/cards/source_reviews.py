@@ -13,15 +13,31 @@ from sqlalchemy.dialects.postgresql import insert
 from app.db.tables.strategy import feature_catalog
 from app.strategy.cards.feature_meta import UniqueLoader
 
-DOC_KEYS = frozenset({"f.close_qfq", "f.high_qfq", "f.low_qfq", "f.list_days", "f.np_yoy_latest"})
-DECLARED_KEYS = frozenset({"f.amount", "f.main_net_20d", "f.market_regime", "f.ind_rs20"})
+MATRIX_DOC_KEYS = frozenset(
+    {"f.close_qfq", "f.high_qfq", "f.low_qfq", "f.list_days", "f.np_yoy_latest", "f.amount"}
+)
+DERIVED_KEYS = frozenset(
+    {
+        "f.rsi14",
+        "f.limit_up_price",
+        "f.limit_down_price",
+        "f.limit_locked_up",
+        "f.limit_locked_down",
+        "f.is_suspended",
+    }
+)
+DOC_KEYS = MATRIX_DOC_KEYS | DERIVED_KEYS
+INDEX_KEYS = frozenset({"f.market_regime_idx"})
+DECLARED_KEYS = frozenset({"f.main_net_20d", "f.market_regime", "f.ind_rs20"})
 
 
 class MatrixRow(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     feature_key: str = Field(pattern=r"^f\.[a-z0-9_]+$")
     spec_ref: str = Field(pattern=r"^F[0-9]+$")
-    current_status: Literal["declared"]
+    current_status: Literal["declared", "verified_doc"]
+    status_ref: str | None = None
+    live_evidence: dict[str, Any] | None = None
     recommendation: Literal["verified_doc_conditional", "keep_declared"]
     evidence: str
     quote: str
@@ -44,13 +60,13 @@ class Review(BaseModel):
     status: Literal["declared", "verified_doc"]
     ceiling: Literal["simulating"] | None
     basis: dict[str, Any]
-    matrix: MatrixRow
+    matrix: MatrixRow | None
     source_matrix_sha256: str
     pit_rule: dict[str, Any] | None
 
 
 def load_reviews(registry: dict[str, dict[str, Any]], document: str | None) -> dict[str, Review]:
-    scoped = {key for key, row in registry.items() if row.get("status_basis")}
+    scoped = {key for key, row in registry.items() if (row.get("status_basis") or {}).get("matrix")}
     if not scoped:
         return {}
     if document is None:
@@ -61,7 +77,11 @@ def load_reviews(registry: dict[str, dict[str, Any]], document: str | None) -> d
     finally:
         loader.dispose()
     keys = [row.feature_key for row in matrix.features]
-    if len(keys) != len(set(keys)) or set(keys) != DOC_KEYS | DECLARED_KEYS or scoped != set(keys):
+    if (
+        len(keys) != len(set(keys))
+        or set(keys) != MATRIX_DOC_KEYS | DECLARED_KEYS
+        or scoped != set(keys) | INDEX_KEYS
+    ):
         raise ValueError("source_matrix_key_set_mismatch")
     reviews = {}
     for row in matrix.features:
@@ -71,9 +91,7 @@ def load_reviews(registry: dict[str, dict[str, Any]], document: str | None) -> d
         if basis.get("matrix") != "T-R18_source_matrix.yaml#" + row.feature_key:
             raise ValueError("source_matrix_reference_mismatch")
         expected = "verified_doc" if row.feature_key in DOC_KEYS else "declared"
-        if status != expected or row.recommendation != (
-            "verified_doc_conditional" if row.feature_key in DOC_KEYS else "keep_declared"
-        ):
+        if status != expected or row.current_status != status:
             raise ValueError("reviewed_source_status_mismatch")
         if basis.get("ceiling") != ("simulating" if row.feature_key in DOC_KEYS else None):
             raise ValueError("reviewed_source_ceiling_mismatch")
@@ -91,6 +109,46 @@ def load_reviews(registry: dict[str, dict[str, Any]], document: str | None) -> d
             matrix=row,
             source_matrix_sha256=hashlib.sha256(document.encode()).hexdigest(),
             pit_rule=copy.deepcopy(pit),
+        )
+    for key in INDEX_KEYS:
+        definition = registry[key]
+        basis = definition["status_basis"]
+        if (
+            definition.get("status") != "verified_doc"
+            or basis.get("ceiling") != "simulating"
+            or basis.get("matrix")
+            != "T-R18_source_matrix.yaml#f.market_regime（T-B81 000300.SH 子项）"
+            or "78de694" not in basis.get("ruling", "")
+        ):
+            raise ValueError("reviewed_index_source_mismatch")
+        parent = next(row for row in matrix.features if row.feature_key == "f.market_regime")
+        if not (parent.live_evidence or {}).get("verified_subitems"):
+            raise ValueError("reviewed_index_evidence_missing")
+        reviews[key] = Review(
+            status="verified_doc",
+            ceiling="simulating",
+            basis=copy.deepcopy(basis),
+            matrix=parent,
+            source_matrix_sha256=hashlib.sha256(document.encode()).hexdigest(),
+            pit_rule=copy.deepcopy(definition.get("pit_rule")),
+        )
+    for key in DERIVED_KEYS:
+        definition = registry[key]
+        basis = definition.get("status_basis") or {}
+        if (
+            definition.get("status") != "verified_doc"
+            or basis.get("ceiling") != "simulating"
+            or "86d42f2" not in basis.get("ruling", "")
+            or basis.get("ref") != "T-R21_derived_features.md §1"
+        ):
+            raise ValueError("reviewed_derived_source_mismatch")
+        reviews[key] = Review(
+            status="verified_doc",
+            ceiling="simulating",
+            basis=copy.deepcopy(basis),
+            matrix=None,
+            source_matrix_sha256=hashlib.sha256(document.encode()).hexdigest(),
+            pit_rule=copy.deepcopy(definition.get("pit_rule")),
         )
     return reviews
 
@@ -113,7 +171,7 @@ def persist_reviews(
             status=review.status,
             source=source,
             owner="T-R18",
-            pipeline_version="feature-spec-1.1.12",
+            pipeline_version="feature-spec-1.1.14",
             **{
                 field: definition.get(field)
                 for field in ["derivation", "unit", "adjust", "frequency", "pit_rule"]
@@ -150,7 +208,9 @@ def source_issues(
         issue = None
         if status not in {"verified_doc", "verified_live"}:
             issue = "feature_not_verified_doc_or_live"
-        elif key in DOC_KEYS | DECLARED_KEYS and (not review or review.get("status") != status):
+        elif key in DOC_KEYS | DECLARED_KEYS | INDEX_KEYS and (
+            not review or review.get("status") != status
+        ):
             issue = "reviewed_source_missing_or_status_conflict"
         elif status == "verified_doc" and target != "simulating":
             issue = "verified_doc_simulating_only"
@@ -161,7 +221,12 @@ def source_issues(
     return issues
 
 
-def required_features(spec: dict[str, Any], _card: dict[str, Any]) -> set[str]:
-    # Preserve the existing G2 rule-feature scope. data_needs also contains the
-    # separate tradability adapters; T-R18 does not reclassify those whitelist inputs.
-    return {key for rule in spec.get("rules", []) for key in rule.get("required_features", [])}
+def required_features(spec: dict[str, Any], card: dict[str, Any]) -> set[str]:
+    # T-R20: data adapters (suspension/limits included) do not get a G2 exemption.
+    needed = {key for rule in spec.get("rules", []) for key in rule.get("required_features", [])}
+    needed.update(
+        need["feature_key"]
+        for need in card.get("data_needs", [])
+        if need.get("feature_key", "").startswith("f.")
+    )
+    return needed

@@ -24,6 +24,7 @@ from app.db.tables.strategy import (
     strategy_cards,
     strategy_versions,
 )
+from app.strategy.cards.applicability import regime_source
 from app.strategy.cards.feature_meta import FeatureMeta, import_metadata, validate_keys
 from app.strategy.cards.models import PendingImport
 from app.strategy.cards.preflight import preflight
@@ -36,6 +37,8 @@ def digest(value: Any) -> str:  # noqa: ANN401
     ).hexdigest()
 
 
+
+
 def validate_batch(
     documents: list[str], registry: dict[str, dict[str, Any]]
 ) -> list[PendingImport]:
@@ -44,6 +47,8 @@ def validate_batch(
         raise ValueError(
             json.dumps({"code": "CARD_IMPORT_INVALID", "issues": errors}, ensure_ascii=False)
         )
+    for item in staged:
+        regime_source(item.blocks["strategy-card"], item.blocks["strategy-spec"])
     return staged
 
 
@@ -172,6 +177,7 @@ def import_batch(
             )
         configuration = {
             **spec,
+            "applicability_eval_source": regime_source(card, spec),
             "mount_policy": card.get("mount_policy", "user"),
             "source_hash": item.source_hash,
             "validation": item.blocks.get("validation"),

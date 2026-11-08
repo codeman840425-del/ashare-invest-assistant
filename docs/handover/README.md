@@ -34,4 +34,5 @@ DeepSeek：未用，原因 本任务明确禁止使用，且涉及权限与交�
 
 ## 团队文本与待办
 - [脱敏团队资料](team/README.md)：tasks/reports/rules与board、token-rules、vision；不包含私密目录、二进制证据或报告子目录。历史记录不视为新派单。
+- [Bot 职责设定原文](team/bots/bot-profiles.md)：各角色 Bot 的名称、职责、权限边界与协作方式，新团队可直接复用。
 - [最新待办](progress-board.md)：T-T22隔离设施、P2N-08剩余、P2N-09、H-01、多周期/前端SSE及交易时段提醒端到端验证。

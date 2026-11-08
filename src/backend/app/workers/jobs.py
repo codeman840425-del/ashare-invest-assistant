@@ -60,6 +60,8 @@ from sqlalchemy import Engine
 from app.config import Settings
 from app.db.engine import engine_for
 from app.master.mairui_snapshot import TASK as MAIRUI_SNAPSHOT
+from app.plans.worker import TASK as PLAN_CONDITIONS
+from app.plans.worker import task as plan_conditions_task
 from app.tracking.worker import TASK as TRACKING
 from app.tracking.worker import tracking_task
 from app.workers.daily import (
@@ -358,6 +360,7 @@ def vendor_sweep_task(settings: Settings) -> int:
 
 #: 任务名 → 实现
 TASKS: Final[dict[str, Task]] = {
+    PLAN_CONDITIONS: plan_conditions_task,
     TRACKING: tracking_task,
     "master.mairui_daily_sweep": mairui_daily_sweep,
     "master.mairui_daily_apply": mairui_daily_apply,

@@ -43,33 +43,27 @@ def _next_td(trading_days, d):
     for x in trading_days:
         if x > d: return x
     raise ValueError(f"交易日历未覆盖 {d} 之后")
-def _normalize(x, trading_days):
-    """带时区时刻 → (可交易时刻, gap)。只实现 F23 原文已写的规整：盘中 → 下一根 1 分钟 bar；盘后（含非交易日）→ 次一交易日开盘 09:30；
-    盘前 → 当日 09:30（按编排者 2026-11-07 口径视为已知；原文未逐字写“盘前”，见 README 待裁定）。
-    原文未覆盖的时段一律返回 (None, gap)，不自行提前可交易：午休 [11:30, 13:00)；以及下一根 bar 落在 11:30 或 15:00 的盘中边界（[11:29, 11:30)、[14:59, 15:00)）。"""
+def _effective(x, trading_days):
+    """带时区时刻 → 生效时刻（plan T-R22 裁定④：F23 每日冻结在 D 09:30，只判所属生效日）。
+    交易日且时刻 < 09:30（含盘前）→ 当日 09:30；其余（含恰为 09:30、盘中、午休、11:30/15:00 边界、盘后、非交易日）→ 次一交易日 09:30。"""
     d = x.date().isoformat(); tod = x.timetz().replace(tzinfo=None)
-    if d not in trading_days or tod >= CLOSE_PM:
-        return datetime.combine(date.fromisoformat(_next_td(trading_days, d)), OPEN_AM, CST), None
-    if tod < OPEN_AM:
-        return datetime.combine(x.date(), OPEN_AM, CST), None
-    if CLOSE_AM <= tod < OPEN_PM:
-        return None, "gap:lunch_break_unruled"
-    nb = x.replace(second=0, microsecond=0) + timedelta(minutes=1)
-    if nb.timetz().replace(tzinfo=None) in (CLOSE_AM, CLOSE_PM):
-        return None, "gap:next_bar_at_session_end_unruled"
-    return nb, None
+    if d in trading_days and tod < OPEN_AM:
+        return datetime.combine(x.date(), OPEN_AM, CST)
+    return datetime.combine(date.fromisoformat(_next_td(trading_days, d)), OPEN_AM, CST)
 def available_from_detail(t, first_seen_at, trading_days):
-    """返回 (available_from, gap)。F23 可得时点 = max(t, first_seen_at) 规整后；t 为纯日期（V7 实测如此）或带时区 datetime，first_seen_at 为带时区 datetime。
-    任一缺失 → (None, "gap:missing_input")；任一端落在未裁定时段 → (None, 该 gap)，待裁定，不得默认可见。只有日期 → 次一交易日 09:30。"""
-    if t is None or first_seen_at is None: return None, "gap:missing_input"
-    fs, g = _normalize(_aware(first_seen_at, "first_seen_at"), trading_days)
-    if g: return None, g
-    if isinstance(t, datetime):
-        tt, g = _normalize(_aware(t, "t"), trading_days)
-        if g: return None, g
-    elif isinstance(t, date): tt = datetime.combine(date.fromisoformat(_next_td(trading_days, t.isoformat())), OPEN_AM, CST)
-    else: raise ValueError(f"t 类型不支持：{t!r}")
-    return max(tt, fs), None
+    """返回 (available_from, note)。available_from = 已知时间（t、first_seen_at）各自生效时刻的 max：不早于已知的首次观测，首次观测之后的信息不回流到过去。
+    t 为纯日期（V7 实测如此）→ 次一交易日 09:30（plan F23“只有日期 → 次一交易日开盘”）；t 为带时区 datetime → 按 _effective。
+    两者都未知 → (None, "unknown")。只知 t → note="t_only_pit_limited"：只是按披露时间推断的可得时点，不等于已保存的首次观测快照，回测有 PIT 局限。
+    只知 first_seen_at → note="first_seen_only"。"""
+    if t is None and first_seen_at is None: return None, "unknown"
+    vals = []
+    if first_seen_at is not None: vals.append(_effective(_aware(first_seen_at, "first_seen_at"), trading_days))
+    if t is not None:
+        if isinstance(t, datetime): vals.append(_effective(_aware(t, "t"), trading_days))
+        elif isinstance(t, date): vals.append(datetime.combine(date.fromisoformat(_next_td(trading_days, t.isoformat())), OPEN_AM, CST))
+        else: raise ValueError(f"t 类型不支持：{t!r}")
+    note = "both" if (t is not None and first_seen_at is not None) else ("t_only_pit_limited" if first_seen_at is None else "first_seen_only")
+    return max(vals), note
 def available_from(t, first_seen_at, trading_days):
     return available_from_detail(t, first_seen_at, trading_days)[0]
 def window_days(trading_days, d, n=10):
@@ -81,7 +75,7 @@ def count(rows, as_of, trading_days):
     as_of：带时区 datetime；D = as_of 的北京日期，须为交易日。as_of < D 09:30 → None（D 日值尚未生效）；否则截断时刻 cutoff = D 09:30。
     rows: [{nr, code, title, available_from}]，available_from 为带时区 datetime 或 None。本函数自行做 PIT 过滤并显式校验：naive/纯日期 → ValueError；不因日期相等默认可见。
     1) 可见 = available_from ≤ cutoff 且其北京日期 ∈ [D-9, D]；cutoff 之后（含 D 日 09:30 之后、下午新公告）的记录不参与，未来更正也不能改写过去；
-    2) 存在 available_from 未知（None，含未裁定时段 gap）的记录 → 返回 None；
+    2) 存在 available_from 未知（None：t 与 first_seen_at 都未知）的记录 → 返回 None；
     3) 可见记录按 nr 或（代码、去版本后缀标题、可交易日）任一相同传递归并（并查集）；每个实体风险取 OR、至多计 1；结果与输入顺序无关。"""
     now = _aware(as_of, "as_of"); d = now.date().isoformat()
     win = window_days(trading_days, d)

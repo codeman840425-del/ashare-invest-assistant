@@ -25,8 +25,6 @@ from sqlalchemy import engine_from_config, pool
 import app.db.tables  # noqa: F401  导入全部表
 from app.db.base import SCHEMAS, metadata
 from app.db.migration_check import (
-    MigrationLineageError,
-    crosses_override_revision,
     require_database_mainline,
     require_safe_downgrade,
     require_single_head,
@@ -94,18 +92,24 @@ def _configure_kwargs() -> dict[str, Any]:
     }
 
 
-def run_migrations_offline() -> None:
-    start, destination = context.get_starting_revision_argument(), context.get_revision_argument()
-    if (
-        start is not None
-        and not crosses_override_revision(mainline_script, start)
-        and crosses_override_revision(mainline_script, destination)
-    ):
-        raise MigrationLineageError(
-            "UNSAFE_DOWNGRADE_0028: offline SQL cannot check cleared overrides; "
-            "use the guarded online migration path"
+def configure_guarded(**kwargs: Any) -> None:
+    # Preserve the command's own planner (including current/check). Guard only
+    # resolved downgrade steps; Alembic itself handles -1 and later descendants.
+    context.configure(**kwargs)
+    planner = context.get_context().opts["fn"]
+
+    def guarded(revisions: Any, migration_context: Any) -> Any:
+        steps = list(planner(revisions, migration_context))
+        require_safe_downgrade(
+            None if context.is_offline_mode() else migration_context.connection, steps
         )
-    context.configure(
+        return steps
+
+    context.configure(fn=guarded, **kwargs)
+
+
+def run_migrations_offline() -> None:
+    configure_guarded(
         url=_database_url(),
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -122,9 +126,8 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         with connection.begin():
             require_database_mainline(connection, mainline_script, allow_empty=True)
-        context.configure(connection=connection, **_configure_kwargs())
+        configure_guarded(connection=connection, **_configure_kwargs())
         with context.begin_transaction():
-            require_safe_downgrade(connection, mainline_script, context.get_revision_argument())
             context.run_migrations()
 
 

@@ -1,0 +1,17 @@
+# T-B98b｜RV-03返工｜2026-11-09 北京时间
+- 修正T-B98引入的守卫回归；基线621fc58，独立分支tb-T-B98b，T-B99按派单暂挂且WIP留在独立目录。
+- 不再读取destination_rev/手工解析目标；保留Alembic原命令planner，先取得完整已解析步骤，再判断是否有移除0028的降级步骤。
+- current/check/upgrade没有该步骤时不查风控行、不取守卫表锁；-1/-2/base由Alembic解析，避免相对版本解析失败。
+- 从0028后继版本跨至0027同样拒绝；完整计划在任何DDL前检查，SHARE锁仍覆盖实际降级事务；不改0028文件、不加生产迁移号。
+- 定点覆盖：current/check命令入口；0028→0027/-1/base拒绝；临时纯合成后继→0027/-2/base拒绝；后继→0028/-1允许；无false行往返允许。
+- 后继测试仅复制迁移目录至pytest临时目录；在其downgrade入口写合成标记，确认拒绝时连前置后继步骤都未执行；离线跨界不输出DROP。
+- 补真实请求：关闭RC2→GET evaluation disabled→DELETE→GET evaluation恢复enabled及继承阈值（文件20/画像17）。
+- 候选用真实inputs/assessed/effective_config/apply_risk/write_candidate链与隔离库产出，HTTP详情/列表可读，证据冻结继承值；他人读取404，已清除行保持false。
+- 定点命令：uv run pytest selfchecks/test_tb95_reset.py -k 'authentication_shape or reset_inheritance or system_profile or advisory_lock or migration_refuses or request_conflicts or reset_then_create or alembic_current or descendant_downgrade or reset_then_evaluation' -q。
+- 结果22 passed；日志F:/workspace/team/reports/T-B98b-pytest.log。专属aia-tb98b-pg、127.0.0.1:55495/tb95_test，纯合成，未碰用户库/真实外呼。
+- 实际CLI：current退出0输出0028(head)；check已进入正常autogenerate判定，报既有signal_states约束及master_vendor_batches可空性/索引差异，未报KeyError；不将其写成check全绿。
+- Windows原ini中文注释触发既有GBK读取错误；CLI复验使用仓库外等价ASCII ini，程序化current/check另有定点覆盖，未修改原ini或掩盖漂移。
+- 检查：受影响app/selfcheck完整ruff、env E9/F/I通过；secret_scan files全0、git diff --check通过。
+- DeepSeek：未用，原因风控、迁移安全和最终判定不外包。
+- 仅本地提交合回team-b，未推送/部署；请编排者转复核复验，metadata漂移如需处理另派。
+- 申请新任务：复核通过后按编排者指令恢复T-B99；当前继续暂挂。

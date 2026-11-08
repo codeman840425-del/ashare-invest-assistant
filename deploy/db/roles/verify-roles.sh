@@ -262,6 +262,26 @@ else
   fi
 fi
 
+
+# T-O27：启动版本检查。api/worker 用 aia_api，ingest 用 aia_ingest。只读；写和 DDL 必须拒绝。
+# 破坏性语句放在事务里，即使授权错误也会 ROLLBACK，不改版本行。
+if [ "$(own -c "SELECT to_regclass('public.alembic_version') IS NOT NULL")" != t ]; then
+  echo "FAIL 库里没有 public.alembic_version，T-O27 无法验收"; fail=1
+else
+  for r in aia_api aia_ingest; do
+    expect_ok "$r" "SELECT to_regclass('public.alembic_version')"
+    expect_ok "$r" "SELECT version_num FROM public.alembic_version"
+    expect_denied "$r" "BEGIN; INSERT INTO public.alembic_version (version_num) VALUES ('t_o27'); ROLLBACK"
+    expect_denied "$r" "UPDATE public.alembic_version SET version_num = version_num WHERE false"
+    expect_denied "$r" "DELETE FROM public.alembic_version WHERE false"
+    expect_denied "$r" "BEGIN; TRUNCATE public.alembic_version; ROLLBACK"
+    expect_ddl_denied "$r" "BEGIN; ALTER TABLE public.alembic_version ADD COLUMN t_o27_probe int; ROLLBACK"
+    expect_ddl_denied "$r" "BEGIN; DROP TABLE public.alembic_version; ROLLBACK"
+    expect_ddl_denied "$r" "BEGIN; CREATE INDEX t_o27_probe ON public.alembic_version (version_num); ROLLBACK"
+  done
+  expect_denied aia_api "SELECT ciphertext FROM app.user_data_licences WHERE false"
+fi
+
 [ "$(own -c "SELECT count(*) FROM app.users WHERE username LIKE 't\_o11\_%'")" = 0 ] \
   || { echo "FAIL 仍有 t_o11_ 探针用户残留"; fail=1; }
 exit "$fail"

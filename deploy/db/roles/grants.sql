@@ -689,3 +689,33 @@ BEGIN
   RAISE NOTICE 'db-roles: 4.6.5A 第 9 条已收窄 aia_ingest（% 只 SELECT+点名列 UPDATE，% 只 INSERT）', batches, rows_tbl;
 END
 $vendor_grant$;
+
+-- T-O27：启动版本检查只读 public.alembic_version。
+-- public 被排除在上面的业务 schema 循环之外（nspname <> 'public'），所以循环里的表级授权到不了这张表。
+-- 实际连接角色不按服务名猜，按 compose 里覆盖后的 DATABASE_URL（secret-env.sh 不改这个变量）：
+--   api（uvicorn app.main:app → check_startup）、worker（python -m app.workers.worker → runner.run）= aia_api
+--   ingest（python -m app.workers.ingest → runner.run）= aia_ingest
+-- signal-rt / beat 仍用属主连接，不在这里授权。只 GRANT SELECT，不授写、TRUNCATE 或 DDL。
+DO $alembic_read$
+DECLARE
+  role text;
+  priv text;
+BEGIN
+  IF to_regclass('public.alembic_version') IS NULL THEN
+    RAISE WARNING 'db-roles: public.alembic_version 不存在（迁移未到？），跳过 T-O27';
+    RETURN;
+  END IF;
+  EXECUTE 'GRANT SELECT ON TABLE public.alembic_version TO aia_api, aia_ingest';
+  FOREACH role IN ARRAY ARRAY['aia_api', 'aia_ingest'] LOOP
+    IF NOT has_table_privilege(role, 'public.alembic_version', 'SELECT') THEN
+      RAISE EXCEPTION 'db-roles: % 缺少 public.alembic_version 的 SELECT', role;
+    END IF;
+    FOREACH priv IN ARRAY ARRAY['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+      IF has_table_privilege(role, 'public.alembic_version', priv) THEN
+        RAISE EXCEPTION 'db-roles: % 对 public.alembic_version 不应有 %', role, priv;
+      END IF;
+    END LOOP;
+  END LOOP;
+  RAISE NOTICE 'db-roles: aia_api、aia_ingest 对 public.alembic_version 仅 SELECT';
+END
+$alembic_read$;

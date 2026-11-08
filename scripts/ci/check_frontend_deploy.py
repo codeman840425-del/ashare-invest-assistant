@@ -53,6 +53,13 @@ def check(repo: Path) -> list[str]:
         errs.append("缺失静态资源必须 return 404 固定短正文，不能用空 return（会落回内置 HTML 页）")
     if "<html" in missing_code.lower() or "nginx" in missing_code.lower():
         errs.append("缺失静态资源的 404 正文不得含 nginx 或 HTML")
+    if 'add_header Cache-Control "no-store" always;' not in missing_code:
+        errs.append("缺失 /assets/ 必须 Cache-Control: no-store，不能长期缓存")
+    if "31536000" in missing_code or "immutable" in missing_code:
+        errs.append("缺失 /assets/ 的 404 不得使用一年 immutable 缓存")
+    assets_ok = _block(conf, "location /assets/ {", "location @assets_missing {")
+    if 'add_header Cache-Control "public, max-age=31536000, immutable" always;' not in assets_ok:
+        errs.append("已有 /assets/ 资源必须仍是一年 immutable 缓存")
     spa = _block(conf, "location / {", "\n  }\n")
     if "try_files $uri /index.html;" not in spa:
         errs.append("location / 必须 try_files $uri /index.html（SPA 深链）")

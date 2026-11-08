@@ -147,12 +147,23 @@ st, hdrs, body = fetch("/research/notes")
 check("深链 /research/notes 200", st == 200 and b'id="root"' in body)
 st, hdrs, body = fetch("/assets/probe.js")
 check("已有 asset 200 且长期缓存", st == 200 and body == b'console.log("asset")\n' and "immutable" in hdrs.get("Cache-Control", ""))
+def miss(path):
+    st, hdrs, body = fetch(path)
+    cc = hdrs.get("Cache-Control", "")
+    check(
+        "缺失 %s 404 短正文、无默认页、no-store" % path,
+        st == 404
+        and body == b"not found\n"
+        and b"<html" not in body.lower()
+        and b"nginx" not in body.lower()
+        and b'id="root"' not in body
+        and cc == "no-store",
+    )
+miss("/assets/missing.js")
+miss("/assets/nested/missing.css")
+miss("/assets/")
 st, hdrs, body = fetch("/assets/no-such-asset.js")
 server = hdrs.get("Server", "")
-check(
-    "缺失 asset 404 短正文且无 nginx 默认页",
-    st == 404 and body == b"not found\n" and b"<html" not in body.lower() and b"nginx" not in body.lower() and b'id="root"' not in body,
-)
 check("Server 头不含版本号（标识本身仍可能是 nginx）: %s" % server, "nginx/" not in server.lower())
 st, hdrs, body = fetch("/health/live")
 check("/health/live 反代到假上游", st == 200 and body == b'{"status":"ok"}')

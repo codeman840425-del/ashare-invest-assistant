@@ -120,6 +120,18 @@ def test_asset_404_must_not_use_default_page(tmp_path: Path) -> None:
     assert any("@assets_missing" in e for e in errs), errs
 
 
+def test_missing_asset_must_not_be_immutable(tmp_path: Path) -> None:
+    repo = _tree(tmp_path)
+    _sub(
+        repo,
+        "deploy/nginx/nginx.conf",
+        'add_header Cache-Control "no-store" always;',
+        'add_header Cache-Control "public, max-age=31536000, immutable" always;',
+    )
+    errs = cfd.check(repo)
+    assert any("不得使用一年 immutable" in e for e in errs), errs
+
+
 def test_asset_404_body_must_stay_empty(tmp_path: Path) -> None:
     repo = _tree(tmp_path)
     _sub(repo, "deploy/nginx/nginx.conf", 'return 404 "not found\\n";', 'return 404 "<html>nginx</html>";')

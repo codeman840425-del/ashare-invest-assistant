@@ -51,10 +51,13 @@ grep -q 'id="root"' "$work/b" && ! grep -q 'frontend not built yet' "$work/b" &&
 body "http://127.0.0.1:$port/research/notes"
 grep -q '^HTTP/1.1 200' "$work/h" && grep -q 'id="root"' "$work/b" && ok "深链 /research/notes 回退 index.html" || bad "深链：$(head -1 "$work/h")"
 code="$(curl -sS -D "$work/mh" -o "$work/miss" -w '%{http_code}' "http://127.0.0.1:$port/assets/no-such-asset.js")"
-if [ "$code" = 404 ] && ! grep -qi 'id="root"\|<html\|nginx' "$work/miss"; then
-  ok "缺失的 /assets 是 404，正文无默认页"
+miss_cc="$(tr -d '\r' < "$work/mh" | tr 'A-Z' 'a-z')"
+if [ "$code" = 404 ] && ! grep -qi 'id="root"\|<html\|nginx' "$work/miss" \
+  && grep -q 'cache-control: no-store' <<<"$miss_cc" \
+  && ! grep -q 'immutable\|31536000' <<<"$miss_cc"; then
+  ok "缺失的 /assets 是 404，正文无默认页，且不长期缓存"
 else
-  bad "缺失资源 HTTP $code 正文：$(head -c 120 "$work/miss")"
+  bad "缺失资源 HTTP $code 缓存：$miss_cc 正文：$(head -c 120 "$work/miss")"
 fi
 if [ "$mode" = config ]; then
   cc="$(curl -sS -D - -o /dev/null "http://127.0.0.1:$port/assets/probe.js" | tr -d '\r' | tr 'A-Z' 'a-z')"

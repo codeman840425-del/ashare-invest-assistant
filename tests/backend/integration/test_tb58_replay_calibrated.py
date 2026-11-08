@@ -66,6 +66,7 @@ def replayed(tmp_path_factory: pytest.TempPathFactory):
     return root, result, output.getvalue()
 
 
+@pytest.mark.skip(reason="T-T22明确裁定F0610旧取证基准已失效；保留用例，未验收，不重建正式/共享源")
 def test_legacy_two_failures_are_exactly_stale_non9_expectations(replayed) -> None:
     _, result, output = replayed
     assert result == 1
@@ -75,6 +76,7 @@ def test_legacy_two_failures_are_exactly_stale_non9_expectations(replayed) -> No
     assert '58 passed, 2 failed' in output
 
 
+@pytest.mark.skip(reason="T-T22明确裁定F0611–F0612旧取证基准已失效；保留用例，未验收")
 @pytest.mark.parametrize('name', sorted(BASELINES))
 def test_full_analysis_equals_reviewed_b59_baseline(replayed, name: str) -> None:
     root, _, _ = replayed

@@ -22,6 +22,11 @@ rc5_loss_streak_drawdown:
   enabled: true
   closed_loss_streak: 3         # 已平仓连续亏损笔数
   drawdown_from_peak_pct: 10    # 账户净值自高点回撤
+  sim_fail_horizon_by_horizon:
+    intraday_t: 1
+    short: 5
+    swing: 20
+    long: 20
   strategy_sim_fail_streak: 5   # 某策略模拟跟踪连续失败次数
   pause_on_trigger: true        # 触发即挂 LOSS_STREAK_PAUSE（2.5.9），用户确认恢复或期满解除
   pause_days: 5                 # ◇ 暂停期（交易日）
@@ -36,3 +41,5 @@ executability:                  # 2.5.9 原因码的默认阈值
     days: 3
   same_template_cooldown_days: 3  # 同模板同证券冷却 3 个交易日（问题 30）
   # DATA_STALE 的阈值不在此处，统一用 realtime.yaml 的 stale_threshold_s
+health:
+  internal_recover_ratio: 0.8

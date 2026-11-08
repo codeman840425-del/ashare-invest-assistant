@@ -1,0 +1,242 @@
+[
+  {
+    "case_id": "TEST-second-01",
+    "synthetic_time": "2031-01-03T10:01:00+08:00",
+    "quote_price": "11",
+    "plan_note": "TEST-plan-01",
+    "feedback_operand": "11",
+    "evidence_id": "TEST-second-01:price",
+    "explanation_text": "TEST观察价格11",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-02",
+    "synthetic_time": "2031-01-03T10:02:00+08:00",
+    "quote_price": "12",
+    "plan_note": "TEST-plan-02",
+    "feedback_operand": "12",
+    "evidence_id": "TEST-second-02:price",
+    "explanation_text": "TEST观察价格12",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-03",
+    "synthetic_time": "2031-01-03T10:03:00+08:00",
+    "quote_price": "13",
+    "plan_note": "TEST-plan-03",
+    "feedback_operand": "13",
+    "evidence_id": "TEST-second-03:price",
+    "explanation_text": "TEST观察价格13",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-04",
+    "synthetic_time": "2031-01-03T10:04:00+08:00",
+    "quote_price": "14",
+    "plan_note": "TEST-plan-04",
+    "feedback_operand": "14",
+    "evidence_id": "TEST-second-04:price",
+    "explanation_text": "TEST观察价格14",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-05",
+    "synthetic_time": "2031-01-03T10:05:00+08:00",
+    "quote_price": "15",
+    "plan_note": "TEST-plan-05",
+    "feedback_operand": "15",
+    "evidence_id": "TEST-second-05:price",
+    "explanation_text": "TEST观察价格15",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-06",
+    "synthetic_time": "2031-01-03T10:06:00+08:00",
+    "quote_price": "16",
+    "plan_note": "TEST-plan-06",
+    "feedback_operand": "16",
+    "evidence_id": "TEST-second-06:price",
+    "explanation_text": "TEST观察价格16",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-07",
+    "synthetic_time": "2031-01-03T10:07:00+08:00",
+    "quote_price": "17",
+    "plan_note": "TEST-plan-07",
+    "feedback_operand": "17",
+    "evidence_id": "TEST-second-07:price",
+    "explanation_text": "TEST观察价格17",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-08",
+    "synthetic_time": "2031-01-03T10:08:00+08:00",
+    "quote_price": "18",
+    "plan_note": "TEST-plan-08",
+    "feedback_operand": "18",
+    "evidence_id": "TEST-second-08:price",
+    "explanation_text": "TEST观察价格18",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-09",
+    "synthetic_time": "2031-01-03T10:09:00+08:00",
+    "quote_price": "19",
+    "plan_note": "TEST-plan-09",
+    "feedback_operand": "19",
+    "evidence_id": "TEST-second-09:price",
+    "explanation_text": "TEST观察价格19",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-10",
+    "synthetic_time": "2031-01-03T10:10:00+08:00",
+    "quote_price": "20",
+    "plan_note": "TEST-plan-10",
+    "feedback_operand": "20",
+    "evidence_id": "TEST-second-10:price",
+    "explanation_text": "TEST观察价格20",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-11",
+    "synthetic_time": "2031-01-03T10:11:00+08:00",
+    "quote_price": "21",
+    "plan_note": "TEST-plan-11",
+    "feedback_operand": "21",
+    "evidence_id": "TEST-second-11:price",
+    "explanation_text": "TEST观察价格21",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-12",
+    "synthetic_time": "2031-01-03T10:12:00+08:00",
+    "quote_price": "22",
+    "plan_note": "TEST-plan-12",
+    "feedback_operand": "22",
+    "evidence_id": "TEST-second-12:price",
+    "explanation_text": "TEST观察价格22",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-13",
+    "synthetic_time": "2031-01-03T10:13:00+08:00",
+    "quote_price": "23",
+    "plan_note": "TEST-plan-13",
+    "feedback_operand": "23",
+    "evidence_id": "TEST-second-13:price",
+    "explanation_text": "TEST观察价格23",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-14",
+    "synthetic_time": "2031-01-03T10:14:00+08:00",
+    "quote_price": "24",
+    "plan_note": "TEST-plan-14",
+    "feedback_operand": "24",
+    "evidence_id": "TEST-second-14:price",
+    "explanation_text": "TEST观察价格24",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-15",
+    "synthetic_time": "2031-01-03T10:15:00+08:00",
+    "quote_price": "25",
+    "plan_note": "TEST-plan-15",
+    "feedback_operand": "25",
+    "evidence_id": "TEST-second-15:price",
+    "explanation_text": "TEST观察价格25",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-16",
+    "synthetic_time": "2031-01-03T10:16:00+08:00",
+    "quote_price": "26",
+    "plan_note": "TEST-plan-16",
+    "feedback_operand": "26",
+    "evidence_id": "TEST-second-16:price",
+    "explanation_text": "TEST观察价格26",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-17",
+    "synthetic_time": "2031-01-03T10:17:00+08:00",
+    "quote_price": "27",
+    "plan_note": "TEST-plan-17",
+    "feedback_operand": "27",
+    "evidence_id": "TEST-second-17:price",
+    "explanation_text": "TEST观察价格27",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-18",
+    "synthetic_time": "2031-01-03T10:18:00+08:00",
+    "quote_price": "28",
+    "plan_note": "TEST-plan-18",
+    "feedback_operand": "28",
+    "evidence_id": "TEST-second-18:price",
+    "explanation_text": "TEST观察价格28",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-19",
+    "synthetic_time": "2031-01-03T10:19:00+08:00",
+    "quote_price": "29",
+    "plan_note": "TEST-plan-19",
+    "feedback_operand": "29",
+    "evidence_id": "TEST-second-19:price",
+    "explanation_text": "TEST观察价格29",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-20",
+    "synthetic_time": "2031-01-03T10:20:00+08:00",
+    "quote_price": "30",
+    "plan_note": "TEST-plan-20",
+    "feedback_operand": "30",
+    "evidence_id": "TEST-second-20:price",
+    "explanation_text": "TEST观察价格30",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-21",
+    "synthetic_time": "2031-01-03T10:21:00+08:00",
+    "quote_price": "31",
+    "plan_note": "TEST-plan-21",
+    "feedback_operand": "31",
+    "evidence_id": "TEST-second-21:price",
+    "explanation_text": "TEST观察价格31",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-22",
+    "synthetic_time": "2031-01-03T10:22:00+08:00",
+    "quote_price": "32",
+    "plan_note": "TEST-plan-22",
+    "feedback_operand": "32",
+    "evidence_id": "TEST-second-22:price",
+    "explanation_text": "TEST观察价格32",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-23",
+    "synthetic_time": "2031-01-03T10:23:00+08:00",
+    "quote_price": "33",
+    "plan_note": "TEST-plan-23",
+    "feedback_operand": "33",
+    "evidence_id": "TEST-second-23:price",
+    "explanation_text": "TEST观察价格33",
+    "fixture_only": true
+  },
+  {
+    "case_id": "TEST-second-24",
+    "synthetic_time": "2031-01-03T10:24:00+08:00",
+    "quote_price": "34",
+    "plan_note": "TEST-plan-24",
+    "feedback_operand": "34",
+    "evidence_id": "TEST-second-24:price",
+    "explanation_text": "TEST观察价格34",
+    "fixture_only": true
+  }
+]

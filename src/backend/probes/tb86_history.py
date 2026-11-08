@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
+from app.ingest.shared_gate import SharedGate, limit_code, public_egress
 from probes.tb86_offline import (
     COUNTER,
     STOP,
@@ -200,6 +201,7 @@ def execute(
     secret = ""
     created_inode = None
     connection = None
+    gate = None
     run = None
     initial_ids: set[str] | None = None
     previous_umask = os.umask(0o077)
@@ -215,6 +217,9 @@ def execute(
         if any(row["id"] in ids for row in state["records"]):
             raise HaltError("history_already_started_no_automatic_resume")
         validate_notices(root)
+        gate = SharedGate.from_environment(None, "probe_tb86")
+        gate.acquire()
+        gate.confirm_egress(public_egress())
         # Only this explicitly authorized env name. No fallback path/key search.
         secret = os.environ.get("MAIRUI_LICENCE", "").strip()
         if not secret:
@@ -247,6 +252,8 @@ def execute(
                 if stop.exists():
                     result["outcome"] = "STOP_present"
                     raise HaltError("STOP_present")
+                gate.check()
+                gate.reserve()
                 try:
                     connection.request(
                         "GET",
@@ -256,6 +263,8 @@ def execute(
                     response = connection.getresponse()
                     result["last_http_status"] = response.status
                     if response.status in {103, 429}:
+                        gate.trip(str(response.status))
+                        gate.complete()
                         result["outcome"] = "rate_limit_103_or_429"
                         raise HaltError("rate_limit_103_or_429")
                     raw = response.read(16 * 1024 * 1024 + 1)
@@ -279,6 +288,12 @@ def execute(
                 except ValueError:
                     body = None
                 result["last_http_status"] = response.status
+                shared_code = limit_code(response.status, body) or limit_code(
+                    None, raw.decode("utf-8", errors="replace")
+                )
+                if shared_code:
+                    gate.trip(shared_code)
+                gate.complete()
                 if (
                     response.status in {103, 429}
                     or business_limit(body)
@@ -324,6 +339,9 @@ def execute(
                 result["temporary_secret_deleted"] = not secret_path.exists()
             except BaseException:
                 result["temporary_secret_deleted"] = False
+        if gate is not None:
+            with contextlib.suppress(BaseException):
+                gate.release()
         secret = ""
         os.umask(previous_umask)
         result["STOP_present"] = stop.exists()

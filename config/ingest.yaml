@@ -58,6 +58,14 @@ licences:                       # T-A07 每用户证书（2.1B）
     focus_max: 20
     focus_interval_s: 15
   eod_scope: user_universe      # 盘后批量只取该用户自选与持仓 + 批量日 K
+  product_daily:              # T-A53：仅名单预算；日K另账、另派单
+    not_before: "18:00"
+    deadline: "23:59:59"
+    list_datasets: [hslt_list, bj_list_all, kc_list_all]
+    list_max_http_per_day: 3
+    min_interval_s: 60
+    upstream_retry: 0
+    exclusive_lock: "ingest:single-egress"
 data_sharing:
   mode: per_licence             # per_licence（默认）| shared_cache【待麦蕊书面确认，禁用】
   allow_cross_licence_fallback: false   # 硬规则：不可改为 true

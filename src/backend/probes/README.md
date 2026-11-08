@@ -1,7 +1,10 @@
 # 麦蕊（Mairui）A 股数据 API 能力验证探针（T003）
 
 一次性前置验证脚本，不是正式实现。结论报告：`team/reports/T003-mairui-capability.md`。
-本目录可以整体拷到另一台机器（Windows / Linux / macOS，Python 3.9+）上运行，**只依赖标准库 + requests**。
+T-B99 起真实探针须与产品共享门禁，使用 Python 3.11+；复制时保留 `src/backend` 层级，
+并带上 `app/__init__.py`、`app/ingest/__init__.py` 和 `app/ingest/shared_gate.py`。
+共享模块只依赖标准库，探针另需 requests；实际挂载、同证书 UUID、出口与人工解闩前置见 [T-B99 运行说明](T-B99-shared-gate.md)。
+以下旧步骤中的删除 STOP、真实执行均服从当次 Chief 派单及上述前置。
 
 > 为什么要换机器：麦蕊规定**同一证书 60 秒内最多 2 个不同公网 IP**，超限返回 HTTP 429 `103:同一Licence证书在60秒内最多允许2个不同IP访问`。
 > 开发 box 的出口经透明代理，**每条新 TCP 连接的公网出口 IP 都可能不同**（实测连续 6 次 6 个 IP），上次因此触发 103。
@@ -23,7 +26,7 @@
 
 ## 2. 需要拷贝的文件
 
-把整个 `src/backend/probes/` 目录拷过去即可（`__pycache__/` 和 `results/dryrun/` 可以不拷）：
+保留 `src/backend/probes/` 与前述三个 `app/` 文件的相对层级（`__pycache__/` 和 `results/dryrun/` 可以不拷）：
 
 | 文件 | 作用 |
 |---|---|

@@ -35,11 +35,9 @@ KIND = "mairui_daily_snapshot"
 APPLY = "master.mairui_daily_apply"
 SWEEP = "master.mairui_daily_sweep"
 LISTS = ("hslt_list", "bj_list", "kc_list")
-# T-B90 correction: one scheduling slot is NOT one external HTTP request.
-# The current complete-source plan requires three distinct HTTP requests, while
-# the assigned authorization permits only one. No receipt/env/client flag may
-# widen this cap. Keep collection blocked pending an explicit contract ruling.
-DAILY_HTTP_LIMIT = 1
+# T-A53: one logical list batch is exactly three independent HTTP requests.
+# This cap does not authorize verification, daily bars or probe requests.
+DAILY_HTTP_LIMIT = 3
 
 
 def live_budget_issue() -> str | None:
@@ -110,15 +108,8 @@ def read_grant(path: Path = AUTHORIZATION) -> Grant | None:
 def eligible(conn: Connection, grant: Grant, now: dt.datetime) -> bool:
     return (
         grant.start <= now < grant.end
-        and conn.execute(
-            select(master_runs.c.id)
-            .where(
-                master_runs.c.stats["task"].astext == KIND,
-                master_runs.c.stats["upstream_halted"].astext == "true",
-            )
-            .limit(1)
-        ).first()
-        is None
+        # T-A53 uses the shared per-licence latch at dispatch. Historical batch
+        # facts must not permanently block unrelated certificates or manual recovery.
         and licence_available(conn, grant.licence_id, now)
         and conn.execute(
             select(user_data_licence_status.c.id).where(
@@ -135,7 +126,7 @@ def request(conn: Connection, grant: Grant, now: dt.datetime) -> uuid.UUID | Non
         return None
     day = now.astimezone(BEIJING).date()
     if (
-        now.astimezone(BEIJING).time() < dt.time(18)
+        not dt.time(18) <= now.astimezone(BEIJING).time() < dt.time(23, 59, 59)
         or not covered(conn, day)
         or not eligible(conn, grant, now)
     ):
@@ -182,11 +173,30 @@ def request(conn: Connection, grant: Grant, now: dt.datetime) -> uuid.UUID | Non
     return bid
 
 
-def publish_pending(engine: Engine, rds: Any) -> int:  # noqa: ANN401
+def publish_pending(
+    engine: Engine,
+    rds: Any,  # noqa: ANN401 - Redis sync response type varies by client version
+    *,
+    now: dt.datetime | None = None,
+) -> int:
     """Durable DB outbox replay also repairs commit->Redis and fetched->apply gaps."""
     if live_budget_issue():
         return 0
-    with engine.connect() as conn:
+    with engine.begin() as conn:
+        # Lock contention must not leave a never-attempted batch queued past midnight.
+        unattempted = select(master_runs.c.id).where(
+            master_runs.c.stats["task"].astext == KIND,
+            master_runs.c.stats["attempted"] == [],
+        )
+        conn.execute(
+            update(batches)
+            .where(
+                batches.c.master_run_id.in_(unattempted),
+                batches.c.status == "requested",
+                batches.c.deadline_at <= (now or dt.datetime.now(dt.UTC)),
+            )
+            .values(status="expired", error_code="deadline_exceeded")
+        )
         pending = conn.execute(
             select(batches.c.id, batches.c.status)
             .join(master_runs, master_runs.c.id == batches.c.master_run_id)

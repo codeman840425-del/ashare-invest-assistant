@@ -16,17 +16,23 @@ import stat
 import time
 import uuid
 from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from sqlalchemy import Engine, insert, select, text, update
 
-from app.db.tables.licences import user_data_licences
+from app.config import Settings
+from app.db.tables.licences import user_data_licence_status, user_data_licences
 from app.db.tables.market import master_runs, securities
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows
+from app.ingest.live import check_egress, feedback
+from app.ingest.shared_gate import GateClosedError, SharedGate, limit_code
+from app.ingest.upstream import Signal, classify
 from app.ingest.vault import LicenceVault, SealedLicence
+from app.licences.service import per_minute_limit
 from app.master.daily_delivery import (
     APPLY,
     KIND,
@@ -37,6 +43,8 @@ from app.master.daily_delivery import (
     live_budget_issue,
     read_grant,
 )
+from app.master.sync import BEIJING
+from app.reports.service import covered
 
 HOST = "api.mairuiapi.com"
 PATHS = dict(zip(LISTS, ("/hslt/list/", "/bj/list/all/", "/kc/list/all/"), strict=True))
@@ -44,6 +52,7 @@ TEMP = Path("/run/aia/mairui-daily.tmp")
 STOP = Path(__file__).resolve().parents[2] / "probes/results/STOP"
 HALT = Path("/run/aia/mairui-daily.HALTED")
 GROUP = "mairui-daily-v1"
+WIRE_GATE: ContextVar[SharedGate | None] = ContextVar("mairui_wire_gate", default=None)
 
 
 class DailyHaltError(RuntimeError):
@@ -51,8 +60,15 @@ class DailyHaltError(RuntimeError):
 
 
 def wire(path: str, secret: str) -> tuple[int, object]:
-    if live_budget_issue():
-        raise DailyHaltError("daily_http_budget_unresolved")
+    gate = WIRE_GATE.get()
+    if (
+        os.environ.get("MAIRUI_MODE", "replay") != "live"
+        or live_budget_issue()
+        or gate is None
+        or not gate.inflight
+    ):
+        raise DailyHaltError("live_transport_closed")
+    gate.check()
     conn = http.client.HTTPSConnection(HOST, timeout=20)
     conn.set_debuglevel(0)
     try:
@@ -72,6 +88,16 @@ def wire(path: str, secret: str) -> tuple[int, object]:
         raise DailyHaltError("transport_or_response_failed_no_retry") from None
     finally:
         conn.close()
+
+
+def send(
+    gate: SharedGate, upstream: Callable[[str, str], tuple[int, object]], path: str, secret: str
+) -> tuple[int, object]:
+    token = WIRE_GATE.set(gate)
+    try:
+        return upstream(path, secret)
+    finally:
+        WIRE_GATE.reset(token)
 
 
 def limited(status: int, body: object) -> bool:
@@ -174,9 +200,23 @@ def process(
     stop: Path = STOP,
     halt: Path = HALT,
     pause: Callable[[float], None] = time.sleep,
+    settings: Settings | None = None,
+    egress: Callable[[], str] = check_egress,
 ) -> str:
-    if live_budget_issue():
-        return "budget_contract_unresolved"
+    if os.environ.get("MAIRUI_MODE", "replay") != "live" or live_budget_issue():
+        return "live_transport_closed"
+    if grant is None or read_grant() != grant:
+        return "authorization_unavailable"
+    if settings is None:
+        from app.config import get_settings
+
+        settings = get_settings()
+    policy = settings.business.ingest.licences.product_daily
+    try:
+        gate = SharedGate.from_environment(grant.licence_id, "product_daily")
+        gate.acquire()
+    except GateClosedError:
+        return "busy"
     identity = None
     secret = None
     # Session lock spans reservation commits and every HTTP request. No retry.
@@ -186,6 +226,7 @@ def process(
         ).scalar_one()
         lock.commit()
         if not locked:
+            gate.release()
             return "busy"
         try:
             with engine.begin() as conn:
@@ -203,7 +244,11 @@ def process(
                     return "noop"
                 issue = None
                 current_grant = read_grant()
-                if (
+                if clock() >= b.deadline_at or p.stats.get("trade_date") != str(
+                    clock().astimezone(BEIJING).date()
+                ):
+                    issue = "deadline_exceeded"
+                elif (
                     current_grant != grant
                     or grant is None
                     or grant.digest != p.stats.get("receipt_digest")
@@ -213,31 +258,46 @@ def process(
                     issue = "authorization_unavailable"
                 elif stop.exists() or halt.exists():
                     issue = "STOP_or_halt_present"
-                elif clock() >= b.deadline_at:
-                    issue = "deadline_exceeded"
+                elif clock().astimezone(BEIJING).time() < dt.time(18) or not covered(
+                    conn, clock().astimezone(BEIJING).date()
+                ):
+                    issue = "outside_covered_daily_window"
                 elif p.stats.get("attempted"):
                     issue = "uncertain_prior_attempt_no_retry"
                 if issue:
+                    outcome = (
+                        "expired"
+                        if issue == "deadline_exceeded" and not p.stats.get("attempted")
+                        else "failed"
+                    )
                     conn.execute(
                         update(batches)
                         .where(batches.c.id == bid)
-                        .values(status="failed", error_code=issue)
+                        .values(status=outcome, error_code=issue)
                     )
-                    return "failed"
+                    return outcome
                 known: dict[str, list[str]] = {}
                 for code in conn.execute(select(securities.c.code)).scalars():
                     known.setdefault(code[:6], []).append(code)
                 lid = b.source_licence_id
                 parent_id = p.id
-            if grant is None:
-                raise DailyHaltError("authorization_unavailable")
+                licence = conn.execute(
+                    select(user_data_licence_status).where(user_data_licence_status.c.id == lid)
+                ).one()
+                minute_limit = per_minute_limit(settings, licence)
+            gate.confirm_egress(egress())
             secret = secret_loader(engine, lid)
             identity = temporary(temp, secret)
             all_rows: list[dict[str, Any]] = []
             summaries = []
             for index, dataset in enumerate(LISTS):
+                gate.check()
                 if index:
-                    pause(60)  # At most one request/minute, even override=1.
+                    pause(policy.min_interval_s)
+                delay = gate.product_delay(clock().timestamp())
+                if delay:
+                    pause(delay)
+                gate.check()
                 if stop.exists() or halt.exists():
                     raise DailyHaltError("STOP_or_halt_present")
                 # Durable write-ahead reservation: a restarted process never repeats
@@ -255,7 +315,7 @@ def process(
                     ):
                         raise DailyHaltError("authorization_expired_or_licence_paused")
                     attempts = list(parent.stats.get("attempted", []))
-                    if dataset in attempts or len(attempts) >= 3:
+                    if dataset in attempts or len(attempts) >= policy.list_max_http_per_day:
                         raise DailyHaltError("daily_budget_exhausted")
                     attempts.append(dataset)
                     conn.execute(
@@ -265,7 +325,41 @@ def process(
                     )
                 if stop.exists() or halt.exists():
                     raise DailyHaltError("STOP_or_halt_present")
-                status, body = upstream(PATHS[dataset], secret)
+                gate.reserve(now=clock().timestamp(), limit=minute_limit)
+                gate.check()
+                try:
+                    status, body = send(gate, upstream, PATHS[dataset], secret)
+                except Exception:  # noqa: BLE001 - persist only the fixed network classification
+                    feedback(
+                        engine,
+                        settings,
+                        lid,
+                        Signal.NETWORK,
+                        token=uuid.uuid5(bid, dataset),
+                        at=clock(),
+                        code="network",
+                    )
+                    raise DailyHaltError("transport_failed_no_retry") from None
+                code = limit_code(status, body)
+                halt_token = gate.trip(code) if code else None
+                gate.complete(now=clock().timestamp())
+                signal = Signal.IP_LIMITED if code else classify(status, body)
+                if signal != Signal.OK:
+                    error_code = code or {
+                        Signal.INVALID: "102",
+                        Signal.QUOTA: "101",
+                        Signal.RATE_LIMITED: "503",
+                        Signal.SERVER_ERROR: "http_5xx",
+                    }.get(signal)
+                    feedback(
+                        engine,
+                        settings,
+                        lid,
+                        signal,
+                        token=halt_token or uuid.uuid5(bid, dataset),
+                        at=clock(),
+                        code=error_code,
+                    )
                 if limited(status, body):
                     try:
                         fd = os.open(halt, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -334,8 +428,13 @@ def process(
                 if identity is not None:
                     remove_owned(temp, identity)
             finally:
-                lock.execute(text("SELECT pg_advisory_unlock(hashtext('ingest:single-egress'))"))
-                lock.commit()
+                try:
+                    lock.execute(
+                        text("SELECT pg_advisory_unlock(hashtext('ingest:single-egress'))")
+                    )
+                    lock.commit()
+                finally:
+                    gate.release()
 
 
 def tick(
@@ -345,9 +444,10 @@ def tick(
     clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.UTC),
     grant: Grant | None = None,
     pause: Callable[[float], None] = time.sleep,
+    settings: Settings | None = None,
 ) -> int:
     """Own consumer group on existing stream; other intent consumers unaffected."""
-    if live_budget_issue():
+    if os.environ.get("MAIRUI_MODE", "replay") != "live" or live_budget_issue():
         return 0
     from redis.exceptions import ResponseError
 
@@ -374,6 +474,7 @@ def tick(
                     grant if grant is not None else read_grant(),
                     clock=clock,
                     pause=pause,
+                    settings=settings,
                 )
                 if result == "busy":
                     continue

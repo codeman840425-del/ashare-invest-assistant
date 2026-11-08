@@ -1,0 +1,436 @@
+{
+  "_comment": "T004 导入验收用例（/workspace/team/reports/T004-import-cases.md v2，54 条：原 53 条 + T-T01a 新增 TC-ENC-12）→ 夹具映射。只引用用例 ID、优先级与合成夹具文件名；期望结果统一读 fmt_a/expected.json（唯一期望来源）。新增/改编号须同步报告。",
+  "source": "team/reports/T004-import-cases.md",
+  "count": 54,
+  "expected_source": "tests/fixtures/broker_statements/fmt_a/expected.json",
+  "cases": [
+    {
+      "id": "TC-ENC-01",
+      "priority": "P0",
+      "group": "ENC",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-02",
+      "priority": "P0",
+      "group": "ENC",
+      "fixtures": [
+        "positions_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-03",
+      "priority": "P0",
+      "group": "ENC",
+      "fixtures": [
+        "trades_utf8.txt",
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-04",
+      "priority": "P0",
+      "group": "ENC",
+      "fixtures": [
+        "trades_utf8_bom.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-05",
+      "priority": "P1",
+      "group": "ENC",
+      "fixtures": [
+        "trades_gb18030_ext_char.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-06",
+      "priority": "P1",
+      "group": "ENC",
+      "fixtures": [
+        "trades_truncated_mid_char.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-07",
+      "priority": "P0",
+      "group": "ENC",
+      "fixtures": [
+        "empty.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-08",
+      "priority": "P0",
+      "group": "ENC",
+      "fixtures": [
+        "trades_header_only.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-09",
+      "priority": "P0",
+      "group": "ENC",
+      "fixtures": [
+        "trades_lf.txt",
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-10",
+      "priority": "P0",
+      "group": "ENC",
+      "fixtures": [
+        "trades_blank_lines.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-11",
+      "priority": "P1",
+      "group": "ENC",
+      "fixtures": [
+        "trades_truncated_last_line.txt"
+      ]
+    },
+    {
+      "id": "TC-ENC-12",
+      "priority": "P1",
+      "group": "ENC",
+      "fixtures": [
+        "trades_cr.txt",
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-FW-01",
+      "priority": "P0",
+      "group": "FW",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-FW-02",
+      "priority": "P0",
+      "group": "FW",
+      "fixtures": [
+        "positions_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-FW-03",
+      "priority": "P0",
+      "group": "FW",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-FW-04",
+      "priority": "P0",
+      "group": "FW",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-FW-05",
+      "priority": "P0",
+      "group": "FW",
+      "fixtures": [
+        "trades_utf8.txt"
+      ]
+    },
+    {
+      "id": "TC-FW-06",
+      "priority": "P1",
+      "group": "FW",
+      "fixtures": [
+        "trades_extra_column.txt",
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-FW-07",
+      "priority": "P0",
+      "group": "FW",
+      "fixtures": [
+        "trades_missing_column.txt"
+      ]
+    },
+    {
+      "id": "TC-FW-08",
+      "priority": "P0",
+      "group": "FW",
+      "fixtures": [
+        "trades_column_mismatch.txt"
+      ]
+    },
+    {
+      "id": "TC-NUM-01",
+      "priority": "P0",
+      "group": "NUM",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-NUM-02",
+      "priority": "P0",
+      "group": "NUM",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-NUM-03",
+      "priority": "P0",
+      "group": "NUM",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-NUM-04",
+      "priority": "P0",
+      "group": "NUM",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-NUM-05",
+      "priority": "P0",
+      "group": "NUM",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-NUM-06",
+      "priority": "P0",
+      "group": "NUM",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-NUM-07",
+      "priority": "P0",
+      "group": "NUM",
+      "fixtures": [
+        "trades_bad_formats.txt"
+      ]
+    },
+    {
+      "id": "TC-NUM-08",
+      "priority": "P0",
+      "group": "NUM",
+      "fixtures": [
+        "trades_bad_formats.txt"
+      ]
+    },
+    {
+      "id": "TC-NUM-09",
+      "priority": "P0",
+      "group": "NUM",
+      "fixtures": [
+        "trades_sign_and_value_errors.txt"
+      ]
+    },
+    {
+      "id": "TC-NUM-10",
+      "priority": "P1",
+      "group": "NUM",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-SIDE-01",
+      "priority": "P0",
+      "group": "SIDE",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-SIDE-02",
+      "priority": "P0",
+      "group": "SIDE",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-SIDE-03",
+      "priority": "P0",
+      "group": "SIDE",
+      "fixtures": [
+        "trades_cancelled.txt"
+      ]
+    },
+    {
+      "id": "TC-SIDE-04",
+      "priority": "P1",
+      "group": "SIDE",
+      "fixtures": [
+        "trades_non_trade_events.txt"
+      ]
+    },
+    {
+      "id": "TC-SIDE-05",
+      "priority": "P1",
+      "group": "SIDE",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-DUP-01",
+      "priority": "P0",
+      "group": "DUP",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-DUP-02",
+      "priority": "P0",
+      "group": "DUP",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-DUP-03",
+      "priority": "P0",
+      "group": "DUP",
+      "fixtures": [
+        "trades_reimport_overlap.txt"
+      ]
+    },
+    {
+      "id": "TC-DUP-04",
+      "priority": "P0",
+      "group": "DUP",
+      "fixtures": [
+        "trades_duplicates_in_file.txt"
+      ]
+    },
+    {
+      "id": "TC-DUP-05",
+      "priority": "P0",
+      "group": "DUP",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-DUP-06",
+      "priority": "P1",
+      "group": "DUP",
+      "fixtures": [
+        "trades_cancelled.txt"
+      ]
+    },
+    {
+      "id": "TC-DUP-07",
+      "priority": "P1",
+      "group": "DUP",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-DUP-08",
+      "priority": "P2",
+      "group": "DUP",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-POS-01",
+      "priority": "P0",
+      "group": "POS",
+      "fixtures": [
+        "positions_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-POS-02",
+      "priority": "P0",
+      "group": "POS",
+      "fixtures": [
+        "positions_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-POS-03",
+      "priority": "P1",
+      "group": "POS",
+      "fixtures": [
+        "positions_multi_currency.txt"
+      ]
+    },
+    {
+      "id": "TC-POS-04",
+      "priority": "P0",
+      "group": "POS",
+      "fixtures": [
+        "positions_sample.txt"
+      ]
+    },
+    {
+      "id": "TC-POS-05",
+      "priority": "P1",
+      "group": "POS",
+      "fixtures": []
+    },
+    {
+      "id": "TC-PRIV-01",
+      "priority": "P0",
+      "group": "PRIV",
+      "fixtures": []
+    },
+    {
+      "id": "TC-PRIV-02",
+      "priority": "P1",
+      "group": "PRIV",
+      "fixtures": [
+        "trades_column_mismatch.txt"
+      ]
+    },
+    {
+      "id": "TC-PRIV-03",
+      "priority": "P0",
+      "group": "PRIV",
+      "fixtures": []
+    },
+    {
+      "id": "TC-PRIV-04",
+      "priority": "P1",
+      "group": "PRIV",
+      "fixtures": []
+    },
+    {
+      "id": "TC-BATCH-01",
+      "priority": "P0",
+      "group": "BATCH",
+      "fixtures": [
+        "trades_sign_and_value_errors.txt"
+      ]
+    },
+    {
+      "id": "TC-BATCH-02",
+      "priority": "P1",
+      "group": "BATCH",
+      "fixtures": [
+        "trades_sample.txt"
+      ]
+    }
+  ]
+}

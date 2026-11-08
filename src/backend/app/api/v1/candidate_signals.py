@@ -125,6 +125,14 @@ def signal_out(conn: Connection, row: Any) -> dict[str, Any]:
     body = {key: getattr(row, key) for key in fields}
     if any(not body[key] for key in ["rule_refs", "evidence", "counter_evidence", "invalidation"]):
         raise AppError(ErrorCode.SIGNAL_NOT_EXPLAINABLE)
+    # RiskGateDetail is deliberately not a candidate table column. Recover it
+    # from the same immutable, owner-bound evaluation snapshot used on write.
+    # Legacy snapshots may omit this optional list; malformed supplied details
+    # still fail the normal P1/evidence-reference validation below.
+    saved_input = snapshot.get("signal_input", {}) if snapshot else {}
+    if not isinstance(saved_input, dict):
+        raise AppError(ErrorCode.SIGNAL_NOT_EXPLAINABLE)
+    risk_details = saved_input.get("risk_details", [])
     try:
         SignalInput.model_validate(
             {
@@ -132,6 +140,7 @@ def signal_out(conn: Connection, row: Any) -> dict[str, Any]:
                     {
                         **body,
                         **block,
+                        "risk_details": risk_details,
                         "confidence": {"level": row.confidence_level, "value": row.confidence},
                     }
                 )[key]

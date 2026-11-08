@@ -1,4 +1,4 @@
-# H-01 持仓风险体检 `hold_risk_monitor` — 正式卡 v1（T-R15，纯离场系统组件）
+# H-01 持仓风险体检 `hold_risk_monitor` — 正式卡 v2（T-R20；v1 为 T-R15，纯离场系统组件）
 
 > 正式卡。导入格式：plan 2.5.14 A 节三个带标签块。`mount_policy: system_only` 纯离场组件（G1 豁免依据，plan 2.5.14 T-R15 裁定②；用户 POST /strategy-instances → 422 `STRATEGY_SYSTEM_ONLY`）：规则只含 exit/weakening/counter/invalidation，`action_map` 不含 buy/add，**不产生任何新开仓**；只对持有中证券求值，未持有不出现在结论中；不能被用户实例化为普通模板。
 > 夹具全部数值**虚构**；`688018.SH`、`688073.SH`、`300364.SZ`、`301218.SZ` 仅为板块场景标签（`desc`），不代表真实行情。期望值由 `golden/gen_T-R15.py` 确定性求值生成。
@@ -7,7 +7,7 @@
 ## 规则摘要
 - **离场 exit（任一为真 → `exit_signal`/sell）**：X1 盘中价 ≤ 计划止损（仅绑定计划时求值）；X2 收盘（qfq@T）< `ctx.cost_price_qfq` − `cost_atr_k`×ATR14（Wilder）；`ctx.cost_price_qfq` 由求值器按每笔成交 P×A(e)/A(T) 折算后加权，规则不直接使用不复权成本。
 - **转弱 weakening（任一为真 → `weakening`/reduce）**：W1 收盘连续 `ma_break_days` 根有效日 K 低于 MA`ma_long`；W2 单只仓位占比 > `single_cap`；W3 行业仓位占比 > `sector_cap`（无行业归属记“未分类”，W3 为 null，不阻断）。
-- **反证 counter**（并列展示，不抵消离场）：C1 大盘 `uptrend`；C2 收盘 > MA20。**失效 invalidation**：I1 收盘连续 `reclaim_days` 日重新站上 MA`ma_long`（转弱前提消失）。
+- **反证 counter**（并列展示，不抵消离场）：C1 大盘（沪深300指数口径 `f.market_regime_idx`）`uptrend`；C2 收盘 > MA20。**失效 invalidation**：I1 收盘连续 `reclaim_days` 日重新站上 MA`ma_long`（转弱前提消失）。
 - **优先级**：exit > weakening > insufficient_data（X2 或 W1 无法求值且无任何命中）> hold_ok。`action_map={exit: sell, weakening: reduce, held_hold: hold, else: hold}`；`insufficient_data` 不是 map 键，不产候选，建议显示 hold 并带缺口原因；数据缺失本身从不产生 sell/reduce。
 - N-01 风险公告对持仓只作反证（由系统组件挂载，不在本卡重复），不直接触发卖出。
 
@@ -22,9 +22,14 @@
 ## 反证 / 失效（研究侧）
 H-01 不预测收益，只提示风险；证伪：模拟跟踪中 `exit_signal` 后 20 日收益显著高于持有（n ≥ 30，扣费），说明阈值过敏。
 
+## v2 变更（T-R20，按 plan「T-R19 裁定」③④，78de694）
+- v1 原文冻结在 `cards/history/hold_risk_monitor.v1.md`。
+- C1 的 `f.market_regime` 改为 `f.market_regime_idx`（只用沪深300，去掉宽度），其余规则不变，仍是纯离场卡。
+- 前后差异：不看宽度后，uptrend 的日子可能变多，C1 反证会更常出现；反证只做展示，不抵消离场，state 和 action 不受影响。
+
 ```yaml strategy-card
 key: hold_risk_monitor
-version_no: 1
+version_no: 2
 name: 持仓风险体检
 category: risk
 horizons: [intraday_t, short, swing, long]
@@ -55,7 +60,7 @@ data_needs:
   - {feature_key: f.high_qfq, frequency: daily, adjust: qfq, available_at: T 日日线入库后}
   - {feature_key: f.low_qfq, frequency: daily, adjust: qfq, available_at: T 日日线入库后}
   - {feature_key: f.is_suspended, frequency: daily, adjust: none, available_at: T 日日线入库后（sf）}
-  - {feature_key: f.market_regime, frequency: daily, adjust: none, available_at: T 日盘后（G-02）}
+  - {feature_key: f.market_regime_idx, frequency: daily, adjust: none, available_at: T 日盘后（沪深300 日线落库后，F50）}
   - {feature_key: f.limit_down_price, frequency: daily, adjust: none, available_at: T 日开盘前（无涨跌幅日为 null）}
   - {feature_key: f.limit_locked_down, frequency: daily, adjust: none, available_at: T 日日线入库后}
 epistemic:
@@ -87,7 +92,7 @@ validation_summary: {type: rule, window: 未执行, benchmark: 继续持有, cos
 
 ```yaml strategy-spec
 key: hold_risk_monitor
-version_no: 1
+version_no: 2
 kind: rule_template
 horizons: [intraday_t, short, swing, long]
 params_schema:
@@ -103,7 +108,7 @@ rules:
   - {id: W1, dimension: technical, role: weakening, weight: 0, eval_time: daily_close, expr: "f.close_qfq < ma(f.close_qfq, p.ma_long) for p.ma_break_days days", required_features: [f.close_qfq]}
   - {id: W2, dimension: technical, role: weakening, weight: 0, eval_time: daily_close, expr: "ctx.position_weight > p.single_cap", required_features: []}
   - {id: W3, dimension: sector_market, role: weakening, weight: 0, eval_time: daily_close, expr: "ctx.sector_weight > p.sector_cap", required_features: []}
-  - {id: C1, dimension: sector_market, role: counter, weight: 0, eval_time: daily_close, expr: "f.market_regime == 'uptrend'", required_features: [f.market_regime]}
+  - {id: C1, dimension: sector_market, role: counter, weight: 0, eval_time: daily_close, expr: "f.market_regime_idx == 'uptrend'", required_features: [f.market_regime_idx]}
   - {id: C2, dimension: technical, role: counter, weight: 0, eval_time: daily_close, expr: "f.close_qfq > ma(f.close_qfq, 20)", required_features: [f.close_qfq]}
   - {id: I1, dimension: technical, role: invalidation, weight: 0, eval_time: daily_close, expr: "f.close_qfq > ma(f.close_qfq, p.ma_long) for p.reclaim_days days", required_features: [f.close_qfq]}
 action_map: {exit: sell, weakening: reduce, held_hold: hold, else: hold}
@@ -159,7 +164,7 @@ fixtures:
     f.limit_down_price: 20.21
     f.limit_locked_up: false
     f.limit_locked_down: false
-    f.market_regime: uptrend
+    f.market_regime_idx: uptrend
   holding:
     qty: 1000
     sellable: 1000
@@ -205,7 +210,7 @@ fixtures:
     f.limit_down_price: 17.63
     f.limit_locked_up: false
     f.limit_locked_down: false
-    f.market_regime: range
+    f.market_regime_idx: range
   holding:
     qty: 1000
     sellable: 1000
@@ -255,7 +260,7 @@ fixtures:
     f.limit_down_price: 17.63
     f.limit_locked_up: false
     f.limit_locked_down: false
-    f.market_regime: range
+    f.market_regime_idx: range
   holding:
     qty: 400
     sellable: 400
@@ -305,7 +310,7 @@ fixtures:
     f.limit_down_price: 20.21
     f.limit_locked_up: false
     f.limit_locked_down: false
-    f.market_regime: range
+    f.market_regime_idx: range
   holding:
     qty: 400
     sellable: 0
@@ -360,7 +365,7 @@ fixtures:
     f.limit_down_price: 20.21
     f.limit_locked_up: false
     f.limit_locked_down: false
-    f.market_regime: uptrend
+    f.market_regime_idx: uptrend
   holding:
     qty: 1000
     sellable: 1000
@@ -410,7 +415,7 @@ fixtures:
     f.limit_down_price: 17.63
     f.limit_locked_up: false
     f.limit_locked_down: false
-    f.market_regime: range
+    f.market_regime_idx: range
   holding:
     qty: 150
     sellable: 150
@@ -460,7 +465,7 @@ fixtures:
     f.limit_down_price: 20.15
     f.limit_locked_up: false
     f.limit_locked_down: true
-    f.market_regime: range
+    f.market_regime_idx: range
   holding:
     qty: 1000
     sellable: 1000
@@ -503,7 +508,7 @@ fixtures:
     f.limit_down_price: null
     f.limit_locked_up: false
     f.limit_locked_down: false
-    f.market_regime: range
+    f.market_regime_idx: range
   holding:
     qty: 200
     sellable: 200
@@ -549,7 +554,7 @@ fixtures:
     f.limit_down_price: 20.21
     f.limit_locked_up: false
     f.limit_locked_down: false
-    f.market_regime: uptrend
+    f.market_regime_idx: uptrend
   holding:
     qty: 1000
     sellable: 1000
@@ -599,7 +604,7 @@ fixtures:
     f.limit_down_price: 17.63
     f.limit_locked_up: false
     f.limit_locked_down: false
-    f.market_regime: range
+    f.market_regime_idx: range
   holding:
     qty: 1000
     sellable: 1000
@@ -656,7 +661,7 @@ fixtures:
     f.limit_down_price: 10.03
     f.limit_locked_up: false
     f.limit_locked_down: false
-    f.market_regime: range
+    f.market_regime_idx: range
   holding:
     qty: 600
     sellable: 600

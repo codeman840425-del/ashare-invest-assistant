@@ -1,5 +1,5 @@
 # feature_catalog_meta.yaml — T-R17（依据：api-contract §7.4 T-A13 裁定，d67d2a9）
-# 覆盖范围：H-01、W-01 正式卡，以及 G-01、G-02、N-01 用到的全部 f.*（共 19 个键）；null 表示研究员暂未确定（契约允许）。
+# 覆盖范围：H-01、W-01 正式卡，以及 G-01、G-02、N-01 用到的全部 f.*（共 19 个键；T-R20 为 v2 卡新增 f.market_regime_idx，共 20 个，老键不删）；null 表示研究员暂未确定（契约允许）。
 # warmup_bars 指特征本身需要的历史根数，不包含卡内 ma(x,n) 等窗口。
 features:
   - feature_key: f.amount
@@ -121,6 +121,13 @@ features:
     available_at: "d 盘后（指数日线与宽度到齐后）"
     epistemic_type: null
     spec_ref: F25
+  - feature_key: f.market_regime_idx
+    description: "大盘状态，指数口径（000300.SH，不含宽度）：uptrend、range 或 downtrend"
+    dimension: "sector_market"
+    warmup_bars: 61
+    available_at: "d 盘后（沪深300 指数日线落库后）"
+    epistemic_type: null
+    spec_ref: F50
   - feature_key: f.np_yoy_latest
     description: "最新一期归母净利润同比增速"
     dimension: "fundamental"

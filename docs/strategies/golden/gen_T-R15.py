@@ -72,10 +72,9 @@ def eval_w01(fx, p=W_P):
     R["F1"] = None if ma(am, 20) is None else ma(am, 20) >= p["min_amount"]
     ld = f.get("f.list_days"); R["F2"] = None if ld is None else ld >= p["min_list_days"]
     R["F3"] = ATRb(lambda a: a / c[-1] * 10000 >= p["min_edge_cost_mult"] * (2 * p["slippage_bp"] + p["fixed_cost_bp"]))
-    rg = f.get("f.market_regime"); R["V1"] = None if rg is None else rg == "downtrend"
+    rg = f.get("f.market_regime_idx"); R["V1"] = None if rg is None else rg == "downtrend"
     ny = f.get("f.np_yoy_latest"); R["V2"] = None if ny is None else ny < p["np_yoy_floor"]
     rs = f.get("f.rsi14"); R["V4"] = None if rs is None else rs > p["rsi_overheat"]
-    ir = f.get("f.ind_rs20"); R["C1"] = None if ir is None else ir < 0
     R["C2"] = None if mn is None else mn < 0
     R["C3"] = None if ma(am, 20) is None else am[-1] < ma(am, 20) * 0.5
     R["I1"] = None if ma(c, p["ma_slow"]) is None else m20 < ma(c, p["ma_slow"])
@@ -89,7 +88,7 @@ def eval_w01(fx, p=W_P):
     R["X4"] = None if len(lo) < 21 else c[-1] < min(lo[-21:-1])
     if held:
         R["X5"] = ATRb(lambda a: ctx["ctx.max_r_reached"] >= p["trail_trigger_r"] and c[-1] < ctx["ctx.highest_close_since_entry_qfq"] - p["trail_atr_mult"] * a)
-    order = ["E1","E2","E3","A1","F1","F2","F3","V1","V2","V4","C1","C2","C3","I1","I2","X1","X2","X3","X4","X5","X6"]
+    order = ["E1","E2","E3","A1","F1","F2","F3","V1","V2","V4","C2","C3","I1","I2","X1","X2","X3","X4","X5","X6"]
     passed = [k for k in order if R.get(k) is True]
     rc = []
     if held:
@@ -114,7 +113,7 @@ def eval_h01(fx, p=H_P):
     R["W1"] = for_days(lambda x: None if ma(x, p["ma_long"]) is None else x[-1] < ma(x, p["ma_long"]), p["ma_break_days"], c)
     R["W2"] = ctx["ctx.position_weight"] > p["single_cap"]
     sw = ctx.get("ctx.sector_weight"); R["W3"] = None if sw is None else sw > p["sector_cap"]
-    rg = fx["features"].get("f.market_regime"); R["C1"] = None if rg is None else rg == "uptrend"
+    rg = fx["features"].get("f.market_regime_idx"); R["C1"] = None if rg is None else rg == "uptrend"
     R["C2"] = None if ma(c, 20) is None else c[-1] > ma(c, 20)
     R["I1"] = for_days(lambda x: None if ma(x, p["ma_long"]) is None else x[-1] > ma(x, p["ma_long"]), p["reclaim_days"], c)
     passed = [k for k in ("X1","X2","W1","W2","W3","C1","C2","I1") if R[k] is True]
@@ -164,12 +163,12 @@ def fx_(cid, code, desc, s, raw, ld, extra, A=None, **kw):
     x.update({"series": s, "features": feat(board, s, raw, ld, extra)}); x.update(kw); return x
 
 UP = path(74, 0.004, [-0.006, -0.006, -0.006, 0.004, 0.004, 0.004])
-WB = {"f.main_net_20d": 30000000.0, "f.np_yoy_latest": 12.0, "f.rsi14": 56.0, "f.market_regime": "range", "f.ind_rs20": 1.5}
+WB = {"f.main_net_20d": 30000000.0, "f.np_yoy_latest": 12.0, "f.rsi14": 56.0, "f.market_regime_idx": "range"}
 W = []
 s, r = mk(UP); W.append(fx_("W01-FX1", "300364", "满足：创业板场景；趋势成立、回踩不破、无否决；买入 lot_rule=100/100", s, r, 600, WB))
 s, r = mk(UP[:-1] + [UP[-2] * 0.95]); W.append(fx_("W01-FX2", "301218", "不满足：当日收盘跌破 MA20（E2 不成立）", s, r, 600, WB))
 s, r = mk(UP); W.append(fx_("W01-FX3", "688018", "缺数据：f.np_yoy_latest 缺失 → V2 无法判定，买入草案 KEY_DATA_MISSING；科创板买入 lot_rule=200/1", s, r, 900, {**WB, "f.np_yoy_latest": None}))
-s, r = mk(UP); W.append(fx_("W01-FX4", "688073", "维度分歧：技术满足，行业弱于大盘、主力净流出（并列，不合并）", s, r, 900, {**WB, "f.main_net_20d": -20000000.0, "f.ind_rs20": -1.8}))
+s, r = mk(UP); W.append(fx_("W01-FX4", "688073", "维度分歧：技术满足，主力净流出（并列，不合并；v2 删除 C1 行业反证）", s, r, 900, {**WB, "f.main_net_20d": -20000000.0}))
 lu = UP[:-1] + [float(limit_prices("star", round(UP[-2], 2), 900, AS)[0])]
 s, r = mk(lu); s["f.high_qfq"][-1] = s["f.low_qfq"][-1] = s["f.close_qfq"][-1]
 W.append(fx_("W01-FX5", "688073", "一字涨停：科创板 20% 涨停价由 market_rules 计算；规则满足但不可成交", s, r, 900, {**WB, "f.rsi14": 70.0, "f.limit_locked_up": True}))
@@ -180,7 +179,7 @@ s, r = mk(dn); W.append(fx_("W01-FX6", "301218", "T+1：当日买入（可卖 0�
 s, r = mk([30.0, 31.5, 33.2]); W.append(fx_("W01-FX7", "688018", "上市初期：第 3 个交易日，注册制新股前 5 日无涨跌幅（limit 价 null，不按 20%）；K 线不足 → insufficient_data，不产候选", s, r, 3, WB))
 lv = path(74, 0.002, [-0.002, -0.002, -0.002, -0.002, 0.0005, 0.0005])
 s, r = mk(lv, band=0.0012); W.append(fx_("W01-FX8", "300364", "成本拒绝：ATR14(Wilder)/收盘 < 3×(2×滑点+固定费率) → F3 不满足", s, r, 600, WB))
-s, r = mk(UP); W.append(fx_("W01-FX9", "688018", "失效：大盘 downtrend → V1 否决、I2 命中", s, r, 900, {**WB, "f.market_regime": "downtrend"}))
+s, r = mk(UP); W.append(fx_("W01-FX9", "688018", "失效：大盘 downtrend → V1 否决、I2 命中", s, r, 900, {**WB, "f.market_regime_idx": "downtrend"}))
 br = UP[:-2] + [UP[-3] * 0.95, UP[-3] * 0.93]
 s, r = mk(br); W.append(fx_("W01-FX10", "688073", "科创板零股：持有 150 股（<200）；收盘连续 2 日破 MA20 → sell，lot_rule 要求一次性卖出全部 150 股", s, r, 900, WB,
     holding={"qty": 150, "sellable": 150}, ctx={"ctx.last_price": round(UP[-3] * 0.93, 2), "ctx.holding_days": 12, "ctx.sellable_qty": 150, "ctx.max_r_reached": 0.4, "ctx.highest_close_since_entry_qfq": round(UP[-3], 2)},
@@ -225,25 +224,25 @@ def hfx(i, code, desc, closes, ld, extra_f, holding, ctx, plan=None, band=0.015,
     if plan: kw["plan"] = plan
     return fx_(f"H01-FX{i}", code, desc, s, r, ld, extra_f, A=A, **kw)
 H = []
-H.append(hfx(1, "300364", "健康持仓：无离场/转弱命中 → hold_ok", HU, 600, {"f.market_regime": "uptrend"}, {"qty": 1000, "sellable": 1000}, cx(last * 0.9)))
+H.append(hfx(1, "300364", "健康持仓：无离场/转弱命中 → hold_ok", HU, 600, {"f.market_regime_idx": "uptrend"}, {"qty": 1000, "sellable": 1000}, cx(last * 0.9)))
 mb = path(74, 0.003, [-0.03, -0.03, -0.03, -0.02, -0.01, -0.005])
-H.append(hfx(2, "301218", "转弱：收盘连续 3 日低于 MA60 → weakening/reduce", mb, 600, {"f.market_regime": "range"}, {"qty": 1000, "sellable": 1000}, cx(mb[-1] * 0.85, lp=mb[-1])))
-H.append(hfx(3, "688018", "跌破成本(qfq)−2×ATR → exit_signal/sell", mb, 900, {"f.market_regime": "range"}, {"qty": 400, "sellable": 400}, cx(mb[-1] * 1.20, lp=mb[-1], sell=400)))
-H.append(hfx(4, "688073", "盘中触及计划止损且当日买入可卖 0（科创板 400 股）→ exit_signal/sell + T1_NOT_SELLABLE", HU, 900, {"f.market_regime": "range"}, {"qty": 400, "sellable": 0},
+H.append(hfx(2, "301218", "转弱：收盘连续 3 日低于 MA60 → weakening/reduce", mb, 600, {"f.market_regime_idx": "range"}, {"qty": 1000, "sellable": 1000}, cx(mb[-1] * 0.85, lp=mb[-1])))
+H.append(hfx(3, "688018", "跌破成本(qfq)−2×ATR → exit_signal/sell", mb, 900, {"f.market_regime_idx": "range"}, {"qty": 400, "sellable": 400}, cx(mb[-1] * 1.20, lp=mb[-1], sell=400)))
+H.append(hfx(4, "688073", "盘中触及计划止损且当日买入可卖 0（科创板 400 股）→ exit_signal/sell + T1_NOT_SELLABLE", HU, 900, {"f.market_regime_idx": "range"}, {"qty": 400, "sellable": 0},
              cx(last, lp=last * 0.93, sell=0, hd=0), {"plan.entry_price": round(last, 2), "plan.entry_price_qfq": round(last, 2), "plan.stop_loss": round(last * 0.94, 2)}))
-H.append(hfx(5, "300364", "单只仓位 0.35 > 上限 0.20 → weakening/reduce", HU, 600, {"f.market_regime": "uptrend"}, {"qty": 1000, "sellable": 1000}, cx(last * 0.9, w=0.35)))
-H.append(hfx(6, "688018", "科创板零股：持有 150 股；收盘连续 3 日低于 MA60 → reduce，lot_rule 一次性卖出 150 股", mb, 900, {"f.market_regime": "range"}, {"qty": 150, "sellable": 150}, cx(mb[-1] * 0.85, lp=mb[-1], sell=150)))
+H.append(hfx(5, "300364", "单只仓位 0.35 > 上限 0.20 → weakening/reduce", HU, 600, {"f.market_regime_idx": "uptrend"}, {"qty": 1000, "sellable": 1000}, cx(last * 0.9, w=0.35)))
+H.append(hfx(6, "688018", "科创板零股：持有 150 股；收盘连续 3 日低于 MA60 → reduce，lot_rule 一次性卖出 150 股", mb, 900, {"f.market_regime_idx": "range"}, {"qty": 150, "sellable": 150}, cx(mb[-1] * 0.85, lp=mb[-1], sell=150)))
 lim = path(78, 0.003, [-0.10]); ldn = float(limit_prices("chinext", round(lim[-2], 2), 600, AS)[1]); lim[-1] = ldn
-x = hfx(7, "301218", "一字跌停（创业板 20% 跌停价由 market_rules 计算）：跌破成本−2×ATR → sell；卖出方向 LIMIT_LOCKED，detail.direction=sell", lim, 600, {"f.market_regime": "range", "f.limit_locked_down": True}, {"qty": 1000, "sellable": 1000}, cx(lim[-2] * 1.05, lp=ldn))
+x = hfx(7, "301218", "一字跌停（创业板 20% 跌停价由 market_rules 计算）：跌破成本−2×ATR → sell；卖出方向 LIMIT_LOCKED，detail.direction=sell", lim, 600, {"f.market_regime_idx": "range", "f.limit_locked_down": True}, {"qty": 1000, "sellable": 1000}, cx(lim[-2] * 1.05, lp=ldn))
 x["series"]["f.high_qfq"][-1] = x["series"]["f.low_qfq"][-1] = x["series"]["f.close_qfq"][-1]; H.append(x)
-H.append(hfx(8, "688073", "上市初期第 3 个交易日（无涨跌幅，limit 价 null）；MA60/ATR 无法求值、无命中 → insufficient_data，不产候选、建议显示 hold", [30.0, 31.5, 33.2], 3, {"f.market_regime": "range"}, {"qty": 200, "sellable": 200}, cx(30.0, lp=33.2, sell=200, hd=2)))
-H.append(hfx(9, "300364", "反证与失效并存：C1/C2/I1 命中、行业占比 0.45 > 0.40 → weakening/reduce（反证并列，不抵消）", HU, 600, {"f.market_regime": "uptrend"}, {"qty": 1000, "sellable": 1000}, cx(last * 0.9, sw=0.45)))
+H.append(hfx(8, "688073", "上市初期第 3 个交易日（无涨跌幅，limit 价 null）；MA60/ATR 无法求值、无命中 → insufficient_data，不产候选、建议显示 hold", [30.0, 31.5, 33.2], 3, {"f.market_regime_idx": "range"}, {"qty": 200, "sellable": 200}, cx(30.0, lp=33.2, sell=200, hd=2)))
+H.append(hfx(9, "300364", "反证与失效并存：C1/C2/I1 命中、行业占比 0.45 > 0.40 → weakening/reduce（反证并列，不抵消）", HU, 600, {"f.market_regime_idx": "uptrend"}, {"qty": 1000, "sellable": 1000}, cx(last * 0.9, sw=0.45)))
 # ---- 新增 ----
-x = hfx(10, "301218", "停牌：as_of f.is_suspended=true，收盘连续 3 日低于 MA60 → reduce，执行层 SUSPENDED", mb, 600, {"f.market_regime": "range"}, {"qty": 1000, "sellable": 1000}, cx(mb[-1] * 0.85, lp=mb[-1]))
+x = hfx(10, "301218", "停牌：as_of f.is_suspended=true，收盘连续 3 日低于 MA60 → reduce，执行层 SUSPENDED", mb, 600, {"f.market_regime_idx": "range"}, {"qty": 1000, "sellable": 1000}, cx(mb[-1] * 0.85, lp=mb[-1]))
 x["features"]["f.is_suspended"] = True; H.append(x)
 raw, A = exdiv(74, 6, 15.0, 0.003, 0.002, 1.5)
 cost_raw = round(raw[60] , 2)   # 建仓于第 61 根（除权前，A(e)=1.0）
-x = hfx(11, "688018", f"成本跨除权：10 送 5，A(d)=前 74 根 1.0、后 6 根 1.5；不复权成本 {cost_raw}，ctx.cost_price_qfq={cost_raw}×1.0/1.5；X2 不触发（误用不复权成本会误触发）", raw, 900, {"f.market_regime": "range"},
+x = hfx(11, "688018", f"成本跨除权：10 送 5，A(d)=前 74 根 1.0、后 6 根 1.5；不复权成本 {cost_raw}，ctx.cost_price_qfq={cost_raw}×1.0/1.5；X2 不触发（误用不复权成本会误触发）", raw, 900, {"f.market_regime_idx": "range"},
         {"qty": 600, "sellable": 600}, cx(cost_raw, lp=round(raw[-1], 2), sell=600, cq=cost_raw / 1.5), A=A)
 H.append(x)
 
@@ -260,7 +259,7 @@ print(f"FX14 SMA {sm:.1f}bp Wilder {wl:.1f}bp"); bad += not (sm < 84 <= wl)
 for fx in W + H:
     ok = fx["expect"]["state"] == EXPECT[fx["id"]]; bad += not ok
     print(("OK " if ok else "BAD"), fx["id"], json.dumps(fx["expect"], ensure_ascii=False))
-out = {"task": "T-R15", "fictitious": True, "note": "全部数值虚构；证券代码仅为板块场景标签，不代表真实行情；价格 series 为 qfq@as_of", "generated_by": "docs/strategies/golden/gen_T-R15.py",
+out = {"task": "T-R15", "card_version": 2, "revised_by": "T-R20（plan T-R19 裁定③④，78de694）；v1 冻结于 golden/history/T-R15_golden.v1.json", "fictitious": True, "note": "全部数值虚构；证券代码仅为板块场景标签，不代表真实行情；价格 series 为 qfq@as_of", "generated_by": "docs/strategies/golden/gen_T-R15.py",
        "params": {"sw_ma_trend_pullback": W_P, "hold_risk_monitor": H_P}, "cards": {"sw_ma_trend_pullback": W, "hold_risk_monitor": H}}
 (pathlib.Path(__file__).parent / "T-R15_golden.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
 sys.exit(1 if bad else 0)

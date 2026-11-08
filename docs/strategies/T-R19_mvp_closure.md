@@ -28,3 +28,9 @@
 1. 确认把 amount 的样本限定 verified_live 同步到 feature_spec（目前只登记在 matrix）。
 2. 批准或否决上述三个首选方案；批准后，研究员改 feature_spec（新增 F25b，版本递增）和两张卡片的版本，后端再接入。
 3. 后端：main_net 覆盖测试（估算见 §1）；指数复权确认。在这之前不发起任何新调用。
+
+## 5. 采纳记录（T-R20 落地，plan「T-R19 裁定」①–④，78de694）
+- ① amount：feature_spec 全局状态升为 verified_doc（v1.1.13）；T-B81 只算样本级证据；matrix current_status 与 feature_spec 同步。
+- ② main_net_20d：采纳四字段派生（F21 正文和 YAML 写明公式与符号），单位和定稿时间待后端覆盖测试，仍为 declared → **W-01 v2 G2 仍阻塞**。
+- ③ 新增 F50 `f.market_regime_idx`（000300.SH，adjust none，不含 F24，2 日防抖），verified_doc；F25 不改。
+- ④ H-01 v2、W-01 v2：改用 F50；W-01 删除 C1。v1 冻结在 cards/history/ 和 golden/history/。26 例中只有 W01-FX4 的 rule_ids_passed 少了 C1，state 和 action 全部不变；features 只是改了键名，series 一致（对照见 T-R20 报告）。上文 §1–§3 的其余内容是提案时的记录。

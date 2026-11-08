@@ -1,5 +1,7 @@
 {
  "task": "T-R15",
+ "card_version": 2,
+ "revised_by": "T-R20（plan T-R19 裁定③④，78de694）；v1 冻结于 golden/history/T-R15_golden.v1.json",
  "fictitious": true,
  "note": "全部数值虚构；证券代码仅为板块场景标签，不代表真实行情；价格 series 为 qfq@as_of",
  "generated_by": "docs/strategies/golden/gen_T-R15.py",
@@ -383,8 +385,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "expect": {
      "state": "entry_ok",
@@ -754,8 +755,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "expect": {
      "state": "not_triggered",
@@ -1119,8 +1119,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": null,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "expect": {
      "state": "entry_ok",
@@ -1146,7 +1145,7 @@
    },
    {
     "id": "W01-FX4",
-    "desc": "【虚构】维度分歧：技术满足，行业弱于大盘、主力净流出（并列，不合并）",
+    "desc": "【虚构】维度分歧：技术满足，主力净流出（并列，不合并；v2 删除 C1 行业反证）",
     "as_of": "2026-10-30",
     "security": {
      "code": "688073.SH",
@@ -1493,8 +1492,7 @@
      "f.main_net_20d": -20000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": -1.8
+     "f.market_regime_idx": "range"
     },
     "expect": {
      "state": "entry_ok",
@@ -1506,7 +1504,6 @@
       "F1",
       "F2",
       "F3",
-      "C1",
       "C2"
      ],
      "lot_rule": {
@@ -1865,8 +1862,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 70.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "expect": {
      "state": "entry_ok",
@@ -2248,8 +2244,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 1000,
@@ -2333,8 +2328,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "expect": {
      "state": "insufficient_data",
@@ -2696,8 +2690,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "expect": {
      "state": "not_triggered",
@@ -3061,8 +3054,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "downtrend",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "downtrend"
     },
     "expect": {
      "state": "vetoed",
@@ -3429,8 +3421,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 150,
@@ -3819,8 +3810,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "expect": {
      "state": "entry_ok",
@@ -4198,8 +4188,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 600,
@@ -4580,8 +4569,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 1000,
@@ -4961,8 +4949,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 800,
@@ -5343,8 +5330,7 @@
      "f.main_net_20d": 30000000.0,
      "f.np_yoy_latest": 12.0,
      "f.rsi14": 56.0,
-     "f.market_regime": "range",
-     "f.ind_rs20": 1.5
+     "f.market_regime_idx": "range"
     },
     "expect": {
      "state": "entry_ok",
@@ -5713,7 +5699,7 @@
      "f.limit_down_price": 20.21,
      "f.limit_locked_up": false,
      "f.limit_locked_down": false,
-     "f.market_regime": "uptrend"
+     "f.market_regime_idx": "uptrend"
     },
     "holding": {
      "qty": 1000,
@@ -6084,7 +6070,7 @@
      "f.limit_down_price": 17.63,
      "f.limit_locked_up": false,
      "f.limit_locked_down": false,
-     "f.market_regime": "range"
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 1000,
@@ -6458,7 +6444,7 @@
      "f.limit_down_price": 17.63,
      "f.limit_locked_up": false,
      "f.limit_locked_down": false,
-     "f.market_regime": "range"
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 400,
@@ -6833,7 +6819,7 @@
      "f.limit_down_price": 20.21,
      "f.limit_locked_up": false,
      "f.limit_locked_down": false,
-     "f.market_regime": "range"
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 400,
@@ -7217,7 +7203,7 @@
      "f.limit_down_price": 20.21,
      "f.limit_locked_up": false,
      "f.limit_locked_down": false,
-     "f.market_regime": "uptrend"
+     "f.market_regime_idx": "uptrend"
     },
     "holding": {
      "qty": 1000,
@@ -7594,7 +7580,7 @@
      "f.limit_down_price": 17.63,
      "f.limit_locked_up": false,
      "f.limit_locked_down": false,
-     "f.market_regime": "range"
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 150,
@@ -7965,7 +7951,7 @@
      "f.limit_down_price": 20.15,
      "f.limit_locked_up": false,
      "f.limit_locked_down": true,
-     "f.market_regime": "range"
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 1000,
@@ -8039,7 +8025,7 @@
      "f.limit_down_price": null,
      "f.limit_locked_up": false,
      "f.limit_locked_down": false,
-     "f.market_regime": "range"
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 200,
@@ -8406,7 +8392,7 @@
      "f.limit_down_price": 20.21,
      "f.limit_locked_up": false,
      "f.limit_locked_down": false,
-     "f.market_regime": "uptrend"
+     "f.market_regime_idx": "uptrend"
     },
     "holding": {
      "qty": 1000,
@@ -8783,7 +8769,7 @@
      "f.limit_down_price": 17.63,
      "f.limit_locked_up": false,
      "f.limit_locked_down": false,
-     "f.market_regime": "range"
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 1000,
@@ -9165,7 +9151,7 @@
      "f.limit_down_price": 10.03,
      "f.limit_locked_up": false,
      "f.limit_locked_down": false,
-     "f.market_regime": "range"
+     "f.market_regime_idx": "range"
     },
     "holding": {
      "qty": 600,

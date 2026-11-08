@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | **v1.1.12（T-R18：按 plan T-A14「T-R18 裁定」（af94de3）新增 §7D 状态登记——F16–F18、F13、F22 改为 `verified_doc`（只到 simulating，附 PIT 限定），F19、F21、F25、F27 保持 `declared`；不是 verified_live，G2 仍阻塞；键数不变）**；此前 v1.1.11（T-R15 第二轮：按 plan 2.5.14 T-R15 第 7 条（f12ef24）新增 F49 `f.is_suspended`——日频布尔、来源日线 `sf`、P0；退市 / 不在列表为 null；分类器 null 按 true；合计 49 个、P0 48 个）**；此前 v1.1.10（T-R13：按 plan 2.12.1“T-R13 补充裁定”，847f41e 写入——V5h 可按“确认没有币种、单位字段”关闭及其抽样范围；`cdr_unit` 逐只清除，V5j 以 689009 的实测为准关闭；CDR 份数判定容差 0.1%，两条都不满足时保留标记并告警 `data_quality`；均为关闭条件，不代表已关闭）**；此前 v1.1.9（T-R12i：按 plan 2.12.1“T-R12h 补充裁定”4，d500474 写入——名单行不加可见时间字段，重算用最新版名单属于更正，回测报告写明 `share_class_list_version`；配对代码定名 `paired_code`（交易所原代码、不加后缀）并加 `paired_market`（`HK` / `SH` / `SZ`））；此前 v1.1.8（T-R12h：按 plan 2.12.1“T-R12h 补充裁定”（7ec6fad）写入 A+B、A+H 名单接入口径——名单放 `config/share_class_list.yaml`，按 `effective_from` / `effective_to` 生效区间取、不得前视；basis 新增 `share_class_list_version`；`verified=false` 的记录照常打 `non_a_share_capital`；V5g 关闭条件加“名单内所有记录 `verified=true`”与“211 对与 209 对的差异已查明”两项）；此前 v1.1.7（T-R12g：按 plan 2.12.1 T-R12f 节中标为 T-R12g 的三点确认（9ad51b8）收尾——截止日规则只用于首次全量回填的季末行，增量季末行取 `max(next_trading_day(plrq), first_seen_at)`；删除 `cdr_unit` 的 S2 剔除条款，`cdr_unit` 只是 F42、F47 值上的标记；CDR 清除条件分两种情况：按份数计 T-B05 确认后即清除，按基础股份计还需转换比例配置接入）；此前 v1.1.6（T-R12f：按 plan 2.12.1“T-R12f 补充裁定”（38d7888）落地 T-R12e 的 8 点——V5i 截止日按 `bdrq` 所属报告期、回填季末行可见时间取 `max(next_trading_day(plrq), next_trading_day(截止日))` 09:30；`basis.pit_basis` 改为字符串数组；`share_class_check` 取值改为 `unavailable` / `list` / `field`；CDR 以 `market.securities.type = cdr` 识别，F43、F48 不另设池剔除；CDR 按基础股份计时的总市值换算与转换比例配置；银行、保险标记照常排序）；此前 v1.1.5（T-R12e：按 plan 2.12.1“T-R12e 补充裁定”（fdd7fdd）落地——新增 V5i（capital 季末行按法定截止日保守可见，`basis.pit_basis = capital_deadline`）、V5j（CDR 股本单位，`verify_pending` 加 `cdr_unit`，不进 PE/PB 行业分位、S2 分子分母同时剔除）；V5g 改为按配置名单识别 B/H 股、新增 `share_class_check = list`、关闭条件重写；§7C S1 加关 V5i、V5j）；此前 v1.1.4（T-R12d：按 plan 2.12.1“T-R12c 补充裁定”（b85b564）收尾——F46 `zczj ≤ 0` 并入 `component_missing` 并发 `data_quality` 告警；`single_period_reason` 优先级改为 plan 已裁定；退市证券不写 null 行）**；此前 v1.1.3（T-R12c：按 plan 2.12.1“T-R12b 补充裁定”（1c62952）落地 `basis.null_reason` 封闭枚举 14 码及优先级、`single_period_reason`、`share_class_check`；`unit_mismatch` 扩到 F45、F46；§7C S1 加关 V5d、V5h）**；此前 v1.1.2（T-R12b：按 plan 2.12.1 T-R12a 裁定（de86b99）补 F42/F44/F47 边界规则与 `basis.null_reason` 原因码、行级待核实标记 `basis.verify_pending`；§7C S2 写入 PB 覆盖率门槛；§11 新增 V5g、V5h）**；此前 v1.1.1（T-R12a：§7A 新增 PB 时点键 F47 `f.pb_pit`、F48 `f.pb_pit_ind_pct`（口径按 plan 2.12.1 PB 裁定）；F45 经营现金流改为已裁定的主备字段；§11 G3 关闭）**；此前 v1.1.0（T-R12：新增 §7A L-01 时点财务特征 F42–F46、§7B plrq 多版本、§7C 线上切换条件；F08/F33/F34 对 L-01 降为对照用；§11 V5 改为部分实测）；v1.0.2（按 T003 探针 run-20261101-190106 p11 更新 §11 V1/V4/V7 状态与 §13 C7；v1.0.1 为 T-R11a/b 修订；v1.0 为 T-R11 首版，2026-11-01）**。本目录此前没有同类文件（已检索 `docs/strategies/`），本文为新建，不是更新 |
+| 版本 | **v1.1.13（T-R20：按 plan「T-R19 裁定」①–④（78de694）：F19 `f.amount` 升为 verified_doc；F21 写明四字段派生口径，仍为 declared；新增 F50 `f.market_regime_idx`（verified_doc，最多到 simulating），合计 50 个，P0 49；F25、F27 不改）**；此前 v1.1.12（T-R18：按 plan T-A14「T-R18 裁定」（af94de3）新增 §7D 状态登记——F16–F18、F13、F22 改为 `verified_doc`（只到 simulating，附 PIT 限定），F19、F21、F25、F27 保持 `declared`；不是 verified_live，G2 仍阻塞；键数不变）**；此前 v1.1.11（T-R15 第二轮：按 plan 2.5.14 T-R15 第 7 条（f12ef24）新增 F49 `f.is_suspended`——日频布尔、来源日线 `sf`、P0；退市 / 不在列表为 null；分类器 null 按 true；合计 49 个、P0 48 个）**；此前 v1.1.10（T-R13：按 plan 2.12.1“T-R13 补充裁定”，847f41e 写入——V5h 可按“确认没有币种、单位字段”关闭及其抽样范围；`cdr_unit` 逐只清除，V5j 以 689009 的实测为准关闭；CDR 份数判定容差 0.1%，两条都不满足时保留标记并告警 `data_quality`；均为关闭条件，不代表已关闭）**；此前 v1.1.9（T-R12i：按 plan 2.12.1“T-R12h 补充裁定”4，d500474 写入——名单行不加可见时间字段，重算用最新版名单属于更正，回测报告写明 `share_class_list_version`；配对代码定名 `paired_code`（交易所原代码、不加后缀）并加 `paired_market`（`HK` / `SH` / `SZ`））；此前 v1.1.8（T-R12h：按 plan 2.12.1“T-R12h 补充裁定”（7ec6fad）写入 A+B、A+H 名单接入口径——名单放 `config/share_class_list.yaml`，按 `effective_from` / `effective_to` 生效区间取、不得前视；basis 新增 `share_class_list_version`；`verified=false` 的记录照常打 `non_a_share_capital`；V5g 关闭条件加“名单内所有记录 `verified=true`”与“211 对与 209 对的差异已查明”两项）；此前 v1.1.7（T-R12g：按 plan 2.12.1 T-R12f 节中标为 T-R12g 的三点确认（9ad51b8）收尾——截止日规则只用于首次全量回填的季末行，增量季末行取 `max(next_trading_day(plrq), first_seen_at)`；删除 `cdr_unit` 的 S2 剔除条款，`cdr_unit` 只是 F42、F47 值上的标记；CDR 清除条件分两种情况：按份数计 T-B05 确认后即清除，按基础股份计还需转换比例配置接入）；此前 v1.1.6（T-R12f：按 plan 2.12.1“T-R12f 补充裁定”（38d7888）落地 T-R12e 的 8 点——V5i 截止日按 `bdrq` 所属报告期、回填季末行可见时间取 `max(next_trading_day(plrq), next_trading_day(截止日))` 09:30；`basis.pit_basis` 改为字符串数组；`share_class_check` 取值改为 `unavailable` / `list` / `field`；CDR 以 `market.securities.type = cdr` 识别，F43、F48 不另设池剔除；CDR 按基础股份计时的总市值换算与转换比例配置；银行、保险标记照常排序）；此前 v1.1.5（T-R12e：按 plan 2.12.1“T-R12e 补充裁定”（fdd7fdd）落地——新增 V5i（capital 季末行按法定截止日保守可见，`basis.pit_basis = capital_deadline`）、V5j（CDR 股本单位，`verify_pending` 加 `cdr_unit`，不进 PE/PB 行业分位、S2 分子分母同时剔除）；V5g 改为按配置名单识别 B/H 股、新增 `share_class_check = list`、关闭条件重写；§7C S1 加关 V5i、V5j）；此前 v1.1.4（T-R12d：按 plan 2.12.1“T-R12c 补充裁定”（b85b564）收尾——F46 `zczj ≤ 0` 并入 `component_missing` 并发 `data_quality` 告警；`single_period_reason` 优先级改为 plan 已裁定；退市证券不写 null 行）**；此前 v1.1.3（T-R12c：按 plan 2.12.1“T-R12b 补充裁定”（1c62952）落地 `basis.null_reason` 封闭枚举 14 码及优先级、`single_period_reason`、`share_class_check`；`unit_mismatch` 扩到 F45、F46；§7C S1 加关 V5d、V5h）**；此前 v1.1.2（T-R12b：按 plan 2.12.1 T-R12a 裁定（de86b99）补 F42/F44/F47 边界规则与 `basis.null_reason` 原因码、行级待核实标记 `basis.verify_pending`；§7C S2 写入 PB 覆盖率门槛；§11 新增 V5g、V5h）**；此前 v1.1.1（T-R12a：§7A 新增 PB 时点键 F47 `f.pb_pit`、F48 `f.pb_pit_ind_pct`（口径按 plan 2.12.1 PB 裁定）；F45 经营现金流改为已裁定的主备字段；§11 G3 关闭）**；此前 v1.1.0（T-R12：新增 §7A L-01 时点财务特征 F42–F46、§7B plrq 多版本、§7C 线上切换条件；F08/F33/F34 对 L-01 降为对照用；§11 V5 改为部分实测）；v1.0.2（按 T003 探针 run-20261101-190106 p11 更新 §11 V1/V4/V7 状态与 §13 C7；v1.0.1 为 T-R11a/b 修订；v1.0 为 T-R11 首版，2026-11-01）**。本目录此前没有同类文件（已检索 `docs/strategies/`），本文为新建，不是更新 |
 | 作者/维护 | 策略研究员（`docs/strategies/` 由研究员维护，架构师不改该目录，plan T-R11 行） |
 | 覆盖范围 | 仓库 `docs/`、`config/` 中出现的全部正式特征键 `f.*`，共 **48 个**：分类器 15 个（T-B30a）+ P0 策略卡 25 个（T-B43 / `_template.md` / `catalog.md`）+ L-01 时点财务 7 个（v1.1.0 5 个 + v1.1.1 PB 2 个，§7A，T-B55）+ P1 1 个（`validation.md`）。另列前端 mock 中出现的 11 个**非正式**键（§8），不计入 48 |
 | 消费方 | T-B30a（分类器 15 键数据层）、T-B43（P0 策略特征）、T-B35（特征底座 `feature_catalog` / `market.feature_bars_daily`）、T-B42（DSL 求值器） |
@@ -289,7 +289,7 @@
 ## 4. P0 策略特征：资金、财务、公告（T-B43）
 
 ### F21 `f.main_net_20d` — 近 20 日主力净流入
-- **公式**：`Σ (特大单主买成交额 + 大单主买成交额 − 特大单主卖成交额 − 大单主卖成交额)`，求和范围为最近 20 个交易日中有资金流记录的有效 K 线日。单位 `CNY`，取整到元。T003：“主力净流入 = 特大+大单主买 − 主卖（与因子文档口径一致）”。
+- **公式（v1.1.13 按 plan「T-R19 裁定」②采纳四字段派生，不用内置因子）**：`Σ_{最近 20 个交易日} (zmbtdcje + zmbddcje − zmstdcje − zmsddcje)`，即主买特大单 + 主买大单 − 主卖特大单 − 主卖大单，买为正、卖为负。求和范围为最近 20 个交易日中有资金流记录的有效 K 线日。**单位与盘后定稿时间仍缺证**（T-B81 原始单位未核实），实测前不取整也不换算。麦蕊内置因子 `main_20d_net` 与四字段和不等价（T-B81：688018 内置 12807880，四字段和 1499643492），不得替代。T003：“主力净流入 = 特大+大单主买 − 主卖（与因子文档口径一致）”。
 - **来源**：`/hsstock/history/transaction/{code}`（T003）；字段示例 `zmbtdcje`、`zmstdcje`（T003 原文“如 zmbtdcje、zmstdcje…”）；**大单对应的字段名、成交额单位【待核实】**。对照：麦蕊因子 `main_20d_net`（资金 capital 类）——注意因子 ID 是 `main_20d_net`，特征键是 `main_net_20d`，两者词序不同，T-B43 映射时不要写错。
 - **可得时点**：d 日 15:40 后（`_template.md`）。
 - **边界**：有效 K 线 < 15 → null；某日资金流缺失而当日有成交 → 整个特征 null（不得当 0）。
@@ -326,6 +326,15 @@
 - **可得时点**：d 日盘后（指数日线 + 宽度都到齐后）。
 - **边界**：指数 MA60 不足 45 根有效 K → null；宽度 20 日均值有效值 < 15 → null；任一 null → `f.market_regime = null`（不得默认为 `range`）。情绪周期 6 阶段在涨停池积累前不输出。
 - **引用**：G-02 产出；RC3、W-01（夹具 `f.market_regime: range`）；P0。
+
+### F50 `f.market_regime_idx` — 大盘状态（指数口径，不含宽度；v1.1.13，plan「T-R19 裁定」③）
+- **公式**：枚举 `uptrend / range / downtrend`，判定方式与 F25 一致，只去掉宽度条件：`uptrend` = 000300.SH 收盘 > MA60 且 MA20 > MA60；`downtrend` = 收盘 < MA60 且 MA20 < MA60；其余为 `range`。须**连续 2 日**满足才切换（防抖）；切换之前保持上一个已确认状态，序列开头没有已确认状态时取当日原始判定。MA 为最近 N 根有效指数日 K 的收盘均值。阈值和防抖天数沿用 F25，没有另加条件。
+- **来源**：沪深300 指数日线 `/hsindex/history/000300.SH/d`（hszsdata 文档；T-B81 实测：目录精确给出 dm=000300.SH、jys=SH，日线返回 64 根）；`adjust: none`（指数不做除权复权，按裁定③）。**不依赖 F24**。
+- **可得时点**：d 日指数日线落库后（盘后）；具体落库时刻【待核实】。
+- **边界**：MA60 的有效 K < 45 → null；当日指数日线缺失 → null；null 不默认为 `range`。预热：MA60 加防抖需要 61 根（最少 45+1 根）。
+- **单位**：enum（没有数值单位）。
+- **状态**：verified_doc（hszsdata 文档 + T-B81 日线实测，裁定③），最多到 simulating。原 F25 `f.market_regime` 不改，仍为 declared。
+- **引用**：H-01 v2（C1）、W-01 v2（V1、I2、applicability）；P0。
 
 ### F26 `f.sw_l1` — 申万一级行业
 - **公式**：d 日有效的申万一级行业代码（字符串）。
@@ -919,7 +928,9 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 | f.close_qfq / f.high_qfq / f.low_qfq（F16–F18） | verified_doc | ② | 只用 as_of 当次取数并存快照；历史回写值不作时点依据、不用于回测；单位“元/股”是推断，记入 gaps，待 T-B05 |
 | f.list_days（F13） | verified_doc | ③ | list_date 早于交易日历覆盖起点时为 null，记 gap（insufficient_data），不估算 |
 | f.np_yoy_latest（F22） | verified_doc | ④ | 可见时点沿用 F22 `next_trading_day(plrq) 09:30`；V5f 未结前以首次观测值为准，带 observed_at；更正作为新观测，不改写旧快照；V5f 随 T-B05 复核 |
-| f.amount、f.main_net_20d、f.market_regime、f.ind_rs20 | declared | ⑤ | 需要实测或补来源；H-01、W-01 的 G2 仍不通过 |
+| f.amount（F19） | verified_doc（v1.1.13，plan「T-R19 裁定」①，78de694） | T-R19① | T-B81 两只股票的样本只算样本级实测证据；verified_live 要等 T-B05 扩大覆盖 |
+| f.market_regime_idx（F50，新增） | verified_doc（v1.1.13，T-R19③） | T-R19③ | 只用 000300.SH，adjust none，不含 F24；最多到 simulating |
+| f.main_net_20d、f.market_regime、f.ind_rs20 | declared | ⑤ / T-R19②③④ | 需要实测或补来源；H-01、W-01 的 G2 仍不通过 |
 
 **裁定④已确认**：架构师明确“plrq”沿用 F22 的 `next_trading_day(plrq) 09:30`，不放宽原 `pit_rule`；首次观测与更正快照仍遵守上表限定。
 
@@ -978,7 +989,7 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 | F18 | f.low_qfq | 前复权最低 | 日线 l(f) | qfq | CNY_per_share | — | d 盘后 | P0 | W-01 atr |
 | F19 | f.amount | 成交额 | 日线 a | none | CNY | — | d 盘后 | P0 | W-01 S-01 W-02 冲击成本 |
 | F20 | f.rsi14 | RSI(14) | 本地 | qfq | 指数 0–100 | warmup 28 | d 盘后 | P0 | W-01 |
-| F21 | f.main_net_20d | 20 日主力净流入 | 资金流 | none | CNY | 20，≥15 | d 15:40 后 | P0 | W-01（W-03 P1） |
+| F21 | f.main_net_20d | 20 日主力净流入 | 资金流（四字段派生） | none | 待实测 | 20，≥15 | d 15:40 后 | P0 | W-01（W-03 P1） |
 | F22 | f.np_yoy_latest | 最新净利同比 | 报表 | — | pct | 最新一期 | plrq 次日 09:30 | P0 | W-01（W-05 P1） |
 | F23 | f.ann_risk_count_10d | 10 日风险公告数 | 公告 + 词表 | — | count | 10 交易日 | 次一交易日 09:30 | P0 | N-01 W-01 H-01 |
 | F24 | f.market_breadth | 上涨家数占比 | 收盘快照 | none | ratio | 当日 | d 15:05 后 | P0 | G-02 |
@@ -1006,14 +1017,15 @@ d = D61，b = D1（d 往前第 60 个交易日）。全部有效 K 线。D41 为
 | F47 | f.pb_pit | PB（时点自算） | 不复权 c × zgb ÷ T 时可见最新 gsmgdqsyhj；≤ 0 或缺失 null | none | 倍 | 最新一期（时点值） | d 日线落库后；财报 next_trading_day(plrq) 09:30 | P0 | L-01 |
 | F48 | f.pb_pit_ind_pct | PB（时点）行业分位 | 本地截面 | — | ratio | 当日 | 同 F47 + 行业快照 | P0 | L-01 |
 | F49 | f.is_suspended | 当日是否停牌 | 日线 sf | — | bool | 当日 | d 盘后 | P0 | G-01 W-01 H-01 |
+| F50 | f.market_regime_idx | 大盘状态（指数口径，不含宽度） | 000300.SH 指数日线 | none | enum | MA60、2 日防抖 | d 盘后 | P0 | H-01 v2、W-01 v2 |
 | F41 | f.excess_ret_std_60d | 60 日超额收益标准差 | 本地 | qfq | ratio | 60，≥45 | d 盘后 | P1 | validation |
 
-**合计 49 个；P0 = 48（分类器 15 + 策略 26（含 v1.1.11 新增 F49 `f.is_suspended`） + L-01 时点财务 7），P1 = 1。** F08、F33、F34 对 L-01 为对照用（F08 仍供分类器）。另建议新增 `f.close_raw`（G1，P0，未计入）；PB 两键 F47、F48 已于 v1.1.1 计入（G3 已解决）。
+**合计 50 个；P0 = 49（分类器 15 + 策略 27（含 v1.1.11 新增 F49 `f.is_suspended`、v1.1.13 新增 F50 `f.market_regime_idx`） + L-01 时点财务 7），P1 = 1。** F08、F33、F34 对 L-01 为对照用（F08 仍供分类器）。另建议新增 `f.close_raw`（G1，P0，未计入）；PB 两键 F47、F48 已于 v1.1.1 计入（G3 已解决）。
 
 机器可读草案（供 T-B30a/T-B43 写 `feature_catalog`；`status` 一律从 `declared` 起步，T-B05 核实后再升级；字段名与表 `app.feature_catalog` 列一致）：
 
 ```yaml
-feature_spec_version: "1.1.12"
+feature_spec_version: "1.1.13"
 rank_pct_universe: "T−1 日盘后落库截面：沪深 A 股股票，剔除北交所、停牌、上市 < 20 个交易日；平均秩 / N，取值 [0, 1]"
 window_rule: {calendar: exchange_trading_days, min_valid_ratio: 0.75, null_fill: forbidden}   # 0.75 待架构师确认
 all_null_when: {listing_status: [delisted, missing_from_list]}   # T-R11b：这两类证券全部 f.* 为 null
@@ -1036,13 +1048,14 @@ features:
   - {feature_key: f.close_qfq, status: verified_doc, status_basis: {ruling: "plan T-A14 T-R18 裁定②（af94de3）", matrix: "T-R18_source_matrix.yaml#f.close_qfq", ceiling: simulating, pit_limit: "只用 as_of 当次取数并存快照；历史回写值不作时点依据、不用于回测", gaps: ["单位元/股为推断，待 T-B05 实测", "前复权锚点未写"]}, unit: CNY_per_share, adjust: qfq, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsstock/history/{code.市场}/d/f", field: c}}
   - {feature_key: f.high_qfq, status: verified_doc, status_basis: {ruling: "plan T-A14 T-R18 裁定②（af94de3）", matrix: "T-R18_source_matrix.yaml#f.high_qfq", ceiling: simulating, pit_limit: "同 f.close_qfq", gaps: ["单位元/股为推断，待 T-B05 实测", "前复权锚点未写"]}, unit: CNY_per_share, adjust: qfq, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsstock/history/{code.市场}/d/f", field: h}}
   - {feature_key: f.low_qfq, status: verified_doc, status_basis: {ruling: "plan T-A14 T-R18 裁定②（af94de3）", matrix: "T-R18_source_matrix.yaml#f.low_qfq", ceiling: simulating, pit_limit: "同 f.close_qfq", gaps: ["单位元/股为推断，待 T-B05 实测", "前复权锚点未写"]}, unit: CNY_per_share, adjust: qfq, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsstock/history/{code.市场}/d/f", field: l}}
-  - {feature_key: f.amount, status: declared, status_basis: {ruling: "plan T-A14 T-R18 裁定⑤（af94de3）", matrix: "T-R18_source_matrix.yaml#f.amount"}, unit: CNY, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsstock/history/{code.市场}/d/n", field: a}}
+  - {feature_key: f.amount, status: verified_doc, status_basis: {ruling: "plan「T-R19 裁定」①（78de694）", matrix: "T-R18_source_matrix.yaml#f.amount", ceiling: simulating, evidence: "T-B81 样本级实测：688018、300364 各 25 根，元单位依赖 V1 v=手；verified_live 待 T-B05 扩大覆盖"}, unit: CNY, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsstock/history/{code.市场}/d/n", field: a}}
   - {feature_key: f.rsi14, unit: index_0_100, adjust: qfq, frequency: daily, priority: P0, derivation: "Wilder RSI(14)", pit_rule: {warmup_bars: 28}}
-  - {feature_key: f.main_net_20d, status: declared, status_basis: {ruling: "plan T-A14 T-R18 裁定⑤（af94de3）", matrix: "T-R18_source_matrix.yaml#f.main_net_20d"}, unit: CNY, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsstock/history/transaction/{code}", field: pending}, pit_rule: {available_at: "d 日 15:40 后", window: 20, min_valid: 15}}
+  - {feature_key: f.main_net_20d, status: declared, status_basis: {ruling: "plan「T-R19 裁定」②（78de694）：采纳四字段派生；单位和定稿时间实测前保持 declared", matrix: "T-R18_source_matrix.yaml#f.main_net_20d"}, unit: pending, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsstock/history/transaction/{code}", field: [zmbtdcje, zmbddcje, zmstdcje, zmsddcje]}, derivation: "Σ20 有效日 (zmbtdcje + zmbddcje − zmstdcje − zmsddcje)；买为正；不得用内置 main_20d_net 替代", pit_rule: {available_at: "d 日 15:40 后（定稿时间待实测）", window: 20, min_valid: 15}}
   - {feature_key: f.np_yoy_latest, status: verified_doc, status_basis: {ruling: "plan T-A14 T-R18 裁定④（af94de3）", matrix: "T-R18_source_matrix.yaml#f.np_yoy_latest", ceiling: simulating, visible_at: "裁定原文：取 plrq（与本条 pit_rule next_trading_day(plrq) 09:30 的关系未裁定，见 §7D 歧义）", v5f_pending: "以首次观测值为准，入库带 observed_at；后续更正作为新观测，不改写旧快照，历史不能用后来的观测回推"}, unit: pct, adjust: none, frequency: quarterly, priority: P0, source: {provider: mairui, endpoint: "/hsstock/financial/income/{code}", field: gsmgsyzzdjlr}, pit_rule: {available_at: "next_trading_day(plrq) 09:30", drop_when: "plrq <= jzrq", version: latest_visible_at_T, null_when: "base <= 0"}}
   - {feature_key: f.ann_risk_count_10d, unit: count, adjust: none, frequency: event, priority: P0, source: {provider: mairui, endpoint: "/hsstock/announcement/{code}", field: [t, zt, nr]}, pit_rule: {window: 10, available_at: "次一交易日 09:30", null_when: "公告源缺失或过期"}}
   - {feature_key: f.market_breadth, unit: ratio, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsrl/ssjy/all", field: pc}, pit_rule: {available_at: "d 日 15:05 后"}}
   - {feature_key: f.market_regime, status: declared, status_basis: {ruling: "plan T-A14 T-R18 裁定⑤（af94de3）", matrix: "T-R18_source_matrix.yaml#f.market_regime"}, unit: enum, adjust: qfq, frequency: daily, priority: P0, derivation: "沪深300 MA20/MA60 + ma(f.market_breadth,20)，2 日防抖", pit_rule: {values: [uptrend, range, downtrend]}}
+  - {feature_key: f.market_regime_idx, status: verified_doc, status_basis: {ruling: "plan「T-R19 裁定」③（78de694）", matrix: "T-R18_source_matrix.yaml#f.market_regime（T-B81 000300.SH 子项）", ceiling: simulating, gaps: ["指数日线落库时刻"]}, unit: enum, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hsindex/history/000300.SH/d", field: c}, derivation: "000300.SH 收盘与 MA20/MA60；不含 F24；2 日防抖", pit_rule: {values: [uptrend, range, downtrend], window: 60, min_valid: 45, available_at: "d 日指数日线落库后"}}
   - {feature_key: f.sw_l1, unit: code, adjust: none, frequency: daily, priority: P0, source: {provider: mairui, endpoint: "/hszg/zg/{code}", field: pending}, pit_rule: {history: weekly_snapshots_from_ingest_start}}
   - {feature_key: f.ind_rs20, status: declared, status_basis: {ruling: "plan T-A14 T-R18 裁定⑤（af94de3）", matrix: "T-R18_source_matrix.yaml#f.ind_rs20"}, unit: pct, adjust: none, frequency: daily, priority: P0, source: {provider: pending, endpoint: pending, field: pending}}
   - {feature_key: f.vwap_intraday, unit: CNY_per_share, adjust: none, frequency: 1m, priority: P0, source: {provider: mairui, endpoint: "/hsstock/real/time/{code}", field: [cje, v]}}
@@ -1110,6 +1123,7 @@ features:
 
 | 版本 | 日期 | 作者 | 说明 |
 |---|---|---|---|
+| 1.1.13 | 2026-11-07 | 研究员（T-R20） | 按 plan「T-R19 裁定」①–④（78de694）：amount 升为 verified_doc；main_net_20d 写明四字段派生公式（单位和定稿时间待实测，仍为 declared）；新增 F50 market_regime_idx（§2、§12 汇总表、YAML、§7D，合计 50 个，P0 49）；只改文档 |
 | 1.1.12 | 2026-11-07 | 研究员（T-R18） | 按 plan T-A14「T-R18 裁定」①–⑤（af94de3）新增 §7D；YAML 中 9 键加 `status`/`status_basis`：F16–F18、F13、F22 改为 verified_doc（上限 simulating，附限定），F19、F21、F25、F27 保持 declared；引用 `T-R18_source_matrix.yaml`；只改文档 |
 | 1.1.11 | 2026-11-07 | 研究员（T-R15） | 新增 F49 `f.is_suspended`（§2 F15 前、§12 汇总表、YAML、合计 49 / P0 48），依据 plan 2.5.14 T-R15 第 7 条（f12ef24）；只改文档 |
 | 1.1.10 | 2026-11-07 | 研究员（T-R13） | 落地 plan 2.12.1“T-R13 补充裁定”，847f41e 第 1–3 条：V5h 可按“确认没有币种、单位字段”关闭的条件与抽样范围（四接口 × 600519/000001/601318/000550，不要求 689009 的 income、cashflow），写入 B5、§7C S1 ③、§11 V5h；`cdr_unit` 逐只清除、V5j 以 689009 的实测为准关闭、CDR 份数容差 0.1%、两条都不满足时保留标记并告警 `data_quality`，写入 §7A.0、§7C S1 ①⑤、§11 V5j 与 YAML `cdr_unit`（`clear_scope`、`tolerance`、`v5j_close_basis`）；YAML 版本 1.1.10；§13 新增 C21。只写条件，不记为已实测关闭。原因码仍 14 个；键数不变（48 个，P0 47 个） |

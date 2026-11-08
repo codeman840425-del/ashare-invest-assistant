@@ -1,4 +1,4 @@
-# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式卡 v1（T-R15）
+# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式卡 v2（T-R20；v1 为 T-R15）
 
 > 正式卡（非 catalog 草案、非 `_template.md` 示例）。导入格式：plan 2.5.14 A 节三个带标签块（`strategy-card` / `strategy-spec` / `validation`），导入器只读这三块，正文存为 `narrative`。
 > 夹具中全部价格、成交额、持仓与场景均为**虚构**；`688018.SH`、`688073.SH`、`300364.SZ`、`301218.SZ` 只作“科创板/创业板”场景标签写在 `desc` 中，不代表、不暗示任何真实行情。夹具期望值由 `golden/gen_T-R15.py` 本地确定性求值生成并自检。
@@ -6,7 +6,7 @@
 
 ## 规则摘要
 - **入场（全部为真才 `entry_ok`）**：E1 MA20>MA60 连续 `trend_days` 根有效日 K；E2 近 3 日最低价 ≤ MA20×(1+`pullback_pct`) 且收盘 > MA20；E3 收盘 ≥ 60 日最高收盘×(1−`max_dd_from_high`)；过滤 F1 20 日均成交额 ≥ `min_amount`；F2 上市交易日数 ≥ `min_list_days`；F3 **成本过滤**：ATR14/收盘（bp）≥ `min_edge_cost_mult`×(2×`slippage_bp`+`fixed_cost_bp`)，一倍 ATR 的波动覆盖不了往返成本的若干倍则不出买入。
-- **否决**：V1 大盘 `downtrend`；V2 最近一期净利同比 < `np_yoy_floor`；V4 RSI14 > `rsi_overheat`。否决数据缺失（`veto_unknown`）→ 状态照常求值，买入方向计划草案由 `KEY_DATA_MISSING` 阻断，解除 = 字段在新快照中非空。
+- **否决**：V1 大盘（沪深300指数口径 `f.market_regime_idx`）`downtrend`；V2 最近一期净利同比 < `np_yoy_floor`；V4 RSI14 > `rsi_overheat`。否决数据缺失（`veto_unknown`）→ 状态照常求值，买入方向计划草案由 `KEY_DATA_MISSING` 阻断，解除 = 字段在新快照中非空。
 - **退出（任一为真 → `exit_signal`/sell）**：X1 收盘连续 `exit_confirm_days` 日低于 MA20；X2 盘中价 ≤ 计划止损；X3 持有 ≥ `time_stop` 日且未达 1R；X4 收盘跌破前 20 日最低价；X5 达 `trail_trigger_r`R 后收盘（qfq）跌破 `ctx.highest_close_since_entry_qfq`−`trail_atr_mult`×ATR14；X6 收盘（qfq@T）≤ 止损价 max2(`plan.entry_price_qfq`−`atr_mult`×ATR14, 前 20 日最低价)。
 - **优先级**：持有中 → 只看 exit（exit > hold）；未持有 → veto > insufficient_data > entry_ok > not_triggered。G-01/N-01 由系统挂载，见 `system_components_T-R15.md`。
 
@@ -20,11 +20,17 @@
 佣金按用户费率（单笔最低 5 元）；印花税卖出 0.05%；过户费双向 0.001%；基础滑点 `slippage_bp` 默认 10bp；冲击成本按参与率 5 档 0/5/15/30/60bp（plan 2.13，待校准），参与率 > 2% 标“容量受限”。`fixed_cost_bp`=8 是 F3 使用的往返固定费率近似值（印花税 5bp + 双边佣金约 2.5bp + 过户费），不进计划价格计算。
 
 ## 反证 / 失效
-反证（并列展示，不抵消）：行业 20 日弱于大盘、主力 20 日净流出、当日成交额 < 20 日均额一半。失效：MA20 跌破 MA60；大盘转 `downtrend`。研究侧证伪见 `hypothesis.falsified_by`。
+反证（并列展示，不抵消）：主力 20 日净流出、当日成交额 < 20 日均额一半。失效：MA20 跌破 MA60；大盘转 `downtrend`。研究侧证伪见 `hypothesis.falsified_by`。
+
+## v2 变更（T-R20，按 plan「T-R19 裁定」③④，78de694）
+- v1 原文冻结在 `cards/history/sw_ma_trend_pullback.v1.md`，v1 夹具冻结在 `golden/history/T-R15_golden.v1.json`。
+- V1 和 I2 的 `f.market_regime` 改为 `f.market_regime_idx`（只用沪深300指数，去掉 F24 宽度）。`applicability.market_regime` 字段名是卡片 schema 字段，没有改；其取值改由 `f.market_regime_idx` 求得（这一点待架构师确认）。
+- 删除 C1（`f.ind_rs20 < 0`，weight 0 的反证）和 data_needs 中的 `f.ind_rs20`；C2、C3 不重新编号。入场 E1–E3/A1、过滤 F1–F3、否决 V1/V2/V4、失效 I1/I2、退出 X1–X6、参数、成本、风控都不变。
+- 前后差异：v1 中行业弱势时会多出一条 C1 反证展示；v2 不再展示这一条，state 和 action 不受影响（C1 原本 weight 0、不参与状态）。失效条件：行业轮动剧烈时，反证不完整。大盘口径不看宽度后，“指数强、宽度弱”的日子可能由 range 变为 uptrend，从而放宽准入；虚构夹具直接给出 regime 值，不覆盖这种情况。
 
 ```yaml strategy-card
 key: sw_ma_trend_pullback
-version_no: 1
+version_no: 2
 name: 波段·均线趋势回踩
 category: trend
 horizons: [swing]
@@ -47,7 +53,6 @@ entry:
   - {ref: E2, text: 近 3 日最低价回到 20 日均线上方 pullback_pct 以内且收盘仍在均线上方, status: quantified}
   - {ref: E3, text: 收盘距 60 日最高收盘回撤不超过 max_dd_from_high, status: quantified}
 counter_evidence:
-  - {ref: C1, text: 所属行业近 20 日弱于大盘, status: quantified}
   - {ref: C2, text: 近 20 日主力资金净流出, status: quantified}
   - {ref: C3, text: 当日成交额不足 20 日均额一半, status: quantified}
 invalidation:
@@ -73,8 +78,7 @@ data_needs:
   - {feature_key: f.rsi14, frequency: daily, adjust: qfq, available_at: T 日日线入库后}
   - {feature_key: f.main_net_20d, frequency: daily, adjust: none, available_at: T 日盘后（待T003验证）}
   - {feature_key: f.np_yoy_latest, frequency: quarterly, adjust: none, available_at: plrq 次一交易日 09:30}
-  - {feature_key: f.market_regime, frequency: daily, adjust: none, available_at: T 日盘后（G-02）}
-  - {feature_key: f.ind_rs20, frequency: daily, adjust: none, available_at: T 日盘后}
+  - {feature_key: f.market_regime_idx, frequency: daily, adjust: none, available_at: T 日盘后（沪深300 日线落库后，F50）}
 epistemic:
   hypothesis: hypothesis
   params_schema.ma_fast: hypothesis
@@ -120,7 +124,7 @@ fit: {effort: low, risk_tolerance_min: 3, experience_min: novice}
 
 ```yaml strategy-spec
 key: sw_ma_trend_pullback
-version_no: 1
+version_no: 2
 kind: rule_template
 horizons: [swing]
 params_schema:
@@ -149,14 +153,13 @@ rules:
   - {id: F1, dimension: technical, role: filter, weight: 0, eval_time: daily_close, expr: "ma(f.amount, 20) >= p.min_amount", required_features: [f.amount]}
   - {id: F2, dimension: technical, role: filter, weight: 0, eval_time: daily_close, expr: "f.list_days >= p.min_list_days", required_features: [f.list_days]}
   - {id: F3, dimension: technical, role: filter, weight: 0, eval_time: daily_close, expr: "atr(14) / f.close_qfq * 10000 >= p.min_edge_cost_mult * (2 * p.slippage_bp + p.fixed_cost_bp)", required_features: [f.high_qfq, f.low_qfq, f.close_qfq]}
-  - {id: V1, dimension: sector_market, role: veto, weight: 0, eval_time: daily_close, expr: "f.market_regime == 'downtrend'", required_features: [f.market_regime], missing_policy: veto_unknown}
+  - {id: V1, dimension: sector_market, role: veto, weight: 0, eval_time: daily_close, expr: "f.market_regime_idx == 'downtrend'", required_features: [f.market_regime_idx], missing_policy: veto_unknown}
   - {id: V2, dimension: fundamental, role: veto, weight: 0, eval_time: daily_close, expr: "f.np_yoy_latest < p.np_yoy_floor", required_features: [f.np_yoy_latest], missing_policy: veto_unknown}
   - {id: V4, dimension: sentiment, role: veto, weight: 0, eval_time: daily_close, expr: "f.rsi14 > p.rsi_overheat", required_features: [f.rsi14], missing_policy: veto_unknown}
-  - {id: C1, dimension: sector_market, role: counter, weight: 0, eval_time: daily_close, expr: "f.ind_rs20 < 0", required_features: [f.ind_rs20]}
   - {id: C2, dimension: capital, role: counter, weight: 0, eval_time: daily_close, expr: "f.main_net_20d < 0", required_features: [f.main_net_20d]}
   - {id: C3, dimension: technical, role: counter, weight: 0, eval_time: daily_close, expr: "f.amount < ma(f.amount, 20) * 0.5", required_features: [f.amount]}
   - {id: I1, dimension: technical, role: invalidation, weight: 0, eval_time: daily_close, expr: "ma(f.close_qfq, p.ma_fast) < ma(f.close_qfq, p.ma_slow)", required_features: [f.close_qfq]}
-  - {id: I2, dimension: sector_market, role: invalidation, weight: 0, eval_time: daily_close, expr: "f.market_regime == 'downtrend'", required_features: [f.market_regime]}
+  - {id: I2, dimension: sector_market, role: invalidation, weight: 0, eval_time: daily_close, expr: "f.market_regime_idx == 'downtrend'", required_features: [f.market_regime_idx]}
   - {id: X1, dimension: technical, role: exit, weight: 0, eval_time: daily_close, expr: "f.close_qfq < ma(f.close_qfq, p.ma_fast) for p.exit_confirm_days days", required_features: [f.close_qfq]}
   - {id: X2, dimension: technical, role: exit, weight: 0, eval_time: intraday_1m, expr: "ctx.last_price <= plan.stop_loss", required_features: []}
   - {id: X3, dimension: technical, role: exit, weight: 0, eval_time: daily_close, expr: "ctx.holding_days >= p.time_stop and ctx.max_r_reached < 1", required_features: []}

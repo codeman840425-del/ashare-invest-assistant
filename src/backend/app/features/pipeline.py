@@ -192,7 +192,7 @@ def prepare(
         raise ValueError("unordered_or_duplicate_sessions")
     inactive = any(reason in {"delisted", "missing_from_list"} for reason in gaps.values())
     series: dict[str, list[Any]] = {
-        key: [] for key in ("f.close_qfq", "f.high_qfq", "f.low_qfq", "f.amount")
+        key: [] for key in ("f.open_qfq", "f.close_qfq", "f.high_qfq", "f.low_qfq", "f.amount")
     }
     missing = []
     for date in selected:
@@ -202,14 +202,23 @@ def prepare(
             missing.append("daily_bar_missing:" + date)
         if a is None or base is None:
             missing.append("adjust_factor_missing:" + date)
-        for key, field in (("f.close_qfq", "close"), ("f.high_qfq", "high"), ("f.low_qfq", "low")):
+        for key, field in (
+            ("f.open_qfq", "open"),
+            ("f.close_qfq", "close"),
+            ("f.high_qfq", "high"),
+            ("f.low_qfq", "low"),
+        ):
             value = (
                 Decimal(str(row[field])) * a / base
                 if row and a is not None and base is not None and not inactive
                 else None
             )
             series[key].append(value)
-        series["f.amount"].append(Decimal(str(row["amount"])) if row and not inactive else None)
+        series["f.amount"].append(
+            Decimal(str(row["amount"]))
+            if row and row.get("amount") is not None and not inactive
+            else None
+        )
     features: dict[str, Any] = dict.fromkeys(registry)
     features["f.is_suspended"] = (
         True if gaps.get(day) == "suspended" else False if day in bars else None

@@ -27,6 +27,7 @@ from app.api.v1 import (
     suggestions,
     trades,
 )
+from app.tracking.api import router as tracking_router
 
 router = APIRouter()
 router.include_router(notifications.router)
@@ -60,3 +61,5 @@ router.include_router(daily_reports.router)
 
 router.include_router(promotions.router)
 router.include_router(risk_controls.router)
+
+router.include_router(tracking_router)

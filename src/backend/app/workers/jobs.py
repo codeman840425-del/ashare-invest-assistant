@@ -60,6 +60,8 @@ from sqlalchemy import Engine
 from app.config import Settings
 from app.db.engine import engine_for
 from app.master.mairui_snapshot import TASK as MAIRUI_SNAPSHOT
+from app.tracking.worker import TASK as TRACKING
+from app.tracking.worker import tracking_task
 from app.workers.daily import (
     ANALYZE,
     RECOVER,
@@ -356,6 +358,7 @@ def vendor_sweep_task(settings: Settings) -> int:
 
 #: 任务名 → 实现
 TASKS: Final[dict[str, Task]] = {
+    TRACKING: tracking_task,
     "master.mairui_daily_sweep": mairui_daily_sweep,
     "master.mairui_daily_apply": mairui_daily_apply,
     MAIRUI_SNAPSHOT: mairui_snapshot_task,
@@ -385,6 +388,7 @@ RETRY_TASKS: Final[dict[str, Callable[[Settings, dict[str, Any], BaseException],
 LOCKED_TASKS: Final = frozenset(
     {
         MAIRUI_SNAPSHOT,
+        TRACKING,
         ANALYZE,
         REPORT,
         RECOVER,
@@ -565,6 +569,8 @@ def worker_tick(settings: Settings, client: redis.Redis | None = None) -> list[t
                     r.delete(lock)
             log.info("worker 任务 %s 完成：%s", task, n)
             done.append((task, "ok"))
+            if task == ANALYZE:
+                _push(r, TRACKING, {"user_id": args.get("user_id")})
             if task == SYNC_LISTS and RECONCILE_VENDOR in TASKS:
                 # T-B53；首次导入（CLI）从不走这里
                 _push(

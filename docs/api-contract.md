@@ -1200,7 +1200,17 @@ evidence: Evidence[]
 | `loss_streak_drawdown`(RC5) | `pause_days` | 5 | 1 | 20 | 交易日；仅 `pause_on_trigger=true` 时生效 |
 
 - 范围放在后端常量/配置校验中（与 `config/risk_controls.yaml` 默认值同源），不放进用户可改项；系统默认值本身必须落在范围内（启动校验）。
-- 前端输入控件按本表设 min/max/step（百分比 step 1，可输 2 位小数）；“恢复默认”取 GET 中 `source="system"` 的值。
+- 前端输入控件按本表设 min/max/step（百分比 step 1，可输 2 位小数）；“恢复默认”取各项的 `default`（见下）。
+
+**T-A26 裁定（status: draft；P2N-02 缺口）**：
+
+1. **GET/PUT 响应的 `default`**：每个 control 元素为 `{control, enabled, params, source, default: object}`。`default` 与 `params` 同形（同键、同值类型），值取系统默认（plan §6.1 / `config/risk_controls.yaml`），用户覆盖不改变它；只读，PUT 提交时带 `default` → `400 VALIDATION_ERROR`（未知键）。`enabled` 的系统默认六项均为 `true`，不单独返回。
+2. **RC1 价格触发（MVP）**：价格一律用**不复权**实际成交价，与 `stops` 同口径；不用 qfq（F16–F18）比较。
+   - 盘中：只用新鲜的最新价（未超 `realtime.yaml` 的 `stale_threshold_s`）；`last ≤ stop_loss` 触发止损，`last ≥ take_profit` 触发止盈；最新价缺失或过期 → 该项 `unknown` + gap，不判定。
+   - 收盘后（日线入库后）补判：当日 `low ≤ stop_loss` 记止损触发，`high ≥ take_profit` 记止盈触发；同一日两者都满足按**止损**记（保守）。事件时点 = 盘中为该价格时间戳，收盘补判为当日 15:00（北京时间）。
+   - 持有期间发生除权除息后，原 `stops` 不自动换算，该项 `unknown` + gap（`stops_ex_rights`），直到重新生成 `stops`。
+   - 触发只产生风控事件与提醒，不改动作、不下单、不阻止 sell/reduce。
+3. **时间止损 `time_stop_days`**：按**交易日**（交易所日历，个股停牌日照常计数）。起点 = 第 0 天：持仓取当前这段持仓的首笔买入成交日（清仓后重开重新起算），尚无成交的建议/计划取其生成日（as_of 所在交易日）。第 N 个交易日**收盘后**仍持有即触发（边界当天算，计入第 N 天），事件时点为该日 15:00（北京时间）。起点或成交缺失 → `unknown` + gap，不推断。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

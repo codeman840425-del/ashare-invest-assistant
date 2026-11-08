@@ -900,9 +900,11 @@ P0 = **G-01、G-02、H-01、N-01、T-01、S-01、W-01、W-02、L-01**（9 项，
 | `gate_tradability`（G-01） | 所有模板 | veto | 只阻断买入方向 |
 | `veto_risk_announcement`（N-01） | 所有带买入动作的模板；对已持有证券作为 counter | veto / counter | 阻断买入；持仓只加反证，不直接触发卖出 |
 | `ctx_market_regime`（G-02） | 不挂规则，产出 `f.market_regime` 供 RC3 与模板引用 | 上下文 | — |
-| `hold_risk_monitor`（H-01） | **每只持仓**一个系统实例：`strategy_instances.origin=system`、`status=active`，用户可暂停单只或全部 | exit / weakening | 只产生 reduce/sell 候选，从不产生 buy/add |
+| `hold_risk_monitor`（H-01） | **每只持仓**一个系统实例：`strategy_instances.origin=system`、`status=active`、`horizon=swing`（T-A48），用户可暂停单只或全部 | exit / weakening | 只产生 reduce/sell 候选，从不产生 buy/add |
 
 H-01 是"周期分类只推荐、不自动启用"（问题 15）的**唯一例外**，因为它只做风险提示方向。系统组件的版本随 `engine_policy` 版本记录在每条信号上（版本编号、存放与落点见 2.5.4 后的 T-A16 第 1 条）。
+
+T-A48 裁定（H-01 多周期口径，详见 `docs/reviews/T-A48-horizon-ruling.md`）：H-01 系统实例挂载周期 = `swing`（`attach_system` 及未来一切挂载调用方传 `horizon="swing"`；卡片 `horizons` 保持四值、不为此出 v3；已存实例不回溯改写）。多周期版本（`horizons` 长度 > 1，含 H-01 v1/v2）在 RC5 回退链第二级不可解析：结论缺 horizon 的观测保持跳过 + gap `sim_fail_horizon_unknown`，不得回填 swing、不得取数组首元素。
 
 **逐项覆盖与缺口**
 

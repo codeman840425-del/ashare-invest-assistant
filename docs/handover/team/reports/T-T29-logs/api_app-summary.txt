@@ -1,0 +1,6 @@
+============================= test session starts =============================
+============================== warnings summary ===============================
+=========================== short test summary info ===========================
+FAILED tests\backend\api_app\test_config.py::test_mairui_env_ignored - Unicod...
+FAILED tests\backend\api_app\test_config_yaml_defaults.py::test_backend_business_files_equal_plan_6_1
+===== 2 failed, 380 passed, 397 skipped, 9 xfailed, 2 warnings in 37.11s ======

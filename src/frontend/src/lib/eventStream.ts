@@ -40,7 +40,7 @@ export function startEventStream(opts: EventStreamOptions): EventStreamHandle {
     retryTimer = setTimeout(() => { retryTimer = null; void connect(); }, delayMs);
   };
   async function connect() {
-    if (stopped) return; setState(everOpened ? 'retrying' : 'connecting'); ctrl = new AbortController(); let opened = false;
+    if (stopped) return; setState(everOpened ? 'retrying' : 'connecting'); ctrl = new AbortController(); let stable = false;
     const headers: Record<string, string> = { Accept: 'text/event-stream', 'Cache-Control': 'no-cache' }; if (lastId) headers['Last-Event-ID'] = lastId;
     const parser = new SseParser((m) => {
       if (m.event === 'reset') {
@@ -63,9 +63,9 @@ export function startEventStream(opts: EventStreamOptions): EventStreamHandle {
       if (stopped) return;
       if ([401, 403, 404].includes(res.status)) { stopped = true; opts.onPolling?.(true); setState('closed'); return; }
       if (!res.ok || !res.body || !(res.headers.get('Content-Type') ?? '').includes('text/event-stream')) throw new Error(`stream http ${res.status}`);
-      const reconnect = everOpened; everOpened = true; opened = true; failures = 0; setState('open'); opts.onPolling?.(false);
+      const reconnect = everOpened; everOpened = true; setState('open'); opts.onPolling?.(false);
       // 短连接成功不归零退避；只有保持连接完整60秒才归零。
-      stableTimer = setTimeout(() => { attempt = 0; failures = 0; stableTimer = null; }, STREAM_DEFAULTS.stableMs);
+      stableTimer = setTimeout(() => { stable = true; attempt = 0; failures = 0; stableTimer = null; }, STREAM_DEFAULTS.stableMs);
       opts.onOpen?.({ reconnect, lastEventId: lastId });
       const reader = res.body.getReader(); const dec = new TextDecoder();
       for (;;) {
@@ -75,8 +75,8 @@ export function startEventStream(opts: EventStreamOptions): EventStreamHandle {
     } catch { /* 建流/传输失败交由统一退避；不记录消息或凭据。 */ }
     finally { clearIdle(); clearStable(); parser.reset(); }
     if (!stopped) {
-      // “建流失败”按未建立有效200 SSE计算；200后的EOF/读中断边界列入报告待架构确认。
-      if (!opened) { failures++; if (failures >= STREAM_DEFAULTS.failureThreshold) opts.onPolling?.(true); }
+      // T-A32：未满60秒结束都计一次失败，200后EOF/读超时也累计；建流成功本身不清计数。
+      if (!stable) { failures++; if (failures >= STREAM_DEFAULTS.failureThreshold) opts.onPolling?.(true); }
       scheduleRetry();
     }
   }

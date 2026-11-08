@@ -1,5 +1,5 @@
 /** P2N-05g：T-A31关键状态机与少量既有示例夹具字段对齐；仅MSW/注入流，无外网。 */
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { http, HttpResponse } from 'msw';
@@ -92,7 +92,7 @@ it('连续3次503建流失败开启轮询；继续指数退避；连上即关闭
   } finally { h.stop(); }
 });
 it('短连接不归零退避，持续收到心跳保持60秒后才归零', async () => {
-  fakeClock(); let calls = 0; const delays: number[] = []; const close: (() => void)[] = [];
+  fakeClock(); let calls = 0; const delays: number[] = []; const failures: number[] = []; const close: (() => void)[] = [];
   const fetchImpl: typeof fetch = async (_url, init) => {
     if (++calls === 1) return new Response(null, { status: 503 });
     return new Response(new ReadableStream({ start(c) {
@@ -101,10 +101,10 @@ it('短连接不归零退避，持续收到心跳保持60秒后才归零', async
       close.push(() => { clearInterval(timer); c.close(); }); init?.signal?.addEventListener('abort', () => { clearInterval(timer); c.error(new Error('stopped')); });
     } }), { headers: { 'Content-Type': 'text/event-stream' } });
   };
-  const h = startEventStream({ fetchImpl, random: () => 0.5, onMessage: () => undefined, onRetry: (v) => delays.push(v.delayMs) });
+  const h = startEventStream({ fetchImpl, random: () => 0.5, onMessage: () => undefined, onRetry: (v) => { delays.push(v.delayMs); failures.push(v.failures); } });
   try {
     await advance(0); await advance(3000); close[0](); await advance(0); expect(delays).toEqual([3000, 6000]);
-    await advance(6000); await advance(60000); close[1](); await advance(0); expect(delays).toEqual([3000, 6000, 3000]);
+    await advance(6000); await advance(60000); close[1](); await advance(0); expect(delays).toEqual([3000, 6000, 3000]); expect(failures).toEqual([1, 2, 0]);
   } finally { h.stop(); }
 });
 it('轮询门控只改变定时器，保持权威初始计数读取；开启后间隔15秒', () => {
@@ -133,4 +133,28 @@ it('45秒无任何字节主动断开；reset不把latest冒充已收到事件，
     await advance(0); expect(h.lastEventId()).toBeNull(); await advance(44999); expect(h.state()).toBe('open');
     await advance(1); expect(h.state()).toBe('retrying'); await advance(3000); expect(cursors).toEqual([null, null]);
   } finally { h.stop(); }
+});
+
+// P2N-05h：T-A32两项裁定，不包含AI解释工作。
+it('T-A32 非200、200后EOF、45秒读超时连续累计到3次，期间建流成功不归零', async () => {
+  fakeClock(); let calls = 0; const failures: number[] = []; const polls: boolean[] = [];
+  const fetchImpl: typeof fetch = async (_url, init) => {
+    calls++; if (calls === 1) return new Response(null, { status: 503 });
+    return new Response(new ReadableStream({ start(c) {
+      if (calls === 2) { c.close(); return; }
+      c.enqueue(new TextEncoder().encode(': open\n\n')); init?.signal?.addEventListener('abort', () => c.error(new Error('stopped')));
+    } }), { headers: { 'Content-Type': 'text/event-stream' } });
+  };
+  const h = startEventStream({ fetchImpl, random: () => 0.5, onMessage: () => undefined, onPolling: (v) => polls.push(v), onRetry: (v) => failures.push(v.failures) });
+  try {
+    await advance(0); await advance(3000); expect(failures).toEqual([1, 2]); await advance(6000); expect(h.state()).toBe('open');
+    await advance(44999); expect(failures).toEqual([1, 2]); await advance(1); expect(failures).toEqual([1, 2, 3]); expect(polls.at(-1)).toBe(true);
+  } finally { h.stop(); }
+});
+it('T-A32 signal/null引用只显示类型与at，不显示id/不拼按时点定位链接，保留总入口', async () => {
+  streamConfig.enabled = false; const n = exampleOfflineNotification(); const ref = n.refs[0];
+  server.use(http.get('*/api/v1/notifications', () => HttpResponse.json({ items: [n], next_cursor: null })), http.get('*/api/v1/notifications/unread-count', () => HttpResponse.json({ count: 1 })));
+  const router = createMemoryRouter(routes, { initialEntries: ['/notifications'] }); render(<AppProviders client={makeQueryClient(true)}><RouterProvider router={router} /></AppProviders>);
+  const refs = await screen.findByTestId(`nc-refs-${n.id}`); expect(refs).toHaveTextContent('signal'); expect(refs).toHaveTextContent('10:50'); expect(refs).not.toHaveTextContent(ref.id);
+  const links = within(refs).getAllByRole('link'); expect(links).toHaveLength(1); expect(links[0]).toHaveAttribute('href', '/signals'); expect(refs.innerHTML).not.toContain('since=');
 });

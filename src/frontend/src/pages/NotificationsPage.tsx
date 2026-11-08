@@ -71,8 +71,8 @@ function NotificationRow({ n }: { n: Notification }) {
         {n.body ? <div className="muted small nc-body">{n.body}</div> : null}
         <details className="small" data-testid={`nc-refs-${n.id}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
           <summary>合并引用（{n.refs.length} 条，最多20条）</summary>
-          {n.refs.length ? <ul>{n.refs.slice(0, 20).map((ref) => <li key={`${ref.type}:${ref.id}`}>{notificationRefRoute(ref) ? <Link to={notificationRefRoute(ref)!}>计划条件引用 {ref.id}</Link> : <span>{ref.type} · <code>{ref.id}</code>（无单条链接）</span>} · {fmtTime(ref.at)}</li>)}</ul> : <p>旧记录或本条通知未附引用；不补造出处。</p>}
-          <span className="muted">引用只跳转服务端提供的站内深链；route=null不跳。 </span><Link to="/signals">查看完整盘中规则事件</Link>
+          {n.refs.length ? <ul>{n.refs.slice(0, 20).map((ref) => <li key={`${ref.type}:${ref.id}`}>{notificationRefRoute(ref) ? <Link to={notificationRefRoute(ref)!}>计划条件引用 {ref.id}</Link> : <span>{ref.type}</span>} · {fmtTime(ref.at)}</li>)}</ul> : <p>旧记录或本条通知未附引用；不补造出处。</p>}
+          <span className="muted">引用只跳转服务端提供的站内深链；route=null只显示类型与时间，不定位、不跳转。 </span><Link to="/signals">查看完整盘中规则事件</Link>
         </details>
         <div className="small nc-target">
           {route ? <span className="link" data-testid={`nc-go-${n.id}`}>查看{TARGET_TYPE[n.target.type]} ›</span>
@@ -172,7 +172,7 @@ export function NotificationsPage() {
       <div className="muted small" style={{ marginBottom: 8 }}>
         候选信号变化、失效条件、计划条件、日报与系统消息都汇总在这里；点击通知跳到对应页面并标为已读。通知内容只是规则信号的提示，不替你做决定。
       </div>
-      <Alert type="info" style={{ marginBottom: 8 }} title={IS_MOCK ? '示例数据 · 提醒流仅为MSW模拟，非真实通知' : '提醒流尚未真实联调，SSE仅在示例模式启用'} description="T-A31：按version防重、reset全量补读；3秒起退避、45秒无字节断开、稳定60秒归零、连续3次建流失败转15秒轮询。本轮不提供外部渠道。" />
+      <Alert type="info" style={{ marginBottom: 8 }} title={IS_MOCK ? '示例数据 · 提醒流仅为MSW模拟，非真实通知' : '提醒流尚未真实联调，SSE仅在示例模式启用'} description="T-A31/T-A32：按version防重、reset全量补读；3秒起退避、45秒无字节断开、稳定60秒归零、连续3次建流失败转15秒轮询。本轮不提供外部渠道。" />
       <NotificationRecovery />
       <Tabs
         activeKey={tab}

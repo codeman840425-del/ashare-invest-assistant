@@ -248,7 +248,15 @@ export interface Divergence {
   summary: string;
   resolving_info: { description: string; subscribable: boolean }[];
 }
-export interface Explanation { source: 'template' | 'llm'; text: string; llm_call_id: string | null }
+/** §7.11.4：三新增键仅旧存档可缺；引用只在所属对象evidence解析。 */
+export interface Explanation {
+  source: 'template' | 'llm';
+  text: string;
+  llm_call_id: string | null;
+  paragraphs?: TextWithEvidence[];
+  prompt_version?: string | null;
+  validation_status?: 'passed' | 'fallback';
+}
 export interface Suggestion extends DataStatusBlock {
   id: Uuid;
   security_code: string;

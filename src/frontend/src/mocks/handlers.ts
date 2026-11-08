@@ -1,3 +1,4 @@
+import { withExampleReportExplanation } from './explanationFixtures';
 import { phase2Handlers, resetPhase2 } from './phase2Handlers';
 import { promotionHandlers, resetPromotions } from './promotionHandlers';
 /**
@@ -355,7 +356,7 @@ const routeHandlers = [
   http.get(`${API}/daily-reports`, ({ request }) => HttpResponse.json(page(DAILY_REPORT_LIST, new URL(request.url)))),
   http.get(`${API}/daily-reports/:date`, ({ params }) => {
     const d = DAILY_REPORTS.find((x) => x.date === params.date);
-    return d ? HttpResponse.json(d) : notFound('日报');
+    return d ? HttpResponse.json(withExampleReportExplanation(d)) : notFound('日报');
   }),
 
 ];

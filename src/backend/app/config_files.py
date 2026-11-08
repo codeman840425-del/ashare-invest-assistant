@@ -576,6 +576,22 @@ class Rc5LossStreakDrawdown(_Strict):
     strategy_sim_fail_streak: Annotated[int, Field(ge=3, le=20)]
     pause_on_trigger: bool
     pause_days: Annotated[int, Field(ge=1, le=20)]
+    # T-A36/37: system-only mapping, no fallback to the removed fixed-five-day key.
+    # None preserves old YAML loading but computation must report missing config.
+    sim_fail_horizon_by_horizon: dict[str, int] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @field_validator("sim_fail_horizon_by_horizon", mode="before")
+    @classmethod
+    def _sim_horizons(cls, value: object) -> object:
+        if value is None:
+            return None
+        if not isinstance(value, dict) or set(value) != {"intraday_t", "short", "swing", "long"}:
+            raise ValueError("sim_fail_horizon_by_horizon requires four explicit horizons")
+        if any(type(days) is not int or days not in {1, 5, 20} for days in value.values()):
+            raise ValueError("sim_fail_horizon_by_horizon values must be integer 1/5/20")
+        return value
 
 
 Rc6Check = Literal[
@@ -610,6 +626,11 @@ class Executability(_Strict):
     same_template_cooldown_days: NonNegInt
 
 
+class HealthFeedbackConfig(_Strict):
+    # No invented default in code: config defaults belong in authorized YAML.
+    internal_recover_ratio: Annotated[Decimal, Field(gt=0, le=1)]
+
+
 class RiskControlsConfig(_File):
     rc1_stop_take: Rc1StopTake
     rc2_position_cap: Rc2PositionCap
@@ -618,6 +639,9 @@ class RiskControlsConfig(_File):
     rc5_loss_streak_drawdown: Rc5LossStreakDrawdown
     rc6_plan_violation: Rc6PlanViolation
     executability: Executability
+    health: HealthFeedbackConfig | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 # ---------------------------------------------------------------------------

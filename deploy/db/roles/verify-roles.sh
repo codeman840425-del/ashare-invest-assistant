@@ -282,6 +282,68 @@ else
   expect_denied aia_api "SELECT ciphertext FROM app.user_data_licences WHERE false"
 fi
 
+
+# T-O29：P2N-07 / T-B90 最小依赖。表未落地则跳过；点名列缺失则失败，不把缺列当成表级 UPDATE 通过。
+if [ "$(own -c "SELECT to_regclass('app.action_plans') IS NOT NULL")" != t ]; then
+  echo "SKIP T-O29：app.action_plans 未落地"
+else
+  miss="$(own -c "SELECT string_agg(c, ',' ORDER BY c) FROM unnest(ARRAY['status','triggered_at','updated_at']) c WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'app.action_plans'::regclass AND a.attname = c AND a.attnum > 0 AND NOT a.attisdropped)")"
+  if [ -n "$miss" ]; then
+    echo "FAIL T-O29：app.action_plans 缺少点名列（$miss），不得退成表级 UPDATE"; fail=1
+  else
+    expect_ok aia_api "SELECT status, triggered_at, updated_at FROM app.action_plans WHERE false"
+    expect_ok aia_api "UPDATE app.action_plans SET status = status, triggered_at = triggered_at, updated_at = updated_at WHERE false"
+    expect_ok aia_api "SELECT id, status FROM app.users WHERE false"
+    expect_ok aia_api "SELECT date, is_open FROM market.trading_calendar WHERE false"
+    expect_ok aia_api "SELECT id, user_id, dedup_key FROM app.alerts WHERE false"
+    expect_ok aia_api "INSERT INTO app.alerts SELECT * FROM app.alerts WHERE false"
+    expect_ok aia_api "INSERT INTO app.audit_logs SELECT * FROM app.audit_logs WHERE false"
+    expect_ddl_denied aia_api "BEGIN; ALTER TABLE app.action_plans ADD COLUMN t_o29_probe int; ROLLBACK"
+    expect_ddl_denied aia_api "BEGIN; DROP TABLE app.action_plans; ROLLBACK"
+    expect_denied aia_api "SELECT ciphertext FROM app.user_data_licences WHERE false"
+    expect_attr "aia_maint 仍不能读证书密文" \
+      "SELECT NOT has_column_privilege('aia_maint', 'app.user_data_licences', 'ciphertext', 'SELECT')"
+  fi
+fi
+if [ "$(own -c "SELECT to_regclass('market.master_runs') IS NOT NULL AND to_regclass('market.master_vendor_batches') IS NOT NULL")" = t ]; then
+  expect_ok aia_api "UPDATE market.master_runs SET status = status, finished_at = finished_at, stats = stats, snapshot_ids = snapshot_ids WHERE false"
+  expect_ok aia_ingest "UPDATE market.master_runs SET stats = stats WHERE false"
+  expect_denied aia_ingest "UPDATE market.master_vendor_batches SET reconciled_at = reconciled_at WHERE false"
+  expect_denied aia_ingest "SELECT security_code FROM market.master_vendor_list_rows WHERE false"
+  expect_ok aia_ingest "SELECT id, user_id, ciphertext, seal_key_version FROM app.user_data_licences WHERE false"
+fi
+
+
+# T-O30 / T-A30：aia_ingest 收窄后的正反例。aia_maint 原有 id/user_id SELECT 与 DELETE 仍允许。
+if [ "$(own -c "SELECT to_regclass('market.master_runs') IS NOT NULL")" = t ]; then
+  expect_ok aia_ingest "SELECT id, stats FROM market.master_runs WHERE false"
+  expect_ok aia_ingest "SELECT id FROM market.master_runs WHERE false FOR UPDATE"
+  expect_ok aia_ingest "UPDATE market.master_runs SET stats = stats WHERE false"
+  expect_denied aia_ingest "BEGIN; INSERT INTO market.master_runs (stats) VALUES ('{}'); ROLLBACK"
+  expect_denied aia_ingest "DELETE FROM market.master_runs WHERE false"
+  expect_denied aia_ingest "BEGIN; TRUNCATE market.master_runs; ROLLBACK"
+  expect_denied aia_ingest "UPDATE market.master_runs SET status = status WHERE false"
+  expect_ok aia_api "BEGIN; INSERT INTO market.master_runs (stats) SELECT '{}'::jsonb WHERE false; ROLLBACK"
+  expect_attr "aia_ingest 对 master_runs 无表级 INSERT/UPDATE/DELETE/TRUNCATE，且不能改 stats 以外的列" \
+    "SELECT has_table_privilege('aia_ingest','market.master_runs','SELECT') AND has_column_privilege('aia_ingest','market.master_runs','stats','UPDATE') AND NOT has_table_privilege('aia_ingest','market.master_runs','INSERT') AND NOT has_table_privilege('aia_ingest','market.master_runs','UPDATE') AND NOT has_table_privilege('aia_ingest','market.master_runs','DELETE') AND NOT has_table_privilege('aia_ingest','market.master_runs','TRUNCATE') AND NOT has_column_privilege('aia_ingest','market.master_runs','status','UPDATE')"
+else
+  echo "SKIP T-O30：market.master_runs 未落地"
+fi
+for rel in app.action_plans app.alert_rules app.alerts; do
+  if [ "$(own -c "SELECT to_regclass('$rel') IS NOT NULL")" != t ]; then
+    echo "SKIP T-O30：$rel 未落地"
+    continue
+  fi
+  expect_denied aia_ingest "SELECT * FROM $rel WHERE false"
+  expect_denied aia_ingest "DELETE FROM $rel WHERE false"
+  expect_ok aia_maint "SELECT id, user_id FROM $rel WHERE false"
+  expect_ok aia_maint "DELETE FROM $rel WHERE false"
+  expect_attr "aia_ingest 对 $rel 无表级和列级权限" \
+    "SELECT NOT has_table_privilege('aia_ingest','$rel','SELECT') AND NOT has_table_privilege('aia_ingest','$rel','INSERT') AND NOT has_table_privilege('aia_ingest','$rel','UPDATE') AND NOT has_table_privilege('aia_ingest','$rel','DELETE') AND NOT has_any_column_privilege('aia_ingest','$rel','SELECT') AND NOT has_any_column_privilege('aia_ingest','$rel','UPDATE')"
+done
+expect_ddl_denied aia_ingest "BEGIN; CREATE TABLE market.t_o30_probe (x int); ROLLBACK"
+expect_denied aia_api "SELECT ciphertext FROM app.user_data_licences WHERE false"
+
 [ "$(own -c "SELECT count(*) FROM app.users WHERE username LIKE 't\_o11\_%'")" = 0 ] \
   || { echo "FAIL 仍有 t_o11_ 探针用户残留"; fail=1; }
 exit "$fail"

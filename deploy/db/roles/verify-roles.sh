@@ -344,6 +344,36 @@ done
 expect_ddl_denied aia_ingest "BEGIN; CREATE TABLE market.t_o30_probe (x int); ROLLBACK"
 expect_denied aia_api "SELECT ciphertext FROM app.user_data_licences WHERE false"
 
+# P2N-06：表未落地则跳过。不把缺表当成失败（旧库）；表在则最小读写必须成立。
+if [ "$(own -c "SELECT to_regclass('app.notification_refs') IS NOT NULL")" = t ]; then
+  expect_ok aia_api "SELECT notification_id, ref_type, ref_id, at FROM app.notification_refs WHERE false"
+  expect_ok aia_api "INSERT INTO app.notification_refs SELECT * FROM app.notification_refs WHERE false"
+  expect_ok aia_maint "DELETE FROM app.notification_refs WHERE false"
+else
+  echo "SKIP P2N-06：app.notification_refs 未落地"
+fi
+if [ "$(own -c "SELECT to_regclass('app.intraday_candidate_refs') IS NOT NULL")" = t ]; then
+  expect_ok aia_api "SELECT instance_id, event_id FROM app.intraday_candidate_refs WHERE false"
+  expect_ok aia_api "INSERT INTO app.intraday_candidate_refs SELECT * FROM app.intraday_candidate_refs WHERE false"
+  expect_ok aia_maint "DELETE FROM app.intraday_candidate_refs WHERE false"
+else
+  echo "SKIP P2N-06：app.intraday_candidate_refs 未落地"
+fi
+if [ "$(own -c "SELECT to_regclass('app.user_realtime_prefs') IS NOT NULL")" = t ]; then
+  expect_ok aia_api "UPDATE app.user_realtime_prefs SET notify_cadence = notify_cadence, updated_at = updated_at WHERE false"
+fi
+if [ "$(own -c "SELECT to_regclass('app.signal_events') IS NOT NULL")" = t ]; then
+  expect_ok aia_api "SELECT id FROM app.signal_events WHERE false"
+  expect_ok aia_maint "DELETE FROM app.signal_events WHERE false"
+fi
+if [ "$(own -c "SELECT to_regclass('app.signal_states') IS NOT NULL")" = t ]; then
+  expect_ok aia_maint "DELETE FROM app.signal_states WHERE false"
+fi
+if [ "$(own -c "SELECT to_regclass('app.intraday_universe') IS NOT NULL")" = t ]; then
+  expect_ok aia_maint "DELETE FROM app.intraday_universe WHERE false"
+fi
+expect_denied aia_api "SELECT ciphertext FROM app.user_data_licences WHERE false"
+
 [ "$(own -c "SELECT count(*) FROM app.users WHERE username LIKE 't\_o11\_%'")" = 0 ] \
   || { echo "FAIL 仍有 t_o11_ 探针用户残留"; fail=1; }
 exit "$fail"

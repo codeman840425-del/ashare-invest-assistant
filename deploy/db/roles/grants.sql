@@ -310,6 +310,14 @@ DECLARE
     'app.notifications|SELECT|id,target_id,user_id',
     'app.notifications|UPDATE|target_id,target_route,target_type',
     'app.notifications|DELETE|',
+    'app.notification_refs|SELECT|notification_id',
+    'app.notification_refs|DELETE|',
+    'app.intraday_candidate_refs|SELECT|instance_id',
+    'app.intraday_candidate_refs|DELETE|',
+    'app.signal_states|SELECT|source_licence_id',
+    'app.signal_states|DELETE|',
+    'app.intraday_universe|SELECT|source_licence_id',
+    'app.intraday_universe|DELETE|',
     'app.opening_positions|SELECT|account_id',
     'app.opening_positions|DELETE|',
     'app.plan_conditions|SELECT|plan_version_id',
@@ -342,7 +350,7 @@ DECLARE
     'app.risk_control_settings_history|DELETE|',
     'app.risk_events|SELECT|id,user_id',
     'app.risk_events|DELETE|',
-    'app.signal_events|SELECT|id,user_id',
+    'app.signal_events|SELECT|id,user_id,source_licence_id',
     'app.signal_events|DELETE|',
     'app.strategies|SELECT|id,owner_user_id',
     'app.strategy_card_versions|SELECT|created_by,id',
@@ -927,3 +935,72 @@ BEGIN
   RAISE NOTICE 'db-roles: T-O30 已收窄 aia_ingest（master_runs 仅 SELECT+UPDATE(stats)；计划/提醒表无权限）';
 END
 $ingest_narrow$;
+
+-- P2N-06：aia_api 的最小依赖（worker/api 实际语句）。不授 ALL，不授 DELETE 给业务角色，
+-- 不把密文列授给 aia_api。表未落地只警告。点名列缺失则失败，不退成表级 UPDATE。
+-- $grants$ 里已有的更宽表级权限不在这里撤销（没有新的收窄裁定）。
+DO $p2n06$
+DECLARE
+  spec text[] := ARRAY[
+    'SELECT|app.notification_refs|',
+    'INSERT|app.notification_refs|',
+    'SELECT|app.intraday_candidate_refs|',
+    'INSERT|app.intraday_candidate_refs|',
+    'SELECT|app.signal_states|',
+    'INSERT|app.signal_states|',
+    'UPDATE|app.signal_states|',
+    'SELECT|app.intraday_universe|',
+    'INSERT|app.intraday_universe|',
+    'UPDATE|app.intraday_universe|',
+    'SELECT|app.signal_events|',
+    'INSERT|app.signal_events|',
+    'SELECT|app.notifications|',
+    'INSERT|app.notifications|',
+    'UPDATE|app.notifications|',
+    'SELECT|app.user_realtime_prefs|',
+    'INSERT|app.user_realtime_prefs|',
+    'UPDATE|app.user_realtime_prefs|notify_cadence,updated_at',
+    'SELECT|app.user_data_licences|id,user_id,status,deleted_at'
+  ];
+  e text; priv text; rel text; cols text; col text; missing text;
+BEGIN
+  FOREACH e IN ARRAY spec LOOP
+    priv := split_part(e, '|', 1);
+    rel := split_part(e, '|', 2);
+    cols := split_part(e, '|', 3);
+    IF to_regclass(rel) IS NULL THEN
+      RAISE WARNING 'db-roles: P2N-06 表 % 不存在（迁移未到？），跳过 aia_api %', rel, priv;
+      CONTINUE;
+    END IF;
+    IF cols <> '' THEN
+      SELECT string_agg(c, ',' ORDER BY c) INTO missing
+        FROM unnest(string_to_array(cols, ',')) AS u(c)
+       WHERE NOT EXISTS (
+         SELECT 1 FROM pg_attribute a
+          WHERE a.attrelid = to_regclass(rel) AND a.attname = c
+            AND a.attnum > 0 AND NOT a.attisdropped);
+      IF missing IS NOT NULL THEN
+        RAISE EXCEPTION 'db-roles: P2N-06 % 缺少点名列（%），不退成表级 %', rel, missing, priv;
+      END IF;
+      EXECUTE format('GRANT %s (%s) ON TABLE %s TO aia_api', priv,
+        (SELECT string_agg(quote_ident(x), ', ') FROM unnest(string_to_array(cols, ',')) AS u(x)),
+        to_regclass(rel));
+      FOREACH col IN ARRAY string_to_array(cols, ',') LOOP
+        IF NOT has_column_privilege('aia_api', rel, col, priv) THEN
+          RAISE EXCEPTION 'db-roles: P2N-06 aia_api 缺少 %(%) ON %', priv, col, rel;
+        END IF;
+      END LOOP;
+    ELSE
+      EXECUTE format('GRANT %s ON TABLE %s TO aia_api', priv, to_regclass(rel));
+      IF NOT has_table_privilege('aia_api', rel, priv) THEN
+        RAISE EXCEPTION 'db-roles: P2N-06 aia_api 缺少 % ON %', priv, rel;
+      END IF;
+    END IF;
+  END LOOP;
+  IF to_regclass('app.user_data_licences') IS NOT NULL
+     AND has_column_privilege('aia_api', 'app.user_data_licences', 'ciphertext', 'SELECT') THEN
+    RAISE EXCEPTION 'db-roles: P2N-06 不得让 aia_api 读取证书密文';
+  END IF;
+  RAISE NOTICE 'db-roles: P2N-06 aia_api 最小依赖已声明（未授 ALL，未改 T-O30 收窄）';
+END
+$p2n06$;

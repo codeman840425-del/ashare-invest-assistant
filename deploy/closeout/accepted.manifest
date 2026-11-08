@@ -1,0 +1,12 @@
+# 收口验收清单。只合并写成 BASE/MERGE 的行。# 开头的行忽略。
+# 不读取分支 tip，不把临时分支 03df03b 当清单，不联网抓取。
+# BASE|角色|hash|证据
+# MERGE|角色|hash|任务|证据
+# hash 为 7–40 位十六进制。合并时只在本地 git rev-parse，对象不在本地就停止。
+BASE|shared-main|96a4b683a658bfecb2d2446f2b71120832e5c872|T-O32 盘点：当时共享 main，前端/契约；最终 head 以合并结果的 alembic heads 为准
+MERGE|test|d0a6644|T-T01|试合顺序第 1 步，只改 tests，合并提交 9cd2672437ebbb6450b7424adf9b8d0b828a4fbe 无冲突
+MERGE|ops|f0785823c8ba4bbd7102fa9b35cd21ed02b69e96|T-O31-cache|本机 13/0 后提交；试合顺序第 2 步，合并提交 03df03be873373511eebbd749db7085c8768d163
+MERGE|ops|9b5ab113ab0488ea739eb914935c588f005978ab|P2N-R08-T-A32-05h|链上 6d096cd、fb6f971、9b5ab11；试合无冲突，合并提交 b7e5aeb828b560c0d294867cc7aebf31044c205a
+MERGE|backend|be685b1d1257329cb675aa124b813e2c90dea676|P2N-06|已验收，含 0025/0026。试合无冲突，合并后分支 4ccc859249dfd97c57732804c65777f49246e345
+# 未纳入：462057c T-A33，看板上没有通过记录。
+# 未纳入：任何未写在本文件里的分支 tip。

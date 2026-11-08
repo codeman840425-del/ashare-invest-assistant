@@ -1,0 +1,31 @@
+# selfchecks 隔离设施类：定点复跑记录（SHA 251b4cb）
+## 代表性错误（夹具断言）
+E   AssertionError: assert False
+    +    where exists = WindowsPath('/tmp/tb70-p2n04-pg-socket/.s.PGSQL.5432').exists
+    +      where WindowsPath('/tmp/tb70-p2n04-pg-socket/.s.PGSQL.5432') = Path(('/tmp/tb70-p2n04-pg-socket' + '/.s.PGSQL.5432'))
+（同一断言散见于下表的每个文件，socket 名各不相同）
+
+## 第一组（4 文件，63 errors）
+test_p2n04_daily_dimensions.py(45) test_p2n06_intraday.py(15)
+test_p2n02_risk_controls.py(12) test_p2n07_plans.py(48)
+结果：1 failed, 56 passed, 1 warning, 63 errors in 6.49s
+FAILED test_unowned_legacy_event_aborts_upgrade_not_guessed - psycopg.OperationalError
+
+## 第二组（12 文件，110 errors）
+test_p2n03_tracking.py(59) test_ta26_rc1.py(61) test_ta27_tracking.py(53)
+test_p2n08_pause.py(13) test_p2n08_worker.py(5) test_p2n08_plan_source.py(2)
+test_tb90_daily_pipeline.py(22) test_tb91_fixes.py(38) test_tb92_repairs.py(10)
+test_tb70_replay.py(6) test_tb85b_mairui_snapshot.py(20) test_tb80_reports.py(1)
+结果：6 failed, 170 passed, 4 skipped, 1 warning, 110 errors in 5.65s
+FAILED test_temp_inode_replacement_and_receipt_permissions - AttributeError（Windows）
+FAILED test_wire_single_attempt_no_redirect_and_sanitized_failure[200/302/103/429/500]（5 项，网络单次尝试）
+ERROR test_tb85b_mairui_snapshot.py 4 项 - Failed: dedicated...（env 夹具主动 fail）
+
+## 未计入本组
+- test_tb89_full_migrations.py：需 docker，未执行。
+- test_tb86_history.py / test_tb86_offline.py：`import fcntl` 收集错误（Windows）。
+- test_tb80_reports.py 内写死 `/workspace/team/reports/T-B80-gates.json` 输出路径。
+
+## 两组合计
+173 errors / 226 passed / 7 failed / 4 skipped（16 文件）；
+换 Linux + 独立 PG/Redis unix socket 后才可判定真实通过率。

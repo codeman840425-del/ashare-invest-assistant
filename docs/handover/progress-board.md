@@ -6,7 +6,10 @@ T-T23 在用户电脑 8080 上做了 86 项 HTTP/API 核查：通过 16、失败
 2. 证券搜索 GET /api/v1/securities/search、管理员用户列表 404；责任后端路由挂载/前后端集成。
 3. 市场概览、今日关注 503；责任后端聚合/数据运维，根因未确证。
 4. 86 项中 53 项未测（被上述问题阻塞，或界面层未验）；G7 和麦蕊实时请求未测。
-明细：team/reports/T-T23.md、T-T23-check-results.md；清单 team/tasks/T-T23-checklist.md。
+5. G7 缺策略卡和版本，且正常 HTTP 没有创建入口；
+6. 风控没有清除覆盖的接口，恢复不了继承语义；
+7. 界面层 44 项需要用户机上可操作的浏览器才能测。
+明细：team/reports/T-T23.md、T-T23-check-results.md、T-T24.md；清单 team/tasks/T-T23-checklist.md。
 
 ## 1. 阶段完成度：按能力与门槛，不填无依据百分比
 | 阶段 | 已有能力/证据 | 未完成的阶段门槛 |

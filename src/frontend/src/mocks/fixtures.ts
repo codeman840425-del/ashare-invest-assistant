@@ -1,3 +1,4 @@
+import { withDailyDimensions } from './phase2Fixtures';
 /**
  * 示例数据（全部虚构）—— 按契约 v0.2.2 结构生成，仅供开发与测试（MSW）使用。
  * 证券代码/简称、价格、持仓、金额、策略名都只是演示，不对应任何真实账户、行情或策略；
@@ -744,7 +745,7 @@ export const DAILY_REPORTS: DailyReport[] = [(() => {
     );
     const first = sg.strategies[0];
     return {
-      security_code: s.code, name: s.name,
+      security_code: s.code, name: s.name, analysis_snapshot_id: null, dimensions: null,
       // v0.2.3：日报所属交易日收盘价/涨跌幅；无数据为 null
       close: s.data_status === 'unavailable' ? null : f2(s.prev_close),
       change_pct: s.data_status === 'unavailable' ? null : f2(((s.seed % 9) - 4) * 0.61),
@@ -805,7 +806,7 @@ DAILY_REPORTS.push((() => {
     highlights: noEv(s.highlights), invalidation: noEv(s.invalidation), next_watch: noEv(s.next_watch),
   }));
   const removed = {
-    security_code: '000003.SZ', name: '示例已移出', close: null, change_pct: null, data_status: 'unavailable' as DataStatus,
+    analysis_snapshot_id: null, dimensions: null, security_code: '000003.SZ', name: '示例已移出', close: null, change_pct: null, data_status: 'unavailable' as DataStatus,
     max_risk_level: null, suggestion_id: null, suggestion: null, change_from_previous: 'removed' as const, change_fields: [],
     highlights: [], invalidation: [], next_watch: [],
   };
@@ -823,6 +824,8 @@ DAILY_REPORTS.push((() => {
     gaps: [{ key: 'market.breadth', reason: 'not_yet_published', message: '市场宽度在生成时尚未发布（示例）' }],
   } satisfies DailyReport;
 })());
+
+DAILY_REPORTS[0] = withDailyDimensions(DAILY_REPORTS[0]);
 
 export const DAILY_REPORT_LIST: DailyReportListItem[] = DAILY_REPORTS.map((d) => ({
   date: d.date, generated_at: d.generated_at, regime: d.market.regime, reconciliation_status: d.reconciliation.status, stock_count: d.stocks.length,

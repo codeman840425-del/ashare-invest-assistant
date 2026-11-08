@@ -11,6 +11,7 @@ import type {
   SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus, AlertOrigin, AlertStatus, PlanConditionKind,
   DataGapScope, SecurityType,
 } from './enums';
+import type { DailyDimensionAnalysis } from './phase2Types';
 
 export type Decimal = string;
 export type DateTime = string;
@@ -271,6 +272,9 @@ export interface SuggestionListItem extends SuggestionSummary { security_code: s
 
 // ---------- §5.3 ----------
 export interface DailyReportStock {
+  /** §7.11.1：旧日报及移出行投影为 null，不补造快照。 */
+  analysis_snapshot_id: Uuid | null;
+  dimensions: DailyDimensionAnalysis[] | null;
   security_code: string;
   name: string;
   /** v0.2.3：日报所属交易日收盘价与涨跌幅（停牌或缺数据为 null） */

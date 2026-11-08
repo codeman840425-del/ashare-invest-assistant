@@ -5,10 +5,11 @@
 import { useEffect } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from './client';
-import type { Paged, Stat, Suggestion, SuggestionListItem } from './types';
+import type { Paged, Suggestion, SuggestionListItem } from './types';
 import { qk } from './queries';
 
-export interface SuggestionTracking { t1: Stat; t5: Stat; t20: Stat }
+import type { SuggestionTracking } from './phase2Types';
+export type { SuggestionTracking } from './phase2Types';
 
 export const useSuggestionTracking = (id: string | undefined) =>
   useQuery({

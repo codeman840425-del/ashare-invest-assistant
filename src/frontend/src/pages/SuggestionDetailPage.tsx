@@ -1,3 +1,4 @@
+import { TrackingResults } from '../components/TrackingResults';
 import { RiskFlagView } from '../components/RiskFlagView';
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../i18n/horizonCaps';
 import { Alert, Button, Input, Modal, Select, Tag, Tooltip } from 'antd';
@@ -350,7 +351,7 @@ function FollowUp({ sg }: { sg: Suggestion }) {
   const [done, setDone] = useState(false);
   return (
     <div className="sg-follow">
-      <section className="panel" data-testid="sg-tracking">
+      <section className="panel" id="sg-tracking" data-testid="sg-tracking">
         <div className="panel-head"><span className="panel-title">事后跟踪（本卡出现后的表现）</span><span className="muted small">每个数字旁是样本量 n；样本少时只作参考</span></div>
         {tr.isLoading ? <div className="muted small">加载中…</div> : tr.isError || !tr.data ? <div className="muted small">跟踪统计暂不可用</div> : (
           <div className="sg-track-grid">
@@ -360,7 +361,7 @@ function FollowUp({ sg }: { sg: Suggestion }) {
           </div>
         )}
         <div className="muted small">数值按服务端原值显示（单位与口径待契约）；窗口：{tr.data?.t1.window ?? '—'}</div>
-        <PendingContract testId="sg-track-basis" what="各期的价格依据" />
+        {tr.data ? <TrackingResults data={tr.data} /> : null}
       </section>
       <section className="panel" data-testid="sg-actions">
         <div className="panel-head"><span className="panel-title">我的处理</span></div>

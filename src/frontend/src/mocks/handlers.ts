@@ -1,3 +1,4 @@
+import { phase2Handlers, resetPhase2 } from './phase2Handlers';
 import { promotionHandlers, resetPromotions } from './promotionHandlers';
 /**
  * MSW 处理器：按契约 v0.2.8 §7 的路径与响应结构返回示例数据。只拦截同源 `/api/v1/*`。
@@ -54,6 +55,7 @@ const API = '/api/v1';
 // 会话内可变状态：通知已读 / SSE 推送新增（notificationStore，T-F14）
 const notifications = allNotifications;
 export function resetMockState() {
+  resetPhase2();
   resetNotificationStore();
   resetStreamMock();
   resetSuggestions();
@@ -140,6 +142,7 @@ const routeHandlers = [
   ...streamHandlers,
   // 鉴权、账号、券商账户、成交、导入、对账（T-F02/T-F02a/T-F04，见 accountHandlers.ts）
   ...accountHandlers,
+  ...phase2Handlers,
   // 证券主数据对账（T-F25，见 reconMock.ts；管理员校验在 accountHandlers 前置处理里）
   ...reconHandlers,
   // 策略库最小模拟（T-F22，见 strategyHandlers.ts）
@@ -169,7 +172,10 @@ const routeHandlers = [
     if (st && !['active', 'cleared'].includes(st)) return validation('status', 'status 取值为 active|cleared');
     const control = url.searchParams.get('control');
     const code = url.searchParams.get('security_code');
-    return HttpResponse.json(page(riskEvents().filter((e) => (!st || e.status === st) && (!control || e.control === control) && (!code || e.security_code === code)), url));
+    const since = url.searchParams.get('since');
+    if (since && !Number.isFinite(Date.parse(since))) return validation('since', 'since必须是日期时间');
+    if (control && !(ENUMS.risk_control as readonly string[]).includes(control)) return validation('control', '未知风控项');
+    return HttpResponse.json(page(riskEvents().filter((e) => (!st || e.status === st) && (!control || e.control === control) && (!code || e.security_code === code) && (!since || Date.parse(e.triggered_at) >= Date.parse(since))), url));
   }),
   http.get(`${API}/market/overview`, () => HttpResponse.json(degrade(MARKET_OVERVIEW, 'market.overview'))),
   http.get(`${API}/watchlist`, () => HttpResponse.json(WATCHLIST)),

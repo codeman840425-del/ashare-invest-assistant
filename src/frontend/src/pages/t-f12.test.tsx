@@ -70,7 +70,8 @@ describe('mock 接口（契约 §7 /suggestions*）', () => {
 
   it('tracking：{t1, t5, t20: Stat}；n < 5 时 value=null；status 非法 → 400', async () => {
     const t = await (await apiFetch(`${API}/suggestions/${sgBank.id}/tracking`)).json();
-    expect(Object.keys(t).sort()).toEqual(['t1', 't20', 't5']);
+    expect(Object.keys(t).sort()).toEqual(['data_as_of', 'data_status', 'gaps', 'results', 't1', 't20', 't5']);
+    expect(t.results.length).toBeGreaterThan(0);
     expect(t.t20).toMatchObject({ value: null, small_sample: true });
     expect((await apiFetch(`${API}/suggestions?status=current`)).status).toBe(400);
   });
@@ -81,10 +82,11 @@ describe('候选信号卡详情页补全', () => {
     const rec = recordRequests();
     const router = renderAt(`/suggestions/${sgBank.id}`);
     expect(await screen.findByTestId('sg-status')).toHaveTextContent('当前');
-    expect(await screen.findByTestId('sg-track-t1')).toHaveTextContent('n=42');
+    expect(await screen.findByTestId('sg-track-t1')).toHaveTextContent('n=1');
     expect(screen.getByTestId('sg-track-t5')).toHaveTextContent('样本少');
     expect(screen.getByTestId('sg-track-t20')).toHaveTextContent('样本不足');
-    for (const t of ['sg-chain-placeholder', 'sg-track-basis', 'sg-trade-link-placeholder']) expect(screen.getByTestId(t)).toHaveTextContent('待契约');
+    expect(screen.getByTestId('tracking-results')).toHaveTextContent('模拟，不代表实际收益');
+    for (const t of ['sg-chain-placeholder', 'sg-trade-link-placeholder']) expect(screen.getByTestId(t)).toHaveTextContent('待契约');
     expect(screen.getByTestId('sg-supersedes')).toHaveAttribute('href', `/suggestions/${uid(99)}`);
     await waitFor(() => expect(actionLog.filter((a) => a.kind === 'viewed' && a.suggestion_id === sgBank.id)).toHaveLength(1));
     await router.navigate('/terminal');

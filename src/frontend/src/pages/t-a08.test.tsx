@@ -118,8 +118,9 @@ describe('“查看全部”目标页接住参数（页面未实现前用占位�
     ['/risk-controls?tab=events&event=x1', 'tab=events'],
   ])('%s', async (path, param) => {
     const router = renderAt(path);
-    const ph = await screen.findByTestId('placeholder');
-    expect(screen.getByTestId('placeholder-params')).toHaveTextContent(param);
+    const ph = await screen.findByTestId('risk-events');
+    expect(screen.getByRole('tab', { name: '事件' })).toHaveAttribute('aria-selected', 'true');
+    expect(router.state.location.search).toContain(param);
     expect(router.state.location.pathname + router.state.location.search).toBe(path);
     expect(ph).toBeInTheDocument();
   });

@@ -42,6 +42,11 @@ describe('T-F13 盘后日报', () => {
   });
 
   it('账户概览：对账状态、差异数与重要差异数、对账时间、查看对账链接；参考区间注明不是指令', async () => {
+    // P2N-05a 默认新日报演示F25未知；本例单独保留“已知参考区间”的既有分支。
+    const known = structuredClone(cur);
+    known.market.regime = 'range'; known.market.regime_position_range = { min_pct: '40', max_pct: '60' };
+    known.stocks.forEach((stock) => { stock.analysis_snapshot_id = null; stock.dimensions = null; });
+    server.use(http.get(`${API}/daily-reports/:date`, () => HttpResponse.json(known)));
     renderAt(`/daily-reports/${REPORT_DATE}`);
     const acct = await screen.findByTestId('report-account');
     expect(within(acct).getByTestId('report-rec').textContent).toBe(`存在差异 · ${cur.reconciliation.diff_count} 处差异（重要 ${cur.reconciliation.important_count}）`);

@@ -1,3 +1,5 @@
+import { DailyDimensions } from '../features/daily/DailyDimensions';
+import { IS_MOCK } from '../lib/env';
 import { Alert, Button, Segmented, Select, Tag } from 'antd';
 import { useEffect, useId, useRef } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -126,6 +128,8 @@ function StockCard({ s, r }: { s: DailyReportStock; r: DailyReport }) {
       <div className="stc-sec"><b className="small">要点</b><Lines items={s.highlights} r={r} /></div>
       <div className="stc-sec stc-inv"><b className="small">失效条件</b><Lines items={s.invalidation} r={r} /></div>
       <div className="stc-sec"><b className="small">次日关注</b><Lines items={s.next_watch} r={r} /></div>
+      <DailyDimensions stock={s} evidence={r.evidence} />
+      <div className="small" onClick={(e) => e.stopPropagation()}><Link to={`/risk-controls?security_code=${encodeURIComponent(s.security_code)}`}>查看当前风控设置与事件</Link>{to ? <> · <Link to={to + "#sg-tracking"}>查看候选信号模拟结果</Link></> : null}</div>
     </section>
   );
 }
@@ -210,6 +214,8 @@ export function DailyReportPage() {
         <DataStatusTag status={r.data_status} asOf={r.data_as_of} gaps={r.gaps} />
         <span className="muted small">生成于 {fmtTime(r.generated_at)} · 数据截至 {fmtTime(r.data_as_of)} · 说明来源：{r.explanation.source === 'template' ? '模板' : 'LLM'}</span>
       </div>
+      <p className="muted small">SSE 盘中变化与 AI 解释增量暂未接入；当前保留原有说明，不标为新增 AI 解释。</p>
+      {IS_MOCK ? <Alert type="info" title="示例数据 · 日报首批为 mock 阶段，未联调后端" /> : null}
       <div className="report-summary">{r.explanation.text}</div>
       <CardDisclaimer />
       {r.gaps.length ? (

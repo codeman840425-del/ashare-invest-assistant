@@ -1,3 +1,5 @@
+import { currentUser } from './session';
+import { exampleTracking } from './phase2Fixtures';
 /**
  * 候选信号卡（建议）补全的 mock（T-F12，契约 §5.2、§7 /suggestions*）：
  * - 列表 / 详情改为读会话内状态：手动刷新会生成新卡，旧卡变为 superseded（取代链）
@@ -5,13 +7,13 @@
  *   有当前卡 → 生成新卡并取代旧卡（changed=true、superseded_id=旧卡 id）；该证券没有任何卡 → {suggestion: null, changed: false}；
  *   同一证券 30 秒内再次刷新 → 409 SUGGESTION_REFRESH_TOO_FREQUENT{retry_after_s}（间隔为示例值）
  * - POST /suggestions/{id}/actions：只收 viewed / dismissed / acted_trade_linked，记录到 actionLog，204（响应体契约未定）
- * - GET /suggestions/{id}/tracking：{t1, t5, t20: Stat}；“价格依据”契约未给结构，mock 不返回
+ * - GET /suggestions/{id}/tracking：§7.11.3 的逐条结果、价格依据、缺口；旧 Stat 不放大样本
  * - GET /suggestions/{id}/chain：契约未给响应结构，mock 不实现（前端也不请求）
  * 全部为示例数据，不发外网请求。
  */
 import { http, HttpResponse } from 'msw';
 import { ENUMS } from '../api/enums';
-import type { Stat, Suggestion, SuggestionListItem } from '../api/types';
+import type { Suggestion, SuggestionListItem } from '../api/types';
 import { errorBody, notFound, page, validation } from './handlerUtils';
 import { SUGGESTIONS, summarize, uid } from './fixtures';
 import { pushStreamEvent } from './streamHandlers';
@@ -45,16 +47,6 @@ resetSuggestions();
 
 export const suggestionsNow = () => cards;
 const listItem = (sg: Suggestion): SuggestionListItem => ({ ...summarize(sg), security_code: sg.security_code, name: sg.name });
-
-function trackingOf(id: string): { t1: Stat; t5: Stat; t20: Stat } {
-  const k = Number.parseInt(id.slice(-3), 10) || 0;
-  const window = '近 120 个交易日（示例）';
-  return {
-    t1: { value: (((k % 7) - 2) / 1000).toFixed(4), n: 42, window, small_sample: false },
-    t5: { value: (((k % 5) - 1) / 100).toFixed(4), n: 18, window, small_sample: true },
-    t20: { value: null, n: 3, window, small_sample: true },
-  };
-}
 
 export const suggestionHandlers = [
   http.get(`${API}/suggestions`, ({ request }) => {
@@ -91,8 +83,9 @@ export const suggestionHandlers = [
     return HttpResponse.json({ suggestion: next, changed: true, superseded_id: cur.id, data_as_of: next.data_as_of });
   }),
   http.get(`${API}/suggestions/:id/tracking`, ({ params }) => {
-    const sg = cards.find((s) => s.id === params.id);
-    return sg ? HttpResponse.json(trackingOf(sg.id)) : notFound('建议');
+    // 本批合成建议仅归示例用户本人；其他会话与不存在的建议同为404。
+    const sg = currentUser()?.username === 'demo_user' ? cards.find((s) => s.id === params.id) : undefined;
+    return sg ? HttpResponse.json(exampleTracking(sg)) : notFound('建议');
   }),
   http.post(`${API}/suggestions/:id/actions`, async ({ params, request }) => {
     const sg = cards.find((s) => s.id === params.id);

@@ -22,6 +22,7 @@ from app.db.tables.market import feature_bars_daily, securities
 from app.db.tables.realtime import suggestions
 from app.db.tables.reviews import data_snapshots
 from app.db.tables.strategy import feature_catalog, strategy_instances
+from app.feedback.plans import Facts as RC6Facts
 from app.importing.pipeline import live_snapshots
 from app.market_rules.lots import LotSpec, lot_spec
 from app.risk.rc1 import Facts as RC1Facts
@@ -103,6 +104,9 @@ class Inputs:
     position_known: bool
     gaps: list[str]
     rc1: RC1Facts | None = None
+    owner_id: uuid.UUID | None = None
+    security_code: str | None = None
+    rc6: RC6Facts | None = None
 
 
 def inputs(
@@ -304,6 +308,8 @@ def _inputs(
         lot,
         known,
         missing,
+        owner_id=owner,
+        security_code=code,
     )
 
 
@@ -354,6 +360,48 @@ def assessed(
         )
         evidence.update({e.id: e for e in rc_evidence})
         extra.update(rc_gaps)
+    if config.rc6_plan_violation.enabled and source.rc6 is not None:
+        from app.feedback.plans import assess as assess_rc6
+
+        # Never trust an assessment's self-declared owner/account in another
+        # caller's Inputs. The owned DB reader must supply the binding.
+        flags = [f for f in flags if f.control != RiskControl.PLAN_VIOLATION]
+        result = result.model_copy(
+            update={
+                "gaps": [
+                    g
+                    for g in result.gaps
+                    if g
+                    not in {
+                        "plan_trade_context",
+                        "traded_quantity",
+                        "planned_quantity",
+                        "plan_invalidation",
+                        "holding_quantity",
+                    }
+                ]
+            }
+        )
+        if source.owner_id is None or (
+            source.owner_id,
+            source.account_id,
+            source.security_code,
+        ) != (
+            source.rc6.owner,
+            source.rc6.account,
+            source.rc6.code,
+        ):
+            extra.add("plan_owner_or_account_unresolved")
+        else:
+            plan_result = assess_rc6(
+                source.rc6, at=at, checks=tuple(config.rc6_plan_violation.checks)
+            )
+            flags.extend(
+                f.model_copy(update={"evidence_ids": [*f.evidence_ids, policy.id]})
+                for f in plan_result.flags
+            )
+            evidence.update({e.id: e for e in plan_result.evidence})
+            extra.update(plan_result.gaps)
     result = result.model_copy(
         update={
             "flags": flags,
@@ -378,7 +426,10 @@ def assessed(
             )
             or (control == "plan_violation" and k.startswith("plan"))
         ]
-        if enabled and control in {"loss_streak_drawdown", "plan_violation"}:
+        if enabled and (
+            control == "loss_streak_drawdown"
+            or (control == "plan_violation" and source.rc6 is None)
+        ):
             keys.append("business_facts_not_connected")
         state = (
             "disabled" if not enabled else "triggered" if selected else "unknown" if keys else "ok"
@@ -499,7 +550,18 @@ def current(
     all_gaps.update({k: gap(k).model_dump(mode="json") for k in source.gaps})
     if not strategies:
         all_gaps["strategy_context"] = gap("strategy_context").model_dump(mode="json")
-    observations = list(source.context.observations.values())
+    observations = list(
+        {
+            e.id: e
+            for e in [*source.context.observations.values(), *evidence.values()]
+            if e.key != "settings"
+        }.values()
+    )
+    data_as_of = earliest_as_of(observations)
+    if observations and data_as_of is None:
+        all_gaps["risk_evidence_time_unknown"] = gap("risk_evidence_time_unknown").model_dump(
+            mode="json"
+        )
     return {
         "account_id": str(source.account_id) if source.account_id else None,
         "security_code": code,
@@ -509,6 +571,14 @@ def current(
         "controls": controls,
         "evidence": [e.model_dump(mode="json") for e in evidence.values()],
         "data_status": "unavailable" if not observations else "partial" if all_gaps else "fresh",
-        "data_as_of": max((e.data_as_of for e in observations), default=None),
+        "data_as_of": data_as_of,
         "gaps": list(all_gaps.values()),
     }
+
+
+def earliest_as_of(observations: list[Evidence]) -> dt.datetime | None:
+    """Oldest data operand, never the evaluation/settings time or newest input."""
+    data = [e for e in observations if e.key != "settings"]
+    if not data or any(e.data_as_of is None for e in data):
+        return None
+    return min(e.data_as_of for e in data if e.data_as_of is not None)

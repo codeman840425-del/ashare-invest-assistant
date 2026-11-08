@@ -1,0 +1,9 @@
+# 测试依赖（T-T01）。Python 3.12（与 plan §1.3 后端版本一致）。
+# 安装：uv venv --python 3.12 tests/.venv && uv pip install --python tests/.venv/bin/python -r tests/requirements.txt
+# 后端 pyproject（T-B01）落地后，这些依赖应迁入其 dev 依赖组，本文件随之删除。
+pytest==9.2.0
+hypothesis==6.170.14
+testcontainers[postgres,redis]==4.15.0
+psycopg[binary]==3.3.6
+redis==8.1.0
+schemathesis==4.33.0

@@ -1,0 +1,124 @@
+# plan v0.2.3 §6.1 `config/market_rules.yaml` 代码块原文快照（测试维护，T-T01b 建立，T-T01c 同步 v0.2.3）；plan 变更时由 test_snapshot_equals_plan_block 提示同步。 T-T25：叠加 T-R10 新增键（docs/strategies/market_rules_T-R10.md，后端 07b8d74 已合并；plan §6.1 尚未同步）。
+schema_version: 1
+modeled_from: "2023-04-10"            # 【已定 2026-11-01】规则只建模到此日，更早的不建模；更早的行情回看时 market_rule_version = null，评估结果标“交易规则未建模”，不得作为晋级依据（T-A02，第 9 节问题 36）
+segments:
+  - effective_from: "2026-07-06"      # 【已定，已核实】沪深主板 ST/*ST 涨跌幅由 5% 改为 10% 的施行日（上证发〔2026〕41 号、深证上〔2026〕551 号）；此前一段为 5%
+    price_limit_pct:                  # 前收 × (1 ± pct)，按四舍五入取至价格最小变动单位（A 股 0.01 元）：沪 3.3.17、深 3.3.19 已核实（含差值不足一价位取前收 ±0.01、结果低于 0.01 取 0.01 两条边界规则）
+      main_board: 10
+      main_board_st: 10               # 【已定，已核实】沪深主板 ST/*ST：10%（上证发〔2026〕41 号、深证上〔2026〕551 号，2026-04-24 发布，2026-07-06 起施行；出处见 docs/strategies/market_rules_check.md O1–O8）
+      chinext: 20                     # 创业板（含风险警示）
+      star: 20                        # 科创板（含风险警示）
+      bse: 30                         # 北交所（含风险警示）
+    no_limit:                         # 无涨跌幅限制的情形（以交易所规则为准）
+      registered_ipo_first_days: 5    # 沪深注册制新股上市前 5 个交易日
+      bse_ipo_first_days: 1
+      delisting_period_first_day: true
+    lot:
+      buy_lot: 100
+      star_min_buy: 200               # 科创板单笔 ≥ 200 股（沪第 6.7 条已核实）；之后按 1 股递增【待核实】
+      star_step: 1
+      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【待核实；V1 不扫描北交所】
+      bse_step: 1
+      odd_lot_sell_all: true          # 卖出时余额不足一个申报单位的部分须一次性申报卖出（沪 3.3.8、6.7；深 3.3.8；已核实，T-R10）
+      star_odd_lot_threshold: 200     # 科创板零股阈值 = 200（沪 2026 第 6.7 条末句；已核实）；其他板块阈值 = buy_lot
+      max_order_qty: 1000000          # 竞价单笔上限 100 万股（份）（沪 3.3.9 / 深 3.3.9；已核实）
+      star_max_limit_order: 100000    # 科创板限价单笔 ≤ 10 万股（沪 2026 第 6.7 条；已核实）
+      star_max_market_order: 50000    # 科创板市价单笔 ≤ 5 万股（沪 2026 第 6.7 条；已核实）
+      star_max_after_hours: 1000000   # 科创板盘后固定价格单笔 ≤ 100 万股（沪 2026 第 6.7 条；已核实）
+      chinext_max_limit_order: 300000 # 创业板限价单笔 ≤ 30 万股（深 3.3.9；已核实）
+      chinext_max_market_order: 150000  # 创业板市价单笔 ≤ 15 万股（深 3.3.9；已核实）
+    sessions:                         # 北京时间
+      call_auction: ["09:15", "09:25"]
+      morning: ["09:30", "11:30"]
+      afternoon: ["13:00", "14:57"]
+      closing_auction: ["14:57", "15:00"]
+    t_plus: 1
+    t0_round_trip:                    # 实行当日回转交易的品种（沪 3.1.5 / 深 3.1.5；类别已核实，无官方代码清单；T-R10 §3）
+      fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
+      cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
+      unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
+      data_source: null                             # 未接入：ETF 类别数据来源见 reports/T-B47-R10.md；接入前全部按 T+1
+    fees:
+      stamp_duty_sell_pct: 0.05       # 印花税仅卖出
+      transfer_fee_pct: 0.001         # 过户费双向
+      commission_rate_default_pct: null   # 佣金按用户费率；null = 未设置时由导入成交反推，仍无则提示用户填写
+      commission_min_yuan: 5          # 单笔最低（券商常见做法，以用户实际为准）
+      slippage_default_pct: 0.1       # 模板参数默认值
+    impact_cost:                      # 【编排者默认，用户可否决；初值待校准】第 9 节 C(7)
+      adv_basis: amount               # 【已定 T-A02】成交额口径：参与率 = 拟成交额（计划数量 × 参考价）÷ 近 N 个有效交易日日成交额均值（停牌日不计），与 _template.md §18 一致
+      adv_window_days: 20             # N
+      tiers:                          # 参与率上界（%，含） → 成本（bp）
+        - {max_participation_pct: 0.1, bp: 0}    # I1
+        - {max_participation_pct: 0.5, bp: 5}    # I2
+        - {max_participation_pct: 1.0, bp: 15}   # I3
+        - {max_participation_pct: 2.0, bp: 30}   # I4
+        - {max_participation_pct: null, bp: 60}  # I5（> 2%）
+    unfillable:
+      one_price_limit_up_blocks_buy: true
+      one_price_limit_down_blocks_sell: true
+      skip_suspended: true
+    risk_warning:                     # 风险警示股票（ST/*ST）的额外约束（T-A02 新增，market_rules_check.md M5/M6）
+      daily_buy_cap_shares: 500000    # 单只当日累计买入 ≤ 50 万股：沪第 4.4.10 条、深第 4.5.4 条均已核实（T006b）；计划草案数量上限截断到此值并在草案中提示
+      applies_to_boards: [main_board, chinext]  # 50 万股上限的适用板块；科创板不适用（沪第 4.4.1、6.14 条）；北交所 V1 不扫描（C(8)）
+      limit_order_only: true          # 只能限价申报：仅沪 4.4.9；深交所 2026 规则未见同类条款
+      limit_order_only_exchanges: [SH]  # T-A03 新增键：limit_order_only 只作用于沪市证券；本产品不下单，只用于草案与通知文案“请使用限价委托”
+  - effective_from: "2023-04-10"      # 2023-04-10 ～ 2026-07-05：除 main_board_st: 5 外与上一段相同（文件中写全，不做继承）。起始日取沪深主板注册制新股首批上市日，依据 O9、O10 第 10.9 条（日历日期由政府网转载证监会信息确认，交易所原页未找到）；【已定 2026-11-01】更早的规则（创业板 2020-08-24 前为 10%、主板新股首日按发行价 144%/64% 等）不建模
+    price_limit_pct:                  # 同上一段
+      main_board: 10
+      main_board_st: 5                # 【已核实】2026-07-06 之前沪深主板 ST/*ST 为 5%（出处同上一段）
+      chinext: 20                     # 创业板（含风险警示）
+      star: 20                        # 科创板（含风险警示）
+      bse: 30                         # 北交所（含风险警示）
+    no_limit:                         # 无涨跌幅限制的情形（以交易所规则为准）
+      registered_ipo_first_days: 5    # 沪深注册制新股上市前 5 个交易日
+      bse_ipo_first_days: 1
+      delisting_period_first_day: true
+    lot:
+      buy_lot: 100
+      star_min_buy: 200               # 科创板单笔 ≥ 200 股（沪第 6.7 条已核实）；之后按 1 股递增【待核实】
+      star_step: 1
+      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【待核实；V1 不扫描北交所】
+      bse_step: 1
+      odd_lot_sell_all: true          # 卖出时余额不足一个申报单位的部分须一次性申报卖出（沪 3.3.8、6.7；深 3.3.8；已核实，T-R10）
+      star_odd_lot_threshold: 200     # 科创板零股阈值 = 200（沪 2026 第 6.7 条末句；已核实）；其他板块阈值 = buy_lot
+      max_order_qty: 1000000          # 竞价单笔上限 100 万股（份）（沪 3.3.9 / 深 3.3.9；已核实）
+      star_max_limit_order: 100000    # 科创板限价单笔 ≤ 10 万股（沪 2026 第 6.7 条；已核实）
+      star_max_market_order: 50000    # 科创板市价单笔 ≤ 5 万股（沪 2026 第 6.7 条；已核实）
+      star_max_after_hours: 1000000   # 科创板盘后固定价格单笔 ≤ 100 万股（沪 2026 第 6.7 条；已核实）
+      chinext_max_limit_order: 300000 # 创业板限价单笔 ≤ 30 万股（深 3.3.9；已核实）
+      chinext_max_market_order: 150000  # 创业板市价单笔 ≤ 15 万股（深 3.3.9；已核实）
+    sessions:                         # 北京时间
+      call_auction: ["09:15", "09:25"]
+      morning: ["09:30", "11:30"]
+      afternoon: ["13:00", "14:57"]
+      closing_auction: ["14:57", "15:00"]
+    t_plus: 1
+    t0_round_trip:                    # 实行当日回转交易的品种（沪 3.1.5 / 深 3.1.5；类别已核实，无官方代码清单；T-R10 §3）
+      fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
+      cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
+      unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
+      data_source: null                             # 未接入：ETF 类别数据来源见 reports/T-B47-R10.md；接入前全部按 T+1
+    fees:
+      stamp_duty_sell_pct: 0.05       # 印花税仅卖出
+      transfer_fee_pct: 0.001         # 过户费双向
+      commission_rate_default_pct: null   # 佣金按用户费率；null = 未设置时由导入成交反推，仍无则提示用户填写
+      commission_min_yuan: 5          # 单笔最低（券商常见做法，以用户实际为准）
+      slippage_default_pct: 0.1       # 模板参数默认值
+    impact_cost:                      # 【编排者默认，用户可否决；初值待校准】第 9 节 C(7)
+      adv_basis: amount
+      adv_window_days: 20
+      tiers:                          # 参与率上界（%，含） → 成本（bp）
+        - {max_participation_pct: 0.1, bp: 0}    # I1
+        - {max_participation_pct: 0.5, bp: 5}    # I2
+        - {max_participation_pct: 1.0, bp: 15}   # I3
+        - {max_participation_pct: 2.0, bp: 30}   # I4
+        - {max_participation_pct: null, bp: 60}  # I5（> 2%）
+    unfillable:
+      one_price_limit_up_blocks_buy: true
+      one_price_limit_down_blocks_sell: true
+      skip_suspended: true
+    risk_warning:
+      daily_buy_cap_shares: 500000    # 适用（沪 2023 第 4.4.12 条，仅竞价 + 大宗；深 2023 第 4.5.4 条）；只影响回看，不影响当前草案
+      applies_to_boards: [main_board, chinext]  # 科创板不适用
+      limit_order_only: true
+      limit_order_only_exchanges: [SH]

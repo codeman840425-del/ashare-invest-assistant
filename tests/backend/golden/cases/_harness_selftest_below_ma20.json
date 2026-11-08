@@ -1,0 +1,16 @@
+{
+  "id": "GOLDEN-SELFTEST-002",
+  "subject": "_harness_selftest",
+  "description": "执行器自检：收盘价在 MA20 下方（虚构数值）",
+  "input": {
+    "strategy_version": {"key": "_selftest", "version": 1},
+    "snapshot": {"security_code": "000001.SZ", "as_of": "2026-11-02", "close": 9.5, "ma20": 10.0},
+    "profile": {"risk_level": "balanced"},
+    "holdings": []
+  },
+  "expected": {
+    "action": "hold",
+    "score": 40,
+    "reasons": [{"code": "close_below_ma20"}]
+  }
+}

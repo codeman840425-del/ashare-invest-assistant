@@ -1,0 +1,12 @@
+{
+  "id": "GOLDEN-STRAT-000",
+  "subject": "strategy_eval",
+  "description": "占位：T-T10 用真实内置策略 × 快照替换。实现 app.strategy.evaluator:evaluate 落地前 skip。",
+  "input": {
+    "strategy_version": {"key": "placeholder", "version": 1},
+    "snapshot": {"security_code": "600000.SH", "as_of": "2026-11-02"},
+    "profile": {"risk_level": "balanced"},
+    "holdings": []
+  },
+  "expected": {}
+}

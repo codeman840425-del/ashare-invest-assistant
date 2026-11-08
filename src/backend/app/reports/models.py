@@ -34,6 +34,7 @@ class Market(Model):
 
 
 class Account(Model):
+    data_as_of: dt.datetime | None = None
     total_assets: Money
     cash: Money
     position_pct: Money | None

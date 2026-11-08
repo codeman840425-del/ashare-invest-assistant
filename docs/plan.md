@@ -3034,6 +3034,9 @@ executability:                  # 2.5.9 原因码的默认阈值
     days: 3
   same_template_cooldown_days: 3  # 同模板同证券冷却 3 个交易日（问题 30）
   # DATA_STALE 的阈值不在此处，统一用 realtime.yaml 的 stale_threshold_s
+
+health:
+  internal_recover_ratio: 0.8   # 内部复验恢复阈值（T-A33 第 9 点；仅 Phase 3 内部评估启用时生效）
 ```
 
 - **T-A25（架构师 2026-11-08）**：RC1–RC5 用户可调参数的 min/max 以 api-contract §7.11.2“参数范围”表为准；本 yaml 只存默认值，不改。

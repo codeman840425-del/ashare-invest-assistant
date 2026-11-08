@@ -89,3 +89,25 @@ def test_dockerfile_rejects_runtime_names(tmp_path: Path, needle: str) -> None:
     df.write_text(df.read_text(encoding="utf-8") + f"\n# {needle}nope\n", encoding="utf-8")
     errs = cfd.check(repo)
     assert any(needle in e for e in errs), errs
+
+
+def test_missing_static_root_rejected(tmp_path: Path) -> None:
+    repo = _tree(tmp_path)
+    _sub(repo, "deploy/nginx/nginx.conf", "    root /usr/share/nginx/html;\n", "")
+    errs = cfd.check(repo)
+    assert any("root /usr/share/nginx/html" in e for e in errs), errs
+
+
+def test_wrong_static_root_rejected(tmp_path: Path) -> None:
+    repo = _tree(tmp_path)
+    _sub(repo, "deploy/nginx/nginx.conf", "root /usr/share/nginx/html;", "root /etc/nginx/html;")
+    errs = cfd.check(repo)
+    assert any("root /usr/share/nginx/html" in e for e in errs), errs
+
+
+def test_location_root_override_rejected(tmp_path: Path) -> None:
+    repo = _tree(tmp_path)
+    _sub(repo, "deploy/nginx/nginx.conf", "location / {\n      try_files $uri /index.html;",
+         "location / {\n      root /tmp/not-the-image;\n      try_files $uri /index.html;")
+    errs = cfd.check(repo)
+    assert any("location / 不得另行指定 root" in e for e in errs), errs

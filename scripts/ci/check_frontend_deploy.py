@@ -48,6 +48,19 @@ def check(repo: Path) -> list[str]:
     spa = _block(conf, "location / {", "\n  }\n")
     if "try_files $uri /index.html;" not in spa:
         errs.append("location / 必须 try_files $uri /index.html（SPA 深链）")
+    code = "\n".join(line.split("#", 1)[0] for line in conf.splitlines())
+    server_at = code.find("server {")
+    assets_at = code.find("location /assets/ {", server_at if server_at >= 0 else 0)
+    root_at = code.find("root /usr/share/nginx/html;", server_at if server_at >= 0 else 0)
+    if server_at < 0 or assets_at < 0 or not (server_at < root_at < assets_at):
+        errs.append(
+            "server 必须在 location /assets/ 之前写 root /usr/share/nginx/html;"
+            "（本文件替换镜像 nginx.conf 且不 include conf.d；缺 root 时 try_files 回退 /index.html 会内部重定向循环）"
+        )
+    if "root " in "\n".join(line.split("#", 1)[0] for line in assets.splitlines()):
+        errs.append("location /assets/ 不得另行指定 root")
+    if "root " in "\n".join(line.split("#", 1)[0] for line in spa.splitlines()):
+        errs.append("location / 不得另行指定 root")
     if "return 200" in spa:
         errs.append("location / 不应再直接 return 200")
     api = _block(conf, "location /api/ {", "location ~")

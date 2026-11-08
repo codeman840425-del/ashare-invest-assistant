@@ -26,7 +26,14 @@ from app.signals.models import Evidence, Stops
 from app.strategy.cards.fixtures import run_fixtures
 from app.strategy.cards.preflight import preflight
 from app.strategy.cards.source_reviews import required_features, source_issues
-from app.strategy.g6 import Overlap, compare, missing_history_gate
+from app.strategy.g6 import (
+    QUOTA_UNKNOWN_REASON,
+    Overlap,
+    QuotaDelta,
+    compare,
+    missing_history_gate,
+    quota_delta,
+)
 from app.suggestions.risk import RiskContext, evaluate_risk
 
 
@@ -199,7 +206,10 @@ def prepare(
         }
     )
     overlap = compare(None, set(), [])
-    results.append(missing_history_gate(fixture_ok, overlap))
+    quota = quota_delta(validation.get("feature_requests"))
+    results.append(
+        missing_history_gate(fixture_ok, overlap, quota_unknown=quota.quota_delta_per_min is None)
+    )
     results.append(
         {
             "gate": "G7",
@@ -213,7 +223,7 @@ def prepare(
         "trigger_rate": stat,
         "coverage": stat,
         **overlap.model_dump(),
-        "quota_delta_per_min": 0 if not validation.get("feature_requests") else None,
+        **quota.model_dump(),
     }
     review_id = existing_review_id or uuid.uuid4()
     old_lint: dict[str, Any] = {}
@@ -284,9 +294,25 @@ def public_review(row: Any) -> dict[str, Any]:  # noqa: ANN401
         {key: report.get(key) for key in ["max_jaccard", "max_jaccard_null_reason"]}
     )
     report.update(overlap.model_dump())
+    quota = QuotaDelta.model_validate({"quota_delta_per_min": report.get("quota_delta_per_min")})
+    report.update(quota.model_dump())
     result = {k: getattr(row, k) for k in ["decision", "gate_results", "fixture_runs"]}
     result["gate_results"] = [
-        {**g, "detail": {**g["detail"], "max_jaccard_null_reason": overlap.max_jaccard_null_reason}}
+        {
+            **g,
+            "result": "warn"
+            if g["result"] == "pass" and quota.quota_delta_per_min is None
+            else g["result"],
+            "detail": {
+                **g["detail"],
+                "max_jaccard_null_reason": overlap.max_jaccard_null_reason,
+                **(
+                    {"quota_delta_reason": QUOTA_UNKNOWN_REASON}
+                    if quota.quota_delta_per_min is None
+                    else {}
+                ),
+            },
+        }
         if g["gate"] == "G6"
         else g
         for g in result["gate_results"]

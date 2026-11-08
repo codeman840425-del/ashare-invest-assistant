@@ -7,6 +7,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+QUOTA_UNKNOWN_REASON = "含待落地特征，配额增量未知"
+
+
+class QuotaDelta(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    quota_delta_per_min: int | None
+
+
+def quota_delta(feature_requests: object) -> QuotaDelta:
+    return QuotaDelta(quota_delta_per_min=None if feature_requests else 0)
+
 
 class Overlap(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -35,13 +46,16 @@ def compare(history_days: int | None, own: set[str], others: list[set[str]]) -> 
     return Overlap(max_jaccard=str(value), max_jaccard_null_reason=None)
 
 
-def missing_history_gate(fixtures_pass: bool, overlap: Overlap) -> dict[str, Any]:
+def missing_history_gate(
+    fixtures_pass: bool, overlap: Overlap, *, quota_unknown: bool = False
+) -> dict[str, Any]:
     """Partial report only: valid fixtures cannot substitute for unexamined G6 statistics."""
     return {
         "gate": "G6",
         "result": "warn" if fixtures_pass else "fail",
         "detail": {
             "fixtures_all_pass": fixtures_pass,
+            **({"quota_delta_reason": QUOTA_UNKNOWN_REASON} if quota_unknown else {}),
             "max_jaccard_null_reason": overlap.max_jaccard_null_reason,
             "history": "not_examined_no_real_120_day_owned_history",
             "warning": "未体检/覆盖不足；不使用合成golden冒充真实历史统计。",

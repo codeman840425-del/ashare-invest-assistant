@@ -50,13 +50,14 @@ class LifecycleRequest(BaseModel):
     to: Literal["draft", "simulating", "published", "observing", "retired"]
     reason: str
     review_id: uuid.UUID | None = None
-    password: SecretStr | None = Field(default=None, repr=False, exclude=True)
+    password: SecretStr = Field(repr=False, exclude=True)
 
 
 def human_admin(request: Request, engine: EngineDep, store: StoreDep) -> AuthContext:
-    if request.headers.get("authorization"):
-        raise AppError(ErrorCode.HUMAN_SESSION_REQUIRED)
+    # Preserve cookie/account/admin/CSRF precedence; never reveal admin routes to others.
     auth = current_admin(request, engine, store)
+    if "authorization" in request.headers:
+        raise AppError(ErrorCode.HUMAN_SESSION_REQUIRED)
     if auth.session.origin != "password_login":
         with engine.begin() as conn:
             audit(

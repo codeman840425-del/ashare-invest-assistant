@@ -172,6 +172,8 @@ def request_review(
         binding = (row.compliance_lint or {}).get("binding", {})
         if binding.get("card_id") == str(card_id) and not is_stale(binding, current, digest):
             return row.id, False
+    from app.strategy.g6 import quota_delta
+
     identifier = uuid.uuid4()
     stat = {"value": None, "n": 0, "window": "120 trading days", "small_sample": True}
     conn.execute(
@@ -190,7 +192,9 @@ def request_review(
                 "coverage": stat,
                 "max_jaccard": None,
                 "max_jaccard_null_reason": "no_history",
-                "quota_delta_per_min": 0,
+                **quota_delta(
+                    (version.config.get("validation") or {}).get("feature_requests")
+                ).model_dump(),
             },
             compliance_lint={
                 "status": "execution_pending",

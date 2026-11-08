@@ -54,6 +54,7 @@ def event(
     after: str | None,
     note: str | None = None,
     detail: dict[str, Any] | None = None,
+    at: dt.datetime | None = None,
 ) -> None:
     conn.execute(
         insert(events).values(
@@ -61,6 +62,7 @@ def event(
             instance_id=instance_id,
             kind=kind,
             actor_id=actor_id,
+            **({"at": at} if at is not None else {}),
             detail={
                 "from_status": before,
                 "to_status": after,

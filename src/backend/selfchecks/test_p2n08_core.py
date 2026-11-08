@@ -46,8 +46,6 @@ OWNER, ACCOUNT, VERSION = ident("self"), ident("synthetic_a"), ident("v1")
 
 def config() -> RiskControlsConfig:
     raw = yaml.safe_load((ROOT / "config/risk_controls.yaml").read_text())
-    raw["rc5_loss_streak_drawdown"]["sim_fail_horizon_by_horizon"] = MAPPING.copy()
-    raw["health"] = {"internal_recover_ratio": ".8"}
     return RiskControlsConfig.model_validate(raw)
 
 
@@ -489,6 +487,8 @@ def test_invalid_result_types_do_not_clear_streak_and_legacy_config_shape() -> N
     result = simulated_failures(OWNER, VERSION, [bad_period], cfg, version_horizon=None, at=AT)
     assert "sim_fail_horizon_unknown" in result.gaps
     raw = yaml.safe_load((ROOT / "config/risk_controls.yaml").read_text())
+    raw["rc5_loss_streak_drawdown"].pop("sim_fail_horizon_by_horizon", None)
+    raw.pop("health", None)
     legacy = RiskControlsConfig.model_validate(raw).model_dump(mode="json")
     assert "sim_fail_horizon_by_horizon" not in legacy["rc5_loss_streak_drawdown"]
     assert "health" not in legacy

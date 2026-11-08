@@ -15,15 +15,16 @@ export function withDailyDimensions(input: DailyReport): DailyReport {
     if (stock.close === null) stock.highlights = [{ text: '示例数据：收盘价缺失，不补造价格事实', expr: null, evidence_ids: [] }];
     stock.analysis_snapshot_id = id(200 + index);
     stock.dimensions = dimensionStates.map((sample, j) => {
+      const hasSource = sample.value !== null && report.data_as_of !== null;
       const evidenceId = `${stock.security_code}:D${j + 1}`;
-      const evidence: Evidence = { id: evidenceId, key: sample.feature, value: sample.value, unit: sample.unit,
-        provider: 'system', endpoint: null, data_as_of: report.data_as_of, fetched_at: report.generated_at, epistemic_type: 'fact' };
+      const evidence: Evidence = { id: evidenceId, key: sample.feature, value: hasSource ? sample.value : null, unit: sample.unit,
+        provider: 'system', endpoint: hasSource ? `reports:cached-facts:${stock.security_code}` : 'reports:missing-source', data_as_of: report.data_as_of ?? report.generated_at, fetched_at: report.generated_at, epistemic_type: 'fact' };
       report.evidence.push(evidence);
-      const gaps = [missing(`${stock.security_code}.${sample.feature}`, sample.value === null ? sample.text : '示例数据：技术维度仅提供一项合成事实，其余输入缺失')];
+      const gaps = [missing(`${stock.security_code}.${sample.feature}`, !hasSource ? '示例数据：来源或数据时点缺失，不补造事实' : '示例数据：技术维度仅提供一项合成事实，其余输入缺失')];
       report.gaps.push(...gaps);
-      return { dimension: sample.dimension, facts: sample.value === null ? [] : [{ text: sample.text, expr: null, evidence_ids: [evidenceId] }],
+      return { dimension: sample.dimension, facts: !hasSource ? [] : [{ text: sample.text, expr: null, evidence_ids: [evidenceId] }],
         feature_refs: [{ feature_key: sample.feature, status: sample.status, evidence_ids: [evidenceId] }],
-        data_status: sample.data_status, data_as_of: sample.value === null ? null : report.data_as_of, gaps };
+        data_status: hasSource ? sample.data_status : 'unavailable', data_as_of: hasSource ? report.data_as_of : null, gaps };
     });
   }
   // F25缺口必须与日报市场/账户说明一致，不能沿用旧夹具的range冒充已知。

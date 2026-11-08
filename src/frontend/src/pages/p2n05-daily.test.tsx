@@ -17,6 +17,7 @@ import { apiGet, apiPut } from '../api/client';
 import { ENUMS } from '../api/enums';
 import type { DailyReport, Paged } from '../api/types';
 import type { RiskControlSetting, RiskEvaluation, RiskEvent, SuggestionTracking } from '../api/phase2Types';
+import { DailyDimensions } from '../features/daily/DailyDimensions';
 import { TrackingResults } from '../components/TrackingResults';
 import { StrategyTrackingStats, TrackingStatValue, SuggestionStrategyTracking, trackingDecimal } from '../components/TrackingStats';
 import { STRATEGY_TEMPLATES, trackingOf } from '../mocks/strategyHandlers';
@@ -338,5 +339,82 @@ it.skipIf(!process.env.P2N05C_SIM_REAL_API)('P2N05c sim real：真实React查询
     globalThis.fetch = nativeFetch; cookies.clear();
     const { writeFileSync } = await import('node:fs'); writeFileSync('/workspace/team/reports/P2N-05c/sim/http-journal.json', JSON.stringify(journal, null, 2));
     server.listen({ onUnhandledFrame: 'error' });
+  }
+});
+
+// P2N-05d日报六维：仅事实覆盖，无中性分数/默认观点回退。
+it('六维缺数据明确使用warning未知标记，不显示默认中性观点或评分', () => {
+  const report = structuredClone(DAILY_REPORTS[0]); const stock = report.stocks[0];
+  render(<DailyDimensions stock={stock} evidence={report.evidence} />);
+  fireEvent.click(screen.getByText('六维事实与缺口（不是策略结论）'));
+  const dimension = screen.getByTestId(`dimension-${stock.security_code}-sentiment`);
+  expect(dimension).toHaveTextContent('未知/缺数据（非中性）');
+  expect(screen.getByTestId(`dimension-missing-${stock.security_code}-sentiment`)).toHaveClass('ant-tag-warning');
+  expect(dimension.querySelector('.ant-tag-default, .view-neutral, .score')).toBeNull();
+  expect(dimension).toHaveTextContent('暂无已知事实'); expect(dimension).toHaveTextContent('未登记');
+});
+it('证据可按原endpoint打开来源，内部reports标识只定位本报告；外链不进入候选页', async () => {
+  const report = structuredClone(DAILY_REPORTS[0]); const stock = report.stocks[0];
+  const evidence = report.evidence.find((row) => row.id === stock.dimensions![0].facts[0].evidence_ids[0])!;
+  evidence.endpoint = 'https://example.invalid/TEST-source.pdf';
+  server.use(http.get(`${API}/daily-reports/:date`, () => HttpResponse.json(report)));
+  const router = renderAt(`/daily-reports/${REPORT_DATE}`); const details = await screen.findByTestId(`dimensions-${stock.security_code}`); fireEvent.click(within(details).getByText('六维事实与缺口（不是策略结论）'));
+  const link = within(details).getByRole('link', { name: `查看来源原文 ${evidence.id}` });
+  expect(link).toHaveAttribute('href', evidence.endpoint); expect(link).toHaveAttribute('target', '_blank'); expect(link).toHaveAttribute('rel', 'noopener noreferrer nofollow'); expect(link).toHaveAttribute('referrerpolicy', 'no-referrer');
+  const anchor = within(details).getByRole('link', { name: `查看六维证据 ${evidence.id}` }); fireEvent.click(anchor);
+  expect(router.state.location.pathname).toBe(`/daily-reports/${REPORT_DATE}`);
+});
+it.each(['javascript:alert(1)', 'data:text/plain,TEST', null, 'reports:missing-source'])('来源不是可信网页URL时不生成外链：%s', (endpoint) => {
+  const report = structuredClone(DAILY_REPORTS[0]); const stock = report.stocks[0]; report.evidence.forEach((entry) => { entry.endpoint = endpoint; });
+  render(<DailyDimensions stock={stock} evidence={report.evidence} />); fireEvent.click(screen.getByText('六维事实与缺口（不是策略结论）'));
+  expect(screen.queryByRole('link', { name: /查看来源原文/ })).not.toBeInTheDocument();
+});
+it('不把带凭据的来源URL作为链接或明文输出，不补造来源', () => {
+  const report = structuredClone(DAILY_REPORTS[0]); const stock = report.stocks[0]; const url = new URL('https://example.invalid/TEST'); url.username = 'TEST'; url.password = 'TEST-PASS';
+  report.evidence.forEach((entry) => { entry.endpoint = url.href; });
+  render(<DailyDimensions stock={stock} evidence={report.evidence} />); fireEvent.click(screen.getByText('六维事实与缺口（不是策略结论）'));
+  expect(screen.queryByRole('link', { name: /查看来源原文/ })).not.toBeInTheDocument(); expect(screen.queryByText(/TEST-PASS/)).not.toBeInTheDocument();
+});
+it('日报顶层时点和账户金额为null时不崩溃、不用生成时点或0回填；旧版六维显示空态', async () => {
+  const report = structuredClone(DAILY_REPORTS[0]); report.data_as_of = null;
+  if (report.account) { report.account.total_assets = null; report.account.cash = null; }
+  report.stocks.forEach((stock) => { stock.dimensions = null; stock.analysis_snapshot_id = null; });
+  server.use(http.get(`${API}/daily-reports/:date`, () => HttpResponse.json(report)));
+  renderAt(`/daily-reports/${REPORT_DATE}`); await screen.findByTestId('daily-report');
+  expect(screen.getByText(/数据截至 —（无来源）/)).toBeInTheDocument();
+  for (const detail of screen.getAllByText('六维事实与缺口（不是策略结论）')) fireEvent.click(detail);
+  expect(screen.getAllByTestId('dimensions-legacy').length).toBe(report.stocks.length);
+  expect(screen.queryByTestId(`dimension-${report.stocks[0].security_code}-technical`)).not.toBeInTheDocument();
+});
+
+it.skipIf(!process.env.P2N05D_REAL_API)('P2N05d real：真实日报路由→六维/缺口/来源→旧版投影与跨用户404', async () => {
+  server.close(); const nativeFetch = globalThis.fetch; const cookies = new Map<string, string>(); const base = 'http://127.0.0.1:15567';
+  const journal: { method: string; path: string; status: number }[] = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url; const original = new URL(raw, base);
+    if (!['127.0.0.1', 'localhost'].includes(original.hostname)) throw new Error('仅允许本任务回环实联');
+    const url = new URL(original.pathname + original.search, base); const headers = new Headers(init.headers); headers.set('Origin', base);
+    if (cookies.size) headers.set('Cookie', [...cookies].map(([key, value]) => key + '=' + value).join('; '));
+    const response = await nativeFetch(url, { ...init, headers });
+    for (const line of response.headers.getSetCookie()) { const first = line.split(';')[0]; const index = first.indexOf('='); cookies.set(first.slice(0, index), first.slice(index + 1)); if (first.startsWith('csrf_token=')) document.cookie = first + '; Path=/'; }
+    journal.push({ method: init.method ?? 'GET', path: url.pathname, status: response.status }); return response;
+  };
+  try {
+    const login = await fetch(base + '/api/v1/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'p2n05d_test', password: process.env.P2N05D_TEST_PASSWORD }) }); expect(login.status).toBe(200);
+    const router = renderAt('/daily-reports/2026-10-30');
+    const details = await screen.findByTestId('dimensions-600000.SH'); fireEvent.click(within(details).getByText('六维事实与缺口（不是策略结论）'));
+    expect(within(details).getByTestId('dimension-600000.SH-technical')).toHaveTextContent('TEST已存收盘事实');
+    expect(within(details).getByTestId('dimension-600000.SH-sentiment')).toHaveTextContent('未知/缺数据（非中性）');
+    expect(within(details).getByTestId('dimension-evidence-600000.SH:missing')).toHaveTextContent('—（缺数据）');
+    expect(within(details).getByRole('link', { name: '查看来源原文 600000.SH:title' })).toHaveAttribute('href', 'https://example.invalid/TEST-daily-source.pdf');
+    const anchor = within(details).getByRole('link', { name: '查看六维证据 600000.SH:close' }); fireEvent.click(anchor); expect(router.state.location.pathname).toBe('/daily-reports/2026-10-30');
+    await router.navigate('/daily-reports/2026-10-29'); await screen.findByText(/数据截至 —（无来源）/);
+    const legacy = await screen.findByTestId('dimensions-600000.SH'); fireEvent.click(within(legacy).getByText('六维事实与缺口（不是策略结论）'));
+    expect(within(legacy).getByTestId('dimensions-legacy')).toHaveTextContent('旧版日报未提供六维分析'); expect(within(legacy).queryByTestId('dimension-600000.SH-technical')).not.toBeInTheDocument();
+    const old = await apiGet<DailyReport>('/daily-reports/2026-10-29'); expect(old.stocks[0].dimensions).toBeNull(); expect(old.stocks[0].analysis_snapshot_id).toBeNull();
+    expect((await apiFetch(`${API}/daily-reports/2026-10-28`)).status).toBe(404);
+    expect(journal.every((item) => !item.path.includes('/admin/'))).toBe(true);
+  } finally {
+    globalThis.fetch = nativeFetch; cookies.clear(); const { writeFileSync } = await import('node:fs'); writeFileSync('/workspace/team/reports/P2N-05d/http-journal.json', JSON.stringify(journal, null, 2)); server.listen({ onUnhandledFrame: 'error' });
   }
 });

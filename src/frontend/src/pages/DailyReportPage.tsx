@@ -212,10 +212,10 @@ export function DailyReportPage() {
         <DateSwitcher date={r.date} />
         <Tag>不可变快照</Tag>
         <DataStatusTag status={r.data_status} asOf={r.data_as_of} gaps={r.gaps} />
-        <span className="muted small">生成于 {fmtTime(r.generated_at)} · 数据截至 {fmtTime(r.data_as_of)} · 说明来源：{r.explanation.source === 'template' ? '模板' : 'LLM'}</span>
+        <span className="muted small">生成于 {fmtTime(r.generated_at)} · 数据截至 {r.data_as_of === null ? '—（无来源）' : fmtTime(r.data_as_of)} · 说明来源：{r.explanation.source === 'template' ? '模板' : 'LLM'}</span>
       </div>
       <p className="muted small">SSE 盘中变化与 AI 解释增量暂未接入；当前保留原有说明，不标为新增 AI 解释。</p>
-      {IS_MOCK ? <Alert type="info" title="示例数据 · 日报首批为 mock 阶段，未联调后端" /> : null}
+      {IS_MOCK ? <Alert type="info" title="示例数据 · 日报六维事实与缺口均为合成示例" /> : <Alert type="info" title="真实日报接口 · 仅读取已生成的本人不可变快照；缺数据不补算、不当中性。" />}
       <div className="report-summary">{r.explanation.text}</div>
       <CardDisclaimer />
       {r.gaps.length ? (

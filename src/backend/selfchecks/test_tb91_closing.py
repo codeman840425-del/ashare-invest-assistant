@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import functools
+import inspect
 import json
 import uuid
 from decimal import Decimal
@@ -12,15 +14,29 @@ from typing import Any
 
 import pytest
 from sqlalchemy import insert, select, update
+from sqlalchemy.dialects.postgresql import insert as upsert
 
+from app.db.tables.accounts import broker_position_snapshot_items, broker_position_snapshots
+from app.db.tables.licences import user_data_licences
+from app.db.tables.market import feature_bars_daily
 from app.db.tables.research import action_plans, plan_versions
-from app.db.tables.signals import candidate_signals, non_executable_reasons, plan_drafts
+from app.db.tables.reviews import data_snapshots
+from app.db.tables.signals import (
+    candidate_signal_events,
+    candidate_signals,
+    non_executable_reasons,
+    plan_drafts,
+)
 from app.db.tables.strategy import strategy_instances
+from app.db.tables.users import audit_logs
+from app.ingest.owned_quotes import record_quote
 from app.plans.budgets import BudgetUnknownError, allocations
-from app.schemas.enums import Action
+from app.schemas.enums import Action, RiskLevel
+from app.signals.models import RiskFlag, Stops
 from selfchecks import test_tb74_candidates as producer
 from selfchecks import test_tb91_fixes as old91
-from selfchecks.test_tb91_fixes import database, env, no_network  # noqa: F401
+from selfchecks.test_p2n02_risk_controls import env, no_network  # noqa: F401
+from selfchecks.test_tb91_fixes import database  # noqa: F401
 
 
 @pytest.fixture
@@ -38,7 +54,8 @@ def buy_fixture(env: Any, monkeypatch: Any, request: Any) -> Any:
         ],
     )
     assert response.status_code == 200, response.text
-    if action == "no_stop":
+    if action in {"no_stop", "disabled_with_stop"}:
+        missing_stop = action == "no_stop"
         action = "buy"
         cfg = next(
             r for r in client.get("/api/v1/risk-controls").json() if r["control"] == "stop_take"
@@ -48,20 +65,24 @@ def buy_fixture(env: Any, monkeypatch: Any, request: Any) -> Any:
             json=[{"control": "stop_take", "enabled": False, "params": cfg["params"]}],
         )
         assert response.status_code == 200, response.text
-        actual_stops = old91.Stops
+        actual_stops = Stops
+        operands = json.loads((Path(__file__).parent / "fixtures/tb91_operands.json").read_text())
+        stop = None if missing_stop else Decimal(operands[0]["last"])
+        assert stop is None or 0 < stop < 25
         monkeypatch.setattr(
             old91,
             "Stops",
-            lambda **_: actual_stops(stop_loss=None, take_profit=None, time_stop_days=None),
+            lambda **_: actual_stops(stop_loss=stop, take_profit=None, time_stop_days=None),
         )
     original = producer.signal
 
+    @functools.wraps(original)
     def supplied(_action: str, code: str = "688018.SH") -> Any:
         value = original("buy", code)
         return value.model_copy(update={"proposed_action": Action(action)})
 
     monkeypatch.setattr(producer, "signal", supplied)
-    return old91.generated_draft.__wrapped__(env)
+    return inspect.unwrap(old91.generated_draft)(env)
 
 
 @pytest.mark.parametrize("buy_fixture", ["buy", "add"], indirect=True)
@@ -187,6 +208,7 @@ def test_budget_exhausted_reason_commit_and_recheck(buy_fixture: Any) -> None:
     assert stale.json()["error"]["code"] == "PLAN_DRAFT_STALE"
 
 
+@pytest.mark.parametrize("buy_fixture", ["buy", "add"], indirect=True)
 def test_budget_multi_full_allocation_latest_unknown_and_stale(buy_fixture: Any) -> None:
     env, draft, answer = buy_fixture
     engine, client, other, owner, other_id, _ = env
@@ -212,9 +234,7 @@ def test_budget_multi_full_allocation_latest_unknown_and_stale(buy_fixture: Any)
             update={
                 "snapshot_id": uuid.uuid4(),
                 "valid_until": dt.datetime.now(dt.UTC) + dt.timedelta(days=1),
-                "stops": old91.Stops(
-                    stop_loss=Decimal(22), take_profit=Decimal(28), time_stop_days=5
-                ),
+                "stops": Stops(stop_loss=Decimal(22), take_profit=Decimal(28), time_stop_days=5),
             }
         )
     setup = (
@@ -287,6 +307,118 @@ def test_budget_multi_full_allocation_latest_unknown_and_stale(buy_fixture: Any)
         )
         with pytest.raises(BudgetUnknownError):
             allocations(conn, owner, both, dt.datetime.now(dt.UTC))
+    # Commit the legitimate unknown latest version before testing the real API.
+    pending = sorted(set(draft["signal_ids"]) - set(merged["signal_ids"]))
+    assert len(pending) == 1  # The unused original candidate is still drafted, not confirmed.
+    tables = (
+        plan_drafts,
+        action_plans,
+        plan_versions,
+        candidate_signals,
+        candidate_signal_events,
+        non_executable_reasons,
+        data_snapshots,
+        audit_logs,
+    )
+
+    def facts() -> Any:
+        with engine.connect() as conn:
+            return [conn.execute(select(t).order_by(t.c.id)).all() for t in tables]
+
+    before = facts()
+    refused = client.post("/api/v1/plan-drafts", json={"signal_ids": pending})
+    assert refused.status_code == 503, refused.text
+    assert refused.json()["error"]["details"]["gaps"] == ["budget_plan_amount"]
+    assert facts() == before  # No draft/plan/version/state/snapshot/audit half-commit.
+    denied = other.post("/api/v1/plan-drafts", json={"signal_ids": pending})
+    assert denied.status_code == 400, denied.text
+    assert facts() == before
+
+    # A second synthetic held code avoids the real, unrelated opposite-plan guard.
+    # Keep all original holdings in an appended broker snapshot; no position mutation.
+    now = dt.datetime.now(dt.UTC)
+    with engine.begin() as conn:
+        conn.execute(
+            update(strategy_instances)
+            .where(strategy_instances.c.id == inst.id)
+            .values(scope="account", security_code=None)
+        )
+        prior = conn.execute(
+            select(broker_position_snapshots)
+            .where(broker_position_snapshots.c.account_id == inst.account_id)
+            .order_by(broker_position_snapshots.c.version_no.desc())
+        ).first()
+        assert prior is not None
+        items = conn.execute(
+            select(broker_position_snapshot_items).where(
+                broker_position_snapshot_items.c.snapshot_id == prior.id
+            )
+        ).all()
+        clone_snapshot = dict(prior._mapping)
+        clone_snapshot.update(id=uuid.uuid4(), version_no=prior.version_no + 1)
+        conn.execute(insert(broker_position_snapshots).values(**clone_snapshot))
+        for item in items:
+            values = dict(item._mapping)
+            values.update(id=uuid.uuid4(), snapshot_id=clone_snapshot["id"])
+            conn.execute(insert(broker_position_snapshot_items).values(**values))
+        conn.execute(
+            insert(broker_position_snapshot_items).values(
+                id=uuid.uuid4(),
+                snapshot_id=clone_snapshot["id"],
+                security_code="688073.SH",
+                quantity=300,
+                sellable_quantity=300,
+                broker_cost_price=25,
+                last_price_ref=25,
+            )
+        )
+        lid = conn.execute(
+            select(user_data_licences.c.id).where(
+                user_data_licences.c.user_id == owner, user_data_licences.c.status == "active"
+            )
+        ).scalar_one()
+        record_quote(
+            conn,
+            env[-1],
+            licence_id=lid,
+            code="688073.SH",
+            observed_at=now,
+            fetched_at=now,
+            now=now,
+            price=Decimal(25),
+            prev_close=Decimal(25),
+            is_suspended=False,
+        )
+        levels = upsert(feature_bars_daily).values(
+            code="688073.SH",
+            trade_date=now.astimezone(dt.timezone(dt.timedelta(hours=8))).date(),
+            feature_set_version=first.feature_set_version,
+            values={"f.limit_up_price": "30", "f.limit_down_price": "20"},
+            computed_at=now,
+        )
+        conn.execute(
+            levels.on_conflict_do_update(
+                index_elements=["code", "trade_date", "feature_set_version"],
+                set_={"values": levels.excluded["values"], "computed_at": now},
+            )
+        )
+    # The same unknown buy budget must not gate sell/reduce; use the actual evaluator.
+    original_signal = inspect.unwrap(producer.signal)
+    single_setup = (*setup[:6], inst.id, *setup[7:])
+    for action in ("sell", "reduce"):
+        outgoing = original_signal(action, "688073.SH").model_copy(
+            update={
+                "snapshot_id": uuid.uuid4(),
+                "valid_until": dt.datetime.now(dt.UTC) + dt.timedelta(days=1),
+                "stops": content.stops,
+            }
+        )
+        written = producer.persist(single_setup, outgoing)
+        generated = client.post("/api/v1/plan-drafts", json={"signal_ids": [written["id"]]})
+        assert generated.status_code == 201, generated.text
+        assert generated.json()["action"] == action
+
+    with engine.begin() as conn:
         operands = json.loads((Path(__file__).parent / "fixtures/tb91_operands.json").read_text())
         assert len(operands) == 24
         fallback_amount = Decimal(operands[0]["last"]) * 100
@@ -345,9 +477,14 @@ def test_rc1_disabled_null_loss_and_positive_below_lot_budget(buy_fixture: Any) 
     assert out.status_code == 201, out.text
     assert out.json()["max_loss_amount"] is None
     assert out.json()["max_loss_pct"] is None
-    assert any(
-        f["control"] == "stop_take" and not f["gated_actions"] for f in out.json()["risk_flags"]
-    )
+    flags = [RiskFlag.model_validate(f) for f in out.json()["risk_flags"]]
+    disabled = next(f for f in flags if f.control == "stop_take")
+    assert disabled.level == RiskLevel.WARNING
+    assert not disabled.gated_actions
+    assert "无法计算" in disabled.message
+    assert {"key": "max_loss_amount", "reason": "rc1_disabled"} in out.json()[
+        "user_context_snapshot"
+    ]["gaps"]
     with engine.begin() as conn:
         iid = conn.execute(
             select(candidate_signals.c.instance_id).where(
@@ -362,13 +499,31 @@ def test_rc1_disabled_null_loss_and_positive_below_lot_budget(buy_fixture: Any) 
     assert "cash_or_quantity_cap_below_minimum" in failed.json()["error"]["details"]["gaps"]
 
 
+@pytest.mark.parametrize("buy_fixture", ["disabled_with_stop"], indirect=True)
+def test_rc1_disabled_with_stop_keeps_loss_and_valid_warning(buy_fixture: Any) -> None:
+    _env, draft, _answer = buy_fixture
+    flags = [RiskFlag.model_validate(f) for f in draft["risk_flags"]]
+    disabled = next(f for f in flags if f.control == "stop_take")
+    assert disabled.level == RiskLevel.WARNING
+    assert not disabled.gated_actions
+    assert "RC1已关闭" in disabled.message
+    assert "无法计算" not in disabled.message
+    assert all(g["key"] != "max_loss_amount" for g in draft["user_context_snapshot"]["gaps"])
+    loss = Decimal(draft["qty_range"]["max"]) * (
+        Decimal(draft["price_range"]["high"]) - Decimal(draft["stops"]["stop_loss"])
+    ) + Decimal(draft["fee_estimate"]["amount"])
+    assert Decimal(draft["max_loss_amount"]) == loss
+    assert Decimal(draft["max_loss_amount"]) > 0
+    assert Decimal(draft["max_loss_pct"]) > 0
+
+
 def test_legacy_known_components_null_root_projected_readonly(env: Any) -> None:
     from app.db.tables.realtime import daily_reports
     from app.reports.service import build
     from selfchecks.test_p2n03_tracking import produced
     from selfchecks.test_p2n04_daily_dimensions import DATE, source
 
-    prepared = produced.__wrapped__(env)
+    prepared = inspect.unwrap(produced)(env)
     source(prepared, bad_fund=True)
     engine, client, _, owner, *_ = env
     now = dt.datetime.now(dt.UTC)

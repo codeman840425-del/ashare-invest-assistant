@@ -28,7 +28,7 @@ from app.plans import service
 from app.plans.budgets import BudgetUnknownError, allocations, remaining
 from app.plans.models import number
 from app.risk.evaluation import inputs
-from app.signals.models import Stops
+from app.signals.models import RiskFlag, Stops
 from app.signals.service import transition
 from app.suggestions.risk import effective_config
 from app.workers.assembly import canonical
@@ -297,7 +297,7 @@ def generate(
     lower = max(Decimal(lot.min_buy), (upper / 2 // lot.step) * lot.step)
     loss = None if stops.stop_loss is None else upper * (high - stops.stop_loss) + fee
     warnings = []
-    if stop_disabled:
+    if stop_disabled and stops.stop_loss is None:
         warnings.append({"key": "max_loss_amount", "reason": "rc1_disabled"})
     if assets is None:
         warnings.append({"key": "max_loss_pct", "reason": "no_source"})
@@ -355,14 +355,20 @@ def generate(
             risk_flags=[f for r in signals for f in (r.risk_flags or [])]
             + (
                 [
-                    {
-                        "control": "stop_take",
-                        "level": "attention",
-                        "message": "RC1已关闭，最大亏损无法计算。",
-                        "gated_actions": [],
-                        "quantity_cap": None,
-                        "evidence_ids": [],
-                    }
+                    RiskFlag.model_validate(
+                        {
+                            "control": "stop_take",
+                            "level": "warning",
+                            "message": (
+                                "RC1已关闭且缺少止损，最大亏损无法计算。"
+                                if stops.stop_loss is None
+                                else "RC1已关闭，不主动监测止损。"
+                            ),
+                            "gated_actions": [],
+                            "quantity_cap": None,
+                            "evidence_ids": [],
+                        }
+                    ).model_dump(mode="json")
                 ]
                 if stop_disabled
                 else []

@@ -27,9 +27,14 @@ OLD_REASONS = ("exchange_list", "exchange_delist_list", "missing_from_list")
 
 
 def _replace(table: str, name: str, column: str, values: tuple[str, ...]) -> None:
-    op.drop_constraint(name, table, schema="market", type_="check")
+    # These names already exist verbatim in 0019; do not apply metadata
+    # naming_convention (ck_<table>_<constraint_name>) a second time.
+    op.drop_constraint(op.f(name), table, schema="market", type_="check")
     op.create_check_constraint(
-        name, table, column + " IN (" + ",".join(repr(v) for v in values) + ")", schema="market"
+        op.f(name),
+        table,
+        column + " IN (" + ",".join(repr(v) for v in values) + ")",
+        schema="market",
     )
 
 

@@ -570,7 +570,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 #### 2.5.0B 晋级门槛 L1 → L2（G1–G7，按调研 §3.3 采纳并补充 P1）
 | 关卡 | 检查内容 | 方式 |
 |---|---|---|
-| G1 规则完整且可解释 | 入场、失效/退出、止损三类规则**全部已量化**（无 `to_quantify`）；每个周期至少一条 exit；做T 须有当日回补或时间止损；**至少 1 条反证规则**；每条规则都能产出 `rule_refs` 和 `evidence`（P1） | 自动 |
+| G1 规则完整且可解释 | 入场、失效/退出、止损三类规则**全部已量化**（无 `to_quantify`）；每个周期至少一条 exit（多周期卡按 T-R24 Q-01 裁定：exit 规则**声明即适用**于全部声明周期，机器判定 = exit 规则集非空且含止损类，不按周期拆分；schema 支持按规则标注适用周期前，不认部分适用）；做T 须有当日回补或时间止损；**至少 1 条反证规则**；每条规则都能产出 `rule_refs` 和 `evidence`（P1） | 自动 |
 | G2 数据可得 | 每个字段都在 `feature_catalog` 白名单内，且来源状态不是"缺口"。只有文档依据（`verified_doc`）的字段只能晋级到 `simulating`（模拟中）；T-B05 实测确认（`verified_live`）后才可能 `published`。预热窗口不足时输出 `insufficient_data`，不算失败 | 自动 |
 | G3 语法安全 | DSL 解析为 AST，只允许白名单字段、运算符和函数（比较、布尔、`cross_up/down`、`ma()`、`for N days`、`rank_pct`、`between`）；限制表达式长度和嵌套深度；**不执行任意代码** | 自动 |
 | G4 参数 schema | 每个参数都有 `type/default/min/max/step/说明`，默认值在范围内；类型严格（不允许用字符串表示布尔值） | 自动 |
@@ -971,7 +971,7 @@ class RuleTemplateStrategy(ScreenerStrategy, TimingStrategy):
    - 晋级到 `simulating`，这是 2.5.13 中通过 G1–G7 后唯一的去向。
    - 不晋级到 `published`：它要求模拟 n≥20 或满 20 个交易日，并且字段全部 `verified_live`，目前达不到。
    - 不用 `observing`：它只能由 published 版本健康度下降自动进入，不能手动设置。
-3. **门禁：G1–G7 全部要通过，一项都不豁免或放宽**：
+3. **门禁：G1–G7 全部要通过，一项都不豁免或放宽**（T-R24 Q-02 澄清：指**关卡层面**——七道关卡一道不能整关跳过、不能放宽判定标准；关卡内**已登记的角色型豁免照常有效**，且豁免必须指向登记的裁定条号，如 G1 对纯离场组件免 entry（T-A03、T-R15 ②）、G2 的 `insufficient_data` 不算失败）：
    - G1：W-01 不能有 `to_quantify`（X5 已改用 `_qfq`）。H-01 按 `mount_policy=system_only` 和纯离场规则享受 G1 豁免（T-R15 第 2 条）。
    - G2：所需字段至少 `verified_doc`，不能是 gap。feature 元数据里的 null 不影响 G2（T-A13）。
    - **T-R18 裁定（架构师 2026-11-07）**：① 公开文档依据可写 `verified_doc`（只够到 simulating，见 2.5.13 G2），前提是公式、窗口、可见时点有文档依据；由研究员在 feature_spec 状态列改写并引用 `docs/strategies/T-R18_source_matrix.yaml` 对应行，架构师代提交；后端只按 feature_spec/catalog 导入，不凭报告或口头升级。② `f.close_qfq/f.high_qfq/f.low_qfq`：接受 PIT 限定——按 T-R15 规则 0 只用 as_of 当次取数并存快照，历史回写值不作时点正确依据、不用于回测；单位“元/股”属推断，记入 gaps，待 T-B05 实测。③ `f.list_days`：接受；上市日早于交易日历覆盖起点时值为 null 并记 gap（insufficient_data），不估算。④ `f.np_yoy_latest`：接受，可见时点取 `plrq`；V5f 未结前以首次观测值为准，入库带 observed_at，后续更正作为新观测、不改写旧快照，V5f 随 T-B05 复核。⑤ `f.amount/f.main_net_20d/f.market_regime/f.ind_rs20` 保持 declared，H-01、W-01 的 G2 仍不通过，需实测或补来源，不得放宽 G2。

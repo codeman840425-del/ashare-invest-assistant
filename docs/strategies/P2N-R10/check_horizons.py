@@ -26,31 +26,74 @@ def parse_block(text,label):
     return get('key'),int(get('version_no')),[h.strip() for h in get('horizons').strip('[]').split(',')]
 
 def _git_tracked(path: Path) -> bool | None:
-    """Return True/False if git tracking is known; None if undeterminable (fail-safe: do not ignore)."""
+    """T-A80 L-1 three-state tracking probe.
+
+    Returns True if tracked (git ls-files --error-unmatch rc==0),
+    False if confirmed untracked (rc==1),
+    None if tracking cannot be determined (rc==128 / other rc / missing git /
+    timeout / any exception) — fail-safe: caller must NOT ignore.
+    """
     try:
         import subprocess
         r = subprocess.run(
             ['git', '-C', str(ROOT), 'ls-files', '--error-unmatch', str(path.relative_to(ROOT))],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=10,
         )
-        return r.returncode == 0
+        if r.returncode == 0:
+            return True
+        if r.returncode == 1:
+            return False
+        return None
     except Exception:
         return None
 
 def _ignore_generated(path: Path) -> bool:
-    """T-A78 ①c ∩ orchestrator: ignore __pycache__ dir / *.pyc only when untracked; unknown tracking → do not ignore."""
+    """Ignore __pycache__ / *.pyc only when confirmed untracked (tracked=False).
+
+    tracked=True → do not ignore (must be registered or fail).
+    tracked=None (tracking_unknown) → do not ignore (fail-safe).
+    """
     is_pyc = path.suffix == '.pyc' or '__pycache__' in path.parts
     if not is_pyc:
         return False
     tracked = _git_tracked(path)
     if tracked is None:
-        return False  # fail-safe
-    return not tracked
+        return False  # tracking_unknown: keep in enum
+    if tracked is True:
+        return False
+    return True  # confirmed untracked
 
 def validate(data):
-    files={str(p.relative_to(ROOT)):p for p in BASE.rglob('*') if p.is_file() and HERE not in p.parents and not _ignore_generated(p)}
+    files={}
+    tracking_unknown=[]
+    for p in BASE.rglob('*'):
+        if not p.is_file() or HERE in p.parents:
+            continue
+        rel=str(p.relative_to(ROOT))
+        is_pyc = p.suffix == '.pyc' or '__pycache__' in p.parts
+        if is_pyc:
+            tracked = _git_tracked(p)
+            if tracked is None:
+                tracking_unknown.append(rel)
+                files[rel]=p  # do not ignore
+                continue
+            if tracked is False:
+                continue  # confirmed untracked → ignore
+            files[rel]=p  # tracked pyc stays
+            continue
+        files[rel]=p
     census=data['scope_snapshot'];require(len({f['path'] for f in census})==len(census))
-    require(set(files)=={f['path'] for f in census}, 'scope files changed: refresh census')
+    if set(files)!={f['path'] for f in census}:
+        extra=sorted(set(files)-{f['path'] for f in census})
+        missing=sorted({f['path'] for f in census}-set(files))
+        parts=[]
+        if tracking_unknown:
+            parts.append('tracking_unknown:'+','.join(tracking_unknown))
+        if extra:
+            parts.append('extra:'+','.join(extra))
+        if missing:
+            parts.append('missing:'+','.join(missing))
+        fail('scope files changed: refresh census; '+' ; '.join(parts))
     actual={}
     # All actual card fences, not merely catalog names; golden render inputs excluded explicitly.
     for path,p in files.items():

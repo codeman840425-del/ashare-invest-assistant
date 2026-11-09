@@ -17,8 +17,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
 
 from app.config_files import IngestLicences
@@ -63,7 +62,6 @@ class LicenceState:
     paused_until: dt.datetime | None = None  # quota / ip_limited / 熔断
     backoff_until: dt.datetime | None = None
     consecutive_failures: int = 0
-    ip_limited_hits: deque[dt.datetime] = field(default_factory=deque)
     expired_daily: DailyCounter | None = None
 
     # ------------------------------------------------------------ 内部
@@ -80,8 +78,13 @@ class LicenceState:
 
     # ------------------------------------------------------------ 时间推进
 
-    def tick(self, now: dt.datetime) -> list[Transition]:
-        """到期判定与暂停期满恢复。调度前调用。"""
+    def tick(
+        self, now: dt.datetime, *, user_escalated_until: dt.datetime | None = None
+    ) -> list[Transition]:
+        """到期判定与暂停期满恢复。调度前调用。
+
+        ``user_escalated_until``（T-A75）不得被本方法提前；取与本行暂停的较晚者。
+        """
         out: list[Transition] = []
         if (
             self.expires_on is not None
@@ -91,10 +94,15 @@ class LicenceState:
             out += self._move(S.EXPIRED, "expired", notify_user=True, notify_admin=True)
             if self.tier == DataLicenceTier.DIAMOND:
                 self.expired_daily = DailyCounter(self.cfg.diamond_after_expiry_per_day)
+        effective = self.paused_until
+        if user_escalated_until is not None and (
+            effective is None or user_escalated_until > effective
+        ):
+            effective = user_escalated_until
         if (
             self.status in (S.QUOTA_EXCEEDED, S.IP_LIMITED)
-            and self.paused_until is not None
-            and now >= self.paused_until
+            and effective is not None
+            and now >= effective
         ):
             self.paused_until = None
             out += self._move(S.ACTIVE, "resumed")
@@ -102,14 +110,27 @@ class LicenceState:
 
     # ------------------------------------------------------------ 调度许可
 
-    def allows(self, priority: Priority, now: dt.datetime, *, verify: bool = False) -> bool:
+    def allows(
+        self,
+        priority: Priority,
+        now: dt.datetime,
+        *,
+        verify: bool = False,
+        user_escalated_until: dt.datetime | None = None,
+    ) -> bool:
         """此刻是否允许为该证书发出一次 ``priority`` 调用（不消耗额度）。
 
         ``verify=True`` 为 ``verify_licence`` 意图：``pending_verification`` 只放行它。
+        ``user_escalated_until``（T-A75）与本行 ``paused_until`` 取较晚者。
         """
         if self._blocked_hard():
             return False
-        if self.paused_until is not None and now < self.paused_until:
+        effective = self.paused_until
+        if user_escalated_until is not None and (
+            effective is None or user_escalated_until > effective
+        ):
+            effective = user_escalated_until
+        if effective is not None and now < effective:
             return False
         if self.backoff_until is not None and now < self.backoff_until:
             return False
@@ -146,23 +167,8 @@ class LicenceState:
             self.paused_until = next_quota_resume(now, cfg.quota_resume_at)
             return self._move(S.QUOTA_EXCEEDED, "quota_exceeded", until=self.paused_until)
         if signal == Signal.IP_LIMITED:
-            esc = cfg.ip_limited_escalate
-            window_start = now - dt.timedelta(seconds=esc.window_s)
-            while self.ip_limited_hits and self.ip_limited_hits[0] < window_start:
-                self.ip_limited_hits.popleft()
-            self.ip_limited_hits.append(now)
-            if len(self.ip_limited_hits) >= esc.count:
-                self.ip_limited_hits.clear()
-                self.paused_until = now + dt.timedelta(seconds=esc.pause_s)
-                return self._move(
-                    S.IP_LIMITED,
-                    "ip_limited_escalated",
-                    notify_user=True,
-                    notify_admin=True,
-                    until=self.paused_until,
-                )
-            self.paused_until = now + dt.timedelta(seconds=cfg.ip_limited_pause_s)
-            return self._move(S.IP_LIMITED, "ip_limited", until=self.paused_until)
+            # T-A75: counting/escalation is user-scoped; IngestCore.apply_ip_limited owns it.
+            raise RuntimeError("IP_LIMITED must be handled by IngestCore.apply_ip_limited")
         if signal in BACKOFF_SIGNALS:
             self.consecutive_failures += 1
             br = cfg.breaker
@@ -197,7 +203,10 @@ class LicenceState:
         return self._move(S.PENDING_VERIFICATION, "admin_resume")
 
     def user_reset(self) -> list[Transition]:
-        """用户重新 PUT 或点“测试”：清掉 invalid/退避，进入待验证（管理员暂停不受影响）。"""
+        """用户重新 PUT 或点“测试”：清掉 invalid/退避，进入待验证（管理员暂停不受影响）。
+
+        本行 ``paused_until`` 可清；用户级升级截止由 IngestCore 保留（T-A75）。
+        """
         if self.status == S.PAUSED_BY_ADMIN:
             return []
         self.paused_until = self.backoff_until = None

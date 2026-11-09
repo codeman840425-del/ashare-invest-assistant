@@ -245,6 +245,10 @@ secret 没挂上时 `secret-env.sh` 拒绝启动，后端不会回落到临时�
 - 删除用户数据（先 dry-run）：`deploy/scripts/compose.sh --profile maint run --rm --no-deps maint-cli --user-id <uuid> [--execute]`。
 - 原始导入文件卷 `<卷前缀>_imports` 只挂给 api 与 maint-cli，挂载点跟随 `IMPORT_STORAGE_PATH`，卷根 10001:10001、700。
 
+## 6.1 IP 限流升级暂停持久化（T-A75 / T-O66）
+
+重启或换机后升级暂停由库（`ops.data_licence_events`）自动恢复，无需人工处理；严禁手工清理 `ops.data_licence_events`。
+
 ## 7. 迁移 0017 预检查（T-B49；review-6670b10）
 
 0017 给 `app.data_snapshots` 加约束：`purpose IN ('candidate','plan','horizon')` 时 `user_id` 必须非空。

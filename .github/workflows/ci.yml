@@ -36,6 +36,21 @@ jobs:
     name: backend (ruff, mypy, pytest+coverage)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # T-O66：t_t41 / t_t45 读 TT41_DATABASE_URL，需要与 contract/migrations 同源的内建 PG。
+    services:
+      db:
+        image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+        env:
+          POSTGRES_USER: aia
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: aia
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aia -d aia" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # CI 专用口令（与 contract/migrations 一致），不是真实密钥；驱动用 psycopg 与用例注释一致。
+      TT41_DATABASE_URL: postgresql+psycopg://aia:ci-only@127.0.0.1:5432/aia
+      DATABASE_URL: postgresql://aia:ci-only@127.0.0.1:5432/aia
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,6 +69,9 @@ jobs:
       - name: mypy --strict
         working-directory: src/backend
         run: uv run --frozen mypy
+      - name: 迁移到 head（供 TT41_DATABASE_URL / t_t41·t_t45）
+        working-directory: src/backend
+        run: uv run --frozen alembic upgrade head
       - name: pytest + 覆盖率
         shell: bash
         run: |

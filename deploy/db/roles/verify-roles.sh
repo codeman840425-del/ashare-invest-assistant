@@ -523,6 +523,30 @@ o60_gate_fn_check "ops.gate_user_refs(uuid)"
 o60_gate_fn_check "ops.purge_user_gate_facts(uuid)"
 
 
+# T-O66 / T-A75 O1：aia_ingest 对 ops.data_licence_events 有 SELECT、INSERT；
+# aia_api / aia_maint 仍无 ingest_private（复用上方 T-O57 反例口径，此处再点名确认）。
+if [ "$(own -c "SELECT to_regclass('ops.data_licence_events') IS NOT NULL")" != t ]; then
+  echo "FAIL T-O66：ops.data_licence_events 不存在（须已迁移）"; fail=1
+else
+  if [ "$(own -c "SELECT has_table_privilege('aia_ingest', 'ops.data_licence_events', 'SELECT')")" = t ]; then
+    echo "OK   T-O66：aia_ingest SELECT ops.data_licence_events"
+  else
+    echo "FAIL T-O66：aia_ingest 缺少 SELECT on ops.data_licence_events"; fail=1
+  fi
+  if [ "$(own -c "SELECT has_table_privilege('aia_ingest', 'ops.data_licence_events', 'INSERT')")" = t ]; then
+    echo "OK   T-O66：aia_ingest INSERT ops.data_licence_events"
+  else
+    echo "FAIL T-O66：aia_ingest 缺少 INSERT on ops.data_licence_events"; fail=1
+  fi
+  expect_ok aia_ingest "SELECT id, user_id FROM ops.data_licence_events WHERE false"
+  if [ "$(own -c "SELECT to_regnamespace('ingest_private') IS NOT NULL")" = t ]; then
+    expect_denied aia_api "SELECT 1 FROM ingest_private.mairui_gate_bindings WHERE false"
+    expect_denied aia_maint "SELECT 1 FROM ingest_private.mairui_gate_bindings WHERE false"
+  else
+    echo "OK   T-O66：ingest_private 不存在，api/maint 无私有 schema 权限可点名（无 SKIP）"
+  fi
+fi
+
 [ "$(own -c "SELECT count(*) FROM app.users WHERE username LIKE 't\_o11\_%'")" = 0 ] \
   || { echo "FAIL 仍有 t_o11_ 探针用户残留"; fail=1; }
 exit "$fail"

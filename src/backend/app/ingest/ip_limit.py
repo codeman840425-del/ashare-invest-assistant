@@ -1,6 +1,7 @@
 """T-A75: user-scoped IP-limit escalation via ops.data_licence_events.
 
 Fail-closed: store errors → treat as escalated for pause_s (no outbound calls).
+L-2: pending escalation mark is rewritten on the next successful store call (one attempt).
 """
 
 from __future__ import annotations
@@ -18,18 +19,37 @@ from app.schemas.enums import DataLicenceStatus
 S = DataLicenceStatus
 
 
+def _as_utc(t: dt.datetime) -> dt.datetime:
+    if t.tzinfo is None:
+        return t.replace(tzinfo=dt.UTC)
+    return t.astimezone(dt.UTC)
+
+
+@dataclass
+class PendingEscalationWrite:
+    """Fail-closed pause that still needs a durable ``paused`` mark in the store."""
+
+    licence_id: uuid.UUID
+    user_id: uuid.UUID
+    from_status: str
+    upstream_code: str
+    at: dt.datetime
+
+
 @dataclass
 class UserIpLimitMemory:
     hits: deque[dt.datetime] = field(default_factory=deque)
     escalated_until: dt.datetime | None = None
+    pending_escalation: PendingEscalationWrite | None = None
 
 
 def later(a: dt.datetime | None, b: dt.datetime | None) -> dt.datetime | None:
+    """Later of two timestamps; ``None`` loses. Compare in UTC."""
     if a is None:
         return b
     if b is None:
         return a
-    return a if a >= b else b
+    return a if _as_utc(a) >= _as_utc(b) else b
 
 
 def trim_hits(mem: UserIpLimitMemory, now: dt.datetime, window_s: int) -> None:
@@ -102,6 +122,12 @@ def rehydrate(
     return UserIpLimitMemory(hits=deque(hits), escalated_until=escalated_until)
 
 
+def merge_rehydrated(mem: UserIpLimitMemory, loaded: UserIpLimitMemory) -> None:
+    """Apply DB snapshot into memory; never shorten an in-memory escalate deadline (B-1)."""
+    mem.hits = loaded.hits
+    mem.escalated_until = later(mem.escalated_until, loaded.escalated_until)
+
+
 def apply_hit_memory(
     mem: UserIpLimitMemory,
     now: dt.datetime,
@@ -123,6 +149,35 @@ def apply_hit_memory(
     return False, until
 
 
+def flush_pending_escalation(conn: Connection, mem: UserIpLimitMemory) -> None:
+    """One-shot durable write for a fail-closed pause (L-2). No retry loop here."""
+    p = mem.pending_escalation
+    if p is None:
+        return
+    # Hit then mark — same shape as a successful record_hit escalate.
+    _write_event(
+        conn,
+        licence_id=p.licence_id,
+        user_id=p.user_id,
+        event="ip_limited",
+        from_status=p.from_status,
+        to_status=S.IP_LIMITED.value,
+        upstream_code=p.upstream_code,
+        at=p.at,
+    )
+    _write_event(
+        conn,
+        licence_id=p.licence_id,
+        user_id=p.user_id,
+        event="paused",
+        from_status=S.IP_LIMITED.value,
+        to_status=S.IP_LIMITED.value,
+        upstream_code=p.upstream_code,
+        at=p.at,
+    )
+    mem.pending_escalation = None
+
+
 def record_hit(
     conn: Connection,
     mem: UserIpLimitMemory,
@@ -141,9 +196,9 @@ def record_hit(
         text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
         {"k": f"ingest:ip_limit:{user_id}"},
     )
+    flush_pending_escalation(conn, mem)
     fresh = rehydrate(conn, user_id, window_s=window_s, pause_s=pause_s, now=now)
-    mem.hits = fresh.hits
-    mem.escalated_until = fresh.escalated_until
+    merge_rehydrated(mem, fresh)
     _write_event(
         conn,
         licence_id=licence_id,
@@ -178,3 +233,22 @@ def record_hit(
 
 def fail_closed_until(now: dt.datetime, pause_s: int) -> dt.datetime:
     return now + dt.timedelta(seconds=pause_s)
+
+
+def queue_pending_escalation(
+    mem: UserIpLimitMemory,
+    *,
+    licence_id: uuid.UUID,
+    user_id: uuid.UUID,
+    from_status: str,
+    upstream_code: str,
+    at: dt.datetime,
+) -> None:
+    """Remember a fail-closed pause for the next successful store call (L-2)."""
+    mem.pending_escalation = PendingEscalationWrite(
+        licence_id=licence_id,
+        user_id=user_id,
+        from_status=from_status,
+        upstream_code=upstream_code,
+        at=at,
+    )

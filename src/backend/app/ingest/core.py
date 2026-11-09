@@ -69,7 +69,12 @@ class IngestCore:
         return mem
 
     def rehydrate(self, user_id: uuid.UUID, now: dt.datetime) -> None:
-        """Fill user IP-limit memory from the store; fail-closed → escalated."""
+        """Fill user IP-limit memory from the store; fail-closed → escalated.
+
+        B-1: merge ``escalated_until`` with ``later`` so an in-memory fail-closed
+        pause is never shortened by an empty DB snapshot after recovery.
+        L-2: after a successful read, one-shot flush of any pending pause mark.
+        """
         esc = self.cfg.ip_limited_escalate
         mem = self._user_mem(user_id)
         if self.engine is None:
@@ -83,11 +88,20 @@ class IngestCore:
                     pause_s=esc.pause_s,
                     now=now,
                 )
-            mem.hits = loaded.hits
-            mem.escalated_until = loaded.escalated_until
+            ipl.merge_rehydrated(mem, loaded)
         except Exception:  # noqa: BLE001 — fail-closed
             mem.hits.clear()
-            mem.escalated_until = ipl.fail_closed_until(now, esc.pause_s)
+            mem.escalated_until = ipl.later(
+                mem.escalated_until, ipl.fail_closed_until(now, esc.pause_s)
+            )
+            return
+        # L-2: one attempt to durable-write a prior fail-closed pause (no loop).
+        if mem.pending_escalation is not None:
+            try:
+                with self.engine.begin() as conn:
+                    ipl.flush_pending_escalation(conn, mem)
+            except Exception:  # noqa: BLE001 — keep pending; still refuse
+                return
 
     def upsert(
         self,
@@ -208,6 +222,15 @@ class IngestCore:
             until = ipl.fail_closed_until(now, esc.pause_s)
             mem.escalated_until = ipl.later(mem.escalated_until, until)
             st.paused_until = ipl.later(st.paused_until, until)
+            # L-2: queue pause mark for next successful store call (bounded: 1/call).
+            ipl.queue_pending_escalation(
+                mem,
+                licence_id=licence_id,
+                user_id=lic.user_id,
+                from_status=from_status,
+                upstream_code=upstream_code,
+                at=now,
+            )
             return st._move(
                 DataLicenceStatus.IP_LIMITED,
                 "ip_limited_escalated",

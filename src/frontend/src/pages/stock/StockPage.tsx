@@ -134,11 +134,13 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
   const daily = useBarsWindow(code, 'd', 250);
   // 评审 T-F22a m12：日 K 还没有当日 bar 时，用 1m 响应的 pre_close 作昨收（与分时图共用缓存）
   const intraday = useBarsOf(code, '1m', 240);
-  const q = quote.data;
-  const tb = todayBar(daily.first ? daily.bars : undefined, q);
+  // T-F34c：轮询失败但保留缓存时，价格/时间已按错误隐藏；成交量/换手率/市值等派生值也不能再拿缓存价算，
+  // 与价格口径一致地隐藏（显示「—」），不新增 UI。请求成功时等价于原来的 quote.data。
+  const qLive = quote.isError ? null : quote.data;
+  const tb = todayBar(daily.first ? daily.bars : undefined, qLive);
   // v0.2.7：停牌不是上市状态，用 suspended 表示
   const suspended = profile.suspended === true;
-  const preClose = tb?.pre_close ?? intradayPreClose(intraday.data, q) ?? (suspended && q ? q.price : null);
+  const preClose = tb?.pre_close ?? intradayPreClose(intraday.data, qLive) ?? (suspended && qLive ? qLive.price : null);
   const float = profile.float_shares ? Number(profile.float_shares) : null;
   // v0.2.8：ETF 价格保留 3 位小数（价格字段是字符串，原样显示即保留；涨跌额也按 3 位）
   const pd = profile.type === 'etf' ? 3 : 2;
@@ -147,11 +149,11 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
     ['最高', tb ? <span className={pctClass(preClose ? Number(tb.high) - Number(preClose) : 0)}>{tb.high}</span> : '—'],
     ['最低', tb ? <span className={pctClass(preClose ? Number(tb.low) - Number(preClose) : 0)}>{tb.low}</span> : '—'],
     ['昨收', preClose ?? '—'],
-    ['成交量', q ? `${fmtAmount(Number(q.volume) / 100)}手` : '—'],
-    ['成交额', q ? fmtAmount(q.amount) : '—'],
-    ['换手率', q && float ? `${fmtNum((Number(q.volume) / float) * 100)}%` : '—'],
-    ['总市值', q && profile.total_shares ? fmtAmount(capOf(q.price, Number(profile.total_shares))) : '—'],
-    ['流通市值', q && float ? fmtAmount(capOf(q.price, float)) : '—'],
+    ['成交量', qLive ? `${fmtAmount(Number(qLive.volume) / 100)}手` : '—'],
+    ['成交额', qLive ? fmtAmount(qLive.amount) : '—'],
+    ['换手率', qLive && float ? `${fmtNum((Number(qLive.volume) / float) * 100)}%` : '—'],
+    ['总市值', qLive && profile.total_shares ? fmtAmount(capOf(qLive.price, Number(profile.total_shares))) : '—'],
+    ['流通市值', qLive && float ? fmtAmount(capOf(qLive.price, float)) : '—'],
   ];
   return (
     <header className="stock-head" data-testid="stock-head">
@@ -167,19 +169,19 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       </div>
       {quote.isPending ? <span className="muted">行情加载中…</span> : quote.isError ? (
         // T-F34b：/quotes 出错不再显示“无行情缓存”（旧口径）。路由未实现 → “功能开发中”提示（与 ErrorBox 同判定）；
-        // 其他错误按通用文案给出，不改头部布局（ErrorBlockMark 为行内紧凑展示）。
+        // 其他错误按通用文案给出，不改头部布局（行内紧凑展示）。
         <QuoteError error={quote.error} />
-      ) : q ? (
+      ) : qLive ? (
         <div className="sh-quote">
-          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{q.price}</span>
-          <span className={`mono ${pctClass(q.change_pct)}`}>
-            {preClose && !suspended ? `${signed(Number(q.price) - Number(preClose), pd)} ` : ''}({signed(q.change_pct)}%)
+          <span className={`q-price mono ${pctClass(qLive.change_pct)}`}>{qLive.price}</span>
+          <span className={`mono ${pctClass(qLive.change_pct)}`}>
+            {preClose && !suspended ? `${signed(Number(qLive.price) - Number(preClose), pd)} ` : ''}({signed(qLive.change_pct)}%)
           </span>
-          <Tooltip title="行情时间（北京时间）"><span className="muted small mono">{fmtTime(q.t)}</span></Tooltip>
-          <DataStatusTag status={q.data_status} asOf={q.data_as_of} gaps={q.gaps} />
+          <Tooltip title="行情时间（北京时间）"><span className="muted small mono">{fmtTime(qLive.t)}</span></Tooltip>
+          <DataStatusTag status={qLive.data_status} asOf={qLive.data_as_of} gaps={qLive.gaps} />
         </div>
       ) : <span className="muted" data-testid="quote-empty">无行情缓存</span>}
-      {q ? <GapNote status={q.data_status} gaps={q.gaps} asOf={q.data_as_of} testId="quote-gap-note" /> : null}
+      {qLive ? <GapNote status={qLive.data_status} gaps={qLive.gaps} asOf={qLive.data_as_of} testId="quote-gap-note" /> : null}
       <div className="sh-stats">
         {stats.map(([k, v]) => (
           <div key={k}>

@@ -1,4 +1,4 @@
-"""P2N-09 offline independent oracle (T-R31).
+"""P2N-09 offline independent oracle (T-R31/T-R33).
 
 Deterministic structural/chain guards for explanation-binding golden cases.
 Does not import application code, models, or R08/R09 checkers.
@@ -12,6 +12,7 @@ import json
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
+from urllib.parse import quote
 
 HERE = Path(__file__).resolve().parent
 FILE = HERE / "P2N-09_golden.json"
@@ -44,7 +45,7 @@ def frac_eq(a, b) -> bool:
 
 
 def findings(c: dict) -> list[str]:
-    """Independent of expected.*; blocked cases short-circuit."""
+    """Independent of expected.*; residual blocked short-circuit (T-A71: none expected)."""
     if c.get("case_status") == "blocked":
         return ["blocked_pending_real_env"]
     kind = c["kind"]
@@ -207,6 +208,49 @@ def findings(c: dict) -> list[str]:
         if i["final_display"] != i["template_body"] + i["system_disclaimer"]:
             out.add("disclaimer_text_mismatch")
 
+
+    elif kind == "auth_leak":
+        # C12: non-admin must not surface llm_call_id in render projection (T-A71)
+        assert i["viewer_role"] == "user" and i.get("llm_call_id")
+        render = i.get("render") or {}
+        if render.get("show_llm_call_id") or render.get("href") or render.get("id_text"):
+            out.add("llm_call_id_leak")
+
+    elif kind == "auth_plain":
+        # C13: admin, no usage page → plain id, no href (T-A71)
+        assert i["viewer_role"] == "admin" and i.get("usage_page_available") is False and i.get("llm_call_id")
+        render = i.get("render") or {}
+        call_id = i["llm_call_id"]
+        if render.get("href"):
+            out.add("link_without_usage_page")
+        if (not render.get("show_llm_call_id")) or render.get("id_text") != call_id:
+            out.add("llm_call_id_leak")
+
+    elif kind == "auth_link":
+        # C14: admin + usage page → href == /admin/llm/usage?call_id= + URL-encoded id (T-A71)
+        assert i["viewer_role"] == "admin" and i.get("usage_page_available") is True and i.get("llm_call_id")
+        render = i.get("render") or {}
+        call_id = i["llm_call_id"]
+        expected_href = "/admin/llm/usage?call_id=" + quote(call_id, safe="")
+        href = render.get("href")
+        if href != expected_href:
+            out.add("auth_link_mismatch")
+        if not render.get("show_llm_call_id"):
+            out.add("llm_call_id_leak")
+
+    elif kind == "cache":
+        # C21: cache_hit + not invoked → explanation byte-equal, llm_call_id unchanged (T-A71)
+        chain = i["chain"]
+        assert chain.get("cache_hit") is True and chain.get("invoked") is False
+        src = i["source_explanation"]
+        cur = i["explanation"]
+        if cur.get("llm_call_id") != src.get("llm_call_id"):
+            out.add("duplicate_llm_call")
+        if cur != src:
+            # body drift without new id still rejected
+            out.add("cache_body_mismatch")
+
+
     else:
         raise AssertionError(f"unknown kind {kind}")
 
@@ -238,18 +282,19 @@ def run_cases(data: dict) -> dict:
 
 def run_mutations(data: dict) -> dict:
     ready = [c for c in data["cases"] if c["case_status"] == "ready"]
+    assert len(ready) == 26
     exp_mut = 0
     inp_mut = 0
-    # expected.verdict corruption must not match oracle
-    for c in ready[:5]:
+    # expected.verdict corruption must not match oracle (include new four)
+    for cid in ("C01", "C05", "C12", "C13", "C14", "C21"):
+        c = next(x for x in ready if x["id"] == cid)
         wrong = copy.deepcopy(c)
         wrong["expected"] = copy.deepcopy(c["expected"])
         wrong["expected"]["verdict"] = "accepted" if c["expected"]["verdict"] == "rejected" else "rejected"
         got = findings(c)
         assert verdict_of(got, c["case_status"]) != wrong["expected"]["verdict"]
         exp_mut += 1
-    # input mutations that should flip findings on selected cases
-    # C05: fix citation → clear finding
+    # legacy input mutations
     c05 = next(c for c in ready if c["id"] == "C05")
     fixed = copy.deepcopy(c05)
     fixed["input"]["stocks"][0]["explanation"]["paragraphs"][0] = {
@@ -259,34 +304,76 @@ def run_mutations(data: dict) -> dict:
     assert findings(fixed) == []
     assert findings(c05) == ["cross_object_citation"]
     inp_mut += 1
-    # C22: mutate protected_result after fallback
     c22 = next(c for c in ready if c["id"] == "C22")
     bad = copy.deepcopy(c22)
     bad["input"]["post_fallback_protected_result"]["score"] = "0.99"
     assert "protected_result_mutation" in findings(bad)
     inp_mut += 1
-    # C24: mutate disclaimer
     c24 = next(c for c in ready if c["id"] == "C24")
     bad = copy.deepcopy(c24)
     bad["input"]["system_disclaimer"] = bad["input"]["system_disclaimer"] + "x"
     assert "disclaimer_text_mismatch" in findings(bad)
     inp_mut += 1
-    # C19: numeric Fraction mismatch
     c19 = next(c for c in ready if c["id"] == "C19")
     bad = copy.deepcopy(c19)
     bad["input"]["explanation"]["paragraphs"][0]["text"] = "分数 0.41"
     assert "numeric_mismatch" in findings(bad)
     assert frac_eq("0.40", Fraction(2, 5))
     inp_mut += 1
-    # C18: AI label on template
     c18 = next(c for c in ready if c["id"] == "C18")
     bad = copy.deepcopy(c18)
     bad["input"]["explanation"]["ui_label"] = "AI 生成"
     assert "template_claimed_as_ai" in findings(bad)
     inp_mut += 1
+    # T-A71 new four — input mutations
+    c12 = next(c for c in ready if c["id"] == "C12")
+    bad = copy.deepcopy(c12)
+    bad["input"]["render"] = {"show_llm_call_id": True, "href": None, "id_text": "call-auth"}
+    assert "llm_call_id_leak" in findings(bad)
+    inp_mut += 1
+    c13 = next(c for c in ready if c["id"] == "C13")
+    bad = copy.deepcopy(c13)
+    bad["input"]["render"] = {
+        "show_llm_call_id": True,
+        "href": "/admin/llm/usage?call_id=call-auth",
+        "id_text": "call-auth",
+    }
+    assert "link_without_usage_page" in findings(bad)
+    inp_mut += 1
+    c14 = next(c for c in ready if c["id"] == "C14")
+    # wrong route
+    bad = copy.deepcopy(c14)
+    bad["input"]["render"] = {
+        "show_llm_call_id": True,
+        "href": "/admin/wrong?call_id=" + quote(c14["input"]["llm_call_id"], safe=""),
+        "id_text": c14["input"]["llm_call_id"],
+    }
+    assert "auth_link_mismatch" in findings(bad)
+    inp_mut += 1
+    # unencoded id
+    bad = copy.deepcopy(c14)
+    bad["input"]["render"] = {
+        "show_llm_call_id": True,
+        "href": "/admin/llm/usage?call_id=" + c14["input"]["llm_call_id"],
+        "id_text": c14["input"]["llm_call_id"],
+    }
+    assert "auth_link_mismatch" in findings(bad)
+    inp_mut += 1
+    c21 = next(c for c in ready if c["id"] == "C21")
+    bad = copy.deepcopy(c21)
+    bad["input"]["explanation"] = copy.deepcopy(c21["input"]["explanation"])
+    bad["input"]["explanation"]["llm_call_id"] = "call-c21-NEW"
+    assert "duplicate_llm_call" in findings(bad)
+    inp_mut += 1
+    bad = copy.deepcopy(c21)
+    bad["input"]["explanation"] = copy.deepcopy(c21["input"]["explanation"])
+    bad["input"]["explanation"]["paragraphs"][0]["text"] = "被改写的缓存正文"
+    assert "cache_body_mismatch" in findings(bad)
+    inp_mut += 1
     return {
         "expected_verdict_mutations_rejected": exp_mut,
         "input_mutations_detected": inp_mut,
+        "t_a71_input_mutations": 6,
     }
 
 
@@ -294,11 +381,12 @@ def main() -> int:
     data = load()
     summary = run_cases(data)
     mut = run_mutations(data)
+    assert summary["ready_pass"] == 26 and summary["blocked"] == 0
     out = {
         **summary,
         **mut,
         "total": 26,
-        "normal_ready_pass": f"{summary['ready_pass']}/{summary['ready_pass']}",
+        "normal_ready_pass": f"{summary['ready_pass']}/26",
         "mutation_reject": f"{mut['expected_verdict_mutations_rejected']}+{mut['input_mutations_detected']}",
     }
     print(json.dumps(out, ensure_ascii=False))

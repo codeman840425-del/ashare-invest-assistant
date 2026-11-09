@@ -191,10 +191,10 @@
 
 ### 3.6 C21–C23 缓存/回退一致性
 
-**C21｜缓存命中不重复调用，解释复用**
-- 输入：同一对象（同 evidence/protected_result 哈希）第二次请求，`chain.cache_hit=true`、`invoked=false`。
-- 期望：第二次 explanation 与首次逐字节相等（含 llm_call_id 复用原值）；不新产生 llm_call_id。
-- 判定：两次 explanation 哈希相等；（新 llm_call_id → rejected，finding=`duplicate_llm_call`）。
+**C21｜缓存命中不重复调用，解释复用**（T-A71：ready 离线不变量）
+- 输入：`chain.cache_hit=true`、`invoked=false`；夹具提供 `source_explanation` 与复用后的 `explanation`。
+- 期望：explanation 与来源逐字节相等，`llm_call_id` 等于来源原值；不新产生 id。缓存键不写入用例（键语义见 §5，按 plan 同证书粒度，不按 user）。
+- 判定：正文漂移 → `cache_body_mismatch`；新 llm_call_id → `duplicate_llm_call`。
 
 **C22｜fallback 不改规则结论**
 - 输入：LLM 超时回落模板，但规则结论（action/score/confidence/stops）已定。
@@ -239,19 +239,33 @@
 
 ---
 
-## 5. 哪些例需要真实数据（留 P2N-09 正式派单用）
+## 5. 离线 26 例与另列真实环境项（T-A71）
 
-> 本扩充集 26 例全部**纯虚构可离线测试**（缓存/回退/鉴权/绑定/模板边界都可用合成 evidence + 伪造链路状态表达，不依赖真实账户或麦蕊）。以下**链路字段**在正式派单时需真实环境才能验证其生产行为，标注如下，勿在草稿阶段假设已在生产成立：
+> **总裁定（T-A71）**：C12/C13/C14/C21 全部改为 **ready 离线用例**；金标准 counts = ready 26 / blocked 0。原先把「后端生产实现」混进金标准阻塞条件；真实环境验证**另列**，不计入 26 例，也不冒充离线通过。
+>
+> 误引更正：草稿曾把 C12–C14 阻塞写成管理员会话 `origin=password_login`（T-A18/T-A20）。T-A20 只约束 G7 晋级决定，与查看 `llm_call_id`/usage **无关**。
 
-| 例 | 需要真实数据的点 | 为什么草稿阶段不测 |
+### 5.1 四例离线口径（已进 golden）
+
+| 例 | 离线判定 | finding（篡改） |
 |---|---|---|
-| C21 缓存复用 | 真实缓存键 = `(user, 对象哈希, prompt_version)` 的实际落库与命中；需真实 DB + ingestion | 当前只有合成回放，`chain.cache_hit` 是伪造字段 |
-| C12–C14 llm_call_id | `/admin/llm/usage?call_id=` 真实端点 + 管理员会话 `origin=password_login` | 鉴权页面/usage 端点生产未接线（T-A18/T-A20 会话门槛） |
-| C09/C10（timeout/provider_error） | 真实 LLM 供应商超时/报错路径（DeepSeek 真实调用） | 草稿只能用合成 `chain` 状态表达，不做真实外呼 |
-| C23 提交前定稿 | 真实「解释生成→提交正文」时序与 revision 生成 | 依赖生产建议/日报不可变正文链路 |
-| C24–C26 免责 | 真实前端渲染免责的位置与逐字（`disclaimer.md` 当前版本文本已在仓库，文本可比对，但"由系统追加、位置在 LLM 外"需真实渲染联调） | 文本可比对，渲染位置需前端联调 |
+| C12 | `viewer_role=user` 时渲染投影不得出现 id/链接 | `llm_call_id_leak` |
+| C13 | `admin` 且无 usage 页：只读纯文本 id，无 href | `link_without_usage_page` |
+| C14 | `admin` 且有 usage 页：href 精确=`/admin/llm/usage?call_id=`+URL 编码 id | `auth_link_mismatch`（错路由/未编码） |
+| C21 | `cache_hit=true` 且 `invoked=false`：explanation 与来源逐字节相等，`llm_call_id` 等于原值 | `duplicate_llm_call` / `cache_body_mismatch` |
 
-> 结论：**守卫逻辑（数字/动作/禁词/绑定/鉴权投影）可离线测**；**生产链时序（缓存命中、供应商超时、usage 深链、提交时序）须真实数据**，正式派单时单独圈出、不冒称离线通过。
+缓存键**不写进 golden**；若叙述缓存键，以 plan.md（同证书 + code、method_version、snapshot，可加 prompt_version）为准，**不按 user**。
+
+### 5.2 另列真实环境项（不计入 26，不阻塞 C12–C21）
+
+| 项 | 说明 |
+|---|---|
+| 后端 `GET /admin/llm/usage?call_id=` | 非管理员 403；实现后前端再把 `hasAdminLlmUsagePage` 改为 true（此前保持 false＝C13 形态） |
+| LLM 网关缓存 selfcheck | 命中不新增 `llm_calls` 行、不跨证书复用（合成数据，不真实外呼） |
+| C09/C10 真实供应商超时/报错 | 离线仍用合成 `chain`；真实外呼另测 |
+| C23 提交时序 / C24–C26 渲染位置 | 正文不可变与免责文本已可离线比；真实联调另列 |
+
+> 结论：26 例守卫/投影/缓存不变量**全部可离线测**；usage 端点与真实缓存落库是后端另列验收，不是本金标准 blocked 条件。
 
 ---
 

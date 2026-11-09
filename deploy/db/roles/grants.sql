@@ -462,7 +462,8 @@ DECLARE
     'app.purge_ref_ids(uuid[])', 'app.purge_target_ref(text, uuid[])', 'app.purge_json_mentions(jsonb, text[])',
     'app.purge_scrub_json(jsonb, text[])', 'app.purge_scrub_json(jsonb)', 'app.purge_pii_key(text)',
     'app.purge_permits(text, text, jsonb, jsonb)', 'app.purge_user_ids()', 'app.purge_row_owner(text, jsonb)',
-    'app.purge_anonymize_ok(text, jsonb, jsonb, uuid[])'];
+    'app.purge_anonymize_ok(text, jsonb, jsonb, uuid[])',
+    'ops.gate_user_refs(uuid)', 'ops.purge_user_gate_facts(uuid)'];
   -- 不可读的列（后端 §1）；另有 users.role / users.password_hash 不可写
   maint_deny text[] := ARRAY[
     'app.users.password_hash', 'app.user_data_licences.ciphertext', 'app.user_data_licences.licence_hmac',
@@ -1234,3 +1235,47 @@ BEGIN
   RAISE NOTICE 'db-roles: T-O33 矩阵已收窄（重复执行保持最小；未建表；未改归属触发器）';
 END
 $o33$;
+
+-- T-O60 / T-A73 O1：ops.gate_user_refs / ops.purge_user_gate_facts 仅 aia_maint 可 EXECUTE。
+-- 放在文件末尾：通配 ALL FUNCTIONS IN SCHEMA ops 会授给 api/ingest；maint 段会撤光后再按清单授回。
+-- 函数不存在（0029 头）整段跳过。DEFAULT PRIVILEGES：通配循环未给 FUNCTIONS 默认 EXECUTE，这里再显式撤一次防回授。
+DO $o60_gate_funcs$
+DECLARE
+  owner_role text := current_user;
+  f text;
+  fns text[] := ARRAY['ops.gate_user_refs(uuid)', 'ops.purge_user_gate_facts(uuid)'];
+  any_present boolean := false;
+BEGIN
+  FOREACH f IN ARRAY fns LOOP
+    IF to_regprocedure(f) IS NULL THEN
+      CONTINUE;
+    END IF;
+    any_present := true;
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM aia_api, aia_ingest, PUBLIC', to_regprocedure(f));
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aia_maint') THEN
+      EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aia_maint', to_regprocedure(f));
+    END IF;
+    IF has_function_privilege('aia_api', to_regprocedure(f), 'EXECUTE') THEN
+      RAISE EXCEPTION 'db-roles: T-O60 aia_api 仍有 EXECUTE %', f;
+    END IF;
+    IF has_function_privilege('aia_ingest', to_regprocedure(f), 'EXECUTE') THEN
+      RAISE EXCEPTION 'db-roles: T-O60 aia_ingest 仍有 EXECUTE %', f;
+    END IF;
+    IF has_function_privilege('public', to_regprocedure(f), 'EXECUTE') THEN
+      RAISE EXCEPTION 'db-roles: T-O60 PUBLIC 仍有 EXECUTE %', f;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aia_maint')
+       AND NOT has_function_privilege('aia_maint', to_regprocedure(f), 'EXECUTE') THEN
+      RAISE EXCEPTION 'db-roles: T-O60 aia_maint 缺少 EXECUTE %', f;
+    END IF;
+  END LOOP;
+  IF to_regnamespace('ops') IS NOT NULL THEN
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA ops REVOKE EXECUTE ON FUNCTIONS FROM aia_api, aia_ingest, PUBLIC', owner_role);
+  END IF;
+  IF any_present THEN
+    RAISE NOTICE 'db-roles: T-O60 gate 函数仅 aia_maint EXECUTE';
+  ELSE
+    RAISE NOTICE 'db-roles: T-O60 gate 函数不存在（未到 0030），跳过';
+  END IF;
+END
+$o60_gate_funcs$;

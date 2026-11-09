@@ -72,26 +72,57 @@ def _dsn(url: str, user: str, pw: str) -> str:
 
 
 GRANTS = _t23.REPO / "deploy" / "db" / "roles" / "grants.sql"
-#: grants.sql 的 $maint$ 自检会检查 aia_api / aia_ingest 的权限与成员关系；测试库里换成 NOLOGIN 占位角色。
+#: grants.sql 的 $maint$ / $o33$ / $o60_gate_funcs$ 自检会检查 aia_api / aia_ingest；测试库里换成 NOLOGIN 占位角色。
 _MAINT_STUBS = {"aia_api": "tt24_api_stub", "aia_ingest": "tt24_ingest_stub"}
+#: T-A76 §7 C：夹具须依次套用这三段（生产 $o33$ 才给 batches 列级 SELECT+DELETE）。
+_MAINT_GRANT_TAGS = ("maint", "o33", "o60_gate_funcs")
 
 
-def _maint_grants_block() -> str | None:
-    """grants.sql 中 aia_maint 的授权段（``DO $maint$ … $maint$;``）；被测树没有则 None。"""
-    if not GRANTS.is_file():
-        return None
-    m = re.search(r"DO \$maint\$.*?\n\$maint\$;", GRANTS.read_text(encoding="utf-8"), re.S)
-    if m is None:
-        return None
-    block = m.group(0)
+def _stub_api_ingest_roles(block: str) -> str:
+    """把块内 aia_api / aia_ingest 标识符（引号内外）换成占位角色；不碰 aia_maint。"""
     for old, new in _MAINT_STUBS.items():
-        block = block.replace(f"'{old}'", f"'{new}'")
+        block = re.sub(rf"(?<!\w){re.escape(old)}(?!\w)", new, block)
     return block
 
 
+def _maint_grants_block() -> str | None:
+    """grants.sql 中 ``$maint$`` + ``$o33$`` + ``$o60_gate_funcs$``（T-A76 C）；被测树缺任一段则 None。"""
+    if not GRANTS.is_file():
+        return None
+    text = GRANTS.read_text(encoding="utf-8")
+    parts: list[str] = []
+    for tag in _MAINT_GRANT_TAGS:
+        m = re.search(rf"DO \${tag}\$.*?\n\${tag}\$;", text, re.S)
+        if m is None:
+            return None
+        parts.append(_stub_api_ingest_roles(m.group(0)))
+    return "\n".join(parts)
+
+
+def _assert_maint_vendor_batch_privs(c: Any) -> None:
+    """T-A76 §7：aia_maint 对 batches 仅 SELECT(source_licence_id)+DELETE；对 list_rows 无权限。"""
+    if c.execute("SELECT to_regclass('market.master_vendor_batches')").fetchone()[0] is None:
+        return
+    assert c.execute(
+        "SELECT has_column_privilege('aia_maint','market.master_vendor_batches','source_licence_id','SELECT')"
+    ).fetchone()[0] is True
+    assert c.execute(
+        "SELECT has_table_privilege('aia_maint','market.master_vendor_batches','DELETE')"
+    ).fetchone()[0] is True
+    # 不得有表级 SELECT（只能列级）
+    assert c.execute(
+        "SELECT has_table_privilege('aia_maint','market.master_vendor_batches','SELECT')"
+    ).fetchone()[0] is False
+    if c.execute("SELECT to_regclass('market.master_vendor_list_rows')").fetchone()[0] is not None:
+        for priv in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+            assert c.execute(
+                "SELECT has_table_privilege('aia_maint','market.master_vendor_list_rows',%s)", (priv,)
+            ).fetchone()[0] is False
+
+
 def _mk_maint_role(authdb: SimpleNamespace) -> str:
-    """aia_maint：按 grants.sql 的角色属性（LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
-    NOINHERIT）与 $maint$ 授权段在测试容器里创建（随机口令）；没有 grants.sql 时退回 DML 近似。返回 DSN（不打印）。"""
+    """aia_maint：按 grants.sql 角色属性与 $maint$+$o33$+$o60_gate_funcs$ 授权（T-A76 C）；无 grants 时退回 DML 近似。
+    连续套用两遍模拟 db-roles 重跑，并断言 batches 列级权限稳定。返回 DSN（不打印）。"""
     block = _maint_grants_block()
     if block is None:
         return _mk_role(authdb, MAINT)
@@ -106,9 +137,11 @@ def _mk_maint_role(authdb: SimpleNamespace) -> str:
         c.execute(f"{verb} ROLE {MAINT} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS "
                   f"NOINHERIT PASSWORD '{pw}'")
         c.execute(block)  # type: ignore[arg-type]
+        c.execute(block)  # 第二遍：db-roles 重跑后权限不变（T-A76 §7 验收 2）
         attrs = c.execute("SELECT rolsuper, rolbypassrls, rolinherit FROM pg_roles WHERE rolname = %s",
                           (MAINT,)).fetchone()
         assert attrs == (False, False, False), "aia_maint 必须是非超级用户、NOBYPASSRLS、NOINHERIT"
+        _assert_maint_vendor_batch_privs(c)
     return _dsn(authdb.url, MAINT, pw)
 
 
@@ -346,3 +379,125 @@ def test_cli_execute_purges_and_anonymizes(cli: SimpleNamespace, victim: SimpleN
     # 再跑一次：用户已不存在 → 拒绝
     r2 = _run(cli, capsys, "--user-id", uid, "--execute", confirm=uid)
     assert r2.rc == 1
+
+
+def _licence_id(sql: Callable[..., Any], uid: str) -> str:
+    rows = sql("SELECT id::text FROM app.user_data_licences WHERE user_id = :u AND deleted_at IS NULL", u=uid)
+    assert rows, "victim 应有活证书"
+    return rows[0][0]
+
+
+def _seed_vendor_batch(sql: Callable[..., Any], licence_id: str, code: str = "600000.SH") -> tuple[str, int]:
+    """插入 master_run + batch + list_row；返回 (batch_id, master_run_id)。"""
+    run = sql(
+        "INSERT INTO market.master_runs (trigger, status) VALUES ('manual', 'ok') RETURNING id"
+    )[0][0]
+    bid = sql(
+        "INSERT INTO market.master_vendor_batches "
+        "(master_run_id, source_licence_id, status, attempt, requested_at, deadline_at, datasets) "
+        "VALUES (:r, CAST(:lic AS uuid), 'fetched', 1, now(), now() + interval '1 hour', '[]'::jsonb) "
+        "RETURNING id::text",
+        r=run, lic=licence_id,
+    )[0][0]
+    sql(
+        "INSERT INTO market.master_vendor_list_rows (batch_id, dataset, security_code) "
+        "VALUES (CAST(:b AS uuid), 'hslt_list', :c)",
+        b=bid, c=code,
+    )
+    return bid, int(run)
+
+
+def test_cli_execute_deletes_vendor_batches_keeps_bystander(
+    cli: SimpleNamespace, victim: SimpleNamespace, roles: SimpleNamespace,
+    sql: Callable[..., Any], capsys: pytest.CaptureFixture[str],
+) -> None:
+    """T-A76 §7：目标证书的 batches+list_rows 删除；旁观证书的保留；master_runs 保留。"""
+    vic_lic = _licence_id(sql, victim.uid)
+    by_lic = _licence_id(sql, victim.by.user.id)
+    vb, vr = _seed_vendor_batch(sql, vic_lic, "600000.SH")
+    bb, br = _seed_vendor_batch(sql, by_lic, "000001.SZ")
+    assert sql("SELECT count(*) FROM market.master_vendor_batches WHERE id = CAST(:b AS uuid)", b=vb)[0][0] == 1
+    assert sql("SELECT count(*) FROM market.master_vendor_list_rows WHERE batch_id = CAST(:b AS uuid)", b=vb)[0][0] == 1
+    use_maint_dsn(cli, roles.maint)
+    r = _run(cli, capsys, "--user-id", victim.uid, "--execute", confirm=victim.uid)
+    assert r.rc == 0, r.text[-1500:]
+    assert sql("SELECT count(*) FROM market.master_vendor_batches WHERE id = CAST(:b AS uuid)", b=vb)[0][0] == 0
+    assert sql("SELECT count(*) FROM market.master_vendor_list_rows WHERE batch_id = CAST(:b AS uuid)", b=vb)[0][0] == 0
+    assert sql("SELECT count(*) FROM market.master_vendor_batches WHERE id = CAST(:b AS uuid)", b=bb)[0][0] == 1
+    assert sql("SELECT count(*) FROM market.master_vendor_list_rows WHERE batch_id = CAST(:b AS uuid)", b=bb)[0][0] == 1
+    assert sql("SELECT count(*) FROM market.master_runs WHERE id = :r", r=vr)[0][0] == 1
+    assert sql("SELECT count(*) FROM market.master_runs WHERE id = :r", r=br)[0][0] == 1
+
+
+def test_cli_drift_unguarded_market_table_permission_denied(
+    cli: SimpleNamespace, victim: SimpleNamespace, roles: SimpleNamespace,
+    sql: Callable[..., Any], capsys: pytest.CaptureFixture[str],
+) -> None:
+    """T-A76 §7 漂移反例 1：新建带 source_licence_id 的 market 表且未授 aia_maint → dry-run/execute 均 permission denied，数据不变。"""
+    tbl = "market.tt40_drift_batches"
+    sql(f"CREATE TABLE {tbl} (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), "
+        f"source_licence_id uuid NOT NULL REFERENCES app.user_data_licences(id))")
+    lic = _licence_id(sql, victim.uid)
+    sql(f"INSERT INTO {tbl} (source_licence_id) VALUES (CAST(:l AS uuid))", l=lic)
+    before_users = sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0]
+    before_rows = sql(f"SELECT count(*) FROM {tbl}")[0][0]
+    use_maint_dsn(cli, roles.maint)
+    denied = False
+    try:
+        r = _run(cli, capsys, "--user-id", victim.uid)
+        text = r.text
+        if r.rc != 0 and ("permission denied" in text.lower() or "InsufficientPrivilege" in text):
+            denied = True
+        elif r.rc == 0:
+            try:
+                r2 = _run(cli, capsys, "--user-id", victim.uid, "--execute", confirm=victim.uid)
+                text = r2.text
+                denied = r2.rc != 0 and ("permission denied" in text.lower() or "InsufficientPrivilege" in text)
+            except Exception as exc:  # dry-run 放过时 execute 可能直接抛
+                denied = "permission denied" in str(exc).lower() or "InsufficientPrivilege" in type(exc).__name__
+    except Exception as exc:
+        denied = "permission denied" in str(exc).lower() or "InsufficientPrivilege" in type(exc).__name__
+    assert denied, "未授权 market 新表应触发 permission denied"
+    assert sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0] == before_users
+    assert sql(f"SELECT count(*) FROM {tbl}")[0][0] == before_rows
+    sql(f"DROP TABLE {tbl}")
+
+
+def test_cli_drift_noncascade_fk_rolls_back(
+    cli: SimpleNamespace, victim: SimpleNamespace, roles: SimpleNamespace,
+    sql: Callable[..., Any], capsys: pytest.CaptureFixture[str],
+) -> None:
+    """T-A76 §7 漂移反例 2：引用 batches 的非级联外键表 → --execute IntegrityError 整笔回滚。"""
+    vic_lic = _licence_id(sql, victim.uid)
+    bid, _ = _seed_vendor_batch(sql, vic_lic, "600519.SH")
+    sql(
+        "CREATE TABLE market.tt40_nocascade (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), "
+        "batch_id uuid NOT NULL REFERENCES market.master_vendor_batches(id))"  # 默认 NO ACTION，非 CASCADE
+    )
+    sql("INSERT INTO market.tt40_nocascade (batch_id) VALUES (CAST(:b AS uuid))", b=bid)
+    before_users = sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0]
+    before_batches = sql(
+        "SELECT count(*) FROM market.master_vendor_batches WHERE source_licence_id = CAST(:l AS uuid)",
+        l=vic_lic,
+    )[0][0]
+    use_maint_dsn(cli, roles.maint)
+    text = ""
+    rc = 0
+    try:
+        r = _run(cli, capsys, "--user-id", victim.uid, "--execute", confirm=victim.uid)
+        rc, text = r.rc, r.text
+    except Exception as exc:
+        rc, text = 1, f"{type(exc).__name__}: {exc}"
+    assert rc != 0, text[-800:]
+    assert (
+        "integrity" in text.lower()
+        or "foreign key" in text.lower()
+        or "ForeignKeyViolation" in text
+        or "回滚" in text
+    ), text[-800:]
+    assert sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0] == before_users
+    assert sql(
+        "SELECT count(*) FROM market.master_vendor_batches WHERE source_licence_id = CAST(:l AS uuid)",
+        l=vic_lic,
+    )[0][0] == before_batches
+    sql("DROP TABLE market.tt40_nocascade")

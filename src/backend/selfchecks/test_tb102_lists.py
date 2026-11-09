@@ -432,3 +432,238 @@ def test_tb102b_r4_busy_keeps_batch_and_stream_then_retries(
             conn.execute(select(batches.c.status).where(batches.c.id == bid)).scalar_one()
             == "fetched"
         )
+
+
+class RetryStream:
+    def __init__(self, fields: dict[bytes, bytes]) -> None:
+        self.fields = fields
+        self.acked: list[Any] = []
+        self.jobs: list[Any] = []
+
+    def xgroup_create(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def xautoclaim(self, *args: Any, **kwargs: Any) -> Any:
+        return b"0-0", [(b"1-0", self.fields)]
+
+    def xack(self, *args: Any) -> None:
+        self.acked.append(args)
+
+    def lpush(self, *args: Any) -> None:
+        self.jobs.append(args)
+
+
+@pytest.mark.parametrize("enforce", [True, False])
+@pytest.mark.parametrize("point", ["after_first", "after_reservation", "before_wire"])
+def test_tb102c_busy_interleaving_resumes_without_replay_or_ack(
+    env: Any,
+    monkeypatch: Any,
+    enforce: bool,
+    point: str,
+) -> None:
+    from app.ingest.send_governance import Governance, Permit
+
+    e = env
+    e.settings = mode(e.settings, enforce)
+    bid = previous.batch(e)
+    inject = [True]
+    fd: list[int] = []
+    waiting = e.root / "probe-waiting.lease.json"
+    real_pause = e.pause
+    real_snapshot = Governance._snapshot_record
+    real_claim = Permit.claim
+    real_process = daily_lists.process
+
+    def probe() -> None:
+        waiting.write_text(json.dumps({"source": "probe_tb05"}))
+        os.chmod(waiting, 0o600)
+
+    def pause(seconds: float) -> None:
+        real_pause(seconds)
+        if inject[0] and point == "after_first":
+            lock = os.open(e.root / "send-control.lock", os.O_RDWR | os.O_CREAT, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fd.append(lock)
+            inject[0] = False
+
+    def snapshot(self: Any, *args: Any, **kwargs: Any) -> None:
+        real_snapshot(self, *args, **kwargs)
+        if inject[0] and point == "after_reservation":
+            probe()
+            inject[0] = False
+
+    def claim(self: Any, path: str) -> None:
+        real_claim(self, path)
+        if inject[0] and point == "before_wire":
+            probe()
+            inject[0] = False
+
+    def process(*args: Any, **kwargs: Any) -> str:
+        upstream = (
+            daily_lists.wire
+            if point == "before_wire" and not e.calls and waiting.exists() is False and inject[0]
+            else e.wire
+        )
+        return real_process(
+            *args,
+            **kwargs,
+            upstream=upstream,
+            temp=e.temp,
+            stop=e.stop,
+            halt=e.halt,
+            egress=lambda: previous.IP,
+        )
+
+    if point == "before_wire":
+        monkeypatch.setattr(
+            daily_lists.http.client,
+            "HTTPSConnection",
+            lambda *args, **kwargs: pytest.fail("busy must precede connection"),
+        )
+    monkeypatch.setattr(Governance, "_snapshot_record", snapshot)
+    monkeypatch.setattr(Permit, "claim", claim)
+    monkeypatch.setattr(daily_lists, "process", process)
+    rds = RetryStream({b"kind": daily_lists.KIND.encode(), b"batch_id": str(bid).encode()})
+    try:
+        assert (
+            daily_lists.tick(
+                e.collector,
+                rds,
+                clock=lambda: e.clock[0],
+                grant=e.grant,
+                pause=pause,
+                settings=e.settings,
+            )
+            == 0
+        )
+        assert rds.acked == rds.jobs == []
+        assert len(e.calls) == int(point == "after_first")
+        ledger = json.loads(e.counter.read_text())["records"]
+        assert len(ledger) == int(point == "after_first")
+        assert all(row["finished_at"] is not None for row in ledger)
+        with e.owner.connect() as conn:
+            b = conn.execute(select(batches).where(batches.c.id == bid)).one()
+            stats = conn.execute(
+                select(master_runs.c.stats).where(master_runs.c.id == b.master_run_id)
+            ).scalar_one()
+            assert b.status == "requested"
+            assert stats["attempted"] == (["hslt_list"] if point == "after_first" else [])
+            assert len(b.datasets) == int(point == "after_first")
+    finally:
+        for lock in fd:
+            os.close(lock)
+        if waiting.exists():
+            assert waiting.parent == e.root
+            assert json.loads(waiting.read_text())["source"] == "probe_tb05"
+            waiting.unlink()
+    assert (
+        daily_lists.tick(
+            e.collector,
+            rds,
+            clock=lambda: e.clock[0],
+            grant=e.grant,
+            pause=real_pause,
+            settings=e.settings,
+        )
+        == 1
+    )
+    assert len(e.calls) == 3
+    assert [path for path, at in e.calls] == list(daily_lists.PATHS.values())
+    assert len(rds.acked) == len(rds.jobs) == 1
+    assert len(json.loads(e.counter.read_text())["records"]) == 3
+    with e.owner.connect() as conn:
+        assert len(conn.execute(select(rows).where(rows.c.batch_id == bid)).all()) == 3 * len(
+            previous.NAMES
+        )
+
+
+@pytest.mark.parametrize("point", ["flock", "after_reservation"])
+def test_tb102c_verification_lock_before_reserve_and_busy_keeps_intent(
+    env: Any,
+    monkeypatch: Any,
+    point: str,
+) -> None:
+    from app.db.tables.ops import ingest_request_log
+    from app.ingest import verification
+    from app.ingest.intents import VerifyIntent
+    from app.ingest.send_state import MinuteLedger
+
+    e = env
+    with e.owner.begin() as conn:
+        conn.execute(
+            update(user_data_licences)
+            .where(user_data_licences.c.id == e.lid)
+            .values(status="pending_verification")
+        )
+    intent = VerifyIntent(e.lid, uuid.uuid4())
+    original = verification.process
+    inject = [point == "after_reservation"]
+    waiting = e.root / "probe-waiting.lease.json"
+    reserve = MinuteLedger.reserve
+    calls: list[str] = []
+
+    def racing_reserve(self: Any, now: float) -> None:
+        reserve(self, now)
+        if inject[0]:
+            waiting.write_text(json.dumps({"source": "probe_tb05"}))
+            os.chmod(waiting, 0o600)
+            inject[0] = False
+
+    def upstream(path: str, secret: str) -> Any:
+        assert send_control.owned(e.root)
+        calls.append(path)
+        return 200, [{"date": str(e.day)}]
+
+    def process(*args: Any, **kwargs: Any) -> str:
+        return original(
+            *args, **kwargs, clock=lambda: e.clock[0], upstream=upstream, egress=lambda: previous.IP
+        )
+
+    monkeypatch.setattr(MinuteLedger, "reserve", racing_reserve)
+    monkeypatch.setattr(verification, "process", process)
+    monkeypatch.setattr(verification, "publish_status", lambda *args: None)
+    rds = RetryStream(
+        {
+            b"kind": b"verify_licence",
+            b"licence_id": str(e.lid).encode(),
+            b"verification_id": str(intent.verification_id).encode(),
+        }
+    )
+    fd = None
+    try:
+        if point == "flock":
+            fd = os.open(e.root / "send-control.lock", os.O_RDWR | os.O_CREAT, 0o600)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        verification.tick(e.collector, rds, e.settings)
+        assert calls == rds.acked == []
+        with e.owner.connect() as conn:
+            assert (
+                conn.execute(
+                    select(ingest_request_log).where(
+                        ingest_request_log.c.id == intent.verification_id
+                    )
+                ).all()
+                == []
+            )
+        for path in e.root.glob("*.requests.json"):
+            state = json.loads(path.read_text())
+            assert state["calls"] == []
+            assert state["inflight"] is False
+        assert list(e.root.glob("*.halt.json")) == []
+        assert not (e.root / "single-egress.lease.json").exists()
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if waiting.exists():
+            assert waiting.parent == e.root
+            assert json.loads(waiting.read_text())["source"] == "probe_tb05"
+            waiting.unlink()
+    verification.tick(e.collector, rds, e.settings)
+    assert len(calls) == len(rds.acked) == 1
+
+
+@pytest.mark.parametrize(
+    "case", ["replay", "settings_off", "held", "deleted", "unapproved", "wrong_licence"]
+)
+def test_tb102c_verification_permission_boundaries(env: Any, case: str, monkeypatch: Any) -> None:
+    previous.test_verification_permission_failures_do_not_read_secret(env, case, monkeypatch)

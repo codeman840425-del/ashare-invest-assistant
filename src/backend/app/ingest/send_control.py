@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import stat
 import threading
@@ -28,6 +29,18 @@ def root_from_environment() -> Path:
 
 def owned(root: Path) -> bool:
     return getattr(_local, "owner", None) == (os.getpid(), str(root.resolve()))
+
+
+def wire_started(root: Path) -> bool:
+    return owned(root) and bool(getattr(_local, "wire_started", False))
+
+
+def begin_wire(root: Path) -> None:
+    from app.ingest.shared_gate import GateClosedError
+
+    if not owned(root):
+        raise GateClosedError("shared_control_not_owned")
+    _local.wire_started = True
 
 
 def legacy_leases(root: Path, *, own_token: str | None = None) -> tuple[bool, bool]:
@@ -129,11 +142,15 @@ def critical(root: Path, *, blocking: bool = True) -> Iterator[None]:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
         except BlockingIOError:
+            logging.getLogger(__name__).info(
+                'send_control {"code":"shared_control_busy","would_block":true}'
+            )
             raise GateClosedError("shared_control_busy") from None
         current = (root / "send-control.lock").lstat()
         if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
             raise GateClosedError("shared_control_replaced")
         _local.owner = (os.getpid(), name)
+        _local.wire_started = False
         _sync_directory(root)
         yield
     except OSError:

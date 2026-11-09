@@ -30,7 +30,7 @@ from app.db.tables.market import master_runs, securities
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows
 from app.ingest.live import check_egress, feedback
-from app.ingest.send_control import critical, root_from_environment, transport
+from app.ingest.send_control import begin_wire, critical, root_from_environment, transport
 from app.ingest.send_governance import LIST_PATHS, Governance, Permit, expected_egress
 from app.ingest.shared_gate import (
     GateClosedError,
@@ -81,6 +81,9 @@ def wire(path: str, secret: str) -> tuple[int, object]:
         own_token=gate.token if isinstance(gate, SharedGate) else None,
     )
     gate.check()
+    begin_wire(gate.governance.root if isinstance(gate, Permit) else gate.root)
+    if isinstance(gate, Permit):
+        gate.sent = True  # The final pre-connect checks passed; outcome can now be uncertain.
     conn = http.client.HTTPSConnection(HOST, timeout=20)
     conn.set_debuglevel(0)
     try:
@@ -93,8 +96,11 @@ def wire(path: str, secret: str) -> tuple[int, object]:
             raise DailyHaltError("response_too_large")
         try:
             body = json.loads(payload)
+            if payload.strip() in {b"103", b"429"}:
+                body = payload.strip().decode("ascii")  # Keep plain text codes as text.
         except (ValueError, UnicodeError):
-            body = "103:" if re.search(rb"(?<!\d)(103|429)(?!\d)", payload) else None
+            match = re.search(rb"(?<!\d)(103|429)(?!\d)", payload)
+            body = match.group(1).decode("ascii") if match else None
         return response.status, body
     except Exception:  # noqa: BLE001 - sanitize upstream/credential exceptions, never log them
         raise DailyHaltError("transport_or_response_failed_no_retry") from None
@@ -107,18 +113,25 @@ def send(
     upstream: Callable[[str, str], tuple[int, object]],
     path: str,
     secret: str,
+    *,
+    dispatch_locked: bool = False,
 ) -> tuple[int, object]:
     with contextlib.ExitStack() as stack:
         if isinstance(gate, Permit):
             gate.claim(path)  # List dispatch already owns the governance critical section.
+            if upstream is not wire:
+                gate.sent = True  # Synthetic/alternate transport starts at this exact boundary.
         else:
             # Existing verification also uses this one transport mouth. Its old
             # authorization/accounting stays intact; only the physical mutex is shared.
-            stack.enter_context(critical(gate.root, blocking=False))
+            if not dispatch_locked:
+                stack.enter_context(critical(gate.root, blocking=False))
             transport(gate.root, own_token=gate.token)
             gate.check()
         token = WIRE_GATE.set(gate)
         try:
+            if upstream is not wire:
+                begin_wire(gate.governance.root if isinstance(gate, Permit) else gate.root)
             return upstream(path, secret)
         finally:
             WIRE_GATE.reset(token)
@@ -238,6 +251,8 @@ def process(
     policy = settings.business.ingest.licences.product_daily
     identity = None
     secret = None
+    active_permit: Permit | None = None
+    pending_dataset: str | None = None
     try:
         root = root_from_environment()
         with engine.begin() as conn:
@@ -251,6 +266,8 @@ def process(
                 return "not_daily"
             if b.status != "requested":
                 return "noop"
+            summaries = list(b.datasets or [])
+            completed = [row["dataset"] for row in summaries if row.get("status") == "ok"]
             issue = None
             current_grant = read_grant()
             if (
@@ -260,7 +277,7 @@ def process(
                 or not eligible(conn, grant, clock())
             ):
                 issue = "authorization_unavailable"
-            elif p.stats.get("attempted"):
+            elif list(p.stats.get("attempted", [])) != completed:
                 issue = "uncertain_prior_attempt_no_retry"
             if issue:
                 outcome = "failed"
@@ -295,9 +312,11 @@ def process(
             raise DailyHaltError("shared_egress_mismatch")
         secret = secret_loader(engine, lid)
         identity = temporary(temp, secret)
-        all_rows: list[dict[str, Any]] = []
-        summaries = []
         for index, dataset in enumerate(LISTS):
+            active_permit = None
+            pending_dataset = None
+            if dataset in completed:
+                continue  # Resume only durably completed results; never resend those endpoints.
             if index:
                 pause(policy.min_interval_s)
             with engine.begin() as conn:
@@ -321,6 +340,8 @@ def process(
                 expected_day=day,
                 trading_day=trading_day,
             ) as permit:
+                active_permit = permit
+                pending_dataset = dataset
                 # Acquiring the physical lock precedes any business attempted flag.
                 # Busy leaves the requested message untouched for tick retry.
                 with engine.begin() as conn:
@@ -401,7 +422,7 @@ def process(
                 if secret in encoded or quote(secret, safe="") in encoded:
                     raise DailyHaltError("credential_echo_rejected")
                 normalized = normalize(body, known)
-                all_rows.extend(
+                dataset_rows = [
                     {
                         "batch_id": bid,
                         "dataset": dataset,
@@ -410,11 +431,16 @@ def process(
                         "dup_conflict": False,
                     }
                     for code, name in normalized
-                )
+                ]
                 summaries.append({"dataset": dataset, "status": "ok", "row_count": len(normalized)})
+                with engine.begin() as conn:
+                    if dataset_rows:
+                        conn.execute(insert(rows), dataset_rows)
+                    conn.execute(
+                        update(batches).where(batches.c.id == bid).values(datasets=summaries)
+                    )
+                completed.append(dataset)
         with engine.begin() as conn:
-            if all_rows:
-                conn.execute(insert(rows), all_rows)
             conn.execute(
                 update(batches)
                 .where(batches.c.id == bid)
@@ -427,7 +453,24 @@ def process(
             )
         return "fetched"
     except Exception as exc:  # noqa: BLE001 - fixed diagnostics, no upstream/secret/DSN text
-        if isinstance(exc, GateClosedError) and str(exc) == "shared_control_busy":
+        if (
+            isinstance(exc, GateClosedError)
+            and str(exc) == "shared_control_busy"
+            and (active_permit is None or not active_permit.sent)
+        ):
+            if pending_dataset is not None:
+                with engine.begin() as conn:
+                    parent = conn.execute(
+                        select(master_runs).where(master_runs.c.id == parent_id).with_for_update()
+                    ).one()
+                    attempts = list(parent.stats.get("attempted", []))
+                    if pending_dataset in attempts:
+                        attempts.remove(pending_dataset)
+                        conn.execute(
+                            update(master_runs)
+                            .where(master_runs.c.id == parent_id)
+                            .values(stats={**parent.stats, "attempted": attempts})
+                        )
             return "busy"
         with engine.begin() as conn:
             conn.execute(

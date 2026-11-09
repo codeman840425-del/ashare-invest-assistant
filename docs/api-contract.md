@@ -1254,6 +1254,7 @@ evidence: Evidence[]
    - **部署顺序**：先停全部 api/worker/ingest 进程，再迁移，再启动新代码；不得让未重启的旧进程连新库。任何操作前先执行 `deploy/scripts/db-backup.sh` 并做恢复演练；不 `alembic stamp`，绝不 `down -v`。修正只能写在 0030（以 0029 为 `down_revision`），不得改动 0029 文件本身。
    - **用户电脑上未跟踪的 0029 文件**（已核对 blob 与入库版一致，05774fe）：经用户批准后由运维执行：① 停 api/worker/ingest（`docker compose stop`）；② db-backup.sh 备份并对 dump 做恢复演练，记录 sha256；③ 把未跟踪副本移到仓库外的备份目录（部署验证通过后再删）；④ 清掉 `__pycache__` 中 0029 的 pyc；⑤ ff 更新代码，确认 `git status` 干净；⑥ 启动服务，**不执行 upgrade**（库已是 head），核对 `alembic current` 与 `alembic heads` 均为 0029。若比对或库内对象（schema/触发器/函数定义）与入库版不一致，则冻结不更新，按 T-A70 评审第 6 节由架构师写收敛的 0030。
    - **grants 口径（以 T-O57 为准）**：`deploy/db/roles/grants.sql` 的通配授权排除 `ingest_private`，只给 aia_ingest 最小权限（与 0029 一致）；**aia_api、aia_maint 不得获授 `ingest_private` 的任何权限**，verify-roles 对二者做 permission denied 反例。RLS（0029:30-35）只是第二道屏障，不能替代授权排除。
+   - **草案（0030，T-A73，未生效）**：为让删除用户数据 CLI 在 0029 库上可用，0030（`down_revision="0029"`）只新增 `ops.gate_user_refs(uuid)`、`ops.purge_user_gate_facts(uuid)` 两个 SECURITY DEFINER（`search_path=pg_catalog`）函数，EXECUTE **只授 aia_maint**，aia_api、aia_ingest、PUBLIC 不授；purge 只对 `status='purging'` 的用户生效。aia_maint 仍不得获授 `ingest_private` 的任何权限。不改 HTTP 接口。详见 docs/reviews/T-A73-0030-plan.md
 
 #### 7.11.3 模拟跟踪结果（status: draft；P2N-03/05/08）
 

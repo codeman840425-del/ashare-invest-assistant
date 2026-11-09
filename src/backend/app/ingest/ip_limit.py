@@ -149,11 +149,27 @@ def apply_hit_memory(
     return False, until
 
 
-def flush_pending_escalation(conn: Connection, mem: UserIpLimitMemory) -> None:
-    """One-shot durable write for a fail-closed pause (L-2). No retry loop here."""
+def ip_limit_lock_key(user_id: uuid.UUID) -> str:
+    """§4.1 advisory lock key (shared by record_hit / flush / tick)."""
+    return f"ingest:ip_limit:{user_id}"
+
+
+def acquire_ip_limit_lock(conn: Connection, user_id: uuid.UUID) -> None:
+    conn.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+        {"k": ip_limit_lock_key(user_id)},
+    )
+
+
+def flush_pending_escalation(conn: Connection, mem: UserIpLimitMemory) -> bool:
+    """Write pending pause mark (L-2). Does **not** clear pending (L-6).
+
+    Caller must set ``mem.pending_escalation = None`` only after the surrounding
+    transaction has committed successfully. Returns True if a write was issued.
+    """
     p = mem.pending_escalation
     if p is None:
-        return
+        return False
     # Hit then mark — same shape as a successful record_hit escalate.
     _write_event(
         conn,
@@ -175,7 +191,7 @@ def flush_pending_escalation(conn: Connection, mem: UserIpLimitMemory) -> None:
         upstream_code=p.upstream_code,
         at=p.at,
     )
-    mem.pending_escalation = None
+    return True
 
 
 def record_hit(
@@ -192,10 +208,7 @@ def record_hit(
     pause_s: int,
     single_pause_s: int,
 ) -> tuple[bool, dt.datetime]:
-    conn.execute(
-        text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
-        {"k": f"ingest:ip_limit:{user_id}"},
-    )
+    acquire_ip_limit_lock(conn, user_id)
     flush_pending_escalation(conn, mem)
     fresh = rehydrate(conn, user_id, window_s=window_s, pause_s=pause_s, now=now)
     merge_rehydrated(mem, fresh)

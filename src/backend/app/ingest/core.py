@@ -13,6 +13,7 @@ T-A75：IP 限流升级计数按 ``user_id`` 共享，并可持久化到 ``ops.d
 from __future__ import annotations
 
 import datetime as dt
+import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -52,6 +53,12 @@ class IngestCore:
     scheduler: Scheduler[Call] = field(init=False)
 
     def __post_init__(self) -> None:
+        # L-1: production must wire a store; memory-only is fine for local/test.
+        if self.engine is None and os.environ.get("APP_ENV") == "production":
+            raise RuntimeError(
+                "IngestCore.engine is required when APP_ENV=production "
+                "(T-A79 L-1 / T-B112)"
+            )
         self.scheduler = Scheduler(
             global_max=self.cfg.global_max_concurrency,
             per_licence_max=self.cfg.per_licence_max_concurrency,
@@ -67,6 +74,22 @@ class IngestCore:
             mem = ipl.UserIpLimitMemory()
             self.user_ip[user_id] = mem
         return mem
+
+    def _try_flush_pending(self, user_id: uuid.UUID) -> None:
+        """One-shot pending rewrite under §4.1 lock; clear only after commit (L-6/L-7)."""
+        if self.engine is None:
+            return
+        mem = self._user_mem(user_id)
+        if mem.pending_escalation is None:
+            return
+        try:
+            with self.engine.begin() as conn:
+                ipl.acquire_ip_limit_lock(conn, user_id)
+                ipl.flush_pending_escalation(conn, mem)
+        except Exception:  # noqa: BLE001 — keep pending; still fail-closed
+            return
+        # L-6: transaction committed successfully.
+        mem.pending_escalation = None
 
     def rehydrate(self, user_id: uuid.UUID, now: dt.datetime) -> None:
         """Fill user IP-limit memory from the store; fail-closed → escalated.
@@ -95,13 +118,8 @@ class IngestCore:
                 mem.escalated_until, ipl.fail_closed_until(now, esc.pause_s)
             )
             return
-        # L-2: one attempt to durable-write a prior fail-closed pause (no loop).
-        if mem.pending_escalation is not None:
-            try:
-                with self.engine.begin() as conn:
-                    ipl.flush_pending_escalation(conn, mem)
-            except Exception:  # noqa: BLE001 — keep pending; still refuse
-                return
+        # L-2/L-7: one attempt under the same advisory lock; L-6 clear after commit.
+        self._try_flush_pending(user_id)
 
     def upsert(
         self,
@@ -148,6 +166,15 @@ class IngestCore:
         self.scheduler.submit(licence_id, priority, call)
 
     def tick(self, now: dt.datetime) -> list[tuple[uuid.UUID, Transition]]:
+        # L-8: each user with pending gets one flush attempt (no unbounded loop).
+        if self.engine is not None:
+            seen: set[uuid.UUID] = set()
+            for lic in self.licences.values():
+                if lic.user_id in seen:
+                    continue
+                seen.add(lic.user_id)
+                if self._user_mem(lic.user_id).pending_escalation is not None:
+                    self._try_flush_pending(lic.user_id)
         out: list[tuple[uuid.UUID, Transition]] = []
         for lid, lic in self.licences.items():
             until = self._user_mem(lic.user_id).escalated_until
@@ -218,6 +245,8 @@ class IngestCore:
                         pause_s=esc.pause_s,
                         single_pause_s=self.cfg.ip_limited_pause_s,
                     )
+                # L-6: record_hit may have flushed pending inside the txn; clear after commit.
+                mem.pending_escalation = None
         except Exception:  # noqa: BLE001 — fail-closed
             until = ipl.fail_closed_until(now, esc.pause_s)
             mem.escalated_until = ipl.later(mem.escalated_until, until)

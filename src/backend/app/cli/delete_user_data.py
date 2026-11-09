@@ -398,6 +398,12 @@ HANDLED_FK: Final[frozenset[str]] = frozenset(
     }
 )  # fmt: skip
 
+#: ingest_private 中指向 app.users 的外键只允许这一列（T-A73 B2）；多出任何一列 → 阻断。
+#: 不把该 schema 纳入 HANDLED_FK / 外键扫描，以免 aia_maint 无 USAGE 时 permission denied。
+_INGEST_PRIVATE_USER_FK_ALLOWED: Final = frozenset(
+    {"ingest_private.mairui_gate_bindings.user_id"}
+)
+
 
 class PurgeRefusedError(Exception):
     """前置检查不通过（用户不存在、已在 purging、存在阻断引用）。"""
@@ -522,6 +528,11 @@ TRIGGER_ALLOWLIST: Final[frozenset[tuple[str, str, str]]] = frozenset(
         ("app.users", "trg_users_purging_guard", "app.guard_users_purging"),
         ("app.users", "trg_users_purging_not_committed", "app.reject_purging_commit"),
         ("ops.data_licence_events", "trg_data_licence_events_immutable", "app.reject_mutation"),
+        (
+            "app.user_data_licences",
+            "mairui_gate_on_licence_deletion",
+            "ingest_private.mairui_gate_licence_deleted",
+        ),
     }
 )
 
@@ -544,6 +555,8 @@ class Plan:
     pending: list[tuple[str, int, str | None]]
     pending_readable: bool = True
     unknown_triggers: list[str] = field(default_factory=list)
+    gate_bindings: int = 0
+    gate_scopes: int = 0
 
 
 #: 本 CLI 会读写的表（触发器自检的范围；清单外表不检查，T-T25 裁定 #4）
@@ -602,6 +615,30 @@ def _market_licence_tables(conn: Connection) -> list[str]:
     return list(rows)
 
 
+
+def _ingest_private_user_fk_drift(conn: Connection) -> list[tuple[str, int]]:
+    """T-A73 B2：ingest_private→users 外键必须正好是允许集。
+
+    多出即阻断；不计行数，避免 aia_maint 无 schema USAGE 时 permission denied。
+    """
+    cols = conn.execute(
+        text(
+            "SELECT n.nspname || '.' || c.relname, a.attname "
+            "FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey) "
+            "WHERE k.contype = 'f' AND k.confrelid = 'app.users'::regclass "
+            "AND n.nspname = 'ingest_private' "
+            "AND NOT c.relispartition ORDER BY 1, 2"
+        )
+    ).all()
+    found = {f"{table}.{col}" for table, col in cols}
+    return [
+        (f"{name}（ingest_private 中未授权的 users 外键）", 1)
+        for name in sorted(found - _INGEST_PRIVATE_USER_FK_ALLOWED)
+    ]
+
+
 def _unhandled_fk_refs(conn: Connection, uid: uuid.UUID) -> list[tuple[str, int]]:
     cols = conn.execute(
         text(
@@ -610,6 +647,7 @@ def _unhandled_fk_refs(conn: Connection, uid: uuid.UUID) -> list[tuple[str, int]
             "JOIN pg_namespace n ON n.oid = c.relnamespace "
             "JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey) "
             "WHERE k.contype = 'f' AND k.confrelid = 'app.users'::regclass "
+            "AND n.nspname <> 'ingest_private' "
             "AND NOT c.relispartition ORDER BY 1, 2"
         )
     ).all()
@@ -701,6 +739,7 @@ def _user_fk_cols(conn: Connection) -> dict[str, list[str]]:
             "JOIN pg_namespace n ON n.oid = c.relnamespace "
             "JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey) "
             "WHERE k.contype = 'f' AND k.confrelid = 'app.users'::regclass "
+            "AND n.nspname <> 'ingest_private' "
             "AND NOT c.relispartition ORDER BY 1, 2"
         )
     ).all():
@@ -847,8 +886,14 @@ def build_plan(conn: Connection, uid: uuid.UUID) -> Plan:
         )
     )
     blockers += _unhandled_fk_refs(conn, uid)
+    blockers += _ingest_private_user_fk_drift(conn)
     triggers = unknown_triggers(conn, _scope_tables(market))
     pending, pending_readable = _read_pending(conn)
+    gate = conn.execute(
+        text("SELECT bindings, scopes FROM ops.gate_user_refs(:uid)"), {"uid": uid}
+    ).one()
+    counts.append(("gate", "ops.gate_user_refs.bindings", int(gate.bindings)))
+    counts.append(("gate", "ops.gate_user_refs.scopes", int(gate.scopes)))
     return Plan(
         user_id=uid,
         username=user.username,
@@ -866,6 +911,8 @@ def build_plan(conn: Connection, uid: uuid.UUID) -> Plan:
         pending=pending,
         pending_readable=pending_readable,
         unknown_triggers=triggers,
+        gate_bindings=int(gate.bindings),
+        gate_scopes=int(gate.scopes),
     )
 
 
@@ -913,7 +960,7 @@ def run_purge(conn: Connection, plan: Plan) -> dict[str, int]:
     for t in _market_licence_tables(conn):
         n = conn.execute(text(f"DELETE FROM {t} WHERE source_licence_id = ANY (:lids)"), p).rowcount
         add(f"delete:{t}", n)
-    for st in (*STEPS, SNAPSHOTS_STEP, LLM_DELETE, LICENCES_STEP):
+    for st in (*STEPS, SNAPSHOTS_STEP, LLM_DELETE):
         if st.action == "delete":
             n = conn.execute(text(f"DELETE FROM {st.table} WHERE {st.where}"), p).rowcount
             add(f"delete:{st.table}", n)
@@ -923,6 +970,20 @@ def run_purge(conn: Connection, plan: Plan) -> dict[str, int]:
             ).rowcount
             if n:
                 add(f"{st.action}:{st.name}", n)
+    # T-A73 B4: purge gate facts before deleting licence rows (0029 trigger leaves orphan scopes).
+    gate = conn.execute(
+        text("SELECT bindings, scopes FROM ops.purge_user_gate_facts(:uid)"), {"uid": uid}
+    ).one()
+    add("delete:ingest_private.mairui_gate_bindings", int(gate.bindings))
+    add("delete:ingest_private.mairui_gate_scopes", int(gate.scopes))
+    st = LICENCES_STEP
+    if st.action == "delete":
+        n = conn.execute(text(f"DELETE FROM {st.table} WHERE {st.where}"), p).rowcount
+        add(f"delete:{st.table}", n)
+    else:
+        n = conn.execute(text(f"UPDATE {st.table} SET {st.set_sql} WHERE {st.where}"), p).rowcount
+        if n:
+            add(f"{st.action}:{st.name}", n)
     n = conn.execute(text("DELETE FROM app.users WHERE id = :uid"), {"uid": uid}).rowcount
     add("delete:app.users", n)
     conn.execute(

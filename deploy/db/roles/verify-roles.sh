@@ -485,6 +485,44 @@ else
   fi
 fi
 
+# T-O60 / T-A73 O2 + T-O61 O-2：gate 函数仅 aia_maint EXECUTE；函数不存在 → FAIL（无 SKIP；0029 库会失败）。
+o60_gate_fn_check() {
+  local f="$1" reg
+  reg="$(own -c "SELECT to_regprocedure('$f')")"
+  if [ -z "$reg" ] || [ "$reg" = "" ]; then
+    echo "FAIL T-O61：$f 不存在（须 0030；缺函数按失败计，无 SKIP）"
+    fail=1
+    return
+  fi
+  if [ "$(own -c "SELECT has_function_privilege('aia_api', '$f'::regprocedure, 'EXECUTE')")" = t ]; then
+    echo "FAIL T-O60：aia_api 对 $f 有 EXECUTE"; fail=1
+  else
+    echo "OK   T-O60：aia_api 对 $f 无 EXECUTE"
+  fi
+  if [ "$(own -c "SELECT has_function_privilege('aia_ingest', '$f'::regprocedure, 'EXECUTE')")" = t ]; then
+    echo "FAIL T-O60：aia_ingest 对 $f 有 EXECUTE"; fail=1
+  else
+    echo "OK   T-O60：aia_ingest 对 $f 无 EXECUTE"
+  fi
+  if [ "$(own -c "SELECT has_function_privilege('public', '$f'::regprocedure, 'EXECUTE')")" = t ]; then
+    echo "FAIL T-O60：PUBLIC 对 $f 有 EXECUTE"; fail=1
+  else
+    echo "OK   T-O60：PUBLIC 对 $f 无 EXECUTE"
+  fi
+  if [ "$(own -c "SELECT has_function_privilege('aia_maint', '$f'::regprocedure, 'EXECUTE')")" = t ]; then
+    echo "OK   T-O60：aia_maint 对 $f 有 EXECUTE"
+  else
+    echo "FAIL T-O60：aia_maint 缺少 $f EXECUTE"; fail=1
+  fi
+  # 调用态反例：用无签名的函数名（签名仅用于 has_function_privilege / to_regprocedure）
+  local call="${f%%(*}"
+  expect_denied aia_api "SELECT * FROM ${call}('00000000-0000-4000-8000-000000000060')"
+  expect_denied aia_ingest "SELECT * FROM ${call}('00000000-0000-4000-8000-000000000060')"
+}
+o60_gate_fn_check "ops.gate_user_refs(uuid)"
+o60_gate_fn_check "ops.purge_user_gate_facts(uuid)"
+
+
 [ "$(own -c "SELECT count(*) FROM app.users WHERE username LIKE 't\_o11\_%'")" = 0 ] \
   || { echo "FAIL 仍有 t_o11_ 探针用户残留"; fail=1; }
 exit "$fail"

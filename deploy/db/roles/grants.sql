@@ -462,7 +462,8 @@ DECLARE
     'app.purge_ref_ids(uuid[])', 'app.purge_target_ref(text, uuid[])', 'app.purge_json_mentions(jsonb, text[])',
     'app.purge_scrub_json(jsonb, text[])', 'app.purge_scrub_json(jsonb)', 'app.purge_pii_key(text)',
     'app.purge_permits(text, text, jsonb, jsonb)', 'app.purge_user_ids()', 'app.purge_row_owner(text, jsonb)',
-    'app.purge_anonymize_ok(text, jsonb, jsonb, uuid[])'];
+    'app.purge_anonymize_ok(text, jsonb, jsonb, uuid[])',
+    'ops.gate_user_refs(uuid)', 'ops.purge_user_gate_facts(uuid)'];
   -- 不可读的列（后端 §1）；另有 users.role / users.password_hash 不可写
   maint_deny text[] := ARRAY[
     'app.users.password_hash', 'app.user_data_licences.ciphertext', 'app.user_data_licences.licence_hmac',
@@ -718,16 +719,27 @@ BEGIN
       RAISE EXCEPTION 'db-roles: aia_api 缺少 %（4.6.5A 第 9 条：其余由 worker 读写）', priv;
     END IF;
   END LOOP;
-  FOREACH priv IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'] LOOP
-    IF has_table_privilege('aia_maint', batches, priv) OR has_table_privilege('aia_maint', rows_tbl, priv) THEN
-      RAISE EXCEPTION 'db-roles: aia_maint 不应有表级 % ON 对账批次表', priv;
+  -- T-O61：aia_maint 对 batches 的最终口径在 $o33$（SELECT source_licence_id + DELETE）；
+  -- 此处只检 api/ingest。maint 断言移到 $o33$ 授完之后，避免同文件先检后授的假矛盾。
+  FOREACH priv IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'TRUNCATE'] LOOP
+    IF has_table_privilege('aia_maint', batches, priv) THEN
+      RAISE EXCEPTION 'db-roles: aia_maint 不应有表级 % ON master_vendor_batches（仅允许 DELETE + 列级 SELECT source_licence_id，见 $o33$）', priv;
     END IF;
   END LOOP;
-  IF has_any_column_privilege('aia_maint', batches, 'SELECT')
+  FOREACH priv IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'] LOOP
+    IF has_table_privilege('aia_maint', rows_tbl, priv) THEN
+      RAISE EXCEPTION 'db-roles: aia_maint 不应有表级 % ON master_vendor_list_rows', priv;
+    END IF;
+  END LOOP;
+  IF EXISTS (
+       SELECT 1 FROM pg_attribute a
+        WHERE a.attrelid = batches AND a.attnum > 0 AND NOT a.attisdropped
+          AND a.attname <> 'source_licence_id'
+          AND has_column_privilege('aia_maint', batches, a.attname, 'SELECT'))
      OR has_any_column_privilege('aia_maint', batches, 'UPDATE')
      OR has_any_column_privilege('aia_maint', rows_tbl, 'SELECT')
      OR has_any_column_privilege('aia_maint', rows_tbl, 'UPDATE') THEN
-    RAISE EXCEPTION 'db-roles: aia_maint 不应有对账批次表的列权限';
+    RAISE EXCEPTION 'db-roles: aia_maint 对对账表列权限超出 $o33$ 口径';
   END IF;
   FOR child IN SELECT inhrelid AS relid, inhrelid::regclass AS q FROM pg_inherits WHERE inhparent IN (batches, rows_tbl) LOOP
     IF has_table_privilege('aia_ingest', child.relid, 'SELECT')
@@ -1129,6 +1141,13 @@ BEGIN
     END IF;
     EXECUTE 'REVOKE ALL ON TABLE market.master_vendor_batches FROM aia_maint';
     EXECUTE 'GRANT SELECT (source_licence_id), DELETE ON TABLE market.master_vendor_batches TO aia_maint';
+    IF NOT has_table_privilege('aia_maint', 'market.master_vendor_batches', 'DELETE')
+       OR NOT has_column_privilege('aia_maint', 'market.master_vendor_batches', 'source_licence_id', 'SELECT')
+       OR has_table_privilege('aia_maint', 'market.master_vendor_batches', 'SELECT')
+       OR has_table_privilege('aia_maint', 'market.master_vendor_batches', 'INSERT')
+       OR has_table_privilege('aia_maint', 'market.master_vendor_batches', 'UPDATE') THEN
+      RAISE EXCEPTION 'db-roles: T-O61/T-O33 aia_maint 对 master_vendor_batches 须为 DELETE + SELECT(source_licence_id)';
+    END IF;
   END IF;
 
   FOREACH rel IN ARRAY rollbacks LOOP
@@ -1234,3 +1253,47 @@ BEGIN
   RAISE NOTICE 'db-roles: T-O33 矩阵已收窄（重复执行保持最小；未建表；未改归属触发器）';
 END
 $o33$;
+
+-- T-O60 / T-A73 O1：ops.gate_user_refs / ops.purge_user_gate_facts 仅 aia_maint 可 EXECUTE。
+-- 放在文件末尾：通配 ALL FUNCTIONS IN SCHEMA ops 会授给 api/ingest；maint 段会撤光后再按清单授回。
+-- 函数不存在（0029 头）整段跳过。DEFAULT PRIVILEGES：通配循环未给 FUNCTIONS 默认 EXECUTE，这里再显式撤一次防回授。
+DO $o60_gate_funcs$
+DECLARE
+  owner_role text := current_user;
+  f text;
+  fns text[] := ARRAY['ops.gate_user_refs(uuid)', 'ops.purge_user_gate_facts(uuid)'];
+  any_present boolean := false;
+BEGIN
+  FOREACH f IN ARRAY fns LOOP
+    IF to_regprocedure(f) IS NULL THEN
+      CONTINUE;
+    END IF;
+    any_present := true;
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM aia_api, aia_ingest, PUBLIC', to_regprocedure(f));
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aia_maint') THEN
+      EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aia_maint', to_regprocedure(f));
+    END IF;
+    IF has_function_privilege('aia_api', to_regprocedure(f), 'EXECUTE') THEN
+      RAISE EXCEPTION 'db-roles: T-O60 aia_api 仍有 EXECUTE %', f;
+    END IF;
+    IF has_function_privilege('aia_ingest', to_regprocedure(f), 'EXECUTE') THEN
+      RAISE EXCEPTION 'db-roles: T-O60 aia_ingest 仍有 EXECUTE %', f;
+    END IF;
+    IF has_function_privilege('public', to_regprocedure(f), 'EXECUTE') THEN
+      RAISE EXCEPTION 'db-roles: T-O60 PUBLIC 仍有 EXECUTE %', f;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aia_maint')
+       AND NOT has_function_privilege('aia_maint', to_regprocedure(f), 'EXECUTE') THEN
+      RAISE EXCEPTION 'db-roles: T-O60 aia_maint 缺少 EXECUTE %', f;
+    END IF;
+  END LOOP;
+  IF to_regnamespace('ops') IS NOT NULL THEN
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA ops REVOKE EXECUTE ON FUNCTIONS FROM aia_api, aia_ingest, PUBLIC', owner_role);
+  END IF;
+  IF any_present THEN
+    RAISE NOTICE 'db-roles: T-O60 gate 函数仅 aia_maint EXECUTE';
+  ELSE
+    RAISE NOTICE 'db-roles: T-O60 gate 函数不存在（未到 0030），跳过';
+  END IF;
+END
+$o60_gate_funcs$;

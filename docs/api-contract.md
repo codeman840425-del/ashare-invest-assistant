@@ -1237,7 +1237,7 @@ evidence: Evidence[]
 - 当前评价不能回写历史建议；建议仍读取生成时的风控标记与 gap。实际风控事件由业务作业幂等写入，复用 §7.5 的 RiskEvent，不增加第二套事件状态机。
 - **T-A33（R4）**：`RiskEvaluation` 的 `DataStatusBlock.data_as_of` 取参与判定各输入时点中**最早**的非空值，全空为 null（同 T-A29 日报口径，不取最新、不取 evaluated_at）。
 
-**T-A52 裁定（status: draft；「清除覆盖」接口，v0.2.9 内；docs/reviews/T-A52-risk-control-reset-ruling.md）**：
+**T-A52 裁定（status: 生效（T-A69，隔离 PG 复验 T-O54 与 tb95 22/22 T-T36b 通过后）；「清除覆盖」接口，v0.2.9 内；docs/reviews/T-A52-risk-control-reset-ruling.md）**：
 
 1. **语义**：`DELETE /risk-controls/{control}` 删除**操作者本人**该 control 的 `scope='user'` 覆盖、恢复继承（文件默认 → system 行 → 本人 user 行链回退），不是删除配置本身。**权限边界（用户裁定）**：只能删除本人 user 行；system 行与文件默认一律不可经本接口删除或改动；普通用户对 system 行无任何写/删路径（变体形状一律 `404 NOT_FOUND`，隐藏存在性，不提供 403 探测面）；不设管理员跨用户重置；system 行管理入口属独立管理员功能，不在本契约范围。
 2. **响应与幂等**：`200 list[RiskSetting]`（六项，与 GET/PUT 同形，删除即刷新）。无本人覆盖时重复清除 → 200、状态不变、无新增副作用（幂等终点「本人无覆盖」），不追加历史与审计。
@@ -1247,6 +1247,12 @@ evidence: Evidence[]
 6. **position_cap 终点**：清除后若 profile `max_single_position_pct` 非 null 则生效、`source=user`，否则文件默认、`source=system`——「回到继承」而非「回到文件默认」，前端按返回值展示。
 7. **并发**：与 PUT 共用既有 advisory lock（同 owner 串行）；只删指定 control，不批量。
 8. **T63 验收**：PUT 改值 → DELETE → GET 回继承值且 `source` 相应变化；幂等重放零副作用；清除后求值链路立即用继承值，无需重启；每两次真实清除间幂等重放不产生新 history/审计。负例集（401/403 CSRF/404 未知 control/404 变体/幂等 200/并发串行等）见裁定文档 §D9，随 T-B95 定点用例。
+9. **回滚指引（T-A69，按 T-A67 修正 RV-01）**：
+   - 代码不得回退到 T-B98b 之前（team-b 原提交 f20fd83，主线拣入后为 2442b9d）。更早的代码不认 `override_active`，会把已清除的覆盖重新当作有效；旧代码 PUT 也不会把它置回 true，新代码会静默忽略用户的新值。
+   - 部署顺序：先停全部 api/worker 进程，再迁移，再启动新代码；不得让未重启的旧进程连 0028 库。
+   - 降到 0027：代码和数据库必须一起降，且只能在 `risk_control_settings` 中没有 `override_active=false` 行时降，此时降级不丢事实；有 false 行时 0028 downgrade 会拒绝，库保持 0028（T-O54 已验）。
+   - 不得为了能降级而删除或改写 false 行（历史不可变，改写等于捏造用户没设过的值）；确需处理时另写脚本，经评审并由用户批准。
+   - 用户库默认按「有 false 行」处理：回滚只能回到 ≥T-B98b 的代码并保持 0028，不降 0027。任何操作前先 db-backup.sh，绝不 `down -v`。
 
 #### 7.11.3 模拟跟踪结果（status: draft；P2N-03/05/08）
 

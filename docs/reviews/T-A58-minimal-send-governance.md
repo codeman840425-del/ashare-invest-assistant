@@ -145,3 +145,13 @@ RV-15c 抓的竞态属实：产品「读旧快照 → 预留写入 →（锁忙�
 
 - T-B102c 返修单（RV-15c 后续）按 R6/R7 执行；T-T34 负例按 R6.5/R7 各增补；T-B103 验收含 R6.4 收窄。
 - **T-B103 范围扩大（T-A61b，编排者+复核确认）**：分钟账单文件读改写需两侧全程共锁，只切 HTTP 发送锁不够——T-B103 除探针切锁外，**分钟账预留/完成/取消全程纳入同一 flock 临界区**（锁边界从 dispatch 扩到「账本读改写→发送→响应记账」）；切锁后单写者成立，产品回滚按 R6.4 恢复精确快照（保留「自己那条仍在」断言，文件被非锁写入者改动即 fail closed）。R6.5 负例①在切锁后语义收窄：竞态由 flock 串行化消除，用例改断言「探针获取锁后看到产品已完成记账，无覆盖窗口」。
+
+### R8｜暂停/回放期到期口径：扫描照跑、入流跳过、恢复后一次性处理（T-A62，北京 2026-11-10）
+
+- **问题**：`publish_pending`（到期扫描→重投）在 ingest 暂停（`ingest:paused`）或 replay 态仍把 `requested` 批次 `xadd` 入流，而消费端此时不处理——消息滞留 PEL，每 60 秒 `xautoclaim` 又领一遍，空转且日志噪声掩盖真事件。
+- **裁定**：取建议方向一（扫描跳过入流），配一次性恢复：
+  1. **到期标记照常**：`deadline_at` 已过 → 置 `expired/error_code=deadline_exceeded` 的 DB 更新在暂停/replay 期**照常执行**（纯 DB 操作，不依赖流，不外呼）。
+  2. **入流跳过**：`publish_pending` 的重投分支（`xadd`）与 tick 的 `xautoclaim` 在 `ingest:paused` 存在或 `MAIRUI_MODE≠live` 时**直接跳过**——不 xadd、不 claim、不清 PEL。DB 侧 `requested/fetched` 待办仍是唯一事实，恢复后不会丢。
+  3. **恢复一次性处理**：暂停解除或切回 live 的首个 tick，`publish_pending` 照常扫描全部未终态批次统一入流一次（既有逻辑天然如此——不需要新代码，只需确认恢复路径无去重缺失）；PEL 里滞留的旧消息由 `xautoclaim` 领取后按批次状态幂等处理（`requested`→处理，`expired/failed`→apply/归档路径），重复投递靠既有 `attempted`/dedup 防重。
+  4. **R7 交互**：跨日批次在恢复后首个 tick 按 `daily_window_expired` 作废（R7），不因「暂停耽搁」续期——暂停不是延长窗口的理由。
+- **负例**：①暂停态置 STOP 键→到期批次只被标 expired、流内零新消息、PEL 不被 claim；②replay 态同样跳过；③解除暂停→首个 tick 恰一批重投、按窗口判定作废或续跑正确；④暂停跨 23:59:59 的批次→恢复后作废不重发。

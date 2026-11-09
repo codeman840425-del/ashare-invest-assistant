@@ -55,7 +55,9 @@ def fresh_db() -> Any:
     cfg = Config()
     cfg.set_main_option("script_location", str(ROOT / "src/backend/migrations"))
     cfg.cmd_opts = Namespace(x=["url=" + url])
-    assert ScriptDirectory.from_config(cfg).get_heads() == ["0027"]
+    script = ScriptDirectory.from_config(cfg)
+    assert len(script.get_heads()) == 1  # single mainline head (0028 after T-B95)
+    assert "0027" in {rev.revision for rev in script.walk_revisions()}
     with psycopg.connect(dbname="postgres", user="postgres", host=SOCKET, autocommit=True) as admin:
         assert admin.execute("SHOW listen_addresses").fetchone() == ("",)
         admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
@@ -123,7 +125,7 @@ def grants(conn: Any) -> None:
 @pytest.fixture
 def database(fresh_db: Any) -> Any:
     url, cfg = fresh_db
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "0027")
     root = create_engine(url)
     with root.begin() as conn:
         deploy_grants(conn)
@@ -208,7 +210,7 @@ def roundtrip(url: str, cfg: Config, expected: Any) -> None:
         assert conn.execute(
             text("SELECT count(*) FROM app.signal_event_projections_rollback")
         ).scalar_one() == len(expected["signal_event_projections"])
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "0027")
     with root.connect() as conn:
         assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0027"
         assert facts(conn) == expected
@@ -272,7 +274,7 @@ def test_legacy_nonempty_proof_refs_upgrade_downgrade_reupgrade(fresh_db: Any) -
             ),
             {"id": notice, "u": uid, "at": old.AT},
         )
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "0027")
     with root.begin() as c:
         legacy = c.execute(select(signal_events).where(signal_events.c.id == eid)).one()
         assert legacy.source_licence_id == lid
@@ -337,7 +339,7 @@ def test_unprovable_legacy_refuses_without_erasing(fresh_db: Any) -> None:
             {"id": uuid.uuid4()},
         )
     with pytest.raises(RuntimeError, match="unowned_signal_events"):
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "0027")
     with root.connect() as c:
         assert c.execute(text("SELECT count(*) FROM app.signal_events")).scalar_one() == 1
         assert c.execute(text("SELECT version_num FROM alembic_version")).scalar_one() not in {
@@ -720,7 +722,7 @@ def test_existing_old_0026_additive_unknown_binding_and_refs_preserved(fresh_db:
         old_refs = list(
             c.execute(text("SELECT to_jsonb(n)::text FROM app.notification_refs n")).scalars()
         )
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "0027")
     with root.connect() as c:
         row = c.execute(select(signal_events).where(signal_events.c.id == eid)).one()
         assert row.source_licence_id == lid

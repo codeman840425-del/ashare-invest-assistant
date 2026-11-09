@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from alembic.config import Config
+from alembic.runtime.migration import MigrationStep
 from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -56,6 +58,30 @@ def require_database_mainline(
             "DATABASE_REVISION_NOT_MAINLINE: "
             + ",".join(safe)
             + "; stop; no automatic stamp/downgrade"
+        )
+
+
+def require_safe_downgrade(conn: Connection | None, steps: Iterable[MigrationStep]) -> None:
+    """Guard the resolved migration plan, before ANY step's DDL is executed.
+
+    Alembic resolves relative revisions and descendants. Read-only commands and
+    upgrades have no downgrade step removing 0028, so never inspect settings.
+    """
+    if not any(step.is_downgrade and "0028" in step.from_revisions_no_deps for step in steps):
+        return
+    if conn is None:
+        raise MigrationLineageError(
+            "UNSAFE_DOWNGRADE_0028: offline SQL cannot check cleared overrides; "
+            "use the guarded online migration path"
+        )
+    # Keep settings writers out until the migration transaction completes.
+    conn.execute(text("LOCK TABLE app.risk_control_settings IN SHARE MODE"))
+    if conn.execute(
+        text("SELECT EXISTS (SELECT 1 FROM app.risk_control_settings WHERE NOT override_active)")
+    ).scalar_one():
+        raise MigrationLineageError(
+            "UNSAFE_DOWNGRADE_0028: cleared overrides exist; keep 0028; "
+            "a separately reviewed state-preserving rollback is required"
         )
 
 

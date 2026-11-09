@@ -67,7 +67,9 @@ def entries(
     overrides = set(
         conn.execute(
             select(settings.c.control).where(
-                settings.c.scope == "user", settings.c.user_id == owner
+                settings.c.scope == "user",
+                settings.c.user_id == owner,
+                settings.c.override_active,
             )
         ).scalars()
     )
@@ -161,6 +163,7 @@ def save(
         ).first()
         if (
             previous is not None
+            and previous.override_active
             and previous.enabled == patch["enabled"]
             and canonical(previous.params) == params
         ):
@@ -182,7 +185,9 @@ def save(
             conn.execute(
                 update(settings)
                 .where(settings.c.id == identifier)
-                .values(enabled=patch["enabled"], params=params, updated_at=now)
+                .values(
+                    enabled=patch["enabled"], params=params, updated_at=now, override_active=True
+                )
             )
         hid = uuid.uuid4()
         conn.execute(
@@ -207,4 +212,63 @@ def save(
             target_id=str(identifier),
             detail={"control": patch["control"], "history_id": str(hid)},
         )
+    return entries(conn, owner, defaults)
+
+
+def reset(
+    conn: Connection,
+    owner: uuid.UUID,
+    role: str,
+    defaults: RiskControlsConfig,
+    control: str,
+    now: dt.datetime,
+) -> list[dict[str, Any]]:
+    """T-A52: clear one owned override, preserving its identity and append-only history."""
+    if control not in CONTROL_FIELDS:
+        raise AppError(ErrorCode.NOT_FOUND)
+    conn.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:owner,202602))"), {"owner": str(owner)}
+    )
+    previous = conn.execute(
+        select(settings)
+        .where(
+            settings.c.scope == "user",
+            settings.c.user_id == owner,
+            settings.c.control == control,
+        )
+        .with_for_update()
+    ).first()
+    if previous is None or not previous.override_active:
+        return entries(conn, owner, defaults)
+    conn.execute(
+        update(settings)
+        .where(settings.c.id == previous.id)
+        .values(
+            override_active=False,
+            updated_at=now,
+        )
+    )
+    hid = uuid.uuid4()
+    conn.execute(
+        insert(history).values(
+            id=hid,
+            setting_id=previous.id,
+            scope="user",
+            user_id=owner,
+            control=control,
+            enabled=None,
+            params=None,
+            changed_by=owner,
+            changed_at=now,
+        )
+    )
+    audit(
+        conn,
+        action="risk_control.reset",
+        actor_id=owner,
+        actor_role=role,
+        target_type="risk_control_setting",
+        target_id=str(previous.id),
+        detail={"control": control, "history_id": str(hid), "had_override": True},
+    )
     return entries(conn, owner, defaults)

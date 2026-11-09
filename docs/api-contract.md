@@ -990,6 +990,7 @@ evidence: Evidence[]
 | GET | `/strategy-instances/{id}/events` 🔒 | §1.2 分页，`at desc, id desc` → 元素 `{id, kind: instance_event_kind, from_status: instance_status \| null, to_status: instance_status \| null, actor: "user" \| "system", reason_code: reason_code \| null, note: string \| null, detail: object \| null, at: string(datetime)}`（v0.2.7）。`created` 的 `from_status` 为 `null`；`params_changed` 两个状态都为 `null`，`detail` 中给出 `{derived_strategy_version_id}` |
 | GET/POST/DELETE | `/restrictions` 🔒 · `/restrictions/{id}` 🔒 | `{kind: "blocklist"\|"cooling_off"\|"mute", target_type: "security"\|"strategy"\|"instance", target_id: string, until: string(datetime) \| null, reason: string \| null}`。删除后会触发相关原因（`BLOCKLISTED`/`USER_MUTED`）重新检查 |
 | GET/PUT | `/risk-controls` 🔒 | `[{control: risk_control, enabled: boolean, params: object, source: "system"\|"user"}]`；可能返回 `422 RISK_CONTROL_INVALID_PARAMS` |
+| DELETE | `/risk-controls/{control}` 🔒 | **新增（v0.2.9 内，T-A52）**。清除**本人**该 control 的用户覆盖，恢复继承（`scope='user'` 行置 `override_active=false`；不是删除配置本身，六项控制恒存在）；返回 `200 list[RiskSetting]`（六项，与 PUT 同形）。幂等：无本人覆盖时重复清除 → 200、状态不变、不追加历史/审计。未知 `control` → `404 NOT_FOUND`；以任何变体形状（`?scope=`、body 目标等）试图触达 system 行 → `404`（本接口只寻址本人 user 行，不提供 403 探测面）。语义、存储、审计、负例与 T63 验收见 §7.11.2 T-A52 裁定 |
 | GET | `/risk-controls/events` 🔒 | 风控事件（v0.2.7 定义）。`?status=active\|cleared&control=&security_code=&since=`，§1.2 分页（`triggered_at desc, id desc`）→ 元素 `RiskEvent = RiskFlag & {id: uuid, security_code: string \| null, name: string \| null, status: "active" \| "cleared", triggered_at: string(datetime), cleared_at: string(datetime) \| null, suggestion_id: uuid \| null, evidence: Evidence[]}`。`/today.risk_flags` 中的每一条都对应一条 `status=active` 的风控事件（由 `risk_event_id` 关联） |
 
 ### 7.6 候选信号、不可执行原因（没有"转计划"接口）
@@ -1235,6 +1236,23 @@ evidence: Evidence[]
 - RC3 沿用 F25，不用卡片的 F50 代替；F25 null → “大盘环境未知”、partial、无 RC3 门控。RC2/RC4 缺分母/归属时额度未知（quantity_cap=null），不是无限额度或零额度；不得因此消除其他可执行性原因。未分类不触发 RC4。RC1–RC4 阈值、取整及 buy/add 门控仍按 plan §2.5.6/T-A15/T-R21，绝不改动作或阻止 sell/reduce。
 - 当前评价不能回写历史建议；建议仍读取生成时的风控标记与 gap。实际风控事件由业务作业幂等写入，复用 §7.5 的 RiskEvent，不增加第二套事件状态机。
 - **T-A33（R4）**：`RiskEvaluation` 的 `DataStatusBlock.data_as_of` 取参与判定各输入时点中**最早**的非空值，全空为 null（同 T-A29 日报口径，不取最新、不取 evaluated_at）。
+
+**T-A52 裁定（status: 生效（T-A69，隔离 PG 复验 T-O54 与 tb95 22/22 T-T36b 通过后）；「清除覆盖」接口，v0.2.9 内；docs/reviews/T-A52-risk-control-reset-ruling.md）**：
+
+1. **语义**：`DELETE /risk-controls/{control}` 删除**操作者本人**该 control 的 `scope='user'` 覆盖、恢复继承（文件默认 → system 行 → 本人 user 行链回退），不是删除配置本身。**权限边界（用户裁定）**：只能删除本人 user 行；system 行与文件默认一律不可经本接口删除或改动；普通用户对 system 行无任何写/删路径（变体形状一律 `404 NOT_FOUND`，隐藏存在性，不提供 403 探测面）；不设管理员跨用户重置；system 行管理入口属独立管理员功能，不在本契约范围。
+2. **响应与幂等**：`200 list[RiskSetting]`（六项，与 GET/PUT 同形，删除即刷新）。无本人覆盖时重复清除 → 200、状态不变、无新增副作用（幂等终点「本人无覆盖」），不追加历史与审计。
+3. **鉴权/CSRF/顺序**：沿 §1.3——未登录 401、非 approved 403 ACCOUNT_NOT_APPROVED、缺/错 CSRF 403 CSRF_FAILED、未知 control 404；判定顺序按 §1.3 v0.2.9 #30，解析不先于认证与 CSRF。
+4. **存储（迁移 0028）**：`risk_control_settings` 加 `override_active boolean NOT NULL DEFAULT true`；清除置 false，user 行读取（effective_config/entries）一律加 `override_active=true` 过滤；历史与 FK 不动，`risk_control_settings_history` 追加一行 `enabled=null, params=null` 表「清除」；PUT 再覆盖时置回 true。不物理删行（append-only 与 FK 完整）。
+5. **审计**：`risk_control.reset`，`actor_id=操作者本人`、`target_type=risk_control_setting`、`target_id=被清 user 行 id`（幂等重放 target_id=null 且不写审计）、`detail={control, history_id, had_override}`；actor 与行属主必须一致（「只有本人动本人」核对口径）。
+6. **position_cap 终点**：清除后若 profile `max_single_position_pct` 非 null 则生效、`source=user`，否则文件默认、`source=system`——「回到继承」而非「回到文件默认」，前端按返回值展示。
+7. **并发**：与 PUT 共用既有 advisory lock（同 owner 串行）；只删指定 control，不批量。
+8. **T63 验收**：PUT 改值 → DELETE → GET 回继承值且 `source` 相应变化；幂等重放零副作用；清除后求值链路立即用继承值，无需重启；每两次真实清除间幂等重放不产生新 history/审计。负例集（401/403 CSRF/404 未知 control/404 变体/幂等 200/并发串行等）见裁定文档 §D9，随 T-B95 定点用例。
+9. **回滚指引（T-A69，按 T-A67 修正 RV-01）**：
+   - 代码不得回退到 T-B98b 之前（team-b 原提交 f20fd83，主线拣入后为 2442b9d）。更早的代码不认 `override_active`，会把已清除的覆盖重新当作有效；旧代码 PUT 也不会把它置回 true，新代码会静默忽略用户的新值。
+   - 部署顺序：先停全部 api/worker 进程，再迁移，再启动新代码；不得让未重启的旧进程连 0028 库。
+   - 降到 0027：代码和数据库必须一起降，且只能在 `risk_control_settings` 中没有 `override_active=false` 行时降，此时降级不丢事实；有 false 行时 0028 downgrade 会拒绝，库保持 0028（T-O54 已验）。
+   - 不得为了能降级而删除或改写 false 行（历史不可变，改写等于捏造用户没设过的值）；确需处理时另写脚本，经评审并由用户批准。
+   - 用户库默认按「有 false 行」处理：回滚只能回到 ≥T-B98b 的代码并保持 0028，不降 0027。任何操作前先 db-backup.sh，绝不 `down -v`。
 
 #### 7.11.3 模拟跟踪结果（status: draft；P2N-03/05/08）
 

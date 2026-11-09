@@ -214,7 +214,8 @@ vendor_rel() {
 nb="$(vendor_count master_vendor_batches)"
 nr="$(vendor_count master_vendor_list_rows)"
 if [ "$nb" = 0 ] && [ "$nr" = 0 ]; then
-  echo "SKIP 4.6.5A 第 9 条：master_vendor_batches / master_vendor_list_rows 未落地（T-B61 迁移前）"
+  echo "FAIL 4.6.5A 第 9 条：master_vendor_batches / master_vendor_list_rows 未落地（T-B61 迁移前）"
+  fail=1
 elif [ "$nb" != 1 ] || [ "$nr" != 1 ]; then
   echo "FAIL 4.6.5A 第 9 条需要后端确认表的位置（master_vendor_batches=$nb 张, master_vendor_list_rows=$nr 张）"
   fail=1
@@ -287,9 +288,10 @@ else
 fi
 
 
-# T-O29：P2N-07 / T-B90 最小依赖。表未落地则跳过；点名列缺失则失败，不把缺列当成表级 UPDATE 通过。
+# T-O29：P2N-07 / T-B90 最小依赖。表未落地则失败；点名列缺失则失败，不把缺列当成表级 UPDATE 通过。
 if [ "$(own -c "SELECT to_regclass('app.action_plans') IS NOT NULL")" != t ]; then
-  echo "SKIP T-O29：app.action_plans 未落地"
+  echo "FAIL T-O29：app.action_plans 未落地"
+  fail=1
 else
   miss="$(own -c "SELECT string_agg(c, ',' ORDER BY c) FROM unnest(ARRAY['status','triggered_at','updated_at']) c WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'app.action_plans'::regclass AND a.attname = c AND a.attnum > 0 AND NOT a.attisdropped)")"
   if [ -n "$miss" ]; then
@@ -331,11 +333,13 @@ if [ "$(own -c "SELECT to_regclass('market.master_runs') IS NOT NULL")" = t ]; t
   expect_attr "aia_ingest 对 master_runs 无表级 INSERT/UPDATE/DELETE/TRUNCATE，且不能改 stats 以外的列" \
     "SELECT has_table_privilege('aia_ingest','market.master_runs','SELECT') AND has_column_privilege('aia_ingest','market.master_runs','stats','UPDATE') AND NOT has_table_privilege('aia_ingest','market.master_runs','INSERT') AND NOT has_table_privilege('aia_ingest','market.master_runs','UPDATE') AND NOT has_table_privilege('aia_ingest','market.master_runs','DELETE') AND NOT has_table_privilege('aia_ingest','market.master_runs','TRUNCATE') AND NOT has_column_privilege('aia_ingest','market.master_runs','status','UPDATE')"
 else
-  echo "SKIP T-O30：market.master_runs 未落地"
+  echo "FAIL T-O30：market.master_runs 未落地"
+  fail=1
 fi
 for rel in app.action_plans app.alert_rules app.alerts; do
   if [ "$(own -c "SELECT to_regclass('$rel') IS NOT NULL")" != t ]; then
-    echo "SKIP T-O30：$rel 未落地"
+    echo "FAIL T-O30：$rel 未落地"
+    fail=1
     continue
   fi
   expect_denied aia_ingest "SELECT * FROM $rel WHERE false"
@@ -348,20 +352,22 @@ done
 expect_ddl_denied aia_ingest "BEGIN; CREATE TABLE market.t_o30_probe (x int); ROLLBACK"
 expect_denied aia_api "SELECT ciphertext FROM app.user_data_licences WHERE false"
 
-# P2N-06：表未落地则跳过。不把缺表当成失败（旧库）；表在则最小读写必须成立。
+# P2N-06：表未落地则失败；表在则最小读写必须成立。
 if [ "$(own -c "SELECT to_regclass('app.notification_refs') IS NOT NULL")" = t ]; then
   expect_ok aia_api "SELECT notification_id, ref_type, ref_id, at FROM app.notification_refs WHERE false"
   expect_ok aia_api "INSERT INTO app.notification_refs SELECT * FROM app.notification_refs WHERE false"
   expect_ok aia_maint "DELETE FROM app.notification_refs WHERE false"
 else
-  echo "SKIP P2N-06：app.notification_refs 未落地"
+  echo "FAIL P2N-06：app.notification_refs 未落地"
+  fail=1
 fi
 if [ "$(own -c "SELECT to_regclass('app.intraday_candidate_refs') IS NOT NULL")" = t ]; then
   expect_ok aia_api "SELECT instance_id, event_id FROM app.intraday_candidate_refs WHERE false"
   expect_ok aia_api "INSERT INTO app.intraday_candidate_refs SELECT * FROM app.intraday_candidate_refs WHERE false"
   expect_ok aia_maint "DELETE FROM app.intraday_candidate_refs WHERE false"
 else
-  echo "SKIP P2N-06：app.intraday_candidate_refs 未落地"
+  echo "FAIL P2N-06：app.intraday_candidate_refs 未落地"
+  fail=1
 fi
 if [ "$(own -c "SELECT to_regclass('app.user_realtime_prefs') IS NOT NULL")" = t ]; then
   expect_ok aia_api "UPDATE app.user_realtime_prefs SET notify_cadence = notify_cadence, updated_at = updated_at WHERE false"
@@ -424,6 +430,17 @@ if o33_has market.master_vendor_batches; then
   expect_ok aia_maint "SELECT source_licence_id FROM market.master_vendor_batches WHERE false"
   expect_ok aia_maint "DELETE FROM market.master_vendor_batches WHERE source_licence_id IN (SELECT id FROM app.user_data_licences WHERE user_id = '${o33_uid}') AND false"
   expect_denied aia_maint "SELECT * FROM market.master_vendor_batches WHERE false"
+fi
+
+# T-O42：0028 override_active。aia_api 走既有表级 DML（无需新授权）；aia_maint 列级清单仍只含 id,user_id。
+if [ "$(own -c "SELECT to_regclass('app.risk_control_settings') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='app.risk_control_settings'::regclass AND attname='override_active' AND attnum>0 AND NOT attisdropped)")" = t ]; then
+  expect_ok     aia_api   "SELECT override_active FROM app.risk_control_settings WHERE false"
+  expect_ok     aia_api   "UPDATE app.risk_control_settings SET override_active = override_active WHERE false"
+  expect_denied aia_maint "SELECT override_active FROM app.risk_control_settings WHERE false"
+  expect_denied aia_maint "UPDATE app.risk_control_settings SET override_active = override_active WHERE false"
+else
+  echo "FAIL T-O42：app.risk_control_settings.override_active 未迁移"
+  fail=1
 fi
 
 [ "$(own -c "SELECT count(*) FROM app.users WHERE username LIKE 't\_o11\_%'")" = 0 ] \

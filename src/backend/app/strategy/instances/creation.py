@@ -18,7 +18,6 @@ from app.config_files import RiskControlsConfig
 from app.db.tables.accounts import accounts, holdings
 from app.db.tables.market import securities
 from app.db.tables.strategy import (
-    risk_control_settings,
     strategies,
     strategy_card_versions,
     symbol_horizon_assessments,
@@ -26,9 +25,9 @@ from app.db.tables.strategy import (
 from app.db.tables.strategy import strategy_instances as instances
 from app.db.tables.strategy import strategy_versions as versions
 from app.db.tables.users import user_profiles
-from app.schemas.enums import RiskControl
 from app.strategy.eligibility import ensure_strategy_eligible
 from app.strategy.instances.service import event, owned
+from app.suggestions.risk import CONTROL_FIELDS, effective_config
 
 
 def version_owned(conn: Connection, user_id: uuid.UUID, version_id: uuid.UUID) -> Row[Any]:
@@ -141,34 +140,13 @@ def derive(
 def risk_snapshot(
     conn: Connection, user_id: uuid.UUID, config: RiskControlsConfig
 ) -> dict[str, Any]:
-    sections = (
-        config.rc1_stop_take,
-        config.rc2_position_cap,
-        config.rc3_total_exposure,
-        config.rc4_sector_concentration,
-        config.rc5_loss_streak_drawdown,
-        config.rc6_plan_violation,
-    )
+    # Share the live evaluator's active-override and profile inheritance rules.
+    effective = effective_config(conn, user_id, config)
     result: dict[str, Any] = {}
-    for control, section in zip(RiskControl, sections, strict=True):
-        effective = section
-        for scope in ("system", "user"):
-            row = conn.execute(
-                select(risk_control_settings).where(
-                    risk_control_settings.c.control == control.value,
-                    risk_control_settings.c.scope == scope,
-                    risk_control_settings.c.user_id.is_(None)
-                    if scope == "system"
-                    else risk_control_settings.c.user_id == user_id,
-                )
-            ).first()
-            if row is not None:
-                effective = type(section).model_validate(
-                    effective.model_dump() | (row.params or {}) | {"enabled": row.enabled}
-                )
-        data = effective.model_dump(mode="json")
+    for control, field in CONTROL_FIELDS.items():
+        data = getattr(effective, field).model_dump(mode="json")
         enabled = data.pop("enabled")
-        result[control.value] = {"enabled": enabled, "params": data}
+        result[control] = {"enabled": enabled, "params": data}
     return result
 
 

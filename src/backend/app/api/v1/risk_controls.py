@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Callable, Coroutine, Iterator
+from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
+from fastapi.routing import APIRoute
 from pydantic import AfterValidator, Field, StrictBool, StrictInt
+from sqlalchemy import Connection, Engine
+from sqlalchemy.exc import DBAPIError
 
 from app.api.v1.candidate_signals import scoped_page
 from app.api.v1.trades import normalize_code
@@ -21,6 +26,57 @@ from app.schemas.enums import RiskControl
 from app.signals.models import Model
 
 router = APIRouter(tags=["risk-controls"])
+
+
+@contextmanager
+def settings_transaction(engine: Engine) -> Iterator[Connection]:
+    """T-A52: roll back before reporting retryable transaction conflicts."""
+    try:
+        with engine.begin() as conn:
+            yield conn
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) in {"40001", "40P01"}:
+            raise AppError(ErrorCode.CONFLICT, details={"field": "risk_controls"}) from None
+        raise
+
+
+class ResetRoute(APIRoute):
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def checked(request: Request) -> Response:
+            # Resource shape is resolved before authentication/CSRF, without decoding JSON.
+            if (
+                request.path_params.get("control") not in {c.value for c in RiskControl}
+                or request.scope.get("query_string")
+                or await request.body()
+            ):
+                raise AppError(ErrorCode.NOT_FOUND)
+            return await handler(request)
+
+        return checked
+
+
+reset_router = APIRouter(route_class=ResetRoute)
+
+
+@reset_router.delete("/risk-controls/{control}", response_model=list[RiskSetting])
+def reset_setting(
+    control: str, auth: AuthDep, engine: EngineDep, settings: SettingsDep, response: Response
+) -> list[dict[str, Any]]:
+    response.headers["Cache-Control"] = "private, no-store"
+    with settings_transaction(engine) as conn:
+        return store.reset(
+            conn,
+            auth.user_id,
+            auth.user.role,
+            settings.business.risk_controls,
+            control,
+            dt.datetime.now(dt.UTC),
+        )
+
+
+router.include_router(reset_router)
 
 
 def decimal_text(value: str) -> str:
@@ -134,7 +190,7 @@ def read_settings(
 def write_settings(
     body: list[RiskPatch], auth: AuthDep, engine: EngineDep, settings: SettingsDep
 ) -> list[dict[str, Any]]:
-    with engine.begin() as conn:
+    with settings_transaction(engine) as conn:
         return store.save(
             conn,
             auth.user_id,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Callable, Coroutine, Iterator
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Literal
@@ -41,7 +41,7 @@ def settings_transaction(engine: Engine) -> Iterator[Connection]:
 
 
 class ResetRoute(APIRoute):
-    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         handler = super().get_route_handler()
 
         async def checked(request: Request) -> Response:

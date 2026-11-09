@@ -215,6 +215,10 @@ services:
       MAIRUI_BASE_URL: ${MAIRUI_BASE_URL:-https://api.mairuiapi.com}
       MAIRUI_PRO_BASE_URL: ${MAIRUI_PRO_BASE_URL:-https://pro.mairuiapi.com}
       MAIRUI_EGRESS_IP_EXPECTED: ${MAIRUI_EGRESS_IP_EXPECTED:-}
+      # T-O44 共享门禁（T-A53 fail-closed）：产品侧 ingest 与探针进程读写同一 STOP/预算台账/证书绑定目录。
+      # 目录由运维预建（POSIX 700、属主容器用户 10001；shared_gate 对 group/other 权限位 fail-closed）。
+      # 不用 Windows DrvFs 路径直挂（实测 /mnt/f 权限位 777，过不了私有性检查）；探针侧经 \\wsl$ UNC 访问同一目录。
+      MAIRUI_SHARED_STATE_DIR: ${MAIRUI_SHARED_STATE_DIR:-/var/lib/aia-shared-gate}
       DATA_LICENCE_SEAL_KEY_VERSION: ${DATA_LICENCE_SEAL_KEY_VERSION:-1}
       # 不得持有主密钥（plan e56462c 按服务分配）：入口包装发现 APP_MASTER_KEY / app_master_key 即拒绝启动
       AIA_FORBID_APP_MASTER_KEY: "1"
@@ -226,6 +230,8 @@ services:
     volumes:
       - ../../config:/app/config:ro
       - *secret-env-mount
+      # T-O44 共享门禁目录（宿主 WSL 原生 ext4，700/10001；rw：产品侧写 STOP/绑定/台账）
+      - ${AIA_SHARED_GATE_HOST_DIR:-/var/lib/aia-shared-gate}:/var/lib/aia-shared-gate
     depends_on: *app-depends
     healthcheck:
       <<: *worker-healthcheck

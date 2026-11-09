@@ -18,6 +18,16 @@ import sys
 import tempfile
 from pathlib import Path
 
+
+def fail(msg: object = "") -> None:
+    """Explicit failure that survives python -O (unlike assert)."""
+    raise AssertionError(msg)
+
+
+def require(cond: object, msg: object = "") -> None:
+    if not cond:
+        fail(msg)
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from daily_check import load_truth, load_fetch, matched, prefix_unique  # noqa: E402
@@ -69,10 +79,10 @@ def main() -> int:
         json.dump(title_only, fh, ensure_ascii=False)
         title_only_path = Path(fh.name)
     h, t, m = evaluate(title_only_path)
-    assert (h, t) == (3, 3) and m == [], (h, t, m, "title-only must still id-match")
+    require((h, t) == (3, 3) and m == [], (h, t, m, "title-only must still id-match"))
 
     h, t, m = evaluate(FIX / "freshness_fetch_ok.json")
-    assert (h, t) == (3, 3) and m == [], (h, t, m, "normal")
+    require((h, t) == (3, 3) and m == [], (h, t, m, "normal"))
 
     probes = [
         ("freshness_mut_p1.json", "900001"),
@@ -82,9 +92,9 @@ def main() -> int:
     rejected = 0
     for name, aid in probes:
         h, t, m = evaluate(FIX / name)
-        assert t == 3, (name, t)
-        assert h == 2, (name, h, "exactly one miss")
-        assert aid in m and len(m) == 1, (name, m)
+        require(t == 3, (name, t))
+        require(h == 2, (name, h, "exactly one miss"))
+        require(aid in m and len(m) == 1, (name, m))
         rejected += 1
 
     out = {
@@ -95,7 +105,7 @@ def main() -> int:
         "f23_status": "declared",
     }
     print(json.dumps(out, ensure_ascii=False))
-    assert rejected == 3
+    require(rejected == 3)
     return 0
 
 

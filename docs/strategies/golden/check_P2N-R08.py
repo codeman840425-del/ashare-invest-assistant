@@ -7,6 +7,16 @@ from collections import Counter
 import json
 import re
 
+
+def fail(msg: object = "") -> None:
+    """Explicit failure that survives python -O (unlike assert)."""
+    raise AssertionError(msg)
+
+
+def require(cond: object, msg: object = "") -> None:
+    if not cond:
+        fail(msg)
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 FILE = HERE / 'P2N-R08_golden.json'
@@ -41,7 +51,7 @@ def evaluate(c):
         return {"results":[evaluate_t33(c["kind"],v) for v in c["input"]["scenarios"]]}
     i = c['input']; kind = c['kind']
     if kind == 'rc5_closed':
-        assert i['all_closed'] and i['complete']
+        require(i['all_closed'] and i['complete'])
         n = tail(i['pnl'], lambda x: D(x) < 0)
         return {'trailing_losses':n, 'triggered':n >= 3}
     if kind == 'rc5_nav':
@@ -49,17 +59,17 @@ def evaluate(c):
         if path[-1] is None:
             return {'drawdown_pct':None, 'state':'unknown'}
         peak = max(D(v) for v in path); current = D(path[-1])
-        assert peak > 0
+        require(peak > 0)
         dd = (peak-current)*100/peak
         # Cross-multiplied threshold test avoids any rounding around 10%.
         hit = current*10 <= peak*9
         return {'drawdown_pct':dd, 'state':'triggered' if hit else 'ok'}
     if kind == 'rc5_sim':
-        assert i['failure_labels_preclassified']
+        require(i['failure_labels_preclassified'])
         n = tail(i['failures'], lambda x: x is True)
         return {'trailing_failures':n, 'triggered':n >= 5}
     if kind == 'rc6_plan':
-        assert i['plan_resolved_at_trade']
+        require(i['plan_resolved_at_trade'])
         check = i['check']
         if check == 'opposite_side':
             hit = (i['plan_side'],i['trade_side']) in [('buy','sell'),('sell','buy')]
@@ -68,7 +78,7 @@ def evaluate(c):
         elif check == 'held_after_invalidation':
             hit = i['invalidated'] and D(i['held_qty']) > 0
             if i['invalidated']:
-                assert datetime.fromisoformat(i['invalidated_at']) < datetime.fromisoformat(i['trade_at'])
+                require(datetime.fromisoformat(i['invalidated_at']) < datetime.fromisoformat(i['trade_at']))
         elif check == 'buy_without_stop':
             hit = i['trade_side'] == 'buy' and i['stop_loss'] is None
         elif check == 'buy_during_wait':
@@ -78,7 +88,7 @@ def evaluate(c):
         return {'check':check,'violated':hit}
     if kind == 'weight':
         n,w = i['n'],i['wins']
-        assert isinstance(n,int) and 0 <= w <= n
+        require(isinstance(n,int) and 0 <= w <= n)
         if n < 20:
             return {'computed_weight':D(1),'applied_weight':D(1)}
         with localcontext() as ctx:
@@ -95,8 +105,8 @@ def evaluate(c):
         return {'weight':D('.3') if v < D('.3') else D('1.2') if v > D('1.2') else v}
     if kind == 'health':
         state = i['state']; review=False
-        assert i['consecutive_trading_days'] and not i['internal_evaluation_enabled']
-        assert set(i['prior_streaks'].values()) == {0}
+        require(i['consecutive_trading_days'] and not i['internal_evaluation_enabled'])
+        require(set(i['prior_streaks'].values()) == {0})
         weights = [D(w) for w in i['site_daily_weights']]
         # Batch ending at evaluation: prior streaks zero; transitions at threshold day.
         low=high=bad=0
@@ -114,7 +124,7 @@ def evaluate(c):
         return {'state':state,'notify_admin_review':review,'auto_retired':False}
     if kind == 'health_internal_entry':
         state=i['state']
-        assert i['internal_evaluation_enabled'] and D(i['baseline_robustness']) > 0
+        require(i['internal_evaluation_enabled'] and D(i['baseline_robustness']) > 0)
         if i['n']>=20 and D(i['robustness'])*100 < D(i['baseline_robustness'])*70:
             state='observing'
         return {'state':state}
@@ -127,13 +137,13 @@ def evaluate(c):
         return {'before_losses':before,'after_losses':after,'after_triggered':after>=3,'auto_resume_instance':False}
     if kind == 'rc6_asof':
         visible=[v for v in i['versions'] if datetime.fromisoformat(v['created_at']) < datetime.fromisoformat(i['trade_at'])]
-        assert len(visible)==1 and visible[0]['id']==i['resolved_version_at_trade']
+        require(len(visible)==1 and visible[0]['id']==i['resolved_version_at_trade'])
         return {'selected_plan_version':visible[0]['id'],'opposite_side':visible[0]['side']!=i['trade_side']}
     if kind == 'rc6_replay':
-        assert i['violation_precomputed']
+        require(i['violation_precomputed'])
         return {'logical_risk_events':len({(i['logical_event_key'],v) for v in i['deliveries']})}
     if kind == 'rc6_missing_plan':
-        assert i['effective_plan_at_trade'] is None
+        require(i['effective_plan_at_trade'] is None)
         return {'state':'unknown','gap':True,'violation':None}
     if kind == 'pause_release':
         if i['operation']=='user_resume' and i['lifecycle'] in ('simulating','retired'):
@@ -141,7 +151,7 @@ def evaluate(c):
         release = i['operation']=='user_resume'
         if i['operation']=='schedule' and i['paused_by']=='system':
             now,until = map(datetime.fromisoformat,(i['now'],i['paused_until']))
-            assert now!=until  # Exact equality deliberately not adjudicated here.
+            require(now!=until)
             release=now>until
         result={'status':'active' if release else 'paused','pause_fields_cleared':release}
         if release and i['operation']=='user_resume' and i['paused_by']=='system':
@@ -149,7 +159,7 @@ def evaluate(c):
         result.update({k:None if release else i[k] for k in ('paused_by','pause_reason_code','paused_until')})
         return result
     if kind == 'pause_trigger':
-        assert i['enabled'] and i['known_trigger']
+        require(i['enabled'] and i['known_trigger'])
         return {'risk_state':'triggered','instance_status':'paused' if i['pause_on_trigger'] else 'active','pause_reason_code':'LOSS_STREAK_PAUSE' if i['pause_on_trigger'] else None}
     if kind == 'ranking_only':
         return {'lifecycle':i['lifecycle'],'rule_payload':i['rule_payload'],'ranking_weight':i['weight'] if i['auto_downweight'] else '1'}
@@ -157,55 +167,55 @@ def evaluate(c):
 
 def equal(actual, expected, tolerance):
     if isinstance(actual, D):
-        assert abs(actual-D(expected)) <= tolerance, (actual,expected)
+        require(abs(actual-D(expected)) <= tolerance, (actual,expected))
     elif isinstance(actual, dict):
-        assert actual.keys()==expected.keys(),(actual.keys(),expected.keys())
+        require(actual.keys()==expected.keys(), (actual.keys(),expected.keys()))
         for key in actual:
             equal(actual[key],expected[key],tolerance)
     else:
-        assert type(actual) is type(expected) and actual==expected,(actual,expected)
+        require(type(actual) is type(expected) and actual==expected, (actual,expected))
 
 def norm(s):
     return re.sub(r'[\s`*]','',s)
 
 def run():
     data=json.loads(FILE.read_text(),parse_float=lambda s:(_ for _ in ()).throw(AssertionError('binary float JSON forbidden')))
-    assert data['fictitious'] is True and data['task']=='P2N-R08'
+    require(data['fictitious'] is True and data['task']=='P2N-R08')
     for source in data['source_registry'].values():
-        assert norm(source['quote']) in norm((ROOT/source['file']).read_text()),source
+        require(norm(source['quote']) in norm((ROOT/source['file']).read_text()), source)
     # Explicit algebraic/analytic anchors independent of stored model notes.
-    assert tanh_series(D(0))==0
-    assert abs(tanh_series(D(1))+tanh_series(D(-1))) < D('1e-75')
-    assert D('.3') < D('.4')+D('1.2')*D(5)/30 == D('.6')
+    require(tanh_series(D(0))==0)
+    require(abs(tanh_series(D(1))+tanh_series(D(-1))) < D('1e-75'))
+    require(D('.3') < D('.4')+D('1.2')*D(5)/30 == D('.6'))
     ids=set();ready=blocked=0
     for c in data['cases']:
-        assert c['id'] not in ids;ids.add(c['id'])
-        assert c['steps'] and c['source_refs'] and c['units'] and c['precision']
-        assert set(c['source_refs']) <= data['source_registry'].keys()
+        require(c['id'] not in ids);ids.add(c['id'])
+        require(c['steps'] and c['source_refs'] and c['units'] and c['precision'])
+        require(set(c['source_refs']) <= data['source_registry'].keys())
         if c['case_status']=='blocked':
-            assert c['expected'] is None and c['kind']=='spec_ambiguity' and c['block_reason']=='spec_ambiguity' and c['question']
+            require(c['expected'] is None and c['kind']=='spec_ambiguity' and c['block_reason']=='spec_ambiguity' and c['question'])
             blocked+=1
             continue
-        assert c['case_status']=='ready'
+        require(c['case_status']=='ready')
         tol=D(c['precision']['oracle_abs_tolerance'])
-        assert D(0)<=tol<=D('1e-12')
+        require(D(0)<=tol<=D('1e-12'))
         try:
             equal(evaluate(c),c['expected'],tol)
         except AssertionError as exc:
             raise AssertionError(c['id']) from exc
         ready+=1
-    assert ready==92 and blocked==0
+    require(ready==92 and blocked==0)
     matrix=Counter(c['kind'] for c in data['cases'] if c['case_status']=='ready')
-    assert matrix['rc6_plan']==10 and matrix['clamp']==6
+    require(matrix['rc6_plan']==10 and matrix['clamp']==6)
     checks={c['input']['check'] for c in data['cases'] if c['kind']=='rc6_plan'}
-    assert checks=={'opposite_side','qty_over_plan','held_after_invalidation','buy_without_stop','buy_during_wait'}
+    require(checks=={'opposite_side','qty_over_plan','held_after_invalidation','buy_without_stop','buy_during_wait'})
     # Negative-oracle checks: reject corruption at high-risk threshold boundaries.
     rejected=0
     for case in [next(c for c in data['cases'] if c['kind']==k) for k in ('rc5_nav','rc6_plan','weight','health')]:
         wrong=dict(case['expected']); key=next(iter(wrong));wrong[key]='CORRUPTED'
         try:equal(evaluate(case),wrong,D(case['precision']['oracle_abs_tolerance']))
         except (AssertionError, ArithmeticError):rejected+=1
-    assert rejected==4
+    require(rejected==4)
     print(json.dumps({'ready_pass':ready,'blocked_not_run':blocked,'negative_oracles_rejected':rejected,'coverage':matrix},ensure_ascii=False))
 
 
@@ -235,7 +245,7 @@ def evaluate_t33(kind,v):
         n=0
         for o in sorted(picked.values(),key=lambda x:(x['exit_at'],x['suggestion_id'])):
             if o['state']=='complete':
-                assert type(o['direction_correct']) is bool
+                require(type(o['direction_correct']) is bool)
                 n=0 if o['direction_correct'] else n+1
         return {'trailing_failures':n,'triggered':n>=5,'gap_codes':sorted(gap)}
     if kind=='t33_closed':
@@ -246,7 +256,7 @@ def evaluate_t33(kind,v):
             if q==0 and f['side']=='sell':gap=True;continue
             if f['side']=='buy':q+=qty;cost-=qty*price+fee
             else:q-=qty;cost+=qty*price-fee
-            assert q>=0
+            require(q>=0)
             accounts[key]=(q,cost)
             if q==0:
                 closed.append((f['executed_at'],f['id'],cost));accounts[key]=(D(0),D(0))
@@ -294,7 +304,7 @@ def evaluate_t33(kind,v):
     if kind=='t33_edge':
         edge=D(v['before'])<D(v['threshold'])<=D(v['after']);until=v['existing_until'];status='paused'
         if edge:
-            new=expiry(v);assert not new['gap'];until=max(until,new['paused_until'])
+            new=expiry(v);require(not new['gap']);until=max(until,new['paused_until'])
         elif v['at_expiry'] and v['trigger_at']>=until:until=None;status='active'
         return {'edge':edge,'paused_until':until,'status':status,'risk_triggered':D(v['after'])>=D(v['threshold'])}
     if kind=='t33_resume':
@@ -312,16 +322,16 @@ def run_r08b():
     import hashlib,copy
     data=json.loads(FILE.read_text(),parse_float=lambda s:(_ for _ in ()).throw(AssertionError('binary float forbidden')))
     baseline=hashlib.sha256(json.dumps(data['cases'][:83],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
-    assert baseline==data['r08b']['baseline_first83_sha256']
-    cases=data['cases'][83:];assert len(cases)==9
+    require(baseline==data['r08b']['baseline_first83_sha256'])
+    cases=data['cases'][83:];require(len(cases)==9)
     refs={r for c in cases for r in c['source_refs']}
     for r in refs:
-        src=data['source_registry'][r];assert norm(src['quote']) in norm((ROOT/src['file']).read_text()),r
+        src=data['source_registry'][r];require(norm(src['quote']) in norm((ROOT/src['file']).read_text()), r)
     rejected=0;vectors=0
     for c in cases:
-        assert c['case_status']=='ready' and c['steps']
+        require(c['case_status']=='ready' and c['steps'])
         raw=json.dumps(c['input']['scenarios'],sort_keys=True,ensure_ascii=False).encode()
-        assert hashlib.sha256(raw).hexdigest()==c['review']['reviewed_input_sha256']
+        require(hashlib.sha256(raw).hexdigest()==c['review']['reviewed_input_sha256'])
         actual=evaluate(c);equal(actual,c['expected'],D(0));vectors+=len(c['input']['scenarios'])
         wrong=copy.deepcopy(c['expected']);wrong['results'][0]['ORACLE_MUTATION']=True
         try:equal(actual,wrong,D(0))
@@ -333,7 +343,7 @@ def run_r08b():
         c=copy.deepcopy(cases[index]);mutate(c['input']['scenarios'][0])
         try:equal(evaluate(c),cases[index]['expected'],D(0))
         except AssertionError:input_rejected+=1
-    assert rejected==9 and input_rejected==9
+    require(rejected==9 and input_rejected==9)
     print(json.dumps({'r08b_ready':9,'vectors_pass':vectors,'original83_hash_preserved':True,'expected_mutations_rejected':rejected,'input_mutations_rejected':input_rejected,'scope':'084-092 only; unit specification, not E2E'},ensure_ascii=False))
 
 if __name__=='__main__':

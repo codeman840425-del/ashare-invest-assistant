@@ -8,6 +8,16 @@ import sys
 import tempfile
 from pathlib import Path
 
+
+def fail(msg: object = "") -> None:
+    """Explicit failure that survives python -O (unlike assert)."""
+    raise AssertionError(msg)
+
+
+def require(cond: object, msg: object = "") -> None:
+    if not cond:
+        fail(msg)
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT))
@@ -16,9 +26,9 @@ import check_f21_ready as m  # noqa: E402
 
 def test_load_ok():
     th = m.load_locked_thresholds()
-    assert th["min_stocks"] == 5 and th["min_days"] == 15 and th["window_days"] == 20
-    assert th["factor_id"] == "main_20d_net"
-    assert th["feature_key"] == "f.main_net_20d"
+    require(th["min_stocks"] == 5 and th["min_days"] == 15 and th["window_days"] == 20)
+    require(th["factor_id"] == "main_20d_net")
+    require(th["feature_key"] == "f.main_net_20d")
 
 
 def test_hash_tamper_rejected():
@@ -38,7 +48,7 @@ def test_hash_tamper_rejected():
             try:
                 m.load_locked_thresholds()
             except SystemExit as e:
-                assert "hash mismatch" in str(e)
+                require("hash mismatch" in str(e))
             else:
                 raise AssertionError("tampered thresholds accepted")
         finally:
@@ -50,7 +60,7 @@ def test_cli_override_rejected():
         try:
             m.reject_override_attempts([flag, "1"])
         except SystemExit as e:
-            assert "rejected" in str(e), flag
+            require("rejected" in str(e), flag)
         else:
             raise AssertionError(flag)
 
@@ -63,7 +73,7 @@ def test_env_override_rejected():
         try:
             m.reject_override_attempts([])
         except SystemExit as e:
-            assert k in str(e)
+            require(k in str(e))
         else:
             raise AssertionError("env override accepted")
     finally:
@@ -75,8 +85,8 @@ def test_env_override_rejected():
 
 def test_decide_ready_boundary():
     th = m.load_locked_thresholds()
-    assert m.decide_ready({"stocks_with_min_days": 5}, th) is True
-    assert m.decide_ready({"stocks_with_min_days": 4}, th) is False
+    require(m.decide_ready({"stocks_with_min_days": 5}, th) is True)
+    require(m.decide_ready({"stocks_with_min_days": 4}, th) is False)
 
 
 def main() -> int:

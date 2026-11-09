@@ -1404,6 +1404,7 @@ evidence: Evidence[]
   - `api` 进程环境中没有 `DATA_LICENCE_SEAL_PRIVATE_KEYS`；仅凭 `api` 的配置无法解密库中密文；`api` 数据库角色 SELECT `ciphertext` 被拒。
   - 两个用户 PUT 同一证书 → 第二个 `409 DATA_LICENCE_IN_USE`；第一个 DELETE 后第二个可设置。PUT 含 `/`、`?`、空白的值 → 400，消息不含输入值。
   - 回放模式：上游 102 → `invalid`，之后该证书外呼次数为 0，其他证书不受影响；101 → `quota_exceeded`，`paused_until` 为次日 00:01（北京时间）；103 → `ip_limited`，暂停 120 秒，1 小时内第 3 次 → 暂停 1 小时并产生 `data_licence` 通知。
+  - **草案（T-A75，风控，需另一个模型复核）**：上条“1 小时内第 3 次”按**用户**累计，不按证书行 id；DELETE 后再 PUT（同一或不同证书）、点“测试”、`ingest` 重启都不清零；计数与升级暂停以 `ops.data_licence_events` 中 `actor=ingest` 的 `ip_limited` 事件及升级标记（`event=paused`、`actor=ingest`、`to_status=ip_limited`）为准，按数据库 UTC 时间计算；升级暂停期内该用户任何证书都不外呼、不验证（#13“换成不同证书照常验证”顺延到暂停结束）；记录写不进库时按已升级处理。方案见 `docs/reviews/T-A75-ratelimit-escalation-fix.md`
   - 用户 B 证书 `invalid` 时：B 的行情接口 `data_status ∈ {stale, unavailable}` 且 `gaps` 含 `data_licence_unavailable`；`manual_refresh` → `409 DATA_LICENCE_UNAVAILABLE`；`ingest` 没有用 A 或管理员的证书为 B 发出任何请求。
   - `per_licence` 模式下，A 读到的所有行情行的 `source_licence_id` 都是 A 的证书。
   - 公平：A 积压 10,000 个 P1、B 有 1 个 P0 → B 的 P0 在下一个调度轮发出；A、B 各有 P1 时交替发出；每证书每分钟调用数不超过其上限。

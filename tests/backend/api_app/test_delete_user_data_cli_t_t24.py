@@ -437,30 +437,40 @@ def test_cli_drift_unguarded_market_table_permission_denied(
     tbl = "market.tt40_drift_batches"
     sql(f"CREATE TABLE {tbl} (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), "
         f"source_licence_id uuid NOT NULL REFERENCES app.user_data_licences(id))")
-    lic = _licence_id(sql, victim.uid)
-    sql(f"INSERT INTO {tbl} (source_licence_id) VALUES (CAST(:l AS uuid))", l=lic)
-    before_users = sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0]
-    before_rows = sql(f"SELECT count(*) FROM {tbl}")[0][0]
-    use_maint_dsn(cli, roles.maint)
-    denied = False
     try:
-        r = _run(cli, capsys, "--user-id", victim.uid)
-        text = r.text
-        if r.rc != 0 and ("permission denied" in text.lower() or "InsufficientPrivilege" in text):
-            denied = True
-        elif r.rc == 0:
-            try:
-                r2 = _run(cli, capsys, "--user-id", victim.uid, "--execute", confirm=victim.uid)
-                text = r2.text
-                denied = r2.rc != 0 and ("permission denied" in text.lower() or "InsufficientPrivilege" in text)
-            except Exception as exc:  # dry-run 放过时 execute 可能直接抛
-                denied = "permission denied" in str(exc).lower() or "InsufficientPrivilege" in type(exc).__name__
-    except Exception as exc:
-        denied = "permission denied" in str(exc).lower() or "InsufficientPrivilege" in type(exc).__name__
-    assert denied, "未授权 market 新表应触发 permission denied"
-    assert sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0] == before_users
-    assert sql(f"SELECT count(*) FROM {tbl}")[0][0] == before_rows
-    sql(f"DROP TABLE {tbl}")
+        lic = _licence_id(sql, victim.uid)
+        sql(f"INSERT INTO {tbl} (source_licence_id) VALUES (CAST(:l AS uuid))", l=lic)
+        before_users = sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0]
+        before_rows = sql(f"SELECT count(*) FROM {tbl}")[0][0]
+        use_maint_dsn(cli, roles.maint)
+        denied = False
+        try:
+            r = _run(cli, capsys, "--user-id", victim.uid)
+            text = r.text
+            if r.rc != 0 and ("permission denied" in text.lower() or "InsufficientPrivilege" in text):
+                denied = True
+            elif r.rc == 0:
+                try:
+                    r2 = _run(cli, capsys, "--user-id", victim.uid, "--execute", confirm=victim.uid)
+                    text = r2.text
+                    denied = r2.rc != 0 and (
+                        "permission denied" in text.lower() or "InsufficientPrivilege" in text
+                    )
+                except Exception as exc:  # dry-run 放过时 execute 可能直接抛
+                    denied = (
+                        "permission denied" in str(exc).lower()
+                        or "InsufficientPrivilege" in type(exc).__name__
+                    )
+        except Exception as exc:
+            denied = (
+                "permission denied" in str(exc).lower()
+                or "InsufficientPrivilege" in type(exc).__name__
+            )
+        assert denied, "未授权 market 新表应触发 permission denied"
+        assert sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0] == before_users
+        assert sql(f"SELECT count(*) FROM {tbl}")[0][0] == before_rows
+    finally:
+        sql(f"DROP TABLE IF EXISTS {tbl}")
 
 
 def test_cli_drift_noncascade_fk_rolls_back(
@@ -468,36 +478,41 @@ def test_cli_drift_noncascade_fk_rolls_back(
     sql: Callable[..., Any], capsys: pytest.CaptureFixture[str],
 ) -> None:
     """T-A76 §7 漂移反例 2：引用 batches 的非级联外键表 → --execute IntegrityError 整笔回滚。"""
+    tbl = "market.tt40_nocascade"
     vic_lic = _licence_id(sql, victim.uid)
     bid, _ = _seed_vendor_batch(sql, vic_lic, "600519.SH")
     sql(
-        "CREATE TABLE market.tt40_nocascade (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), "
+        f"CREATE TABLE {tbl} (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), "
         "batch_id uuid NOT NULL REFERENCES market.master_vendor_batches(id))"  # 默认 NO ACTION，非 CASCADE
     )
-    sql("INSERT INTO market.tt40_nocascade (batch_id) VALUES (CAST(:b AS uuid))", b=bid)
-    before_users = sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0]
-    before_batches = sql(
-        "SELECT count(*) FROM market.master_vendor_batches WHERE source_licence_id = CAST(:l AS uuid)",
-        l=vic_lic,
-    )[0][0]
-    use_maint_dsn(cli, roles.maint)
-    text = ""
-    rc = 0
     try:
-        r = _run(cli, capsys, "--user-id", victim.uid, "--execute", confirm=victim.uid)
-        rc, text = r.rc, r.text
-    except Exception as exc:
-        rc, text = 1, f"{type(exc).__name__}: {exc}"
-    assert rc != 0, text[-800:]
-    assert (
-        "integrity" in text.lower()
-        or "foreign key" in text.lower()
-        or "ForeignKeyViolation" in text
-        or "回滚" in text
-    ), text[-800:]
-    assert sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0] == before_users
-    assert sql(
-        "SELECT count(*) FROM market.master_vendor_batches WHERE source_licence_id = CAST(:l AS uuid)",
-        l=vic_lic,
-    )[0][0] == before_batches
-    sql("DROP TABLE market.tt40_nocascade")
+        sql(f"INSERT INTO {tbl} (batch_id) VALUES (CAST(:b AS uuid))", b=bid)
+        before_users = sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0]
+        before_batches = sql(
+            "SELECT count(*) FROM market.master_vendor_batches WHERE source_licence_id = CAST(:l AS uuid)",
+            l=vic_lic,
+        )[0][0]
+        use_maint_dsn(cli, roles.maint)
+        text = ""
+        rc = 0
+        try:
+            r = _run(cli, capsys, "--user-id", victim.uid, "--execute", confirm=victim.uid)
+            rc, text = r.rc, r.text
+        except Exception as exc:
+            rc, text = 1, f"{type(exc).__name__}: {exc}"
+        assert rc != 0, text[-800:]
+        # T-A77：不得单凭「回滚」放行（任意库错误都会带这词）；须是外键/完整性违例。
+        low = text.lower()
+        assert (
+            "foreignkeyviolation" in low.replace(" ", "")
+            or "foreign key" in low
+            or "integrityerror" in low.replace(" ", "")
+            or ("integrity" in low and ("foreign" in low or "violat" in low or "constraint" in low))
+        ), text[-800:]
+        assert sql("SELECT count(*) FROM app.users WHERE id = :u", u=victim.uid)[0][0] == before_users
+        assert sql(
+            "SELECT count(*) FROM market.master_vendor_batches WHERE source_licence_id = CAST(:l AS uuid)",
+            l=vic_lic,
+        )[0][0] == before_batches
+    finally:
+        sql(f"DROP TABLE IF EXISTS {tbl}")

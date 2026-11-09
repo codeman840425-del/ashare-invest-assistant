@@ -35,6 +35,7 @@ def run(
     *,
     sources: Sequence[str] = BOOTSTRAP_SOURCES,
     now: dt.datetime | None = None,
+    rebuild_search_terms: bool = False,
 ) -> sync.RunResult:
     now = now or dt.datetime.now(dt.UTC)
     root = sync.resolve_master_root(settings.master_snapshot_path, settings.app_env)
@@ -50,6 +51,8 @@ def run(
         now=now,
         raw_root=root,
         force_rebuild=True,
+        rebuild_search_terms=rebuild_search_terms,
+        initials_max_variants=settings.business.securities.search.initials_max_variants,
     )
 
 
@@ -59,6 +62,11 @@ def main(argv: list[str] | None = None, *, fetcher: Fetcher | None = None) -> in
         "--sources",
         default=",".join(BOOTSTRAP_SOURCES),
         help="逗号分隔的来源（默认全部）",
+    )
+    ap.add_argument(
+        "--rebuild-search-terms",
+        action="store_true",
+        help="explicitly rebuild public search terms after merging sources",
     )
     args = ap.parse_args(argv)
     sources = [s for s in args.sources.split(",") if s]
@@ -73,7 +81,13 @@ def main(argv: list[str] | None = None, *, fetcher: Fetcher | None = None) -> in
     engine = engine_for(settings.database_url.get_secret_value())
     try:
         with engine.begin() as conn:
-            res = run(conn, settings, fetcher or http_fetcher(), sources=sources)
+            res = run(
+                conn,
+                settings,
+                fetcher or http_fetcher(),
+                sources=sources,
+                rebuild_search_terms=args.rebuild_search_terms,
+            )
     finally:
         engine.dispose()
     for s in res.snaps.values():

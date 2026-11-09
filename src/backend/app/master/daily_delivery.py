@@ -29,7 +29,7 @@ from app.master.sync import BEIJING
 from app.master.vendor import licence_available
 from app.reports.service import covered
 
-AUTHORIZATION = Path("/run/aia/authorizations/mairui-daily.json")
+AUTHORIZATION = Path("/run/aia/receipts/mairui-daily.json")
 STREAM = "ingest:requests"
 KIND = "mairui_daily_snapshot"
 APPLY = "master.mairui_daily_apply"

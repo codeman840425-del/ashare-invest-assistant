@@ -40,9 +40,9 @@ from app.master.daily_delivery import (
 
 HOST = "api.mairuiapi.com"
 PATHS = dict(zip(LISTS, ("/hslt/list/", "/bj/list/all/", "/kc/list/all/"), strict=True))
-TEMP = Path("/run/aia/mairui-daily.tmp")
+TEMP = Path("/run/aia/tmp/mairui-daily.tmp")
 STOP = Path(__file__).resolve().parents[2] / "probes/results/STOP"
-HALT = Path("/run/aia/mairui-daily.HALTED")
+HALT = Path("/run/aia/state/halt/mairui-daily.HALTED")
 GROUP = "mairui-daily-v1"
 
 
@@ -112,7 +112,24 @@ def credential(engine: Engine, lid: uuid.UUID) -> str:
 
 
 def temporary(path: Path, value: str) -> tuple[int, int]:
-    """O_EXCL prevents overwriting even an existing symlink or another process."""
+    """Create an exclusive 0600 regular file for credential material.
+
+    O_EXCL + O_NOFOLLOW refuse clobbering a live peer or following a symlink.
+    T-A85 B-2: a leftover *regular* file after SIGKILL is unlinked without reading
+    or logging its contents, then recreated — so residue cannot permanently halt
+    collection. Non-regular leftovers are refused. Halt flags are never cleared here.
+    """
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        info = None
+    if info is not None:
+        if not stat.S_ISREG(info.st_mode):
+            raise DailyHaltError("temp_path_not_regular")
+        try:
+            path.unlink()  # discard residue; never read/print contents
+        except FileNotFoundError:
+            pass
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     identity = os.fstat(fd)
     try:

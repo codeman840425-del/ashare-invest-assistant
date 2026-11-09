@@ -1293,6 +1293,14 @@ BEGIN
   IF any_present THEN
     RAISE NOTICE 'db-roles: T-O60 gate 函数仅 aia_maint EXECUTE';
   ELSE
+    -- T-O63：库已到 ≥0030 却缺 gate 函数 → 失败；未到 0030 仍跳过
+    IF to_regclass('public.alembic_version') IS NOT NULL
+       AND EXISTS (
+         SELECT 1 FROM public.alembic_version v
+          WHERE v.version_num >= '0030'
+       ) THEN
+      RAISE EXCEPTION 'db-roles: T-O63 库 version≥0030 但缺少 ops.gate_user_refs / purge_user_gate_facts';
+    END IF;
     RAISE NOTICE 'db-roles: T-O60 gate 函数不存在（未到 0030），跳过';
   END IF;
 END

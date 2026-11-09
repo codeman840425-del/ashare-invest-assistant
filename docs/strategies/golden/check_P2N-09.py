@@ -210,45 +210,65 @@ def findings(c: dict) -> list[str]:
 
 
     elif kind == "auth_leak":
-        # C12: non-admin must not surface llm_call_id in render projection (T-A71)
-        assert i["viewer_role"] == "user" and i.get("llm_call_id")
+        # C12: non-admin must not surface llm_call_id (T-A71; usage_page_available any)
+        if i.get("viewer_role") != "user":
+            out.add("auth_role_mismatch")
+        if not i.get("llm_call_id"):
+            out.add("llm_call_id_missing")
         render = i.get("render") or {}
         if render.get("show_llm_call_id") or render.get("href") or render.get("id_text"):
             out.add("llm_call_id_leak")
 
     elif kind == "auth_plain":
-        # C13: admin, no usage page → plain id, no href (T-A71)
-        assert i["viewer_role"] == "admin" and i.get("usage_page_available") is False and i.get("llm_call_id")
+        # C13: admin, no usage page → plain id, no href (T-A71/T-A72)
+        if i.get("viewer_role") != "admin":
+            out.add("auth_role_mismatch")
+        if i.get("usage_page_available") is not False:
+            out.add("usage_page_flag_mismatch")
+        call_id = i.get("llm_call_id")
+        if not call_id:
+            out.add("llm_call_id_missing")
         render = i.get("render") or {}
-        call_id = i["llm_call_id"]
         if render.get("href"):
             out.add("link_without_usage_page")
-        if (not render.get("show_llm_call_id")) or render.get("id_text") != call_id:
-            out.add("llm_call_id_leak")
+        if not render.get("show_llm_call_id"):
+            out.add("llm_call_id_missing")
+        elif render.get("id_text") != call_id:
+            out.add("llm_call_id_missing")
 
     elif kind == "auth_link":
-        # C14: admin + usage page → href == /admin/llm/usage?call_id= + URL-encoded id (T-A71)
-        assert i["viewer_role"] == "admin" and i.get("usage_page_available") is True and i.get("llm_call_id")
+        # C14: admin + usage page → encoded href + id_text == llm_call_id (T-A71/T-A72)
+        if i.get("viewer_role") != "admin":
+            out.add("auth_role_mismatch")
+        if i.get("usage_page_available") is not True:
+            out.add("usage_page_flag_mismatch")
+        call_id = i.get("llm_call_id")
+        if not call_id:
+            out.add("llm_call_id_missing")
         render = i.get("render") or {}
-        call_id = i["llm_call_id"]
-        expected_href = "/admin/llm/usage?call_id=" + quote(call_id, safe="")
+        expected_href = "/admin/llm/usage?call_id=" + quote(str(call_id), safe="") if call_id else None
         href = render.get("href")
-        if href != expected_href:
+        if expected_href is not None and href != expected_href:
             out.add("auth_link_mismatch")
         if not render.get("show_llm_call_id"):
-            out.add("llm_call_id_leak")
+            out.add("llm_call_id_missing")
+        elif render.get("id_text") != call_id:
+            out.add("llm_call_id_missing")
 
     elif kind == "cache":
         # C21: cache_hit + not invoked → explanation byte-equal, llm_call_id unchanged (T-A71)
-        chain = i["chain"]
-        assert chain.get("cache_hit") is True and chain.get("invoked") is False
-        src = i["source_explanation"]
-        cur = i["explanation"]
-        if cur.get("llm_call_id") != src.get("llm_call_id"):
-            out.add("duplicate_llm_call")
-        if cur != src:
-            # body drift without new id still rejected
-            out.add("cache_body_mismatch")
+        chain = i.get("chain") or {}
+        if chain.get("cache_hit") is not True or chain.get("invoked") is not False:
+            out.add("cache_chain_mismatch")
+        src = i.get("source_explanation")
+        cur = i.get("explanation")
+        if src is None or cur is None:
+            out.add("cache_chain_mismatch")
+        else:
+            if cur.get("llm_call_id") != src.get("llm_call_id"):
+                out.add("duplicate_llm_call")
+            if cur != src:
+                out.add("cache_body_mismatch")
 
 
     else:
@@ -325,11 +345,18 @@ def run_mutations(data: dict) -> dict:
     bad["input"]["explanation"]["ui_label"] = "AI 生成"
     assert "template_claimed_as_ai" in findings(bad)
     inp_mut += 1
-    # T-A71 new four — input mutations
+    # T-A71/T-A72 new four — input mutations
     c12 = next(c for c in ready if c["id"] == "C12")
     bad = copy.deepcopy(c12)
     bad["input"]["render"] = {"show_llm_call_id": True, "href": None, "id_text": "call-auth"}
     assert "llm_call_id_leak" in findings(bad)
+    inp_mut += 1
+    # C12: usage_page_available=true leak (highest risk; T-A71 any-value / T-A72)
+    bad = copy.deepcopy(c12)
+    bad["input"]["usage_page_available"] = True
+    bad["input"]["render"] = {"show_llm_call_id": True, "href": "/admin/llm/usage?call_id=call-auth", "id_text": "call-auth"}
+    assert "llm_call_id_leak" in findings(bad)
+    assert findings(bad)  # rejected
     inp_mut += 1
     c13 = next(c for c in ready if c["id"] == "C13")
     bad = copy.deepcopy(c13)
@@ -359,6 +386,12 @@ def run_mutations(data: dict) -> dict:
     }
     assert "auth_link_mismatch" in findings(bad)
     inp_mut += 1
+    # C14: id_text != llm_call_id (T-A72)
+    bad = copy.deepcopy(c14)
+    bad["input"]["render"] = copy.deepcopy(c14["input"]["render"])
+    bad["input"]["render"]["id_text"] = "WRONG-ID"
+    assert "llm_call_id_missing" in findings(bad)
+    inp_mut += 1
     c21 = next(c for c in ready if c["id"] == "C21")
     bad = copy.deepcopy(c21)
     bad["input"]["explanation"] = copy.deepcopy(c21["input"]["explanation"])
@@ -370,10 +403,21 @@ def run_mutations(data: dict) -> dict:
     bad["input"]["explanation"]["paragraphs"][0]["text"] = "被改写的缓存正文"
     assert "cache_body_mismatch" in findings(bad)
     inp_mut += 1
+    # T-A72 ③: precondition failure → finding, not AssertionError
+    bad = copy.deepcopy(c12)
+    bad["input"]["viewer_role"] = "admin"  # C12 expects user
+    got = findings(bad)
+    assert "auth_role_mismatch" in got
+    assert not isinstance(got, BaseException)
+    inp_mut += 1
+    bad = copy.deepcopy(c13)
+    bad["input"]["usage_page_available"] = True  # C13 expects False
+    assert "usage_page_flag_mismatch" in findings(bad)
+    inp_mut += 1
     return {
         "expected_verdict_mutations_rejected": exp_mut,
         "input_mutations_detected": inp_mut,
-        "t_a71_input_mutations": 6,
+        "t_a71_t_a72_input_mutations": 10,
     }
 
 

@@ -1,6 +1,7 @@
 import { Button, Result, Tabs, Tag, Tooltip } from 'antd';
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ApiError } from '../../api/client';
+import { errorText, isRoutePending, isStockSubPending, ROUTE_PENDING_TEXT } from '../../api/errorPolicy';
 import { ENUMS } from '../../api/enums';
 import { CODE_RE, useBarsOf, useBarsWindow, useQuote, useSecurityProfile } from '../../api/marketQueries';
 import type { SecurityProfile } from '../../api/marketTypes';
@@ -110,6 +111,22 @@ function intradayPreClose(res: BarsResponse | undefined, q: QuoteItem | null | u
  */
 const capOf = (price: string, shares: number) => Number(price) * shares;
 
+/**
+ * T-F34b：行情头里的错误提示（行内紧凑，不撑破 .stock-head 的 flex 行）。
+ * 判定与 ErrorBox 一致：路由未实现 → ROUTE_PENDING_TEXT；否则用 errorText 的通用文案，附错误码便于排查。
+ */
+function QuoteError({ error }: { error: unknown }) {
+  if (isRoutePending(error) || isStockSubPending(error)) {
+    return <span className="muted small" data-testid="quote-error" data-kind="route-pending">{ROUTE_PENDING_TEXT}</span>;
+  }
+  const e = error instanceof ApiError ? error : null;
+  return (
+    <span className="error-text small" role="alert" data-testid="quote-error" data-kind="error" data-code={e?.code}>
+      行情加载失败：{errorText(error)}{e ? <span className="muted small">（{e.code}）</span> : null}
+    </span>
+  );
+}
+
 function StockHeader({ profile }: { profile: SecurityProfile }) {
   const code = profile.security_code;
   const quote = useQuote(code);
@@ -148,7 +165,11 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
         {profile.listing_status !== 'listed' ? <Tag color="default" data-testid="listing-status-tag">{LISTING_STATUS[profile.listing_status]}</Tag> : null}
         <AddToResearch origin="from_stock" securityCode={code} securityType={profile.type} />
       </div>
-      {quote.isPending ? <span className="muted">行情加载中…</span> : q ? (
+      {quote.isPending ? <span className="muted">行情加载中…</span> : quote.isError ? (
+        // T-F34b：/quotes 出错不再显示“无行情缓存”（旧口径）。路由未实现 → “功能开发中”提示（与 ErrorBox 同判定）；
+        // 其他错误按通用文案给出，不改头部布局（ErrorBlockMark 为行内紧凑展示）。
+        <QuoteError error={quote.error} />
+      ) : q ? (
         <div className="sh-quote">
           <span className={`q-price mono ${pctClass(q.change_pct)}`}>{q.price}</span>
           <span className={`mono ${pctClass(q.change_pct)}`}>
@@ -157,7 +178,7 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
           <Tooltip title="行情时间（北京时间）"><span className="muted small mono">{fmtTime(q.t)}</span></Tooltip>
           <DataStatusTag status={q.data_status} asOf={q.data_as_of} gaps={q.gaps} />
         </div>
-      ) : <span className="muted">无行情缓存</span>}
+      ) : <span className="muted" data-testid="quote-empty">无行情缓存</span>}
       {q ? <GapNote status={q.data_status} gaps={q.gaps} asOf={q.data_as_of} testId="quote-gap-note" /> : null}
       <div className="sh-stats">
         {stats.map(([k, v]) => (

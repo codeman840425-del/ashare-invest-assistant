@@ -250,12 +250,16 @@ def execute(
             ) as number:
                 result["new_reserved_calls"] += 1
                 result["batch_total"] = number
-                if stop.exists():
+                if map_legacy_stop(stop):
                     result["outcome"] = "STOP_present"
                     raise HaltError("STOP_present")
                 gate.check()
                 gate.reserve()
                 try:
+                    if map_legacy_stop(stop):
+                        result["outcome"] = "STOP_present"
+                        raise HaltError("STOP_present")
+                    gate.check()
                     connection.request(
                         "GET",
                         path + quote(secret, safe="") + query,

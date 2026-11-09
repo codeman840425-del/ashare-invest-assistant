@@ -580,16 +580,18 @@ def test_verification_real_redis_consumer_and_fallback_are_once_only(
     if delivery != "fallback":
         enqueue_verify(rds, licence_id=e.lid, verification_id=token)
     if delivery == "pending":
-        rds.xgroup_create(verification.STREAM, verification.GROUP, id="0")
-        messages = rds.xreadgroup(verification.GROUP, "old", {verification.STREAM: ">"})
+        group = verification.GROUP + ":" + str(e.lid)
+        rds.xgroup_create(verification.STREAM, group, id="0")
+        messages = rds.xreadgroup(group, "old", {verification.STREAM: ">"})
         mid = messages[0][1][0][0]
         assert verification.tick(e.collector, rds, e.settings) == 0
         assert calls == []  # Recent pending stream ownership forbids DB fallback.
-        rds.xclaim(verification.STREAM, verification.GROUP, "old", 0, [mid], idle=60001)
+        rds.xclaim(verification.STREAM, group, "old", 0, [mid], idle=60001)
     assert verification.tick(e.collector, rds, e.settings) == 1
     assert verification.tick(e.collector, rds, e.settings) == 0
     assert calls == [f"/tcalendar/list/{e.day.year}/"]
-    assert rds.xpending(verification.STREAM, verification.GROUP)["pending"] == 0
+    group = verification.GROUP + ":" + str(e.lid)
+    assert rds.xpending(verification.STREAM, group)["pending"] == 0
     bodies = rds.hvals(f"p2n06:sse:{e.user}:body")
     assert len(bodies) == 1
     event = json.loads(bodies[0])
@@ -664,7 +666,8 @@ def test_verification_malformed_stream_message_is_acknowledged_without_http(
 
     monkeypatch.setattr(verification, "process", forbidden)
     assert verification.tick(e.collector, rds, e.settings) == 0
-    assert rds.xpending(verification.STREAM, verification.GROUP)["pending"] == 0
+    group = verification.GROUP + ":" + str(e.lid)
+    assert rds.xpending(verification.STREAM, group)["pending"] == 0
 
 
 @pytest.mark.parametrize(("mode", "paused"), [("replay", False), ("live", True), ("live", False)])

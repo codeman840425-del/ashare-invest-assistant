@@ -21,7 +21,7 @@ from app.ingest.shared_gate import GateClosedError, SharedGate, limit_code
 from app.ingest.state import LicenceState, Priority
 from app.ingest.upstream import Signal, classify
 from app.ingest.verification_grants import read_grant
-from app.licences.service import is_held, per_minute_limit
+from app.licences.service import is_held, lock_control, per_minute_limit
 from app.schemas.enums import DataLicenceStatus, DataLicenceTier
 
 STREAM = "ingest:requests"
@@ -167,11 +167,31 @@ def process(
                     return "failed_no_retry"
                 if send_paused(settings):
                     return "failed_no_retry"
-                with engine.connect() as conn:
-                    if not allowed_before_send(conn, settings, intent, grant.user_id, clock()):
-                        return "failed_no_retry"
                 try:
-                    status, body = send(gate, upstream, f"/tcalendar/list/{started.year}/", secret)
+                    # Same transaction lock as every API pause/hold/replace/delete.
+                    # Keep it through the send, including the actual wire boundary.
+                    with engine.begin() as conn:
+                        lock_control(conn, grant.user_id)
+
+                        def final_check() -> None:
+                            gate.check()
+                            if (
+                                read_grant() != grant
+                                or not grant.valid(intent.licence_id, clock())
+                                or send_paused(settings)
+                                or not allowed_before_send(
+                                    conn, settings, intent, grant.user_id, clock()
+                                )
+                            ):
+                                raise GateClosedError("verification_send_revoked")
+
+                        final_check()
+                        status, body = send(
+                            gate, upstream, f"/tcalendar/list/{started.year}/", secret,
+                            before_send=final_check,
+                        )
+                except GateClosedError:
+                    return "failed_no_retry"
                 except Exception:  # noqa: BLE001 - persist only the fixed network classification
                     feedback(
                         engine,
@@ -246,32 +266,38 @@ def tick(engine: Engine, rds: redis.Redis, settings: Settings) -> int:
         return 0
     from redis.exceptions import ResponseError
 
+    # Each authorized certificate has its own consumer group. Acknowledging an
+    # unrelated entry here cannot consume it for that entry's certificate, and
+    # old/unconfirmed work in the legacy global group cannot suppress recovery.
+    group = GROUP + ":" + str(authorization.licence_id)
     try:
-        rds.xgroup_create(STREAM, GROUP, id="0", mkstream=True)
+        rds.xgroup_create(STREAM, group, id="0", mkstream=True)
     except ResponseError as exc:
         if "BUSYGROUP" not in str(exc):
             raise RuntimeError("verification_stream_unavailable") from None
     pending = rds.xautoclaim(
-        STREAM, GROUP, "ingest-verify", min_idle_time=60000, start_id="0-0", count=1
+        STREAM, group, "ingest-verify", min_idle_time=60000, start_id="0-0", count=32
     )[1]
     messages = (
         pending
-        or (rds.xreadgroup(GROUP, "ingest-verify", {STREAM: ">"}, count=1) or [(None, [])])[0][1]
+        or (rds.xreadgroup(group, "ingest-verify", {STREAM: ">"}, count=32) or [(None, [])])[0][1]
     )
     for mid, fields in messages:
         try:
             intent = parse_intent(fields)
         except (ValueError, UnicodeError):
-            rds.xack(STREAM, GROUP, mid)
-            return 0
-        result = process(engine, settings, intent) if isinstance(intent, VerifyIntent) else "skip"
+            rds.xack(STREAM, group, mid)
+            continue
+        if not isinstance(intent, VerifyIntent) or intent.licence_id != authorization.licence_id:
+            rds.xack(STREAM, group, mid)
+            continue
+        result = process(engine, settings, intent)
         if result not in {"busy_or_closed", "authorization_unavailable"}:
-            rds.xack(STREAM, GROUP, mid)
-            if isinstance(intent, VerifyIntent):
-                publish_status(engine, rds, intent)
-        return int(result != "skip")
-    # A recent pending stream message still owns verification; never invent a second intent.
-    if rds.xpending(STREAM, GROUP)["pending"]:
+            rds.xack(STREAM, group, mid)
+            publish_status(engine, rds, intent)
+        return 1
+    # Only this certificate's pending group can suppress its own fallback.
+    if rds.xpending(STREAM, group)["pending"]:
         return 0
     # Recover an enqueue failure once per pending generation, excluding any logged attempt.
     with engine.connect() as conn:

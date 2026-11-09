@@ -39,6 +39,7 @@ from sqlalchemy import (
     insert,
     or_,
     select,
+    text,
     update,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -124,9 +125,22 @@ def status_view(row: Row[Any] | None, *, held: bool = False) -> dict[str, Any]:
     }
 
 
+def lock_control(conn: Connection, user_id: uuid.UUID) -> None:
+    """One transaction fence for pause/hold/replace/delete and the actual live send.
+
+    The sender holds this through HTTP. A completed pause/delete therefore cannot
+    race a later send based on an earlier status read. No extra table ACL is needed.
+    """
+    conn.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 99))"),
+        {"key": "data-licence-control:" + str(user_id)},
+    )
+
+
 def live_row(conn: Connection, user_id: uuid.UUID, *, lock: bool = False) -> Row[Any] | None:
     """本人未删除的证书行（视图列；``lock`` 时直接锁表行，仍不取密文列）。"""
     if lock:
+        lock_control(conn, user_id)
         cols = [udl.c[name] for name in user_data_licence_status.c.keys()]  # noqa: SIM118
         stmt = (
             select(*cols)
@@ -205,6 +219,7 @@ def is_held(conn: Connection, user_id: uuid.UUID) -> bool:
 
 
 def hold(conn: Connection, user_id: uuid.UUID) -> None:
+    lock_control(conn, user_id)
     conn.execute(
         pg_insert(user_data_licence_holds)
         .values(user_id=user_id)
@@ -214,6 +229,7 @@ def hold(conn: Connection, user_id: uuid.UUID) -> None:
 
 def release_hold(conn: Connection, user_id: uuid.UUID) -> bool:
     """删除暂停记录；返回之前是否处于暂停。"""
+    lock_control(conn, user_id)
     h = user_data_licence_holds.c
     res = conn.execute(delete(user_data_licence_holds).where(h.user_id == user_id))
     return bool(res.rowcount)

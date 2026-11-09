@@ -19,14 +19,17 @@
 - ingest 仍禁止全站 `MAIRUI_LICENCE` / `APP_MASTER_KEY`；产品只在门禁通过后从原 HPKE vault 解开本人证书。探针按既有安全接入方式临时读环境证书。
 - 仅在批准后设置 ingest `MAIRUI_MODE=live`、启用既有设置页证书开关；dev compose 的 replay 覆盖需由运维当次调整。名单还必须有既有只读授权回执、已覆盖的交易日日历、有效本人证书。只改 mode 不产生授权。
 - 名单固定北京时间交易日 18:00 至 23:59:59，一批三 HTTP，端点各一次，完成至下一开始至少 60 秒；失败/预留不退数，不跨日补打。名单回执与调度/outbox 复用既有路径。
-- T-B99b：验证另需 `/run/aia/authorizations/mairui-verification.json`，父目录/文件沿用 root-owned、不可组写、文件0444门槛。字段严格为 `kind=mairui_licence_verification`、本人 `user_id/licence_id`、唯一 `receipt_id`、带时区 `not_before/expires_at`、`max_http_requests=1`；过期、换人/换行、次数非1均拒绝。按 receipt_id 持久预留一次，多个验证意图不能叠加。只有名单三次回执时，队列和pending扫描都不验证；验证仍需独立当次明确授权，不占名单三次/探针128。
-- 验证继续消费既有 `verify_licence` 与pending漏投兜底，调用 `/tcalendar/list/{year}/`；发送前重新检查回执、全局暂停、本人证书/账号/管理员hold。名单也逐请求重查Redis全局暂停、18:00窗口、日历和本人状态；Redis不可用即闭锁。
+- T-B99c：验证另需 `/run/aia/authorizations/mairui-verification.json`，父目录/文件沿用 root-owned、不可组写、文件0444门槛。字段严格为 `kind=mairui_licence_verification`、本人 `user_id/licence_id`、唯一 `receipt_id`、带时区 `not_before/expires_at`、`max_http_requests=1`；有效期必须正数且≤30天，与请求日志去重保留期对齐，读取时已过期/尚未生效也拒绝。按 receipt_id 持久预留一次，多个验证意图不能叠加。只有名单三次回执时，队列和pending扫描都不验证；验证仍需独立当次明确授权，不占名单三次/探针128。
+- 验证继续消费既有 `verify_licence` 与pending漏投兜底，调用 `/tcalendar/list/{year}/`；每个证书使用独立consumer group，无关证书在旧组未确认不会挡住本人兜底。发送前、发送适配器内及真实HTTP构造连接后重查回执、全局暂停、本人证书/账号/管理员hold；名单也逐请求重查Redis全局暂停、18:00窗口、日历和本人状态，Redis不可用即闭锁。
+- 本人证书控制事务与最终检查到HTTP动作共用用户级PG事务锁；API暂停/hold/替换/删除均遵守同一锁顺序。暂停先取得锁并提交时发送为0；发送先取得锁时暂停等待其结束，暂停成功返回后不会再按旧检查外呼。此互斥不表示能撤回已经发出的HTTP；运维全局Redis键仍每次在传输边界重读。
 - 真实 T-B05 必须做既有 `--check-egress` 并得到稳定出口；未确认出口不能预留麦蕊请求。T-B86 还保留原官方证据、128 分项台账、临时凭据 0600/清理等全部门禁。
 
 ## 停机与人工恢复
 
-- 公共 `STOP` 停所有证书；历史STOP在两个真实入口的提前退出前也映射公共STOP。写入固定脱敏标记并flush/fsync文件与POSIX目录，不复制旧STOP内容。
-- T-B99b：103/429、分钟账改按证书内容导出的私有不透明标识定位，UUID仅作策略/归属及 `.binding.json` 映射；所有四类真实发送均须先确认该绑定。删重设同证书换UUID后继承原halt和分钟账，IP超限一小时次数也跨这些UUID累计；标识、绑定、分钟账不进入API/报告，不得通过删除绑定或换目录重置。
+- 公共 `STOP` 停所有证书；历史STOP在两个真实入口的提前退出前也映射公共STOP，T-B05等待每≤0.25秒及实际发送前重映射，T-B86预留后发送前再映射。STOP写入/读取共用判定：有效普通目标才算存在；失效软链和异常文件闭锁，不把FileExistsError当成功。写入固定脱敏标记并flush/fsync文件与POSIX目录，不复制旧STOP内容。
+- T-B99c：103/429、分钟账使用独立随机UUID的 `state-<uuid>` 文件名。关联集中存于0600的 `certificate-bindings.sqlite3`，等值匹配用运行时独立随机0600密钥 `binding-key.json` 的HMAC；不读DB HMAC/APP_MASTER_KEY，不落无密钥证书指纹、证书原文或派生文件名。SQLite启用secure_delete、DELETE journal、内存临时表，不留WAL。绑定有效时同证书换UUID继承原halt/分钟账与一小时次数。
+- 绑定最长30天，访问时到期清理；每次心跳（含全局暂停/replay）按无密文状态视图清理删除/注销关联。非冷却删除移除关联；冷却删除只保留到paused_until，空截止最多删除后30天。清理同时擦除无引用HMAC；随机halt/预算事实原样保留，遗孤halt/未知在途/最近一分钟账全局保守闭锁，不允许借清理重获预算。实现不自动清停机事实；所有进程停止时不会有后台清理，恢复后先清理再考虑发送。
+- 旧 `.binding.json`、`certificate-*` 派生文件若存在仍拒发，须授权运维另单迁移/核清；本单没有读取或迁移用户共享目录。
 - 未迁移的旧UUID halt保留并保守闭锁，旧UUID未知在途/最近一分钟账也闭锁，交授权运维核清，不能自动丢掉历史闩锁以启用新格式。显示的120秒/一小时暂停到期仍不会清持久闩锁。
 - `single-egress.lease.json` 是 `ingest:single-egress` 文件互斥。探针优先标记只在争锁阶段使用；正常请求完成才清除逐证书 `requests.json` 的 inflight。未知在途保留租约、预留和 halt，进程重启也不重放。
 - 历史 `master_runs.stats.upstream_halted` 保留为事实；后续停机范围以共享证书闩锁为准，避免旧历史永久阻塞其他证书。原 `results/STOP`、名单 HALTED、T-B86 原台账 halted 仍须检查；T-B05 发现旧 STOP 会映射成公共 STOP，不能通过迁移目录绕过。

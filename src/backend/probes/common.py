@@ -29,7 +29,7 @@ from requests.adapters import HTTPAdapter
 # Direct `python run_all.py` also imports the same packaged standard-library gate.
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app.ingest.shared_gate import SharedGate, limit_code, map_legacy_stop, write_stop
+from app.ingest.shared_gate import SharedGate, limit_code, map_legacy_stop, stop_present, write_stop
 
 REAL_BASE = "https://api.mairuiapi.com"
 REAL_PRO_BASE = "https://pro.mairuiapi.com"
@@ -300,15 +300,21 @@ def is_limit_response(status: Optional[int], text: str, data: Any) -> bool:
             or body.startswith("103") or body.startswith("101") or "最多允许2个不同IP" in body)
 
 
+def _check_stop(c: RunCtx) -> None:
+    if not c.dry_run:
+        map_legacy_stop(STOP_FILE)
+    if stop_present(c.stop_file):
+        raise LimitHit("STOP present; request refused")
+    if c.shared_gate is not None:
+        c.shared_gate.check()
+
+
 def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", json_body: Any = None,
          **params) -> Resp:
     c = ctx()
-    if not c.dry_run:
-        if c.shared_gate is None:
-            raise LimitHit("shared gate required before live request")
-        map_legacy_stop(STOP_FILE)
-    if c.stop_file.exists():
-        raise LimitHit("STOP present; request refused")
+    if not c.dry_run and c.shared_gate is None:
+        raise LimitHit("shared gate required before live request")
+    _check_stop(c)
     if c.inflight != 0:
         raise RuntimeError("检测到并发调用，探针必须串行")
     if pro and c.skip_pro_host:
@@ -317,11 +323,13 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
         return Resp(name, red, None, 0.0, 0, None, "", "skipped: --skip-pro-host")
     url = build_url(path_tpl, pro=pro, **params)
     red = redact(url)
-    wait = c.min_interval - (time.monotonic() - c.last_call)
-    if wait > 0:
-        time.sleep(wait)
-    if c.stop_file.exists():
-        raise LimitHit("STOP present before request")
+    while True:
+        _check_stop(c)
+        wait = c.min_interval - (time.monotonic() - c.last_call)
+        if wait <= 0:
+            break
+        time.sleep(min(wait, 0.25))
+    _check_stop(c)
     if c.shared_gate is not None:
         c.shared_gate.bind_certificate(_licence())
         c.shared_gate.check()
@@ -330,6 +338,7 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
     t0 = time.monotonic()
     status, text, err, hdr, redirected = None, "", None, {}, False
     try:
+        _check_stop(c)
         r = c.session.request(method, url, json=json_body, timeout=TIMEOUT, allow_redirects=False)
         status, text, redirected = r.status_code, r.text, bool(r.history)
         hdr = {k: v for k, v in r.headers.items() if k.lower() in (

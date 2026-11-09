@@ -108,6 +108,27 @@ def test_real_incomplete_notices_prevent_credential_access(
     assert not context["secret_path"].exists()
 
 
+def test_legacy_stop_after_reservation_prevents_history_http(
+    context: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    enable_synthetic(monkeypatch)
+    original = probe.SharedGate.reserve
+
+    def reserve(gate: Any, **kwargs: Any) -> None:
+        original(gate, **kwargs)
+        context["stop"].touch()
+
+    monkeypatch.setattr(probe.SharedGate, "reserve", reserve)
+    result = probe.execute(**context)
+    assert FakeConnection.calls == 0
+    assert result["new_reserved_calls"] == 1
+    assert result["outcome"] == "STOP_present"
+    assert result["temporary_secret_deleted"]
+    root = Path(probe.os.environ["MAIRUI_SHARED_STATE_DIR"])
+    assert (root / "STOP").is_file()
+    assert json.loads(context["counter"].read_text())["halted"]
+
+
 def test_six_synthetic_calls_have_locked_ledger_and_cleanup(
     context: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

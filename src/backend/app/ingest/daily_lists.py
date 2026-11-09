@@ -29,10 +29,16 @@ from app.db.tables.market import master_runs, securities
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows
 from app.ingest.live import check_egress, feedback, send_paused
-from app.ingest.shared_gate import GateClosedError, SharedGate, limit_code
+from app.ingest.shared_gate import (
+    GateClosedError,
+    SharedGate,
+    limit_code,
+    map_legacy_stop,
+    stop_present,
+)
 from app.ingest.upstream import Signal, classify
 from app.ingest.vault import LicenceVault, SealedLicence
-from app.licences.service import per_minute_limit
+from app.licences.service import lock_control, per_minute_limit
 from app.master.daily_delivery import (
     APPLY,
     KIND,
@@ -53,6 +59,7 @@ STOP = Path(__file__).resolve().parents[2] / "probes/results/STOP"
 HALT = Path("/run/aia/mairui-daily.HALTED")
 GROUP = "mairui-daily-v1"
 WIRE_GATE: ContextVar[SharedGate | None] = ContextVar("mairui_wire_gate", default=None)
+WIRE_CHECK: ContextVar[Callable[[], None] | None] = ContextVar("mairui_wire_check", default=None)
 
 
 class DailyHaltError(RuntimeError):
@@ -72,6 +79,10 @@ def wire(path: str, secret: str) -> tuple[int, object]:
     conn = http.client.HTTPSConnection(HOST, timeout=20)
     conn.set_debuglevel(0)
     try:
+        check = WIRE_CHECK.get()
+        if check is not None:
+            check()
+        gate.check()
         conn.request("GET", path + quote(secret, safe=""))
         response = conn.getresponse()
         if response.status in (103, 429):
@@ -91,12 +102,22 @@ def wire(path: str, secret: str) -> tuple[int, object]:
 
 
 def send(
-    gate: SharedGate, upstream: Callable[[str, str], tuple[int, object]], path: str, secret: str
+    gate: SharedGate,
+    upstream: Callable[[str, str], tuple[int, object]],
+    path: str,
+    secret: str,
+    *,
+    before_send: Callable[[], None] | None = None,
 ) -> tuple[int, object]:
     token = WIRE_GATE.set(gate)
+    check_token = WIRE_CHECK.set(before_send)
     try:
+        if before_send is not None:
+            before_send()
+        gate.check()
         return upstream(path, secret)
     finally:
+        WIRE_CHECK.reset(check_token)
         WIRE_GATE.reset(token)
 
 
@@ -258,7 +279,7 @@ def process(
                     or not eligible(conn, grant, clock())
                 ):
                     issue = "authorization_unavailable"
-                elif stop.exists() or halt.exists():
+                elif stop_present(stop) or stop_present(halt):
                     issue = "STOP_or_halt_present"
                 elif clock().astimezone(BEIJING).time() < dt.time(18) or not covered(
                     conn, clock().astimezone(BEIJING).date()
@@ -301,7 +322,7 @@ def process(
                 if delay:
                     pause(delay)
                 gate.check()
-                if stop.exists() or halt.exists():
+                if stop_present(stop) or stop_present(halt):
                     raise DailyHaltError("STOP_or_halt_present")
                 if send_paused(settings):
                     raise DailyHaltError("global_pause_before_send")
@@ -333,28 +354,39 @@ def process(
                         .where(master_runs.c.id == parent_id)
                         .values(stats={**parent.stats, "attempted": attempts})
                     )
-                if stop.exists() or halt.exists():
+                if stop_present(stop) or stop_present(halt):
                     raise DailyHaltError("STOP_or_halt_present")
                 gate.reserve(now=clock().timestamp(), limit=minute_limit)
                 gate.check()
                 if send_paused(settings):
                     raise DailyHaltError("global_pause_before_send")
-                with engine.connect() as conn:
-                    current_time = clock()
-                    day = current_time.astimezone(BEIJING).date()
-                    if (
-                        read_grant() != grant
-                        or current_time >= b.deadline_at
-                        or not dt.time(18)
-                        <= current_time.astimezone(BEIJING).time()
-                        < dt.time(23, 59, 59)
-                        or p.stats.get("trade_date") != str(day)
-                        or not covered(conn, day)
-                        or not eligible(conn, grant, current_time)
-                    ):
-                        raise DailyHaltError("permission_or_window_changed_before_send")
                 try:
-                    status, body = send(gate, upstream, PATHS[dataset], secret)
+                    with engine.begin() as conn:
+                        lock_control(conn, grant.user_id)
+
+                        def final_check() -> None:
+                            if map_legacy_stop(stop) or stop_present(halt):
+                                raise DailyHaltError("STOP_or_halt_present")
+                            gate.check()
+                            current_time = clock()
+                            day = current_time.astimezone(BEIJING).date()
+                            if (
+                                send_paused(settings)
+                                or read_grant() != grant
+                                or current_time >= b.deadline_at
+                                or not dt.time(18)
+                                <= current_time.astimezone(BEIJING).time()
+                                < dt.time(23, 59, 59)
+                                or p.stats.get("trade_date") != str(day)
+                                or not covered(conn, day)
+                                or not eligible(conn, grant, current_time)
+                            ):
+                                raise DailyHaltError("permission_or_window_changed_before_send")
+
+                        final_check()
+                        status, body = send(
+                            gate, upstream, PATHS[dataset], secret, before_send=final_check
+                        )
                 except Exception:  # noqa: BLE001 - persist only the fixed network classification
                     feedback(
                         engine,

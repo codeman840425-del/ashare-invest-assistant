@@ -99,7 +99,7 @@ def write_heartbeat(settings: Settings) -> None:
                 time.sleep(duration)
                 remaining -= duration
 
-        if settings.database_url is not None and not client.exists(settings.ingest_paused_key):
+        if settings.database_url is not None:
             engine = engine_for(settings.database_url.get_secret_value())
             try:
                 shared_root = os.environ.get("MAIRUI_SHARED_STATE_DIR")
@@ -107,7 +107,10 @@ def write_heartbeat(settings: Settings) -> None:
                     from pathlib import Path
 
                     sync_halts(engine, settings, client, Path(shared_root))
-                if os.environ.get("MAIRUI_MODE", "replay") == "live":
+                if (
+                    os.environ.get("MAIRUI_MODE", "replay") == "live"
+                    and not client.exists(settings.ingest_paused_key)
+                ):
                     verify_tick(engine, client, settings)
                     tick(engine, client, pause=heartbeat_wait, settings=settings)
             finally:

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 AUTHORIZATION = Path("/run/aia/authorizations/mairui-verification.json")
+MAX_AGE = dt.timedelta(days=30)  # Never outlive the request log's dedup retention.
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,12 @@ class VerificationGrant:
     def valid(self, licence_id: uuid.UUID, now: dt.datetime) -> bool:
         return (
             self.licence_id == licence_id
+            and type(self.max_http_requests) is int
             and self.max_http_requests == 1
+            and self.start.tzinfo is not None
+            and self.end.tzinfo is not None
+            and now.tzinfo is not None
+            and dt.timedelta(0) < self.end - self.start <= MAX_AGE
             and self.start <= now < self.end
         )
 
@@ -76,7 +82,12 @@ def read_grant(path: Path = AUTHORIZATION) -> VerificationGrant | None:
             dt.datetime.fromisoformat(obj["not_before"]),
             dt.datetime.fromisoformat(obj["expires_at"]),
         )
-        if start.tzinfo is None or end.tzinfo is None or start >= end:
+        if (
+            start.tzinfo is None
+            or end.tzinfo is None
+            or not dt.timedelta(0) < end - start <= MAX_AGE
+            or not start <= dt.datetime.now(dt.UTC) < end
+        ):
             return None
         return VerificationGrant(
             uuid.UUID(obj["user_id"]),

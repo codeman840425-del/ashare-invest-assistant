@@ -22,7 +22,14 @@ from app.db.tables.licences import data_licence_events, user_data_licence_status
 from app.db.tables.licences import user_data_licences as licences
 from app.db.tables.notify import notifications
 from app.db.tables.users import users
-from app.ingest.shared_gate import GateClosedError, _read, bound_halt, related_licences
+from app.ingest.certificate_bindings import TTL, cleanup
+from app.ingest.shared_gate import (
+    GateClosedError,
+    _read,
+    bound_halt,
+    related_licences,
+    stop_present,
+)
 from app.ingest.state import LicenceState
 from app.ingest.upstream import Signal
 from app.licences import service
@@ -228,15 +235,20 @@ def sync_halts(engine: Engine, settings: Settings, rds: redis.Redis, root: Path)
     """Reflect a probe's shared latch without using its samples or reading a licence."""
     now = dt.datetime.now(dt.UTC)
     with engine.connect() as conn:
-        lids = (
-            conn.execute(
-                select(user_data_licence_status.c.id).where(
-                    user_data_licence_status.c.deleted_at.is_(None)
+        states = conn.execute(select(user_data_licence_status)).all()
+    retained = {}
+    for row in states:
+        end = now + dt.timedelta(seconds=TTL)
+        if row.deleted_at is not None:
+            end = row.deleted_at
+            if row.status in {"ip_limited", "quota_exceeded"} or row.paused_until is not None:
+                end = min(
+                    row.deleted_at + dt.timedelta(seconds=TTL),
+                    row.paused_until or row.deleted_at + dt.timedelta(seconds=TTL),
                 )
-            )
-            .scalars()
-            .all()
-        )
+        retained[str(row.id)] = end.timestamp()
+    cleanup(root, retained, now.timestamp())
+    lids = [row.id for row in states if row.deleted_at is None]
     for lid in lids:
         path = bound_halt(root, lid)
         if not path.exists():
@@ -251,7 +263,7 @@ def sync_halts(engine: Engine, settings: Settings, rds: redis.Redis, root: Path)
         )
         publish_feedback(rds, payload, token)
     stop = root / "STOP"
-    if stop.exists():
+    if stop_present(stop):
         info = stop.stat()
         key = "global-stop:" + str(info.st_ino) + ":" + str(info.st_mtime_ns)
         with engine.begin() as conn:

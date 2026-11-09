@@ -8,7 +8,6 @@ STOP, halt or an uncertain lease; this module has no reset/initialization comman
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import http.client
 import ipaddress
 import json
@@ -116,11 +115,29 @@ def _write(path: Path, obj: dict[str, Any], *, exclusive: bool = False) -> None:
             temporary.unlink()
 
 
+def stop_present(path: Path) -> bool:
+    """A dangling link or invalid sentinel is closed, never an absent/successful STOP."""
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        raise GateClosedError("shared_STOP_unavailable") from None
+    try:
+        if not stat.S_ISREG(path.stat().st_mode):
+            raise GateClosedError("shared_STOP_invalid")
+    except OSError:
+        raise GateClosedError("shared_STOP_invalid") from None
+    return True
+
+
 def write_stop(path: Path) -> None:
     """Latch a fixed diagnostic durably, never read/copy historical STOP contents."""
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
+        if not stop_present(path):
+            raise GateClosedError("shared_STOP_creation_raced") from None
         return
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
         stream.write("operator_review_required\n")
@@ -130,7 +147,12 @@ def write_stop(path: Path) -> None:
 
 
 def map_legacy_stop(path: Path) -> bool:
-    if not path.exists():
+    # Even an invalid legacy sentinel must stop the product side.
+    try:
+        present = stop_present(path)
+    except GateClosedError:
+        present = True
+    if not present:
         return False
     raw = os.environ.get("MAIRUI_SHARED_STATE_DIR", "")
     root = Path(raw)
@@ -143,26 +165,16 @@ def map_legacy_stop(path: Path) -> bool:
 
 
 def bound_halt(root: Path, licence_id: uuid.UUID) -> Path:
-    binding = root / (str(licence_id) + ".binding.json")
-    if not binding.exists():
-        return root / (str(licence_id) + ".halt.json")
-    key = _read(binding).get("certificate_id")
-    if not isinstance(key, str) or not re.fullmatch(r"certificate-[0-9a-f]{64}", key):
-        raise GateClosedError("shared_certificate_binding_invalid")
-    return root / (key + ".halt.json")
+    from app.ingest.certificate_bindings import identity
+
+    ident = identity(root, str(licence_id))
+    return root / (("state-" + ident if ident else str(licence_id)) + ".halt.json")
 
 
 def related_licences(root: Path, licence_id: uuid.UUID) -> list[uuid.UUID]:
-    target = bound_halt(root, licence_id).name
-    result = {licence_id}
-    for path in root.glob("*.binding.json"):
-        try:
-            ident = uuid.UUID(path.name.removesuffix(".binding.json"))
-        except ValueError:
-            raise GateClosedError("shared_certificate_binding_invalid") from None
-        if bound_halt(root, ident).name == target:
-            result.add(ident)
-    return list(result)
+    from app.ingest.certificate_bindings import related
+
+    return related(root, str(licence_id))
 
 
 class SharedGate:
@@ -210,22 +222,33 @@ class SharedGate:
     def bind_certificate(self, secret: str) -> None:
         if self.token is None or not secret:
             raise GateClosedError("shared_lease_and_certificate_required")
-        # A private, domain-separated opaque identity survives row replacement and deletion.
-        # It is never returned in API responses/logs; no DB HMAC or master key is read.
-        key = "certificate-" + hashlib.sha256(b"mairui-shared/v1\0" + secret.encode()).hexdigest()
-        binding = self.root / (self.licence_id + ".binding.json")
-        if binding.exists() and _read(binding).get("certificate_id") != key:
-            raise GateClosedError("shared_certificate_binding_changed")
-        if not binding.exists():
-            _write(binding, {"certificate_id": key}, exclusive=True)
-        self.halt_path = self.root / (key + ".halt.json")
-        self.state_path = self.root / (key + ".requests.json")
+        from app.ingest.certificate_bindings import bind
+
+        self.check()
+        ident = bind(self.root, self.licence_id, secret, time.time())
+        self.halt_path = self.root / ("state-" + ident + ".halt.json")
+        self.state_path = self.root / ("state-" + ident + ".requests.json")
         self.certificate_confirmed = True
         self.check()
 
     def check(self) -> None:
-        if self.stop.exists():
+        from app.ingest.certificate_bindings import identifiers
+
+        if stop_present(self.stop):
             raise GateClosedError("shared_STOP")
+        # Never silently adopt fingerprint-based v1 files. An authorized operator
+        # must migrate/remove the associations while preserving all stop facts.
+        if any(self.root.glob("*.binding.json")) or any(self.root.glob("certificate-*.json")):
+            raise GateClosedError("shared_legacy_binding_requires_review")
+        known = {"state-" + ident for ident in identifiers(self.root)}
+        for path in self.root.glob("state-*.halt.json"):
+            if path.name.removesuffix(".halt.json") not in known:
+                raise GateClosedError("shared_orphan_licence_halted")
+        for path in self.root.glob("state-*.requests.json"):
+            if path.name.removesuffix(".requests.json") not in known:
+                state = _read(path)
+                if state.get("inflight") or state.get("last_finished", 0) > time.time() - 60:
+                    raise GateClosedError("shared_orphan_budget_requires_review")
         if self.halt_path.exists():
             raise GateClosedError("shared_licence_halted")
         # An unbound v1 UUID latch cannot be safely attributed after row replacement.

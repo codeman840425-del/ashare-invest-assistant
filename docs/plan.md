@@ -421,6 +421,7 @@ Celery Beat + 唯一 `ingest`（外呼）+ `signal-rt`（计算）（交易日�
    - **错峰互斥**：产品名单、产品日 K、T-B05、T-B86 共用 `ingest:single-egress` 互斥与逐请求检查；探针运行/持锁/在途不确定时产品不发起，反向同理，重叠时探针优先。目标配置归 `config/ingest.yaml` 的 `licences.product_daily`（`not_before=18:00`、`deadline=23:59:59`、`list_max_http_per_day=3`、`min_interval_s=60`、`upstream_retry=0`）；后端实现时同步实际 YAML 与 pydantic 校验，不支持前不得只写运行配置。
    - **共用停机**：公共 STOP 停全部证书；任一侧遇 103/HTTP 429，停该证书产品+探针并锁存当批，原台账计次。保留既有 `ip_limited/paused_until` 展示，但错峰期持久 halted 闩锁不自动恢复，须授权人员确认另一侧停止、最后请求后 ≥60 秒且出口唯一后按指令双侧解闩。通知复用 `data_licence` 站内通知与管理端 IP 告警，按证书状态跃迁去重，不新增外发通道。
    - **最小行情**：只读本人证书的日级 `adj_type=none` 数据，范围与字段映射见契约 §7.3 T-A53；日 K 走既有盘后 P1 队列和证书令牌桶、按实际请求另记产品日账，不能占名单 3 次或探针 128 次，真实执行次数仍须当次授权。
+   - **T-A58 最小发送治理（用户 2026-11-09 指令，docs/reviews/T-A58-minimal-send-governance.md）**：停止 T-B101 重写路线（DB outbox/Redis 唤醒/HPKE 全家桶不采用）；发送治理只保四件事，全部复用探针已验证路径——单出口发送锁（`send_control.critical` flock）、公共 STOP（`shared_gate`）、128 次计数台账（`tb86_offline` 模式：发送前落账+fsync、失败也计数、fail closed）、每日名单 3 次上限（T-A53 R2/R4 不变）。挂载 POSIX 目录是门禁唯一事实源；切换顺序先旁路只读一个交易日再强制阻断；实跑仍须 Chief 当次派单。
 
 ### 2.2 后端模块（与五种能力映射）
 

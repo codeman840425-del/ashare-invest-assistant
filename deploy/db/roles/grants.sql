@@ -100,6 +100,7 @@ BEGIN
        AND n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema'
        AND n.nspname NOT LIKE '\_timescaledb%' AND n.nspname NOT LIKE 'timescaledb\_%'
        AND n.nspname <> 'public'
+       AND n.nspname <> 'ingest_private'  -- T-O57/T-A70：不进通配与 DEFAULT PRIVILEGES
      ORDER BY 1
   LOOP
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO aia_api, aia_ingest', s);
@@ -140,6 +141,48 @@ BEGIN
   END LOOP;
 END
 $grants$;
+
+-- T-O57 / T-A70：ingest_private 是 schema（0029）。通配循环已排除；此处幂等撤清 api/maint/PUBLIC，
+-- 并仅给 aia_ingest 最小权限（与 0029 一致）。schema 不存在时整段跳过（0028 头安全）。
+DO $o57_ingest_private$
+DECLARE
+  owner_role text := current_user;
+BEGIN
+  IF to_regnamespace('ingest_private') IS NULL THEN
+    RAISE NOTICE 'db-roles: T-O57 ingest_private 不存在，跳过私有 schema 授权';
+    RETURN;
+  END IF;
+  EXECUTE 'REVOKE ALL ON SCHEMA ingest_private FROM aia_api, aia_maint, PUBLIC';
+  EXECUTE 'REVOKE ALL ON ALL TABLES IN SCHEMA ingest_private FROM aia_api, aia_maint, PUBLIC';
+  EXECUTE 'REVOKE ALL ON ALL SEQUENCES IN SCHEMA ingest_private FROM aia_api, aia_maint, PUBLIC';
+  EXECUTE 'REVOKE ALL ON ALL FUNCTIONS IN SCHEMA ingest_private FROM aia_api, aia_maint, PUBLIC';
+  EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA ingest_private REVOKE ALL ON TABLES FROM aia_api, aia_ingest, aia_maint, PUBLIC', owner_role);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA ingest_private REVOKE ALL ON SEQUENCES FROM aia_api, aia_ingest, aia_maint, PUBLIC', owner_role);
+  EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA ingest_private REVOKE ALL ON FUNCTIONS FROM aia_api, aia_ingest, aia_maint, PUBLIC', owner_role);
+  -- 允许角色：仅 aia_ingest（T-A70 / 0029）
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aia_ingest') THEN
+    EXECUTE 'GRANT USAGE ON SCHEMA ingest_private TO aia_ingest';
+    IF to_regclass('ingest_private.mairui_gate_bindings') IS NOT NULL THEN
+      EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ingest_private.mairui_gate_bindings TO aia_ingest';
+    END IF;
+    IF to_regclass('ingest_private.mairui_gate_scopes') IS NOT NULL THEN
+      EXECUTE 'GRANT SELECT, INSERT, UPDATE ON TABLE ingest_private.mairui_gate_scopes TO aia_ingest';
+    END IF;
+    IF to_regprocedure('ingest_private.prune_mairui_gate_bindings()') IS NOT NULL THEN
+      EXECUTE 'GRANT EXECUTE ON FUNCTION ingest_private.prune_mairui_gate_bindings() TO aia_ingest';
+    END IF;
+  END IF;
+  -- 自检：aia_api / aia_maint 不得有 schema USAGE
+  IF has_schema_privilege('aia_api', 'ingest_private', 'USAGE') THEN
+    RAISE EXCEPTION 'db-roles: T-O57 aia_api 仍有 ingest_private USAGE';
+  END IF;
+  IF has_schema_privilege('aia_maint', 'ingest_private', 'USAGE') THEN
+    RAISE EXCEPTION 'db-roles: T-O57 aia_maint 仍有 ingest_private USAGE';
+  END IF;
+  RAISE NOTICE 'db-roles: T-O57 ingest_private 已排除 api/maint，仅 aia_ingest 最小授权';
+END
+$o57_ingest_private$;
+
 
 -- T-O11：待清文件队列只给 aia_maint（上面的 ALL TABLES 授权与默认权限会把它也授给 api/ingest，这里每次都撤回）。
 DO $purges$

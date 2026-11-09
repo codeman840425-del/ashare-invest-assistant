@@ -719,16 +719,27 @@ BEGIN
       RAISE EXCEPTION 'db-roles: aia_api 缺少 %（4.6.5A 第 9 条：其余由 worker 读写）', priv;
     END IF;
   END LOOP;
-  FOREACH priv IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'] LOOP
-    IF has_table_privilege('aia_maint', batches, priv) OR has_table_privilege('aia_maint', rows_tbl, priv) THEN
-      RAISE EXCEPTION 'db-roles: aia_maint 不应有表级 % ON 对账批次表', priv;
+  -- T-O61：aia_maint 对 batches 的最终口径在 $o33$（SELECT source_licence_id + DELETE）；
+  -- 此处只检 api/ingest。maint 断言移到 $o33$ 授完之后，避免同文件先检后授的假矛盾。
+  FOREACH priv IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'TRUNCATE'] LOOP
+    IF has_table_privilege('aia_maint', batches, priv) THEN
+      RAISE EXCEPTION 'db-roles: aia_maint 不应有表级 % ON master_vendor_batches（仅允许 DELETE + 列级 SELECT source_licence_id，见 $o33$）', priv;
     END IF;
   END LOOP;
-  IF has_any_column_privilege('aia_maint', batches, 'SELECT')
+  FOREACH priv IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'] LOOP
+    IF has_table_privilege('aia_maint', rows_tbl, priv) THEN
+      RAISE EXCEPTION 'db-roles: aia_maint 不应有表级 % ON master_vendor_list_rows', priv;
+    END IF;
+  END LOOP;
+  IF EXISTS (
+       SELECT 1 FROM pg_attribute a
+        WHERE a.attrelid = batches AND a.attnum > 0 AND NOT a.attisdropped
+          AND a.attname <> 'source_licence_id'
+          AND has_column_privilege('aia_maint', batches, a.attname, 'SELECT'))
      OR has_any_column_privilege('aia_maint', batches, 'UPDATE')
      OR has_any_column_privilege('aia_maint', rows_tbl, 'SELECT')
      OR has_any_column_privilege('aia_maint', rows_tbl, 'UPDATE') THEN
-    RAISE EXCEPTION 'db-roles: aia_maint 不应有对账批次表的列权限';
+    RAISE EXCEPTION 'db-roles: aia_maint 对对账表列权限超出 $o33$ 口径';
   END IF;
   FOR child IN SELECT inhrelid AS relid, inhrelid::regclass AS q FROM pg_inherits WHERE inhparent IN (batches, rows_tbl) LOOP
     IF has_table_privilege('aia_ingest', child.relid, 'SELECT')
@@ -1130,6 +1141,13 @@ BEGIN
     END IF;
     EXECUTE 'REVOKE ALL ON TABLE market.master_vendor_batches FROM aia_maint';
     EXECUTE 'GRANT SELECT (source_licence_id), DELETE ON TABLE market.master_vendor_batches TO aia_maint';
+    IF NOT has_table_privilege('aia_maint', 'market.master_vendor_batches', 'DELETE')
+       OR NOT has_column_privilege('aia_maint', 'market.master_vendor_batches', 'source_licence_id', 'SELECT')
+       OR has_table_privilege('aia_maint', 'market.master_vendor_batches', 'SELECT')
+       OR has_table_privilege('aia_maint', 'market.master_vendor_batches', 'INSERT')
+       OR has_table_privilege('aia_maint', 'market.master_vendor_batches', 'UPDATE') THEN
+      RAISE EXCEPTION 'db-roles: T-O61/T-O33 aia_maint 对 master_vendor_batches 须为 DELETE + SELECT(source_licence_id)';
+    END IF;
   END IF;
 
   FOREACH rel IN ARRAY rollbacks LOOP

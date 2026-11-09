@@ -19,5 +19,6 @@ umask 077
 tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
 { printf '\\set api_pw %s\n\\set ingest_pw %s\n\\set maint_pw %s\n' "$api_pw" "$ingest_pw" "$maint_pw"; cat "$here/grants.sql"; } > "$tmp"
 for i in $(seq 1 30); do pg_isready -q && break; sleep 1; done
-psql -X -q -v ON_ERROR_STOP=1 -f "$tmp"
+# T-O61 O-1：整文件单事务，避免通配 GRANT 与后续 REVOKE 之间中途失败留下越权中间态
+psql -X -q --single-transaction -v ON_ERROR_STOP=1 -f "$tmp"
 echo "db-roles: OK（aia_api、aia_ingest、aia_maint 已授权；库 ${PGDATABASE:-?}）"

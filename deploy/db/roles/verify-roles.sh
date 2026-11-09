@@ -485,12 +485,13 @@ else
   fi
 fi
 
-# T-O60 / T-A73 O2：ops.gate_user_refs / purge_user_gate_facts 仅 aia_maint EXECUTE；函数不存在 → OK（无 SKIP）。
+# T-O60 / T-A73 O2 + T-O61 O-2：gate 函数仅 aia_maint EXECUTE；函数不存在 → FAIL（无 SKIP；0029 库会失败）。
 o60_gate_fn_check() {
   local f="$1" reg
   reg="$(own -c "SELECT to_regprocedure('$f')")"
   if [ -z "$reg" ] || [ "$reg" = "" ]; then
-    echo "OK   T-O60：$f 不存在（未到 0030；排除项幂等，无 SKIP）"
+    echo "FAIL T-O61：$f 不存在（须 0030；缺函数按失败计，无 SKIP）"
+    fail=1
     return
   fi
   if [ "$(own -c "SELECT has_function_privilege('aia_api', '$f'::regprocedure, 'EXECUTE')")" = t ]; then

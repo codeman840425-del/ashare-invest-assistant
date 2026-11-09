@@ -26,7 +26,7 @@
 | 检查 | 命令/路径 | 结果（代理观测） |
 |---|---|---|
 | 格式+fixtures 虚构标 | `docs/strategies/golden/check_T-R15.py` | PASS（含 H-01 11 fixtures、S-01 8 fixtures） |
-| horizon census | `docs/strategies/P2N-R10/check_horizons.py` | PASS identity=43 / scope=112（本单登记后将 +1 非身份文件） |
+| horizon census | `docs/strategies/P2N-R10/check_horizons.py` | PASS identity=43 / scope 见 R10；T-R42 另增非身份文件 |
 | 相关提交 | `fe2afa5`（T-R40 S-01 FX 标虚构）、`055105a`（T-R25 S-01 正式化）、`e3daf66`/`b752487`（H-01 v2/v1） | 仅文档史；**不是** G7 批准记录 |
 
 ---
@@ -38,7 +38,7 @@
 | H1 | 身份 key/version/card_id | hold_risk_monitor.md:31-36 `key`/`version_no:2`/`card_id:H-01` | strategy-spec:94-95 同 key/version | check_T-R15 key 一致检查；R10 正式身份 record | 一致 | ☐ |
 | H2 | 多周期 horizons | :35 `[intraday_t, short, swing, long]` | spec:97 同列表 | check_T-R15 horizons 枚举；R10 `explicit_multi` | 一致 | ☐ |
 | H3 | 纯离场 / 无开仓 | 文首:3 `mount_policy: system_only`；无 entry 列表 | spec:106-114 仅 exit/weakening/counter/invalidation；action_map 无 buy/add | check_T-R15 纯离场分支；文首自称 G1 豁免依据 | 一致 | ☐ |
-| H4 | 假设 hypothesis | card:39-43 | （叙述性；无独立 DSL） | 仅文档存在；无独立语义 checker | 缺证据 | ☐ |
+| H4 | 假设 hypothesis | card:39-43 | （叙述性；无独立 DSL） | T-R42 `hypothesis_structure_check.py` 结构 PASS（why/falsified_by/counter/invalidation 字段在）；**无可靠语义审核** → 初核仍缺证据 | 缺证据 | ☐ |
 | H5 | 维度 dimensions | card:44-46 technical + sector_market | 规则 dimension 字段 :106-113 | check_T-R15 dimension 枚举 | 一致 | ☐ |
 | H6 | 离场 exit X1/X2 | 正文:8；card exit:52-56 | spec:106-107 expr | check_T-R15 ref↔role；fixtures H01-FX3/FX4 | 一致 | ☐ |
 | H7 | 转弱 weakening W1–W3 | 正文:9；由 exit/weakening 角色体现 | spec:108-110 | fixtures H01-FX2/FX5/FX6 | 一致 | ☐ |
@@ -48,15 +48,15 @@
 | H11 | 数据 data_needs | card:58-72（含 qfq、limit、suspended、market_regime_idx 等） | 规则 required_features 引用同键 | check_T-R15 data_needs∈feature_spec catalog | 一致 | ☐ |
 | H12 | 标的 universe | card:74-77 持仓范围；北交所不含见 a_share | screen:null :118 | 文档层一致；**运行时挂载策略未在本报告核实** | 缺证据 | ☐ |
 | H13 | A 股约束 | card:89；正文:17 T+1/涨跌停/零股 | fixtures FX4/FX6/FX7/FX10 | check_T-R15 reason_codes/lot_rule | 一致 | ☐ |
-| H14 | 成本滑点 | card:82-88；正文:20 离场不因成本放弃卖出 | validation 成本叙述 | 无独立成本数值回放证据 | 缺证据 | ☐ |
+| H14 | 成本滑点 | card:82-88；正文:20 离场不因成本放弃卖出 | validation 成本叙述；plan:1614 | T-R42 `cost_replay.py`+`cost_replay_cases.json` PASS（7【虚构】例：买卖/最低佣金/涨跌停锁/T+1/离场不因成本放弃；佣金费率卡上未钉 → 缺口已标） | 一致 | ☐ |
 | H15 | 验证/fixtures | validation 块 fixtures H01-FX1..11（:136+）均 `【虚构】` | expect state/action | check_T-R15 PASS（11 fixtures） | 一致 | ☐ |
-| H16 | 合规/禁用词文案 | 卡内无收益承诺句（代理目视） | G7 decision 另有 compliance_lint（契约 api-contract.md:953） | **未跑**禁用词服务端校验 | 缺证据 | ☐ |
+| H16 | 合规/禁用词文案 | 卡内无收益承诺句（代理目视） | G7 decision 另有 compliance_lint（契约 api-contract.md:953） | T-R42 `compliance_lint_local.py` 本地自查 PASS（词表照录 plan:3362/162 + reviews.py:317；篡改 exit≠0）；**本地自查不替代服务端** lint | 一致 | ☐ |
 | H17 | **horizon 多值风险** | horizons 四周期 :35 | 实例/跟踪若缺 horizon → gap（T-R35 README:89/97；T-A74 B2） | 文档裁定有；**后端定点用例 T-A74 称未实现**（T-R35:108） | 缺证据（运行缺口） | ☐ |
-| H18 | null/gap / insufficient_data | 正文:16 预热不足 `passed=null`；FX8 limit null | fixtures H01-FX8 | check_T-R15 含该例；实盘 null 传播**未在本报告实测** | 缺证据 | ☐ |
+| H18 | null/gap / insufficient_data | 正文:16 预热不足 `passed=null`；FX8 limit null | fixtures H01-FX8 | T-R42 `null_propagation_replay.py` 参考层 PASS（H01-FX8：3 根→W1/X2 passed=null→insufficient_data；limit null 不锁）；**实盘传播归编排者** | 一致 | ☐ |
 | H19 | 不可执行原因码 | FX4 T1_NOT_SELLABLE；FX7 LIMIT_LOCKED；FX10 SUSPENDED | expect.reason_codes | check_T-R15 与 api-contract 原因码表交叉 | 一致 | ☐ |
 | H20 | 选股/入场 | **无**（纯离场，设计如此） | action_map 无 buy | check_T-R15 允许 exitonly | 一致 | ☐ |
 
-**H-01 代理小结**：格式与 fixtures 代理初核多为「一致」；**阻塞/风险**为 H17（多 horizon + 缺 horizon 运行处理仅有文档裁定）、H18（null 实盘）、H14/H16（成本与合规 lint 缺本机服务证据）。**不得**据此视为已过 G7。
+**H-01 代理小结**：T-R42 后 H14/H16/H18 代理初核改「一致」（成本回放/本地合规/参考层 null）；**仍缺证据** H4（无语义审核）、H12（挂载执行链）、H17（后端定点用例）。**不得**据此视为已过 G7。
 
 ---
 
@@ -66,7 +66,7 @@
 |---|---|---|---|---|---|---|
 | S1 | 身份 key/version/card_id | st_pullback_ma.md:28-33 | spec:91-92 | check_T-R15；R10 正式身份 `st_pullback_ma@1:current_formal…` | 一致 | ☐ |
 | S2 | horizon=[short] | card:32；spec:94 | RC5 short→5（inventory rc5_boundary） | R10；T-R35 B4 主口径 T+5 | 一致 | ☐ |
-| S3 | 假设 hypothesis | card:35-40 | 叙述性 | 无独立语义审核器 | 缺证据 | ☐ |
+| S3 | 假设 hypothesis | card:35-40 | 叙述性 | T-R42 `hypothesis_structure_check.py` 结构 PASS；**无可靠语义审核** → 初核仍缺证据 | 缺证据 | ☐ |
 | S4 | 维度 | card:41-43 technical + sector_market | 规则 dimension | check_T-R15 | 一致 | ☐ |
 | S5 | 入场 E1–E4 | 正文:9；card entry:44-48 | spec rules E1–E4（约:105+） | fixtures S01-FX1；check_T-R15 ref | 一致 | ☐ |
 | S6 | 过滤/否决（正文 F1/F2/V1） | 正文:10 | spec 对应 filter/veto 规则行 | FX1/FX4；V1→vetoed | 一致 | ☐ |
@@ -77,15 +77,15 @@
 | S11 | 数据 data_needs | card:58-76 | required_features | check_T-R15∈catalog | 一致 | ☐ |
 | S12 | 标的 universe | card:78-81 全市场优先持仓/自选；bse:false | screen:null | 文档一致；**选股执行链未跑** | 缺证据 | ☐ |
 | S13 | A 股约束 | card:86；正文:19 | FX5 涨停锁、FX 科创板等 | check_T-R15 | 一致 | ☐ |
-| S14 | 成本滑点 | 正文:21–22（estimate） | validation_summary:87 含 cost_model | 无独立回放数值证据 | 缺证据 | ☐ |
+| S14 | 成本滑点 | 正文:21–22（estimate） | validation_summary:87 含 cost_model；plan:1614 | T-R42 `cost_replay.py` CR-S14-* PASS（买入可成交/涨停锁；费用参数同源；佣金费率缺口已标） | 一致 | ☐ |
 | S15 | 验证/fixtures | validation S01-FX1..8，desc 均以 `【虚构】` 开头（T-R40 fe2afa5） | expect | check_T-R15 PASS；**改前** d75b0ec/d2e7d51 曾因未标虚构失败 | 一致 | ☐ |
-| S16 | 合规文案 | 卡头:5「结论只由规则决定；AI 只做中文解释」 | G7 compliance_lint 服务端 | **未跑** lint API | 缺证据 | ☐ |
+| S16 | 合规文案 | 卡头:5「结论只由规则决定；AI 只做中文解释」 | G7 compliance_lint 服务端 | T-R42 `compliance_lint_local.py` 本地自查 PASS（同上词表；篡改 exit≠0）；**不替代服务端** | 一致 | ☐ |
 | S17 | 与草稿关系 | 卡头:3 由 T-R16 草稿正式化；草稿 `T-R16/S-01_…` 已非「知识卡 vN」身份 | R10：草稿 role=`research_draft_superseded_by_formal_card` | R10 census | 一致 | ☐ |
 | S18 | 正式化差异 E1/X4 | 卡头:6 E1 改绝对涨幅；X4 未进 v1 | 规则无 rank_pct / 无 X4 | 文档自述；需用户确认是否接受缺口 | 缺证据（产品接受度） | ☐ |
 | S19 | 不可执行原因 | FX5 LIMIT_LOCKED；FX6 SUSPENDED；FX7 T1_NOT_SELLABLE | expect.reason_codes | check_T-R15 | 一致 | ☐ |
 | S20 | 仓位/选股 screen | screen:null :140 | 无自动筛股 DSL | 设计为 null；实例侧如何选股**缺证据** | 缺证据 | ☐ |
 
-**S-01 代理小结**：机器可读块与虚构 fixtures 代理初核多为「一致」；**风险**为 S12/S14/S16/S18/S20（执行链、成本、合规 lint、正式化取舍、选股）。**不得**视为已过 G7。
+**S-01 代理小结**：T-R42 后 S14/S16 改「一致」；**仍缺证据** S3（无语义审核）、S12/S20（选股执行链）、S18（E1/X4 产品接受度需用户）。**不得**视为已过 G7。
 
 ---
 
@@ -128,12 +128,12 @@
 
 | 卡 | 项数 | 一致 | 不一致 | 缺证据 |
 |---|---|---|---|---|
-| H-01 | 20 | 14 | 0 | 6 |
-| S-01 | 20 | 13 | 0 | 7 |
-| 合计 | 40 | 27 | 0 | 13 |
+| H-01 | 20 | 17 | 0 | 3 |
+| S-01 | 20 | 16 | 0 | 4 |
+| 合计 | 40 | 33 | 0 | 7 |
 
 （用户勾选全部默认未勾；最终以用户勾选与系统审计为准。）
 
 ---
 
-*文件路径：`docs/strategies/T-R41/g7_review_H-01_S-01.md`｜任务 T-R41｜代理准备*
+*文件路径：`docs/strategies/T-R41/g7_review_H-01_S-01.md`｜任务 T-R41｜代理准备；T-R42 仅更新「代理初核/当前证据/§5 计数」列，用户勾选仍未勾*

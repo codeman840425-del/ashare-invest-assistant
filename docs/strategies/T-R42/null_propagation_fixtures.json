@@ -1,0 +1,108 @@
+{
+  "fictitious": true,
+  "task": "T-R42",
+  "fixtures": {
+    "H01-FX8": {
+      "id": "H01-FX8",
+      "desc": "【虚构】上市初期第 3 个交易日（无涨跌幅，limit 价 null）；MA60/ATR 无法求值、无命中 → insufficient_data，不产候选、建议显示 hold",
+      "series": {
+        "f.close_qfq": [
+          30.0,
+          31.5,
+          33.2
+        ],
+        "f.high_qfq": [
+          30.45,
+          31.97,
+          33.7
+        ],
+        "f.low_qfq": [
+          29.55,
+          31.03,
+          32.7
+        ],
+        "f.amount": [
+          200000000.0,
+          200000000.0,
+          200000000.0
+        ]
+      },
+      "features": {
+        "f.list_days": 3,
+        "f.is_suspended": false,
+        "f.limit_up_price": null,
+        "f.limit_down_price": null,
+        "f.limit_locked_up": false,
+        "f.limit_locked_down": false,
+        "f.market_regime_idx": "range"
+      },
+      "expect": {
+        "state": "insufficient_data",
+        "action": "hold",
+        "rule_ids_passed": []
+      },
+      "source_card": "docs/strategies/cards/hold_risk_monitor.md"
+    },
+    "S01-FX3": {
+      "id": "S01-FX3",
+      "desc": "【虚构】缺数据：有效 K 仅 10 根（warmup 25 不足）→ insufficient_data/wait",
+      "series": {
+        "f.close_qfq": [
+          10.0,
+          10.0,
+          10.0,
+          10.0,
+          10.0,
+          10.0,
+          10.0,
+          10.0,
+          10.0,
+          10.0
+        ],
+        "f.low_qfq": [
+          9.9,
+          9.9,
+          9.9,
+          9.9,
+          9.9,
+          9.9,
+          9.9,
+          9.9,
+          9.9,
+          9.9
+        ],
+        "f.amount": [
+          200000000.0,
+          200000000.0,
+          200000000.0,
+          200000000.0,
+          200000000.0,
+          200000000.0,
+          200000000.0,
+          200000000.0,
+          200000000.0,
+          200000000.0
+        ]
+      },
+      "features": {
+        "f.list_days": 600,
+        "f.is_suspended": false,
+        "f.limit_up_price": 11.0,
+        "f.limit_down_price": 9.0,
+        "f.limit_locked_up": false,
+        "f.limit_locked_down": false,
+        "f.market_regime_idx": "uptrend"
+      },
+      "expect": {
+        "state": "insufficient_data",
+        "action": "wait",
+        "rule_ids_passed": [
+          "E3",
+          "F2"
+        ],
+        "reason_codes": []
+      },
+      "source_card": "docs/strategies/cards/st_pullback_ma.md"
+    }
+  }
+}

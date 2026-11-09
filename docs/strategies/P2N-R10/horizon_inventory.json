@@ -292,6 +292,41 @@
       "note": "T-R41 G7 review worksheet for user; T-A78 ①b non-identity doc; not a strategy card"
     },
     {
+      "path": "docs/strategies/T-R42/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R42 README; T-A78 ①b non-identity"
+    },
+    {
+      "path": "docs/strategies/T-R42/cost_replay.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R42 G7 evidence filler (cost/compliance/hypothesis/null); T-A78 ①b non-identity"
+    },
+    {
+      "path": "docs/strategies/T-R42/cost_replay_cases.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R42 G7 evidence filler (cost/compliance/hypothesis/null); T-A78 ①b non-identity"
+    },
+    {
+      "path": "docs/strategies/T-R42/compliance_lint_local.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R42 G7 evidence filler (cost/compliance/hypothesis/null); T-A78 ①b non-identity"
+    },
+    {
+      "path": "docs/strategies/T-R42/hypothesis_structure_check.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R42 G7 evidence filler (cost/compliance/hypothesis/null); T-A78 ①b non-identity"
+    },
+    {
+      "path": "docs/strategies/T-R42/null_propagation_replay.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R42 G7 evidence filler (cost/compliance/hypothesis/null); T-A78 ①b non-identity"
+    },
+    {
+      "path": "docs/strategies/T-R42/null_propagation_fixtures.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R42 G7 evidence filler (cost/compliance/hypothesis/null); T-A78 ①b non-identity"
+    },
+    {
       "path": "docs/strategies/_template.md",
       "scope_role": "teaching_example_not_formal_card"
     },

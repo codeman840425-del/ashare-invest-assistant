@@ -1,10 +1,10 @@
-"""T-R39 negative: non-git tree + .pyc → tracking_unknown → exit≠0 (T-A80 L-1).
+"""T-R39 negative: nongit + authority files; control (no pyc) PASS; with pyc → tracking_unknown.
 
-Copies docs/strategies into a temp directory without .git, drops an unregistered
-.pyc, runs check_horizons under normal and -O. Expects non-zero exit and
-tracking_unknown in the failure message. Also records the no-pyc result in the
-same non-git tree (may fail for missing repo-level authority paths such as
-docs/plan.md — reported, not required to PASS). Offline; no network.
+Temp tree only (does not modify the repo). Copies docs/strategies plus the
+authority paths check_horizons reads outside strategies (docs/plan.md,
+docs/api-contract.md). Control group must exit 0 under normal and -O; then a
+planted .pyc must exit≠0 with tracking_unknown in the message. Explicit
+require/fail (no assert). Offline; no network; no credentials.
 """
 from __future__ import annotations
 
@@ -16,6 +16,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 STRATEGIES = HERE.parent  # docs/strategies
+REPO = STRATEGIES.parents[1]  # repository root (…/docs/strategies → parents[1])
+AUTHORITY_RELS = (
+    "docs/plan.md",
+    "docs/api-contract.md",
+)
 
 
 def fail(msg: object = "") -> None:
@@ -34,57 +39,69 @@ def _run_checker(strategies_dir: Path, optimize: bool) -> subprocess.CompletedPr
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
+def _build_nongit_tree(dest_root: Path) -> Path:
+    dest = dest_root / "docs" / "strategies"
+    shutil.copytree(
+        STRATEGIES,
+        dest,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    for rel in AUTHORITY_RELS:
+        src = REPO / rel
+        require(src.is_file(), f"missing authority source {rel}")
+        dst = dest_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+    require(not (dest_root / ".git").exists(), "temp tree must not be a git repo")
+    return dest
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="t-r39-nongit-") as td:
-        td_path = Path(td)
-        # Layout: <td>/repo/docs/strategies/... so ROOT=parents[2] of checker is <td>/repo
-        dest_root = td_path / "repo"
-        dest = dest_root / "docs" / "strategies"
-        shutil.copytree(
-            STRATEGIES,
-            dest,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-        )
-        require(not (dest_root / ".git").exists(), "temp tree must not be a git repo")
+        dest_root = Path(td) / "repo"
+        dest = _build_nongit_tree(dest_root)
+
+        control = {}
+        for optimize in (False, True):
+            r = _run_checker(dest, optimize=optimize)
+            require(
+                r.returncode == 0,
+                f"control(no pyc) optimize={optimize} expected exit=0, got {r.returncode}; "
+                f"stderr={ (r.stderr or '')[-400:] }",
+            )
+            require(
+                '"result": "PASS"' in r.stdout or '"result":"PASS"' in r.stdout,
+                f"control missing PASS: {r.stdout[-200:]}",
+            )
+            control["O" if optimize else "normal"] = {"exit": r.returncode}
+
         plant = dest / "__pycache__" / "_tr39_nongit_plant.cpython-313.pyc"
         plant.parent.mkdir(parents=True, exist_ok=True)
         plant.write_bytes(b"\0" * 16)
 
-        with_pyc = {}
+        experiment = {}
         for optimize in (False, True):
             r = _run_checker(dest, optimize=optimize)
-            require(r.returncode != 0, f"with_pyc optimize={optimize} expected nonzero, got {r.returncode}")
+            require(
+                r.returncode != 0,
+                f"experiment(with pyc) optimize={optimize} expected nonzero, got {r.returncode}",
+            )
             err = (r.stderr or "") + (r.stdout or "")
             require(
                 "tracking_unknown" in err,
-                f"with_pyc optimize={optimize} missing tracking_unknown: {err[-500:]}",
+                f"experiment optimize={optimize} missing tracking_unknown: {err[-500:]}",
             )
-            with_pyc["O" if optimize else "normal"] = {
+            experiment["O" if optimize else "normal"] = {
                 "exit": r.returncode,
                 "has_tracking_unknown": True,
             }
 
-        plant.unlink()
-        no_pyc = {}
-        for optimize in (False, True):
-            r = _run_checker(dest, optimize=optimize)
-            err = ((r.stderr or "") + (r.stdout or ""))[-400:]
-            no_pyc["O" if optimize else "normal"] = {
-                "exit": r.returncode,
-                "stderr_tail": err,
-                "note": "non-git strategies-only tree may miss docs/plan.md authorities",
-            }
-
     out = {
         "result": "PASS",
-        "case": "nongit_pyc_tracking_unknown",
-        "git_rc_probe": {
-            "in_repo_untracked_expected": 1,
-            "non_repo_expected": 128,
-            "tracked_expected": 0,
-        },
-        "with_pyc": with_pyc,
-        "nongit_no_pyc": no_pyc,
+        "case": "nongit_pyc_tracking_unknown_vs_control",
+        "authorities_copied": list(AUTHORITY_RELS),
+        "control_no_pyc": control,
+        "experiment_with_pyc": experiment,
     }
     print(json.dumps(out, ensure_ascii=False))
     return 0

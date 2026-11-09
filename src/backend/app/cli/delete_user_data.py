@@ -398,6 +398,12 @@ HANDLED_FK: Final[frozenset[str]] = frozenset(
     }
 )  # fmt: skip
 
+#: ingest_private 中指向 app.users 的外键只允许这一列（T-A73 B2）；多出任何一列 → 阻断。
+#: 不把该 schema 纳入 HANDLED_FK / 外键扫描，以免 aia_maint 无 USAGE 时 permission denied。
+_INGEST_PRIVATE_USER_FK_ALLOWED: Final = frozenset(
+    {"ingest_private.mairui_gate_bindings.user_id"}
+)
+
 
 class PurgeRefusedError(Exception):
     """前置检查不通过（用户不存在、已在 purging、存在阻断引用）。"""
@@ -522,6 +528,11 @@ TRIGGER_ALLOWLIST: Final[frozenset[tuple[str, str, str]]] = frozenset(
         ("app.users", "trg_users_purging_guard", "app.guard_users_purging"),
         ("app.users", "trg_users_purging_not_committed", "app.reject_purging_commit"),
         ("ops.data_licence_events", "trg_data_licence_events_immutable", "app.reject_mutation"),
+        (
+            "app.user_data_licences",
+            "mairui_gate_on_licence_deletion",
+            "ingest_private.mairui_gate_licence_deleted",
+        ),
     }
 )
 
@@ -602,6 +613,27 @@ def _market_licence_tables(conn: Connection) -> list[str]:
     return list(rows)
 
 
+
+def _ingest_private_user_fk_drift(conn: Connection) -> list[tuple[str, int]]:
+    """T-A73 B2：ingest_private 里指向 users 的外键必须正好是允许集；多出即阻断（不计行，避免无 USAGE）。"""
+    cols = conn.execute(
+        text(
+            "SELECT n.nspname || '.' || c.relname, a.attname "
+            "FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey) "
+            "WHERE k.contype = 'f' AND k.confrelid = 'app.users'::regclass "
+            "AND n.nspname = 'ingest_private' "
+            "AND NOT c.relispartition ORDER BY 1, 2"
+        )
+    ).all()
+    found = {f"{table}.{col}" for table, col in cols}
+    return [
+        (f"{name}（ingest_private 中未授权的 users 外键）", 1)
+        for name in sorted(found - _INGEST_PRIVATE_USER_FK_ALLOWED)
+    ]
+
+
 def _unhandled_fk_refs(conn: Connection, uid: uuid.UUID) -> list[tuple[str, int]]:
     cols = conn.execute(
         text(
@@ -610,6 +642,7 @@ def _unhandled_fk_refs(conn: Connection, uid: uuid.UUID) -> list[tuple[str, int]
             "JOIN pg_namespace n ON n.oid = c.relnamespace "
             "JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey) "
             "WHERE k.contype = 'f' AND k.confrelid = 'app.users'::regclass "
+            "AND n.nspname <> 'ingest_private' "
             "AND NOT c.relispartition ORDER BY 1, 2"
         )
     ).all()
@@ -701,6 +734,7 @@ def _user_fk_cols(conn: Connection) -> dict[str, list[str]]:
             "JOIN pg_namespace n ON n.oid = c.relnamespace "
             "JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey) "
             "WHERE k.contype = 'f' AND k.confrelid = 'app.users'::regclass "
+            "AND n.nspname <> 'ingest_private' "
             "AND NOT c.relispartition ORDER BY 1, 2"
         )
     ).all():
@@ -847,6 +881,7 @@ def build_plan(conn: Connection, uid: uuid.UUID) -> Plan:
         )
     )
     blockers += _unhandled_fk_refs(conn, uid)
+    blockers += _ingest_private_user_fk_drift(conn)
     triggers = unknown_triggers(conn, _scope_tables(market))
     pending, pending_readable = _read_pending(conn)
     return Plan(

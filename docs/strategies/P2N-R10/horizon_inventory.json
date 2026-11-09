@@ -521,6 +521,16 @@
     {
       "path": "docs/strategies/validation.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R43/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R43 README (G7 worksheet fixes per T-A83); T-A78 ①b non-identity"
+    },
+    {
+      "path": "docs/strategies/T-R43/s01_fixture_eval.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R43 S-01 fixture reference recompute (S7 C1/C2 positives); T-A78 ①b non-identity"
     }
   ],
   "records": [

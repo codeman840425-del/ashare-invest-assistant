@@ -7,6 +7,8 @@
 - falsified_by 文本是否字面提到卡上已有的 counter/invalidation/exit ref（弱启发；非语义）
 
 不做「假设是否正确」的语义审核。若仅结构通过，核对表初核仍可保留「缺证据」。
+`--mutate <name>`（T-R43）：对卡文本做真实篡改（删 falsified_by / 删 counter_evidence 引用 /
+清空 why_it_works）后走同一检查，须 exit 1 且原因指向该卡与被删字段。
 """
 from __future__ import annotations
 
@@ -23,13 +25,13 @@ CARDS = {
 }
 
 
-def fail(msg: object = "") -> None:
-    raise AssertionError(msg)
+class CheckFail(Exception):
+    pass
 
 
-def require(cond: object, msg: object = "") -> None:
+def require(cond: object, msg: str) -> None:
     if not cond:
-        fail(msg)
+        raise CheckFail(msg)
 
 
 def extract_yaml_card(text: str) -> str:
@@ -50,21 +52,23 @@ def parse_hypothesis(block: str) -> dict:
     m = re.search(r"^hypothesis:\s*\n((?:^[ \t]+.+\n)+)", block, re.M)
     require(m, "hypothesis block")
     body = m.group(1)
-    why = re.search(r"why_it_works:\s*(.+)$", body, re.M)
-    require(why and why.group(1).strip(), "why_it_works")
+    why = re.search(r"why_it_works:[ \t]*(.*)$", body, re.M)  # T-R43: \s* 曾跨行吞下一行，空值漏检
+    require(why and why.group(1).strip(), "why_it_works empty")
     fb = re.findall(r"^\s+-\s+(.+)$", body, re.M)
     # falsified_by items only — skip why line; collect after falsified_by:
     fb_m = re.search(r"falsified_by:\s*\n((?:^\s+-\s+.+\n)+)", body, re.M)
-    require(fb_m, "falsified_by")
+    require(fb_m, "falsified_by missing")
     items = re.findall(r"^\s+-\s+(.+)$", fb_m.group(1), re.M)
     require(len(items) >= 1, "falsified_by empty")
     return {"why_it_works": why.group(1).strip(), "falsified_by": items}
 
 
-def check_card(card_id: str, path: Path) -> dict:
-    text = path.read_text(encoding="utf-8")
+def check_card(card_id: str, path: Path, text: str) -> dict:
     block = extract_yaml_card(text)
-    hyp = parse_hypothesis(block)
+    try:
+        hyp = parse_hypothesis(block)
+    except CheckFail as e:
+        raise CheckFail(f"{card_id} {e}") from None
     counter = refs_in(block, "counter_evidence")
     inval = refs_in(block, "invalidation")
     exit_refs = refs_in(block, "exit")
@@ -91,22 +95,77 @@ def check_card(card_id: str, path: Path) -> dict:
     }
 
 
+def _drop_falsified(s: str) -> str:
+    return re.sub(r"(  falsified_by:\n)((?:    - .+\n)+)", "", s, count=1)
+
+
+def _drop_counter_refs(s: str) -> str:
+    return re.sub(r"(counter_evidence:\n)((?:  - .+\n)+)", r"counter_evidence:\n  []\n", s, count=1)
+
+
+def _empty_why(s: str) -> str:
+    return re.sub(r"(why_it_works:)[^\n]*", r"\1 ", s, count=1)
+
+
+# name -> (card id, transform, expected failure)
+MUTATIONS = {
+    "h01_drop_falsified_by": ("H-01", _drop_falsified, "H-01 falsified_by missing"),
+    "s01_drop_counter_refs": ("S-01", _drop_counter_refs, "S-01 counter_evidence"),
+    "s01_empty_why": ("S-01", _empty_why, "S-01 why_it_works empty"),
+}
+
+
+def run(texts: dict) -> list[dict]:
+    return [check_card(cid, CARDS[cid], texts[cid]) for cid in CARDS]
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    mutate = "--mutate" in argv
-    rows = []
+    texts = {}
     for cid, path in CARDS.items():
-        require(path.is_file(), path)
-        if mutate:
-            # Plant empty falsified_by by checking a forged block
-            fail("mutation: missing falsified_by")
-        rows.append(check_card(cid, path))
+        if not path.is_file():
+            print(json.dumps({"result": "FAIL", "reason": f"missing {path.name}"}, ensure_ascii=False))
+            return 1
+        texts[cid] = path.read_text(encoding="utf-8")
+
+    def mutated(name: str) -> dict:
+        cid, fn, _ = MUTATIONS[name]
+        m = dict(texts)
+        m[cid] = fn(m[cid])
+        require(m[cid] != texts[cid], f"mutation_noop:{name}")
+        return m
+
+    if argv[:1] == ["--mutate"]:
+        name = argv[1] if len(argv) > 1 else ""
+        if name not in MUTATIONS:
+            print(json.dumps({"error": "unknown mutation", "choices": sorted(MUTATIONS)}, ensure_ascii=False))
+            return 2
+        try:
+            run(mutated(name))
+        except CheckFail as e:
+            print(json.dumps({"result": "FAIL", "mutation": name, "reason": str(e)}, ensure_ascii=False))
+            return 1
+        print(json.dumps({"result": "MUTATION_NOT_DETECTED", "mutation": name}, ensure_ascii=False))
+        return 0
+    try:
+        rows = run(texts)
+        for name, (_, _, tag) in MUTATIONS.items():
+            m = mutated(name)
+            try:
+                run(m)
+                reason = None
+            except CheckFail as e:
+                reason = str(e)
+            require(reason == tag, f"mutation_not_rejected:{name}:{reason}")
+    except CheckFail as e:
+        print(json.dumps({"result": "FAIL", "reason": str(e)}, ensure_ascii=False))
+        return 1
     out = {
         "result": "PASS",
         "checks": rows,
         "proxy_初核_recommendation": "缺证据",
-        "reason": "仅结构字段/引用存在性；无可可靠自动语义审核 → H4/S3 初核仍保留缺证据",
-        "note": "run with --mutate to force exit≠0 under normal/-O",
+        "reason": "仅结构字段/引用存在性；无可靠自动语义审核 → H4/S3 初核仍保留缺证据",
+        "mutations_rejected": sorted(MUTATIONS),
     }
     print(json.dumps(out, ensure_ascii=False))
     return 0

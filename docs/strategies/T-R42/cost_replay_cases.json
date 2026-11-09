@@ -8,7 +8,9 @@
     "plan_2_13_fees": "docs/plan.md:1614（印花税卖出 0.05%、过户费双向 0.001%、佣金最低 5 元、滑点默认 0.1%）"
   },
   "gaps": [
-    "cards do not pin a numeric user commission_rate; tests that need a rate declare 【虚构】0.0003 only to exercise the 5-yuan floor"
+    "cards do not pin a numeric user commission_rate; tests that need a rate declare 【虚构】0.0003 only to exercise the 5-yuan floor",
+    "impact cost not modelled: hold_risk_monitor.md:86-88 impact_adv_days/max_participation_pct/impact_tiers and st_pullback_ma.md:22 冲击成本分档 are not replayed (T-R43, T-A83 L-5)",
+    "no cost-abandon threshold: cards define none; sell is never abandoned for cost (hold_risk_monitor.md:20); former abandon_on_cost branch was dead and removed (T-R43)"
   ],
   "cases": [
     {
@@ -26,7 +28,6 @@
       "limit_down": "11.25",
       "limit_locked": false,
       "sellable": 1000,
-      "abandon_on_cost": false,
       "expect": {
         "executable": true,
         "reasons": [],
@@ -55,7 +56,6 @@
       "limit_down": "9.00",
       "limit_locked": false,
       "sellable": 100,
-      "abandon_on_cost": false,
       "expect": {
         "executable": true,
         "reasons": [],
@@ -84,7 +84,6 @@
       "limit_down": "11.25",
       "limit_locked": true,
       "sellable": 1000,
-      "abandon_on_cost": false,
       "expect": {
         "executable": false,
         "reasons": [
@@ -115,7 +114,6 @@
       "limit_down": "10.35",
       "limit_locked": false,
       "sellable": 0,
-      "abandon_on_cost": false,
       "expect": {
         "executable": false,
         "reasons": [
@@ -146,7 +144,6 @@
       "limit_down": "18.00",
       "limit_locked": false,
       "sellable": null,
-      "abandon_on_cost": false,
       "expect": {
         "executable": true,
         "reasons": [],
@@ -175,7 +172,6 @@
       "limit_down": "18.00",
       "limit_locked": true,
       "sellable": null,
-      "abandon_on_cost": false,
       "expect": {
         "executable": false,
         "reasons": [
@@ -206,7 +202,6 @@
       "limit_down": "11.25",
       "limit_locked": false,
       "sellable": 1000,
-      "abandon_on_cost": false,
       "expect": {
         "executable": true,
         "reasons": [],

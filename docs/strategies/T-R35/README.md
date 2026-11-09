@@ -279,4 +279,3 @@
 
 
 机器可读字段槽见同目录 `metrics_slots.json`（正式阈值以本文 §2.1 / plan 为准；DeepSeek 分组草稿见 team/reports/deepseek/T-R35/，未核实）。
-

@@ -1,7 +1,7 @@
 # 首批策略卡正式导入清单与路径说明（T-R25）
 
 > 版本 v1.0｜任务 T-R25｜2026-11-09 北京时间｜维护：策略研究员
-> 依据：`card_promotion_gates.md` v1.1（57 项验收）；plan §2.5.0B/§2.5.13/§2.5.14、T-A14、T-B80 报告；契约 §7.4（promotion-requests）；catalog v0.3.9；feature_spec 7D 状态表。
+> 依据：`card_promotion_gates.md` v1.1（66 项验收）；plan §2.5.0B/§2.5.13/§2.5.14、T-A14、T-B80 报告；契约 §7.4（promotion-requests）；catalog v0.3.9；feature_spec 7D 状态表。
 > 边界：本文只做**研究与预检**。不执行导入（后端 T-B71/T-B25 CLI）、不跑 G1–G6（T-B80 门禁执行器）、不做 G7 决定（用户本人）。G2 结论以引擎实跑为准（T-R20 ②）。
 > 现状基线：库内 cards/versions/instances 全 0（派单）；T-B80 报告：两正式卡 26 golden 通过、仍 `draft`，G2 因四键 `declared` 未过、G7 未执行、正式接线 pending。
 
@@ -23,7 +23,7 @@
 
 ---
 
-## 2. 三张卡的预检结论（对照 57 项验收）
+## 2. 三张卡的预检结论（对照 66 项验收）
 
 > 完整勾选记录在 §4；本节只列**到「可提交导入」还差什么**。
 

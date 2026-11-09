@@ -35,7 +35,7 @@ hash 只在本地 `git rev-parse`，对象不在本地就停止，不 fetch。
 ## 父端复验准备
 
 不要改 tests，不要碰 `/tmp/tb70-tb91-owned-socket`。`test_tb91_closing.py` 经 `test_tb91_fixes.py` 把 PG socket 写成 `/tmp/tb70-tb91-owned-socket`，Redis 写成 `unix:///tmp/tb91-owned-redis/redis.sock`，并断言 socket 文件存在，不能用环境变量换。连接方式等编排者裁定。
-ACL 复验另用新的 network none unix socket：库到 head 0027，先跑 `apply-roles.sh` 再跑 `verify-roles.sh`。不需要真实用户、证书或外部 HTTP。投影表、五表和 `market.master_vendor_batches`（若库里有）必须已由迁移创建，脚本不建表。
+ACL 复验另用新的 network none unix socket：库到当前 head，先跑 `apply-roles.sh` 再跑 `verify-roles.sh`。不需要真实用户、证书或外部 HTTP。投影表、五表和 `market.master_vendor_batches`（若库里有）必须已由迁移创建，脚本不建表。
 
 ## 本环境没有做的事
 

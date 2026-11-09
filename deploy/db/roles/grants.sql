@@ -1263,9 +1263,27 @@ DECLARE
   f text;
   fns text[] := ARRAY['ops.gate_user_refs(uuid)', 'ops.purge_user_gate_facts(uuid)'];
   any_present boolean := false;
+  ver_ge_0030 boolean := false;
+  ver_raw text;
 BEGIN
+  -- T-O63b/T-O64：数字前缀比较版本；缺表或无法解析 → 失败（fail-closed）。
+  -- 依据：deploy/scripts/up.sh:8、deploy/compose/docker-compose.yml:313-338 均为 migrate 成功后再跑 db-roles，
+  -- 正常路径必有 alembic_version；无表视为异常，不静默当 <0030。
+  IF to_regclass('public.alembic_version') IS NULL THEN
+    RAISE EXCEPTION 'db-roles: T-O64 缺少 public.alembic_version（db-roles 须在 migrate 之后）';
+  END IF;
+  SELECT v.version_num INTO ver_raw FROM public.alembic_version v LIMIT 1;
+  IF ver_raw IS NULL OR ver_raw !~ '^[0-9]+' THEN
+    RAISE EXCEPTION 'db-roles: T-O64 alembic_version=% 无法解析为数字前缀', coalesce(ver_raw, '<NULL>');
+  END IF;
+  ver_ge_0030 := (substring(ver_raw from '^[0-9]+'))::bigint >= 30;
+
   FOREACH f IN ARRAY fns LOOP
     IF to_regprocedure(f) IS NULL THEN
+      -- T-O63b：≥0030 缺任一个 gate 函数即失败（不只两个都缺）
+      IF ver_ge_0030 THEN
+        RAISE EXCEPTION 'db-roles: T-O63b 库 version≥0030 但缺少 %', f;
+      END IF;
       CONTINUE;
     END IF;
     any_present := true;

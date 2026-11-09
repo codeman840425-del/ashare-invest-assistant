@@ -443,6 +443,48 @@ else
   fail=1
 fi
 
+
+# T-O57 / T-A70：ingest_private schema 反例。不存在 → OK（说明原因，不 SKIP）；存在则 api/maint 不得有任何权限。
+o57_deny_role() {
+  local role="$1" rel
+  if [ "$(own -c "SELECT has_schema_privilege('$role', 'ingest_private', 'USAGE')")" = t ]; then
+    echo "FAIL T-O57：$role 对 ingest_private 有 USAGE"; fail=1
+  fi
+  if [ "$(own -c "SELECT has_schema_privilege('$role', 'ingest_private', 'CREATE')")" = t ]; then
+    echo "FAIL T-O57：$role 对 ingest_private 有 CREATE"; fail=1
+  fi
+  for rel in ingest_private.mairui_gate_bindings ingest_private.mairui_gate_scopes; do
+    if [ "$(own -c "SELECT to_regclass('$rel') IS NOT NULL")" != t ]; then
+      continue
+    fi
+    if [ "$(own -c "SELECT has_any_column_privilege('$role', '$rel'::regclass, 'SELECT') OR has_table_privilege('$role', '$rel'::regclass, 'INSERT') OR has_table_privilege('$role', '$rel'::regclass, 'UPDATE') OR has_table_privilege('$role', '$rel'::regclass, 'DELETE') OR has_table_privilege('$role', '$rel'::regclass, 'TRUNCATE')")" = t ]; then
+      echo "FAIL T-O57：$role 对 $rel 仍有表/列权限"; fail=1
+    fi
+  done
+}
+if [ "$(own -c "SELECT to_regnamespace('ingest_private') IS NOT NULL")" != t ]; then
+  echo "OK   T-O57：ingest_private 不存在（当前库未到 0029；排除项幂等，无 SKIP）"
+else
+  o57_deny_role aia_api
+  o57_deny_role aia_maint
+  # aia_ingest 允许 USAGE（T-A70 / 0029）；若表存在应能 SELECT WHERE false
+  if [ "$(own -c "SELECT has_schema_privilege('aia_ingest', 'ingest_private', 'USAGE')")" = t ]; then
+    echo "OK   T-O57：aia_ingest 有 ingest_private USAGE（允许）"
+  else
+    echo "FAIL T-O57：aia_ingest 缺少 ingest_private USAGE"; fail=1
+  fi
+  if [ "$(own -c "SELECT to_regclass('ingest_private.mairui_gate_bindings') IS NOT NULL")" = t ]; then
+    expect_ok aia_ingest "SELECT 1 FROM ingest_private.mairui_gate_bindings WHERE false"
+    expect_denied aia_api "SELECT 1 FROM ingest_private.mairui_gate_bindings WHERE false"
+    expect_denied aia_maint "SELECT 1 FROM ingest_private.mairui_gate_bindings WHERE false"
+  fi
+  if [ "$(own -c "SELECT to_regclass('ingest_private.mairui_gate_scopes') IS NOT NULL")" = t ]; then
+    expect_ok aia_ingest "SELECT 1 FROM ingest_private.mairui_gate_scopes WHERE false"
+    expect_denied aia_api "SELECT 1 FROM ingest_private.mairui_gate_scopes WHERE false"
+    expect_denied aia_maint "SELECT 1 FROM ingest_private.mairui_gate_scopes WHERE false"
+  fi
+fi
+
 [ "$(own -c "SELECT count(*) FROM app.users WHERE username LIKE 't\_o11\_%'")" = 0 ] \
   || { echo "FAIL 仍有 t_o11_ 探针用户残留"; fail=1; }
 exit "$fail"

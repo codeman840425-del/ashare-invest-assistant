@@ -30,6 +30,7 @@ class GateClosedError(RuntimeError):
 
 
 def limit_code(status: int | None, body: object) -> str | None:
+    """Use HTTP status or exact error-code fields, never values in arbitrary text."""
     if status in {103, 429}:
         return str(status)
     if isinstance(body, dict):
@@ -47,10 +48,6 @@ def limit_code(status: int | None, body: object) -> str | None:
             result = limit_code(None, value)
             if result:
                 return result
-    elif isinstance(body, str):
-        match = re.search(r"(?<!\d)(103|429)(?!\d)", body)
-        if match:
-            return match[1]
     return None
 
 

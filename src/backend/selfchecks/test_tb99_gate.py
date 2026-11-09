@@ -119,14 +119,62 @@ def test_world_accessible_runtime_directory_is_refused(gate_env: Any) -> None:
 
 
 @pytest.mark.parametrize(
-    "payload", ["103", "103: test", {"error": "103: test"}, {"nested": [{"error_code": 429}]}]
+    "payload", [{"code": 103}, {"error_code": "429"}, {"nested": [{"status": 103}]}]
 )
 def test_body_wrapped_ip_limits_are_recognized(payload: Any) -> None:
+    from probes.common import is_limit_response
+
     assert limit_code(200, payload) in {"103", "429"}
+    assert is_limit_response(200, json.dumps(payload), payload)
 
 
-def test_tb05_real_call_adapter_sets_shared_latch_without_redirect_or_secret_output(
-    gate_env: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "103.0",
+        "103 元",
+        "103",
+        "103: historical value",
+        {"amount": 103.0, "comment": "103 元"},
+        {"error": "103: historical value"},
+        {"message": "最多允许2个不同IP"},
+        {"code": "103.0"},
+        {"code": 103.0},
+        [{"jlr": 103.0}, {"price": "429 元"}],
+    ],
+)
+def test_financial_numbers_and_arbitrary_text_do_not_trigger_limit(payload: Any) -> None:
+    from probes.common import is_limit_response
+
+    assert limit_code(200, payload) is None
+    assert limit_code(200, json.dumps(payload, ensure_ascii=False)) is None
+    assert not is_limit_response(200, json.dumps(payload, ensure_ascii=False), payload)
+
+
+@pytest.mark.parametrize("status", [103, 429])
+def test_http_limit_status_always_wins_over_normal_payload(status: int) -> None:
+    from probes.common import is_limit_response
+
+    assert limit_code(status, {"amount": "103 元"}) == str(status)
+    assert is_limit_response(status, "normal data", {"amount": 103.0})
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "halted"),
+    [
+        (200, {"error_code": 103}, True),
+        (103, {}, True),
+        (429, {}, True),
+        (200, [{"jlr": 103.0, "comment": "103 元"}], False),
+    ],
+)
+def test_tb05_adapter_limits_preserve_shared_latch_and_secret_safety(
+    gate_env: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    body: Any,
+    halted: bool,
 ) -> None:
     from probes import common
 
@@ -142,7 +190,7 @@ def test_tb05_real_call_adapter_sets_shared_latch_without_redirect_or_secret_out
         assert kwargs["allow_redirects"] is False
         calls.append(1)
         return SimpleNamespace(
-            status_code=200, text='{"error":"103: test"}', history=[], headers={}
+            status_code=status, text=json.dumps(body, ensure_ascii=False), history=[], headers={}
         )
 
     context = common.RunCtx(
@@ -161,13 +209,18 @@ def test_tb05_real_call_adapter_sets_shared_latch_without_redirect_or_secret_out
     monkeypatch.setattr(common, "_ctx", context)
     monkeypatch.setattr(common, "connection_stats", dict)
     try:
-        with pytest.raises(common.LimitHit, match="latch"):
-            common.call("synthetic", "/synthetic/{licence}")
+        if halted:
+            with pytest.raises(common.LimitHit, match="latch"):
+                common.call("synthetic", "/synthetic/{licence}")
+            with pytest.raises(GateClosedError, match="halted"):
+                SharedGate(root, lid, "product_daily").acquire()
+            assert secret not in gate.halt_path.read_text(encoding="utf-8")
+        else:
+            assert common.call("synthetic", "/synthetic/{licence}").data == body
+            assert not gate.halt_path.exists()
+            assert not gate.stop.exists()
         assert calls == [1]
-        with pytest.raises(GateClosedError, match="halted"):
-            SharedGate(root, lid, "product_daily").acquire()
         assert secret not in context.call_log.read_text(encoding="utf-8")
-        assert secret not in gate.halt_path.read_text(encoding="utf-8")
     finally:
         gate.release()
 

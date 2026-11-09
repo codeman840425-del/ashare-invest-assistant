@@ -292,13 +292,14 @@ def build_url(path_tpl: str, pro: bool = False, **params) -> str:
 
 
 def is_limit_response(status: Optional[int], text: str, data: Any) -> bool:
-    """429 / 非数据类 503 / 响应体或 code 为 101、103 → 限流或配额/IP 超限。"""
+    """仅认 HTTP 状态或明确错误码字段；保留非数据类 HTTP 503 的既有停机口径。"""
     data_err_503 = status == 503 and any(k in text for k in ("redis history", "history miss", "cold fallback"))
-    body = text.strip()
-    code_hit = isinstance(data, dict) and str(data.get("code", "")) in ("101", "103")
-    return (limit_code(status, data) is not None or limit_code(status, text) is not None
-            or status == 429 or (status == 503 and not data_err_503) or code_hit
-            or body.startswith("103") or body.startswith("101") or "最多允许2个不同IP" in body)
+    code_hit = isinstance(data, dict) and any(
+        str(key).lower() in {"code", "error_code", "status"} and str(value) == "101"
+        for key, value in data.items()
+    )
+    return (limit_code(status, data) is not None
+            or (status == 503 and not data_err_503) or code_hit)
 
 
 def _check_stop(c: RunCtx) -> None:
@@ -361,7 +362,7 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
             data = json.loads(text)
         except ValueError:
             data = None
-    shared_code = limit_code(status, data) or limit_code(status, text)
+    shared_code = limit_code(status, data)
     if c.shared_gate is not None:
         if shared_code:
             c.shared_gate.trip(shared_code)

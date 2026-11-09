@@ -36,6 +36,17 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: Any) -> Any:
     counter = root / "daily_lists.count"
     counter.write_text(json.dumps({"schema": "mairui-daily/v1", "records": []}), encoding="utf-8")
     os.chmod(counter, 0o600)
+    lid = uuid.uuid4()
+    (root / "policy.json").write_text(
+        json.dumps(
+            {
+                "schema": "mairui-shared/v1",
+                "egress_ip": "192.0.2.10",
+                "licences": {str(lid): {"per_minute_limit": 150}},
+            }
+        ),
+        encoding="utf-8",
+    )
     now = [dt.datetime(2031, 1, 2, 18, tzinfo=BEIJING)]
     caplog.set_level("INFO", logger="app.ingest.send_governance")
 
@@ -43,7 +54,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: Any) -> Any:
         raise AssertionError("external network forbidden")
 
     monkeypatch.setattr(socket.socket, "connect", forbidden)
-    return SimpleNamespace(root=root, counter=counter, now=now, calls=[], caplog=caplog)
+    return SimpleNamespace(root=root, counter=counter, lid=lid, now=now, calls=[], caplog=caplog)
 
 
 def records(e: Any) -> list[Any]:
@@ -51,7 +62,13 @@ def records(e: Any) -> list[Any]:
 
 
 def governance(e: Any, *, enforce: bool = True) -> Governance:
-    return Governance(e.root, enforce=enforce, clock=lambda: e.now[0])
+    return Governance(
+        e.root,
+        enforce=enforce,
+        clock=lambda: e.now[0],
+        licence_id=e.lid,
+        ledger128=e.root / "mairui-batch-T-B86.count",
+    )
 
 
 def dispatch(
@@ -73,6 +90,7 @@ def logs(e: Any) -> list[Any]:
         json.loads(record.getMessage().split("send_governance ", 1)[1])
         for record in e.caplog.records
         if record.name == "app.ingest.send_governance"
+        and '"would_block":true' in record.getMessage()
     ]
 
 
@@ -243,15 +261,9 @@ def test_tb102_lock_contention_uses_same_inode_and_observation_logs(
     fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if enforce:
-            with pytest.raises(GateClosedError, match="lock_refused"):
-                dispatch(e)
-            assert e.calls == []
-        else:
-            dispatch(e, enforce=False)
-            assert len(e.calls) == len(records(e)) == 1
-        assert logs(e)[0]["code"] == ("skipped_lock" if enforce else "bypass_lock_would_block")
-        assert logs(e)[0]["snapshot"]["lock_holder"] == os.getpid()
+        with pytest.raises(GateClosedError, match="shared_control_busy"):
+            dispatch(e, enforce=enforce)
+        assert e.calls == records(e) == []
     finally:
         os.close(fd)
 
@@ -270,6 +282,7 @@ def test_tb102_legacy_inflight_preserved_and_observed(env: Any, enforce: bool) -
     e = env
     lease = e.root / "single-egress.lease.json"
     lease.write_text('{"synthetic":"unresolved"}', encoding="utf-8")
+    os.chmod(lease, 0o600)
     original = lease.read_bytes()
     if enforce:
         with pytest.raises(GateClosedError, match="lock_refused"):

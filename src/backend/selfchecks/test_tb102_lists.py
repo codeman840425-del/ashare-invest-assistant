@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime as dt
+import fcntl
 import json
 import os
 import uuid
@@ -97,6 +98,7 @@ def logged(e: Any) -> list[Any]:
         json.loads(record.getMessage().split("send_governance ", 1)[1])
         for record in e.logs.records
         if record.name == "app.ingest.send_governance"
+        and '"would_block":true' in record.getMessage()
     ]
 
 
@@ -322,3 +324,111 @@ def test_tb102_product_window_decision_uses_governance_in_both_modes(
         assert previous.run(e, bid) == "fetched"
         assert len(e.calls) == len(json.loads(e.counter.read_text())["records"]) == 3
     assert logged(e)[0]["code"] == ("blocked_daily" if enforce else "bypass_daily_would_block")
+
+
+@pytest.mark.parametrize("enforce", [True, False])
+@pytest.mark.parametrize("busy", ["flock", "probe_lease"])
+def test_tb102b_r4_busy_keeps_batch_and_stream_then_retries(
+    env: Any,
+    monkeypatch: Any,
+    enforce: bool,
+    busy: str,
+) -> None:
+    e = env
+    e.settings = mode(e.settings, enforce)
+    bid = previous.batch(e)
+    real_process = daily_lists.process
+
+    def process(*args: Any, **kwargs: Any) -> str:
+        return real_process(
+            *args,
+            **kwargs,
+            upstream=e.wire,
+            temp=e.temp,
+            stop=e.stop,
+            halt=e.halt,
+            egress=lambda: previous.IP,
+        )
+
+    monkeypatch.setattr(daily_lists, "process", process)
+
+    class Stream:
+        def __init__(self) -> None:
+            self.acked: list[Any] = []
+            self.jobs: list[Any] = []
+
+        def xgroup_create(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def xautoclaim(self, *args: Any, **kwargs: Any) -> Any:
+            return b"0-0", [
+                (b"1-0", {b"kind": daily_lists.KIND.encode(), b"batch_id": str(bid).encode()})
+            ]
+
+        def xack(self, *args: Any) -> None:
+            self.acked.append(args)
+
+        def lpush(self, *args: Any) -> None:
+            self.jobs.append(args)
+
+    rds = Stream()
+    fd = None
+    lease = e.root / "single-egress.lease.json"
+    try:
+        if busy == "flock":
+            fd = os.open(e.root / "send-control.lock", os.O_RDWR | os.O_CREAT, 0o600)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            lease.write_text(json.dumps({"source": "probe_f21", "token": "synthetic"}))
+            os.chmod(lease, 0o600)
+        assert (
+            daily_lists.tick(
+                e.collector,
+                rds,
+                clock=lambda: e.clock[0],
+                grant=e.grant,
+                pause=e.pause,
+                settings=e.settings,
+            )
+            == 0
+        )
+        with e.owner.connect() as conn:
+            b = conn.execute(select(batches).where(batches.c.id == bid)).one()
+            stats = conn.execute(
+                select(master_runs.c.stats).where(
+                    master_runs.c.id == b.master_run_id,
+                )
+            ).scalar_one()
+            assert b.status == "requested"
+            assert b.error_code is None
+            assert not stats.get("attempted")
+        assert e.calls == rds.acked == rds.jobs == []
+        assert json.loads(e.counter.read_text())["records"] == []
+        assert not (e.root / f"{e.lid}.requests.json").exists()
+        assert not e.temp.exists()
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if busy == "probe_lease":
+            # This exact temporary synthetic fixture was created above, never a live lease.
+            assert lease.parent == e.root
+            assert json.loads(lease.read_text())["source"] == "probe_f21"
+            lease.unlink()
+    assert (
+        daily_lists.tick(
+            e.collector,
+            rds,
+            clock=lambda: e.clock[0],
+            grant=e.grant,
+            pause=e.pause,
+            settings=e.settings,
+        )
+        == 1
+    )
+    assert len(e.calls) == 3
+    assert len(rds.acked) == len(rds.jobs) == 1
+    with e.owner.connect() as conn:
+        assert (
+            conn.execute(select(batches.c.status).where(batches.c.id == bid)).scalar_one()
+            == "fetched"
+        )

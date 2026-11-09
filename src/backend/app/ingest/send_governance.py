@@ -13,6 +13,7 @@ import datetime as dt
 import ipaddress
 import json
 import logging
+import math
 import os
 import stat
 import uuid
@@ -22,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from app.ingest import send_control
-from app.ingest.shared_gate import GateClosedError, _read, stop_present
+from app.ingest.shared_gate import GateClosedError, SharedGate, _read, _write, stop_present
 
 logger = logging.getLogger(__name__)
 BEIJING = dt.timezone(dt.timedelta(hours=8))
@@ -133,6 +134,36 @@ def _persist(fd: int, path: Path, obj: dict[str, Any]) -> None:
         raise GateClosedError("daily_counter_write_failed") from None
 
 
+def _private_json(path: Path, *, maximum: int = MAX_BYTES) -> dict[str, Any]:
+    fd = None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        _identity(fd, path)
+        raw = os.read(fd, maximum + 1)
+        if len(raw) > maximum:
+            raise ValueError
+        obj = json.loads(raw)
+        _identity(fd, path)
+        if not isinstance(obj, dict):
+            raise ValueError
+        return obj
+    except (OSError, ValueError, TypeError):
+        raise GateClosedError("shared_observation_unavailable") from None
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _ledger128_total(path: Path) -> int | None:
+    # Reuse the original validator, never reserve/write/reset this independent ledger.
+    from probes.tb86_offline import HaltError, validate_state
+
+    try:
+        return int(validate_state(_private_json(path, maximum=131072))["total"])
+    except (GateClosedError, HaltError):
+        return None  # Unknown is explicit, never a fabricated zero allowance.
+
+
 def _lock_holder(root: Path, owned: bool) -> int | str | None:
     """Only a PID, never lease tokens, licence IDs or arbitrary file contents."""
     if owned:
@@ -169,6 +200,7 @@ class Permit:
         self.sent = True
 
     def check(self) -> None:
+        send_control.transport(self.governance.root)
         _identity(self.fd, self.governance.counter)
         self.governance.check_stop(self.snapshot)
 
@@ -180,10 +212,27 @@ class Governance:
         *,
         enforce: bool,
         clock: Callable[[], dt.datetime],
+        licence_id: uuid.UUID,
+        minute_limit: int | None = None,
+        ledger128: Path | None = None,
         legacy_stops: tuple[Path, ...] = (),
     ) -> None:
         self.root, self.enforce, self.clock = root, enforce, clock
+        policy = SharedGate(root, licence_id, "product_daily")
+        self.minute_limit = (
+            min(policy.limit, minute_limit) if minute_limit is not None else policy.limit
+        )
+        self.minute_path = policy.state_path
         self.counter = root / "daily_lists.count"
+        self.ledger128 = ledger128 or Path(
+            os.environ.get(
+                "MAIRUI_TB86_COUNTER_PATH",
+                str(
+                    Path.home()
+                    / ".local/state/ashare-invest-assistant/runtime/mairui-batch-T-B86.count"
+                ),
+            )
+        )
         self.stops = (root / "STOP", *legacy_stops)
         self._observed: set[tuple[str, str, str]] = set()
 
@@ -222,18 +271,95 @@ class Governance:
         if self.enforce:
             raise GateClosedError("send_governance_" + kind + "_refused")
 
-    def check_stop(self, snapshot: dict[str, Any]) -> bool:
+    def _probe_halted(self) -> bool:
+        try:
+            for path in self.root.glob("*.halt.json"):
+                try:
+                    if str(_private_json(path).get("code")) in {"103", "429"}:
+                        return True
+                except GateClosedError:
+                    return True
+        except OSError:
+            return True
+        return False
+
+    def _stop_state(self, snapshot: dict[str, Any]) -> tuple[bool, bool]:
         stopped = False
         for index, path in enumerate(self.stops):
-            try:
-                present = stop_present(path)
-            except GateClosedError:
-                present = True
+            present = self._stop_flag(path)
             snapshot["stop_" + str(index)] = present
             stopped |= present
+        probe = self._probe_halted()
+        snapshot["probe_halt_present"] = probe
+        return stopped, probe
+
+    def _minute_state(self, snapshot: dict[str, Any], now: dt.datetime) -> dict[str, Any]:
+        try:
+            self.minute_path.lstat()
+        except FileNotFoundError:
+            return {"calls": [], "inflight": False, "last_finished": 0}
+        except OSError:
+            raise GateClosedError("shared_minute_state_unavailable") from None
+        try:
+            state = _private_json(self.minute_path)
+            calls = state["calls"]
+            finished = state.get("last_finished", 0)
+            if (
+                type(state["inflight"]) is not bool
+                or not isinstance(calls, list)
+                or any(
+                    type(value) not in {int, float} or not math.isfinite(value) for value in calls
+                )
+                or type(finished) not in {int, float}
+                or not math.isfinite(finished)
+                or any(value > now.timestamp() for value in calls)
+                or finished > now.timestamp()
+            ):
+                raise ValueError
+        except (GateClosedError, KeyError, TypeError, ValueError):
+            self._record("lock", snapshot, reason="shared_minute_state_unknown")
+            raise GateClosedError("shared_minute_state_unavailable") from None
+        return state
+
+    def _minute_decisions(
+        self, snapshot: dict[str, Any], state: dict[str, Any], now: float
+    ) -> None:
+        calls = [value for value in state["calls"] if now - value < 60]
+        snapshot.update(
+            minute_count=len(calls),
+            minute_limit=self.minute_limit,
+            minute_inflight=state["inflight"],
+            last_finished=state.get("last_finished", 0),
+        )
+        if state["inflight"]:
+            self._decision("lock", snapshot, "shared_prior_request_uncertain")
+        if len(calls) >= self.minute_limit:
+            self._decision("lock", snapshot, "shared_minute_budget_exhausted")
+        if now - state.get("last_finished", 0) < 60:
+            self._decision("daily", snapshot, "shared_product_interval_not_elapsed")
+
+    def _snapshot_record(self, snapshot: dict[str, Any]) -> None:
+        logger.info(
+            "send_governance %s",
+            json.dumps(
+                {
+                    "code": "send_snapshot",
+                    "would_block": False,
+                    "ts": self.clock().astimezone(BEIJING).isoformat(),
+                    "snapshot": dict(snapshot),
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        )
+
+    def check_stop(self, snapshot: dict[str, Any]) -> bool:
+        stopped, probe = self._stop_state(snapshot)
+        if probe:
+            self._decision("stop", snapshot, "probe_halt_present")
         if stopped:
             self._decision("stop", snapshot, "STOP_present_or_unknown")
-        return stopped
+        return stopped or probe
 
     @contextlib.contextmanager
     def dispatch(
@@ -250,34 +376,25 @@ class Governance:
             raise GateClosedError("shared_control_reentry_refused")
         snapshot: dict[str, Any] = {
             "ledger_total": None,
+            "ledger128_total": _ledger128_total(self.ledger128),
             "daily_count": None,
             "reservation_id": str(token),
             "lock_holder": "unknown",
             "stop_0": None,
         }
         with contextlib.ExitStack() as stack:
-            try:
-                stack.enter_context(send_control.critical(self.root, blocking=False))
-                locked = True
-            except GateClosedError as exc:
-                if str(exc) != "shared_control_busy":
-                    raise  # Invalid filesystem/permissions are not a safe observation mode.
-                locked = False
-            snapshot["lock_holder"] = _lock_holder(self.root, locked)
-            for index, path in enumerate(self.stops):
-                snapshot["stop_" + str(index)] = self._stop_flag(path)
-            legacy_busy = any(
-                os.path.lexists(self.root / name)
-                for name in (
-                    "single-egress.lease.json",
-                    "probe-waiting.lease.json",
-                )
-            )
+            stack.enter_context(send_control.critical(self.root, blocking=False))
+            snapshot["lock_holder"] = _lock_holder(self.root, True)
+            self._stop_state(snapshot)
+            legacy_busy, probe_busy = send_control.legacy_leases(self.root)
             snapshot["legacy_lease_present"] = legacy_busy
+            if probe_busy:
+                self._record("lock", snapshot, reason="probe_lease_busy")
+                raise GateClosedError("shared_control_busy")
             try:
                 fd, state = stack.enter_context(_ledger(self.counter))
             except GateClosedError:
-                if not locked or legacy_busy:
+                if legacy_busy:
                     self._record("lock", snapshot, reason="send_lock_or_uncertain_lease")
                 self._record(
                     "budget",
@@ -296,14 +413,17 @@ class Governance:
             # Identity dedup is unconditional, including in observation mode.
             if any(row["id"] == str(token) for row in records):
                 raise GateClosedError("daily_reservation_already_consumed")
-            if not locked or legacy_busy or any(row["finished_at"] is None for row in records):
+            if legacy_busy or any(row["finished_at"] is None for row in records):
                 self._decision("lock", snapshot, "send_lock_or_uncertain_lease")
+            minute = self._minute_state(snapshot, now)
+            self._minute_decisions(snapshot, minute, now.timestamp())
             # F2 is evaluated/logged ahead of F4. Defer the strong STOP exception until
             # after reservation so STOP attempts are accounted without sending HTTP.
-            stop_blocked = any(self._stop_flag(path) for path in self.stops)
-            for index, path in enumerate(self.stops):
-                snapshot["stop_" + str(index)] = self._stop_flag(path)
-            if stop_blocked:
+            stopped, probe_halted = self._stop_state(snapshot)
+            stop_blocked = stopped or probe_halted
+            if probe_halted:
+                self._record("stop", snapshot, reason="probe_halt_present")
+            if stopped:
                 self._record("stop", snapshot, reason="STOP_present_or_unknown")
             reasons = []
             if (
@@ -350,6 +470,17 @@ class Governance:
             snapshot.update(ledger_total_after=len(records), daily_count_after=len(today) + 1)
             if stop_blocked and self.enforce:
                 raise GateClosedError("send_governance_stop_refused")
+            # Restore the existing minute accounting, also in bypass mode. A prior
+            # uncertain request stays uncertain after this call, never silently cleared.
+            prior_inflight = minute["inflight"]
+            minute = {
+                "calls": [value for value in minute["calls"] if now.timestamp() - value < 60]
+                + [now.timestamp()],
+                "inflight": True,
+                "last_finished": minute.get("last_finished", 0),
+            }
+            _write(self.minute_path, minute)
+            self._snapshot_record(snapshot)
             permit = Permit(self, snapshot, fd, dataset)
             try:
                 permit.check()
@@ -359,8 +490,17 @@ class Governance:
                 # in-flight next time; no reset/automatic retry is provided.
                 raise
             else:
-                records[-1]["finished_at"] = self.clock().astimezone(BEIJING).isoformat()
+                finished = self.clock().astimezone(BEIJING)
+                records[-1]["finished_at"] = finished.isoformat()
                 _persist(fd, self.counter, state)
+                _write(
+                    self.minute_path,
+                    minute
+                    | {
+                        "inflight": prior_inflight,
+                        "last_finished": finished.timestamp(),
+                    },
+                )
             finally:
                 permit.inflight = False
 

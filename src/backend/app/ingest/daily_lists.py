@@ -25,20 +25,22 @@ from urllib.parse import quote
 from sqlalchemy import Engine, insert, select, update
 
 from app.config import Settings
-from app.db.tables.licences import user_data_licences
+from app.db.tables.licences import user_data_licence_status, user_data_licences
 from app.db.tables.market import master_runs, securities
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows
 from app.ingest.live import check_egress, feedback
-from app.ingest.send_control import critical, root_from_environment
+from app.ingest.send_control import critical, root_from_environment, transport
 from app.ingest.send_governance import LIST_PATHS, Governance, Permit, expected_egress
 from app.ingest.shared_gate import (
+    GateClosedError,
     SharedGate,
     _write_stop_unlocked,
     limit_code,
 )
 from app.ingest.upstream import Signal, classify
 from app.ingest.vault import LicenceVault, SealedLicence
+from app.licences.service import per_minute_limit
 from app.master.daily_delivery import (
     APPLY,
     KIND,
@@ -74,6 +76,10 @@ def wire(path: str, secret: str) -> tuple[int, object]:
         or not gate.inflight
     ):
         raise DailyHaltError("live_transport_closed")
+    transport(
+        gate.governance.root if isinstance(gate, Permit) else gate.root,
+        own_token=gate.token if isinstance(gate, SharedGate) else None,
+    )
     gate.check()
     conn = http.client.HTTPSConnection(HOST, timeout=20)
     conn.set_debuglevel(0)
@@ -109,6 +115,7 @@ def send(
             # Existing verification also uses this one transport mouth. Its old
             # authorization/accounting stays intact; only the physical mutex is shared.
             stack.enter_context(critical(gate.root, blocking=False))
+            transport(gate.root, own_token=gate.token)
             gate.check()
         token = WIRE_GATE.set(gate)
         try:
@@ -233,12 +240,6 @@ def process(
     secret = None
     try:
         root = root_from_environment()
-        governance = Governance(
-            root,
-            enforce=settings.business.ingest.send_governance.enforce,
-            clock=clock,
-            legacy_stops=(stop, halt),
-        )
         with engine.begin() as conn:
             b = conn.execute(select(batches).where(batches.c.id == bid).with_for_update()).first()
             if b is None:
@@ -277,6 +278,18 @@ def process(
                 known.setdefault(code[:6], []).append(code)
             lid, parent_id = b.source_licence_id, p.id
             day = dt.date.fromisoformat(p.stats["trade_date"])
+            licence = conn.execute(
+                select(user_data_licence_status).where(user_data_licence_status.c.id == lid)
+            ).one()
+            minute_limit = per_minute_limit(settings, licence)
+        governance = Governance(
+            root,
+            enforce=settings.business.ingest.send_governance.enforce,
+            clock=clock,
+            licence_id=lid,
+            minute_limit=minute_limit,
+            legacy_stops=(stop, halt),
+        )
         # Existing egress/receipt/HPKE boundaries are mandatory in either mode.
         if egress() != expected_egress(root, lid):
             raise DailyHaltError("shared_egress_mismatch")
@@ -301,16 +314,6 @@ def process(
                 attempts = list(parent.stats.get("attempted", []))
                 if dataset in attempts:
                     raise DailyHaltError("uncertain_prior_attempt_no_retry")
-                # This is business progress only. The independent file ledger enforces
-                # the global daily limit across different batches/process restarts.
-                attempts.append(dataset)
-                conn.execute(
-                    update(master_runs)
-                    .where(master_runs.c.id == parent_id)
-                    .values(
-                        stats={**parent.stats, "attempted": attempts},
-                    )
-                )
                 trading_day = covered(conn, clock().astimezone(BEIJING).date())
             with governance.dispatch(
                 token=uuid.uuid5(bid, dataset),
@@ -318,8 +321,29 @@ def process(
                 expected_day=day,
                 trading_day=trading_day,
             ) as permit:
+                # Acquiring the physical lock precedes any business attempted flag.
+                # Busy leaves the requested message untouched for tick retry.
+                with engine.begin() as conn:
+                    parent = conn.execute(
+                        select(master_runs).where(master_runs.c.id == parent_id).with_for_update()
+                    ).one()
+                    if read_grant() != grant or not eligible(conn, grant, clock()):
+                        raise DailyHaltError("authorization_expired_or_licence_paused")
+                    attempts = list(parent.stats.get("attempted", []))
+                    if dataset in attempts:
+                        raise DailyHaltError("uncertain_prior_attempt_no_retry")
+                    attempts.append(dataset)
+                    conn.execute(
+                        update(master_runs)
+                        .where(master_runs.c.id == parent_id)
+                        .values(
+                            stats={**parent.stats, "attempted": attempts},
+                        )
+                    )
                 try:
                     status, body = send(permit, upstream, PATHS[dataset], secret)
+                except GateClosedError:
+                    raise
                 except Exception:  # noqa: BLE001 - transport may contain the secret URL
                     feedback(
                         engine,
@@ -402,7 +426,9 @@ def process(
                 )
             )
         return "fetched"
-    except Exception:  # noqa: BLE001 - fixed diagnostics, no upstream/secret/DSN text
+    except Exception as exc:  # noqa: BLE001 - fixed diagnostics, no upstream/secret/DSN text
+        if isinstance(exc, GateClosedError) and str(exc) == "shared_control_busy":
+            return "busy"
         with engine.begin() as conn:
             conn.execute(
                 update(batches)

@@ -21,18 +21,23 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from sqlalchemy import Engine, insert, select, text, update
+from sqlalchemy import Engine, insert, select, update
 
 from app.config import Settings
-from app.db.tables.licences import user_data_licence_status, user_data_licences
+from app.db.tables.licences import user_data_licences
 from app.db.tables.market import master_runs, securities
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows
 from app.ingest.live import check_egress, feedback
-from app.ingest.shared_gate import GateClosedError, SharedGate, limit_code
+from app.ingest.send_control import root_from_environment
+from app.ingest.send_governance import LIST_PATHS, Governance, Permit, expected_egress
+from app.ingest.shared_gate import (
+    SharedGate,
+    _write_stop_unlocked,
+    limit_code,
+)
 from app.ingest.upstream import Signal, classify
 from app.ingest.vault import LicenceVault, SealedLicence
-from app.licences.service import per_minute_limit
 from app.master.daily_delivery import (
     APPLY,
     KIND,
@@ -47,12 +52,12 @@ from app.master.sync import BEIJING
 from app.reports.service import covered
 
 HOST = "api.mairuiapi.com"
-PATHS = dict(zip(LISTS, ("/hslt/list/", "/bj/list/all/", "/kc/list/all/"), strict=True))
+PATHS = dict(LIST_PATHS)
 TEMP = Path("/run/aia/mairui-daily.tmp")
 STOP = Path(__file__).resolve().parents[2] / "probes/results/STOP"
 HALT = Path("/run/aia/mairui-daily.HALTED")
 GROUP = "mairui-daily-v1"
-WIRE_GATE: ContextVar[SharedGate | None] = ContextVar("mairui_wire_gate", default=None)
+WIRE_GATE: ContextVar[SharedGate | Permit | None] = ContextVar("mairui_wire_gate", default=None)
 
 
 class DailyHaltError(RuntimeError):
@@ -91,8 +96,13 @@ def wire(path: str, secret: str) -> tuple[int, object]:
 
 
 def send(
-    gate: SharedGate, upstream: Callable[[str, str], tuple[int, object]], path: str, secret: str
+    gate: SharedGate | Permit,
+    upstream: Callable[[str, str], tuple[int, object]],
+    path: str,
+    secret: str,
 ) -> tuple[int, object]:
+    if isinstance(gate, Permit):
+        gate.claim(path)  # One reserved list endpoint permits exactly one dispatch.
     token = WIRE_GATE.set(gate)
     try:
         return upstream(path, secret)
@@ -212,124 +222,98 @@ def process(
 
         settings = get_settings()
     policy = settings.business.ingest.licences.product_daily
-    try:
-        gate = SharedGate.from_environment(grant.licence_id, "product_daily")
-        gate.acquire()
-    except GateClosedError:
-        return "busy"
     identity = None
     secret = None
-    # Session lock spans reservation commits and every HTTP request. No retry.
-    with engine.connect() as lock:
-        locked = lock.execute(
-            text("SELECT pg_try_advisory_lock(hashtext('ingest:single-egress'))")
-        ).scalar_one()
-        lock.commit()
-        if not locked:
-            gate.release()
-            return "busy"
-        try:
+    try:
+        root = root_from_environment()
+        governance = Governance(
+            root,
+            enforce=settings.business.ingest.send_governance.enforce,
+            clock=clock,
+            legacy_stops=(stop, halt),
+        )
+        with engine.begin() as conn:
+            b = conn.execute(select(batches).where(batches.c.id == bid).with_for_update()).first()
+            if b is None:
+                return "missing"
+            p = conn.execute(
+                select(master_runs).where(master_runs.c.id == b.master_run_id).with_for_update()
+            ).one()
+            if p.stats.get("task") != KIND:
+                return "not_daily"
+            if b.status != "requested":
+                return "noop"
+            issue = None
+            current_grant = read_grant()
+            if (
+                current_grant != grant
+                or grant.digest != p.stats.get("receipt_digest")
+                or grant.licence_id != b.source_licence_id
+                or not eligible(conn, grant, clock())
+            ):
+                issue = "authorization_unavailable"
+            elif p.stats.get("attempted"):
+                issue = "uncertain_prior_attempt_no_retry"
+            if issue:
+                outcome = "failed"
+                conn.execute(
+                    update(batches)
+                    .where(batches.c.id == bid)
+                    .values(
+                        status=outcome,
+                        error_code=issue,
+                    )
+                )
+                return outcome
+            known: dict[str, list[str]] = {}
+            for code in conn.execute(select(securities.c.code)).scalars():
+                known.setdefault(code[:6], []).append(code)
+            lid, parent_id = b.source_licence_id, p.id
+            day = dt.date.fromisoformat(p.stats["trade_date"])
+        # Existing egress/receipt/HPKE boundaries are mandatory in either mode.
+        if egress() != expected_egress(root, lid):
+            raise DailyHaltError("shared_egress_mismatch")
+        secret = secret_loader(engine, lid)
+        identity = temporary(temp, secret)
+        all_rows: list[dict[str, Any]] = []
+        summaries = []
+        for index, dataset in enumerate(LISTS):
+            if index:
+                pause(policy.min_interval_s)
             with engine.begin() as conn:
-                b = conn.execute(
-                    select(batches).where(batches.c.id == bid).with_for_update()
-                ).first()
-                if b is None:
-                    return "missing"
-                p = conn.execute(
-                    select(master_runs).where(master_runs.c.id == b.master_run_id).with_for_update()
+                parent = conn.execute(
+                    select(master_runs).where(master_runs.c.id == parent_id).with_for_update()
                 ).one()
-                if p.stats.get("task") != KIND:
-                    return "not_daily"
-                if b.status != "requested":
-                    return "noop"
-                issue = None
-                current_grant = read_grant()
-                if clock() >= b.deadline_at or p.stats.get("trade_date") != str(
-                    clock().astimezone(BEIJING).date()
-                ):
-                    issue = "deadline_exceeded"
-                elif (
-                    current_grant != grant
-                    or grant is None
-                    or grant.digest != p.stats.get("receipt_digest")
-                    or grant.licence_id != b.source_licence_id
+                current = read_grant()
+                if (
+                    current is None
+                    or current.digest != grant.digest
                     or not eligible(conn, grant, clock())
                 ):
-                    issue = "authorization_unavailable"
-                elif stop.exists() or halt.exists():
-                    issue = "STOP_or_halt_present"
-                elif clock().astimezone(BEIJING).time() < dt.time(18) or not covered(
-                    conn, clock().astimezone(BEIJING).date()
-                ):
-                    issue = "outside_covered_daily_window"
-                elif p.stats.get("attempted"):
-                    issue = "uncertain_prior_attempt_no_retry"
-                if issue:
-                    outcome = (
-                        "expired"
-                        if issue == "deadline_exceeded" and not p.stats.get("attempted")
-                        else "failed"
+                    raise DailyHaltError("authorization_expired_or_licence_paused")
+                attempts = list(parent.stats.get("attempted", []))
+                if dataset in attempts:
+                    raise DailyHaltError("uncertain_prior_attempt_no_retry")
+                # This is business progress only. The independent file ledger enforces
+                # the global daily limit across different batches/process restarts.
+                attempts.append(dataset)
+                conn.execute(
+                    update(master_runs)
+                    .where(master_runs.c.id == parent_id)
+                    .values(
+                        stats={**parent.stats, "attempted": attempts},
                     )
-                    conn.execute(
-                        update(batches)
-                        .where(batches.c.id == bid)
-                        .values(status=outcome, error_code=issue)
-                    )
-                    return outcome
-                known: dict[str, list[str]] = {}
-                for code in conn.execute(select(securities.c.code)).scalars():
-                    known.setdefault(code[:6], []).append(code)
-                lid = b.source_licence_id
-                parent_id = p.id
-                licence = conn.execute(
-                    select(user_data_licence_status).where(user_data_licence_status.c.id == lid)
-                ).one()
-                minute_limit = per_minute_limit(settings, licence)
-            gate.confirm_egress(egress())
-            secret = secret_loader(engine, lid)
-            identity = temporary(temp, secret)
-            all_rows: list[dict[str, Any]] = []
-            summaries = []
-            for index, dataset in enumerate(LISTS):
-                gate.check()
-                if index:
-                    pause(policy.min_interval_s)
-                delay = gate.product_delay(clock().timestamp())
-                if delay:
-                    pause(delay)
-                gate.check()
-                if stop.exists() or halt.exists():
-                    raise DailyHaltError("STOP_or_halt_present")
-                # Durable write-ahead reservation: a restarted process never repeats
-                # an uncertain external request, even after a response/commit crash.
-                with engine.begin() as conn:
-                    parent = conn.execute(
-                        select(master_runs).where(master_runs.c.id == parent_id).with_for_update()
-                    ).one()
-                    current = read_grant()
-                    if (
-                        current is None
-                        or current.digest != grant.digest
-                        or clock() >= b.deadline_at
-                        or not eligible(conn, grant, clock())
-                    ):
-                        raise DailyHaltError("authorization_expired_or_licence_paused")
-                    attempts = list(parent.stats.get("attempted", []))
-                    if dataset in attempts or len(attempts) >= policy.list_max_http_per_day:
-                        raise DailyHaltError("daily_budget_exhausted")
-                    attempts.append(dataset)
-                    conn.execute(
-                        update(master_runs)
-                        .where(master_runs.c.id == parent_id)
-                        .values(stats={**parent.stats, "attempted": attempts})
-                    )
-                if stop.exists() or halt.exists():
-                    raise DailyHaltError("STOP_or_halt_present")
-                gate.reserve(now=clock().timestamp(), limit=minute_limit)
-                gate.check()
+                )
+                trading_day = covered(conn, clock().astimezone(BEIJING).date())
+            with governance.dispatch(
+                token=uuid.uuid5(bid, dataset),
+                dataset=dataset,
+                expected_day=day,
+                trading_day=trading_day,
+            ) as permit:
                 try:
-                    status, body = send(gate, upstream, PATHS[dataset], secret)
-                except Exception:  # noqa: BLE001 - persist only the fixed network classification
+                    status, body = send(permit, upstream, PATHS[dataset], secret)
+                except Exception:  # noqa: BLE001 - transport may contain the secret URL
                     feedback(
                         engine,
                         settings,
@@ -340,9 +324,10 @@ def process(
                         code="network",
                     )
                     raise DailyHaltError("transport_failed_no_retry") from None
+                # Keep the existing response rules. Parser redesign is outside T-B102.
                 code = limit_code(status, body)
-                halt_token = gate.trip(code) if code else None
-                gate.complete(now=clock().timestamp())
+                if limited(status, body):
+                    _write_stop_unlocked(root / "STOP")
                 signal = Signal.IP_LIMITED if code else classify(status, body)
                 if signal != Signal.OK:
                     error_code = code or {
@@ -356,18 +341,11 @@ def process(
                         settings,
                         lid,
                         signal,
-                        token=halt_token or uuid.uuid5(bid, dataset),
+                        token=uuid.uuid5(bid, dataset),
                         at=clock(),
                         code=error_code,
                     )
                 if limited(status, body):
-                    try:
-                        fd = os.open(halt, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                        os.write(fd, b"limit_103_or_429")
-                        os.fsync(fd)
-                        os.close(fd)
-                    except FileExistsError:
-                        pass
                     with engine.begin() as conn:
                         parent = conn.execute(
                             select(master_runs)
@@ -382,7 +360,7 @@ def process(
                                     **parent.stats,
                                     "upstream_halted": True,
                                     "halt_reason": "limit_103_or_429",
-                                }
+                                },
                             )
                         )
                     raise DailyHaltError("limit_103_or_429")
@@ -403,38 +381,32 @@ def process(
                     for code, name in normalized
                 )
                 summaries.append({"dataset": dataset, "status": "ok", "row_count": len(normalized)})
-            with engine.begin() as conn:
-                if all_rows:
-                    conn.execute(insert(rows), all_rows)
-                conn.execute(
-                    update(batches)
-                    .where(batches.c.id == bid)
-                    .values(
-                        status="fetched", fetched_at=clock(), datasets=summaries, error_code=None
-                    )
+        with engine.begin() as conn:
+            if all_rows:
+                conn.execute(insert(rows), all_rows)
+            conn.execute(
+                update(batches)
+                .where(batches.c.id == bid)
+                .values(
+                    status="fetched",
+                    fetched_at=clock(),
+                    datasets=summaries,
+                    error_code=None,
                 )
-            return "fetched"
-        except Exception:  # noqa: BLE001 - sanitize upstream/credential exceptions, never log them
-            with engine.begin() as conn:
-                conn.execute(
-                    update(batches)
-                    .where(batches.c.id == bid, batches.c.status == "requested")
-                    .values(status="failed", error_code="daily_collection_failed_no_retry")
-                )
-            return "failed"
-        finally:
-            secret = None
-            try:
-                if identity is not None:
-                    remove_owned(temp, identity)
-            finally:
-                try:
-                    lock.execute(
-                        text("SELECT pg_advisory_unlock(hashtext('ingest:single-egress'))")
-                    )
-                    lock.commit()
-                finally:
-                    gate.release()
+            )
+        return "fetched"
+    except Exception:  # noqa: BLE001 - fixed diagnostics, no upstream/secret/DSN text
+        with engine.begin() as conn:
+            conn.execute(
+                update(batches)
+                .where(batches.c.id == bid, batches.c.status == "requested")
+                .values(status="failed", error_code="daily_collection_failed_no_retry")
+            )
+        return "failed"
+    finally:
+        secret = None
+        if identity is not None:
+            remove_owned(temp, identity)
 
 
 def tick(

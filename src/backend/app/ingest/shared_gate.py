@@ -115,6 +115,46 @@ def _write(path: Path, obj: dict[str, Any], *, exclusive: bool = False) -> None:
             temporary.unlink()
 
 
+def stop_present(path: Path) -> bool:
+    """A dangling link or invalid sentinel is closed, never an absent/successful STOP."""
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        raise GateClosedError("shared_STOP_unavailable") from None
+    try:
+        if not stat.S_ISREG(path.stat().st_mode):
+            raise GateClosedError("shared_STOP_invalid")
+    except OSError:
+        raise GateClosedError("shared_STOP_invalid") from None
+    return True
+
+
+def write_stop(path: Path) -> None:
+    """Use exactly the dispatch mutex; a writer cannot commit between check and HTTP."""
+    from app.ingest.send_control import critical
+
+    raw = os.environ.get("MAIRUI_SHARED_STATE_DIR")
+    with critical(Path(raw) if raw else path.parent):
+        _write_stop_unlocked(path)
+
+
+def _write_stop_unlocked(path: Path) -> None:
+    """Caller owns the permanent control inode; fixed contents, flush/fsync."""
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        if not stop_present(path):
+            raise GateClosedError("shared_STOP_creation_raced") from None
+        return
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        stream.write("operator_review_required\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    _sync_directory(path.parent)
+
+
 class SharedGate:
     def __init__(self, root: Path, licence_id: uuid.UUID, source: str) -> None:
         if source not in SOURCES or not root.is_dir() or root.is_symlink():

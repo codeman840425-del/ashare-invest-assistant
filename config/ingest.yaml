@@ -1,6 +1,8 @@
 # config/ingest.yaml —— 内容逐字取自 docs/plan.md §6.1（默认值唯一出处，改值先改 plan）。
 # 校验：src/backend/app/config_files.py（pydantic，extra="forbid"，未知键启动失败）。
 schema_version: 1
+send_governance:                 # T-A58：仅产品拒发判定旁路；落账/脱敏/出口不旁路
+  enforce: false                # 观察后须用户确认，由 Chief 另派才切 true
 # T-A07：budget.* 改为“每张证书”的默认值（证书档位未知且无管理员覆盖时使用）；全进程并发见 licences.global_max_concurrency
 budget:
   per_minute_budget: 3000       # int，每证书令牌桶（原为全局）（钻石版文档 6000/分钟，自设一半）【待 T003】；可热调，上调上限 5400

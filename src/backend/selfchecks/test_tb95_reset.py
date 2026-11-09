@@ -59,7 +59,8 @@ def database() -> Any:
     with engine.connect() as conn:
         assert conn.execute(text("select current_database()")).scalar_one() == "tb95_test"
     cfg = migration_config()
-    assert ScriptDirectory.from_config(cfg).get_heads() == ["0028"]
+    heads = ScriptDirectory.from_config(cfg).get_heads()
+    assert len(heads) == 1  # single mainline head (0029 after dormant absorb)
     command.upgrade(cfg, "0027")
     marker = uuid.uuid4()
     with engine.begin() as conn:

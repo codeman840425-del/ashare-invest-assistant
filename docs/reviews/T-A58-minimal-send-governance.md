@@ -83,3 +83,40 @@ T-A55/T-A57/T-B101 的 DB outbox、Redis 唤醒、HPKE 全家桶是**为多用�
 3. 台账文件权限非 0600/链接数 >1/状态未知 → 拒发（fail closed）。
 4. 同线程 dispatch 内再取锁 → 拒绝。
 5. 旁路期日志与探针台账逐条对齐；切换后强制阻断生效。
+
+## 6. T-A60 返修口径（五条，北京 2026-11-10；对象 tb-T-B102 = aedab8e + c1c8877 + eaa4744）
+
+RV-15 六项 P1 中四项需定口径，逐条裁定（已核 tb-T-B102 实码与探针既有门禁；五条全部为「复用已验证路径」边界内的返修，零新设计）：
+
+### R1｜锁互通：判定统一、锁文件唯一（对应 RV-15 ①③）
+
+- **根因**：探针 `SharedGate.acquire()` 用 O_EXCL lease 文件（`single-egress.lease.json`）+ `probe-waiting.lease.json` 优先占位互斥；产品 tb-T-B102 用 `send_control.critical`（flock `send-control.lock`）。两套机制物理互不相干——这是①悬挂软链、③锁互通风险的共同源头。
+- **裁定**：两侧统一走 `send_control.critical`（同一 `send-control.lock` flock，T-B99e 本为两侧共用而写）。lease 文件降级为「存在即 busy」的**旁路观测信号**，不再作互斥依据；软链/悬挂/权限判定沿 `send_control` 既有检查（nlink=1、非符号链、0600、属主一致）。
+- **顺序（编排者定）**：产品侧半边（wire 判定/软链判定统一到 send_control 入口）在 T-B102b 本轮做；**探针 common.py 切锁留到明天全部麦蕊触点跑完后的空窗**（15:45 F21 收盘后～后天之间），单独小单 T-B103 执行。空窗前探针零改动照跑。
+- 过渡期语义：T-B102b 上线～T-B103 完成之间，产品侧除 flock 外仍观测 lease 文件存在性（`legacy_lease_present` 已有），探针持 lease 时产品按 R1 判 busy——互斥仍成立（探针写 lease、产品认 lease），只是反向（产品持 flock、探针不认）在空窗后由 T-B103 补齐。空窗期内产品与探针时段本就错峰（T-A53 R2），实际并发风险为零。
+
+### R2｜证书闩锁互认：halt 文件存在即停（对应 RV-15 ②）
+
+- 产品 `sync_halts`（live.py）读 `*.halt.json` 反馈通知那半**不动**；缺的是发送判定时不看探针 halt。
+- **裁定**：`Governance.stops` 增一类：`root/*.halt.json` 任一存在且 `code∈{103,429}` → 视同 STOP（旁路记 `bypass_stop_would_block`，reason=`probe_halt_present`）。**不解析 licence_id**——单人系统一张证书，按 T-A53 R3「任一侧触发→两侧全停」原语义。产品自身 103/429 已写 STOP（`_write_stop_unlocked`），闭环。
+- halt 文件本身的软链/悬挂判定同 `stop_present` 语义：不可判定即视为停（fail closed）。
+
+### R3｜分钟账与产品间隔回装（对应 RV-15 ④）
+
+- tb-T-B102 的新名单账 `daily_lists.count` 只管 F4 三次/日，把旧 `SharedGate.reserve/product_delay` 的分钟账（T-B05 实跑验证）丢了——确认这是缺陷不是精简。
+- **裁定**：产品发送前读 `state_path`（`requests.json`）分钟账：`inflight=true` → 拒（uncertain）；60s 滚动窗口内调用数 ≥ limit → 拒；产品侧 `last_finished` 距今 <60s → 拒。探针写账照旧（已实跑）。`expected_egress` 读 `policy.json` 不动。旁路期命中记 `bypass_lock_would_block`（uncertain/分钟满）与 `bypass_daily_would_block`（间隔），与 F1/F4 归口一致。
+
+### R4｜锁忙语义：恢复 tick 重试（对应 RV-15 ⑤⑥）
+
+- tb-T-B102 删了 `return "busy"`，锁忙落进 `except Exception → batch failed` 且 ACK 消息——错误。
+- **裁定**：flock `LOCK_EX|LOCK_NB` 得 `BlockingIOError` → `dispatch` 抛 `GateClosedError("shared_control_busy")` → `process()` 捕获后**直接 `return "busy"`**：不写 batch failed、不标 attempted、不 ACK；tick 层 `result=="busy" → continue`（消息留流内下一 tick 重试）。仅确定性拒绝（授权失效/deadline/STOP 落账后/预算尽）才标 failed。旁路模式下同样 return "busy"——锁忙是能力缺失不是治理判定，不属旁路范围。
+
+### R5｜观察口径：ledger128 对齐列（对应 RV-15 P2⑦）
+
+- `snapshot` 增 `ledger128_total`（128 台账当前总数，**只读**），与 `ledger_total`（名单账）并列；旁路与强制两模式都记。不动 128 台账本体。观察期即可逐条对齐两本账（T-T34/T-O48 验收口径）。
+
+### 返修顺序与单据（编排者 T-A60 验收定）
+
+- **T-B102b（后端，本轮）**：R2/R3/R4/R5 全部 + R1 产品侧半边。全在产品代码内，探针零改动。
+- **T-B103（后端，空窗单）**：R1 探针半边——common.py 的 `SharedGate` 互斥切到 `send_control.critical`，lease 降旁路观测。时机=明天 15:45 F21 收盘后全部触点完成～后天之间，单独派单。
+- RV-15 复验对象=T-B102b 全量 diff：四件事边界零突破 + 五条口径逐条核。

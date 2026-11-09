@@ -245,9 +245,10 @@ secret 没挂上时 `secret-env.sh` 拒绝启动，后端不会回落到临时�
 - 删除用户数据（先 dry-run）：`deploy/scripts/compose.sh --profile maint run --rm --no-deps maint-cli --user-id <uuid> [--execute]`。
 - 原始导入文件卷 `<卷前缀>_imports` 只挂给 api 与 maint-cli，挂载点跟随 `IMPORT_STORAGE_PATH`，卷根 10001:10001、700。
 
-## 6.1 IP 限流升级暂停持久化（T-A75 / T-O66）
+## 6.1 IP 限流升级暂停持久化（T-A75 / T-O66 / T-O66b）
 
 重启或换机后升级暂停由库（`ops.data_licence_events`）自动恢复，无需人工处理；严禁手工清理 `ops.data_licence_events`。
+换机或重建容器后，**以库里的 `upstream_halted` / 相关事件行为准**；`/run/aia/state/halt/` 下的停机标志文件只是本机缓存，文件丢失也照样停（见 `deploy/runbooks/ingest-halt.md`）。
 
 ## 7. 迁移 0017 预检查（T-B49；review-6670b10）
 

@@ -193,8 +193,8 @@ services:
       - master:${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}
       - ../../config:/app/config:ro
       - *secret-env-mount
-      # T-O66：授权收据 /run/aia/authorizations 与 ingest 共用 aia_run 卷
-      - aia_run:/run/aia
+      # T-O66b：收据卷 root 属主，对 worker 只读（不挂 ingest 状态卷）
+      - aia_receipts:/run/aia/receipts:ro
     depends_on: *app-depends
     healthcheck:
       <<: *worker-healthcheck
@@ -228,8 +228,11 @@ services:
     volumes:
       - ../../config:/app/config:ro
       - *secret-env-mount
-      # T-O66：HALT/临时文件落在具名卷，重建容器不丢停机标志
-      - aia_run:/run/aia
+      # T-O66b：ingest 独占状态卷（10001/700，停机标志）；收据只读；解密临时文件用 tmpfs
+      - ingest_state:/run/aia/state
+      - aia_receipts:/run/aia/receipts:ro
+    tmpfs:
+      - /run/aia/tmp:mode=0700,uid=10001,gid=10001,size=64m,noexec,nosuid
     depends_on: *app-depends
     healthcheck:
       <<: *worker-healthcheck
@@ -430,9 +433,12 @@ volumes:
     name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_imports
   master:
     name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_master
-  # T-O66：持久化 /run/aia（ingest HALT、master/worker 授权收据）。容器重建后停机标志不丢。
-  aia_run:
-    name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_aia_run
+  # T-O66b：拆分原 aia_run 卷。ingest_state 仅 ingest（停机标志）；aia_receipts 为 root 属主、对 ingest/worker :ro。
+  # 收尾部署：旧 <前缀>_aia_run 不再挂载，可人工确认后删除；停机以库 upstream_halted 为准，不迁移旧卷内容。
+  ingest_state:
+    name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_ingest_state
+  aia_receipts:
+    name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_aia_receipts
 
 # 证书封装密钥（T-O09）：由 deploy/scripts/seal-keygen.sh 生成在仓库外的 AIA_SECRETS_DIR（compose.sh 解析，
 # 默认 ~/.config/aia/secrets/<卷前缀>）。私钥 600、属主为容器用户；不入库、不进镜像、不进 .env。

@@ -555,6 +555,8 @@ class Plan:
     pending: list[tuple[str, int, str | None]]
     pending_readable: bool = True
     unknown_triggers: list[str] = field(default_factory=list)
+    gate_bindings: int = 0
+    gate_scopes: int = 0
 
 
 #: 本 CLI 会读写的表（触发器自检的范围；清单外表不检查，T-T25 裁定 #4）
@@ -615,7 +617,10 @@ def _market_licence_tables(conn: Connection) -> list[str]:
 
 
 def _ingest_private_user_fk_drift(conn: Connection) -> list[tuple[str, int]]:
-    """T-A73 B2：ingest_private 里指向 users 的外键必须正好是允许集；多出即阻断（不计行，避免无 USAGE）。"""
+    """T-A73 B2：ingest_private→users 外键必须正好是允许集。
+
+    多出即阻断；不计行数，避免 aia_maint 无 schema USAGE 时 permission denied。
+    """
     cols = conn.execute(
         text(
             "SELECT n.nspname || '.' || c.relname, a.attname "
@@ -884,6 +889,11 @@ def build_plan(conn: Connection, uid: uuid.UUID) -> Plan:
     blockers += _ingest_private_user_fk_drift(conn)
     triggers = unknown_triggers(conn, _scope_tables(market))
     pending, pending_readable = _read_pending(conn)
+    gate = conn.execute(
+        text("SELECT bindings, scopes FROM ops.gate_user_refs(:uid)"), {"uid": uid}
+    ).one()
+    counts.append(("gate", "ops.gate_user_refs.bindings", int(gate.bindings)))
+    counts.append(("gate", "ops.gate_user_refs.scopes", int(gate.scopes)))
     return Plan(
         user_id=uid,
         username=user.username,
@@ -901,6 +911,8 @@ def build_plan(conn: Connection, uid: uuid.UUID) -> Plan:
         pending=pending,
         pending_readable=pending_readable,
         unknown_triggers=triggers,
+        gate_bindings=int(gate.bindings),
+        gate_scopes=int(gate.scopes),
     )
 
 
@@ -948,7 +960,7 @@ def run_purge(conn: Connection, plan: Plan) -> dict[str, int]:
     for t in _market_licence_tables(conn):
         n = conn.execute(text(f"DELETE FROM {t} WHERE source_licence_id = ANY (:lids)"), p).rowcount
         add(f"delete:{t}", n)
-    for st in (*STEPS, SNAPSHOTS_STEP, LLM_DELETE, LICENCES_STEP):
+    for st in (*STEPS, SNAPSHOTS_STEP, LLM_DELETE):
         if st.action == "delete":
             n = conn.execute(text(f"DELETE FROM {st.table} WHERE {st.where}"), p).rowcount
             add(f"delete:{st.table}", n)
@@ -958,6 +970,20 @@ def run_purge(conn: Connection, plan: Plan) -> dict[str, int]:
             ).rowcount
             if n:
                 add(f"{st.action}:{st.name}", n)
+    # T-A73 B4: purge gate facts before deleting licence rows (0029 trigger leaves orphan scopes).
+    gate = conn.execute(
+        text("SELECT bindings, scopes FROM ops.purge_user_gate_facts(:uid)"), {"uid": uid}
+    ).one()
+    add("delete:ingest_private.mairui_gate_bindings", int(gate.bindings))
+    add("delete:ingest_private.mairui_gate_scopes", int(gate.scopes))
+    st = LICENCES_STEP
+    if st.action == "delete":
+        n = conn.execute(text(f"DELETE FROM {st.table} WHERE {st.where}"), p).rowcount
+        add(f"delete:{st.table}", n)
+    else:
+        n = conn.execute(text(f"UPDATE {st.table} SET {st.set_sql} WHERE {st.where}"), p).rowcount
+        if n:
+            add(f"{st.action}:{st.name}", n)
     n = conn.execute(text("DELETE FROM app.users WHERE id = :uid"), {"uid": uid}).rowcount
     add("delete:app.users", n)
     conn.execute(

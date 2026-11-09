@@ -1,0 +1,17 @@
+# T-B99e｜北京时间2026-11-09｜待RV-09
+- 代码9aa119f0ce1bc42a83c3321797b8619e231dc1a3；基线e3c990b，分支tb-T-B99e；仅本地，未合回/推送/部署。
+- 发送/STOP/全局暂停共用永久POSIX flock；检查至实际HTTP始终在同一临界区，无TTL，不替换锁inode。
+- 四入口：名单、验证、T-B05、T-B86；最终transport之后注入写入竞争，另有独立进程真实kernel flock竞争；写入方先赢则0 HTTP。
+- 新ingest_control CLI统一停机写入口；PAUSED先fsync镜像再写Redis，恢复先删Redis再删镜像；同线程重入及非POSIX真实控制拒绝。
+- 0029为单一head：私有DB关联tag、scope历史、删除触发器；DELETE/替换与缩短保留同事务，回滚一起恢复；非冷却即删、非空截止沿用、空截止冷却最多24h。
+- 所有期限判定用数据库now()；心跳在replay/暂停/无共享目录时也清到期tag；API无需共享目录/运行时密钥。
+- RLS在真实广授权脚本重跑后仍拒API读取tag；DAL拒owner/API等非aia_ingest身份；API密文读取负例通过，未使用属主重试业务路径。
+- R3A：A停不阻B；删除A后B正常、旧A拒发；同人同证书有效tombstone恢复halt，换证/逾期不恢复；公共STOP及未知scope继续全局闭锁，历史文件保留。
+- 队列逐证书v2 group每tick最多20条、全部逐条处理/ACK；19条历史+本人意图同tick，25条分20+5处理且只1 HTTP，pending=0；原v1事实不删。
+- Linux专用PG/Redis合成定点41 passed（含7项兼容用例），Windows控制权限负例2 passed；不跑全量/coverage，不用真实用户样本。
+- 受影响模块ruff通过；common既存53/当前53/新增0；app-only镜像network=none导入通过；17源码/说明文件secret_scan阻断0/警告0，diff --check通过。
+- 原始日志：F:/workspace/team/reports/T-B99e-atomic-tests.log、T-B99e-windows-tests.log、T-B99e-secret-scan.log；专用PG/Redis及PG匿名卷已按标签核对清理。
+- 部署前须复核0029/私有角色、同UID同物理POSIX目录/同锁inode、统一停机CLI；旧直接Redis/touch写法不参与协议，不能据此验收同步。
+- 独立探针须同版SQLAlchemy/psycopg/requests和显式MAIRUI_SHARED_DATABASE_URL_FILE；无参考/权限即闭锁；旧SQLite/指纹缓存不自动迁移，未知旧闩锁仍停机。
+- 本单麦蕊0调用，未接用户库/生产Redis，未解STOP、G7或部署；T-B05第1段已因共享门禁接线缺失停跑，未用未审代码绕行。
+- 申请新任务：请编排者转RV-09；通过后由运维接0029、私有数据库参考及统一写入口，再另派真实探针/名单验收。

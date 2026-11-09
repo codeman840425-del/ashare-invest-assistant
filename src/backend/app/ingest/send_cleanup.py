@@ -28,6 +28,10 @@ class CleanupPendingError(GateClosedError):
     pass
 
 
+class CleanupProofError(CleanupPendingError):
+    """Known-unsent proof was not durably created; preserve busy, never refund blindly."""
+
+
 class UnsentCleanup:
     def __init__(self, root: Path, request_id: uuid.UUID) -> None:
         self.root, self.request_id = root, request_id
@@ -70,8 +74,13 @@ class UnsentCleanup:
                 else None
             ),
         }
-        if not self.exists():
-            _write(self.path, value, exclusive=True)
+        try:
+            if not self.exists():
+                _write(self.path, value, exclusive=True)
+        except OSError:
+            # Preserve the cleanup classification across the dispatch context.
+            # No refund/ACK is safe without a valid durable proof.
+            raise CleanupProofError("unsent_cleanup_proof_unavailable") from None
 
     def run(self, engine: Engine, *, refund: Callable[[], None] | None = None) -> None:
         if not send_control.owned(self.root):

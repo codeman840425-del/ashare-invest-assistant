@@ -9,7 +9,9 @@ from typing import Any
 
 
 class ResponseBodyError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def sniff_envelope(prefix: str) -> str | None:
@@ -67,22 +69,24 @@ def sniff_envelope(prefix: str) -> str | None:
 def read_body(response: http.client.HTTPResponse) -> Any:  # noqa: ANN401 - vendor JSON shape
     maximum, head_size, sniff_size = 16 * 1024 * 1024, 4096, 64 * 1024
     payload = bytearray()
+    total = 0
     read_chunk = getattr(response, "read1", None)
     while True:
-        chunk = (
-            read_chunk(min(head_size, maximum + 1 - len(payload)))
-            if read_chunk is not None
-            else response.read(maximum + 1)
-        )
+        count = min(head_size, maximum + 1 - total)
+        chunk = read_chunk(count) if read_chunk is not None else response.read(maximum + 1 - total)
+        total += len(chunk)  # Whitespace consumes the same transport budget as JSON.
         content = chunk.lstrip(b" \t\r\n") if not payload else chunk
         before = len(payload)
         payload.extend(content)
+        if total > maximum:
+            # Never require the oversized JSON to finish parsing. Retain the
+            # already-read control envelope even after the normal sniff window.
+            code = sniff_envelope(bytes(payload[:sniff_size]).decode("utf-8", errors="replace"))
+            raise ResponseBodyError("response_too_large", code=code)
         if before < sniff_size and (
             code := sniff_envelope(bytes(payload[:sniff_size]).decode("utf-8", errors="replace"))
         ):
             return code
-        if len(payload) > maximum:
-            raise ResponseBodyError("response_too_large")
         if not chunk or read_chunk is None:
             break
     raw = bytes(payload).strip()

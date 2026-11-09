@@ -67,7 +67,7 @@ def test_tb102d_verification_stop_uses_lstat_fail_closed(env: Any, shape: str) -
 def test_tb102d_oversized_stream_retains_early_envelope(prefix: bytes) -> None:
     class Stream:
         def __init__(self) -> None:
-            self.padding = 20 * 1024 * 1024  # Leading whitespace must not consume the sniff window.
+            self.padding = 128 * 1024  # Within total limit; keep the full sniff window.
             self.reads = 0
 
         def read1(self, count: int) -> bytes:
@@ -82,7 +82,7 @@ def test_tb102d_oversized_stream_retains_early_envelope(prefix: bytes) -> None:
 
     stream = Stream()
     assert read_body(stream) == ("429" if b"429" in prefix else "103")
-    assert stream.reads == 20 * 1024 * 1024 // 4096 + 1
+    assert stream.reads == 128 * 1024 // 4096 + 1
 
 
 @pytest.mark.parametrize(

@@ -39,7 +39,7 @@ from app.ingest.send_control import (
     transport,
 )
 from app.ingest.send_governance import LIST_PATHS, Governance, Permit, expected_egress
-from app.ingest.send_response import read_body
+from app.ingest.send_response import ResponseBodyError, read_body
 from app.ingest.send_state import MinuteLedger
 from app.ingest.shared_gate import (
     GateClosedError,
@@ -104,6 +104,14 @@ def wire(path: str, secret: str) -> tuple[int, object]:
         if response.status in (103, 429):
             return response.status, None
         return response.status, read_body(response)
+    except ResponseBodyError as exc:
+        if exc.code is not None:
+            # The oversized response is a failure, but its limit evidence must
+            # survive the business error while the dispatch mutex is still held.
+            _write_stop_unlocked(
+                (gate.governance.root if isinstance(gate, Permit) else gate.root) / "STOP"
+            )
+        raise DailyHaltError("transport_or_response_failed_no_retry") from None
     except Exception:  # noqa: BLE001 - sanitize upstream/credential exceptions, never log them
         raise DailyHaltError("transport_or_response_failed_no_retry") from None
     finally:
@@ -244,13 +252,6 @@ def process(
 ) -> str:
     if os.environ.get("MAIRUI_MODE", "replay") != "live" or live_budget_issue():
         return "live_transport_closed"
-    if grant is None or read_grant() != grant:
-        return "authorization_unavailable"
-    if settings is None:
-        from app.config import get_settings
-
-        settings = get_settings()
-    policy = settings.business.ingest.licences.product_daily
     identity = None
     secret = None
     active_permit: Permit | None = None
@@ -271,7 +272,6 @@ def process(
             summaries = list(b.datasets or [])
             completed = [row["dataset"] for row in summaries if row.get("status") == "ok"]
             issue = None
-            current_grant = read_grant()
             now = clock().astimezone(BEIJING)
             if (
                 clock() >= b.deadline_at
@@ -281,7 +281,8 @@ def process(
             ):
                 issue = "daily_window_expired"
             elif (
-                current_grant != grant
+                grant is None
+                or read_grant() != grant
                 or grant.digest != p.stats.get("receipt_digest")
                 or grant.licence_id != b.source_licence_id
                 or not eligible(conn, grant, clock())
@@ -300,6 +301,13 @@ def process(
                     )
                 )
                 return outcome
+            if grant is None:
+                raise DailyHaltError("authorization_unavailable")
+            if settings is None:
+                from app.config import get_settings
+
+                settings = get_settings()
+            policy = settings.business.ingest.licences.product_daily
             known: dict[str, list[str]] = {}
             for code in conn.execute(select(securities.c.code)).scalars():
                 known.setdefault(code[:6], []).append(code)

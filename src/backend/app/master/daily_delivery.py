@@ -183,20 +183,10 @@ def publish_pending(
     if live_budget_issue():
         return 0
     with engine.begin() as conn:
-        # Lock contention must not leave a never-attempted batch queued past midnight.
-        unattempted = select(master_runs.c.id).where(
-            master_runs.c.stats["task"].astext == KIND,
-            master_runs.c.stats["attempted"] == [],
-        )
-        conn.execute(
-            update(batches)
-            .where(
-                batches.c.master_run_id.in_(unattempted),
-                batches.c.status == "requested",
-                batches.c.deadline_at <= (now or dt.datetime.now(dt.UTC)),
-            )
-            .values(status="expired", error_code="deadline_exceeded")
-        )
+        # Republish every requested batch, including partial/attempted and overdue
+        # batches. Ingest must recover known-unsent cleanup BEFORE adjudicating
+        # expiry or a missing receipt; worker-side finalization could skip that
+        # recovery and ACK/apply a batch with stranded file reservations.
         pending = conn.execute(
             select(batches.c.id, batches.c.status)
             .join(master_runs, master_runs.c.id == batches.c.master_run_id)

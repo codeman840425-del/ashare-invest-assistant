@@ -156,31 +156,33 @@ def critical(root: Path, *, blocking: bool = True) -> Iterator[None]:
         raise GateClosedError("shared_control_reentry_refused")
     fd = None
     try:
-        fd = os.open(root / "send-control.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-        info = os.fstat(fd)
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_nlink != 1
-            or stat.S_IMODE(info.st_mode) != 0o600
-            or info.st_uid != os.geteuid()
-        ):
-            raise GateClosedError("shared_control_private_required")
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
-        except BlockingIOError:
-            logging.getLogger(__name__).info(
-                'send_control {"code":"shared_control_busy","would_block":true}'
-            )
-            raise GateClosedError("shared_control_busy") from None
-        current = (root / "send-control.lock").lstat()
-        if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
-            raise GateClosedError("shared_control_replaced")
-        _local.owner = (os.getpid(), name)
-        _local.wire_started = False
-        _sync_directory(root)
+            fd = os.open(root / "send-control.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            info = os.fstat(fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.geteuid()
+            ):
+                raise GateClosedError("shared_control_private_required")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            except BlockingIOError:
+                logging.getLogger(__name__).info(
+                    'send_control {"code":"shared_control_busy","would_block":true}'
+                )
+                raise GateClosedError("shared_control_busy") from None
+            current = (root / "send-control.lock").lstat()
+            if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+                raise GateClosedError("shared_control_replaced")
+            _local.owner = (os.getpid(), name)
+            _local.wire_started = False
+            _sync_directory(root)
+        except OSError:
+            raise GateClosedError("shared_control_unavailable") from None
+        # Caller failures belong to their operation, not mutex acquisition.
         yield
-    except OSError:
-        raise GateClosedError("shared_control_unavailable") from None
     finally:
         if fd is not None:
             if getattr(_local, "owner", None) == (os.getpid(), name):

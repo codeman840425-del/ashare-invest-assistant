@@ -11,7 +11,6 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
-import { ROUTE_PENDING_TEXT } from '../api/errorPolicy';
 import { splitHighlight } from '../lib/searchText';
 import { server } from '../mocks/server';
 import { mockLoginAs } from '../mocks/session';
@@ -102,20 +101,26 @@ describe('② 命中高亮', () => {
   });
 });
 
-describe('③ T13 详情页：路由未实现 404 → 「功能开发中」，不白屏', () => {
+describe('③ T13 详情页（T-F34 回改：后端已补详情路由，裸 404 = 证券不存在）', { timeout: 20_000 }, () => {
   beforeEach(() => mockLoginAs('demo_user'));
   const bare404 = (shape: 'envelope' | 'fastapi') =>
     shape === 'envelope'
       ? HttpResponse.json({ error: { code: 'NOT_FOUND', message: '资源不存在', details: null, request_id: 'r' } }, { status: 404 })
       : HttpResponse.json({ detail: 'Not Found' }, { status: 404 });
 
-  it.each([[['envelope']], [['fastapi']]] as const)('裸 404（%s）→ route-pending 空态，保留代码，无报错堆栈', async (shape) => {
-    server.use(http.get(`${API}/securities/:code`, () => bare404(shape[0] as 'envelope' | 'fastapi')));
-    renderAt('/stocks/600000.SH');
-    const el = await screen.findByTestId('route-pending', {}, { timeout: 5000 });
-    expect(el).toHaveTextContent(ROUTE_PENDING_TEXT);
+  it('裸 404（NOT_FOUND 信封）→ 资源 404「未找到该证券」，不再显示「功能开发中」', async () => {
+    server.use(http.get(`${API}/securities/:code`, () => bare404('envelope')));
+    renderAt('/stocks/999999.SH');
+    expect(await screen.findByText('未找到该证券', {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByTestId('stock-page')).toBeInTheDocument(); // 不白屏
-    expect(document.querySelector('.error-box')).toBeNull(); // 不显示错误框/堆栈
+    expect(screen.queryByTestId('route-pending')).toBeNull();
+    expect(document.querySelector('.error-box')).toBeNull();
+  });
+  it('裸 404（FastAPI 默认体）→ 同样按资源 404', async () => {
+    server.use(http.get(`${API}/securities/:code`, () => bare404('fastapi')));
+    renderAt('/stocks/999999.SH');
+    expect(await screen.findByText('未找到该证券', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.queryByTestId('route-pending')).toBeNull();
   });
 
   it('北交所旧代码 404（details.superseded_by）→ 仍是资源 404 原文案', async () => {

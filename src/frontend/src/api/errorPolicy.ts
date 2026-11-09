@@ -116,14 +116,21 @@ export function errorText(e: unknown): string {
  * 带 account_id / security_code 的请求可能因归属或证券不存在而 404（契约 §7.2、#27），一律按原文案处理（保守）。
  * 非信封的 404（如 FastAPI 默认 {"detail":"Not Found"} → HTTP_ERROR）在这些路径上同样算路由不存在。
  *
- * T-F33（T13 已知问题）：`GET /securities/{code}` 详情路由本版本未实现（后端只注册了 /search 与 /?q= 别名），
- * 未实现时同样返回 404 NOT_FOUND 信封，与“证券不存在”无法区分。前端在 StockPage 用 404 响应是否有
- * `details.superseded_by`（契约 §7.3：北交所旧代码→404 带该键）区分：带键的是真实“资源 404”，不带键的按
- * “功能开发中”展示——搜索命中的证券必然存在（主数据来自交易所列表），裸 404 只可能是路由未实现。
+ * T-F33（T13 已知问题）：`GET /securities/{code}` 详情路由当时未实现，与“证券不存在”同形无法区分。
+ * T-F34：后端已补该详情路由（T-B100，src/backend/app/api/v1/securities.py `@router.get("/{code}")`），StockPage 改回
+ * 资源 404 口径（裸 404 = 证券不存在）。**仍在建设中**的是以下个股子资源 / 聚合端点（后端 v1 尚无对应路由，
+ * 未注册路由同样返回 NOT_FOUND 信封）：`/securities/{code}/bars|financials|fund-flows|factors|announcements`、
+ * `/quotes`、`/market/sector-flows`。它们带 {code} 或是聚合端点，按契约会返回资源 404 的路径一律按原文案，
+ * 这里只登记“不带 query 参数即不可能 404”的聚合端点，避免把真实的资源 404 误判为开发中。
  */
 export const ROUTE_PENDING_PATHS: readonly string[] = [
   '/today', '/daily-reports', '/notifications', '/notifications/unread-count', '/stream', '/suggestions', '/signals',
   '/candidate-signals', '/terminal', '/strategies', '/strategy-instances', '/plans', '/market/overview',
+  '/quotes', '/market/sector-flows',
+];
+/** 仍在建设中、但路径带 {code} 段的个股子资源：只在 StockTabs / 图表内展示“功能开发中”，不进入通用判定 */
+export const STOCK_SUB_PATHS_PENDING: readonly RegExp[] = [
+  /^\/securities\/[^/]+\/(bars|financials|fund-flows|factors|announcements)$/,
 ];
 export const ROUTE_PENDING_TEXT = '功能开发中，即将上线';
 export function isRoutePending(e: unknown): boolean {
@@ -133,6 +140,14 @@ export function isRoutePending(e: unknown): boolean {
   const path = u.pathname.replace(/^\/api\/v1/, '');
   if (!ROUTE_PENDING_PATHS.includes(path)) return false;
   return !u.searchParams.has('account_id') && !u.searchParams.has('security_code');
+}
+
+/** T-F34：个股子资源（bars/financials/fund-flows/factors/announcements）路由尚未实现时的 404，展示“功能开发中” */
+export function isStockSubPending(e: unknown): boolean {
+  if (!(e instanceof ApiError) || e.status !== 404 || !e.url) return false;
+  if (e.code !== 'NOT_FOUND' && e.code !== 'HTTP_ERROR') return false;
+  const path = new URL(e.url, 'http://x').pathname.replace(/^\/api\/v1/, '');
+  return STOCK_SUB_PATHS_PENDING.some((re) => re.test(path));
 }
 
 export type GlobalErrorAction = 'login' | 'csrf' | 'log' | 'none';

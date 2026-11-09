@@ -2,7 +2,7 @@
   "task": "P2N-09",
   "schema_version": 1,
   "fictitious": true,
-  "note": "Explanation-chain golden draft formalized under T-R31; independent offline oracle. Blocked cases need real env per draft §5. Does not replace R09 text guards.",
+  "note": "Explanation-chain golden under T-R31/T-R33; independent offline oracle. C12/C13/C14/C21 ready per T-A71 offline projection/invariant. Does not replace R09 text guards. Real usage endpoint/cache store are backend follow-ups, not counted in 26.",
   "disclaimer_sha256": "38728c3d2a1095a48066761eaad9b98a392e784b15125312c8cd3f3e55ea349d",
   "disclaimer_text": "本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。",
   "cases": [
@@ -455,65 +455,70 @@
     },
     {
       "id": "C12",
-      "case_status": "blocked",
+      "case_status": "ready",
       "kind": "auth_leak",
       "fictitious": true,
-      "block_reason": "needs_real_admin_session_or_usage_endpoint",
       "input": {
         "viewer_role": "user",
         "usage_page_available": false,
-        "llm_call_id": "call-auth"
+        "llm_call_id": "call-auth",
+        "render": {
+          "show_llm_call_id": false,
+          "href": null
+        }
       },
       "candidate": {
         "pass": true
       },
       "expected": {
-        "verdict": "blocked",
-        "findings": [
-          "blocked_pending_real_env"
-        ]
+        "verdict": "accepted",
+        "findings": []
       }
     },
     {
       "id": "C13",
-      "case_status": "blocked",
+      "case_status": "ready",
       "kind": "auth_plain",
       "fictitious": true,
-      "block_reason": "needs_real_admin_session_or_usage_endpoint",
       "input": {
         "viewer_role": "admin",
         "usage_page_available": false,
-        "llm_call_id": "call-auth"
+        "llm_call_id": "call-auth",
+        "render": {
+          "show_llm_call_id": true,
+          "href": null,
+          "id_text": "call-auth"
+        }
       },
       "candidate": {
         "pass": true
       },
       "expected": {
-        "verdict": "blocked",
-        "findings": [
-          "blocked_pending_real_env"
-        ]
+        "verdict": "accepted",
+        "findings": []
       }
     },
     {
       "id": "C14",
-      "case_status": "blocked",
+      "case_status": "ready",
       "kind": "auth_link",
       "fictitious": true,
-      "block_reason": "needs_real_admin_session_or_usage_endpoint",
       "input": {
         "viewer_role": "admin",
         "usage_page_available": true,
-        "llm_call_id": "call-auth"
+        "llm_call_id": "call/auth space",
+        "render": {
+          "show_llm_call_id": true,
+          "href": "/admin/llm/usage?call_id=call%2Fauth%20space",
+          "id_text": "call/auth space"
+        }
       },
       "candidate": {
         "pass": true
       },
       "expected": {
-        "verdict": "blocked",
-        "findings": [
-          "blocked_pending_real_env"
-        ]
+        "verdict": "accepted",
+        "findings": []
       }
     },
     {
@@ -692,24 +697,49 @@
     },
     {
       "id": "C21",
-      "case_status": "blocked",
+      "case_status": "ready",
       "kind": "cache",
       "fictitious": true,
-      "block_reason": "needs_real_cache_store",
       "input": {
         "chain": {
           "cache_hit": true,
           "invoked": false
+        },
+        "source_explanation": {
+          "source": "llm",
+          "validation_status": "passed",
+          "fallback_reason": null,
+          "llm_call_id": "call-c21-orig",
+          "paragraphs": [
+            {
+              "text": "缓存复用正文 [E1]",
+              "cites": [
+                "E1"
+              ]
+            }
+          ]
+        },
+        "explanation": {
+          "source": "llm",
+          "validation_status": "passed",
+          "fallback_reason": null,
+          "llm_call_id": "call-c21-orig",
+          "paragraphs": [
+            {
+              "text": "缓存复用正文 [E1]",
+              "cites": [
+                "E1"
+              ]
+            }
+          ]
         }
       },
       "candidate": {
         "pass": true
       },
       "expected": {
-        "verdict": "blocked",
-        "findings": [
-          "blocked_pending_real_env"
-        ]
+        "verdict": "accepted",
+        "findings": []
       }
     },
     {
@@ -857,8 +887,8 @@
     }
   ],
   "counts": {
-    "ready": 22,
-    "blocked": 4,
+    "ready": 26,
+    "blocked": 0,
     "total": 26
   }
 }

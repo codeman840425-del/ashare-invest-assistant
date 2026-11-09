@@ -1,0 +1,2846 @@
+{
+  "schema_version": 1,
+  "list_version": 1,
+  "as_of": "2026-11-01",
+  "sources": {
+    "draft": "team/reports/T-R12ef-lists.md",
+    "a_h_count": 211,
+    "a_b_count": 72,
+    "discrepancy_211_209_resolved": false,
+    "union_complete": false,
+    "limitations": "只有211对草稿，没有209家逐项清单；上市生效日期缺证，待核实草稿仅放sources.pending_records，不作为正式名单记录。",
+    "pending_records": [
+      {
+        "code": "000002.SZ",
+        "class": "H",
+        "paired_code": "02202",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000039.SZ",
+        "class": "H",
+        "paired_code": "02039",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000063.SZ",
+        "class": "H",
+        "paired_code": "00763",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000157.SZ",
+        "class": "H",
+        "paired_code": "01157",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000166.SZ",
+        "class": "H",
+        "paired_code": "06806",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000333.SZ",
+        "class": "H",
+        "paired_code": "00300",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000338.SZ",
+        "class": "H",
+        "paired_code": "02338",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000488.SZ",
+        "class": "H",
+        "paired_code": "01812",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000513.SZ",
+        "class": "H",
+        "paired_code": "01513",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000756.SZ",
+        "class": "H",
+        "paired_code": "00719",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000776.SZ",
+        "class": "H",
+        "paired_code": "01776",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000898.SZ",
+        "class": "H",
+        "paired_code": "00347",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000921.SZ",
+        "class": "H",
+        "paired_code": "00921",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "001236.SZ",
+        "class": "H",
+        "paired_code": "03678",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "001246.SZ",
+        "class": "H",
+        "paired_code": "02245",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "001289.SZ",
+        "class": "H",
+        "paired_code": "00916",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "001389.SZ",
+        "class": "H",
+        "paired_code": "01989",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002050.SZ",
+        "class": "H",
+        "paired_code": "02050",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002130.SZ",
+        "class": "H",
+        "paired_code": "09981",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002202.SZ",
+        "class": "H",
+        "paired_code": "02208",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002352.SZ",
+        "class": "H",
+        "paired_code": "06936",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002384.SZ",
+        "class": "H",
+        "paired_code": "02384",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002399.SZ",
+        "class": "H",
+        "paired_code": "09989",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002460.SZ",
+        "class": "H",
+        "paired_code": "01772",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002466.SZ",
+        "class": "H",
+        "paired_code": "09696",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002475.SZ",
+        "class": "H",
+        "paired_code": "02475",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002487.SZ",
+        "class": "H",
+        "paired_code": "01081",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002490.SZ",
+        "class": "H",
+        "paired_code": "00568",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002594.SZ",
+        "class": "H",
+        "paired_code": "01211",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002600.SZ",
+        "class": "H",
+        "paired_code": "01688",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002672.SZ",
+        "class": "H",
+        "paired_code": "00895",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002703.SZ",
+        "class": "H",
+        "paired_code": "01057",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002714.SZ",
+        "class": "H",
+        "paired_code": "02714",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002747.SZ",
+        "class": "H",
+        "paired_code": "02715",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002768.SZ",
+        "class": "H",
+        "paired_code": "02768",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002803.SZ",
+        "class": "H",
+        "paired_code": "02603",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002821.SZ",
+        "class": "H",
+        "paired_code": "06821",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002865.SZ",
+        "class": "H",
+        "paired_code": "02865",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002881.SZ",
+        "class": "H",
+        "paired_code": "03268",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002936.SZ",
+        "class": "H",
+        "paired_code": "06196",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "002948.SZ",
+        "class": "H",
+        "paired_code": "03866",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "003021.SZ",
+        "class": "H",
+        "paired_code": "02692",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "003816.SZ",
+        "class": "H",
+        "paired_code": "01816",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300077.SZ",
+        "class": "H",
+        "paired_code": "02701",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300223.SZ",
+        "class": "H",
+        "paired_code": "03223",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300308.SZ",
+        "class": "H",
+        "paired_code": "03308",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300347.SZ",
+        "class": "H",
+        "paired_code": "03347",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300408.SZ",
+        "class": "H",
+        "paired_code": "06951",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300433.SZ",
+        "class": "H",
+        "paired_code": "06613",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300450.SZ",
+        "class": "H",
+        "paired_code": "00470",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300476.SZ",
+        "class": "H",
+        "paired_code": "02476",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300568.SZ",
+        "class": "H",
+        "paired_code": "06067",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300638.SZ",
+        "class": "H",
+        "paired_code": "00638",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300661.SZ",
+        "class": "H",
+        "paired_code": "03661",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300748.SZ",
+        "class": "H",
+        "paired_code": "06680",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300750.SZ",
+        "class": "H",
+        "paired_code": "03750",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300757.SZ",
+        "class": "H",
+        "paired_code": "03757",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300759.SZ",
+        "class": "H",
+        "paired_code": "03759",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300866.SZ",
+        "class": "H",
+        "paired_code": "00668",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "300919.SZ",
+        "class": "H",
+        "paired_code": "02579",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "301087.SZ",
+        "class": "H",
+        "paired_code": "01187",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "301200.SZ",
+        "class": "H",
+        "paired_code": "03200",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "301308.SZ",
+        "class": "H",
+        "paired_code": "09976",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "301377.SZ",
+        "class": "H",
+        "paired_code": "01377",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600011.SH",
+        "class": "H",
+        "paired_code": "00902",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600012.SH",
+        "class": "H",
+        "paired_code": "00995",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600016.SH",
+        "class": "H",
+        "paired_code": "01988",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600026.SH",
+        "class": "H",
+        "paired_code": "01138",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600027.SH",
+        "class": "H",
+        "paired_code": "01071",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600028.SH",
+        "class": "H",
+        "paired_code": "00386",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600029.SH",
+        "class": "H",
+        "paired_code": "01055",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600030.SH",
+        "class": "H",
+        "paired_code": "06030",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600031.SH",
+        "class": "H",
+        "paired_code": "06031",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600036.SH",
+        "class": "H",
+        "paired_code": "03968",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600115.SH",
+        "class": "H",
+        "paired_code": "00670",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600188.SH",
+        "class": "H",
+        "paired_code": "01171",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600196.SH",
+        "class": "H",
+        "paired_code": "02196",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600276.SH",
+        "class": "H",
+        "paired_code": "01276",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600332.SH",
+        "class": "H",
+        "paired_code": "00874",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600362.SH",
+        "class": "H",
+        "paired_code": "00358",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600377.SH",
+        "class": "H",
+        "paired_code": "00177",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600547.SH",
+        "class": "H",
+        "paired_code": "01787",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600548.SH",
+        "class": "H",
+        "paired_code": "00548",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600585.SH",
+        "class": "H",
+        "paired_code": "00914",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600600.SH",
+        "class": "H",
+        "paired_code": "00168",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600635.SH",
+        "class": "H",
+        "paired_code": "01635",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600660.SH",
+        "class": "H",
+        "paired_code": "03606",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600685.SH",
+        "class": "H",
+        "paired_code": "00317",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600688.SH",
+        "class": "H",
+        "paired_code": "00338",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600690.SH",
+        "class": "H",
+        "paired_code": "06690",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600699.SH",
+        "class": "H",
+        "paired_code": "00699",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600775.SH",
+        "class": "H",
+        "paired_code": "00553",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600801.SH",
+        "class": "H",
+        "paired_code": "06655",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600808.SH",
+        "class": "H",
+        "paired_code": "00323",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600860.SH",
+        "class": "H",
+        "paired_code": "00187",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600871.SH",
+        "class": "H",
+        "paired_code": "01033",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600874.SH",
+        "class": "H",
+        "paired_code": "01065",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600875.SH",
+        "class": "H",
+        "paired_code": "01072",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600876.SH",
+        "class": "H",
+        "paired_code": "01108",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600938.SH",
+        "class": "H",
+        "paired_code": "00883",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600941.SH",
+        "class": "H",
+        "paired_code": "00941",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600956.SH",
+        "class": "H",
+        "paired_code": "00956",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600958.SH",
+        "class": "H",
+        "paired_code": "03958",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600988.SH",
+        "class": "H",
+        "paired_code": "06693",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600999.SH",
+        "class": "H",
+        "paired_code": "06099",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601005.SH",
+        "class": "H",
+        "paired_code": "01053",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601038.SH",
+        "class": "H",
+        "paired_code": "00038",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601066.SH",
+        "class": "H",
+        "paired_code": "06066",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601068.SH",
+        "class": "H",
+        "paired_code": "02068",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601077.SH",
+        "class": "H",
+        "paired_code": "03618",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601088.SH",
+        "class": "H",
+        "paired_code": "01088",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601107.SH",
+        "class": "H",
+        "paired_code": "00107",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601111.SH",
+        "class": "H",
+        "paired_code": "00753",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601127.SH",
+        "class": "H",
+        "paired_code": "09927",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601186.SH",
+        "class": "H",
+        "paired_code": "01186",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601211.SH",
+        "class": "H",
+        "paired_code": "02611",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601238.SH",
+        "class": "H",
+        "paired_code": "02238",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601288.SH",
+        "class": "H",
+        "paired_code": "01288",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601298.SH",
+        "class": "H",
+        "paired_code": "06198",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601318.SH",
+        "class": "H",
+        "paired_code": "02318",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601319.SH",
+        "class": "H",
+        "paired_code": "01339",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601326.SH",
+        "class": "H",
+        "paired_code": "03369",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601328.SH",
+        "class": "H",
+        "paired_code": "03328",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601330.SH",
+        "class": "H",
+        "paired_code": "01330",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601333.SH",
+        "class": "H",
+        "paired_code": "00525",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601336.SH",
+        "class": "H",
+        "paired_code": "01336",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601375.SH",
+        "class": "H",
+        "paired_code": "01375",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601390.SH",
+        "class": "H",
+        "paired_code": "00390",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601398.SH",
+        "class": "H",
+        "paired_code": "01398",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601456.SH",
+        "class": "H",
+        "paired_code": "01456",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601588.SH",
+        "class": "H",
+        "paired_code": "00588",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601598.SH",
+        "class": "H",
+        "paired_code": "00598",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601600.SH",
+        "class": "H",
+        "paired_code": "02600",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601601.SH",
+        "class": "H",
+        "paired_code": "02601",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601607.SH",
+        "class": "H",
+        "paired_code": "02607",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601618.SH",
+        "class": "H",
+        "paired_code": "01618",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601628.SH",
+        "class": "H",
+        "paired_code": "02628",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601633.SH",
+        "class": "H",
+        "paired_code": "02333",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601658.SH",
+        "class": "H",
+        "paired_code": "01658",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601678.SH",
+        "class": "H",
+        "paired_code": "06745",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601688.SH",
+        "class": "H",
+        "paired_code": "06886",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601717.SH",
+        "class": "H",
+        "paired_code": "00564",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601727.SH",
+        "class": "H",
+        "paired_code": "02727",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601728.SH",
+        "class": "H",
+        "paired_code": "00728",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601766.SH",
+        "class": "H",
+        "paired_code": "01766",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601788.SH",
+        "class": "H",
+        "paired_code": "06178",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601800.SH",
+        "class": "H",
+        "paired_code": "01800",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601808.SH",
+        "class": "H",
+        "paired_code": "02883",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601811.SH",
+        "class": "H",
+        "paired_code": "00811",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601818.SH",
+        "class": "H",
+        "paired_code": "06818",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601828.SH",
+        "class": "H",
+        "paired_code": "01528",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601857.SH",
+        "class": "H",
+        "paired_code": "00857",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601865.SH",
+        "class": "H",
+        "paired_code": "06865",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601866.SH",
+        "class": "H",
+        "paired_code": "02866",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601868.SH",
+        "class": "H",
+        "paired_code": "03996",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601869.SH",
+        "class": "H",
+        "paired_code": "06869",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601880.SH",
+        "class": "H",
+        "paired_code": "02880",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601881.SH",
+        "class": "H",
+        "paired_code": "06881",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601888.SH",
+        "class": "H",
+        "paired_code": "01880",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601898.SH",
+        "class": "H",
+        "paired_code": "01898",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601899.SH",
+        "class": "H",
+        "paired_code": "02899",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601916.SH",
+        "class": "H",
+        "paired_code": "02016",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601919.SH",
+        "class": "H",
+        "paired_code": "01919",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601939.SH",
+        "class": "H",
+        "paired_code": "00939",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601963.SH",
+        "class": "H",
+        "paired_code": "01963",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601988.SH",
+        "class": "H",
+        "paired_code": "03988",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601991.SH",
+        "class": "H",
+        "paired_code": "00991",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601992.SH",
+        "class": "H",
+        "paired_code": "02009",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601995.SH",
+        "class": "H",
+        "paired_code": "03908",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "601998.SH",
+        "class": "H",
+        "paired_code": "00998",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603083.SH",
+        "class": "H",
+        "paired_code": "06166",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603093.SH",
+        "class": "H",
+        "paired_code": "02691",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603127.SH",
+        "class": "H",
+        "paired_code": "06127",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603228.SH",
+        "class": "H",
+        "paired_code": "03228",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603259.SH",
+        "class": "H",
+        "paired_code": "02359",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603288.SH",
+        "class": "H",
+        "paired_code": "03288",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603296.SH",
+        "class": "H",
+        "paired_code": "03296",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603341.SH",
+        "class": "H",
+        "paired_code": "09611",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603345.SH",
+        "class": "H",
+        "paired_code": "02648",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603501.SH",
+        "class": "H",
+        "paired_code": "00501",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603650.SH",
+        "class": "H",
+        "paired_code": "09607",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603906.SH",
+        "class": "H",
+        "paired_code": "02465",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603986.SH",
+        "class": "H",
+        "paired_code": "03986",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "603993.SH",
+        "class": "H",
+        "paired_code": "03993",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "605198.SH",
+        "class": "H",
+        "paired_code": "02218",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "605499.SH",
+        "class": "H",
+        "paired_code": "09980",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688008.SH",
+        "class": "H",
+        "paired_code": "06809",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688009.SH",
+        "class": "H",
+        "paired_code": "03969",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688031.SH",
+        "class": "H",
+        "paired_code": "06727",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688036.SH",
+        "class": "H",
+        "paired_code": "02636",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688052.SH",
+        "class": "H",
+        "paired_code": "02676",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688062.SH",
+        "class": "H",
+        "paired_code": "02493",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688180.SH",
+        "class": "H",
+        "paired_code": "01877",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688185.SH",
+        "class": "H",
+        "paired_code": "06185",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688187.SH",
+        "class": "H",
+        "paired_code": "03898",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688234.SH",
+        "class": "H",
+        "paired_code": "02631",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688235.SH",
+        "class": "H",
+        "paired_code": "06160",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688236.SH",
+        "class": "H",
+        "paired_code": "01858",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688249.SH",
+        "class": "H",
+        "paired_code": "02249",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688279.SH",
+        "class": "H",
+        "paired_code": "01304",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688331.SH",
+        "class": "H",
+        "paired_code": "09995",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688337.SH",
+        "class": "H",
+        "paired_code": "00537",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688339.SH",
+        "class": "H",
+        "paired_code": "02402",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688347.SH",
+        "class": "H",
+        "paired_code": "01347",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688366.SH",
+        "class": "H",
+        "paired_code": "06826",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688385.SH",
+        "class": "H",
+        "paired_code": "01385",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688428.SH",
+        "class": "H",
+        "paired_code": "09969",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688505.SH",
+        "class": "H",
+        "paired_code": "01349",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688630.SH",
+        "class": "H",
+        "paired_code": "09630",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688796.SH",
+        "class": "H",
+        "paired_code": "02315",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "688981.SH",
+        "class": "H",
+        "paired_code": "00981",
+        "paired_market": "HK",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 腾讯A_H 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000011.SZ",
+        "class": "B",
+        "paired_code": "200011",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000012.SZ",
+        "class": "B",
+        "paired_code": "200012",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000017.SZ",
+        "class": "B",
+        "paired_code": "200017",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000019.SZ",
+        "class": "B",
+        "paired_code": "200019",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000020.SZ",
+        "class": "B",
+        "paired_code": "200020",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000025.SZ",
+        "class": "B",
+        "paired_code": "200025",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000026.SZ",
+        "class": "B",
+        "paired_code": "200026",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000028.SZ",
+        "class": "B",
+        "paired_code": "200028",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000029.SZ",
+        "class": "B",
+        "paired_code": "200029",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000030.SZ",
+        "class": "B",
+        "paired_code": "200030",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000037.SZ",
+        "class": "B",
+        "paired_code": "200037",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000045.SZ",
+        "class": "B",
+        "paired_code": "200045",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000055.SZ",
+        "class": "B",
+        "paired_code": "200055",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000056.SZ",
+        "class": "B",
+        "paired_code": "200056",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000058.SZ",
+        "class": "B",
+        "paired_code": "200058",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000429.SZ",
+        "class": "B",
+        "paired_code": "200429",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000488.SZ",
+        "class": "B",
+        "paired_code": "200488",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000505.SZ",
+        "class": "B",
+        "paired_code": "200505",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000521.SZ",
+        "class": "B",
+        "paired_code": "200521",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000530.SZ",
+        "class": "B",
+        "paired_code": "200530",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000539.SZ",
+        "class": "B",
+        "paired_code": "200539",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000541.SZ",
+        "class": "B",
+        "paired_code": "200541",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000550.SZ",
+        "class": "B",
+        "paired_code": "200550",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000553.SZ",
+        "class": "B",
+        "paired_code": "200553",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000570.SZ",
+        "class": "B",
+        "paired_code": "200570",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000581.SZ",
+        "class": "B",
+        "paired_code": "200581",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000596.SZ",
+        "class": "B",
+        "paired_code": "200596",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000625.SZ",
+        "class": "B",
+        "paired_code": "200625",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000725.SZ",
+        "class": "B",
+        "paired_code": "200725",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000726.SZ",
+        "class": "B",
+        "paired_code": "200726",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000761.SZ",
+        "class": "B",
+        "paired_code": "200761",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "000869.SZ",
+        "class": "B",
+        "paired_code": "200869",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "001872.SZ",
+        "class": "B",
+        "paired_code": "201872",
+        "paired_market": "SZ",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600054.SH",
+        "class": "B",
+        "paired_code": "900942",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600094.SH",
+        "class": "B",
+        "paired_code": "900940",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600190.SH",
+        "class": "B",
+        "paired_code": "900952",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600221.SH",
+        "class": "B",
+        "paired_code": "900945",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600272.SH",
+        "class": "B",
+        "paired_code": "900943",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600295.SH",
+        "class": "B",
+        "paired_code": "900936",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600320.SH",
+        "class": "B",
+        "paired_code": "900947",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600602.SH",
+        "class": "B",
+        "paired_code": "900901",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600604.SH",
+        "class": "B",
+        "paired_code": "900902",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600610.SH",
+        "class": "B",
+        "paired_code": "900906",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600611.SH",
+        "class": "B",
+        "paired_code": "900903",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600612.SH",
+        "class": "B",
+        "paired_code": "900905",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600613.SH",
+        "class": "B",
+        "paired_code": "900904",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600617.SH",
+        "class": "B",
+        "paired_code": "900913",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600618.SH",
+        "class": "B",
+        "paired_code": "900908",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600619.SH",
+        "class": "B",
+        "paired_code": "900910",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600623.SH",
+        "class": "B",
+        "paired_code": "900909",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600639.SH",
+        "class": "B",
+        "paired_code": "900911",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600648.SH",
+        "class": "B",
+        "paired_code": "900912",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600650.SH",
+        "class": "B",
+        "paired_code": "900914",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600663.SH",
+        "class": "B",
+        "paired_code": "900932",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600679.SH",
+        "class": "B",
+        "paired_code": "900916",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600689.SH",
+        "class": "B",
+        "paired_code": "900922",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600698.SH",
+        "class": "B",
+        "paired_code": "900946",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600726.SH",
+        "class": "B",
+        "paired_code": "900937",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600751.SH",
+        "class": "B",
+        "paired_code": "900938",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600754.SH",
+        "class": "B",
+        "paired_code": "900934",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600776.SH",
+        "class": "B",
+        "paired_code": "900941",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600818.SH",
+        "class": "B",
+        "paired_code": "900915",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600819.SH",
+        "class": "B",
+        "paired_code": "900918",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600822.SH",
+        "class": "B",
+        "paired_code": "900927",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600827.SH",
+        "class": "B",
+        "paired_code": "900923",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600835.SH",
+        "class": "B",
+        "paired_code": "900925",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600841.SH",
+        "class": "B",
+        "paired_code": "900920",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600843.SH",
+        "class": "B",
+        "paired_code": "900924",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600844.SH",
+        "class": "B",
+        "paired_code": "900921",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600845.SH",
+        "class": "B",
+        "paired_code": "900926",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600848.SH",
+        "class": "B",
+        "paired_code": "900928",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      },
+      {
+        "code": "600851.SH",
+        "class": "B",
+        "paired_code": "900917",
+        "paired_market": "SH",
+        "effective_from": null,
+        "effective_to": null,
+        "source": "team/reports/T-R12ef-lists.md 证券之星AB 2026-11-01 MST",
+        "verified": false
+      }
+    ]
+  },
+  "records": []
+}

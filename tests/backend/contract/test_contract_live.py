@@ -14,8 +14,9 @@
 from __future__ import annotations
 
 import pytest
-import schemathesis
-from schemathesis.checks import not_a_server_error
+
+schemathesis = pytest.importorskip("schemathesis", reason="schemathesis 未安装，契约用例 skip（T-T35 收集容错）")
+from schemathesis.checks import not_a_server_error  # noqa: E402
 
 import r11_exceptions
 

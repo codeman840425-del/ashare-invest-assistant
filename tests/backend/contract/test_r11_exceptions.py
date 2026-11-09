@@ -18,18 +18,15 @@ from typing import Any
 
 import hypothesis
 import pytest
-import schemathesis
-from hypothesis import HealthCheck
-from schemathesis.core.failures import FailureGroup
+
+fastapi = pytest.importorskip("fastapi")
+schemathesis = pytest.importorskip("schemathesis", reason="schemathesis 未安装，契约用例 skip（T-T35 收集容错）")
+from hypothesis import HealthCheck  # noqa: E402
+from schemathesis.core.failures import FailureGroup  # noqa: E402
 
 import r11_exceptions as r11
 
 pytestmark = [pytest.mark.contract, pytest.mark.unit]
-
-fastapi = pytest.importorskip("fastapi")
-from fastapi import FastAPI  # noqa: E402
-from fastapi.responses import JSONResponse  # noqa: E402
-from pydantic import BaseModel  # noqa: E402
 
 ERR = {"description": "错误外壳", "content": {"application/json": {"schema": {
     "type": "object", "required": ["error"], "properties": {"error": {

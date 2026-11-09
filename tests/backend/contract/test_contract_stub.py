@@ -6,9 +6,10 @@ import re
 from pathlib import Path
 
 import pytest
-import schemathesis
-from schemathesis.core.failures import FailureGroup
-from schemathesis.openapi.checks import JsonSchemaError
+
+schemathesis = pytest.importorskip("schemathesis", reason="schemathesis 未安装，契约用例 skip（T-T35 收集容错）")
+from schemathesis.core.failures import FailureGroup  # noqa: E402
+from schemathesis.openapi.checks import JsonSchemaError  # noqa: E402
 
 from mock_app import STUB, make_app
 

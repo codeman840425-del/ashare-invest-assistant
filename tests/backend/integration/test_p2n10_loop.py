@@ -11,6 +11,7 @@ import datetime as dt
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -51,6 +52,10 @@ from sqlalchemy import create_engine, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 ROOT = Path(__file__).resolve().parents[3]
+# T-T35: importlib mode cannot import bare sibling modules; add this dir to sys.path.
+_INTEGRATION_DIR = Path(__file__).resolve().parent
+if str(_INTEGRATION_DIR) not in sys.path:
+    sys.path.insert(0, str(_INTEGRATION_DIR))
 INPUTS = json.loads((Path(__file__).parent / "fixtures/p2n10_inputs.json").read_text())
 F23 = dim.GROUPS["news"][
     0

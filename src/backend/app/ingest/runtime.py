@@ -1,7 +1,9 @@
-"""Optional IngestCore handle for the ingest worker heartbeat loop (T-B113).
+"""Optional IngestCore handle for the ingest worker heartbeat loop (T-B113 / T-B114).
 
-Wiring sets the core once; each heartbeat round calls :func:`tick_ingest_core`
-so pending IP-limit rewrites run even when the user never resets (T-A84 L-8).
+Ingest ``main`` wires the core once via ``set_ingest_core(IngestCore(..., engine=...))``
+(see ``app.workers.ingest.bootstrap_ingest_core``). Each heartbeat round calls
+:func:`tick_ingest_core` so pending IP-limit rewrites run even when the user never
+resets (T-A84 L-8).
 """
 
 from __future__ import annotations

@@ -10,6 +10,9 @@ T-A07（plan §2.1B 第 7 点、契约 v0.2.6）：生产与预发**不再使用
 每位用户的证书以 HPKE 密文存库。``ingest`` 发现环境变量 ``MAIRUI_LICENCE`` 非空即**拒绝启动**
 （退出码 78 = EX_CONFIG），且不输出它的值、长度或任何片段。只有本机实测脚本（``probes/``，
 不属于本服务）可以在用户本人电脑的 shell 中临时设置它。
+
+T-B114：启动时正式接线 ``set_ingest_core(IngestCore(..., engine=...))``，限流升级计数落库；
+``DATABASE_URL`` / engine 不可用则拒绝启动（与 L-1′ 一致）。
 """
 
 from __future__ import annotations
@@ -22,6 +25,8 @@ import time
 from collections.abc import Mapping
 
 import redis
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
 
 from app.config import Settings
 from app.version import APP_VERSION
@@ -44,6 +49,16 @@ MASTER_KEY_ENV = "APP_MASTER_KEY"
 MASTER_KEY_MESSAGE = (
     "ingest 拒绝启动：发现 APP_MASTER_KEY。主密钥只给 api / worker，ingest 不得派生任何 HMAC / "
     "签名密钥；请从 ingest 的 environment / secrets 中删除它"
+)
+
+#: T-B114：无 DATABASE_URL / engine 不可用时拒绝启动（退出码 78，与 L-1′ 一致）
+NO_DATABASE_URL_MESSAGE = (
+    "ingest 拒绝启动：DATABASE_URL 未设置。T-B114 起 IngestCore 必须持有真实 engine"
+    "（限流升级计数落库，与 L-1′ 一致）；请在 compose / env 中为 ingest 配置 DATABASE_URL"
+)
+ENGINE_UNAVAILABLE_MESSAGE = (
+    "ingest 拒绝启动：无法从 DATABASE_URL 取得可用 engine（连接探测失败）。"
+    "T-B114 / L-1′：无 engine 不得启动 ingest"
 )
 
 
@@ -73,6 +88,33 @@ def heartbeat_payload(now: float | None = None) -> str:
     )
 
 
+def bootstrap_ingest_core(settings: Settings) -> Engine:
+    """Construct ``IngestCore`` with a real engine and register it for the process.
+
+    T-B114 / L-1′: refuse (raise ``RuntimeError``) when ``DATABASE_URL`` is missing
+    or the engine cannot answer ``SELECT 1``. Call once from ingest ``main`` before
+    the heartbeat loop. Returns the shared engine (do not dispose while the core
+    is wired).
+    """
+    from app.db.engine import engine_for
+    from app.ingest.core import IngestCore
+    from app.ingest.runtime import set_ingest_core
+
+    if settings.database_url is None:
+        raise RuntimeError(NO_DATABASE_URL_MESSAGE)
+
+    engine = engine_for(settings.database_url.get_secret_value())
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001  surface as start refusal, not crash traceback path
+        raise RuntimeError(f"{ENGINE_UNAVAILABLE_MESSAGE}: {type(exc).__name__}") from exc
+
+    core = IngestCore(cfg=settings.business.ingest.licences, engine=engine)
+    set_ingest_core(core)
+    return engine
+
+
 def write_heartbeat(settings: Settings) -> None:
     if not settings.redis_url:
         raise RuntimeError("REDIS_URL 未设置")
@@ -85,6 +127,7 @@ def write_heartbeat(settings: Settings) -> None:
         client.set(settings.ingest_heartbeat_key, heartbeat_payload(), ex=hb.ttl_s)
         from app.db.engine import engine_for
         from app.ingest.daily_lists import tick
+        from app.ingest.runtime import get_ingest_core, tick_ingest_core
 
         # No live I/O is possible without the operator receipt; absent receipt
         # does not load the HPKE vault. Existing heartbeat remains available.
@@ -98,16 +141,20 @@ def write_heartbeat(settings: Settings) -> None:
                 time.sleep(duration)
                 remaining -= duration
 
-        if settings.database_url is not None and not client.exists(settings.ingest_paused_key):
-            engine = engine_for(settings.database_url.get_secret_value())
-            try:
-                tick(engine, client, pause=heartbeat_wait)
-            finally:
-                engine.dispose()
-        # T-B113 / T-A84: once IngestCore is wired, every heartbeat round must tick it
-        # (pending IP-limit flush). No-op until set_ingest_core(...).
-        from app.ingest.runtime import tick_ingest_core
-
+        # Prefer the process-lifetime engine from bootstrap (T-B114). Do not dispose
+        # a shared engine_for handle — that would break IngestCore mid-flight.
+        core = get_ingest_core()
+        shared_engine = core.engine if core is not None else None
+        if not client.exists(settings.ingest_paused_key):
+            if shared_engine is not None:
+                tick(shared_engine, client, pause=heartbeat_wait)
+            elif settings.database_url is not None:
+                engine = engine_for(settings.database_url.get_secret_value())
+                try:
+                    tick(engine, client, pause=heartbeat_wait)
+                finally:
+                    engine.dispose()
+        # T-B113 / T-A84: every heartbeat round must tick IngestCore (pending IP-limit flush).
         tick_ingest_core()
     finally:
         client.close()
@@ -125,7 +172,15 @@ def main() -> int:
     from app.config import get_settings
 
     # 主密钥若来自其他配置来源（secret 文件等），Settings 校验同样拒绝（SERVICE_NAME=ingest）
-    interval = get_settings().business.ingest.heartbeat.interval_s
+    settings = get_settings()
+    # T-B114: wire IngestCore with real engine before the heartbeat loop.
+    try:
+        bootstrap_ingest_core(settings)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_LEGACY_LICENCE
+
+    interval = settings.business.ingest.heartbeat.interval_s
     return run("ingest", tick=write_heartbeat, interval_s=interval)
 
 

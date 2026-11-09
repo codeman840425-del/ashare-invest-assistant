@@ -1,9 +1,19 @@
 # T-R22 F23 词表 v1 离线检查（研究侧；无网络、无麦蕊）。用法：python check_f23.py → PASS/FAIL
 import pathlib, sys, collections, yaml
+
+def fail(msg: object = "") -> None:
+    """Explicit failure that survives python -O (unlike assert)."""
+    raise AssertionError(msg)
+
+
+def require(cond: object, msg: object = "") -> None:
+    if not cond:
+        fail(msg)
+
 D = pathlib.Path(__file__).parent; sys.path.insert(0, str(D))
 class U(yaml.SafeLoader): pass
 def _m(l, n, deep=False):
-    ks = [l.construct_object(k, deep=deep) for k, _ in n.value]; assert len(ks) == len(set(ks)), f"重复键 {ks}"
+    ks = [l.construct_object(k, deep=deep) for k, _ in n.value]; require(len(ks) == len(set(ks)), f"重复键 {ks}")
     return yaml.SafeLoader.construct_mapping(l, n, deep)
 U.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _m)
 for f in ("f23_lexicon_v1.yaml", "f23_offline_cases.yaml", "known_risk_announcements.yaml"): yaml.load((D / f).read_text(), Loader=U)

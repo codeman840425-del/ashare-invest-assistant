@@ -25,8 +25,30 @@ def parse_block(text,label):
     def get(k):return re.search(r'^'+k+r':\s*(.*)$',block,re.M).group(1).strip()
     return get('key'),int(get('version_no')),[h.strip() for h in get('horizons').strip('[]').split(',')]
 
+def _git_tracked(path: Path) -> bool | None:
+    """Return True/False if git tracking is known; None if undeterminable (fail-safe: do not ignore)."""
+    try:
+        import subprocess
+        r = subprocess.run(
+            ['git', '-C', str(ROOT), 'ls-files', '--error-unmatch', str(path.relative_to(ROOT))],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return r.returncode == 0
+    except Exception:
+        return None
+
+def _ignore_generated(path: Path) -> bool:
+    """T-A78 ①c ∩ orchestrator: ignore __pycache__ dir / *.pyc only when untracked; unknown tracking → do not ignore."""
+    is_pyc = path.suffix == '.pyc' or '__pycache__' in path.parts
+    if not is_pyc:
+        return False
+    tracked = _git_tracked(path)
+    if tracked is None:
+        return False  # fail-safe
+    return not tracked
+
 def validate(data):
-    files={str(p.relative_to(ROOT)):p for p in BASE.rglob('*') if p.is_file() and HERE not in p.parents}
+    files={str(p.relative_to(ROOT)):p for p in BASE.rglob('*') if p.is_file() and HERE not in p.parents and not _ignore_generated(p)}
     census=data['scope_snapshot'];require(len({f['path'] for f in census})==len(census))
     require(set(files)=={f['path'] for f in census}, 'scope files changed: refresh census')
     actual={}

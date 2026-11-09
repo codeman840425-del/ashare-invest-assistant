@@ -1,5 +1,15 @@
 # T-R16：按沪深交易所 2026 年休市通知生成 open_days（格式同 financial_basis.TradingCalendar）。
 import datetime as dt, json, pathlib
+
+def fail(msg: object = "") -> None:
+    """Explicit failure that survives python -O (unlike assert)."""
+    raise AssertionError(msg)
+
+
+def require(cond: object, msg: object = "") -> None:
+    if not cond:
+        fail(msg)
+
 CLOSED = {  # 官方通知原文休市区间（含首尾），沪深两份逐字一致
  "元旦": ("2026-01-01", "2026-01-03"), "春节": ("2026-02-15", "2026-02-23"), "清明节": ("2026-04-04", "2026-04-06"),
  "劳动节": ("2026-05-01", "2026-05-05"), "端午节": ("2026-06-19", "2026-06-21"), "中秋节": ("2026-09-25", "2026-09-27"),
@@ -18,14 +28,14 @@ while x <= d("2026-12-31"):
     if x.weekday() < 5 and x not in closed: days.append(x.isoformat())
     x += dt.timedelta(1)
 # 断言
-assert all(d(s).weekday() < 5 for s in days)
-assert not set(WEEKEND_NOTED) & set(days) and all(d(s).weekday() >= 5 for s in WEEKEND_NOTED)
+require(all(d(s).weekday() < 5 for s in days))
+require(not set(WEEKEND_NOTED) & set(days) and all(d(s).weekday() >= 5 for s in WEEKEND_NOTED))
 for h, r in REOPEN.items():
-    assert r in days, h
+    require(r in days, h)
     prev = max(s for s in days if s < r) if any(s < r for s in days) else None
-    assert prev is None or prev < CLOSED[h][0], h            # 休市区间内无开市日
-    assert next(s for s in days if s > CLOSED[h][1]) == r, h  # 复市日 = 区间后首个开市日
-assert days == sorted(set(days))
+    require(prev is None or prev < CLOSED[h][0], h)
+    require(next(s for s in days if s > CLOSED[h][1]) == r, h)
+require(days == sorted(set(days)))
 out = {"coverage_start": "2026-01-01", "coverage_end": "2026-12-31", "open_days": days,
        "source": f"上交所 {SSE[1]}，{SSE[2]}，{SSE[0]}；深交所 {SZSE[1]}，{SZSE[2]}，{SZSE[0]}；两所休市区间逐项一致；周末（含调休上班的周六日）不开市"}
 p = pathlib.Path(__file__).parent / "trading_calendar_2026.json"

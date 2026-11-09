@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "task": "T-R28/T-R31",
+  "note": "Locked F21 readiness thresholds. Derived from T-A19 coverage scale (5 stocks × ≥15 days in 20-day window); not CLI/env-overridable. F21 status stays declared; this file does not upgrade.",
+  "factor_id": "main_20d_net",
+  "feature_key": "f.main_net_20d",
+  "min_stocks": 5,
+  "min_days": 15,
+  "window_days": 20
+}

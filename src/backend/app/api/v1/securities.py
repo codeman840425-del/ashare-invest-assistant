@@ -6,6 +6,7 @@ from fastapi import APIRouter, Header, Request, Response
 
 from app.api.v1.imports import etag_response
 from app.auth.deps import AuthDep, EngineDep, SettingsDep
+from app.master.profile import profile
 from app.master.search import invalid, search
 
 router = APIRouter(prefix="/securities", tags=["securities"])
@@ -48,4 +49,16 @@ def search_securities(
         if alias
         else value
     )
+    return etag_response(content, if_none_match)
+
+
+@router.get("/{code}")
+def security_profile(
+    code: str,
+    auth: AuthDep,
+    engine: EngineDep,
+    if_none_match: str | None = Header(default=None),
+) -> Response:
+    with engine.connect() as conn:
+        content = profile(conn, auth.user_id, code)
     return etag_response(content, if_none_match)

@@ -99,4 +99,3 @@ T-A19 实测清单第 4 项只写「20 只」未给代码（T-B86 2026-11-09 段
 | `evidence/` | 真值 `gt_D<n>.jsonl`（研究员巨潮公开页保全）与 T-B86 脱敏取数证据 `tb86_*.json` |
 
 > 自检记录：合成夹具（2 股、3 条真值、1 fetch_fail）freshness 输出 M/N=2/3、fetch_fail_all_miss 正确；completeness 以 3 条真实标题夹具跑通（pass=3/10、其余 fetch_fail 符合预期）、冻结匹配器命中正常。临时夹具文件已删。
-

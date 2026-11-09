@@ -57,7 +57,8 @@
     {
       "field": "sim_fail_horizon_unknown",
       "source": "契约§7.11.3/TB-A48",
-      "formal": true
+      "formal": true,
+      "ruling": "T-A74 ②a: H-01 no version split; missing horizon not in n/winrate, gap only"
     },
     {
       "field": "ack_warn_gates",
@@ -67,8 +68,10 @@
     {
       "field": "unified_20d_vs_rc5_window",
       "source": "T-R35风险说明",
-      "formal": false,
-      "pending_ruling": true
+      "formal": true,
+      "pending_ruling": false,
+      "ruling": "T-A74 B1: 20d is publish eligibility window only; reports keep T+1/5/20; n uses mapped horizon completes",
+      "note": "待异源复核前的默认裁定"
     }
   ]
 }

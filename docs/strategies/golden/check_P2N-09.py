@@ -1,4 +1,4 @@
-"""P2N-09 offline independent oracle (T-R31/T-R33).
+"""P2N-09 offline independent oracle (T-R31/T-R33/T-R36).
 
 Deterministic structural/chain guards for explanation-binding golden cases.
 Does not import application code, models, or R08/R09 checkers.
@@ -234,7 +234,7 @@ def findings(c: dict) -> list[str]:
         if not render.get("show_llm_call_id"):
             out.add("llm_call_id_missing")
         elif render.get("id_text") != call_id:
-            out.add("llm_call_id_missing")
+            out.add("llm_call_id_mismatch")
 
     elif kind == "auth_link":
         # C14: admin + usage page → encoded href + id_text == llm_call_id (T-A71/T-A72)
@@ -253,7 +253,7 @@ def findings(c: dict) -> list[str]:
         if not render.get("show_llm_call_id"):
             out.add("llm_call_id_missing")
         elif render.get("id_text") != call_id:
-            out.add("llm_call_id_missing")
+            out.add("llm_call_id_mismatch")
 
     elif kind == "cache":
         # C21: cache_hit + not invoked → explanation byte-equal, llm_call_id unchanged (T-A71)
@@ -272,7 +272,7 @@ def findings(c: dict) -> list[str]:
 
 
     else:
-        raise AssertionError(f"unknown kind {kind}")
+        raise SystemExit(f"unknown kind {kind}")
 
     return sorted(out)
 
@@ -283,81 +283,109 @@ def verdict_of(detected: list[str], status: str) -> str:
     return "rejected" if detected else "accepted"
 
 
+def fail(msg: str) -> None:
+    """Explicit failure path that survives python -O (unlike assert)."""
+    raise SystemExit(msg)
+
+
+def require(cond: bool, msg: str) -> None:
+    if not cond:
+        fail(msg)
+
+
 def run_cases(data: dict) -> dict:
-    assert data["fictitious"] is True
-    assert data["disclaimer_sha256"] == hashlib.sha256(disclaimer_from_repo().encode()).hexdigest()
-    assert len(data["cases"]) == 26
+    require(data.get("fictitious") is True, "golden.fictitious must be true")
+    require(
+        data.get("disclaimer_sha256")
+        == hashlib.sha256(disclaimer_from_repo().encode()).hexdigest(),
+        "disclaimer sha256 mismatch",
+    )
+    require(len(data.get("cases") or []) == 26, f"expected 26 cases, got {len(data.get('cases') or [])}")
     ready = blocked = 0
     for c in data["cases"]:
         got = findings(c)
-        assert got == c["expected"]["findings"], (c["id"], got, c["expected"]["findings"])
-        assert verdict_of(got, c["case_status"]) == c["expected"]["verdict"], c["id"]
+        require(
+            got == c["expected"]["findings"],
+            f"{c['id']}: findings {got} != {c['expected']['findings']}",
+        )
+        require(
+            verdict_of(got, c["case_status"]) == c["expected"]["verdict"],
+            f"{c['id']}: verdict mismatch",
+        )
         if c["case_status"] == "ready":
             ready += 1
         else:
             blocked += 1
-            assert c["expected"]["verdict"] == "blocked"
+            require(c["expected"]["verdict"] == "blocked", f"{c['id']}: blocked expected")
     return {"ready_pass": ready, "blocked": blocked}
 
 
 def run_mutations(data: dict) -> dict:
     ready = [c for c in data["cases"] if c["case_status"] == "ready"]
-    assert len(ready) == 26
+    require(len(ready) == 26, f"ready count {len(ready)} != 26")
     exp_mut = 0
     inp_mut = 0
-    # expected.verdict corruption must not match oracle (include new four)
     for cid in ("C01", "C05", "C12", "C13", "C14", "C21"):
         c = next(x for x in ready if x["id"] == cid)
         wrong = copy.deepcopy(c)
         wrong["expected"] = copy.deepcopy(c["expected"])
-        wrong["expected"]["verdict"] = "accepted" if c["expected"]["verdict"] == "rejected" else "rejected"
+        wrong["expected"]["verdict"] = (
+            "accepted" if c["expected"]["verdict"] == "rejected" else "rejected"
+        )
         got = findings(c)
-        assert verdict_of(got, c["case_status"]) != wrong["expected"]["verdict"]
+        require(
+            verdict_of(got, c["case_status"]) != wrong["expected"]["verdict"],
+            f"{cid}: expected-verdict mutation not rejected",
+        )
         exp_mut += 1
-    # legacy input mutations
     c05 = next(c for c in ready if c["id"] == "C05")
     fixed = copy.deepcopy(c05)
     fixed["input"]["stocks"][0]["explanation"]["paragraphs"][0] = {
         "text": "正引 [D1_1]",
         "cites": ["D1_1"],
     }
-    assert findings(fixed) == []
-    assert findings(c05) == ["cross_object_citation"]
+    require(findings(fixed) == [], "C05 fixed should clear findings")
+    require(findings(c05) == ["cross_object_citation"], "C05 baseline findings")
     inp_mut += 1
     c22 = next(c for c in ready if c["id"] == "C22")
     bad = copy.deepcopy(c22)
     bad["input"]["post_fallback_protected_result"]["score"] = "0.99"
-    assert "protected_result_mutation" in findings(bad)
+    require("protected_result_mutation" in findings(bad), "C22 mutation")
     inp_mut += 1
     c24 = next(c for c in ready if c["id"] == "C24")
     bad = copy.deepcopy(c24)
     bad["input"]["system_disclaimer"] = bad["input"]["system_disclaimer"] + "x"
-    assert "disclaimer_text_mismatch" in findings(bad)
+    require("disclaimer_text_mismatch" in findings(bad), "C24 mutation")
     inp_mut += 1
     c19 = next(c for c in ready if c["id"] == "C19")
     bad = copy.deepcopy(c19)
     bad["input"]["explanation"]["paragraphs"][0]["text"] = "分数 0.41"
-    assert "numeric_mismatch" in findings(bad)
-    assert frac_eq("0.40", Fraction(2, 5))
+    require("numeric_mismatch" in findings(bad), "C19 mutation")
+    require(frac_eq("0.40", Fraction(2, 5)), "Fraction sanity")
     inp_mut += 1
     c18 = next(c for c in ready if c["id"] == "C18")
     bad = copy.deepcopy(c18)
     bad["input"]["explanation"]["ui_label"] = "AI 生成"
-    assert "template_claimed_as_ai" in findings(bad)
+    require("template_claimed_as_ai" in findings(bad), "C18 mutation")
     inp_mut += 1
-    # T-A71/T-A72 new four — input mutations
+    # C12 probes: prefer golden.mutation_probes when present
     c12 = next(c for c in ready if c["id"] == "C12")
-    bad = copy.deepcopy(c12)
-    bad["input"]["render"] = {"show_llm_call_id": True, "href": None, "id_text": "call-auth"}
-    assert "llm_call_id_leak" in findings(bad)
-    inp_mut += 1
-    # C12: usage_page_available=true leak (highest risk; T-A71 any-value / T-A72)
-    bad = copy.deepcopy(c12)
-    bad["input"]["usage_page_available"] = True
-    bad["input"]["render"] = {"show_llm_call_id": True, "href": "/admin/llm/usage?call_id=call-auth", "id_text": "call-auth"}
-    assert "llm_call_id_leak" in findings(bad)
-    assert findings(bad)  # rejected
-    inp_mut += 1
+    probes = c12.get("mutation_probes") or [
+        {"name": "leak_false", "usage_page_available": False, "expect_finding": "llm_call_id_leak"},
+        {"name": "leak_true", "usage_page_available": True, "expect_finding": "llm_call_id_leak"},
+    ]
+    for probe in probes:
+        bad = copy.deepcopy(c12)
+        bad["input"]["usage_page_available"] = probe["usage_page_available"]
+        bad["input"]["render"] = {
+            "show_llm_call_id": True,
+            "href": "/admin/llm/usage?call_id=call-auth",
+            "id_text": "call-auth",
+        }
+        got = findings(bad)
+        require(probe["expect_finding"] in got, f"C12 probe {probe.get('name')}: {got}")
+        require(bool(got), f"C12 probe {probe.get('name')} must reject")
+        inp_mut += 1
     c13 = next(c for c in ready if c["id"] == "C13")
     bad = copy.deepcopy(c13)
     bad["input"]["render"] = {
@@ -365,59 +393,63 @@ def run_mutations(data: dict) -> dict:
         "href": "/admin/llm/usage?call_id=call-auth",
         "id_text": "call-auth",
     }
-    assert "link_without_usage_page" in findings(bad)
+    require("link_without_usage_page" in findings(bad), "C13 link mutation")
     inp_mut += 1
     c14 = next(c for c in ready if c["id"] == "C14")
-    # wrong route
     bad = copy.deepcopy(c14)
     bad["input"]["render"] = {
         "show_llm_call_id": True,
         "href": "/admin/wrong?call_id=" + quote(c14["input"]["llm_call_id"], safe=""),
         "id_text": c14["input"]["llm_call_id"],
     }
-    assert "auth_link_mismatch" in findings(bad)
+    require("auth_link_mismatch" in findings(bad), "C14 wrong route")
     inp_mut += 1
-    # unencoded id
     bad = copy.deepcopy(c14)
     bad["input"]["render"] = {
         "show_llm_call_id": True,
         "href": "/admin/llm/usage?call_id=" + c14["input"]["llm_call_id"],
         "id_text": c14["input"]["llm_call_id"],
     }
-    assert "auth_link_mismatch" in findings(bad)
+    require("auth_link_mismatch" in findings(bad), "C14 unencoded")
     inp_mut += 1
-    # C14: id_text != llm_call_id (T-A72)
     bad = copy.deepcopy(c14)
     bad["input"]["render"] = copy.deepcopy(c14["input"]["render"])
     bad["input"]["render"]["id_text"] = "WRONG-ID"
-    assert "llm_call_id_missing" in findings(bad)
+    require("llm_call_id_mismatch" in findings(bad), "C14 id_text mismatch")
     inp_mut += 1
     c21 = next(c for c in ready if c["id"] == "C21")
     bad = copy.deepcopy(c21)
     bad["input"]["explanation"] = copy.deepcopy(c21["input"]["explanation"])
     bad["input"]["explanation"]["llm_call_id"] = "call-c21-NEW"
-    assert "duplicate_llm_call" in findings(bad)
+    require("duplicate_llm_call" in findings(bad), "C21 new id")
     inp_mut += 1
     bad = copy.deepcopy(c21)
     bad["input"]["explanation"] = copy.deepcopy(c21["input"]["explanation"])
     bad["input"]["explanation"]["paragraphs"][0]["text"] = "被改写的缓存正文"
-    assert "cache_body_mismatch" in findings(bad)
+    require("cache_body_mismatch" in findings(bad), "C21 body")
     inp_mut += 1
-    # T-A72 ③: precondition failure → finding, not AssertionError
+    # precondition → finding (not crash); cover C12/C13/C14/C21
     bad = copy.deepcopy(c12)
-    bad["input"]["viewer_role"] = "admin"  # C12 expects user
+    bad["input"]["viewer_role"] = "admin"
     got = findings(bad)
-    assert "auth_role_mismatch" in got
-    assert not isinstance(got, BaseException)
+    require("auth_role_mismatch" in got, "C12 role precondition")
     inp_mut += 1
     bad = copy.deepcopy(c13)
-    bad["input"]["usage_page_available"] = True  # C13 expects False
-    assert "usage_page_flag_mismatch" in findings(bad)
+    bad["input"]["usage_page_available"] = True
+    require("usage_page_flag_mismatch" in findings(bad), "C13 flag precondition")
+    inp_mut += 1
+    bad = copy.deepcopy(c14)
+    bad["input"]["usage_page_available"] = False
+    require("usage_page_flag_mismatch" in findings(bad), "C14 flag precondition")
+    inp_mut += 1
+    bad = copy.deepcopy(c21)
+    bad["input"]["chain"] = {"cache_hit": False, "invoked": True}
+    require("cache_chain_mismatch" in findings(bad), "C21 chain precondition")
     inp_mut += 1
     return {
         "expected_verdict_mutations_rejected": exp_mut,
         "input_mutations_detected": inp_mut,
-        "t_a71_t_a72_input_mutations": 10,
+        "t_a71_t_a72_input_mutations": inp_mut,  # actual count, not a frozen constant
     }
 
 
@@ -425,7 +457,7 @@ def main() -> int:
     data = load()
     summary = run_cases(data)
     mut = run_mutations(data)
-    assert summary["ready_pass"] == 26 and summary["blocked"] == 0
+    require(summary["ready_pass"] == 26 and summary["blocked"] == 0, "ready/blocked summary")
     out = {
         **summary,
         **mut,

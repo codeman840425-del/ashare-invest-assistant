@@ -1,10 +1,20 @@
 # T-R23 F23 词表 v2 离线检查（研究侧；无网络、无麦蕊、不读 T-R22 隔离样本）。用法：python check_f23_v2.py → PASS/FAIL
 # PASS 只表示规则、用例与已知清单一致，不代表正式验收；正式验收见 rules_freeze.yaml holdout_acceptance（未执行）。
 import pathlib, sys, collections, hashlib, yaml
+
+def fail(msg: object = "") -> None:
+    """Explicit failure that survives python -O (unlike assert)."""
+    raise AssertionError(msg)
+
+
+def require(cond: object, msg: object = "") -> None:
+    if not cond:
+        fail(msg)
+
 D = pathlib.Path(__file__).parent; R22 = D.parent / "T-R22"; sys.path.insert(0, str(D))
 class U(yaml.SafeLoader): pass
 def _m(l, n, deep=False):
-    ks = [l.construct_object(k, deep=deep) for k, _ in n.value]; assert len(ks) == len(set(ks)), f"重复键 {ks}"
+    ks = [l.construct_object(k, deep=deep) for k, _ in n.value]; require(len(ks) == len(set(ks)), f"重复键 {ks}")
     return yaml.SafeLoader.construct_mapping(l, n, deep)
 U.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _m)
 for f in ("f23_lexicon_v2.yaml", "f23_v2_cases.yaml", "known_risk_v2_new.yaml", "known_risk_v1_reused.yaml", "title_insufficient.yaml", "rules_freeze.yaml"): yaml.load((D / f).read_text(), Loader=U)

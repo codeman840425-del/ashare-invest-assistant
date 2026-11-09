@@ -1,10 +1,20 @@
 # T-R23 F23 词表 v2.1 离线检查（保守否决修订；研究侧；无网络、无麦蕊、不读 T-R22 隔离样本）。用法：python check_f23_v2_1.py
 # PASS 只表示规则、用例与已知真值集一致，不代表验收；正式验收见 rules_freeze_v2_1.yaml（未执行）。
 import pathlib, sys, hashlib, collections, yaml
+
+def fail(msg: object = "") -> None:
+    """Explicit failure that survives python -O (unlike assert)."""
+    raise AssertionError(msg)
+
+
+def require(cond: object, msg: object = "") -> None:
+    if not cond:
+        fail(msg)
+
 D = pathlib.Path(__file__).parent; R22 = D.parent / "T-R22"; sys.path.insert(0, str(D))
 class U(yaml.SafeLoader): pass
 def _m(l, n, deep=False):
-    ks = [l.construct_object(k, deep=deep) for k, _ in n.value]; assert len(ks) == len(set(ks)), f"重复键 {ks}"
+    ks = [l.construct_object(k, deep=deep) for k, _ in n.value]; require(len(ks) == len(set(ks)), f"重复键 {ks}")
     return yaml.SafeLoader.construct_mapping(l, n, deep)
 U.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _m)
 ld = lambda f: yaml.load((D / f).read_text(), Loader=U)

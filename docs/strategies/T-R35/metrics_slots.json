@@ -1,0 +1,77 @@
+{
+  "task": "T-R35",
+  "slots": [
+    {
+      "field": "n",
+      "source": "plan§2.5.7",
+      "formal": true
+    },
+    {
+      "field": "win_rate_smoothed",
+      "source": "plan§2.5.7",
+      "formal": true,
+      "formula": "(wins+α*0.5)/(n+α) α=10"
+    },
+    {
+      "field": "avg_excess_pct",
+      "source": "plan§2.5.7/§2.8",
+      "formal": true
+    },
+    {
+      "field": "weight",
+      "source": "plan§2.5.7",
+      "formal": true,
+      "formula": "clamp(raw,0.3,1.2); n<20 => 1"
+    },
+    {
+      "field": "tracking_T1_T5_T20",
+      "source": "plan§2.8",
+      "formal": true
+    },
+    {
+      "field": "direction_correct",
+      "source": "plan§2.8",
+      "formal": true
+    },
+    {
+      "field": "published_n_or_20d",
+      "source": "plan§2.5.13",
+      "formal": true
+    },
+    {
+      "field": "health_published_observing_retired",
+      "source": "plan§2.8.2",
+      "formal": true
+    },
+    {
+      "field": "rc5_sim_fail_horizon_by_horizon",
+      "source": "T-A36/T-A37",
+      "formal": true,
+      "map": {
+        "intraday_t": 1,
+        "short": 5,
+        "swing": 20,
+        "long": 20
+      }
+    },
+    {
+      "field": "sim_fail_horizon_unknown",
+      "source": "契约§7.11.3/TB-A48",
+      "formal": true,
+      "ruling": "T-A74 ②a: H-01 no version split; missing horizon not in n/winrate, gap only"
+    },
+    {
+      "field": "ack_warn_gates",
+      "source": "T-A18",
+      "formal": true
+    },
+    {
+      "field": "unified_20d_vs_rc5_window",
+      "source": "T-R35风险说明",
+      "formal": true,
+      "pending_ruling": false,
+      "ruling": "T-A74 B1: 20d is publish eligibility window only; reports keep T+1/5/20; n uses mapped horizon completes",
+      "note": "待异源复核前的默认裁定"
+    }
+  ]
+}

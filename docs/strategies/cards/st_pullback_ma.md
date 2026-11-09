@@ -151,7 +151,7 @@ pass_criteria:
   - {metric: trigger_rate, op: ">", value: 0}
 fixtures:
   - id: S01-FX1
-    desc: 【入场】强势+多头排列+缩量回踩 MA10 不破 → entry_ok/buy
+    desc: 【虚构】入场：强势+多头排列+缩量回踩 MA10 不破 → entry_ok/buy
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -172,7 +172,7 @@ fixtures:
       rule_ids_passed: [E1, E2, E3, E4, F1, F2]
       reason_codes: []
   - id: S01-FX2
-    desc: 【不满足】未回踩（最低价远离 MA10）且未缩量 → not_triggered/wait
+    desc: 【虚构】不满足：未回踩（最低价远离 MA10）且未缩量 → not_triggered/wait
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -193,7 +193,7 @@ fixtures:
       rule_ids_passed: [E1, E2, F1, F2]
       reason_codes: []
   - id: S01-FX3
-    desc: 【缺数据】有效 K 仅 10 根（warmup 25 不足）→ insufficient_data/wait
+    desc: 【虚构】缺数据：有效 K 仅 10 根（warmup 25 不足）→ insufficient_data/wait
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2026-09-15'}
     series:
@@ -214,7 +214,7 @@ fixtures:
       rule_ids_passed: [E3, F2]
       reason_codes: []
   - id: S01-FX4
-    desc: 【维度分歧】入场条件全满足但大盘 downtrend 否决 → vetoed/wait
+    desc: 【虚构】维度分歧：入场条件全满足但大盘 downtrend 否决 → vetoed/wait
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -235,7 +235,7 @@ fixtures:
       rule_ids_passed: [E1, E2, E3, E4, F1, F2, V1]
       reason_codes: []
   - id: S01-FX5
-    desc: 【一字涨停】入场成立但买入方向 LIMIT_LOCKED，不可执行
+    desc: 【虚构】一字涨停：入场成立但买入方向 LIMIT_LOCKED，不可执行
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -257,7 +257,7 @@ fixtures:
       reason_codes: [LIMIT_LOCKED]
       reason_details: {LIMIT_LOCKED: {direction: buy}}
   - id: S01-FX6
-    desc: 【停牌】入场成立但标的停牌，不可执行
+    desc: 【虚构】停牌：入场成立但标的停牌，不可执行
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -279,7 +279,7 @@ fixtures:
       reason_codes: [SUSPENDED]
       reason_details: {SUSPENDED: {direction: buy}}
   - id: S01-FX7
-    desc: 【可卖 0 时卖出信号】持有中跌破止损（X2）与 MA10（X1），当日买入部分 T+1 不可卖
+    desc: 【虚构】可卖 0 时卖出信号：持有中跌破止损（X2）与 MA10（X1），当日买入部分 T+1 不可卖
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -306,7 +306,7 @@ fixtures:
       rule_ids_passed: [F1, F2, I1, X1, X2]
       reason_codes: [T1_NOT_SELLABLE]
   - id: S01-FX8
-    desc: 【时间止损】持有满 time_stop 日未达 1R → exit_signal/sell（可卖充足）
+    desc: 【虚构】时间止损：持有满 time_stop 日未达 1R → exit_signal/sell（可卖充足）
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:

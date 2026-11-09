@@ -47,22 +47,6 @@ def _git_tracked(path: Path) -> bool | None:
     except Exception:
         return None
 
-def _ignore_generated(path: Path) -> bool:
-    """Ignore __pycache__ / *.pyc only when confirmed untracked (tracked=False).
-
-    tracked=True → do not ignore (must be registered or fail).
-    tracked=None (tracking_unknown) → do not ignore (fail-safe).
-    """
-    is_pyc = path.suffix == '.pyc' or '__pycache__' in path.parts
-    if not is_pyc:
-        return False
-    tracked = _git_tracked(path)
-    if tracked is None:
-        return False  # tracking_unknown: keep in enum
-    if tracked is True:
-        return False
-    return True  # confirmed untracked
-
 def validate(data):
     files={}
     tracking_unknown=[]

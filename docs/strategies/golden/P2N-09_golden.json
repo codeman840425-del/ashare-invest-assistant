@@ -473,7 +473,19 @@
       "expected": {
         "verdict": "accepted",
         "findings": []
-      }
+      },
+      "mutation_probes": [
+        {
+          "name": "leak_with_usage_page_false",
+          "usage_page_available": false,
+          "expect_finding": "llm_call_id_leak"
+        },
+        {
+          "name": "leak_with_usage_page_true",
+          "usage_page_available": true,
+          "expect_finding": "llm_call_id_leak"
+        }
+      ]
     },
     {
       "id": "C13",

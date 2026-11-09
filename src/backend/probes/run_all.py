@@ -494,7 +494,41 @@ def _p13_phase(check, args, st_api, st_pro, base_api, base_pro, echo_url):
             reasons = {x["basis"].get("null_reason") for xs in a.get("6_pb", {}).values() for x in xs}
             check("p13 mock：⑥ null_reason 只取 plan 2.12.1 封闭 14 码", reasons - {None} <= set(an.NULL_REASONS)
                   and len(an.NULL_REASONS) == 14, str(reasons))
-            pb = a.get("6_pb", {})
+            # Positive cases get explicit synthetic facts; actual analysis remains conservative.
+            raw = an.load_raw(ctx.run_dir)
+            first_seen = an.load_first_seen(ctx.run_dir)
+            mock_calendar = an.TradingCalendar(
+                "2010-01-01", "2027-12-31",
+                ("2011-07-01", "2011-07-04", "2016-05-03", "2016-08-15",
+                 "2025-05-06", "2025-08-14", "2025-09-04", "2025-12-18",
+                 "2026-04-01", "2026-05-06", "2026-07-01", "2026-09-01",
+                 "2026-10-01", "2026-11-02"),
+                "synthetic_dryrun_only_not_exchange_calendar",
+            )
+            mock_lists = {
+                "list_version": 1, "as_of": "2026-10-30", "sources": {},
+                "records": [
+                    {"code": code, "class": kind, "paired_code": paired,
+                     "paired_market": market, "effective_from": "2010-01-01",
+                     "effective_to": None, "source": "synthetic_dryrun_only", "verified": False}
+                    for code, kind, paired, market in (
+                        ("601318.SH", "H", "09999", "HK"),
+                        ("000550.SZ", "B", "299999", "SZ"),
+                    )
+                ],
+            }
+            synthetic = an.analyze(raw, meta, first_seen, calendar=mock_calendar,
+                                   share_class_config=mock_lists)
+            absent = an.analyze(raw, meta, first_seen, share_class_config={
+                "list_version": 1, "as_of": "2026-10-30", "sources": {}, "records": [],
+            })
+            check("p13 mock：缺日历/名单不伪造 PB 或已核实名单",
+                  all(x["value"] is None and x["basis"]["calendar_status"] == "unconfirmed"
+                      and x["basis"]["share_class_check"] == "unavailable"
+                      for values in absent["6_pb"].values() for x in values))
+            check("p13 mock：合成名单不能关闭真实 V5g",
+                  synthetic["7_share_class_lists"]["v5g_close"]["closed"] is False)
+            pb = synthetic.get("6_pb", {})
             check("p13 mock：⑥ 三只 PB 均有值且 basis 含 zgb_bdrq/mcap_basis",
                   all(x and x[-1].get("value") and x[-1]["basis"].get("zgb_bdrq") for x in pb.values()) and len(pb) == 3)
             check("p13 mock：V5j 689009 capital 已采集、v5j_cdr_unit 有结论（mock 按 CDR 份数 → zgb≈CDR份数）",
@@ -510,7 +544,7 @@ def _p13_phase(check, args, st_api, st_pro, base_api, base_pro, echo_url):
             check("p13 mock：V5i 000550 无报告 → 只给内部统计（inconclusive）",
                   bf.get("by_code", {}).get("000550", {}).get("verdict") == "inconclusive"
                   and bf["by_code"]["000550"]["plrq_is_quarter_end"]["n"] >= 1)
-            pb6 = a.get("6_pb", {})
+            pb6 = synthetic.get("6_pb", {})
             pb_ok = all(isinstance(x.get("basis", {}).get("pit_basis", []), list) for v in pb6.values() for x in v)
             b318 = [x["basis"] for x in pb6.get("601318", [])]
             check("p13 mock：PB pit_basis 为数组；share_class_check=list；601318 non_a_share_capital 来自名单（m3）",

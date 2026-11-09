@@ -1,0 +1,864 @@
+{
+  "task": "P2N-09",
+  "schema_version": 1,
+  "fictitious": true,
+  "note": "Explanation-chain golden draft formalized under T-R31; independent offline oracle. Blocked cases need real env per draft §5. Does not replace R09 text guards.",
+  "disclaimer_sha256": "38728c3d2a1095a48066761eaad9b98a392e784b15125312c8cd3f3e55ea349d",
+  "disclaimer_text": "本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。",
+  "cases": [
+    {
+      "id": "C01",
+      "case_status": "ready",
+      "kind": "bind_stock",
+      "fictitious": true,
+      "input": {
+        "stocks": [
+          {
+            "security_code": "999001.SZ",
+            "explanation": {
+              "source": "llm",
+              "validation_status": "passed",
+              "fallback_reason": null,
+              "llm_call_id": "call-c01",
+              "paragraphs": [
+                {
+                  "text": "观测记录 [D1_1]",
+                  "cites": [
+                    "D1_1"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "security_code": "999002.SZ",
+            "explanation": null
+          }
+        ],
+        "evidence": [
+          {
+            "id": "D1_1",
+            "security_code": "999001.SZ",
+            "value": "1",
+            "unit": "count"
+          }
+        ],
+        "top_explanation": null
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": [],
+        "explanation_projection": {
+          "stocks0_source": "llm",
+          "stocks1": null
+        }
+      }
+    },
+    {
+      "id": "C02",
+      "case_status": "ready",
+      "kind": "bind_divergence",
+      "fictitious": true,
+      "input": {
+        "divergence": [
+          {
+            "dimensions": [
+              "technical"
+            ],
+            "explanation": {
+              "source": "llm",
+              "validation_status": "passed",
+              "fallback_reason": null,
+              "llm_call_id": "call-c02a",
+              "paragraphs": [
+                {
+                  "text": "技术 [E_T]",
+                  "cites": [
+                    "E_T"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "dimensions": [
+              "capital"
+            ],
+            "explanation": {
+              "source": "llm",
+              "validation_status": "passed",
+              "fallback_reason": null,
+              "llm_call_id": "call-c02b",
+              "paragraphs": [
+                {
+                  "text": "资金 [E_C]",
+                  "cites": [
+                    "E_C"
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "id": "E_T",
+            "dimension": "technical",
+            "value": "1",
+            "unit": "count"
+          },
+          {
+            "id": "E_C",
+            "dimension": "capital",
+            "value": "2",
+            "unit": "count"
+          }
+        ]
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    },
+    {
+      "id": "C03",
+      "case_status": "ready",
+      "kind": "null_no_reuse",
+      "fictitious": true,
+      "input": {
+        "stocks": [
+          {
+            "security_code": "999001.SZ",
+            "explanation": null
+          }
+        ],
+        "top_explanation": {
+          "source": "llm",
+          "validation_status": "passed",
+          "fallback_reason": null,
+          "llm_call_id": "call-c03",
+          "paragraphs": [
+            {
+              "text": "顶层 [D1_1]",
+              "cites": [
+                "D1_1"
+              ]
+            }
+          ]
+        },
+        "render_stock0_text": null
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    },
+    {
+      "id": "C04",
+      "case_status": "ready",
+      "kind": "missing_key",
+      "fictitious": true,
+      "input": {
+        "divergence_item": {
+          "dimensions": [
+            "technical"
+          ],
+          "evidence_ids": [
+            "E_T"
+          ]
+        },
+        "render_text": null
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    },
+    {
+      "id": "C05",
+      "case_status": "ready",
+      "kind": "cross_object",
+      "fictitious": true,
+      "input": {
+        "stocks": [
+          {
+            "security_code": "999001.SZ",
+            "explanation": {
+              "source": "llm",
+              "validation_status": "passed",
+              "fallback_reason": null,
+              "llm_call_id": "call-c05",
+              "paragraphs": [
+                {
+                  "text": "错引 [D2_1]",
+                  "cites": [
+                    "D2_1"
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "id": "D1_1",
+            "security_code": "999001.SZ",
+            "value": "1",
+            "unit": "count"
+          },
+          {
+            "id": "D2_1",
+            "security_code": "999002.SZ",
+            "value": "1",
+            "unit": "count"
+          }
+        ]
+      },
+      "candidate": {
+        "pass": false
+      },
+      "expected": {
+        "verdict": "rejected",
+        "findings": [
+          "cross_object_citation"
+        ],
+        "explanation_projection": {
+          "source": "template",
+          "fallback_reason": "validation_failed"
+        }
+      }
+    },
+    {
+      "id": "C06",
+      "case_status": "ready",
+      "kind": "cross_dimension",
+      "fictitious": true,
+      "input": {
+        "divergence": [
+          {
+            "dimensions": [
+              "technical"
+            ],
+            "explanation": {
+              "source": "llm",
+              "validation_status": "passed",
+              "fallback_reason": null,
+              "llm_call_id": "call-c06",
+              "paragraphs": [
+                {
+                  "text": "错维 [E_N]",
+                  "cites": [
+                    "E_N"
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "id": "E_T",
+            "dimension": "technical",
+            "value": "1",
+            "unit": "count"
+          },
+          {
+            "id": "E_N",
+            "dimension": "news",
+            "value": "1",
+            "unit": "count"
+          }
+        ]
+      },
+      "candidate": {
+        "pass": false
+      },
+      "expected": {
+        "verdict": "rejected",
+        "findings": [
+          "citation_fact_mismatch"
+        ],
+        "explanation_projection": {
+          "source": "template",
+          "fallback_reason": "validation_failed"
+        }
+      }
+    },
+    {
+      "id": "C07",
+      "case_status": "ready",
+      "kind": "fallback_enum",
+      "fictitious": true,
+      "input": {
+        "chain": {
+          "invoked": false,
+          "fallback_reason": "not_enabled",
+          "llm_call_id": null
+        },
+        "protected_result": {
+          "action": "hold",
+          "score": "0.40",
+          "confidence": "0.50",
+          "stops": null
+        }
+      },
+      "candidate": null,
+      "expected": {
+        "verdict": "accepted",
+        "findings": [],
+        "explanation_projection": {
+          "source": "template",
+          "validation_status": "fallback",
+          "fallback_reason": "not_enabled",
+          "llm_call_id": null
+        }
+      }
+    },
+    {
+      "id": "C08",
+      "case_status": "ready",
+      "kind": "fallback_enum",
+      "fictitious": true,
+      "input": {
+        "chain": {
+          "invoked": false,
+          "fallback_reason": "budget_exceeded",
+          "llm_call_id": null
+        },
+        "protected_result": {
+          "action": "hold",
+          "score": "0.40",
+          "confidence": "0.50",
+          "stops": null
+        }
+      },
+      "candidate": null,
+      "expected": {
+        "verdict": "accepted",
+        "findings": [],
+        "explanation_projection": {
+          "source": "template",
+          "validation_status": "fallback",
+          "fallback_reason": "budget_exceeded",
+          "llm_call_id": null
+        }
+      }
+    },
+    {
+      "id": "C09",
+      "case_status": "ready",
+      "kind": "fallback_enum",
+      "fictitious": true,
+      "input": {
+        "chain": {
+          "invoked": true,
+          "fallback_reason": "timeout",
+          "llm_call_id": "call-c09"
+        },
+        "protected_result": {
+          "action": "hold",
+          "score": "0.40",
+          "confidence": "0.50",
+          "stops": null
+        }
+      },
+      "candidate": null,
+      "expected": {
+        "verdict": "accepted",
+        "findings": [],
+        "explanation_projection": {
+          "source": "template",
+          "validation_status": "fallback",
+          "fallback_reason": "timeout",
+          "llm_call_id": "call-c09"
+        }
+      }
+    },
+    {
+      "id": "C10",
+      "case_status": "ready",
+      "kind": "fallback_enum",
+      "fictitious": true,
+      "input": {
+        "chain": {
+          "invoked": true,
+          "fallback_reason": "provider_error",
+          "llm_call_id": "call-c10"
+        },
+        "protected_result": {
+          "action": "hold",
+          "score": "0.40",
+          "confidence": "0.50",
+          "stops": null
+        }
+      },
+      "candidate": null,
+      "expected": {
+        "verdict": "accepted",
+        "findings": [],
+        "explanation_projection": {
+          "source": "template",
+          "validation_status": "fallback",
+          "fallback_reason": "provider_error",
+          "llm_call_id": "call-c10"
+        }
+      }
+    },
+    {
+      "id": "C11",
+      "case_status": "ready",
+      "kind": "fallback_enum",
+      "fictitious": true,
+      "input": {
+        "chain": {
+          "invoked": true,
+          "fallback_reason": "validation_failed",
+          "llm_call_id": "call-c11"
+        },
+        "protected_result": {
+          "action": "hold",
+          "score": "0.40",
+          "confidence": "0.50",
+          "stops": null
+        }
+      },
+      "candidate": {
+        "paragraphs": [
+          {
+            "text": "减仓建议",
+            "cites": []
+          }
+        ]
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": [],
+        "explanation_projection": {
+          "source": "template",
+          "validation_status": "fallback",
+          "fallback_reason": "validation_failed",
+          "llm_call_id": "call-c11"
+        }
+      }
+    },
+    {
+      "id": "C12",
+      "case_status": "blocked",
+      "kind": "auth_leak",
+      "fictitious": true,
+      "block_reason": "needs_real_admin_session_or_usage_endpoint",
+      "input": {
+        "viewer_role": "user",
+        "usage_page_available": false,
+        "llm_call_id": "call-auth"
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "blocked",
+        "findings": [
+          "blocked_pending_real_env"
+        ]
+      }
+    },
+    {
+      "id": "C13",
+      "case_status": "blocked",
+      "kind": "auth_plain",
+      "fictitious": true,
+      "block_reason": "needs_real_admin_session_or_usage_endpoint",
+      "input": {
+        "viewer_role": "admin",
+        "usage_page_available": false,
+        "llm_call_id": "call-auth"
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "blocked",
+        "findings": [
+          "blocked_pending_real_env"
+        ]
+      }
+    },
+    {
+      "id": "C14",
+      "case_status": "blocked",
+      "kind": "auth_link",
+      "fictitious": true,
+      "block_reason": "needs_real_admin_session_or_usage_endpoint",
+      "input": {
+        "viewer_role": "admin",
+        "usage_page_available": true,
+        "llm_call_id": "call-auth"
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "blocked",
+        "findings": [
+          "blocked_pending_real_env"
+        ]
+      }
+    },
+    {
+      "id": "C15",
+      "case_status": "ready",
+      "kind": "null_vs_missing",
+      "fictitious": true,
+      "input": {
+        "object_a": {
+          "explanation": null
+        },
+        "object_b": {},
+        "render_a": null,
+        "render_b": null
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    },
+    {
+      "id": "C16",
+      "case_status": "ready",
+      "kind": "no_infer",
+      "fictitious": true,
+      "input": {
+        "object": {
+          "evidence_ids": [
+            "E_T"
+          ]
+        },
+        "render_text": null
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    },
+    {
+      "id": "C17",
+      "case_status": "ready",
+      "kind": "no_cascade",
+      "fictitious": true,
+      "input": {
+        "top_explanation": {
+          "source": "llm",
+          "validation_status": "passed",
+          "fallback_reason": null,
+          "llm_call_id": "call-c17",
+          "paragraphs": [
+            {
+              "text": "顶 [D1_1]",
+              "cites": [
+                "D1_1"
+              ]
+            }
+          ]
+        },
+        "stocks": [
+          {
+            "security_code": "999001.SZ",
+            "explanation": null
+          }
+        ],
+        "render_stock0_text": null
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    },
+    {
+      "id": "C18",
+      "case_status": "ready",
+      "kind": "template_boundary",
+      "fictitious": true,
+      "input": {
+        "explanation": {
+          "source": "template",
+          "validation_status": "fallback",
+          "fallback_reason": "timeout",
+          "llm_call_id": null,
+          "paragraphs": [
+            {
+              "text": "模板正文",
+              "cites": []
+            }
+          ]
+        }
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    },
+    {
+      "id": "C19",
+      "case_status": "ready",
+      "kind": "llm_success",
+      "fictitious": true,
+      "input": {
+        "explanation": {
+          "source": "llm",
+          "validation_status": "passed",
+          "fallback_reason": null,
+          "llm_call_id": "call-c19",
+          "paragraphs": [
+            {
+              "text": "分数 0.40",
+              "cites": [
+                "E1"
+              ]
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "id": "E1",
+            "value": "0.40",
+            "unit": "pct"
+          }
+        ],
+        "protected_result": {
+          "action": "hold",
+          "score": "0.40",
+          "confidence": "0.50",
+          "stops": null
+        }
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    },
+    {
+      "id": "C20",
+      "case_status": "ready",
+      "kind": "no_fabricated_call",
+      "fictitious": true,
+      "input": {
+        "explanation": {
+          "source": "template",
+          "validation_status": "fallback",
+          "fallback_reason": "not_enabled",
+          "llm_call_id": null,
+          "paragraphs": [
+            {
+              "text": "模板",
+              "cites": []
+            }
+          ]
+        }
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    },
+    {
+      "id": "C21",
+      "case_status": "blocked",
+      "kind": "cache",
+      "fictitious": true,
+      "block_reason": "needs_real_cache_store",
+      "input": {
+        "chain": {
+          "cache_hit": true,
+          "invoked": false
+        }
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "blocked",
+        "findings": [
+          "blocked_pending_real_env"
+        ]
+      }
+    },
+    {
+      "id": "C22",
+      "case_status": "ready",
+      "kind": "protected_invariant",
+      "fictitious": true,
+      "input": {
+        "protected_result": {
+          "action": "hold",
+          "score": "0.40",
+          "confidence": "0.50",
+          "stops": null
+        },
+        "explanation": {
+          "source": "template",
+          "validation_status": "fallback",
+          "fallback_reason": "timeout",
+          "llm_call_id": "call-c22",
+          "paragraphs": [
+            {
+              "text": "模板",
+              "cites": []
+            }
+          ]
+        },
+        "post_fallback_protected_result": {
+          "action": "hold",
+          "score": "0.40",
+          "confidence": "0.50",
+          "stops": null
+        }
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    },
+    {
+      "id": "C23",
+      "case_status": "ready",
+      "kind": "immutable",
+      "fictitious": true,
+      "input": {
+        "committed": true,
+        "operation": "overwrite_existing_explanation",
+        "explanation": {
+          "source": "llm",
+          "validation_status": "passed",
+          "fallback_reason": null,
+          "llm_call_id": "call-c23",
+          "paragraphs": [
+            {
+              "text": "已定稿",
+              "cites": [
+                "E1"
+              ]
+            }
+          ]
+        }
+      },
+      "candidate": {
+        "paragraphs": [
+          {
+            "text": "试图改写",
+            "cites": [
+              "E1"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "verdict": "rejected",
+        "findings": [
+          "immutable_snapshot"
+        ]
+      }
+    },
+    {
+      "id": "C24",
+      "case_status": "ready",
+      "kind": "disclaimer_append",
+      "fictitious": true,
+      "input": {
+        "llm_body": "观测记录",
+        "system_disclaimer": "本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。",
+        "final_display": "观测记录本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。"
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    },
+    {
+      "id": "C25",
+      "case_status": "ready",
+      "kind": "disclaimer_in_llm",
+      "fictitious": true,
+      "input": {
+        "candidate_text": "结论。本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。",
+        "system_disclaimer": "本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。"
+      },
+      "candidate": {
+        "paragraphs": [
+          {
+            "text": "结论。本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。",
+            "cites": []
+          }
+        ]
+      },
+      "expected": {
+        "verdict": "rejected",
+        "findings": [
+          "llm_wrote_disclaimer"
+        ],
+        "explanation_projection": {
+          "source": "template",
+          "fallback_reason": "validation_failed"
+        }
+      }
+    },
+    {
+      "id": "C26",
+      "case_status": "ready",
+      "kind": "disclaimer_on_template",
+      "fictitious": true,
+      "input": {
+        "template_body": "模板正文",
+        "system_disclaimer": "本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。",
+        "final_display": "模板正文本工具仅供个人研究参考，不构成投资建议。候选信号由规则自动生成，数据可能延迟或出错，盈亏自负。"
+      },
+      "candidate": {
+        "pass": true
+      },
+      "expected": {
+        "verdict": "accepted",
+        "findings": []
+      }
+    }
+  ],
+  "counts": {
+    "ready": 22,
+    "blocked": 4,
+    "total": 26
+  }
+}

@@ -27,6 +27,20 @@ ENV_FILE="$ROOT/deploy/env/.env"
 ENV_EXAMPLE="$ROOT/deploy/env/.env.example"
 PROFILE="${AIA_PROFILE:-dev}"
 
+# T-O40 运行环境守卫：本机运行栈在 Docker Desktop + WSL 内，密钥目录由 $HOME 派生
+# （通常 /root/.config/aia/secrets/<前缀>）。从 Windows Git Bash/MSYS/Cygwin 调用时
+# $HOME 指向 Windows 用户目录，密钥目录会被解析到另一个位置，并可能生成与运行栈不匹配
+# 的分角色口令文件（T-O39 已复现）。检测到即报错退出，且不创建/覆盖/删除任何文件。
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    echo "错误：compose.sh 必须在 WSL（Linux）内运行，不能在 Windows Git Bash/MSYS/Cygwin 下运行。" >&2
+    echo "  原因：密钥目录由 \$HOME 派生，Windows 侧解析结果与运行栈实际使用的 WSL 密钥目录不一致，" >&2
+    echo "        继续执行会生成与运行栈不匹配的分角色口令文件（T-O39 已复现）。" >&2
+    echo "  请在 WSL（Linux）终端中进入本仓库后重新执行。" >&2
+    exit 2
+    ;;
+esac
+
 if [ ! -f "$ENV_FILE" ]; then
   echo "未找到 deploy/env/.env，从 .env.example 生成（仅占位值，请按需修改）。" >&2
   cp "$ENV_EXAMPLE" "$ENV_FILE"
@@ -95,6 +109,20 @@ if [ "${1-}" = "--get" ]; then
     *) echo "--get 只支持 COMPOSE_PROJECT_NAME|AIA_VOLUME_PREFIX|AIA_BACKEND_IMAGE|AIA_FRONTEND_IMAGE|AIA_SECRETS_DIR" >&2; exit 2 ;;
   esac
   exit 0
+fi
+
+# T-O40：运行栈一致性守卫。若已有运行中的 api 容器，且它挂载的 app_master_key 不在
+# 本次解析的密钥目录下，说明 $HOME 与运行栈来源不一致；此时继续会在错误目录生成与
+# 运行栈不匹配的分角色口令文件。直接报错，不创建/覆盖/删除任何文件（只读检查）。
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  running_key="$(docker inspect "${project}-api-1" --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/app_master_key"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
+  if [ -n "$running_key" ] && [ "$(dirname "$running_key")" != "$secrets_dir" ]; then
+    echo "错误：本次解析的密钥目录与运行中栈的来源不一致，已停止（未写任何文件）。" >&2
+    echo "  本次解析：$secrets_dir" >&2
+    echo "  运行栈：  $(dirname "$running_key")" >&2
+    echo "  请在运行栈所属环境（通常是 WSL/root）内执行 compose.sh。" >&2
+    exit 2
+  fi
 fi
 
 # 分库角色口令（T-O10）：api/ingest 的 DATABASE_URL 用 aia_api/aia_ingest，口令只存在 $AIA_SECRETS_DIR（600），

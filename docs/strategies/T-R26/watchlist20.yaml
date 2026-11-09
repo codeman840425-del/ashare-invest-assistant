@@ -1,0 +1,30 @@
+# T-R26 F23 新鲜度实测 20 只股名单（研究员候选，待架构师确认；T-A19 第 4 项未给代码）
+# 依据：docs/strategies/f23_freshness_protocol.md §2；全部代码来自仓库内公开材料，无凭记忆生成。
+# 用途：T-B86 每日 08:20（北京）对下列 20 只各取 1 次 /hsstock/announcement/{code}，连续 D1-D5（2026-11-09..13）。
+version: f23_freshness_watchlist_v1_candidate
+status: pending_architect_confirmation
+window: {d1: '2026-11-09', d5: '2026-11-13', fetch_at_beijing: 'D(d+1) 08:20，09:00 前有效'}
+securities:
+  # F21 五样本（T-A19 表项 1 固定样本，用户/裁定指定）
+  - {code: '600519.SH', board: main,      group: f21_sample}
+  - {code: '688018.SH', board: star,      group: f21_sample}
+  - {code: '300364.SZ', board: chinext,   group: f21_sample}
+  - {code: '688073.SH', board: star,      group: f21_sample}
+  - {code: '301218.SZ', board: chinext,   group: f21_sample}
+  # 已知风险·v1 复用（T-R23/known_risk_v1_reused.yaml，已核 PDF，公告活跃）
+  - {code: '300477.SZ', board: chinext,   group: known_risk_v1, ref_announcement_id: '1225650594'}
+  - {code: '000520.SZ', board: main,      group: known_risk_v1, ref_announcement_id: '1225661288'}
+  - {code: '688130.SH', board: star,      group: known_risk_v1, ref_announcement_id: '1225654385'}
+  - {code: '000972.SZ', board: main,      group: known_risk_v1, ref_announcement_id: '1225654160'}
+  - {code: '002598.SZ', board: main,      group: known_risk_v1, ref_announcement_id: '1225632935'}
+  - {code: '002535.SZ', board: main,      group: known_risk_v1, ref_announcement_id: '1225604722'}
+  - {code: '300497.SZ', board: chinext,   group: known_risk_v1, ref_announcement_id: '1225605728'}
+  - {code: '600606.SH', board: main,      group: known_risk_v1, ref_announcement_id: '1225619125'}
+  # 已知风险·v2 / v2.1 新增（公开巨潮链接）
+  - {code: '688110.SH', board: star,      group: known_risk_v2, ref_announcement_id: '1225650284'}
+  - {code: '002726.SZ', board: main,      group: known_risk_v1, ref_announcement_id: '1225661582'}
+  - {code: '601611.SH', board: main,      group: known_risk_v2, ref_announcement_id: '1225650984'}
+  - {code: '300250.SZ', board: chinext,   group: known_risk_v2, ref_announcement_id: '1225550775'}
+  - {code: '002719.SZ', board: main,      group: known_risk_v2, ref_announcement_id: '1225526544'}
+  - {code: '600818.SH', board: main,      group: known_risk_v2, ref_announcement_id: '1225564163'}
+  - {code: '300474.SZ', board: chinext,   group: known_risk_v2_1, ref_announcement_id: '1225649706'}

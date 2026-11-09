@@ -264,3 +264,18 @@ env -u MAIRUI_LICENCE python3 p11_replay.py --tag T-B05 results/run-20261101-190
 - 严格串行（in-flight 计数断言 + 连接池 `pool_maxsize=1, pool_block=True`），调用间隔与冷却都用 `time.sleep`；不做压测，总量约 268 次。
 - 不使用 subprocess / fork / signal；路径全部基于脚本所在目录（pathlib）；文件读写显式 UTF-8；控制台输出 `reconfigure(encoding='utf-8', errors='replace')`，GBK 终端不会因中文崩溃（个别字符可能显示为乱码/问号，不影响结果文件）。
 - 结果文件以独占方式创建（同名自动加 `.2`、`.3` 后缀），每次运行独立目录，绝不覆盖旧结果。
+
+## 9. T-B86 本机 POSIX 台账接线（T-B96，离线检查不授权发送）
+
+`tb86_history.py` 依赖 POSIX `fcntl`，Windows 上请通过 WSL 运行。台账应放在 WSL 文件系统中（不能用 NTFS 的宽松 mode 冒充 600）；既有账本不得清零或覆盖。
+
+```bash
+# 从 src/backend 运行；只检查权限、锁、计数、STOP、临时文件不存在，不读取证书、不发请求。
+python3 -m probes.tb86_history --preflight-only \
+  --counter "$HOME/.local/state/ashare-invest-assistant/runtime/mairui-batch-T-B86.count" \
+  --secret-path "$HOME/.local/state/ashare-invest-assistant/runtime/mairui-T-B86.tmp"
+```
+
+`offline_controls_ready` 仅证明本地控制门禁可读，不表示官方原公告、证书、出口或真实执行授权已通过。历史入口须另获派单、补齐原公告证据后，显式使用 `--execute-authorized-history` 并携带相同 `--counter` / `--secret-path`；不带执行标志不发送。每次请求仍在同一锁内先记数/fsync再发送，最多128、分类最多126、2次保留；失败照常消耗并停止。
+
+团队安全密钥仅在运行进程内映射为 `MAIRUI_LICENCE`；通过 `WSLENV` 传递变量名即可，值不得出现在命令参数或日志中。完成后清除映射、还原 `WSLENV`。`run_all.py --dry-run` 使用虚构证书与回环服务，真实变量只用于泄漏断言，不会发送给模拟接口；无需创建证书临时文件。

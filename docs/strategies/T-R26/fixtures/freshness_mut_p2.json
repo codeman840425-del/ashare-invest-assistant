@@ -1,0 +1,32 @@
+{
+  "fetched_at_beijing": "2026-11-09T18:00:00+08:00",
+  "items": [
+    {
+      "security_code": "999001.SZ",
+      "fetch_ok": true,
+      "announcements": [
+        {
+          "zt": "虚构会议通知ABCDEF",
+          "nr": "https://example.invalid/900001",
+          "t": "2026-11-09"
+        },
+        {
+          "zt": "被篡改标题不会匹配P2",
+          "nr": "https://example.invalid/800002",
+          "t": "2026-11-09"
+        }
+      ]
+    },
+    {
+      "security_code": "999002.SZ",
+      "fetch_ok": true,
+      "announcements": [
+        {
+          "zt": "虚构董事会决议MNOPQR",
+          "nr": "https://example.invalid/900003",
+          "t": "2026-11-09"
+        }
+      ]
+    }
+  ]
+}

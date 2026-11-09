@@ -345,10 +345,43 @@ def execute(
     return result
 
 
-def main() -> int:
-    import sys
+def main(argv: list[str] | None = None) -> int:
+    import argparse
 
-    if sys.argv[1:] != ["--execute-authorized-history"]:
+    parser = argparse.ArgumentParser(
+        description="T-B86 explicit history runner / offline control check"
+    )
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--execute-authorized-history", action="store_true")
+    modes.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--counter", type=Path, default=COUNTER)
+    parser.add_argument("--secret-path", type=Path, default=TEMP_SECRET)
+    args = parser.parse_args(argv)
+    if args.preflight_only:
+        # POSIX permissions/lock/state only. No credential access, files or HTTP requests.
+        try:
+            if STOP.exists():
+                raise HaltError("STOP_present")
+            state = inspect_counter(args.counter)
+            if state["halted"]:
+                raise HaltError("batch_halted")
+            if args.secret_path.exists():
+                raise HaltError("temporary_secret_already_exists")
+            result = {
+                "task": "T-B86",
+                "outcome": "offline_controls_ready",
+                "batch_total": state["total"],
+                "new_calls": 0,
+                "official_notices_checked": False,
+                "credential_read": False,
+            }
+            code = 0
+        except (HaltError, OSError, ValueError):
+            result = {"task": "T-B86", "outcome": "offline_controls_not_ready", "new_calls": 0}
+            code = 2
+        print(json.dumps(result))
+        return code
+    if not args.execute_authorized_history:
         print(
             json.dumps(
                 {
@@ -365,7 +398,7 @@ def main() -> int:
 
     for sig in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, interrupted)
-    result = execute()
+    result = execute(counter=args.counter, secret_path=args.secret_path)
     print(json.dumps(result))
     return (
         0

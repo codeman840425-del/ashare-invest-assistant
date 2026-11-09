@@ -60,6 +60,7 @@ HALT = Path("/run/aia/mairui-daily.HALTED")
 GROUP = "mairui-daily-v1"
 WIRE_GATE: ContextVar[SharedGate | None] = ContextVar("mairui_wire_gate", default=None)
 WIRE_CHECK: ContextVar[Callable[[], None] | None] = ContextVar("mairui_wire_check", default=None)
+WIRE_SETTINGS: ContextVar[Settings | None] = ContextVar("mairui_wire_settings", default=None)
 
 
 class DailyHaltError(RuntimeError):
@@ -68,22 +69,29 @@ class DailyHaltError(RuntimeError):
 
 def wire(path: str, secret: str) -> tuple[int, object]:
     gate = WIRE_GATE.get()
+    settings, check = WIRE_SETTINGS.get(), WIRE_CHECK.get()
     if (
         os.environ.get("MAIRUI_MODE", "replay") != "live"
         or live_budget_issue()
         or gate is None
         or not gate.inflight
+        or settings is None
+        or check is None
     ):
         raise DailyHaltError("live_transport_closed")
     gate.check()
     conn = http.client.HTTPSConnection(HOST, timeout=20)
     conn.set_debuglevel(0)
     try:
-        check = WIRE_CHECK.get()
-        if check is not None:
-            check()
+        # Resolve/encode everything before the last guard: even an adapter or
+        # quoting hook must not open a gap after the last STOP/pause read.
+        request = conn.request
+        target = path + quote(secret, safe="")
         gate.check()
-        conn.request("GET", path + quote(secret, safe=""))
+        check()  # The caller still owns the user-level transaction lock here.
+        if send_paused(settings) or stop_present(gate.stop):
+            raise DailyHaltError("transport_STOP_or_global_pause")
+        request("GET", target)
         response = conn.getresponse()
         if response.status in (103, 429):
             return response.status, None
@@ -108,15 +116,18 @@ def send(
     secret: str,
     *,
     before_send: Callable[[], None] | None = None,
+    settings: Settings | None = None,
 ) -> tuple[int, object]:
     token = WIRE_GATE.set(gate)
     check_token = WIRE_CHECK.set(before_send)
+    settings_token = WIRE_SETTINGS.set(settings)
     try:
         if before_send is not None:
             before_send()
         gate.check()
         return upstream(path, secret)
     finally:
+        WIRE_SETTINGS.reset(settings_token)
         WIRE_CHECK.reset(check_token)
         WIRE_GATE.reset(token)
 
@@ -385,7 +396,12 @@ def process(
 
                         final_check()
                         status, body = send(
-                            gate, upstream, PATHS[dataset], secret, before_send=final_check
+                            gate,
+                            upstream,
+                            PATHS[dataset],
+                            secret,
+                            before_send=final_check,
+                            settings=settings,
                         )
                 except Exception:  # noqa: BLE001 - persist only the fixed network classification
                     feedback(

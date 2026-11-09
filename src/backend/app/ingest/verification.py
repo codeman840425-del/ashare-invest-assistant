@@ -25,7 +25,7 @@ from app.licences.service import is_held, lock_control, per_minute_limit
 from app.schemas.enums import DataLicenceStatus, DataLicenceTier
 
 STREAM = "ingest:requests"
-GROUP = "licence-verification-v1"
+GROUP = "licence-verification-v2"
 
 
 def allowed_before_send(
@@ -187,8 +187,12 @@ def process(
 
                         final_check()
                         status, body = send(
-                            gate, upstream, f"/tcalendar/list/{started.year}/", secret,
+                            gate,
+                            upstream,
+                            f"/tcalendar/list/{started.year}/",
+                            secret,
                             before_send=final_check,
+                            settings=settings,
                         )
                 except GateClosedError:
                     return "failed_no_retry"
@@ -266,21 +270,27 @@ def tick(engine: Engine, rds: redis.Redis, settings: Settings) -> int:
         return 0
     from redis.exceptions import ResponseError
 
-    # Each authorized certificate has its own consumer group. Acknowledging an
-    # unrelated entry here cannot consume it for that entry's certificate, and
-    # old/unconfirmed work in the legacy global group cannot suppress recovery.
+    # Each certificate has its own v2 group, starting at the retained stream head.
+    # V1's prefetched/unprocessed PEL is preserved and cannot block v2 fallback.
+    # Durable intent/receipt reservations still prevent replay across versions.
+    # Acknowledging unrelated work affects only this certificate's group.
     group = GROUP + ":" + str(authorization.licence_id)
     try:
         rds.xgroup_create(STREAM, group, id="0", mkstream=True)
     except ResponseError as exc:
         if "BUSYGROUP" not in str(exc):
             raise RuntimeError("verification_stream_unavailable") from None
+    # Process one intent per tick. Never prefetch a batch into pending and return
+    # after only its first entry. Recent owned pending work must settle before
+    # claiming new entries, so repeated busy ticks cannot accumulate leftovers.
     pending = rds.xautoclaim(
-        STREAM, group, "ingest-verify", min_idle_time=60000, start_id="0-0", count=32
+        STREAM, group, "ingest-verify", min_idle_time=60000, start_id="0-0", count=1
     )[1]
+    if not pending and rds.xpending(STREAM, group)["pending"]:
+        return 0
     messages = (
         pending
-        or (rds.xreadgroup(group, "ingest-verify", {STREAM: ">"}, count=32) or [(None, [])])[0][1]
+        or (rds.xreadgroup(group, "ingest-verify", {STREAM: ">"}, count=1) or [(None, [])])[0][1]
     )
     for mid, fields in messages:
         try:

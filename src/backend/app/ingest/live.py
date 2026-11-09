@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import redis
-from sqlalchemy import Engine, select, update
+from sqlalchemy import Engine, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.config import Settings
@@ -233,8 +233,8 @@ def publish_feedback(rds: redis.Redis, payload: dict[str, Any] | None, token: uu
 
 def sync_halts(engine: Engine, settings: Settings, rds: redis.Redis, root: Path) -> None:
     """Reflect a probe's shared latch without using its samples or reading a licence."""
-    now = dt.datetime.now(dt.UTC)
     with engine.connect() as conn:
+        now = conn.execute(select(func.now())).scalar_one().astimezone(dt.UTC)
         states = conn.execute(select(user_data_licence_status)).all()
     retained = {}
     for row in states:
@@ -244,7 +244,7 @@ def sync_halts(engine: Engine, settings: Settings, rds: redis.Redis, root: Path)
             if row.status in {"ip_limited", "quota_exceeded"} or row.paused_until is not None:
                 end = min(
                     row.deleted_at + dt.timedelta(seconds=TTL),
-                    row.paused_until or row.deleted_at + dt.timedelta(seconds=TTL),
+                    row.paused_until or row.deleted_at + service.COOLDOWN_NULL_UNTIL_TTL,
                 )
         retained[str(row.id)] = end.timestamp()
     cleanup(root, retained, now.timestamp())

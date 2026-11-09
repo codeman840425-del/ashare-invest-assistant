@@ -303,7 +303,14 @@ class IngestDataSharing(_Strict):
     allow_cross_licence_fallback: Literal[False]
 
 
+class SendGovernance(_Strict):
+    """T-A58/T-B102: observation by default; accounting/egress/redaction stay mandatory."""
+
+    enforce: StrictBool = False
+
+
 class IngestConfig(_File):
+    send_governance: SendGovernance = Field(default_factory=SendGovernance)
     budget: IngestBudget
     backoff: IngestBackoff
     leader: IngestLeader

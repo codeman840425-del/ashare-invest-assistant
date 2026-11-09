@@ -59,6 +59,33 @@ def require_database_mainline(
         )
 
 
+def crosses_override_revision(script: ScriptDirectory, destination: str | None) -> bool:
+    """Whether the destination predates the override-active column."""
+    return "0028" not in {rev.revision for rev in script.iterate_revisions(destination, "base")}
+
+
+def require_safe_downgrade(
+    conn: Connection, script: ScriptDirectory, destination: str | None
+) -> None:
+    """T-B98: retain cleared overrides; called in the migration's DDL transaction."""
+    if not crosses_override_revision(script, destination):
+        return
+    if conn.execute(text("SELECT to_regclass('public.alembic_version')")).scalar_one() is None:
+        return
+    current = conn.execute(text("SELECT version_num FROM public.alembic_version")).scalars().all()
+    if "0028" not in current:
+        return
+    # Keep settings writers out until the migration transaction completes.
+    conn.execute(text("LOCK TABLE app.risk_control_settings IN SHARE MODE"))
+    if conn.execute(
+        text("SELECT EXISTS (SELECT 1 FROM app.risk_control_settings WHERE NOT override_active)")
+    ).scalar_one():
+        raise MigrationLineageError(
+            "UNSAFE_DOWNGRADE_0028: cleared overrides exist; keep 0028; "
+            "a separately reviewed state-preserving rollback is required"
+        )
+
+
 def check_startup(settings: Settings) -> None:
     script = script_directory()
     require_single_head(script)

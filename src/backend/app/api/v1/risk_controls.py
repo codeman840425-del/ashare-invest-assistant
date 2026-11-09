@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.routing import APIRoute
 from pydantic import AfterValidator, Field, StrictBool, StrictInt
+from sqlalchemy import Connection, Engine
+from sqlalchemy.exc import DBAPIError
 
 from app.api.v1.candidate_signals import scoped_page
 from app.api.v1.trades import normalize_code
@@ -23,6 +26,18 @@ from app.schemas.enums import RiskControl
 from app.signals.models import Model
 
 router = APIRouter(tags=["risk-controls"])
+
+
+@contextmanager
+def settings_transaction(engine: Engine) -> Iterator[Connection]:
+    """T-A52: roll back before reporting retryable transaction conflicts."""
+    try:
+        with engine.begin() as conn:
+            yield conn
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) in {"40001", "40P01"}:
+            raise AppError(ErrorCode.CONFLICT, details={"field": "risk_controls"}) from None
+        raise
 
 
 class ResetRoute(APIRoute):
@@ -50,7 +65,7 @@ def reset_setting(
     control: str, auth: AuthDep, engine: EngineDep, settings: SettingsDep, response: Response
 ) -> list[dict[str, Any]]:
     response.headers["Cache-Control"] = "private, no-store"
-    with engine.begin() as conn:
+    with settings_transaction(engine) as conn:
         return store.reset(
             conn,
             auth.user_id,
@@ -175,7 +190,7 @@ def read_settings(
 def write_settings(
     body: list[RiskPatch], auth: AuthDep, engine: EngineDep, settings: SettingsDep
 ) -> list[dict[str, Any]]:
-    with engine.begin() as conn:
+    with settings_transaction(engine) as conn:
         return store.save(
             conn,
             auth.user_id,

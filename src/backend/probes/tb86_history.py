@@ -256,23 +256,24 @@ def execute(
                 gate.check()
                 gate.reserve()
                 try:
-                    if map_legacy_stop(stop):
-                        result["outcome"] = "STOP_present"
-                        raise HaltError("STOP_present")
-                    gate.check()
-                    connection.request(
-                        "GET",
-                        path + quote(secret, safe="") + query,
-                        headers={"Connection": "keep-alive"},
-                    )
-                    response = connection.getresponse()
-                    result["last_http_status"] = response.status
-                    if response.status in {103, 429}:
-                        gate.trip(str(response.status))
-                        gate.complete()
-                        result["outcome"] = "rate_limit_103_or_429"
-                        raise HaltError("rate_limit_103_or_429")
-                    raw = response.read(16 * 1024 * 1024 + 1)
+                    with gate.dispatch():
+                        if map_legacy_stop(stop):
+                            result["outcome"] = "STOP_present"
+                            raise HaltError("STOP_present")
+                        gate.check()
+                        connection.request(
+                            "GET",
+                            path + quote(secret, safe="") + query,
+                            headers={"Connection": "keep-alive"},
+                        )
+                        response = connection.getresponse()
+                        result["last_http_status"] = response.status
+                        if response.status in {103, 429}:
+                            gate.trip(str(response.status))
+                            gate.complete()
+                            result["outcome"] = "rate_limit_103_or_429"
+                            raise HaltError("rate_limit_103_or_429")
+                        raw = response.read(16 * 1024 * 1024 + 1)
                 except HaltError:
                     raise
                 except BaseException:

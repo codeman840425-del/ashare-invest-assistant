@@ -16,6 +16,7 @@ import re
 import stat
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -132,7 +133,16 @@ def stop_present(path: Path) -> bool:
 
 
 def write_stop(path: Path) -> None:
-    """Latch a fixed diagnostic durably, never read/copy historical STOP contents."""
+    """Use exactly the dispatch mutex; a writer cannot commit between check and HTTP."""
+    from app.ingest.send_control import critical
+
+    raw = os.environ.get("MAIRUI_SHARED_STATE_DIR")
+    with critical(Path(raw) if raw else path.parent):
+        _write_stop_unlocked(path)
+
+
+def _write_stop_unlocked(path: Path) -> None:
+    """Caller owns the permanent control inode; fixed contents, flush/fsync."""
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
@@ -225,27 +235,34 @@ class SharedGate:
         from app.ingest.certificate_bindings import bind
 
         self.check()
-        ident = bind(self.root, self.licence_id, secret, time.time())
+        ident = bind(self.root, self.licence_id, secret)
         self.halt_path = self.root / ("state-" + ident + ".halt.json")
         self.state_path = self.root / ("state-" + ident + ".requests.json")
         self.certificate_confirmed = True
         self.check()
 
     def check(self) -> None:
-        from app.ingest.certificate_bindings import identifiers
+        from app.ingest.certificate_bindings import identifiers, live
 
-        if stop_present(self.stop):
+        if stop_present(self.stop) or stop_present(self.root / "PAUSED"):
             raise GateClosedError("shared_STOP")
         # Never silently adopt fingerprint-based v1 files. An authorized operator
         # must migrate/remove the associations while preserving all stop facts.
-        if any(self.root.glob("*.binding.json")) or any(self.root.glob("certificate-*.json")):
+        if (
+            any(self.root.glob("*.binding.json"))
+            or any(self.root.glob("certificate-*.json"))
+            or (self.root / "certificate-bindings.sqlite3").exists()
+        ):
             raise GateClosedError("shared_legacy_binding_requires_review")
+        if not live(self.root, self.licence_id):
+            raise GateClosedError("shared_licence_detached")
         known = {"state-" + ident for ident in identifiers(self.root)}
+        active = {"state-" + ident for ident in identifiers(self.root, active_only=True)}
         for path in self.root.glob("state-*.halt.json"):
             if path.name.removesuffix(".halt.json") not in known:
-                raise GateClosedError("shared_orphan_licence_halted")
+                raise GateClosedError("shared_unknown_scope_halted")
         for path in self.root.glob("state-*.requests.json"):
-            if path.name.removesuffix(".requests.json") not in known:
+            if path.name.removesuffix(".requests.json") not in active:
                 state = _read(path)
                 if state.get("inflight") or state.get("last_finished", 0) > time.time() - 60:
                     raise GateClosedError("shared_orphan_budget_requires_review")
@@ -265,6 +282,20 @@ class SharedGate:
                     raise GateClosedError("shared_legacy_budget_requires_review")
         if self.token is not None and _read(self.lock_path).get("token") != self.token:
             raise GateClosedError("shared_lease_replaced")
+
+    @contextlib.contextmanager
+    def dispatch(self) -> Iterator[None]:
+        from app.ingest.certificate_bindings import control
+        from app.ingest.send_control import critical
+
+        owner = (
+            control(self.licence_id)
+            if self.source.startswith("probe_")
+            else contextlib.nullcontext()
+        )
+        with owner, critical(self.root):
+            self.check()
+            yield
 
     def acquire(self) -> None:
         self.check()

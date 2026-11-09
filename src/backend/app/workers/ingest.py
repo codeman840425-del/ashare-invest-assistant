@@ -107,9 +107,13 @@ def write_heartbeat(settings: Settings) -> None:
                     from pathlib import Path
 
                     sync_halts(engine, settings, client, Path(shared_root))
-                if (
-                    os.environ.get("MAIRUI_MODE", "replay") == "live"
-                    and not client.exists(settings.ingest_paused_key)
+                else:
+                    from app.ingest.certificate_bindings import cleanup
+
+                    # Retention is independent of live mode, pause and filesystem wiring.
+                    cleanup(engine=engine)
+                if os.environ.get("MAIRUI_MODE", "replay") == "live" and not client.exists(
+                    settings.ingest_paused_key
                 ):
                     verify_tick(engine, client, settings)
                     tick(engine, client, pause=heartbeat_wait, settings=settings)

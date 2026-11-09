@@ -17,6 +17,7 @@ import re
 import statistics
 import sys
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -338,8 +339,10 @@ def call(name: str, path_tpl: str, *, pro: bool = False, method: str = "GET", js
     t0 = time.monotonic()
     status, text, err, hdr, redirected = None, "", None, {}, False
     try:
-        _check_stop(c)
-        r = c.session.request(method, url, json=json_body, timeout=TIMEOUT, allow_redirects=False)
+        with (c.shared_gate.dispatch() if c.shared_gate is not None else nullcontext()):
+            _check_stop(c)
+            r = c.session.request(
+                method, url, json=json_body, timeout=TIMEOUT, allow_redirects=False)
         status, text, redirected = r.status_code, r.text, bool(r.history)
         hdr = {k: v for k, v in r.headers.items() if k.lower() in (
             "content-type", "x-ratelimit-limit", "x-ratelimit-remaining", "retry-after", "date", "last-modified",

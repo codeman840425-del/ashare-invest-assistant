@@ -29,6 +29,7 @@ from app.db.tables.market import master_runs, securities
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows
 from app.ingest.live import check_egress, feedback, send_paused
+from app.ingest.send_control import critical, owned
 from app.ingest.shared_gate import (
     GateClosedError,
     SharedGate,
@@ -77,6 +78,7 @@ def wire(path: str, secret: str) -> tuple[int, object]:
         or not gate.inflight
         or settings is None
         or check is None
+        or not owned(gate.root)
     ):
         raise DailyHaltError("live_transport_closed")
     gate.check()
@@ -122,10 +124,11 @@ def send(
     check_token = WIRE_CHECK.set(before_send)
     settings_token = WIRE_SETTINGS.set(settings)
     try:
-        if before_send is not None:
-            before_send()
-        gate.check()
-        return upstream(path, secret)
+        with critical(gate.root):
+            if before_send is not None:
+                before_send()
+            gate.check()
+            return upstream(path, secret)
     finally:
         WIRE_SETTINGS.reset(settings_token)
         WIRE_CHECK.reset(check_token)

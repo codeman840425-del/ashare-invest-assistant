@@ -1,107 +1,122 @@
-"""Private, erasable certificate associations. No credential-derived filenames.
+"""DB-authoritative private bindings: deletion retention and clock are one SQL transaction.
 
-Only the shared gate lease holder binds. The keyed equality tag lives in one
-0600 SQLite database (secure_delete, no WAL); UUID state files contain no tag.
-Deletion/expiry removes associations, never halt/budget facts. Orphan facts
-remain fail-closed until an authorized operator resolves them.
+Only a runtime-keyed tag enters ingest_private; API/maintenance cannot SELECT it.
+Scope UUID history contains no tag and distinguishes detached from unknown files.
+No local-clock expiry and no SQLite cache can outlive the DELETE transaction.
 """
 
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import hmac
 import os
-import sqlite3
 import stat
-import time
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
-from app.ingest.shared_gate import GateClosedError, _read, _sync_directory, _write
+from sqlalchemy import Engine, create_engine, select, text
+from sqlalchemy.exc import SQLAlchemyError
 
-DATABASE = "certificate-bindings.sqlite3"
+from app.db.tables.licences import user_data_licence_status as licences
+from app.ingest.shared_gate import GateClosedError, _read, _write
+
 KEY = "binding-key.json"
-TTL = 30 * 86400
+
+
+@functools.lru_cache(maxsize=4)
+def _configured_engine(path: str) -> Engine:
+    fd = None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_mode & 0o022:
+            raise GateClosedError("shared_database_reference_invalid")
+        raw = os.read(fd, 8193)
+        if len(raw) > 8192:
+            raise GateClosedError("shared_database_reference_invalid")
+        value = raw.decode().strip()
+        if not value.startswith("postgresql+psycopg://"):
+            raise GateClosedError("shared_database_reference_invalid")
+        return create_engine(value, hide_parameters=True, connect_args={"connect_timeout": 2})
+    except (OSError, UnicodeError, ValueError):
+        raise GateClosedError("shared_database_reference_unavailable") from None
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def engine_from_environment() -> Engine:
+    reference = os.environ.get("MAIRUI_SHARED_DATABASE_URL_FILE", "")
+    if reference:
+        return _configured_engine(reference)
+    # Product ingest reuses its existing role/secret wiring; standalone probes
+    # must supply an explicit private reference instead of searching credentials.
+    from app.config import get_settings
+    from app.db.engine import engine_for
+
+    settings = get_settings()
+    if settings.service_name != "ingest" or settings.database_url is None:
+        raise GateClosedError("shared_database_clock_required")
+    return engine_for(settings.database_url.get_secret_value())
 
 
 @contextlib.contextmanager
-def database(root: Path, *, create: bool = False) -> Iterator[sqlite3.Connection | None]:
-    path = root / DATABASE
+def transaction(engine: Engine | None = None, *, prune: bool = True) -> Iterator[Any]:
     try:
-        if create:
-            try:
-                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            except FileExistsError:
-                pass
-            else:
-                os.close(fd)
-                _sync_directory(root)
-        try:
-            info = path.lstat()
-        except FileNotFoundError:
-            yield None
-            return
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_nlink != 1
-            or (
-                os.name != "nt"
-                and (stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.geteuid())
-            )
-        ):
-            raise GateClosedError("shared_binding_storage_private_required")
-        conn = sqlite3.connect(path, timeout=1, isolation_level=None)
-        try:
-            conn.execute("PRAGMA secure_delete=ON")
-            conn.execute("PRAGMA journal_mode=DELETE")
-            conn.execute("PRAGMA temp_store=MEMORY")
-            conn.execute("PRAGMA synchronous=FULL")
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS certificates "
-                "(id TEXT PRIMARY KEY, tag BLOB UNIQUE NOT NULL, expires REAL NOT NULL)"
-            )
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS bindings "
-                "(licence TEXT PRIMARY KEY, certificate TEXT NOT NULL, expires REAL NOT NULL)"
-            )
+        with (engine or engine_from_environment()).begin() as conn:
+            role = conn.execute(
+                text(
+                    "SELECT current_user AS name,rolsuper OR rolcreatedb OR rolcreaterole "
+                    "OR rolreplication OR rolbypassrls AS privileged FROM pg_roles "
+                    "WHERE rolname=current_user"
+                )
+            ).one()
+            if role.name != "aia_ingest" or role.privileged:
+                raise GateClosedError("shared_database_role_refused")
+            # Expiry, including immediate DELETE expiry, uses only PostgreSQL now().
+            if prune:
+                conn.execute(text("SELECT ingest_private.prune_mairui_gate_bindings()"))
             yield conn
-            conn.commit()
-        except BaseException:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-    except (OSError, sqlite3.Error):
-        raise GateClosedError("shared_binding_storage_unavailable") from None
+    except SQLAlchemyError:
+        raise GateClosedError("shared_database_state_unavailable") from None
 
 
-def _identifier(value: object) -> str:
-    try:
-        if not isinstance(value, str) or uuid.UUID(value).hex != value:
-            raise ValueError
-    except ValueError:
-        raise GateClosedError("shared_certificate_binding_invalid") from None
-    return value
+def bind(root: Path, licence: str, secret: str, engine: Engine | None = None) -> str:
+    ident = uuid.UUID(licence)
+    with transaction(engine, prune=False) as conn:
+        row = conn.execute(
+            select(licences.c.user_id).where(
+                licences.c.id == ident,
+                licences.c.deleted_at.is_(None),
+            )
+        ).first()
+        if row is None:
+            raise GateClosedError("shared_licence_detached")
+        # Serialize all tag bindings for this owner with API DELETE/replace/hold.
+        # A sender already owns that same control lock only after binding finishes.
+        from app.licences.service import lock_control
 
-
-def _prune(conn: sqlite3.Connection, now: float) -> None:
-    conn.execute("DELETE FROM bindings WHERE expires <= ?", (now,))
-    conn.execute(
-        "DELETE FROM certificates WHERE expires <= ? OR id NOT IN "
-        "(SELECT certificate FROM bindings)",
-        (now,),
-    )
-
-
-def bind(root: Path, licence: str, secret: str, now: float) -> str:
-    with database(root, create=True) as conn:
-        assert conn is not None  # noqa: S101 - create=True
+        lock_control(conn, row.user_id)
+        conn.execute(text("SELECT ingest_private.prune_mairui_gate_bindings()"))
+        if (
+            conn.execute(
+                select(licences.c.id).where(
+                    licences.c.id == ident,
+                    licences.c.deleted_at.is_(None),
+                )
+            ).first()
+            is None
+        ):
+            raise GateClosedError("shared_licence_detached")
         keyfile = root / KEY
         if not keyfile.exists():
-            if conn.execute("SELECT 1 FROM certificates LIMIT 1").fetchone():
+            if conn.execute(
+                text("SELECT 1 FROM ingest_private.mairui_gate_bindings LIMIT 1")
+            ).first():
                 raise GateClosedError("shared_binding_key_missing")
             _write(keyfile, {"key": os.urandom(32).hex()}, exclusive=True)
         info = keyfile.lstat()
@@ -113,73 +128,126 @@ def bind(root: Path, licence: str, secret: str, now: float) -> str:
                 raise ValueError
         except (ValueError, TypeError, KeyError):
             raise GateClosedError("shared_binding_key_invalid") from None
-        tag = hmac.digest(key, b"mairui-binding/v2\0" + secret.encode(), hashlib.sha256)
-        _prune(conn, now)
-        row = conn.execute("SELECT id FROM certificates WHERE tag = ?", (tag,)).fetchone()
-        ident = _identifier(row[0]) if row else uuid.uuid4().hex
+        tag = hmac.digest(
+            key, b"mairui-binding/v3\0" + row.user_id.bytes + secret.encode(), hashlib.sha256
+        )
+        found = conn.execute(
+            text(
+                "SELECT scope_id FROM ingest_private.mairui_gate_bindings "
+                "WHERE user_id=:owner AND tag=:tag AND (expires_at IS NULL OR expires_at>now()) "
+                "ORDER BY licence_id LIMIT 1"
+            ),
+            {"owner": row.user_id, "tag": tag},
+        ).first()
+        scope = found.scope_id if found else uuid.uuid4()
         existing = conn.execute(
-            "SELECT certificate FROM bindings WHERE licence = ?", (licence,)
-        ).fetchone()
-        if existing and existing[0] != ident:
+            text("SELECT scope_id FROM ingest_private.mairui_gate_bindings WHERE licence_id=:id"),
+            {"id": ident},
+        ).first()
+        if existing and existing.scope_id != scope:
             raise GateClosedError("shared_certificate_binding_changed")
+        if not found:
+            conn.execute(
+                text(
+                    "INSERT INTO ingest_private.mairui_gate_scopes(id,origin_licence_id) "
+                    "VALUES(:scope,:id)"
+                ),
+                {"scope": scope, "id": ident},
+            )
         conn.execute(
-            "INSERT INTO certificates VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE "
-            "SET expires=excluded.expires",
-            (ident, tag, now + TTL),
+            text(
+                "INSERT INTO ingest_private.mairui_gate_bindings(licence_id,user_id,scope_id,tag) "
+                "VALUES(:id,:owner,:scope,:tag) ON CONFLICT(licence_id) DO NOTHING"
+            ),
+            {"id": ident, "owner": row.user_id, "scope": scope, "tag": tag},
         )
         conn.execute(
-            "INSERT INTO bindings VALUES (?, ?, ?) ON CONFLICT(licence) DO UPDATE "
-            "SET expires=excluded.expires",
-            (licence, ident, now + TTL),
+            text("UPDATE ingest_private.mairui_gate_scopes SET detached_at=NULL WHERE id=:id"),
+            {"id": scope},
         )
-        return ident
+        return scope.hex
 
 
-def identity(root: Path, licence: str) -> str | None:
-    with database(root) as conn:
-        if conn is None:
-            return None
-        _prune(conn, time.time())
+@contextlib.contextmanager
+def control(licence: str) -> Iterator[None]:
+    """Probe sends join the existing API per-user deletion/hold transaction fence."""
+    from app.licences.service import lock_control
+
+    with transaction(prune=False) as conn:
+        owner = conn.execute(
+            select(licences.c.user_id).where(
+                licences.c.id == uuid.UUID(licence),
+                licences.c.deleted_at.is_(None),
+            )
+        ).scalar_one_or_none()
+        if owner is None:
+            raise GateClosedError("shared_licence_detached")
+        lock_control(conn, owner)
+        if (
+            conn.execute(
+                select(licences.c.id).where(
+                    licences.c.id == uuid.UUID(licence),
+                    licences.c.deleted_at.is_(None),
+                )
+            ).first()
+            is None
+        ):
+            raise GateClosedError("shared_licence_detached")
+        yield
+
+
+def identity(root: Path, licence: str, engine: Engine | None = None) -> str | None:
+    with transaction(engine) as conn:
         row = conn.execute(
-            "SELECT certificate FROM bindings WHERE licence = ?", (licence,)
-        ).fetchone()
-        return _identifier(row[0]) if row else None
+            text(
+                "SELECT b.scope_id FROM ingest_private.mairui_gate_bindings b "
+                "JOIN app.user_data_licence_status l ON l.id=b.licence_id "
+                "WHERE b.licence_id=:id AND l.deleted_at IS NULL "
+                "AND (b.expires_at IS NULL OR b.expires_at>now())"
+            ),
+            {"id": uuid.UUID(licence)},
+        ).first()
+        return row.scope_id.hex if row else None
 
 
-def related(root: Path, licence: str) -> list[uuid.UUID]:
-    with database(root) as conn:
-        if conn is None:
-            return [uuid.UUID(licence)]
-        _prune(conn, time.time())
+def related(root: Path, licence: str, engine: Engine | None = None) -> list[uuid.UUID]:
+    ident = uuid.UUID(licence)
+    with transaction(engine) as conn:
         rows = conn.execute(
-            "SELECT licence FROM bindings WHERE certificate = "
-            "(SELECT certificate FROM bindings WHERE licence = ?)",
-            (licence,),
+            text(
+                "SELECT licence_id FROM ingest_private.mairui_gate_bindings WHERE scope_id="
+                "(SELECT scope_id FROM ingest_private.mairui_gate_bindings WHERE licence_id=:id)"
+            ),
+            {"id": ident},
         )
-        return list({uuid.UUID(licence), *(uuid.UUID(row[0]) for row in rows)})
+        return list({ident, *(row.licence_id for row in rows)})
 
 
-def identifiers(root: Path) -> set[str]:
-    with database(root) as conn:
-        if conn is None:
-            return set()
-        _prune(conn, time.time())
-        return {_identifier(row[0]) for row in conn.execute("SELECT id FROM certificates")}
+def identifiers(root: Path, engine: Engine | None = None, *, active_only: bool = False) -> set[str]:
+    with transaction(engine) as conn:
+        sql = "SELECT id FROM ingest_private.mairui_gate_scopes"
+        if active_only:
+            sql += " WHERE detached_at IS NULL"
+        return {row.id.hex for row in conn.execute(text(sql))}
 
 
-def cleanup(root: Path, retained: Mapping[str, float], now: float) -> None:
-    """Keep live rows; deleted rows only until their existing bounded cooldown.
+def cleanup(root: Path | None = None, *, engine: Engine | None = None) -> None:
+    with transaction(engine):
+        pass
 
-    The caller supplies non-secret status metadata, never the DB credential HMAC.
-    No state/STOP/halt/request file is removed by this operation.
-    """
-    with database(root) as conn:
-        if conn is None:
-            return
-        for licence, expires in conn.execute("SELECT licence, expires FROM bindings").fetchall():
-            end = min(expires, retained.get(licence, now), now + TTL)
-            if end <= now:
-                conn.execute("DELETE FROM bindings WHERE licence = ?", (licence,))
-            else:
-                conn.execute("UPDATE bindings SET expires = ? WHERE licence = ?", (end, licence))
-        _prune(conn, now)
+
+def live(root: Path, licence: str, engine: Engine | None = None) -> bool:
+    with transaction(engine) as conn:
+        return (
+            conn.execute(
+                text(
+                    "SELECT l.id FROM app.user_data_licence_status l "
+                    "JOIN app.users u ON u.id=l.user_id WHERE l.id=:id AND l.deleted_at IS NULL "
+                    "AND u.status='approved' AND l.status<>'paused_by_admin' "
+                    "AND NOT EXISTS(SELECT 1 FROM app.user_data_licence_holds h "
+                    "WHERE h.user_id=l.user_id)"
+                ),
+                {"id": uuid.UUID(licence)},
+            ).first()
+            is not None
+        )

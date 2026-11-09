@@ -40,7 +40,7 @@ APP: Final = "app"
 MARKET: Final = "market"
 OPS: Final = "ops"
 EVALUATION: Final = "evaluation"
-SCHEMAS: Final[tuple[str, ...]] = (APP, MARKET, OPS, EVALUATION)
+SCHEMAS: Final[tuple[str, ...]] = (APP, MARKET, OPS, EVALUATION, "ingest_private")
 
 NAMING_CONVENTION: Final[dict[str, str]] = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",

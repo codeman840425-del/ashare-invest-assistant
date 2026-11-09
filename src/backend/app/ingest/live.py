@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import http.client
 import ipaddress
+import json
 import os
 import re
 import uuid
@@ -22,7 +23,7 @@ from app.db.tables.licences import data_licence_events, user_data_licence_status
 from app.db.tables.licences import user_data_licences as licences
 from app.db.tables.notify import notifications
 from app.db.tables.users import users
-from app.ingest.certificate_bindings import TTL, cleanup
+from app.ingest.certificate_bindings import cleanup
 from app.ingest.shared_gate import (
     GateClosedError,
     _read,
@@ -71,6 +72,52 @@ def send_paused(settings: Settings) -> bool:
         return True
     finally:
         if client is not None:
+            with suppress(redis.RedisError, OSError):
+                client.close()
+
+
+def set_global_pause(
+    settings: Settings, paused: bool, *, client: redis.Redis | None = None
+) -> None:
+    """Supported operator writer: same non-expiring mutex as every real send.
+
+    A durable mirror also stops standalone probes. Pause writes the mirror first;
+    resume removes it only after Redis succeeds. Failure always leaves a stop.
+    """
+    from app.ingest.send_control import critical, root_from_environment
+    from app.ingest.shared_gate import _sync_directory, _write_stop_unlocked
+
+    root = root_from_environment()
+    own = client is None
+    try:
+        if not settings.redis_url and client is None:
+            raise GateClosedError("global_pause_redis_required")
+        client = client or redis.Redis.from_url(
+            settings.redis_url, socket_connect_timeout=1, socket_timeout=1
+        )
+        with critical(root):
+            marker = root / "PAUSED"
+            if paused:
+                _write_stop_unlocked(marker)
+                client.set(
+                    settings.ingest_paused_key,
+                    json.dumps(
+                        {
+                            "by": "operator",
+                            "at": dt.datetime.now(dt.UTC).isoformat(),
+                            "reason": "operator_review_required",
+                        }
+                    ),
+                )
+            else:
+                client.delete(settings.ingest_paused_key)
+                if stop_present(marker):
+                    marker.unlink()
+                    _sync_directory(root)
+    except (redis.RedisError, OSError, ValueError):
+        raise GateClosedError("global_pause_write_failed_closed") from None
+    finally:
+        if own and client is not None:
             with suppress(redis.RedisError, OSError):
                 client.close()
 
@@ -236,18 +283,7 @@ def sync_halts(engine: Engine, settings: Settings, rds: redis.Redis, root: Path)
     with engine.connect() as conn:
         now = conn.execute(select(func.now())).scalar_one().astimezone(dt.UTC)
         states = conn.execute(select(user_data_licence_status)).all()
-    retained = {}
-    for row in states:
-        end = now + dt.timedelta(seconds=TTL)
-        if row.deleted_at is not None:
-            end = row.deleted_at
-            if row.status in {"ip_limited", "quota_exceeded"} or row.paused_until is not None:
-                end = min(
-                    row.deleted_at + dt.timedelta(seconds=TTL),
-                    row.paused_until or row.deleted_at + service.COOLDOWN_NULL_UNTIL_TTL,
-                )
-        retained[str(row.id)] = end.timestamp()
-    cleanup(root, retained, now.timestamp())
+    cleanup(root, engine=engine)
     lids = [row.id for row in states if row.deleted_at is None]
     for lid in lids:
         path = bound_halt(root, lid)

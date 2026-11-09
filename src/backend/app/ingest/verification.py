@@ -280,18 +280,20 @@ def tick(engine: Engine, rds: redis.Redis, settings: Settings) -> int:
     except ResponseError as exc:
         if "BUSYGROUP" not in str(exc):
             raise RuntimeError("verification_stream_unavailable") from None
-    # Process one intent per tick. Never prefetch a batch into pending and return
-    # after only its first entry. Recent owned pending work must settle before
-    # claiming new entries, so repeated busy ticks cannot accumulate leftovers.
-    pending = rds.xautoclaim(
-        STREAM, group, "ingest-verify", min_idle_time=60000, start_id="0-0", count=1
-    )[1]
-    if not pending and rds.xpending(STREAM, group)["pending"]:
-        return 0
+    # Drain every claimed entry, at most 20 per tick. Retry our own pending
+    # immediately, rather than waiting a minute after each busy/local failure.
+    owned = (rds.xreadgroup(group, "ingest-verify", {STREAM: "0"}, count=20) or [(None, [])])[0][1]
+    pending = (
+        owned
+        or rds.xautoclaim(
+            STREAM, group, "ingest-verify", min_idle_time=60000, start_id="0-0", count=20
+        )[1]
+    )
     messages = (
         pending
-        or (rds.xreadgroup(group, "ingest-verify", {STREAM: ">"}, count=1) or [(None, [])])[0][1]
+        or (rds.xreadgroup(group, "ingest-verify", {STREAM: ">"}, count=20) or [(None, [])])[0][1]
     )
+    handled = 0
     for mid, fields in messages:
         try:
             intent = parse_intent(fields)
@@ -305,7 +307,9 @@ def tick(engine: Engine, rds: redis.Redis, settings: Settings) -> int:
         if result not in {"busy_or_closed", "authorization_unavailable"}:
             rds.xack(STREAM, group, mid)
             publish_status(engine, rds, intent)
-        return 1
+        handled += 1
+    if handled:
+        return handled
     # Only this certificate's pending group can suppress its own fallback.
     if rds.xpending(STREAM, group)["pending"]:
         return 0

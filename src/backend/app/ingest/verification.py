@@ -15,7 +15,7 @@ from app.config import Settings
 from app.db.tables.licences import user_data_licence_status
 from app.db.tables.ops import ingest_request_log
 from app.db.tables.users import users
-from app.ingest.daily_lists import credential, send, wire
+from app.ingest.daily_lists import LimitResponseError, credential, send, wire
 from app.ingest.intents import VerifyIntent, parse_intent
 from app.ingest.live import check_egress, feedback, publish_feedback
 from app.ingest.send_cleanup import CleanupPendingError, UnsentCleanup
@@ -142,6 +142,8 @@ def process(
                             secret,
                             dispatch_locked=True,
                         )
+                    except LimitResponseError as exc:
+                        status, body = 200, {"code": exc.code}
                     except GateClosedError as exc:
                         if str(exc) == "shared_control_busy" and not wire_started(gate.root):
                             cleanup = UnsentCleanup(gate.root, intent.verification_id)

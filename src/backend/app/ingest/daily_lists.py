@@ -76,6 +76,14 @@ class DailyHaltError(RuntimeError):
     """Fixed diagnostic only; never chain an upstream exception or URL."""
 
 
+class LimitResponseError(DailyHaltError):
+    """Oversized response failed, with durable 103/429 evidence rather than a network error."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__("transport_or_response_failed_no_retry")
+        self.code = code
+
+
 def wire(path: str, secret: str) -> tuple[int, object]:
     gate = WIRE_GATE.get()
     if (
@@ -111,6 +119,7 @@ def wire(path: str, secret: str) -> tuple[int, object]:
             _write_stop_unlocked(
                 (gate.governance.root if isinstance(gate, Permit) else gate.root) / "STOP"
             )
+            raise LimitResponseError(exc.code) from None
         raise DailyHaltError("transport_or_response_failed_no_retry") from None
     except Exception:  # noqa: BLE001 - sanitize upstream/credential exceptions, never log them
         raise DailyHaltError("transport_or_response_failed_no_retry") from None
@@ -397,6 +406,10 @@ def process(
                     )
                 try:
                     status, body = send(permit, upstream, PATHS[dataset], secret)
+                except LimitResponseError as exc:
+                    # Preserve the regular limit feedback/notification/business
+                    # halt path without retaining the oversized upstream body.
+                    status, body = 200, {"code": exc.code}
                 except GateClosedError:
                     raise
                 except Exception:  # noqa: BLE001 - transport may contain the secret URL

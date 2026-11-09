@@ -25,6 +25,15 @@ def _initial_text(value: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", normalize(value))
 
 
+def _pypinyin_errors_keep_chars(chunk: str) -> list[str]:
+    """Pass non-Han chunks through as individual characters.
+
+    pypinyin accepts list[str] from ``errors`` at runtime; upstream stubs type it as
+    Callable[[str], str], which is why call sites need an explicit ignore.
+    """
+    return list(chunk)
+
+
 def initials(value: str, maximum: int = 16) -> list[str]:
     if maximum < 1:
         raise ValueError("initials maximum must be positive")
@@ -36,7 +45,7 @@ def initials(value: str, maximum: int = 16) -> list[str]:
                 value,
                 style=Style.FIRST_LETTER,
                 strict=False,
-                errors=lambda chunk: list(chunk),
+                errors=_pypinyin_errors_keep_chars,  # type: ignore[arg-type]
             )
         )
     )
@@ -48,7 +57,7 @@ def initials(value: str, maximum: int = 16) -> list[str]:
             style=Style.FIRST_LETTER,
             heteronym=True,
             strict=False,
-            errors=lambda chunk: list(chunk),
+            errors=_pypinyin_errors_keep_chars,  # type: ignore[arg-type]
         )
         choices.append(list(dict.fromkeys(_initial_text(item) for item in readings[0])))
     for combination in itertools.product(*choices):

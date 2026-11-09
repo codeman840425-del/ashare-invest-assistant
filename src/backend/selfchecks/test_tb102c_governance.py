@@ -200,7 +200,10 @@ def test_tb102c_minute_rollback_only_own_unsent_preserves_probe_history(env: Any
     minute.read(e.now[0].timestamp())
     minute.reserve(e.now[0].timestamp())
     minute.cancel_unsent()
-    assert json.loads(path.read_text()) == state
+    assert json.loads(path.read_text()) == {
+        **state,
+        "calls": [],
+    }  # Rolling 60s eviction stays evicted.
 
 
 @pytest.mark.parametrize("enforce", [True, False])

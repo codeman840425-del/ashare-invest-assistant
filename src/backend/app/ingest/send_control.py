@@ -43,6 +43,32 @@ def begin_wire(root: Path) -> None:
     _local.wire_started = True
 
 
+def stop_flag(path: Path) -> bool:
+    from app.ingest.shared_gate import GateClosedError, stop_present
+
+    try:
+        return stop_present(path)
+    except GateClosedError:
+        return True
+
+
+def check_stops(root: Path, halt_path: Path | None = None) -> None:
+    from app.ingest.shared_gate import GateClosedError
+
+    paths = (root / "STOP",) + ((halt_path,) if halt_path is not None else ())
+    if any(stop_flag(path) for path in paths):
+        raise GateClosedError("shared_STOP")
+
+
+def check_product(gate: object) -> None:
+    from app.ingest.shared_gate import SharedGate
+
+    if not isinstance(gate, SharedGate):
+        raise TypeError("product_gate_required")
+    check_stops(gate.root, gate.halt_path)
+    gate.check()
+
+
 def legacy_leases(root: Path, *, own_token: str | None = None) -> tuple[bool, bool]:
     """One product-side lease check, including dangling links and owned verify leases.
 

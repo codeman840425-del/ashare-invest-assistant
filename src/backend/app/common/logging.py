@@ -9,6 +9,7 @@ UUID 整体保留（批次号等需要可追查）。证券代码（6 位）也�
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sys
@@ -25,7 +26,7 @@ _UUID: Final = re.compile(
 _SENSITIVE: Final = re.compile(r"(?<![0-9A-Za-z])(?:[A-Za-z]\d{9}|\d{6,})(?![0-9A-Za-z])")
 
 
-def redact(text: str) -> str:
+def _redact_plain(text: str) -> str:
     """把 UUID 以外的片段中的长数字串与股东代码样式替换为 ``***``。"""
     out: list[str] = []
     pos = 0
@@ -35,6 +36,34 @@ def redact(text: str) -> str:
         pos = m.end()
     out.append(_SENSITIVE.sub(REDACTED, text[pos:]))
     return "".join(out)
+
+
+def _redact_json(value: object) -> object:
+    if isinstance(value, str):
+        return _redact_plain(value)
+    if isinstance(value, list):
+        return [_redact_json(item) for item in value]
+    if isinstance(value, dict):
+        return {_redact_plain(str(key)): _redact_json(item) for key, item in value.items()}
+    if type(value) in {int, float} and _SENSITIVE.search(json.dumps(value)):
+        return REDACTED  # JSON serialization adds quotes around the placeholder.
+    return value
+
+
+def redact(text: str) -> str:
+    """Preserve structured log JSON when masking numeric literals and strings."""
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"[\[{]", text):
+        try:
+            value, end = decoder.raw_decode(text, match.start())
+        except (ValueError, RecursionError):
+            continue
+        return (
+            _redact_plain(text[: match.start()])
+            + json.dumps(_redact_json(value), ensure_ascii=False, separators=(",", ":"))
+            + _redact_plain(text[end:])
+        )
+    return _redact_plain(text)
 
 
 class RedactFilter(logging.Filter):

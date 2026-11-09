@@ -321,14 +321,20 @@ def test_tb102_window_day_interval_same_rules_both_modes(
         ):
             e.calls.append("sent")
 
-    if enforce:
+    if kind != "interval":
+        with pytest.raises(GateClosedError, match="daily_window_expired"):
+            run()
+        assert e.calls == records(e) == []
+        assert logs(e)[-1]["code"] == "daily_window_expired"
+    elif enforce:
         with pytest.raises(GateClosedError, match="daily_refused"):
             run()
-        assert len(e.calls) == int(kind == "interval")
+        assert len(e.calls) == 1
+        assert logs(e)[-1]["code"] == "blocked_daily"
     else:
         run()
-        assert len(e.calls) == 1 + int(kind == "interval")
-    assert logs(e)[-1]["code"] == ("blocked_daily" if enforce else "bypass_daily_would_block")
+        assert len(e.calls) == 2
+        assert logs(e)[-1]["code"] == "bypass_daily_would_block"
 
 
 def test_tb102_bypass_fourth_keeps_actual_four_and_next_day_does_not_reset_history(

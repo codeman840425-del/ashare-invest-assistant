@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Any, cast
 
 import redis
-from sqlalchemy import Engine, delete, insert, select, text, update
+from sqlalchemy import Engine, insert, select, text, update
 
 from app.config import Settings
 from app.db.tables.licences import user_data_licence_status
@@ -18,7 +18,8 @@ from app.db.tables.users import users
 from app.ingest.daily_lists import credential, send, wire
 from app.ingest.intents import VerifyIntent, parse_intent
 from app.ingest.live import check_egress, feedback, publish_feedback
-from app.ingest.send_control import critical, transport, wire_started
+from app.ingest.send_cleanup import CleanupPendingError, UnsentCleanup
+from app.ingest.send_control import check_product, critical, transport, wire_started
 from app.ingest.send_state import MinuteLedger, halt_present
 from app.ingest.shared_gate import GateClosedError, SharedGate, _write_stop_unlocked, limit_code
 from app.ingest.state import LicenceState, Priority
@@ -53,9 +54,13 @@ def process(
     reserved = False
     try:
         with critical(gate.root, blocking=False):
+            recovery = UnsentCleanup(gate.root, intent.verification_id)
+            if recovery.exists():
+                recovery.run(engine)
             transport(gate.root)
             if halt_present(gate.root):
                 return "busy_or_closed"
+            check_product(gate)
             gate.acquire()
             with engine.connect() as lock:
                 if not lock.execute(
@@ -127,7 +132,7 @@ def process(
                                 licence_id=intent.licence_id,
                             )
                         )
-                    gate.check()
+                    check_product(gate)
                     secret = secret_loader(engine, intent.licence_id)
                     try:
                         status, body = send(
@@ -139,16 +144,17 @@ def process(
                         )
                     except GateClosedError as exc:
                         if str(exc) == "shared_control_busy" and not wire_started(gate.root):
-                            minute.cancel_unsent()
+                            cleanup = UnsentCleanup(gate.root, intent.verification_id)
+                            cleanup.create(
+                                minute,
+                                kind="verify",
+                                owner=intent.licence_id,
+                                lease_token=gate.token,
+                            )
                             gate.inflight = False
+                            gate.token = None  # Cleanup owns only the recorded lease token now.
                             reserved = False
-                            with engine.begin() as conn:
-                                conn.execute(
-                                    delete(ingest_request_log).where(
-                                        ingest_request_log.c.id == intent.verification_id,
-                                        ingest_request_log.c.status == "queued",
-                                    )
-                                )
+                            cleanup.run(engine)
                             return "busy_or_closed"
                         raise
                     except Exception:  # noqa: BLE001 - persist only the fixed network classification
@@ -212,6 +218,8 @@ def process(
                         text("SELECT pg_advisory_unlock(hashtext('ingest:single-egress'))")
                     )
                     lock.commit()
+    except CleanupPendingError:
+        return "busy_or_closed"
     except GateClosedError:
         return "failed_no_retry" if reserved else "busy_or_closed"
     except Exception:  # noqa: BLE001 - sanitize transport/credential errors; never retry

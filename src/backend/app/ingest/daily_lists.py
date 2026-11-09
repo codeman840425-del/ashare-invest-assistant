@@ -30,8 +30,17 @@ from app.db.tables.market import master_runs, securities
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows
 from app.ingest.live import check_egress, feedback
-from app.ingest.send_control import begin_wire, critical, root_from_environment, transport
+from app.ingest.send_cleanup import CleanupPendingError, UnsentCleanup, recover_daily
+from app.ingest.send_control import (
+    begin_wire,
+    check_product,
+    critical,
+    root_from_environment,
+    transport,
+)
 from app.ingest.send_governance import LIST_PATHS, Governance, Permit, expected_egress
+from app.ingest.send_response import read_body
+from app.ingest.send_state import MinuteLedger
 from app.ingest.shared_gate import (
     GateClosedError,
     SharedGate,
@@ -80,7 +89,10 @@ def wire(path: str, secret: str) -> tuple[int, object]:
         gate.governance.root if isinstance(gate, Permit) else gate.root,
         own_token=gate.token if isinstance(gate, SharedGate) else None,
     )
-    gate.check()
+    if isinstance(gate, SharedGate):
+        check_product(gate)
+    else:
+        gate.check()
     begin_wire(gate.governance.root if isinstance(gate, Permit) else gate.root)
     if isinstance(gate, Permit):
         gate.sent = True  # The final pre-connect checks passed; outcome can now be uncertain.
@@ -91,17 +103,7 @@ def wire(path: str, secret: str) -> tuple[int, object]:
         response = conn.getresponse()
         if response.status in (103, 429):
             return response.status, None
-        payload = response.read(16 * 1024 * 1024 + 1)
-        if len(payload) > 16 * 1024 * 1024:
-            raise DailyHaltError("response_too_large")
-        try:
-            body = json.loads(payload)
-            if payload.strip() in {b"103", b"429"}:
-                body = payload.strip().decode("ascii")  # Keep plain text codes as text.
-        except (ValueError, UnicodeError):
-            match = re.search(rb"(?<!\d)(103|429)(?!\d)", payload)
-            body = match.group(1).decode("ascii") if match else None
-        return response.status, body
+        return response.status, read_body(response)
     except Exception:  # noqa: BLE001 - sanitize upstream/credential exceptions, never log them
         raise DailyHaltError("transport_or_response_failed_no_retry") from None
     finally:
@@ -127,7 +129,7 @@ def send(
             if not dispatch_locked:
                 stack.enter_context(critical(gate.root, blocking=False))
             transport(gate.root, own_token=gate.token)
-            gate.check()
+            check_product(gate)
         token = WIRE_GATE.set(gate)
         try:
             if upstream is not wire:
@@ -252,9 +254,9 @@ def process(
     identity = None
     secret = None
     active_permit: Permit | None = None
-    pending_dataset: str | None = None
     try:
         root = root_from_environment()
+        recover_daily(engine, root, bid)
         with engine.begin() as conn:
             b = conn.execute(select(batches).where(batches.c.id == bid).with_for_update()).first()
             if b is None:
@@ -270,7 +272,15 @@ def process(
             completed = [row["dataset"] for row in summaries if row.get("status") == "ok"]
             issue = None
             current_grant = read_grant()
+            now = clock().astimezone(BEIJING)
             if (
+                clock() >= b.deadline_at
+                or str(now.date()) != p.stats.get("trade_date")
+                or not dt.time(18) <= now.time() < dt.time(23, 59, 59)
+                or not covered(conn, now.date())
+            ):
+                issue = "daily_window_expired"
+            elif (
                 current_grant != grant
                 or grant.digest != p.stats.get("receipt_digest")
                 or grant.licence_id != b.source_licence_id
@@ -314,11 +324,12 @@ def process(
         identity = temporary(temp, secret)
         for index, dataset in enumerate(LISTS):
             active_permit = None
-            pending_dataset = None
             if dataset in completed:
                 continue  # Resume only durably completed results; never resend those endpoints.
             if index:
                 pause(policy.min_interval_s)
+            if clock() >= b.deadline_at:
+                raise GateClosedError("daily_window_expired")
             with engine.begin() as conn:
                 parent = conn.execute(
                     select(master_runs).where(master_runs.c.id == parent_id).with_for_update()
@@ -334,14 +345,29 @@ def process(
                 if dataset in attempts:
                     raise DailyHaltError("uncertain_prior_attempt_no_retry")
                 trading_day = covered(conn, clock().astimezone(BEIJING).date())
+
+            def unsent(
+                minute: MinuteLedger, refund: Callable[[], None], dataset: str = dataset
+            ) -> None:
+                cleanup = UnsentCleanup(root, uuid.uuid5(bid, dataset))
+                cleanup.create(
+                    minute,
+                    kind="daily",
+                    owner=bid,
+                    dataset=dataset,
+                    temporary=(temp, identity) if identity is not None else None,
+                )
+                cleanup.run(engine, refund=refund)
+
             with governance.dispatch(
                 token=uuid.uuid5(bid, dataset),
                 dataset=dataset,
                 expected_day=day,
                 trading_day=trading_day,
+                deadline_at=b.deadline_at,
+                on_unsent=unsent,
             ) as permit:
                 active_permit = permit
-                pending_dataset = dataset
                 # Acquiring the physical lock precedes any business attempted flag.
                 # Busy leaves the requested message untouched for tick retry.
                 with engine.begin() as conn:
@@ -453,30 +479,24 @@ def process(
             )
         return "fetched"
     except Exception as exc:  # noqa: BLE001 - fixed diagnostics, no upstream/secret/DSN text
-        if (
+        if isinstance(exc, (CleanupPendingError, FileExistsError)) or (
             isinstance(exc, GateClosedError)
             and str(exc) == "shared_control_busy"
             and (active_permit is None or not active_permit.sent)
         ):
-            if pending_dataset is not None:
-                with engine.begin() as conn:
-                    parent = conn.execute(
-                        select(master_runs).where(master_runs.c.id == parent_id).with_for_update()
-                    ).one()
-                    attempts = list(parent.stats.get("attempted", []))
-                    if pending_dataset in attempts:
-                        attempts.remove(pending_dataset)
-                        conn.execute(
-                            update(master_runs)
-                            .where(master_runs.c.id == parent_id)
-                            .values(stats={**parent.stats, "attempted": attempts})
-                        )
             return "busy"
         with engine.begin() as conn:
             conn.execute(
                 update(batches)
                 .where(batches.c.id == bid, batches.c.status == "requested")
-                .values(status="failed", error_code="daily_collection_failed_no_retry")
+                .values(
+                    status="failed",
+                    error_code=(
+                        "daily_window_expired"
+                        if isinstance(exc, GateClosedError) and str(exc) == "daily_window_expired"
+                        else "daily_collection_failed_no_retry"
+                    ),
+                )
             )
         return "failed"
     finally:

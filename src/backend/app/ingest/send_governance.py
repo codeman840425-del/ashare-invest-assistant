@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from app.ingest import send_control
-from app.ingest.send_state import MinuteLedger, halt_present, ledger128_total
+from app.ingest.send_state import MinuteLedger, halt_present, ledger128_total, private_json
 from app.ingest.shared_gate import GateClosedError, SharedGate, _read, stop_present
 
 logger = logging.getLogger(__name__)
@@ -160,6 +160,9 @@ class Permit:
     snapshot: dict[str, Any]
     fd: int
     dataset: str
+    expected_day: dt.date
+    trading_day: bool
+    deadline_at: dt.datetime | None = None
     inflight: bool = True
     sent: bool = False
     claimed: bool = False
@@ -171,6 +174,14 @@ class Permit:
         self.claimed = True
 
     def check(self) -> None:
+        now = self.governance.clock().astimezone(BEIJING)
+        if (
+            (self.deadline_at is not None and now >= self.deadline_at)
+            or not self.trading_day
+            or now.date() != self.expected_day
+            or not dt.time(18) <= now.time() < dt.time(23, 59, 59)
+        ):
+            raise GateClosedError("daily_window_expired")
         send_control.transport(self.governance.root)
         _identity(self.fd, self.governance.counter)
         self.governance.check_stop(self.snapshot)
@@ -231,7 +242,7 @@ class Governance:
                 {
                     "code": code,
                     "would_block": True,
-                    "ts": self.clock().astimezone(BEIJING).isoformat(),
+                    "ts": self.clock().astimezone(BEIJING).isoformat(timespec="seconds"),
                     "snapshot": {**snapshot, "reason": reason},
                 },
                 separators=(",", ":"),
@@ -284,6 +295,29 @@ class Governance:
         if now - state.get("last_finished", 0) < 60:
             self._decision("daily", snapshot, "shared_product_interval_not_elapsed")
 
+    def _observe_counters(self, snapshot: dict[str, Any]) -> None:
+        # A busy sender cannot take the writer locks. Read/validate one current
+        # inode; concurrent partial/replaced state remains explicit unknown, never zero.
+        try:
+            state = _validate(private_json(self.counter))
+            day = self.clock().astimezone(BEIJING).date().isoformat()
+            snapshot.update(
+                ledger_total=len(state["records"]),
+                daily_count=sum(row["day"] == day for row in state["records"]),
+            )
+        except (GateClosedError, ValueError, KeyError, TypeError):
+            snapshot["counter_observation_unknown"] = True
+        try:
+            minute = MinuteLedger(self.root, self.licence_id).read(self.clock().timestamp())
+            snapshot.update(
+                minute_count=sum(self.clock().timestamp() - v < 60 for v in minute["calls"]),
+                minute_inflight=minute["inflight"],
+                minute_limit=self.minute_limit,
+            )
+        except GateClosedError:
+            snapshot["minute_observation_unknown"] = True
+        self._stop_state(snapshot)
+
     def _snapshot_record(
         self, snapshot: dict[str, Any], *, code: str = "send_snapshot", blocked: bool = False
     ) -> None:
@@ -293,7 +327,7 @@ class Governance:
                 {
                     "code": code,
                     "would_block": blocked,
-                    "ts": self.clock().astimezone(BEIJING).isoformat(),
+                    "ts": self.clock().astimezone(BEIJING).isoformat(timespec="seconds"),
                     "snapshot": dict(snapshot),
                 },
                 separators=(",", ":"),
@@ -317,6 +351,8 @@ class Governance:
         dataset: str,
         expected_day: dt.date,
         trading_day: bool,
+        deadline_at: dt.datetime | None = None,
+        on_unsent: Callable[[MinuteLedger, Callable[[], None]], None] | None = None,
     ) -> Iterator[Permit]:
         if dataset not in DATASETS or self.clock().tzinfo is None:
             raise GateClosedError("daily_dispatch_invalid")
@@ -330,12 +366,23 @@ class Governance:
             "lock_holder": "unknown",
             "stop_0": None,
         }
+        now = self.clock().astimezone(BEIJING)
+        if (
+            (deadline_at is not None and now >= deadline_at)
+            or not trading_day
+            or now.date() != expected_day
+            or not dt.time(18) <= now.time() < dt.time(23, 59, 59)
+        ):
+            self._observe_counters(snapshot)
+            self._snapshot_record(snapshot, code="daily_window_expired", blocked=True)
+            raise GateClosedError("daily_window_expired")
         with contextlib.ExitStack() as stack:
             try:
                 stack.enter_context(send_control.critical(self.root, blocking=False))
             except GateClosedError as exc:
                 if str(exc) == "shared_control_busy":
                     snapshot["lock_holder"] = _lock_holder(self.root, False)
+                    self._observe_counters(snapshot)
                     self._snapshot_record(snapshot, code="shared_control_busy", blocked=True)
                 raise
             snapshot["lock_holder"] = _lock_holder(self.root, True)
@@ -343,6 +390,7 @@ class Governance:
             legacy_busy, probe_busy = send_control.legacy_leases(self.root)
             snapshot["legacy_lease_present"] = legacy_busy
             if probe_busy:
+                self._observe_counters(snapshot)
                 self._record("lock", snapshot, reason="probe_lease_busy")
                 raise GateClosedError("shared_control_busy")
             try:
@@ -380,12 +428,6 @@ class Governance:
             if stopped:
                 self._record("stop", snapshot, reason="STOP_present_or_unknown")
             reasons = []
-            if (
-                not trading_day
-                or now.date() != expected_day
-                or not dt.time(18) <= now.time() < dt.time(23, 59, 59)
-            ):
-                reasons.append("outside_daily_window")
             if len(today) >= 3:
                 reasons.append("daily_budget_exhausted")
             if any(row["dataset"] == dataset for row in today):
@@ -426,16 +468,23 @@ class Governance:
                 raise GateClosedError("send_governance_stop_refused")
             self.minute.reserve(now.timestamp())
             self._snapshot_record(snapshot)
-            permit = Permit(self, snapshot, fd, dataset)
+            permit = Permit(self, snapshot, fd, dataset, expected_day, trading_day, deadline_at)
             try:
                 permit.check()
                 yield permit  # Both inode locks remain held through dispatch and response.
             except GateClosedError as exc:
                 if str(exc) == "shared_control_busy" and not permit.sent:
-                    # A known unsent busy is retryable; real/uncertain sends never refund.
-                    records.pop()
-                    _persist(fd, self.counter, state)
-                    self.minute.cancel_unsent()
+                    # DB attempted must clear before either file refund. The
+                    # caller persists a known-unsent proof for crash recovery.
+                    def refund() -> None:
+                        records[:] = [row for row in records if row["id"] != str(token)]
+                        _persist(fd, self.counter, state)
+
+                    if on_unsent is not None:
+                        on_unsent(self.minute, refund)
+                    else:
+                        self.minute.cancel_unsent()
+                        refund()
                 raise
             else:
                 finished = self.clock().astimezone(BEIJING)

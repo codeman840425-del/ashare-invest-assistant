@@ -100,7 +100,12 @@ def halt_present(root: Path) -> bool:
     try:
         for path in root.glob("*.halt.json"):
             halt = private_json(path)
-            if "code" not in halt or str(halt["code"]) in {"103", "429"}:
+            code = halt.get("code")
+            if type(code) not in {str, int} or not re.fullmatch(
+                r"(?:[1-5][0-9]{2}|uncertain|egress_mismatch)", str(code)
+            ):
+                return True
+            if str(code) in {"103", "429"}:
                 return True
     except (GateClosedError, OSError):
         return True
@@ -160,23 +165,64 @@ class MinuteLedger:
         except (GateClosedError, OSError, ValueError, KeyError, TypeError):
             raise GateClosedError("shared_minute_state_unavailable") from None
 
+    def _current(self) -> dict[str, Any]:
+        try:
+            self.path.lstat()
+        except FileNotFoundError:
+            return {"calls": [], "inflight": False, "last_finished": 0}
+        state = private_json(self.path)
+        if (
+            not isinstance(state.get("calls"), list)
+            or any(type(v) not in {int, float} or not math.isfinite(v) for v in state["calls"])
+            or type(state.get("inflight")) is not bool
+            or type(state.get("last_finished", 0)) not in {int, float}
+            or not math.isfinite(state.get("last_finished", 0))
+        ):
+            raise GateClosedError("shared_minute_state_unavailable")
+        return state
+
     def reserve(self, now: float) -> None:
-        self.pending = {
+        # Re-read after the aggregate check; never roll a newly added probe call back.
+        self.original = self._current()
+        self.pending = self.original | {
             "calls": [v for v in self.original["calls"] if now - v < 60] + [now],
             "inflight": True,
-            "last_finished": self.original.get("last_finished", 0),
         }
         _write(self.path, self.pending)
 
     def complete(self, now: float) -> None:
         if self.pending is None:
             raise GateClosedError("shared_minute_reservation_required")
+        current = self._current()
+        if self.pending["calls"][-1] not in current["calls"]:
+            return  # Another writer replaced this entry: preserve its entire current state.
+        unchanged = current == self.pending
         _write(
-            self.path, self.pending | {"inflight": self.original["inflight"], "last_finished": now}
+            self.path,
+            current
+            | {
+                "inflight": self.original["inflight"] if unchanged else current["inflight"],
+                "last_finished": max(current.get("last_finished", 0), now),
+            },
         )
 
     def cancel_unsent(self) -> None:
-        # Only a known pre-HTTP busy may undo its own provisional minute entry.
-        if self.pending is not None:
-            _write(self.path, self.original)
+        if self.pending is None:
+            return
+        current = self._current()
+        token = self.pending["calls"][-1]
+        if token not in current["calls"]:
             self.pending = None
+            return  # Never restore an older snapshot when another writer has replaced us.
+        unchanged = current == self.pending
+        calls = list(current["calls"])
+        calls.remove(token)  # Exactly one occurrence, preserving every other writer's entry.
+        _write(
+            self.path,
+            current
+            | {
+                "calls": calls,
+                "inflight": self.original["inflight"] if unchanged else current["inflight"],
+            },
+        )
+        self.pending = None

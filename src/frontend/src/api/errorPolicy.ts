@@ -145,11 +145,30 @@ export function isSuperseded(e: unknown): boolean {
   return e instanceof ApiError && e.status === 404 && typeof e.details?.superseded_by === 'string' && e.details.superseded_by !== '';
 }
 
+/**
+ * T-F34c：404 信封的"资源语义"特征。
+ * 后端未注册路由由 `_http_exception_handler` 转成 `NOT_FOUND` + 固定 message「资源不存在」（src/backend/app/common/errors.py
+ * 的 `ErrorSpec` 默认值），FastAPI 默认体则是 `{"detail":"Not Found"}`（code=HTTP_ERROR）。
+ * 其余 message（如「证券 不存在」「XX 不存在（示例数据）」）是业务代码主动抛的资源 404，**不是**路由不存在。
+ */
+const ROUTE_MISSING_MESSAGES = ['资源不存在', '资源不存在。'];
+export function isResourceNotFound(e: unknown): boolean {
+  if (!(e instanceof ApiError) || e.status !== 404) return false;
+  if (typeof e.details?.superseded_by === 'string' && e.details.superseded_by !== '') return true;
+  if (e.code === 'HTTP_ERROR') {
+    // FastAPI 默认体 {"detail":"Not Found"} 无法再区分，按路由不存在处理（保守，与 T-F20 一致）
+    return false;
+  }
+  if (e.code !== 'NOT_FOUND') return true;
+  const m = (e.message ?? '').trim();
+  return !!m && !ROUTE_MISSING_MESSAGES.includes(m);
+}
+
 export function isRoutePending(e: unknown): boolean {
   if (!(e instanceof ApiError) || e.status !== 404 || !e.url) return false;
   if (e.code !== 'NOT_FOUND' && e.code !== 'HTTP_ERROR') return false;
-  // 资源 404（旧代码提示新代码）优先于未实现判定
-  if (isSuperseded(e)) return false;
+  // 资源 404（旧代码提示新代码 / 业务资源语义）优先于未实现判定
+  if (isResourceNotFound(e)) return false;
   const u = new URL(e.url, 'http://x');
   const path = u.pathname.replace(/^\/api\/v1/, '');
   if (!ROUTE_PENDING_PATHS.includes(path)) return false;
@@ -163,11 +182,11 @@ const templateToRegExp = (tpl: string) => {
   return new RegExp(`^${esc(head)}[^/]+${esc(tail)}$`);
 };
 
-/** T-F34b：个股子资源路由尚未实现时的 404 → “开发中”；superseded_by 等真实资源 404 一律不吞 */
+/** T-F34b/c：个股子资源路由尚未实现时的 404 → “开发中”；superseded_by 与资源语义 404 一律不吞 */
 export function isStockSubPending(e: unknown): boolean {
   if (!(e instanceof ApiError) || e.status !== 404 || !e.url) return false;
   if (e.code !== 'NOT_FOUND' && e.code !== 'HTTP_ERROR') return false;
-  if (isSuperseded(e)) return false;
+  if (isResourceNotFound(e)) return false;
   const path = new URL(e.url, 'http://x').pathname.replace(/^\/api\/v1/, '');
   return STOCK_SUB_PATHS_PENDING.some((tpl) => templateToRegExp(tpl).test(path));
 }

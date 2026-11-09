@@ -18,8 +18,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from app.config import _DEV_ENVS
 from app.config_files import IngestLicences
 from app.ingest import ip_limit as ipl
 from app.ingest.bucket import TokenBucket
@@ -44,6 +46,26 @@ class _Licence:
     user_id: uuid.UUID
 
 
+
+def engine_required_for_process(
+    *,
+    service_name: str | None = None,
+    app_env: str | None = None,
+) -> bool:
+    """True when this process must not run IngestCore without a DB engine.
+
+    Smaller L-1′ fix vs wiring-only: honor compose ``SERVICE_NAME=ingest`` and
+    treat any non-dev ``APP_ENV`` (staging/production/…) as requiring a store.
+    """
+    raw_service = service_name if service_name is not None else os.environ.get("SERVICE_NAME", "")
+    service = raw_service.strip()
+    raw_env = app_env if app_env is not None else os.environ.get("APP_ENV", "local")
+    env = raw_env.strip() or "local"
+    if service == "ingest":
+        return True
+    return env not in _DEV_ENVS
+
+
 @dataclass
 class IngestCore:
     cfg: IngestLicences
@@ -53,11 +75,13 @@ class IngestCore:
     scheduler: Scheduler[Call] = field(init=False)
 
     def __post_init__(self) -> None:
-        # L-1: production must wire a store; memory-only is fine for local/test.
-        if self.engine is None and os.environ.get("APP_ENV") == "production":
+        # L-1′ (T-A84): require engine when running as ingest, or outside local/test.
+        # compose sets SERVICE_NAME=ingest but leaves APP_ENV=local — production-only
+        # check never fired. Dev whitelist matches config._DEV_ENVS.
+        if self.engine is None and engine_required_for_process():
             raise RuntimeError(
-                "IngestCore.engine is required when APP_ENV=production "
-                "(T-A79 L-1 / T-B112)"
+                "IngestCore.engine is required when SERVICE_NAME=ingest "
+                "or APP_ENV not in local/test (T-A84 L-1′ / T-B113)"
             )
         self.scheduler = Scheduler(
             global_max=self.cfg.global_max_concurrency,
@@ -76,14 +100,22 @@ class IngestCore:
         return mem
 
     def _try_flush_pending(self, user_id: uuid.UUID) -> None:
-        """One-shot pending rewrite under §4.1 lock; clear only after commit (L-6/L-7)."""
+        """One-shot pending rewrite; try-lock + timeouts (L-6/L-7/L-10).
+
+        Tick must not block forever on a held advisory lock or hung DB. On
+        lock miss / timeout / error: keep pending and stay fail-closed.
+        """
         if self.engine is None:
             return
         mem = self._user_mem(user_id)
         if mem.pending_escalation is None:
             return
         try:
-            with self.engine.begin() as conn:
+            with self.engine.connect() as conn, conn.begin():
+                # L-10: bound lock wait (ms); keep blocking acquire for L-7 fairness.
+                # On lock_timeout / statement_timeout → except → pending kept (fail-closed).
+                conn.execute(text("SET LOCAL lock_timeout = '2000'"))
+                conn.execute(text("SET LOCAL statement_timeout = '5000'"))
                 ipl.acquire_ip_limit_lock(conn, user_id)
                 ipl.flush_pending_escalation(conn, mem)
         except Exception:  # noqa: BLE001 — keep pending; still fail-closed

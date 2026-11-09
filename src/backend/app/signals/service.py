@@ -49,6 +49,7 @@ from app.schemas.enums import Action
 from app.signals.admission import run_with_master_guard
 from app.signals.execution import assess, condition
 from app.signals.models import MarketFacts, SignalInput
+from app.signals.screen import screen_membership
 from app.strategy.instances.service import owned
 
 BJT = dt.timezone(dt.timedelta(hours=8))
@@ -321,13 +322,16 @@ def write_candidate(
         else None
     )
     universe = (fields or {}).get("universe", version.config.get("universe"))
-    if not universe or set(universe) - {"boards", "pool", "security_types"}:
-        return {"id": None, "diagnostic": "universe_not_defined_or_supported"}
-    pool = universe.get("pool")
-    if pool not in {"持仓", "持仓 ∪ 自选"}:
-        return {"id": None, "diagnostic": "universe_pool_not_supported"}
-    if not qty and (pool == "持仓" or not watched):
-        return {"id": None, "diagnostic": "outside_universe"}
+    mount_policy = (fields or {}).get("mount_policy", version.config.get("mount_policy", "user"))
+    diag = screen_membership(
+        universe=universe,
+        quantity=qty,
+        on_watchlist=watched,
+        mount_policy=str(mount_policy or "user"),
+        proposed_action=content.proposed_action,
+    )
+    if diag is not None:
+        return {"id": None, "diagnostic": diag}
     identity = f"{user_id}:{instance_id}:{actual}:{content.snapshot_id}:{content.security_code}"
     key = hashlib.sha256(identity.encode()).hexdigest()
     existing = conn.execute(

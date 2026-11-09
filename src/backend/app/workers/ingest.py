@@ -104,6 +104,11 @@ def write_heartbeat(settings: Settings) -> None:
                 tick(engine, client, pause=heartbeat_wait)
             finally:
                 engine.dispose()
+        # T-B113 / T-A84: once IngestCore is wired, every heartbeat round must tick it
+        # (pending IP-limit flush). No-op until set_ingest_core(...).
+        from app.ingest.runtime import tick_ingest_core
+
+        tick_ingest_core()
     finally:
         client.close()
 

@@ -49,7 +49,8 @@ const FIN_ROWS: FinRow[] = [
 export function FinancialsTab({ code }: { code: string }) {
   const q = useFinancials(code);
   if (q.isPending) return <Loading />;
-  if (q.isError) return <ErrorBox error={q.error} />;
+  // T-F34b：错误分支保留页签容器，路由未实现的 404 由 ErrorBox 显示「功能开发中」，不白屏
+  if (q.isError) return <div data-testid="tab-financials"><ErrorBox error={q.error} /></div>;
   const d = q.data;
   const cols: ColumnsType<FinRow> = [
     { title: '指标', dataIndex: 'label', width: 150, fixed: 'left', render: (v: string) => <span className="fin-label">{v}</span> },
@@ -91,7 +92,7 @@ const amtCell = (v: string | null) => <span className={`mono ${pctClass(v)}`}>{v
 export function FundFlowTab({ code }: { code: string }) {
   const q = useFundFlows(code, 60);
   if (q.isPending) return <Loading />;
-  if (q.isError) return <ErrorBox error={q.error} />;
+  if (q.isError) return <div data-testid="tab-fund-flow"><ErrorBox error={q.error} /></div>;
   const d = q.data;
   const recent = [...d.items].reverse();
   const cols: ColumnsType<FundFlowDay> = [
@@ -152,7 +153,7 @@ function PctBar({ v, rank }: { v: string | null; rank: number | null }) {
 export function FactorsTab({ code }: { code: string }) {
   const q = useFactors(code);
   if (q.isPending) return <Loading />;
-  if (q.isError) return <ErrorBox error={q.error} />;
+  if (q.isError) return <div data-testid="tab-factors"><ErrorBox error={q.error} /></div>;
   const d = q.data;
   const cols: ColumnsType<FactorValue> = [
     { title: '分类', dataIndex: 'category', width: 80, render: (g: string) => <Tag variant="outlined">{factorCategoryLabel(g)}</Tag> },

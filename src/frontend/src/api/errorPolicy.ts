@@ -116,23 +116,60 @@ export function errorText(e: unknown): string {
  * 带 account_id / security_code 的请求可能因归属或证券不存在而 404（契约 §7.2、#27），一律按原文案处理（保守）。
  * 非信封的 404（如 FastAPI 默认 {"detail":"Not Found"} → HTTP_ERROR）在这些路径上同样算路由不存在。
  *
- * T-F33（T13 已知问题）：`GET /securities/{code}` 详情路由本版本未实现（后端只注册了 /search 与 /?q= 别名），
- * 未实现时同样返回 404 NOT_FOUND 信封，与“证券不存在”无法区分。前端在 StockPage 用 404 响应是否有
- * `details.superseded_by`（契约 §7.3：北交所旧代码→404 带该键）区分：带键的是真实“资源 404”，不带键的按
- * “功能开发中”展示——搜索命中的证券必然存在（主数据来自交易所列表），裸 404 只可能是路由未实现。
+ * T-F33（T13 已知问题）：`GET /securities/{code}` 详情路由当时未实现，与“证券不存在”同形无法区分。
+ * T-F34：后端已补该详情路由（T-B100，src/backend/app/api/v1/securities.py `@router.get("/{code}")`），StockPage 改回
+ * 资源 404 口径（裸 404 = 证券不存在）。**仍在建设中**的个股子资源见 `STOCK_SUB_PATHS_PENDING`（显式逐个登记，
+ * 后端注册其中一个就把它删掉，不做通配正则，避免将来已实现的子路由 404 被误吞成“开发中”）。
  */
 export const ROUTE_PENDING_PATHS: readonly string[] = [
   '/today', '/daily-reports', '/notifications', '/notifications/unread-count', '/stream', '/suggestions', '/signals',
   '/candidate-signals', '/terminal', '/strategies', '/strategy-instances', '/plans', '/market/overview',
+  '/quotes', '/market/sector-flows',
+];
+/**
+ * T-F34b：逐个显式登记的「后端尚未注册」的个股子资源路径（模板串，`{code}` 处可替换为任意值）。
+ * 只收录确认未实现者：bars / financials / fund-flows / factors / announcements（后端 v1 无此路由）。
+ * 后端实现对某个子资源后，必须从本清单删除对应行；不要改回通配正则。
+ */
+export const STOCK_SUB_PATHS_PENDING: readonly string[] = [
+  '/securities/{code}/bars',
+  '/securities/{code}/financials',
+  '/securities/{code}/fund-flows',
+  '/securities/{code}/factors',
+  '/securities/{code}/announcements',
 ];
 export const ROUTE_PENDING_TEXT = '功能开发中，即将上线';
+
+/** 契约 §7.3：北交所旧代码访问 `/securities/{code}` 时 404 带 `details.superseded_by`，这是真实资源 404 */
+export function isSuperseded(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404 && typeof e.details?.superseded_by === 'string' && e.details.superseded_by !== '';
+}
+
 export function isRoutePending(e: unknown): boolean {
   if (!(e instanceof ApiError) || e.status !== 404 || !e.url) return false;
   if (e.code !== 'NOT_FOUND' && e.code !== 'HTTP_ERROR') return false;
+  // 资源 404（旧代码提示新代码）优先于未实现判定
+  if (isSuperseded(e)) return false;
   const u = new URL(e.url, 'http://x');
   const path = u.pathname.replace(/^\/api\/v1/, '');
   if (!ROUTE_PENDING_PATHS.includes(path)) return false;
   return !u.searchParams.has('account_id') && !u.searchParams.has('security_code');
+}
+
+/** 模板 `/securities/{code}/bars` → 普通正则；`{code}` 恰为一段（不含斜杠），其余字符按字面匹配 */
+const templateToRegExp = (tpl: string) => {
+  const [head, tail = ''] = tpl.split('{code}');
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${esc(head)}[^/]+${esc(tail)}$`);
+};
+
+/** T-F34b：个股子资源路由尚未实现时的 404 → “开发中”；superseded_by 等真实资源 404 一律不吞 */
+export function isStockSubPending(e: unknown): boolean {
+  if (!(e instanceof ApiError) || e.status !== 404 || !e.url) return false;
+  if (e.code !== 'NOT_FOUND' && e.code !== 'HTTP_ERROR') return false;
+  if (isSuperseded(e)) return false;
+  const path = new URL(e.url, 'http://x').pathname.replace(/^\/api\/v1/, '');
+  return STOCK_SUB_PATHS_PENDING.some((tpl) => templateToRegExp(tpl).test(path));
 }
 
 export type GlobalErrorAction = 'login' | 'csrf' | 'log' | 'none';

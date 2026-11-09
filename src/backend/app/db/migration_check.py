@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from alembic.config import Config
+from alembic.runtime.migration import MigrationStep
 from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -59,22 +61,19 @@ def require_database_mainline(
         )
 
 
-def crosses_override_revision(script: ScriptDirectory, destination: str | None) -> bool:
-    """Whether the destination predates the override-active column."""
-    return "0028" not in {rev.revision for rev in script.iterate_revisions(destination, "base")}
+def require_safe_downgrade(conn: Connection | None, steps: Iterable[MigrationStep]) -> None:
+    """Guard the resolved migration plan, before ANY step's DDL is executed.
 
-
-def require_safe_downgrade(
-    conn: Connection, script: ScriptDirectory, destination: str | None
-) -> None:
-    """T-B98: retain cleared overrides; called in the migration's DDL transaction."""
-    if not crosses_override_revision(script, destination):
+    Alembic resolves relative revisions and descendants. Read-only commands and
+    upgrades have no downgrade step removing 0028, so never inspect settings.
+    """
+    if not any(step.is_downgrade and "0028" in step.from_revisions_no_deps for step in steps):
         return
-    if conn.execute(text("SELECT to_regclass('public.alembic_version')")).scalar_one() is None:
-        return
-    current = conn.execute(text("SELECT version_num FROM public.alembic_version")).scalars().all()
-    if "0028" not in current:
-        return
+    if conn is None:
+        raise MigrationLineageError(
+            "UNSAFE_DOWNGRADE_0028: offline SQL cannot check cleared overrides; "
+            "use the guarded online migration path"
+        )
     # Keep settings writers out until the migration transaction completes.
     conn.execute(text("LOCK TABLE app.risk_control_settings IN SHARE MODE"))
     if conn.execute(

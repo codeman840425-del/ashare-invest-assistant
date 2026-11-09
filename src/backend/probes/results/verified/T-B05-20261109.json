@@ -1,0 +1,349 @@
+{
+  "date_beijing": "2026-11-09",
+  "execution_code": "8c5746b7471dbef5ff195d947d9e8abec14a87bb",
+  "coverage": "partial; only segment3 and postclose segment4 real calls",
+  "segment1": {
+    "status": "skipped-prerequisites",
+    "mairui_http": 0
+  },
+  "segment2": {
+    "status": "skipped-per-Chief",
+    "mairui_http": 0,
+    "pre_send_rehearsal": "passed"
+  },
+  "segment3": {
+    "start": "2026-11-09T14:45:00.054344+08:00",
+    "finish": "2026-11-09T14:45:50.295963+08:00",
+    "mairui_http": 61,
+    "http_status_counts": {
+      "200": 61
+    },
+    "source_statistics": {
+      "real_time_broker": {
+        "uncorrected": {
+          "n": 30,
+          "min": 4.973,
+          "p50": 14.174,
+          "p95": 10041724.572,
+          "max": 10041736.906
+        },
+        "ntp_corrected": {
+          "n": 30,
+          "min": 7.705,
+          "p50": 16.906,
+          "p95": 10041727.304,
+          "max": 10041739.638
+        }
+      },
+      "ssjy_web": {
+        "uncorrected": {
+          "n": 30,
+          "min": 6.234,
+          "p50": 17.561,
+          "p95": 25.917,
+          "max": 50.493
+        },
+        "ntp_corrected": {
+          "n": 30,
+          "min": 8.966,
+          "p50": 20.293,
+          "p95": 28.649,
+          "max": 53.225
+        }
+      }
+    },
+    "sample_quality": {
+      "real_time_broker/000001": {
+        "n": 6,
+        "n_with_t": 6,
+        "t_distinct": 5
+      },
+      "real_time_broker/600519": {
+        "n": 6,
+        "n_with_t": 6,
+        "t_distinct": 5
+      },
+      "real_time_broker/300750": {
+        "n": 6,
+        "n_with_t": 6,
+        "t_distinct": 4
+      },
+      "real_time_broker/688981": {
+        "n": 6,
+        "n_with_t": 6,
+        "t_distinct": 4
+      },
+      "real_time_broker/920000": {
+        "n": 6,
+        "n_with_t": 6,
+        "t_distinct": 1
+      },
+      "ssjy_web/000001": {
+        "n": 6,
+        "n_with_t": 6,
+        "t_distinct": 3
+      },
+      "ssjy_web/600519": {
+        "n": 6,
+        "n_with_t": 6,
+        "t_distinct": 3
+      },
+      "ssjy_web/300750": {
+        "n": 6,
+        "n_with_t": 6,
+        "t_distinct": 3
+      },
+      "ssjy_web/688981": {
+        "n": 6,
+        "n_with_t": 6,
+        "t_distinct": 3
+      },
+      "ssjy_web/920000": {
+        "n": 6,
+        "n_with_t": 6,
+        "t_distinct": 3
+      }
+    },
+    "ntp_samples": 6,
+    "ntp_mean_s": -2.731906,
+    "stale_threshold_candidate": {
+      "ref_p95_s": 10041727.304,
+      "basis": "ntp_corrected_p95",
+      "suggested_s": 20083455
+    },
+    "stale_threshold_approved": false
+  },
+  "segment4": {
+    "start": "2026-11-09T15:40:09.767747+08:00",
+    "finish": "2026-11-09T15:40:17.399337+08:00",
+    "mairui_http": 6,
+    "http_status_counts": {
+      "200": 6
+    },
+    "gap6_status": "inconclusive",
+    "conclusion": {
+      "summary": "没有可用的涨停股（池 54 行，选中 0 只）",
+      "limit_up_sampling": {
+        "sampled_at_bj": "2026-11-09T15:40:12+08:00",
+        "pool_rows": 54,
+        "picks": [],
+        "rejected": {
+          "bad_code": 0,
+          "excluded": 0,
+          "no_fbt": 54,
+          "fbt_after_sample": 0
+        },
+        "received_at_bj": "2026-11-09T15:40:13+08:00"
+      },
+      "zt_codes": [],
+      "base_codes": [
+        "600519",
+        "300750",
+        "000001",
+        "688981",
+        "920000"
+      ],
+      "seal_factors": {
+        "limit_up_streak": {
+          "limit_up_null": [],
+          "others_null": [
+            "600519",
+            "300750",
+            "000001",
+            "688981"
+          ]
+        },
+        "seal_ratio": {
+          "limit_up_null": [],
+          "others_null": [
+            "600519",
+            "300750",
+            "000001",
+            "688981"
+          ]
+        },
+        "seal_to_float": {
+          "limit_up_null": [],
+          "others_null": [
+            "600519",
+            "300750",
+            "000001",
+            "688981"
+          ]
+        }
+      },
+      "null_sets": {
+        "600519": [
+          "limit_up_streak",
+          "north_20d_net",
+          "north_5d_net",
+          "seal_ratio",
+          "seal_to_float"
+        ],
+        "300750": [
+          "limit_up_streak",
+          "north_20d_net",
+          "north_5d_net",
+          "seal_ratio",
+          "seal_to_float"
+        ],
+        "000001": [
+          "current_ratio",
+          "limit_up_streak",
+          "north_20d_net",
+          "north_5d_net",
+          "peg",
+          "seal_ratio",
+          "seal_to_float"
+        ],
+        "688981": [
+          "dividend_growth_3y",
+          "dividend_yield",
+          "limit_up_streak",
+          "north_20d_net",
+          "north_5d_net",
+          "payout_ratio",
+          "peg",
+          "seal_ratio",
+          "seal_to_float"
+        ],
+        "920000": [
+          "data"
+        ]
+      }
+    },
+    "factor_shape_evidence": {
+      "600519": {
+        "ok": true,
+        "n_factors": 85,
+        "nulls": [
+          "limit_up_streak",
+          "north_20d_net",
+          "north_5d_net",
+          "seal_ratio",
+          "seal_to_float"
+        ],
+        "limit_up": false,
+        "trade_date": "20261106",
+        "update_time": null
+      },
+      "300750": {
+        "ok": true,
+        "n_factors": 85,
+        "nulls": [
+          "limit_up_streak",
+          "north_20d_net",
+          "north_5d_net",
+          "seal_ratio",
+          "seal_to_float"
+        ],
+        "limit_up": false,
+        "trade_date": "20261106",
+        "update_time": null
+      },
+      "000001": {
+        "ok": true,
+        "n_factors": 85,
+        "nulls": [
+          "current_ratio",
+          "limit_up_streak",
+          "north_20d_net",
+          "north_5d_net",
+          "peg",
+          "seal_ratio",
+          "seal_to_float"
+        ],
+        "limit_up": false,
+        "trade_date": "20261106",
+        "update_time": null
+      },
+      "688981": {
+        "ok": true,
+        "n_factors": 85,
+        "nulls": [
+          "dividend_growth_3y",
+          "dividend_yield",
+          "limit_up_streak",
+          "north_20d_net",
+          "north_5d_net",
+          "payout_ratio",
+          "peg",
+          "seal_ratio",
+          "seal_to_float"
+        ],
+        "limit_up": false,
+        "trade_date": "20261106",
+        "update_time": null
+      },
+      "920000": {
+        "ok": true,
+        "n_factors": 2,
+        "nulls": [
+          "data"
+        ],
+        "limit_up": false,
+        "trade_date": null,
+        "update_time": null
+      }
+    }
+  },
+  "T-B59": {
+    "mairui_http": 0,
+    "status": "deferred-time-budget",
+    "preliminary": "2024 calendar / 000550 period comparison / V5h remain unconfirmed"
+  },
+  "total_mairui_http": 67,
+  "stop_or_halt": false,
+  "owned_lease_released": true,
+  "limits": [
+    "No morning factor-null baseline; no intraday/postclose paired comparison.",
+    "One snapshot window only; cannot generalize to opening/afternoon windows.",
+    "No T-B59 new evidence; no V5g/V5h or historical visibility signoff."
+  ],
+  "local_raw_evidence_sha256": [
+    {
+      "local_relative_path": "T-B05-segment3-20261109T064256328498Z/execution.json",
+      "sha256": "8e3447b55b41de3c12f6bebb4f7646efd4b8801854c967a9a6110ba9e5b036a4"
+    },
+    {
+      "local_relative_path": "T-B05-segment3-20261109T064256328498Z/postcheck.json",
+      "sha256": "eba6c137cdf7d0f93517e67e2b1913a6df491ea56b8566e9e0c37a6df299efdc"
+    },
+    {
+      "local_relative_path": "T-B05-segment3-20261109T064256328498Z/run-20261108-234500/calls.jsonl",
+      "sha256": "f6fca22c5ba7100cdc96a3748b65d32c5effca8d7ef39212ca45aadc64bdca13"
+    },
+    {
+      "local_relative_path": "T-B05-segment3-20261109T064256328498Z/run-20261108-234500/p11_gaps.json",
+      "sha256": "c458734b78b8ce9e9639672ecbacf45ea72e18c4ca71026400724ddcb58ed803"
+    },
+    {
+      "local_relative_path": "T-B05-segment3-20261109T064256328498Z/run-20261108-234500/summary.json",
+      "sha256": "8d5f7f7f169dac8bac82e51a7ee4b1821a8aaa9ef183aa50585201cdccda7bb5"
+    },
+    {
+      "local_relative_path": "T-B05-segment3-20261109T064256328498Z/runner.log",
+      "sha256": "6a973c4d996e2691a3da12e986757d7d27cb3b735691516635956e72ae7e1a2d"
+    },
+    {
+      "local_relative_path": "T-B05-segment4-20261109T074008765674Z/execution.json",
+      "sha256": "fd843d8d23e721137613db8c1ff2a6285ff72262aeaf3db19707d138b8fbf0d2"
+    },
+    {
+      "local_relative_path": "T-B05-segment4-20261109T074008765674Z/run-20261109-004009/calls.jsonl",
+      "sha256": "1e2075573badbdb2af47dc97960e9272e2af38da4dede6848ffa477979f085f0"
+    },
+    {
+      "local_relative_path": "T-B05-segment4-20261109T074008765674Z/run-20261109-004009/p11_gaps.json",
+      "sha256": "4cd45a497f7a5f0a7c0b5070c9d34c91240659d89bef891f33a4769ebf4733fe"
+    },
+    {
+      "local_relative_path": "T-B05-segment4-20261109T074008765674Z/run-20261109-004009/summary.json",
+      "sha256": "aa1e8d5fd07871be5afa0e728f47cf63cb62bfa6e4482fd4110ccab2a9f7cb30"
+    },
+    {
+      "local_relative_path": "T-B05-segment4-20261109T074008765674Z/runner.log",
+      "sha256": "542e741a6108fa0c04a1a20e7a9599b0e83849adc4b7783571322571abc3a40b"
+    }
+  ]
+}

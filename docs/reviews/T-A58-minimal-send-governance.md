@@ -155,3 +155,15 @@ RV-15c 抓的竞态属实：产品「读旧快照 → 预留写入 →（锁忙�
   3. **恢复一次性处理**：暂停解除或切回 live 的首个 tick，`publish_pending` 照常扫描全部未终态批次统一入流一次（既有逻辑天然如此——不需要新代码，只需确认恢复路径无去重缺失）；PEL 里滞留的旧消息由 `xautoclaim` 领取后按批次状态幂等处理（`requested`→处理，`expired/failed`→apply/归档路径），重复投递靠既有 `attempted`/dedup 防重。
   4. **R7 交互**：跨日批次在恢复后首个 tick 按 `daily_window_expired` 作废（R7），不因「暂停耽搁」续期——暂停不是延长窗口的理由。
 - **负例**：①暂停态置 STOP 键→到期批次只被标 expired、流内零新消息、PEL 不被 claim；②replay 态同样跳过；③解除暂停→首个 tick 恰一批重投、按窗口判定作废或续跑正确；④暂停跨 23:59:59 的批次→恢复后作废不重发。
+
+### R9｜三处实现边界（T-A63，北京 2026-11-10；对象 tb-T-B102f）
+
+**① limit_code 判定分层**：产品新增公共判定模块（完整体+前缀统一文法），名单/验证（产品侧）接入新判定；**旧 `shared_gate.limit_code` 与探针 common.py/tb86_history.py 保持逐字不动**——它们是冻结的已实跑路径，行为改变须真实调用验证，而本阶段零真实麦蕊。两侧判定不一致时**产品侧更严**：产品用新判定判出 103/429 而旧判定没判出的，按产品判定停（写 STOP/反馈）；反之（旧判出、新没判出）只出现在探针侧，探针自身即停规则不变。T-B103 切锁时空窗内可评估探针切换到公共判定，切换本身须 dry-run 160 基线不回退。
+
+**② 未完成 attempted + 无有效凭证 = busy，不退款不重发**：确认后端建议方向。`UnsentCleanup` 证明文件存在但 `run()` 因凭证 open 失败（vault/DSN 不可用）未完成 → 下一 tick：有未完成 attempted 且无法出示「cleanup 已完成」证据时**保持 busy**——不 ACK 消息、不退款（分钟账/名单账预留在账上）、不重发；直到凭证恢复且 cleanup 跑完（attempted 清、预留退、临时文件删）才恢复 dispatch。无未完成 attempted 的纯门禁忙（flock busy、暂停）同样 busy。理由：凭证 open 失败发生在 attempted+分钟预留之后，进程无法证明 wire 未发出——按「不确定即保守」处理，宁可多占一次名单额度（当批作废重派，R7）也不能重发可能已发出的请求。注意与 ① 的 cleanup 语义衔接：cleanup 文件本身就是「known pre-HTTP busy」的持久证明，`create()` 在 wire_started 前落盘——所以「有证明文件」≠「已清理完成」，恢复判据是 cleanup 三步（attempted 清/退款/临时删）全部提交。
+
+**④ expired 批次的恢复-apply 顺序与错误码先后**：
+- **顺序**：`publish_pending` 对 `expired` 批次**不得直接 lpush APPLY**。改为：恢复后首个 tick 先把遗留 `expired` 批次重新入 `STREAM`（同 `requested` 路径 xadd，消息 kind 不变）——`process()` 拿到后由 dispatch 的窗口判定（R7）统一裁决：窗口内→按 `requested` 续跑（attempted 幂等防重发）；窗口外→`GateClosedError("daily_window_expired")` → 标 failed。`apply_batch` 对 `expired` 状态的批次在 process 裁决前**不受理**（`if batch.status == "expired": return parent.id`，与 requested 同等待遇——等 process 先把它改成终态）。
+- **错误码先后**：`deadline_exceeded`（暂停期扫描打的标）与 `daily_window_expired`（process 裁决）可能叠加。裁定：**process 裁决为准、最终 error_code 只留一个**——恢复后 dispatch 判窗口外 → error_code 覆写为 `daily_window_expired`（语义更精确：deadline 是暂停期标记，window_expired 是终审）；若批次在入流前已被标 expired 且恢复后窗口仍合法（同日暂停恢复），process 按窗口内续跑，`deadline_exceeded` 标记清除（error_code 置 null 恢复 requested 语义）。两条码不并留，避免下游对账歧义。
+- **遗留补偿不跳过**：`fetched`（三端点已完成）批次照旧 lpush APPLY（无发送语义，纯入库）；只有 `expired` 需先经 process 裁决。
+- **T-A62b 补裁（编排者方向确认）**：expired 批次**不允许抄近路直接 apply**——到期处理必须走与 R8 恢复同一序：①有有效凭证→先跑 cleanup 恢复（T-A63 ②三步）→再按 R7 窗口裁决续跑或作废；②无凭证但有未完成 attempted→保持 busy 等凭证（不 apply 不作废）；③无凭证且无未完成 attempted→重入 STREAM 排队，由 process 窗口裁决（窗口内续跑/窗口外 daily_window_expired 作废）。R8「恢复后重投」与 R7「到期作废」共享此恢复序，apply 只受理 fetched 或已完成裁决的终态批次。

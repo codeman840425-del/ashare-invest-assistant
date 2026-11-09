@@ -45,7 +45,7 @@ def test_tb102e_oversize_sniffs_incomplete_read_prefix_before_failure(case: str)
     response = SimpleNamespace(read=lambda count: body[:count])
     with pytest.raises(ResponseBodyError, match="response_too_large") as caught:
         read_body(response)
-    assert caught.value.code == {"nested103": "103", "nested429": "429"}.get(case)
+    assert caught.value.code == {"nested103": "103", "nested429": "429", "outside": "103"}.get(case)
 
 
 @pytest.mark.parametrize("case", ["nested103", "nested429", "data", "number", "string", "outside"])
@@ -72,7 +72,7 @@ def test_tb102e_real_wire_oversize_persists_stop_before_sanitized_failure(
 
         def close(self) -> None:
             closed.append(True)
-            assert (e.root / "STOP").exists() is case.startswith("nested")
+            assert (e.root / "STOP").exists() is (case.startswith("nested") or case == "outside")
             assert send_control.owned(e.root)
 
     monkeypatch.setattr(daily_lists.http.client, "HTTPSConnection", Connection)

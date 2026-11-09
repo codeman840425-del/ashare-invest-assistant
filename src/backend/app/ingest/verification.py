@@ -20,11 +20,14 @@ from app.ingest.intents import VerifyIntent, parse_intent
 from app.ingest.live import check_egress, feedback, publish_feedback
 from app.ingest.send_cleanup import CleanupPendingError, UnsentCleanup
 from app.ingest.send_control import check_product, critical, transport, wire_started
+from app.ingest.send_limits import classify_response as classify
+from app.ingest.send_limits import limit_code
 from app.ingest.send_state import MinuteLedger, halt_present
-from app.ingest.shared_gate import GateClosedError, SharedGate, _write_stop_unlocked, limit_code
+from app.ingest.shared_gate import GateClosedError, SharedGate, _write_stop_unlocked
 from app.ingest.state import LicenceState, Priority
-from app.ingest.upstream import Signal, classify
+from app.ingest.upstream import Signal
 from app.licences.service import is_held, per_minute_limit
+from app.master.daily_delivery import delivery_running
 from app.schemas.enums import DataLicenceStatus, DataLicenceTier
 
 STREAM = "ingest:requests"
@@ -95,13 +98,18 @@ def process(
                         if not state.allows(Priority.P0, clock(), verify=True):
                             return "unavailable"
                         dedup = "verify:" + str(intent.verification_id)
-                        if conn.execute(
-                            select(ingest_request_log.c.id).where(
+                        prior = conn.execute(
+                            select(ingest_request_log.c.status).where(
                                 ingest_request_log.c.licence_id == row.id,
                                 ingest_request_log.c.dedup_key == dedup,
                             )
-                        ).first():
-                            return "already_attempted"
+                        ).first()
+                        if prior is not None:
+                            return (
+                                "busy_or_closed"
+                                if prior.status in {"queued", "dropped"}
+                                else "already_attempted"
+                            )
                         limit = per_minute_limit(settings, row)
                     minute = MinuteLedger(gate.root, intent.licence_id)
                     current = minute.read(clock().timestamp())
@@ -147,6 +155,10 @@ def process(
                     except GateClosedError as exc:
                         if str(exc) == "shared_control_busy" and not wire_started(gate.root):
                             cleanup = UnsentCleanup(gate.root, intent.verification_id)
+                            # This exact send was rejected before HTTP. A proof
+                            # write failure must keep accounting queued, but must
+                            # not invent an uncertain-send halt in finally.
+                            gate.inflight = False
                             cleanup.create(
                                 minute,
                                 kind="verify",
@@ -233,9 +245,8 @@ def process(
 
 
 def tick(engine: Engine, rds: redis.Redis, settings: Settings) -> int:
-    if (
-        os.environ.get("MAIRUI_MODE", "replay") != "live"
-        or not settings.data_licence_settings_enabled
+    if not settings.data_licence_settings_enabled or not delivery_running(
+        rds, paused_key=settings.ingest_paused_key
     ):
         return 0
     from redis.exceptions import ResponseError

@@ -173,6 +173,16 @@ def request(conn: Connection, grant: Grant, now: dt.datetime) -> uuid.UUID | Non
     return bid
 
 
+def delivery_running(rds: Any, *, paused_key: str | None = None) -> bool:  # noqa: ANN401
+    if os.environ.get("MAIRUI_MODE", "replay") != "live":
+        return False
+    if paused_key is None:
+        from app.config import get_settings
+
+        paused_key = get_settings().ingest_paused_key
+    return not bool(rds.exists(paused_key))
+
+
 def publish_pending(
     engine: Engine,
     rds: Any,  # noqa: ANN401 - Redis sync response type varies by client version
@@ -183,10 +193,18 @@ def publish_pending(
     if live_budget_issue():
         return 0
     with engine.begin() as conn:
-        # Republish every requested batch, including partial/attempted and overdue
-        # batches. Ingest must recover known-unsent cleanup BEFORE adjudicating
-        # expiry or a missing receipt; worker-side finalization could skip that
-        # recovery and ACK/apply a batch with stranded file reservations.
+        # R8: expiry marking is DB-only, including during pause/replay. R9:
+        # expired is still pending recovery, never a shortcut to apply.
+        daily = select(master_runs.c.id).where(master_runs.c.stats["task"].astext == KIND)
+        conn.execute(
+            update(batches)
+            .where(
+                batches.c.master_run_id.in_(daily),
+                batches.c.status == "requested",
+                batches.c.deadline_at <= (now or dt.datetime.now(dt.UTC)),
+            )
+            .values(status="expired", error_code="deadline_exceeded")
+        )
         pending = conn.execute(
             select(batches.c.id, batches.c.status)
             .join(master_runs, master_runs.c.id == batches.c.master_run_id)
@@ -197,12 +215,17 @@ def publish_pending(
             )
             .order_by(batches.c.requested_at)
         ).all()
+    running = delivery_running(rds)
+    count = 0
     for b in pending:
-        if b.status == "requested":
+        if b.status in {"requested", "expired"}:
+            if not running:
+                continue
             rds.xadd(STREAM, {"kind": KIND, "batch_id": str(b.id)})
         else:
             rds.lpush("jobs:worker", json.dumps({"task": APPLY, "args": {"batch_id": str(b.id)}}))
-    return len(pending)
+        count += 1
+    return count
 
 
 def apply_batch(conn: Connection, bid: uuid.UUID, *, now: dt.datetime, cfg: Any, root: Path) -> int:  # noqa: ANN401
@@ -216,8 +239,8 @@ def apply_batch(conn: Connection, bid: uuid.UUID, *, now: dt.datetime, cfg: Any,
         raise ValueError("not_daily_batch")
     if parent.finished_at is not None:
         return int(parent.stats["applied_run_id"])
-    if batch.status == "requested":
-        return parent.id
+    if batch.status in {"requested", "expired"}:
+        return int(parent.id)
     day = dt.date.fromisoformat(parent.stats["trade_date"])
     delivery = None
     if batch.status == "fetched":

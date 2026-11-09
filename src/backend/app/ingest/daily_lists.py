@@ -39,15 +39,16 @@ from app.ingest.send_control import (
     transport,
 )
 from app.ingest.send_governance import LIST_PATHS, Governance, Permit, expected_egress
+from app.ingest.send_limits import classify_response as classify
+from app.ingest.send_limits import limit_code
 from app.ingest.send_response import ResponseBodyError, read_body
 from app.ingest.send_state import MinuteLedger
 from app.ingest.shared_gate import (
     GateClosedError,
     SharedGate,
     _write_stop_unlocked,
-    limit_code,
 )
-from app.ingest.upstream import Signal, classify
+from app.ingest.upstream import Signal
 from app.ingest.vault import LicenceVault, SealedLicence
 from app.licences.service import per_minute_limit
 from app.master.daily_delivery import (
@@ -56,6 +57,7 @@ from app.master.daily_delivery import (
     LISTS,
     STREAM,
     Grant,
+    delivery_running,
     eligible,
     live_budget_issue,
     read_grant,
@@ -157,25 +159,7 @@ def send(
 
 
 def limited(status: int, body: object) -> bool:
-    if status in (103, 429):
-        return True
-    if isinstance(body, dict):
-        for key, value in body.items():
-            if str(key).lower() in {"code", "error_code", "status"} and (
-                str(value) in {"103", "429"}
-                or (isinstance(value, (int, float)) and value in (103, 429))
-            ):
-                return True
-            if (
-                isinstance(value, (dict, list)) or str(key).lower() in {"error", "msg", "message"}
-            ) and limited(200, value):
-                return True
-        return False
-    if isinstance(body, list):
-        return any(limited(200, item) for item in body)
-    if isinstance(body, str):
-        return bool(re.search(r"(?<!\d)(103|429)(?!\d)", body))
-    return False
+    return limit_code(status, body) is not None
 
 
 def credential(engine: Engine, lid: uuid.UUID) -> str:
@@ -276,10 +260,14 @@ def process(
             ).one()
             if p.stats.get("task") != KIND:
                 return "not_daily"
-            if b.status != "requested":
+            if b.status not in {"requested", "expired"}:
                 return "noop"
             summaries = list(b.datasets or [])
             completed = [row["dataset"] for row in summaries if row.get("status") == "ok"]
+            if list(p.stats.get("attempted", [])) != completed:
+                # Recovery already ran. An unfinished attempt without completed
+                # cleanup cannot prove zero HTTP, even if its receipt/deadline expired.
+                return "busy"
             issue = None
             now = clock().astimezone(BEIJING)
             if (
@@ -297,8 +285,6 @@ def process(
                 or not eligible(conn, grant, clock())
             ):
                 issue = "authorization_unavailable"
-            elif list(p.stats.get("attempted", [])) != completed:
-                issue = "uncertain_prior_attempt_no_retry"
             if issue:
                 outcome = "failed"
                 conn.execute(
@@ -310,6 +296,12 @@ def process(
                     )
                 )
                 return outcome
+            if b.status == "expired":
+                conn.execute(
+                    update(batches)
+                    .where(batches.c.id == bid)
+                    .values(status="requested", error_code=None)
+                )
             if grant is None:
                 raise DailyHaltError("authorization_unavailable")
             if settings is None:
@@ -502,7 +494,12 @@ def process(
     except Exception as exc:  # noqa: BLE001 - fixed diagnostics, no upstream/secret/DSN text
         if isinstance(exc, (CleanupPendingError, FileExistsError)) or (
             isinstance(exc, GateClosedError)
-            and str(exc) == "shared_control_busy"
+            and str(exc)
+            in {
+                "shared_control_busy",
+                "daily_reservation_already_consumed",
+                "send_governance_lock_refused",
+            }
             and (active_permit is None or not active_permit.sent)
         ):
             return "busy"
@@ -536,7 +533,9 @@ def tick(
     settings: Settings | None = None,
 ) -> int:
     """Own consumer group on existing stream; other intent consumers unaffected."""
-    if os.environ.get("MAIRUI_MODE", "replay") != "live" or live_budget_issue():
+    if live_budget_issue() or not delivery_running(
+        rds, paused_key=settings.ingest_paused_key if settings is not None else None
+    ):
         return 0
     from redis.exceptions import ResponseError
 

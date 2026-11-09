@@ -440,6 +440,10 @@ class RetryStream:
         self.acked: list[Any] = []
         self.jobs: list[Any] = []
 
+    def exists(self, key: str) -> bool:
+        assert key == "ingest:paused"
+        return False
+
     def xgroup_create(self, *args: Any, **kwargs: Any) -> None:
         pass
 

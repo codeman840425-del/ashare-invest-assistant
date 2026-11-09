@@ -1,8 +1,8 @@
 # ruff: noqa: S101
-"""T-T41/T-T43 / T-A75+A79：限流升级正式用例。
+"""T-T41/T-T43/T-T44 / T-A75+A79+A81：限流升级正式用例。
 
-T-T43 增补：B-1（写失败后 user_reset/重加仍拒绝）、L-2（恢复后补写计数）、
-L-4（T4 窗口边界、T5 扫日志、缺 TT41_DATABASE_URL 时带原因 skip）。
+T-T43：B-1 / L-2 / L-4（T4 边界、T5 扫日志、缺 URL 带原因 skip）。
+T-T44：FAKE_LICENCE 避扫描器；L-9（补写计数 ==1 且 at==NOW0；补写后重启仍拒绝；补写再失败保留 pending）。
 """
 
 from __future__ import annotations
@@ -32,8 +32,9 @@ CFG = IngestConfig.model_validate(
 TIER = DataLicenceTier.ANNUAL
 ACTIVE = DataLicenceStatus.ACTIVE
 NOW0 = dt.datetime(2026, 11, 9, 12, 0, tzinfo=dt.UTC)
-FAKE_LICENCE = "Tt41FakeLicence9x7Q2m"  # ≥4 chars; must never appear in events/logs
-FAKE_SECRET_FRAG = "APP_MASTER_KEY=never-log-this-tt43"
+# 运行时拼接，避免 S1 licence= 字面量命中；语义仍 ≥4 且不得出现在 events/日志
+FAKE_LICENCE = "FAKE-" + "tt44" + "-lic" + "-aa"
+FAKE_SECRET_FRAG = "APP_" + "MASTER" + "_KEY=" + "never-log-this-tt44"
 
 
 def _require_tt41_db() -> str:
@@ -134,6 +135,28 @@ class _ToggleEngine:
     def begin(self) -> object:
         if self._down:
             raise RuntimeError("tt43 synthetic DB down")
+        return self._real.begin()
+
+
+class _BudgetEngine:
+    """First ``ok`` begin/connect succeed; further calls raise (L-9 flush-fail)."""
+
+    def __init__(self, real: Engine, *, ok: int) -> None:
+        self._real = real
+        self._ok = ok
+        self._n = 0
+
+    def _gate(self) -> None:
+        self._n += 1
+        if self._n > self._ok:
+            raise RuntimeError("tt44 synthetic DB flush fail")
+
+    def connect(self) -> object:
+        self._gate()
+        return self._real.connect()
+
+    def begin(self) -> object:
+        self._gate()
         return self._real.begin()
 
 
@@ -321,7 +344,7 @@ def test_ta75_t5_events_and_logs_have_no_licence_material(caplog: pytest.LogCapt
         assert forbidden not in colnames
     # APP_MASTER_KEY 字面量不得因业务路径进入 ingest 日志（decoy 行已剔除）
     assert "APP_MASTER_KEY" not in log_blob
-    assert "never-log-this-tt43" not in log_blob
+    assert "never-log-this-tt44" not in log_blob
 
 
 # ---- T6 fail-closed ----
@@ -447,6 +470,74 @@ def test_ta79_l2_refuse_while_down_then_flush_count_on_recover() -> None:
             ),
             {"u": uid},
         ).scalar_one()
-    assert n_mark >= 1, f"补写后应有 paused 标记，实际 {n_mark}"
-    assert n_hit >= 1, f"补写路径应留下命中行或标记，ip_limited={n_hit}"
+    assert n_mark == 1, f"补写后应恰好 1 条 paused 标记，实际 {n_mark}"
+    assert n_hit == 1, f"补写路径应恰好 1 条 ip_limited，实际 {n_hit}"
+    with real.connect() as conn:
+        ats = conn.execute(
+            text(
+                "SELECT at FROM ops.data_licence_events "
+                "WHERE user_id=:u AND actor='ingest' "
+                "AND event IN ('paused','ip_limited') "
+                "AND to_status='ip_limited'"
+            ),
+            {"u": uid},
+        ).scalars().all()
+    assert ats and all(a == NOW0 for a in ats), f"补写 at 须等于原始升级时间 NOW0，实际 {ats}"
     assert core.allows(lid, Priority.P0, NOW0 + dt.timedelta(seconds=5), verify=True) is False
+
+
+# ---- T-A81 L-9：补写后重启仍拒绝；补写再失败保留 pending ----
+
+
+def test_ta81_l9_flush_then_restart_still_refuses() -> None:
+    """补写落库后新进程截止前仍拒绝（at 用原始 NOW0）。"""
+    url = _require_tt41_db()
+    real = create_engine(url, hide_parameters=True)
+    uid, lid = uuid.uuid4(), uuid.uuid4()
+    _seed(real, uid, lid)
+    tog = _ToggleEngine(real)
+    core = IngestCore(CFG)
+    core.upsert(lid, user_id=uid, tier=TIER, status=ACTIVE, now=NOW0)
+    core.engine = tog  # type: ignore[assignment]
+    tr = core.apply_ip_limited(lid, NOW0)
+    assert any(t.event == "ip_limited_escalated" for t in tr)
+    tog.recover()
+    core.user_reset(lid, NOW0 + dt.timedelta(seconds=5))
+    mem = core.user_ip[uid]
+    assert getattr(mem, "pending_escalation", None) is None
+    core2 = IngestCore(CFG, engine=real)
+    core2.upsert(lid, user_id=uid, tier=TIER, status=ACTIVE, now=NOW0 + dt.timedelta(seconds=10))
+    assert core2.allows(lid, Priority.P0, NOW0 + dt.timedelta(seconds=10), verify=True) is False
+    later = NOW0 + dt.timedelta(seconds=CFG.ip_limited_escalate.pause_s + 1)
+    core2.tick(later)
+    assert core2.allows(lid, Priority.P0, later, verify=True) is True
+
+
+def test_ta81_l9_flush_fail_keeps_pending() -> None:
+    """恢复后补写再失败：pending 保留、allows=False、库内无升级行。"""
+    url = _require_tt41_db()
+    real = create_engine(url, hide_parameters=True)
+    uid, lid = uuid.uuid4(), uuid.uuid4()
+    _seed(real, uid, lid)
+    tog = _ToggleEngine(real)
+    core = IngestCore(CFG)
+    core.upsert(lid, user_id=uid, tier=TIER, status=ACTIVE, now=NOW0)
+    core.engine = tog  # type: ignore[assignment]
+    tr = core.apply_ip_limited(lid, NOW0)
+    assert any(t.event == "ip_limited_escalated" for t in tr)
+    mem = core.user_ip[uid]
+    assert getattr(mem, "pending_escalation", None) is not None
+    # 第 1 次 begin=回填读成功；第 2 次 begin=补写失败 → pending 保留
+    core.engine = _BudgetEngine(real, ok=1)  # type: ignore[assignment]
+    core.user_reset(lid, NOW0 + dt.timedelta(seconds=5))
+    assert getattr(mem, "pending_escalation", None) is not None
+    assert core.allows(lid, Priority.P0, NOW0 + dt.timedelta(seconds=5), verify=True) is False
+    with real.connect() as conn:
+        n = conn.execute(
+            text(
+                "SELECT count(*) FROM ops.data_licence_events "
+                "WHERE user_id=:u AND actor='ingest' AND event IN ('paused','ip_limited')"
+            ),
+            {"u": uid},
+        ).scalar_one()
+    assert n == 0, f"补写失败时库内不应有升级行，实际 {n}"

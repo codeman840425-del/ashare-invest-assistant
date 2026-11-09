@@ -1263,9 +1263,23 @@ DECLARE
   f text;
   fns text[] := ARRAY['ops.gate_user_refs(uuid)', 'ops.purge_user_gate_facts(uuid)'];
   any_present boolean := false;
+  ver_ge_0030 boolean := false;
+  ver_raw text;
 BEGIN
+  -- T-O63b：用数字前缀比较版本，避免字符串比较依赖补零
+  IF to_regclass('public.alembic_version') IS NOT NULL THEN
+    SELECT v.version_num INTO ver_raw FROM public.alembic_version v LIMIT 1;
+    IF ver_raw ~ '^[0-9]+' THEN
+      ver_ge_0030 := (substring(ver_raw from '^[0-9]+'))::bigint >= 30;
+    END IF;
+  END IF;
+
   FOREACH f IN ARRAY fns LOOP
     IF to_regprocedure(f) IS NULL THEN
+      -- T-O63b：≥0030 缺任一个 gate 函数即失败（不只两个都缺）
+      IF ver_ge_0030 THEN
+        RAISE EXCEPTION 'db-roles: T-O63b 库 version≥0030 但缺少 %', f;
+      END IF;
       CONTINUE;
     END IF;
     any_present := true;
@@ -1293,14 +1307,6 @@ BEGIN
   IF any_present THEN
     RAISE NOTICE 'db-roles: T-O60 gate 函数仅 aia_maint EXECUTE';
   ELSE
-    -- T-O63：库已到 ≥0030 却缺 gate 函数 → 失败；未到 0030 仍跳过
-    IF to_regclass('public.alembic_version') IS NOT NULL
-       AND EXISTS (
-         SELECT 1 FROM public.alembic_version v
-          WHERE v.version_num >= '0030'
-       ) THEN
-      RAISE EXCEPTION 'db-roles: T-O63 库 version≥0030 但缺少 ops.gate_user_refs / purge_user_gate_facts';
-    END IF;
     RAISE NOTICE 'db-roles: T-O60 gate 函数不存在（未到 0030），跳过';
   END IF;
 END

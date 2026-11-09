@@ -7,6 +7,7 @@ never persisted batches/history or their results. No retries or redirects.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import http.client
 import json
@@ -29,7 +30,7 @@ from app.db.tables.market import master_runs, securities
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows
 from app.ingest.live import check_egress, feedback
-from app.ingest.send_control import root_from_environment
+from app.ingest.send_control import critical, root_from_environment
 from app.ingest.send_governance import LIST_PATHS, Governance, Permit, expected_egress
 from app.ingest.shared_gate import (
     SharedGate,
@@ -101,13 +102,19 @@ def send(
     path: str,
     secret: str,
 ) -> tuple[int, object]:
-    if isinstance(gate, Permit):
-        gate.claim(path)  # One reserved list endpoint permits exactly one dispatch.
-    token = WIRE_GATE.set(gate)
-    try:
-        return upstream(path, secret)
-    finally:
-        WIRE_GATE.reset(token)
+    with contextlib.ExitStack() as stack:
+        if isinstance(gate, Permit):
+            gate.claim(path)  # List dispatch already owns the governance critical section.
+        else:
+            # Existing verification also uses this one transport mouth. Its old
+            # authorization/accounting stays intact; only the physical mutex is shared.
+            stack.enter_context(critical(gate.root, blocking=False))
+            gate.check()
+        token = WIRE_GATE.set(gate)
+        try:
+            return upstream(path, secret)
+        finally:
+            WIRE_GATE.reset(token)
 
 
 def limited(status: int, body: object) -> bool:

@@ -24,7 +24,7 @@ from app.config import Settings
 from app.config_files import SendGovernance
 from app.ingest import daily_lists, send_control
 from app.ingest.send_governance import BEIJING, DATASETS, Governance
-from app.ingest.shared_gate import GateClosedError, write_stop
+from app.ingest.shared_gate import GateClosedError, SharedGate, write_stop
 from probes import tb86_offline as batch
 
 
@@ -539,3 +539,47 @@ def test_tb102_one_reservation_only_one_fixed_endpoint_send(env: Any, enforce: b
         daily_lists.send(permit, upstream, "/hslt/list/", "synthetic")
     assert e.calls == ["/hslt/list/"]
     assert len(records(e)) == 1
+
+
+@pytest.mark.parametrize("busy", [False, True])
+def test_tb102_existing_transport_caller_also_holds_same_dispatch_inode(
+    env: Any, busy: bool
+) -> None:
+    e = env
+    lid = uuid.uuid4()
+    (e.root / "policy.json").write_text(
+        json.dumps(
+            {
+                "schema": "mairui-shared/v1",
+                "egress_ip": "192.0.2.10",
+                "licences": {str(lid): {"per_minute_limit": 150}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    lock_fd = None
+    gate = SharedGate(e.root, lid, "product_verify")
+    gate.acquire()
+    gate.confirm_egress("192.0.2.10")
+    gate.reserve(now=e.now[0].timestamp())
+
+    def upstream(path: str, secret: str) -> Any:
+        assert send_control.owned(e.root)
+        e.calls.append(path)
+        return 200, []
+
+    try:
+        if busy:
+            lock_fd = os.open(e.root / "send-control.lock", os.O_RDWR | os.O_CREAT, 0o600)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with pytest.raises(GateClosedError, match="control_busy"):
+                daily_lists.send(gate, upstream, "/tcalendar/list/2031/", "synthetic")
+            assert e.calls == []
+        else:
+            daily_lists.send(gate, upstream, "/tcalendar/list/2031/", "synthetic")
+            gate.complete(now=e.now[0].timestamp())
+            assert e.calls == ["/tcalendar/list/2031/"]
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
+        gate.release()

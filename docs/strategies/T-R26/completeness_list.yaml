@@ -1,0 +1,21 @@
+# T-R26 F23 完整性 10 条已知风险公告清单（主 10 + 备 2；研究员候选，待编排者确认执行）
+# 依据：docs/strategies/f23_freshness_protocol.md §5；来源 docs/strategies/T-R23/known_risk_*.yaml（仓库内公开保全）。
+# 判定：对应股票公告列表出现（匹配规则同新鲜度）且冻结词表 v2.1 命中 → pass；10/10 达标、漏 0。
+# 备选启用：仅当主清单出现 miss_window 且编排者批准（T-A19 全批 128 次无富余）。
+version: f23_completeness_list_v1_candidate
+status: pending_chief_confirmation
+primary:
+  - {seq: 1,  code: '000520.SZ', category: investigation,        ann_date: '2026-11-07', ann_id: '1225661288', source: known_risk_v1_reused}
+  - {seq: 2,  code: '002726.SZ', category: investigation,        ann_date: '2026-11-07', ann_id: '1225661582', source: known_risk_v1_reused}
+  - {seq: 3,  code: '688130.SH', category: investigation,        ann_date: '2026-11-03', ann_id: '1225654385', source: known_risk_v1_reused}
+  - {seq: 4,  code: '300477.SZ', category: investigation,        ann_date: '2026-11-02', ann_id: '1225650594', source: known_risk_v1_reused}
+  - {seq: 5,  code: '000972.SZ', category: delisting_risk,       ann_date: '2026-11-03', ann_id: '1225654160', source: known_risk_v1_reused}
+  - {seq: 6,  code: '688110.SH', category: regulatory_action,    ann_date: '2026-10-31', ann_id: '1225650284', source: known_risk_v2_new}
+  - {seq: 7,  code: '300474.SZ', category: inquiry_transfer_policy, ann_date: '2026-10-30', ann_id: '1225649706', source: known_risk_v2_1_added}
+  - {seq: 8,  code: '002598.SZ', category: other_risk_warning,   ann_date: '2026-10-29', ann_id: '1225632935', source: known_risk_v1_reused}
+  - {seq: 9,  code: '600606.SH', category: insolvency,           ann_date: '2026-10-24', ann_id: '1225619125', source: known_risk_v1_reused}
+  - {seq: 10, code: '002535.SZ', category: regulatory_action,    ann_date: '2026-10-15', ann_id: '1225604722', source: known_risk_v1_reused}
+backup:
+  - {seq: 11, code: '300497.SZ', category: control_person_risk,  ann_date: '2026-10-14', ann_id: '1225605728', source: known_risk_v1_reused}
+  - {seq: 12, code: '300250.SZ', category: controller_equity,    ann_date: '2026-09-07', ann_id: '1225550775', source: known_risk_v2_new}
+known_gap: concert_change_policy 类唯一样本 001336（2026-05-28）过老未进主清单；本实测不覆盖该类完整性。

@@ -134,6 +134,7 @@ def env(database: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setenv("MAIRUI_SOURCE_LICENCE_ID", str(lid))
     monkeypatch.setattr(daily, "read_grant", lambda: grant)
     monkeypatch.setattr(ingest, "read_grant", lambda: grant)
+    monkeypatch.setattr(ingest, "runtime_paused", lambda settings: False)
     monkeypatch.setattr(LicenceVault, "from_secrets", classmethod(lambda _: LicenceVault({1: key})))
     monkeypatch.setattr(shared_gate, "time", SimpleNamespace(time=lambda: clock[0].timestamp()))
     calls, waits = [], []

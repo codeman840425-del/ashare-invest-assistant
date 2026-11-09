@@ -7,7 +7,7 @@ import http.client
 import json
 from typing import Any
 
-from app.ingest.send_limits import EnvelopeSniffer, sniff_envelope  # noqa: F401 - compatibility
+from app.ingest.send_limits import EnvelopeSniffer, sniff_envelope
 
 
 class ResponseBodyError(RuntimeError):
@@ -32,6 +32,8 @@ def read_body(response: http.client.HTTPResponse) -> Any:  # noqa: ANN401 - vend
         # fields and incomplete error strings; no separate 64KiB blind spot.
         code = sniff.feed(decoder.decode(chunk, final=not chunk))
         if total > maximum:
+            if code is None:
+                code = sniff_envelope(bytes(payload).decode("utf-8", errors="replace"))
             raise ResponseBodyError("response_too_large", code=code)
         if code is not None:
             return code

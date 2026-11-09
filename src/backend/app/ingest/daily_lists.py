@@ -62,6 +62,7 @@ from app.master.daily_delivery import (
     live_budget_issue,
     read_grant,
 )
+from app.master.daily_stream import acknowledge
 from app.master.sync import BEIJING
 from app.reports.service import covered
 
@@ -140,6 +141,7 @@ def send(
     with contextlib.ExitStack() as stack:
         if isinstance(gate, Permit):
             gate.claim(path)  # List dispatch already owns the governance critical section.
+            gate.check()
             if upstream is not wire:
                 gate.sent = True  # Synthetic/alternate transport starts at this exact boundary.
         else:
@@ -228,6 +230,32 @@ def normalize(body: object, known: dict[str, list[str]]) -> list[tuple[str, str]
     return sorted(found.items())
 
 
+def runtime_paused(settings: Settings | None) -> bool:
+    """Direct callers also honor the configured pause; missing/unreadable Redis is closed."""
+    import redis
+
+    if settings is None or settings.redis_url is None:
+        return True
+    try:
+        with redis.Redis.from_url(
+            settings.redis_url,
+            socket_connect_timeout=settings.health_check_timeout_s,
+            socket_timeout=settings.health_check_timeout_s,
+        ) as client:
+            return not delivery_running(client, paused_key=settings.ingest_paused_key)
+    except redis.exceptions.RedisError:
+        return True
+
+
+def require_running(paused: Callable[[], bool]) -> None:
+    try:
+        closed = paused() is not False
+    except Exception:  # noqa: BLE001 - unreadable pause state must never become a send
+        closed = True
+    if closed:
+        raise GateClosedError("shared_control_busy")
+
+
 def process(
     engine: Engine,
     bid: uuid.UUID,
@@ -242,6 +270,7 @@ def process(
     pause: Callable[[float], None] = time.sleep,
     settings: Settings | None = None,
     egress: Callable[[], str] = check_egress,
+    paused: Callable[[], bool] | None = None,
 ) -> str:
     if os.environ.get("MAIRUI_MODE", "replay") != "live" or live_budget_issue():
         return "live_transport_closed"
@@ -326,6 +355,8 @@ def process(
             minute_limit=minute_limit,
             legacy_stops=(stop, halt),
         )
+        is_paused = paused if paused is not None else lambda: runtime_paused(settings)
+        require_running(is_paused)
         # Existing egress/receipt/HPKE boundaries are mandatory in either mode.
         if egress() != expected_egress(root, lid):
             raise DailyHaltError("shared_egress_mismatch")
@@ -337,6 +368,7 @@ def process(
                 continue  # Resume only durably completed results; never resend those endpoints.
             if index:
                 pause(policy.min_interval_s)
+            require_running(is_paused)
             if clock() >= b.deadline_at:
                 raise GateClosedError("daily_window_expired")
             with engine.begin() as conn:
@@ -377,6 +409,7 @@ def process(
                 on_unsent=unsent,
             ) as permit:
                 active_permit = permit
+                permit.pause_check = lambda: require_running(is_paused)
                 # Acquiring the physical lock precedes any business attempted flag.
                 # Busy leaves the requested message untouched for tick retry.
                 with engine.begin() as conn:
@@ -396,6 +429,7 @@ def process(
                             stats={**parent.stats, "attempted": attempts},
                         )
                     )
+                require_running(is_paused)
                 try:
                     status, body = send(permit, upstream, PATHS[dataset], secret)
                 except LimitResponseError as exc:
@@ -553,6 +587,7 @@ def tick(
     )
     count = 0
     for mid, fields in messages:
+        bid = None
         if fields.get(b"kind") == KIND.encode():
             try:
                 bid = uuid.UUID(fields[b"batch_id"].decode())
@@ -563,6 +598,12 @@ def tick(
                     clock=clock,
                     pause=pause,
                     settings=settings,
+                    paused=lambda: (
+                        not delivery_running(
+                            rds,
+                            paused_key=settings.ingest_paused_key if settings is not None else None,
+                        )
+                    ),
                 )
                 if result == "busy":
                     continue
@@ -572,5 +613,8 @@ def tick(
             except (ValueError, KeyError):
                 pass
             count += 1
-        rds.xack(STREAM, GROUP, mid)
+        if bid is not None:
+            acknowledge(rds, STREAM, GROUP, bid, mid)
+        else:
+            rds.xack(STREAM, GROUP, mid)
     return count

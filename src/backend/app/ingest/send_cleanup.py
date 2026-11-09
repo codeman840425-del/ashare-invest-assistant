@@ -43,6 +43,8 @@ class UnsentCleanup:
             return True
         except FileNotFoundError:
             return False
+        except OSError:
+            raise CleanupPendingError("unsent_cleanup_probe_unavailable") from None
 
     def create(
         self,
@@ -60,6 +62,7 @@ class UnsentCleanup:
             raise CleanupPendingError("unsent_cleanup_reservation_required")
         value = {
             "schema": "product-unsent/v1",
+            "durability": "unconfirmed",
             "request_id": str(self.request_id),
             "kind": kind,
             "owner": str(owner),
@@ -82,10 +85,33 @@ class UnsentCleanup:
             # No refund/ACK is safe without a valid durable proof.
             raise CleanupProofError("unsent_cleanup_proof_unavailable") from None
 
+    def _confirm(self, identity: os.stat_result) -> None:
+        # A visible JSON body does not prove its earlier fsync succeeded. Reconfirm
+        # every proof (including old schema-v1 proofs) before any compensation.
+        fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            opened = os.fstat(fd)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or opened.st_uid != os.geteuid()
+                or opened.st_nlink != 1
+                or (opened.st_dev, opened.st_ino) != (identity.st_dev, identity.st_ino)
+            ):
+                raise CleanupPendingError("unsent_cleanup_unconfirmed")
+            os.fsync(fd)
+            _sync_directory(self.root)
+            current = self.path.lstat()
+            if (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
+                raise CleanupPendingError("unsent_cleanup_unconfirmed")
+        finally:
+            os.close(fd)
+
     def run(self, engine: Engine, *, refund: Callable[[], None] | None = None) -> None:
         if not send_control.owned(self.root):
             raise CleanupPendingError("unsent_cleanup_lock_required")
         try:
+            identity = self.path.lstat()
             value = private_json(self.path)
             if (
                 value.get("schema") != "product-unsent/v1"
@@ -114,7 +140,7 @@ class UnsentCleanup:
                 or not math.isfinite(minute.pending["calls"][-1])
             ):
                 raise ValueError
-            identity = self.path.lstat()
+            self._confirm(identity)
             # 1: clear the business attempt marker. The durable proof stays until
             # every refund and the final queued-row deletion has committed.
             with engine.begin() as conn:
@@ -211,5 +237,8 @@ def recover_daily(engine: Engine, root: Path, bid: uuid.UUID) -> None:
     for dataset in DATASETS:
         cleanup = UnsentCleanup(root, uuid.uuid5(bid, dataset))
         if cleanup.exists():
-            with send_control.critical(root, blocking=False):
-                cleanup.run(engine)
+            try:
+                with send_control.critical(root, blocking=False):
+                    cleanup.run(engine)
+            except GateClosedError:
+                raise CleanupPendingError("unsent_cleanup_pending") from None

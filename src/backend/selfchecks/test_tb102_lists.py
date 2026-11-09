@@ -352,26 +352,7 @@ def test_tb102b_r4_busy_keeps_batch_and_stream_then_retries(
 
     monkeypatch.setattr(daily_lists, "process", process)
 
-    class Stream:
-        def __init__(self) -> None:
-            self.acked: list[Any] = []
-            self.jobs: list[Any] = []
-
-        def xgroup_create(self, *args: Any, **kwargs: Any) -> None:
-            pass
-
-        def xautoclaim(self, *args: Any, **kwargs: Any) -> Any:
-            return b"0-0", [
-                (b"1-0", {b"kind": daily_lists.KIND.encode(), b"batch_id": str(bid).encode()})
-            ]
-
-        def xack(self, *args: Any) -> None:
-            self.acked.append(args)
-
-        def lpush(self, *args: Any) -> None:
-            self.jobs.append(args)
-
-    rds = Stream()
+    rds = RetryStream({b"kind": daily_lists.KIND.encode(), b"batch_id": str(bid).encode()})
     fd = None
     lease = e.root / "single-egress.lease.json"
     try:
@@ -439,6 +420,26 @@ class RetryStream:
         self.fields = fields
         self.acked: list[Any] = []
         self.jobs: list[Any] = []
+        self.publish_hints: set[str] = set()
+
+    def eval(self, script: str, key_count: int, *args: Any) -> int:
+        from app.master.daily_stream import ACK, PUBLISH_ONCE
+
+        assert key_count == 2
+        stream, marker, first, second = args
+        if script == PUBLISH_ONCE:
+            if marker in self.publish_hints:
+                return 0
+            self.xadd(stream, {"kind": first, "batch_id": second})
+            self.publish_hints.add(marker)
+            return 1
+        assert script == ACK
+        self.xack(stream, first, second)
+        self.publish_hints.discard(marker)
+        return 1
+
+    def xadd(self, *args: Any) -> None:
+        raise AssertionError("this stream fixture does not publish")
 
     def exists(self, key: str) -> bool:
         assert key == "ingest:paused"

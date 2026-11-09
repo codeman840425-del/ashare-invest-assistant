@@ -63,6 +63,8 @@ class EnvelopeSniffer:
             if kind == "{":
                 self.frames.append({"phase": "key", "key": ""})
             else:
+                if kind == "string":
+                    self.code = _text_code(value, complete=True)
                 self.done = True
             return
         if not self.frames:
@@ -89,8 +91,8 @@ class EnvelopeSniffer:
             elif kind in {"{", "["}:
                 self.skip = 1
             elif kind in {"string", "scalar"}:
-                if key in _FIELDS and value in _CODES:
-                    self.code = value
+                if key in _FIELDS and value.strip() in _CODES:
+                    self.code = value.strip()
                 elif key in _TEXT and kind == "string" and value:
                     self.code = _text_code(value, complete=True)
             else:
@@ -176,7 +178,7 @@ class EnvelopeSniffer:
         return self.code is not None or self.done
 
     def _in_text_field(self) -> bool:
-        return bool(
+        return (not self.started and not self.frames) or bool(
             self.frames
             and self.frames[-1]["phase"] == "value"
             and self.frames[-1]["key"] in _TEXT
@@ -198,7 +200,14 @@ class EnvelopeSniffer:
 
 
 def sniff_envelope(prefix: str) -> str | None:
-    return EnvelopeSniffer().feed(prefix)
+    code = EnvelopeSniffer().feed(prefix)
+    if code is not None:
+        return code
+    try:
+        complete = json.loads(prefix)
+    except (ValueError, UnicodeError, RecursionError):
+        return None
+    return limit_code(200, complete)
 
 
 def limit_code(status: int | None, body: object) -> str | None:
@@ -210,7 +219,10 @@ def limit_code(status: int | None, body: object) -> str | None:
             encoded = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
         except (ValueError, TypeError, RecursionError):
             return None
-        return EnvelopeSniffer().feed(encoded)
+        code = EnvelopeSniffer().feed(encoded)
+        if code is None and legacy_classify(status or 200, body) == Signal.IP_LIMITED:
+            return "103"  # Preserve the older, stricter error-envelope decision.
+        return code
     if isinstance(body, str):
         return _text_code(body, complete=True) or sniff_envelope(body)
     if isinstance(body, list):
@@ -221,9 +233,4 @@ def limit_code(status: int | None, body: object) -> str | None:
 def classify_response(status: int, body: object) -> Signal:
     if limit_code(status, body) is not None:
         return Signal.IP_LIMITED
-    signal = legacy_classify(status, body)
-    if signal == Signal.IP_LIMITED:
-        # Legacy error-text substring matching must not turn a product grammar
-        # negative (e.g. 103.0 in business text) into a limit through another path.
-        return Signal.CLIENT_ERROR if status == 200 else legacy_classify(status)
-    return signal
+    return legacy_classify(status, body)

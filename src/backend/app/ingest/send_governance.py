@@ -166,6 +166,7 @@ class Permit:
     inflight: bool = True
     sent: bool = False
     claimed: bool = False
+    pause_check: Callable[[], None] | None = None
 
     def claim(self, path: str) -> None:
         if self.claimed or not self.inflight or path != LIST_PATHS[self.dataset]:
@@ -174,6 +175,8 @@ class Permit:
         self.claimed = True
 
     def check(self) -> None:
+        if self.pause_check is not None:
+            self.pause_check()
         now = self.governance.clock().astimezone(BEIJING)
         if (
             (self.deadline_at is not None and now >= self.deadline_at)

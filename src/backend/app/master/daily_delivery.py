@@ -24,6 +24,7 @@ from app.db.tables.licences import user_data_licence_status
 from app.db.tables.market import master_runs
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.db.tables.vendor import master_vendor_list_rows as rows
+from app.master.daily_stream import publish_once
 from app.master.mairui_snapshot import DATASETS, DailyNames, apply_delivery
 from app.master.sync import BEIJING
 from app.master.vendor import licence_available
@@ -221,7 +222,8 @@ def publish_pending(
         if b.status in {"requested", "expired"}:
             if not running:
                 continue
-            rds.xadd(STREAM, {"kind": KIND, "batch_id": str(b.id)})
+            count += int(publish_once(rds, STREAM, KIND, b.id))
+            continue
         else:
             rds.lpush("jobs:worker", json.dumps({"task": APPLY, "args": {"batch_id": str(b.id)}}))
         count += 1

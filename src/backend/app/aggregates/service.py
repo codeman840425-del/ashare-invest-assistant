@@ -11,7 +11,7 @@ from typing import Literal
 from sqlalchemy import Connection, func, select
 
 from app.aggregates import models as m
-from app.aggregates import products
+from app.aggregates import products, t_view
 from app.aggregates.reconciliation import read as read_reconciliation
 from app.api.v1.portfolio import _account
 from app.common.errors import AppError, ErrorCode
@@ -28,6 +28,7 @@ from app.schemas.enums import (
     DataGapScope,
     DataStatus,
     GapReason,
+    MarketSession,
     RiskLevel,
     SecurityType,
 )
@@ -267,6 +268,8 @@ def today(
     account_id: uuid.UUID | None,
     clock: m.MarketClock,
     now: dt.datetime,
+    *,
+    interval_s: int,
 ) -> m.Today:
     base = terminal(conn, user_id, account_id, clock, now, "all", _focus_only=True)
     recon = read_reconciliation(conn, account_id, now)
@@ -302,7 +305,33 @@ def today(
         if "building" in reports
         else "not_yet"
     )
-    focus = base.rows
+    trades = t_view.today_trades(conn, account_id, clock.trade_date) if account_id else {}
+    focus = []
+    for row in base.rows:
+        view = None
+        if row.holding is not None:
+            code = row.security_code
+            qty = Decimal(row.holding.qty)
+            bought, sold = trades.get(code, (Decimal(0), Decimal(0)))
+            view = t_view.build(
+                code=code,
+                security_type=row.holding.security_type,
+                base_qty=qty - bought + sold,
+                sold_today=sold,
+                holding_sellable=Decimal(row.holding.sellable_qty),
+                bars=t_view.today_bars(conn, code, clock.trade_date, now),
+                history=t_view.history_volumes(conn, code, clock.trade_date),
+                now=now,
+                trading_day=clock.session is not MarketSession.NON_TRADING_DAY
+                and clock.trade_date == now.astimezone(t_view.BEIJING).date(),
+                # M3 盘中采集未接线，没有排程信息，按 §3.7⑥ 没数据即 unavailable。
+                scheduled=False,
+                interval_s=interval_s,
+                thresholds=t_view.THRESHOLDS,
+            )
+        focus.append(
+            m.TodayRow(**{k: getattr(row, k) for k in m.TerminalRow.model_fields}, t_view=view)
+        )
     empty = m.EmptyBlock(items=(), more=False)
     action_gaps = [
         m.TodayGap(

@@ -429,7 +429,7 @@ resetSession();
 export const currentUser = (): MockUser | null => state.users.find((x) => x.id === state.currentUserId) ?? null;
 export const toMe = (x: MockUser): Me => ({
   id: x.id, username: x.username, display_name: x.display_name, role: x.role, status: x.status,
-  entitlements: { 'watchlist.per_user_cap': 50 }, data_licence_status: licenceState(x.id),
+  entitlements: { 'watchlist.per_user_cap': 100 }, data_licence_status: licenceState(x.id),
 });
 export const toAdminUser = (x: MockUser): AdminUser => ({
   id: x.id, username: x.username, display_name: x.display_name, role: x.role, status: x.status, apply_note: x.apply_note, created_at: x.created_at,

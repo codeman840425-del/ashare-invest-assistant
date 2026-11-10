@@ -168,7 +168,7 @@ export const WATCHLIST: WatchlistResponse = {
     security_code: s.code, name: s.name, focus: s.focus, group: s.holding ? '持仓相关' : null, note: null,
     added_at: `2026-10-${String(10 + i).padStart(2, '0')}T20:00:00+08:00`, refresh_tier: s.focus ? 'tier1' : 'tier2',
   })),
-  caps: { watchlist: 50, focus: 10 },
+  caps: { watchlist: 100, focus: 20 },
 };
 
 const CASH = 190000;
@@ -839,7 +839,7 @@ export const DAILY_REPORT_LIST: DailyReportListItem[] = DAILY_REPORTS.map((d) =>
 // ---------------- 账号 / 健康 ----------------
 export const ME: Me = {
   id: uid(2), username: 'demo_user', display_name: '示例用户', role: 'user', status: 'approved',
-  entitlements: { 'watchlist.per_user_cap': 50 }, data_licence_status: 'active',
+  entitlements: { 'watchlist.per_user_cap': 100 }, data_licence_status: 'active',
 };
 export const HEALTH_READY: HealthReady = { status: 'ok', db: 'ok', redis: 'ok', ingest: 'ok', checked_at: NOW, version: 'mock-0.2' };
 

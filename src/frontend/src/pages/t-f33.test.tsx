@@ -46,8 +46,8 @@ describe('mock：/watchlist 五分支', () => {
     expect(r.items.length).toBeGreaterThan(0);
     expect(r.items.map((x) => x.added_at)).toEqual([...r.items.map((x) => x.added_at)].sort());
     expect(r.items.every((x) => x.refresh_tier === null)).toBe(true);
-    expect(typeof r.caps.watchlist).toBe('number');
-    expect(typeof r.caps.focus).toBe('number');
+    // T-F33b：示例上限与后端回落值（realtime.yaml）一致
+    expect(r.caps).toEqual({ watchlist: 100, focus: 20 });
   });
   it('201：裸 6 位代码规范化；省略 group/note 为 null；同键同体重放返回同一 201，不新增行', async () => {
     const before = codes().length;
@@ -89,6 +89,7 @@ describe('mock：/watchlist 五分支', () => {
     expect(codes()).not.toContain('600000.SH');
     expect((await del('600000.SH')).status).toBe(404);
     expect((await del('600002.SH')).status).toBe(404);
+    expect((await del('Sh600001')).status).toBe(400);
     const bad = await del('60000X');
     expect(bad.status).toBe(400);
     expect((JSON.parse(bad.text) as Err).error.details).toEqual({ fields: [{ field: 'security_code', issue: 'invalid' }] });
@@ -98,8 +99,32 @@ describe('mock：/watchlist 五分支', () => {
     expect(await issue({ security_code: '000300.SH' })).toEqual([{ field: 'security_code', issue: 'security_type_not_supported' }]);
     expect(await issue({ security_code: '600999.SH' })).toEqual([{ field: 'security_code', issue: 'unknown_security' }]);
     expect(await issue({ security_code: 'ABC' })).toEqual([{ field: 'security_code', issue: 'invalid' }]);
+    // T-F33c（契约 §5）：交易所前后缀大小写混写判 invalid；全大写、全小写合法
+    for (const mixed of ['Sh600002', 'sH600002', '600002.Sh', '600002.sH']) {
+      expect(await issue({ security_code: mixed })).toEqual([{ field: 'security_code', issue: 'invalid' }]);
+    }
+    expect((await post({ security_code: '600002.sh' })).status).toBe(201);
+    expect((await post({ security_code: 'SH600002' })).status).toBe(409);
     expect(await issue({ security_code: '600002.SH', group: 'x'.repeat(33) })).toEqual([{ field: 'group', issue: 'too_long' }]);
-    expect((await post({ security_code: '600002.SH', focus: true })).status).toBe(400);
+  });
+  it('400 请求体层（契约 §5，T-F33b）：未知键 unknown field、缺字段 required、空体 required；类型错只断言 field', async () => {
+    const fields = async (body: unknown) => {
+      const r = await post(body);
+      expect(r.status).toBe(400);
+      expect((r.body as Err).error.code).toBe('VALIDATION_ERROR');
+      return (r.body as Err).error.details!.fields as { field: string; issue: string }[];
+    };
+    const before = codes().length;
+    expect(await fields({ security_code: '600002.SH', focus: true })).toContainEqual({ field: 'focus', issue: 'unknown field' });
+    expect(await fields({})).toContainEqual({ field: 'security_code', issue: 'required' });
+    // 不断言 pydantic 英文原句，只断言 field
+    expect((await fields({ security_code: 600000 }))[0].field).toBe('security_code');
+    expect((await fields({ security_code: '600002.SH', group: 1 }))[0].field).toBe('group');
+    expect((await fields([]))[0].field).toBe('body');
+    const empty = await apiFetch(`${API}/watchlist`, { method: 'POST', headers: { 'content-type': 'application/json' } });
+    expect(empty.status).toBe(400);
+    expect(((await empty.json()) as Err).error.details).toEqual({ fields: [{ field: 'body', issue: 'required' }] });
+    expect(codes().length).toBe(before);
   });
   it('写请求缺 CSRF 头 → 403 CSRF_FAILED（统一前置）', async () => {
     const r = await fetch(`${API}/watchlist`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ security_code: '600002.SH' }) });
@@ -141,6 +166,10 @@ describe('api client：头与错误文案', () => {
     const e404 = await removeWatchlist('300001.SZ').catch((e: unknown) => e);
     expect(watchlistErrorText(e404, 'remove')).toBe('该证券已不在自选中');
     expect(watchlistErrorText(new ApiError(403, 'ENTITLEMENT_LIMIT_REACHED', 'x', null, null), 'add')).toBe('自选已达上限，请先移出部分自选');
+    // ③ 并发兜底时后端 existing_id 可能为 null：文案不依赖该字段
+    expect(watchlistErrorText(new ApiError(409, 'CONFLICT', 'x', { field: 'security_code', existing_id: null }, null), 'add')).toBe('已在自选');
+    // 请求体层 400（pydantic 原句）只给通用文案
+    expect(watchlistErrorText(new ApiError(400, 'VALIDATION_ERROR', '参数校验失败', { fields: [{ field: 'focus', issue: 'unknown field' }] }, null), 'add')).toBe('加入自选失败：参数校验失败');
   });
 });
 

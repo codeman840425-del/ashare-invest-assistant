@@ -328,7 +328,42 @@
     - `test_t_view_sellable_null_gap_when_snapshot_lacks_sellable`：Given 无流水、快照时点为当日 10:00（另一例时点为空）、快照该代码可卖数量为空 / Then sellable_qty 为 null，gaps 含 t_view.sellable_qty，message 为上面的定稿文案，data_status 为 partial；
     - `test_t_view_sellable_from_preopen_snapshot_t_plus_1`：Given 无流水、快照时点为上一交易日 15:30、可卖数量为空 / Then sellable_qty 等于 base_qty，gaps 含 t_view.sellable_qty，message 为推算文案，data_status 为 partial；
     - `test_t_view_snapshot_boundary_call_auction`：Given 快照时点分别为当日 09:14:59、09:15:00、09:26:00 / Then 09:14:59 时不加 base_qty gap，可卖按推算给出；09:15:00 和 09:26:00 时加 base_qty gap，可卖为空时 sellable_qty 为 null。原用例 `test_t_view_base_qty_snapshot_before_open_no_gap` 的整点边界随之从 09:30 改为 09:15。
-  - 不在本节范围：快照比上一交易日更早时（多日未更新），base_qty 本身可能已经过期。是否另加 stale 类 gap，由编排者另定，本节不改。
+  - **T-B134c 裁定（编排者 12:25，从保守、可撤回；架构师写入，依据 tasks/T-B134c.md、reports/T-B134b-arch.md「待裁定」）**。本条是 t_view 与 `/portfolio` 可卖口径的唯一出处；`api-contract.md` §7.2 `GET /portfolio` 的 `sellable_qty` 以本条为准。
+    - 适用范围：只针对没有流水的账户，也就是 `_has_ledger` 为 False、持仓取最新有效快照的账户。有流水的账户口径不变。
+    - 快照时点：取 `as_of`；`/portfolio` 沿用现行做法，as_of 为空时回退到 `created_at`。一律换到北京时间后再与界限比较。界限为当日 09:15，同上文。
+    - ① `/portfolio` 的可卖数，按快照里该代码有没有可卖数量分三种：
+      - 有可卖数量，且快照是当日的：取 min(qty, 快照可卖数)，不变。
+      - **没有可卖数量，且快照时点在当日 09:15 及以后（含 as_of 为空、按 created_at 算是当日）**：sellable_qty 取 **0**，不取 qty。
+        - 不改成 null，因为 R6 ③ 规定 `sellable_qty` 不为 null。
+        - gaps 加一项：key 为 `positions.sellable_qty`，reason 为 `user_input_missing`，message 为「当日持仓快照没有可卖数量，无法核实今日可卖，可卖暂按 0 计」。
+        - 按 `/portfolio` 现有规则，data_status 为 partial。
+        - 下游 plans 的 `generation`、`drafts` 取到 0，就不会生成卖出数量，这正是保守方向想要的结果。
+      - **没有可卖数量，且快照时点早于当日 09:15（包括非当日的快照）**：按上文 ② 推算。
+        - sellable_qty = qty；
+        - gaps 加一项：key 为 `positions.sellable_qty`，reason 为 `user_input_missing`，message 为「可卖数按开盘前持仓快照推算（T+1），未扣今日卖出和冻结、限售股份」。
+      - 非当日快照有可卖数量时，仍取 qty，不变：这些股份都是此前交易日买入的。
+      - 同一原因的缺口沿用 `/portfolio`「按原因各列一项」的做法，不按代码逐只列。
+    - 与 t_view 的一致性：
+      - 当日 09:15 及以后的快照、没有可卖数量时，`holding.sellable_qty` 为 "0"，t_view.sellable_qty 为 null。两者含义相同，都是「无法核实，不可据以卖出」。写法不同，是因为 `/portfolio` 受 R6 ③ 约束不能为 null。
+      - t_view 不用 `holding.sellable_qty` 的 0 去走 §3.7 ④ 的截断：可卖数量未知时直接输出 null，`snapshot_basis` 按快照原始可卖数判定。
+      - 前端：t_view 显示「—」；持仓行显示 0，并附 GapNote。
+      - 开盘前推算的情形，两边的值都是 qty，并且都带推算 gap。
+    - ② 快照过期：
+      - 条件：快照日期（北京时间）早于上一开市日，即多日没有更新。
+        - 上一开市日指严格早于今日的最近一个开市日，取自交易日历。日历查不到时，同样加这项 gap（保守）。
+        - 例：周四的快照，周六查看时上一开市日是周五，算过期；周五的快照，周一查看时不算过期。
+      - 新增的 gap：
+        - `/portfolio` 加一项，key 为 `positions.snapshot`，reason 为 `user_input_missing`，message 为「持仓快照停在 {快照日期}，早于上一交易日，之后的买卖未反映，持仓与可卖可能已变」；
+        - t_view 的每个持仓行加一项，key 为 `t_view.base_qty`，reason 和 message 同上。
+        - 过期快照一定早于当日 09:15，所以不会和本条前面「09:15 及以后」那项 base_qty gap 同时出现。
+      - data_status 至少为 partial。数值照常给出，不因过期改为 0 或 null：过期快照里没有今日买入，不违反 T+1，只是持仓可能已变，由这项 gap 提示。
+      - reason 暂借 `user_input_missing`，意思是需要用户导入新快照。不新增 `gap_reason` 枚举，与 §3.7 ④ 暂借 upstream_error 的做法相同。
+    - 新增用例（后端 T-B134c 实现，测试 T-T78 复核）：
+      - `test_portfolio_sellable_zero_when_today_snapshot_lacks_sellable`：Given 无流水、快照时点为当日 10:00（另一例 as_of 为空、created_at 为当日）、可卖数量为空 / Then sellable_qty 为 "0"，gaps 含 `positions.sellable_qty`，data_status 为 partial；
+      - `test_portfolio_sellable_from_preopen_snapshot_with_gap`：Given 快照时点为上一交易日 15:30、当日 09:14:59、当日 09:15:00，可卖数量都为空 / Then 前两例 sellable_qty 为 qty 并带推算 gap，09:15:00 一例为 "0"；
+      - `test_portfolio_ledger_account_sellable_unchanged`：Given 有流水的账户 / Then 可卖数仍按持仓 − 当日买入计算，不出现以上两项 gap；
+      - `test_portfolio_snapshot_stale_gap`：Given 快照日期早于上一开市日；快照日期等于上一开市日；周末查看周五的快照 / Then 只有第一例带 `positions.snapshot` gap；
+      - `test_t_view_base_qty_snapshot_stale_gap`：Given 无流水、快照日期早于上一开市日 / Then gaps 含 `t_view.base_qty`（过期文案），data_status 为 partial。
   - 对 T-B134 的影响：在现行实现上补「快照时点」的判断和上面两项 gap。新增用例：
     - `test_t_view_base_qty_from_snapshot_without_trades`：Given 无流水、快照时点为当日 10:00 / Then base_qty 为快照数量，gaps 含 t_view.base_qty，data_status 为 partial；
     - `test_t_view_base_qty_snapshot_before_open_no_gap`：Given 快照时点为上一交易日 15:30 / Then 不加 t_view.base_qty 的 gap。

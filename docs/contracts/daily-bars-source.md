@@ -435,6 +435,25 @@
 - 「开放真实麦蕊」须同时满足，缺一不出网：
   1. 环境变量 `DAILY_BARS_SOURCE` 为 mairui（运维配置）；
   2. 运维安装的只读回执 `/run/aia/receipts/mairui-daily-bars.json`，按 `daily_delivery.read_grant` 的规则校验（root 属主、0444、目录不可写、在 start–end 有效期内）；
+     - **（T-A138 细化，以 be/T-B130=41259c0 的 `ingest/daily_bars.read_daily_bars_grant` 为准，解析方式同 `daily_delivery.read_grant`）**
+     - kind：回执的 kind 字段取值为 `mairui_daily_bars`，与日 K outbox 的 kind 共用同一个模块常量 `KIND`。它与名单链路（`daily_delivery`）的 `mairui_daily_snapshot` 是两个不同的值，名单回执 `mairui-daily.json` 不能冒充日 K 回执。
+     - 字段集合：JSON 对象的键必须**恰好**是下面 6 个，多一个或少一个都拒绝（例如多带 limit 字段会被拒）：
+       - kind；
+       - user_id（UUID）；
+       - licence_id（UUID）；
+       - receipt_id（UUID）；
+       - not_before（带时区的 ISO 时间）；
+       - expires_at（带时区的 ISO 时间）。
+     - 校验项（缺一即拒）：
+       - 文件：root 属主、权限恰为 0444、常规文件、不跟随符号链接、不超过 8192 字节；
+       - 所在目录：root 属主、组和其他人不可写，路径中不含符号链接；
+       - 内容：可解析为 JSON，kind 符合上文；
+       - 时间：not_before 与 expires_at 都带时区，且 not_before 早于 expires_at；按注入的 clock 取 now，须满足 not_before ≤ now < expires_at；
+       - user_id：与本次拉取的 owner 相同；
+       - 不读证书：licence_id 只作记录，不据此读取任何证书或密钥。
+     - 违反任意一项时：transport 0 次，零写入，pipeline_runs 记 `data_licence_unavailable`，运行状态为 skipped。
+     - 回执里的任何字段都不影响预算。预算只看常量，即 `daily_bars_http_budget(DAILY_BARS_HTTP_LIMIT)`，并且在读回执之前判定（unset 时根本不读回执）。
+     - 用例（41259c0 自检）：`test_receipt_expired_is_rejected`、`test_receipt_wrong_kind_is_rejected`、`test_receipt_non_json_is_rejected`、`test_receipt_user_mismatch_is_rejected`，以及正向对照 `test_valid_receipt_still_allows_unlimited_fetch`（仅测试里 monkeypatch 为哨兵）。
   3. `daily_bars_http_budget(DAILY_BARS_HTTP_LIMIT)` 的结果不是 unset（即开放单已合入）；
   4. 单 C 与开放单都已合入。
 - 不动：`daily_delivery.DAILY_HTTP_LIMIT` 仍为 1，`live_budget_issue()` 不变；`ingest.yaml` 的 budget/shares/licences 不动；并发仍为 1。

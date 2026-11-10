@@ -83,6 +83,8 @@
 | R7 | T-A74 B3（:45） | G6 warn 经 ack 只留审计，不挡信号、不降权 |
 | R8 | T-A74 B4（:46） | S-01 以 T+5 为主口径，资格计数取 T+5 complete |
 
+> 勘误（T-A95）：本节表中「R5–R8」即 T-A74 裁定的 B1–B4（`docs/reviews/T-A74-rulings.md:43-46`），与团队后续编号冲突；自 T-A79 起 R5–R11 指 IP 限流与时钟项，B1–B4 单列。以 `docs/reviews/cross-review-R1-R19.md` 为准。
+
 ## 5. 待补
 
 - 运维 T-O60（O1/O2）的 diff 交来后补评，重点是问题 1 与 R3。

@@ -10,6 +10,7 @@
 
 本文件只补缺口：H12 的 422 ``STRATEGY_SYSTEM_ONLY`` 与北交所；S12 的 bse / ST / 停牌 / F2；
 官方卡字段直通（S12/S20 的 screen:null 规范化，以及 H-01 主板键）。
+T-T64：在 T-B119 合入后去掉两条 strict xfail，断言未改、未弱化。
 
 对照：``git show 60ce9fd:docs/strategies/T-R41/g7_review_H-01_S-01.md`` §6、
 /workspace/team/reports/T-R47.md、T-A111.md。夹具均为【虚构】；不调麦蕊。
@@ -184,14 +185,6 @@ def test_h12_bse_not_in_universe(
     _assert_h12_bse_excluded(h01[0]["universe"])
 
 
-@pytest.mark.xfail(
-    reason=(
-        "功能缺口：H-01 卡 universe.boards 键为 main，service.py persist 用 "
-        "master.board=main_board 且未归一，主板会被误判 outside_universe。"
-        "应由后端（或卡键对齐）修，本单不改 src。"
-    ),
-    strict=True,
-)
 def test_h12_main_board_in_universe_via_production_key(
     h01: tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]],
 ) -> None:
@@ -373,16 +366,6 @@ def test_s12_tamper_f2_always_pass_self_fails(
         _assert_s12_f2_excludes(card, spec, fx1, market_rules, feature_keys)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "功能缺口：S-01 官方卡 universe 含叙述性 exclude 键（screen_membership 只允许 "
-        "boards/pool/security_types），pool 字面为「全市场（持仓 ∪ 自选优先）」不在允许池，"
-        "screen:null 无生产改写。实测诊断 universe_not_defined_or_supported，"
-        "持仓/自选也无法入选。另缺 security_types，persist 类型校验也会全拒。"
-        "应由后端补 screen:null 规范化，本单不改 src。"
-    ),
-    strict=True,
-)
 def test_s12_s20_official_card_fields_admit_holdings_and_watchlist(
     s01: tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]],
 ) -> None:

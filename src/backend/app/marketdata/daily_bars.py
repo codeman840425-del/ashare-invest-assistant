@@ -22,6 +22,7 @@ from app.db.tables.market import daily_bars, securities, trading_calendar
 from app.db.tables.realtime import pipeline_runs
 from app.db.tables.users import users
 from app.reports.service import covered
+from app.schemas.enums import GapReason
 
 DAILY_BARS_FETCH: str = "daily_bars_fetch"
 _STEP: str = "daily_bars.fetch"
@@ -52,12 +53,17 @@ class BarGap:
     code: str
     trade_date: dt.date | None
     reason: str
+    issue: str
 
 
 @dataclass(frozen=True)
-class FetchResult:
+class DailyBarsResult:
     bars: Sequence[DailyBar] = ()
     gaps: Sequence[BarGap] = ()
+    halted: str | None = None
+
+
+FetchResult = DailyBarsResult
 
 
 @dataclass(frozen=True)
@@ -71,7 +77,7 @@ class UpsertStats:
 class DailyBarsSource(Protocol):
     def fetch(
         self, codes: Sequence[str], start: dt.date, end: dt.date, adjust: str
-    ) -> FetchResult:
+    ) -> DailyBarsResult:
         """按闭区间拉取日 K。"""
 
 
@@ -127,13 +133,20 @@ class FakeDailyBarsSource:
 
     def fetch(
         self, codes: Sequence[str], start: dt.date, end: dt.date, adjust: str
-    ) -> FetchResult:
+    ) -> DailyBarsResult:
         bars: list[DailyBar] = []
         gaps: list[BarGap] = []
         days = _days(start, end)
         for code in codes:
             if code in self._missing:
-                gaps.append(BarGap(code=code, trade_date=None, reason="missing"))
+                gaps.append(
+                    BarGap(
+                        code=code,
+                        trade_date=None,
+                        reason=GapReason.NO_SOURCE,
+                        issue=f"daily_bars_missing:{code}",
+                    )
+                )
                 continue
             for day in days:
                 if code in self._suspended:
@@ -172,7 +185,7 @@ class FakeDailyBarsSource:
                         is_suspended=False,
                     )
                 )
-        return FetchResult(bars=tuple(bars), gaps=tuple(gaps))
+        return DailyBarsResult(bars=tuple(bars), gaps=tuple(gaps), halted=None)
 
 
 def _q(value: Decimal | None) -> Decimal | None:
@@ -293,23 +306,15 @@ def upsert_daily_bars(
 
 
 def daily_universe(
-    conn: Connection, *, trade_date: dt.date, user_id: uuid.UUID | None
+    conn: Connection, owner: uuid.UUID, trade_date: dt.date
 ) -> list[str]:
-    if user_id is not None:
-        owners: list[uuid.UUID] = [user_id]
-    else:
-        owners = list(
-            conn.execute(
-                select(users.c.id).where(users.c.status == "approved").order_by(users.c.id)
-            )
-            .scalars()
-            .all()
-        )
+    """单用户宇宙：持仓中 type=stock 且 listing_status=listed 的代码，去重后升序。
+
+    listing_status 为空视为不合格，不按 listed 推断。
+    """
     raw: set[str] = set()
-    for owner in owners:
-        account_id = select_account(conn, owner, None)
-        if account_id is None:
-            continue
+    account_id = select_account(conn, owner, None)
+    if account_id is not None:
         for code in _account(conn, account_id, trade_date).positions:
             raw.add(code)
     if not raw:
@@ -326,6 +331,23 @@ def daily_universe(
         .all()
     )
     return sorted(listed)
+
+
+def _approved_owners(conn: Connection) -> list[uuid.UUID]:
+    return list(
+        conn.execute(select(users.c.id).where(users.c.status == "approved").order_by(users.c.id))
+        .scalars()
+        .all()
+    )
+
+
+def _union_universe(
+    conn: Connection, owners: Sequence[uuid.UUID], trade_date: dt.date
+) -> list[str]:
+    codes: set[str] = set()
+    for owner in owners:
+        codes.update(daily_universe(conn, owner, trade_date))
+    return sorted(codes)
 
 
 def _empty_stats(
@@ -396,24 +418,12 @@ def fetch_and_record(
 ) -> int:
     day = _as_day(trade_date)
     uid = _as_user(user_id)
-    if window_trading_days is not None and window_trading_days <= 0:
+    if window_trading_days is not None and (
+        type(window_trading_days) is not int or window_trading_days <= 0
+    ):
         raise ValueError("window_trading_days must be a positive integer")
-
-    try:
-        return _run_fetch(conn, source, day, uid, window_trading_days)
-    except ValueError:
-        raise
-    except Exception as exc:
-        _record_run(
-            conn,
-            day,
-            uid,
-            window_trading_days,
-            status="failed",
-            stats=_empty_stats(uid, window_trading_days),
-            error=type(exc).__name__,
-        )
-        raise
+    # 事务由调用方负责，这里不 begin / commit。
+    return _run_fetch(conn, source, day, uid, window_trading_days)
 
 
 def _run_fetch(
@@ -468,7 +478,8 @@ def _run_fetch(
             .all()
         )
 
-    codes = daily_universe(conn, trade_date=day, user_id=uid)
+    owners = [uid] if uid is not None else _approved_owners(conn)
+    codes = _union_universe(conn, owners, day)
     if not codes:
         stats = _empty_stats(uid, window_trading_days, codes=0)
         _record_run(conn, day, uid, window_trading_days, status="ok", stats=stats)
@@ -486,7 +497,7 @@ def _run_fetch(
                 missing_codes.add(code)
     upsert = upsert_daily_bars(
         conn,
-        FetchResult(bars=kept, gaps=raw.gaps),
+        DailyBarsResult(bars=kept, gaps=raw.gaps, halted=raw.halted),
         source="fake",
         licence_id=None,
         fetched_at=dt.datetime.now(dt.UTC),
@@ -510,6 +521,24 @@ def _run_fetch(
     return upsert.inserted
 
 
+def _validate_task_args(
+    trade_date: str, user_id: str | None, window_trading_days: int | None
+) -> tuple[dt.date, uuid.UUID | None]:
+    day = dt.date.fromisoformat(trade_date)
+    if user_id is not None:
+        try:
+            uid = uuid.UUID(user_id)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("user_id must be a UUID string") from exc
+    else:
+        uid = None
+    if window_trading_days is not None and (
+        type(window_trading_days) is not int or window_trading_days <= 0
+    ):
+        raise ValueError("window_trading_days must be a positive integer")
+    return day, uid
+
+
 def daily_bars_fetch_task(
     settings: Settings,
     trade_date: str,
@@ -518,26 +547,36 @@ def daily_bars_fetch_task(
 ) -> int:
     from app.workers.jobs import _engine
 
-    day = dt.date.fromisoformat(trade_date)
-    uid = uuid.UUID(user_id) if user_id else None
-    if window_trading_days is not None and window_trading_days <= 0:
-        raise ValueError("window_trading_days must be a positive integer")
+    day, uid = _validate_task_args(trade_date, user_id, window_trading_days)
     engine = _engine(settings)
-    with engine.begin() as conn:
-        if settings.daily_bars_source == "off":
-            stats = _empty_stats(uid, window_trading_days, issues=["daily_bars_source_off"])
-            _record_run(conn, day, uid, window_trading_days, status="skipped", stats=stats)
-            return 0
-        if settings.daily_bars_source == "mairui":
-            stats = _empty_stats(
-                uid, window_trading_days, issues=["daily_bars_http_budget_unset"]
+    try:
+        with engine.begin() as conn:
+            if settings.daily_bars_source == "off":
+                stats = _empty_stats(uid, window_trading_days, issues=["daily_bars_source_off"])
+                _record_run(conn, day, uid, window_trading_days, status="skipped", stats=stats)
+                return 0
+            if settings.daily_bars_source == "mairui":
+                stats = _empty_stats(
+                    uid, window_trading_days, issues=["daily_bars_http_budget_unset"]
+                )
+                _record_run(conn, day, uid, window_trading_days, status="skipped", stats=stats)
+                return 0
+            return fetch_and_record(
+                conn,
+                FakeDailyBarsSource(),
+                trade_date=day,
+                user_id=uid,
+                window_trading_days=window_trading_days,
             )
-            _record_run(conn, day, uid, window_trading_days, status="skipped", stats=stats)
-            return 0
-        return fetch_and_record(
-            conn,
-            FakeDailyBarsSource(),
-            trade_date=day,
-            user_id=uid,
-            window_trading_days=window_trading_days,
-        )
+    except Exception as exc:
+        with engine.begin() as conn:
+            _record_run(
+                conn,
+                day,
+                uid,
+                window_trading_days,
+                status="failed",
+                stats=_empty_stats(uid, window_trading_days),
+                error=type(exc).__name__,
+            )
+        raise

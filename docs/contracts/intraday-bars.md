@@ -34,6 +34,26 @@
   - 然后 open、high、low、close、成交额为 float32，成交量为整数，最后 4 字节保留。
   - .lc1 为 1 分钟，.lc5 为 5 分钟。价格是否需要换算、成交量是股还是手，都要用「额 ÷ 量落在 [low, high]」逐文件自检，规则同日线（`tdx_unit_suspect:<code>`）。
 
+**实现同步（T-A149，be/T-B133 = 7d161ad；依据 T-A147 评审结论）**
+- 命令：`intraday-bars-import-tdx`，必填 `--kind lc1` 或 `--kind lc5`；默认 dry-run，`--apply` 才写库；`--until` 可选，只用来把每只代码的截止日再往前压（`until_for`，口径见 §1.3）。dry-run 不写 pipeline_runs，同 `daily-bars-tdx.md` §3.3。
+- 目录：`--root` 下须有 sh、sz、bj 三个市场的 minline（lc1）或 fzline（lc5），目录名不区分大小写（`kind_dirs`）。
+  - 未被排除的市场缺任一目录即拒绝，原因为 `root_missing:<市场>/<目录>`；用 `,exclude-bj` 排除的 bj 不检查（见下一条）。缺的是 bj 时，拒绝信息末尾附提示「hint: --scope owned,exclude-bj」（T-B133 11:07 裁定 ②）。
+  - 用例：`test_lc_root_missing_bj_minline_refused_with_scope_hint`、`test_real_lc_root_without_bj_minline_refused`。
+- 显式排除 bj：`--scope owned,exclude-bj`（只对分钟线有效，日线带它会被拒绝）。
+  - 不扫描 bj 目录，目录存在也不扫（`test_lc_scope_exclude_bj_skips_existing_bj_dir`）。
+  - 清单记一行缺口「gap、bj/minline（或 bj/fzline）、excluded_by_scope」（`build_manifest`）。
+  - issues 记 `tdx_scope_excluded:bj/minline`（或 bj/fzline）。运行状态不因此变为 partial：排除是用户显式选择，在清单和 issues 里可见。
+  - 用例：`test_lc_scope_exclude_bj_records_manifest_gap`、`test_real_lc_scope_exclude_bj_on_sample_root`。
+  - 保守默认不变：不带该参数时，缺 bj 照样拒绝。
+- 格式的实测结论：T-B133 在 8 个真实样本上核对过（2 只代码，lc1 133 天、lc5 287 天，`test_real_lc_cross_check_against_day`），只在样本范围内成立：
+  - 分钟值是 bar 结束时刻，每日首根为 09:31 或 09:35；
+  - 价格是 float32 原值，不缩放；
+  - 成交量单位为股。
+  - 分钟量合计与日量相差在 100 股以内、不完全相等，原因是「推断，未验证」，生产代码不做「合计等于日量」的强校验。
+  - 全市场仍靠逐文件单位自检（`unit_suspect`）兜底。
+- **分钟线金额不比对**：分钟金额容差没有出处，属未验证，默认关闭。`_execute` 只对日线开启金额比对；分钟线对账只比 OHLC 和量，对账报告的汇总行 `amount_compared` 为 false。待有出处后另行评审，再决定是否开启。
+- 落盘文件的名称与格式同 `daily-bars-tdx.md` §3.3 的「导入时的落盘文件」，kind 为 lc1 或 lc5；对账明细的 ts 为 bar 结束时刻。
+
 ### 1.3 来源标注与不混写
 
 - 每行带 source。新写入只用两个取值：mairui、tdx_local。基线 CHECK 里已有的 pro_latest、pro_history 保留，只为兼容，新代码不再写。
@@ -260,6 +280,36 @@
 - 删除用例：无（原口径没有专门用例）。
 - 前端不受影响：量比仍是原样显示的 2 位字符串。
 
+**T-B134 待裁定的契约结论（T-A149，对应 reports/T-B134.md §待裁定 第 1、3、4、6 项）**
+- ① 「有成交的交易日」：
+  - 定义为该开市日在 minute_bars 里有这只代码的 mairui 分钟行，至少一根。有分钟行但全日量为 0 的日子也计入。
+  - 停牌日没有分钟行，自然被跳过，按上文向前顺延。
+  - 这样「过去 5 日总量为 0」的情形可以出现，§3.7 ⑦ 的「历史 5 日无成交」才有意义。
+  - 认可 T-B134 的现行实现。
+  - 单 D 首次实调时核对：麦蕊在停牌日是否返回零量的占位分钟行。如果返回，复牌后量比会偏高，届时另行评审，改为「全日量大于 0 才计入」。
+  - 保守默认：在核对之前不改。
+- ③ 「不适用」的判定顺序：
+  - 顺序为 t_view.security_type 优先，其次 t_view.base_qty，最后 t_view.session，取第一个命中的，gaps 只放这一项（§3.7 ⑤）。理由：不是 A 股股票的，无论有没有底仓、是否在交易时段，都没有做 T 视图。
+  - 主数据缺失（查不到 security_type）：按 t_view.security_type 不适用处理，与 `is_strategy_eligible` 对未知品种取「否」一致（保守默认：不对身份不明的品种显示做 T 指标）。
+  - 认可现行实现。
+- ④ 只有持仓快照、没有成交流水的账户：
+  - base_qty 取最新持仓快照的数量。
+  - 快照时点（`broker_position_snapshots.as_of`）早于当日 09:30（北京时间）时，就是上一交易日收盘的持有量，不加 gap。
+  - 快照时点在当日 09:30 及以后，或时点为空时，可能含今日买入：
+    - gaps 加一项，key 为 t_view.base_qty，reason 为 user_input_missing，message 为「未导入今日成交流水，底仓按持仓快照计，可能含今日买入」；
+    - data_status 至少为 partial。
+  - sellable_qty 仍按 §3.7 ④ 截断。快照没有可卖数量时，sellable_qty 为 null，并加 gap（key 为 t_view.sellable_qty，reason 为 user_input_missing）。不能核实 T+1 时不给可卖数（fail closed）。
+  - 对 T-B134 的影响：在现行实现上补「快照时点」的判断和上面两项 gap。新增用例：
+    - `test_t_view_base_qty_from_snapshot_without_trades`：Given 无流水、快照时点为当日 10:00 / Then base_qty 为快照数量，gaps 含 t_view.base_qty，data_status 为 partial；
+    - `test_t_view_base_qty_snapshot_before_open_no_gap`：Given 快照时点为上一交易日 15:30 / Then 不加 t_view.base_qty 的 gap。
+- ⑥ 分母缓存：
+  - 进程内缓存可以接受，键为（代码、交易日），每日一次。多实例各算一次，结果相同。
+  - 首次计算后才补齐的昨日分钟线，当天不刷新，次日生效，符合「每日一次」。
+  - 结果为空（历史不足 5 日或总量为 0）时**不缓存**，下次请求重算，避免早盘一次缺数导致全天都为空。
+  - 不引入新的缓存时长参数。
+  - 新增用例：`test_t_view_volume_ratio_null_not_cached`：Given 首次计算时历史不足、随后补齐 / Then 同一交易日内的下次请求得到非空量比。
+- 权属：本节只定口径。实现改动由后端 T-B134 续单完成，用例由测试 T-T78 复核。T-B134 的裁定把这 4 项分给了 T-A150，本单按 T-A149 §追加（11:50）先写入，T-A150 是否还需要由编排者定。
+
 ### 3.6 压后
 
 自选股的盘中信号与做 T 视图；ETF T+0；五档盘口；集合竞价；分钟级因子与技术指标接口；全市场分钟线的存储与采集；5 分钟实时采集；通知推送节奏调优；复测引擎；任何形式的自动下单（永不做）。
@@ -320,6 +370,17 @@
 - `test_lc_import_rerun_idempotent`：Then 第二次 inserted 为 0。
 - `test_lc_import_readonly_root`：Given 只读根目录 / Then 成功，根目录不变。
 - `test_lc_import_no_network`：Then `egress.mairui_get` 调用数为 0。
+
+- 用例名与实现的对应（T-A149，be/T-B133 = 7d161ad）：
+  - 合并实现：
+    - `test_lc_import_a_share_only` 与 `test_lc_import_manifest_generated_and_compared` 合并为 `test_lc_import_a_share_only_and_manifest`；
+    - `test_lc_import_rerun_idempotent` 与 `test_lc_import_readonly_root` 合并为 `test_lc_import_rerun_idempotent_and_readonly_root`；
+    - `test_lc5_goes_to_minute5_bars_only` 由 `test_lc_apply_tables_and_until_before_first_mairui` 覆盖（连库）；
+    - M1 的 `test_migration_0034_downgrade_refuses_with_rows` 并入 `test_migration_up_down_up_and_0034_downgrade_refuses_with_rows`（连库）。
+  - `test_lc_import_no_network` 由 `test_tdx_import_no_network` 覆盖：日线与分钟线共用同一模块，静态检查两个模块不 import egress 或 transport；运行时打桩只跑日线。
+  - 新增：`test_lc_date_encoding_boundaries`、`test_lc_root_missing_bj_minline_refused_with_scope_hint`、`test_lc_scope_exclude_bj_records_manifest_gap`、`test_lc_scope_exclude_bj_skips_existing_bj_dir`。
+  - 真实样本：`test_real_lc_cross_check_against_day`、`test_real_lc_root_without_bj_minline_refused`、`test_real_lc_scope_exclude_bj_on_sample_root`、`test_real_lc_dry_run_counts_and_index_filter`（未设置 `TB133_TDX_SAMPLES` 时跳过）。
+  - 待补（T-A147 建议 S7）：分钟线对账在金额不同时不算 mismatch，且 `amount_compared` 为 false 的专门用例。
 
 **M3 麦蕊分钟采集（现在用打桩 transport 开发；常量改 30 在 D 后）**
 - `test_intraday_limit_default_zero_no_network`：Given 默认常量 / When 盘中 tick / Then transport 0 次，记 `daily_bars_http_budget_unset` 同类的 unset issue（建议名 `intraday_bars_budget_unset`）。

@@ -1,4 +1,4 @@
-# 通达信本地日线融合契约（T-A142，T-A143 修订，draft）
+# 通达信本地日线融合契约（T-A142，T-A143 修订，T-A149 按实现同步，draft）
 
 状态：draft，架构契约，不代表已实现。基线 main `ef32153`。依据：用户提议（编排者转述，见 `reports/T-A142.md`）与 `reports/T-A136.md` 方案 B 的格式调研；数据现状据编排者 2026-11-10 只读扫描（§1.1，未经架构核实）。与 `daily-bars-source.md`（下称「源契约」）§8–§9 配套。
 
@@ -58,6 +58,9 @@
   - `--until`：截止日期 D，必填（§3.4）；
   - `--from`：起始日期，可选，缺省为文件内最早日期；
   - `--scope`：owned（默认，只导 `daily_universe` 里的代码）或 market（受源契约 §9.6 的 `RESEARCH_MARKET_SCOPE_ENABLED` 把关）。
+    - T-A149 同步（be/T-B133 = 7d161ad，`_scope`）：语法为 `owned` 或 `market`，后面可接 `,exclude-bj`。其他写法在参数解析阶段报错，退出码 2，零写入，审计目录不写任何文件。
+    - `,exclude-bj` 只用于分钟线（`intraday-bars.md` §1.2）。日线带它时，`_execute` 拒绝，原因为 `scope_exclude_bj_intraday_only`。日线没有排除选项，缺 bj/lday 照上一条拒绝。用例：`test_daily_scope_exclude_bj_refused`。
+    - market：源契约 §9.6 的开关在基线中未实现，`_execute` 一律拒绝，原因为 `market_scope_disabled`（保守默认）。
 - 执行顺序（任一步失败就整次拒绝，零写入，退出码非 0）：
   1. **只扫描 A 股 .day**：文件名须为 sh、sz、bj 加 6 位数字加 .day；经 `trades.normalize_code` 规范化后，只保留 `securities` 里 type 为 stock 且 listing_status 为 listed 的代码。其余文件不打开、不计算哈希，只按原因计数（非 A 股、规范化失败、非 listed）。
   2. **自己生成 sha256 清单**：对第 1 步留下的每个文件算 sha256，写成清单落盘到 `--audit-dir`（文件名含本次运行的北京时间与 run 编号）。清单每行为「sha256、字节数、相对路径」，末行为文件数与清单自身的 sha256。dry-run 也生成清单。
@@ -68,6 +71,20 @@
 - 单位自检（逐文件）：成交额 ÷ 成交量须落在当日 [low, high] 内（容差 1%）；不满足的比例超过 5% 时整文件拒绝，记 `tdx_unit_suspect:<code>`。
 - 幂等：写入只经 `upsert_daily_bars`，DO NOTHING；同样参数重复运行，第二次 inserted 为 0、行数不变。一次性动作，可重复运行。
 - 记录：每次运行写一条 pipeline_runs，stats 含清单 sha256、文件数、导入行数、跳过数（按原因）、冲突数、拒绝数、复跑比对计数；不写宿主路径。
+  - T-A149 修订（T-B133 11:07 裁定 ①，取代上句的「每次运行」）：**dry-run 不写 pipeline_runs**。dry-run 用只读连接，结束时回滚；只有 `--apply` 在写入的同一事务里由 `DbDeps.record_run` 写一条：kind 为 daily_batch，step 为 `tdx_local.import_day`（分钟线为 `tdx_local.import_lc1`、`tdx_local.import_lc5`），status 为 ok 或 partial。dry-run 的统计只打印到标准输出（键=值逐行，末行为 dry-run 或 applied），并落在审计目录的清单与对账报告里。用例：`test_tdx_cli_generates_manifest`（断言 dry-run 时 runs 为空）。
+- 拒绝的输出：标准输出一行 `refused: <原因>`，退出码 1，零写入。日线 dry-run 另打印一行 `recommended_until=<D>`。
+
+**导入时的落盘文件（T-A149 同步，`run_import`）**
+- 清单：`tdx-<kind>-manifest-<北京时间，形如 20261110T153000>-<run 编号>.txt`，kind 为 day、lc1 或 lc5。
+  - 每行为「sha256、字节数、相对路径」，以制表符分隔；
+  - 分钟线显式排除 bj 时，另有一行「gap、相对路径（如 bj/minline）、excluded_by_scope」，复跑比对时跳过这类行（`parse_manifest`）；
+  - 末行为「files=N」与「manifest_sha256=…」。
+- 导入时对账报告：`tdx-<kind>-reconcile-<北京时间>-<run 编号>.jsonl`，dry-run 也生成。
+  - 对象：与库中已有行同键（任何来源）的记录。这些行只对账，不交给写入器。
+  - 明细行只有 mismatch 一种，字段为 code、trade_date、ts（日线为 null）、field、existing_source、existing_value、tdx_value、tolerance、kind。
+  - 末行汇总：summary（值为 true）、overlap_keys、mismatch_keys、mismatch_items、mismatch_rate、amount_compared。
+  - 比对规则同 §5：OHLC、量完全相等；日线金额按 §5 的容差；分钟线不比对金额，`amount_compared` 为 false（见 `intraday-bars.md` §1.2）。
+  - 这份报告与 §5 的 `daily-bars-crosscheck-tdx` 报告是两种文件：§5 以麦蕊为对象、有 missing_* 两类，属单 T2，尚未实现。T2 实现时字段名再统一（T-A147 建议 S5）。
 - 不出网：模块不得 import 任何 egress 或 transport。
 
 ### 3.4 截止日期 D（推荐不变）
@@ -142,6 +159,21 @@
 - `test_tdx_import_no_network`（新）：Given 打桩 `egress.mairui_get` / Then 调用数为 0。
 - `test_snapshot_excludes_tdx_local`（新，连库，测试隔离库）：Given 某持仓代码在窗口内只有 tdx_local 行 / When build / Then 快照里该代码没有这些 bar，按既有规则记缺口。
 - `test_backfill_ready_ignores_tdx_local`（新）：Given 窗口内全是 tdx_local 行 / Then `backfill_ready` 为 False。
+
+用例名与实现的对应（T-A149，be/T-B133 = 7d161ad；连库用例在 `test_tb133_tdx_db`，其余在 `test_tb133_tdx_local`）：
+- 合并实现：
+  - `test_tdx_import_rerun_idempotent` 与 `test_snapshot_excludes_tdx_local` 合并为 `test_tdx_daily_apply_do_nothing_idempotent_and_snapshot_excludes`（连库）；
+  - `test_migration_0033_allows_tdx_local` 的「有 tdx_local 行时 downgrade 拒绝」并入 `test_migration_up_down_up_and_0034_downgrade_refuses_with_rows`（连库）。
+- 未实现，仍为本节要求：`test_tdx_import_readonly_mount`（日线只读根目录；分钟线由 `test_lc_import_rerun_idempotent_and_readonly_root` 覆盖）。以 root 运行时 chmod 不生效，补用例时须断言进程确实不可写，或在 root 下跳过（T-A147 建议 S3）。
+- 暂缓：`test_backfill_ready_ignores_tdx_local`，基线还没有 `backfill_ready`（源契约 §9.2），随该函数实现补上。
+- 提前实现：`test_crosscheck_tolerance_amount_float32` 已在 T1 实现（导入对账与 §5 共用容差）。T2 的另外两例仍归 T2。
+- 实现方新增（已合入验收）：
+  - `test_tdx_root_dir_names_case_insensitive`；
+  - `test_tdx_import_owned_scope_only`；
+  - `test_unit_selfcheck_threshold_five_percent`；
+  - `test_day_rejects_invalid_records_and_truncated_file`；
+  - `test_daily_scope_exclude_bj_refused`。
+- 真实样本用例：`test_real_samples_present_and_checksums`、`test_real_day_dry_run_filters_index_counts_and_sha`、`test_real_day_overlap_reconcile_only`。只读用户提供的样本；未设置 `TB133_TDX_SAMPLES` 时跳过，跳过原因写明「样本未提供」。
 
 后端（新单 T2：核对）：
 - `test_crosscheck_tolerance_amount_float32`（新）：Given amount 差 200 元、量级 1e9 / Then 不算 mismatch；差 300 元 / Then mismatch。

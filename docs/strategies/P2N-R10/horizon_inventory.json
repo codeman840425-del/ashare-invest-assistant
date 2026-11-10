@@ -541,6 +541,11 @@
       "path": "docs/strategies/T-R48/H-01_v3_falsification_diff.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R48 H-01 v3 falsification diff draft (not a card, not importable); T-A78 ①b non-identity"
+    },
+    {
+      "path": "docs/strategies/T-R54/g1_g6_transcript_H-01_S-01.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R54 G1-G6 read-only transcript for H-01/S-01 (not a card, not importable); T-A78 ①b non-identity"
     }
   ],
   "records": [

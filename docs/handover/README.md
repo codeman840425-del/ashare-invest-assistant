@@ -5,10 +5,12 @@
 > T-A46 收口：2026-11-08 MST。已合并/推送并部署基线为7e167f7，迁移head=0027；本次仅补文档与脱敏归档，未执行推送、部署或测试。
 
 ## 阅读顺序
+先读 [START-HERE.md](START-HERE.md)（必读导航、用户本人决定项与当前卡点）。
 1. [进度、看板与阻塞](progress-board.md)：先判断哪些只是本地实现，哪些仍待复审。
 2. [角色、目录与团队规则](roles-rules.md)：明确接班权限与审批边界。
 3. [本地部署与检查](local-operations.md)：默认隔离回放，先核验版本与迁移门槛。
 4. [另行补齐的私有前置](private-prerequisites.md)：仅名称/用途，不含任何值或样本。
+5. [数据验证交接（G2 剩余键、T-B86/T-B59）](data-validation-handoff.md)：新团队续做 F21/F23/F14/F15 与实测批次的步骤（T-A110）。G7 代批与晋级只引用 T-A109，见该文第 5 节（随 T-A109 合入）。
 
 ## 权威依据与冲突处理
 - 产品架构：[plan](../plan.md)；接口：[api-contract](../api-contract.md)；当前最小切片：[plan-phase2-next](../plan-phase2-next.md)。明确的新裁定优先于旧描述；后续正式修订仍须核对。

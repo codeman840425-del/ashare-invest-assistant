@@ -79,7 +79,25 @@ def test_master_volume_still_required(tmp_path: Path) -> None:
     repo = _tree(tmp_path)
     _sub(repo, "deploy/compose/docker-compose.yml", "master:${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}", "imports:${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}")
     errs = cfd.check(repo)
-    assert any("master 快照卷" in e for e in errs), errs
+    assert any("worker 的 master 快照卷" in e for e in errs), errs
+    # worker 被换掉后，不得因为 master-bootstrap 仍挂着同一卷而漏报
+    assert not any("master-bootstrap 的 master 快照卷" in e for e in errs), errs
+
+
+def test_master_bootstrap_volume_still_required(tmp_path: Path) -> None:
+    repo = _tree(tmp_path)
+    p = repo / "deploy/compose/docker-compose.yml"
+    yml = p.read_text(encoding="utf-8")
+    boot = cfd._service_block(yml, "master-bootstrap")
+    assert boot, "当前基线应有 master-bootstrap 服务"
+    old = "master:${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}"
+    new = "imports:${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}"
+    boot2 = boot.replace(old, new, 1)
+    assert boot2 != boot
+    p.write_text(yml.replace(boot, boot2, 1), encoding="utf-8")
+    errs = cfd.check(repo)
+    assert any("master-bootstrap 的 master 快照卷" in e for e in errs), errs
+    assert not any("worker 的 master 快照卷" in e for e in errs), errs
 
 
 @pytest.mark.parametrize("needle", ["MAIRUI_", "PASSWORD"])

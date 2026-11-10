@@ -1349,6 +1349,21 @@ evidence: Evidence[]
 3. 通知 refs 只按显式历史关系建立；不补通知、不重置已读、不虚增 merged_count/version。
 4. 降级必须完全可逆；0025 不得固定抛错冒充回滚，0026 降级前保留完整 refs，再升恢复；旧键冲突条件拒绝并保持事务/事实，不静默合并或丢数据。0027 维护窗口升降级复验仍为发布门槛。
 
+#### 7.11.5 ingest 麦蕊统一出口（内部接口，status: draft；T-A87 / M-1；风控，须异源复核 R12/R14–R16）
+
+不是 HTTP 接口，是 ingest 进程内的 Python 契约，实现见 plan.md「T-A87 M-1 IngestCore 外呼接线」。
+
+1. **唯一出口**：`src/backend/app` 下，只有 `app/ingest/egress.py` 可以打开连到麦蕊的连接（静态守卫 A1）。新增任何麦蕊外呼（包括将来的 `verify_licence`）都必须调用 `mairui_get`。`src/backend/probes/` 是本机探针，不进镜像，不在此列。
+2. **lease**：`single_egress(engine) -> ContextManager[EgressLease | None]`。它用一条独立会话执行 `pg_try_advisory_lock(hashtext('ingest:single-egress'))`，拿不到就 yield None（调用方返回 `busy`）。退出时解锁。`EgressLease.held: bool`。
+3. **出口函数**：`mairui_get(*, lease: EgressLease, core: IngestCore | None, engine: Engine, licence_id: UUID, user_id: UUID, path: str, secret: str, priority: Priority, clock: Callable[[], datetime], stop: Path, halt: Path, transport: Callable[[str, str], tuple[int, object]] = _https_get) -> EgressResult`。
+   - `EgressResult(status: int, body: object, signal: Signal, transitions: list[Transition])`
+   - 拒绝时抛 `EgressDenied(code)`。`code` 只能取以下固定值：`halt_present`、`single_egress_not_held`、`core_unavailable`、`licence_unavailable`、`core_denied`，并且不含 URL、证书或上游原文。
+   - transport 失败抛 `DailyHaltError("transport_or_response_failed_no_retry")`，抛出前已经 `core.complete(NETWORK)`。
+4. **调用顺序（不得调换）**：① STOP/HALT 存在则 `halt_present`；② `lease.held` 为假则拒绝；③ core 为 None 则拒绝；④ 读 `user_data_licence_status`，只有 active、未删除、不在暂停期才 `core.upsert` 加 `core.rehydrate`，否则 `licence_unavailable`；⑤ `core.submit` 加 `core.next_call`，返回 None 或不是本次 Call 时 `core_denied`，并丢弃本次排队项；⑥ 再判一次 STOP/HALT；⑦ 调 transport（超时 20s，不重试、不跟随跳转）；⑧ 若为限流（`limited()` 或 classify 结果为 IP_LIMITED），先写 HALT 文件；⑨ `core.complete(d, signal, now)`，IP_LIMITED 时写 `ops.data_licence_events`。
+5. **调用方义务**：调用时不得有未提交的事务；在 `upstream_halted` 检查（`eligible`）之后调用；限流时由调用方把 `upstream_halted` 写入 master_runs；TEMP 的创建和清理（R13）仍由调用方在 lease 内完成。
+6. **优先级**：HALT 文件和库内 `upstream_halted` 高于 IngestCore 的任何状态。egress 和 core 都不清除这两者，user_reset、换证书、重启也不行。
+7. **ingest 启动（L-1/L-2）**：`engine_for(url, profile="ingest")` 使用 NullPool，并设 `connect_timeout=3`、keepalives、`tcp_user_timeout=5000`、`statement_timeout=5000`、`lock_timeout=2000`。拿不到 DATABASE_URL、URL 格式错、Settings 校验失败、连接探测失败都以退出码 78 拒绝启动，stderr 只有固定文案加异常类型名，不出现 traceback 和口令。
+
 ## 8. SSE `GET /stream` 🔒
 - `text/event-stream`；每 15 秒发一次 `heartbeat`；支持 `Last-Event-ID` 续传，服务端保留最近 10 分钟的事件；断线时客户端退回到轮询 `/notifications/unread-count`，终端与首页改为每 ≥ 15 秒带 `If-None-Match` 轮询 `/terminal`、`/today`。
 - 每个事件：`id: <单调递增字符串>`，`event: <type>`，`data: <JSON>`。

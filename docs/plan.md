@@ -3729,6 +3729,69 @@ admin:
 
 缺口：`create-admin` 命令未实现，已排给后端 T-B64；管理员创建步骤实现后再验收。
 
+### T-A87 M-1 IngestCore 外呼接线（status: draft；架构师 2026-11-09；基 integ/B3=a7ce362；风控项须异源复核）
+
+来源：T-A86 中 M-1（R12）。bootstrap 建出的 `IngestCore` 是空壳：没有 licence，生产代码里没有任何 submit/next_call/complete 调用。daily_lists 外呼只靠 STOP/HALT 文件、库内 `upstream_halted` 和 single-egress 锁，103/429 不写 `ops.data_licence_events`，所以契约 §9 v0.2.6「T-A75 按用户累计」在生产外呼路径上不成立。本节同时收 T-A86 的后端 L-1、L-2、L-4。开发和测试全程不得真实调用麦蕊，只用假 transport、mock 上游和一次性 PG。
+
+**1. 麦蕊 HTTP 外呼点（a7ce362 上 `rg` 全库扫描）**
+
+| # | 位置 | 性质 | 经 IngestCore | STOP/HALT | single-egress | 库 upstream_halted |
+|---|---|---|---|---|---|---|
+| E1 | `src/backend/app/ingest/daily_lists.py:56`（`HTTPSConnection`）、`:59`（`request`），由 `process` `:285` 调用 | 服务内，在镜像里 | 否 | 是（:231/:258/:283） | 是（:202 会话锁） | 是（`eligible` :228/:271） |
+| E2 | `src/backend/probes/common.py:309`（基址 :29-30；p01–p13、run_all 共用） | 本机探针，不在镜像里（`deploy/docker/backend.Dockerfile.dockerignore` 白名单不含 probes） | 否 | 自有 STOP | 否 | 否 |
+| E3 | `src/backend/probes/tb81.py:195-196` | 同上 | 否 | 自有 STOP | 否 | 否 |
+| E4 | `src/backend/probes/tb86_history.py:157`、`:251` | 同上 | 否 | 自有 STOP | 否 | 否 |
+
+- 合计 4 处，4 处都不经过限流核心。服务内只有 E1 一处必须接入。E2–E4 是用户本人电脑上手动跑的探针，不属于 ingest，本单不改，但静态守卫要把它们列入白名单并断言不进镜像、不被 `app/` 导入。
+- 已排除：`app/master/sources.py:541` 只连交易所，不连麦蕊；`selfchecks/test_tb90_*` 里都是 monkeypatch 的假连接；`vendor_lists.py` 只是注入边界；`verify_licence` 意图还没有消费者，将来接入时同样必须走统一出口。
+- 现状说明：`live_budget_issue()`（daily_delivery.py:45-46，LISTS=3 > DAILY_HTTP_LIMIT=1）目前让 E1 永远到不了 socket，所以 M-1 没有实际泄漏。但预算一旦放开就会直接暴露，必须在放开之前完成本单。
+
+**2. 最小改法**
+- 新建 `app/ingest/egress.py`，作为唯一的麦蕊出口，接口契约见 api-contract §7.11.5。daily_lists 的 `wire` 改为 egress 的私有 transport `_https_get`，`process` 改为通过 `single_egress(engine)` 拿 lease，再调 `mairui_get(...)`。daily_lists 不再直接 import `http.client`。
+- licence 注册时机：采用懒注册，每次调 `mairui_get` 时现读 `user_data_licence_status`（tier/status/expires_on/paused_until/deleted_at），然后 `core.upsert(...)`，再强制 `core.rehydrate(user_id, now)`。bootstrap 不预加载。行不存在、已删除或不是 active 时拒绝外呼。
+- 准入：复用 `core.submit` 加 `core.next_call`，不另写准入逻辑。返回 None，或返回的不是本次 Call，都拒绝外呼，并 `scheduler.drop_licence` 清掉本次排队项。完成后一律调 `core.complete(d, signal, now)`。signal 的判定：daily 的 `limited()` 为真时记为 IP_LIMITED，否则用 `upstream.classify`。
+- 103/429 的处理：HALT 文件的写入从 daily 挪进 egress，顺序是先写 HALT，再 `core.complete`（内部 `record_hit` 写 `ops.data_licence_events`）。`upstream_halted` 仍由 daily 写进 master_runs。三步里后一步失败不撤销前一步。
+- L-1：`engine_for` 增加 profile 参数。`profile="ingest"` 时用 NullPool，`connect_args` 设 `connect_timeout=3`、keepalives、`tcp_user_timeout=5000`、`options=-c statement_timeout=5000 -c lock_timeout=2000`。api 和 worker 默认 profile 不变。bootstrap 和 daily 共用 ingest profile。
+- L-2：`main` 用 try 包住 `get_settings()` 和 `bootstrap_ingest_core()`，捕获全部 Exception（包括 ArgumentError 和 pydantic ValidationError），只打印固定文案加异常类型名，退出码 78。不打印 `str(exc)`，因为 ValidationError 会带出 input_value，可能含口令。bootstrap 内 `engine_for` 也要放进 try。
+- L-4：保留阻塞式 `acquire_ip_limit_lock` 加 `lock_timeout` 2s（T-A84 L-7 的公平性，已验收），删除未被调用的 `ip_limit.py:164` `try_acquire_ip_limit_lock`，把 `core.py:103` 的 docstring 改为「有界等待（lock_timeout 2s），不是 try-lock」。
+
+**3. fail-closed 矩阵（每一行的结果都是 0 次 socket）**
+
+| 情况 | 现在（E1） | 改后 |
+|---|---|---|
+| STOP/HALT 存在 | 拒绝 | 拒绝 `halt_present`，在取任何锁和读库之前判断 |
+| 库 `upstream_halted` | 拒绝（eligible） | 不变，排在 core 之前判断 |
+| 库不可用 | 连库异常，冒泡到 runner | 同样冒泡；如果走到 core，rehydrate 失败会记为已升级，拒绝 `core_denied`；连接最多等 3s（L-1） |
+| 拿不到 single-egress | `busy` | 不变；egress 没有 lease 时拒绝 `single_egress_not_held` |
+| ip_limit 锁超时 | 不涉及 | rehydrate 失败记为已升级，拒绝；最多等 2s |
+| core 未接线 | 照常外呼（缺口） | 拒绝 `core_unavailable` |
+| 没有 licence 或非 active | eligible 拒绝 | 另外在 egress 里拒绝 `licence_unavailable` |
+| 限流或升级暂停、令牌桶、日额度 | 不检查（缺口） | next_call 返回 None 时拒绝 `core_denied` |
+| 计数写库失败 | 不写（缺口） | 内存 fail-closed 加 pending（L-2/L-6），本批失败，后续调用拒绝 |
+| HTTP 超时或网络错 | 本批失败、不重试 | 同样失败，并 `core.complete(NETWORK)` 进入退避 |
+
+**4. 与 single-egress 锁、停机标志的关系**
+- 检查顺序：`live_budget_issue` → STOP/HALT 文件 → single-egress lease（非阻塞）→ batch 事务内 grant/eligible（含 `upstream_halted`）→ 读密钥、建 TEMP（R13）→ 每个数据集依次：STOP/HALT → 预约事务 eligible → `mairui_get`（HALT → lease → core 注册/rehydrate → next_call → 发 socket 前最后一次 HALT）→ socket → 若限流则 HALT → `core.complete` → `upstream_halted`。
+- 锁的层级：single-egress 会话锁在最外层；`ingest:ip_limit:{user}` 事务锁在内层，有界 2s；batches/master_runs 的 FOR UPDATE 在各自的短事务里。规则：不在持有 ip_limit 锁或任何未提交事务时取 single-egress；`mairui_get` 必须在调用方没有打开事务时调用；不在任何事务内发 HTTP。`tick_ingest_core` 只取 ip_limit 锁、不取 single-egress，所以没有环。worker 侧的 `mairui_daily_outbox`、`master.mairui_risk_snapshot` 锁不在 ingest 进程里，不嵌套。
+- 停机标志（HALT 文件和库 `upstream_halted`）优先级最高：任何 core 状态（包括 user_reset、换证书）都不能越过它们。egress 和 core 都不清 HALT，解除仍按 runbook ingest-halt.md 由用户本人确认。
+- R13：TEMP 只在拿到 lease 并通过 batch 检查之后创建，任何拒绝路径都由 `process` 的 finally `remove_owned` 清理。残留普通文件替换、非普通文件拒绝的语义不变。egress 不碰 TEMP。
+
+**5. 验收用例（24 条，都要先红后绿；普通模式和 `-O` 都跑；只用假 transport、一次性无网 PG，conftest 屏蔽麦蕊 DNS）**
+- A1 静态守卫：AST 扫描 `src/backend/app/**`，`http.client`/`urllib.request`/`requests`/`httpx`/`socket.create_connection` 加麦蕊域名字面量，只允许出现在 `app/ingest/egress.py`；`master/sources.py` 允许 urllib 但不允许麦蕊域名；`app/` 不导入 probes；dockerignore 白名单不含 probes。基线红在 daily_lists.py:56。
+- A2 core 未接线时拒绝；A3 库里已有 2 条 ip_limited 事件，第 3 次升级后拒绝，transport 0 次；A4 假 103 后写入 `actor=ingest` 的 ip_limited 事件，同时 HALT 和 `upstream_halted` 照常写；A5 rehydrate 时库不可用，拒绝；A6 ip_limit 锁被占时 ≤3s 拒绝；A7 licence 缺失、已删除、非 active 都拒绝；A8 计数写库失败（触发器拒绝 INSERT）时 pending 加暂停，下一次调用拒绝；A9 transport 超时，记 NETWORK、本批失败、TEMP 已清；A10 令牌桶 per_minute=1 时第 2 次拒绝；A11 HALT 存在时拒绝，并断言没有取锁、没有查库；A12 `upstream_halted` 时拒绝且没有调 rehydrate；A13 没有 lease 时调 `mairui_get` 拒绝；A14 R13：TEMP 时序、拒绝路径清理、HALT 不被清除；A15 tick 和 process 两线程并发 10 轮无死锁且有时间上界；A16 拒绝码和日志不含哨兵证书和 URL。
+- L-1：A17 用只 accept 不应答的假 TCP 端口当库，`tick_ingest_core` 和 bootstrap ≤8s 返回，bootstrap rc=78（基线红：超过 20s）；A18 ingest profile 的 connect_args 和 NullPool 断言。
+- L-2：A19 格式错误的 URL（含假口令）rc=78，stderr 没有 `Traceback` 和口令；A20 Settings 校验失败时同样 rc=78 且不泄露。
+- L-4：A21 `try_acquire_ip_limit_lock` 已删除，docstring 与实际一致；锁被占时 `_try_flush_pending` ≤2.5s 返回且 pending 保留。
+- A22 回归：tb90（含 [existing_temp] 新语义）、T-T47、T41/T45/tb111–115 全部通过；A23 `-O` 全量；A24 每条用例断言假 transport 的调用计数（0 或预期值），并断言真实 `_https_get` 没有被调用。
+
+**6. 工作包（按权限边界）**
+- 后端 T-B116（只改 src）：egress.py、daily_lists 改造、core 的 docstring、ip_limit 删死代码、`engine_for` 的 profile、`main` 退出码 78；`src/backend/selfchecks` 里的 tb90 [existing_temp] 和 tb90 的 transport 注入点随之改（selfchecks 在 src 下，归后端）。
+- 测试 T-T49（只改 tests）：A1–A24 正式用例，放在 `tests/backend/unit|integration`；假 TCP 黑洞夹具；在基线 a7ce362 上先证明红。
+- 运维 T-O67（只改 deploy/CI）：ci.yml 把新增目录和一次性 PG 服务纳入（沿用 ci-only 口令）；compose 不用改。如果要加 env 形式的超时参数，由后端先定键名。
+- 风控类，须异源复核：R12（本单整体）、R14 检查和锁的顺序及停机优先级、R15 L-1 超时上界与残余、R16 静态守卫白名单；R7、R13 随之复核。
+
+**未决**：① ip_limit 锁超时或库抖动按 T-A75 一律记为已升级，暂停 1h，代价偏大，是否改成短暂停，需要异源意见；② NullPool 加 `tcp_user_timeout` 防不住「库进程暂停但内核照常 ACK」时语句执行中途的挂起，A17 只覆盖建连阶段，残余风险记在 R15；③ 预算 `DAILY_HTTP_LIMIT` 何时放开、由谁批，不在本单范围。
+
 ### 关键路径
 T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → **T-B05（真实证书实测，与 T003 对账）** → T-B06 → T-B07 → T-B35 特征底座 → T-B09 → **T-B20a → T-B20b → T-B20c → T-B32 → T-B33 → T-B34**（与 T-B21 建议引擎、T-B31 风控、T-B36 交易规则并行汇合） → T-B24 盘后日报 →（T-B22 → T-B23 盘中）→ T-B26 通知 → T-B27 跟踪 → M2。T-B08/T-B18/T-B19 导入与 T-B30 分类并行（T-B30 完成前须先完成 T-R11 → T-B30a 分类器特征，挂在 T-B35 之后，v0.2.9 内裁定）；T-B25 LLM 网关独立并行（主线不依赖它，模板兜底）。前端全程按契约 mock 并行。
 

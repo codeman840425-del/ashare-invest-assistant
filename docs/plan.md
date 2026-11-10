@@ -3729,9 +3729,11 @@ admin:
 
 缺口：`create-admin` 命令未实现，已排给后端 T-B64；管理员创建步骤实现后再验收。
 
-### T-A87 M-1 IngestCore 外呼接线（status: draft；架构师 2026-11-09；基 integ/B3=a7ce362；风控项须异源复核）
+### T-A87 M-1 IngestCore 外呼接线（status: draft；架构师 2026-11-09；基 integ/B3=a7ce362；T-A89 修订 M-2；风控项须异源复核）
 
 来源：T-A86 中 M-1（R12）。bootstrap 建出的 `IngestCore` 是空壳：没有 licence，生产代码里没有任何 submit/next_call/complete 调用。daily_lists 外呼只靠 STOP/HALT 文件、库内 `upstream_halted` 和 single-egress 锁，103/429 不写 `ops.data_licence_events`，所以契约 §9 v0.2.6「T-A75 按用户累计」在生产外呼路径上不成立。本节同时收 T-A86 的后端 L-1、L-2、L-4。开发和测试全程不得真实调用麦蕊，只用假 transport、mock 上游和一次性 PG。
+
+**T-A89 修订理由（M-2，风控，R17）**：T-A88 评审 be/T-B116=2422107 时实测：① `core.upsert` 每次把库里的 active 写回内存，上游 102→INVALID 后下一次 `mairui_get` 仍放行（transport 共 2 次），违反 state「102 停止全部调用」；② `EgressLease(held=True)` 可被调用方自造绕过 single-egress；③ 另一会话持 `ip_limit` 锁且无 pending 时 rehydrate 不取锁即放行；④ 公开 `daily_lists.wire` 直接拿到 `_https_get`，静态守卫未挡住 4 种绕过。故修订 api-contract §7.11.5 第④条（证书状态以库为准、102/INVALID 后必拒、状态变化先写库、内存与库取更严、解除须人工）与 lease 不可伪造，并补 B-1(a)/B-2 契约；验收由 A1–A24 增至 28 条（A1–A5/A6a/A6b/A7–A27，见下表）。后端 M-2 实现等本契约合入后再接（T-B116b）。
 
 **1. 麦蕊 HTTP 外呼点（a7ce362 上 `rg` 全库扫描）**
 
@@ -3747,8 +3749,8 @@ admin:
 - 现状说明：`live_budget_issue()`（daily_delivery.py:45-46，LISTS=3 > DAILY_HTTP_LIMIT=1）目前让 E1 永远到不了 socket，所以 M-1 没有实际泄漏。但预算一旦放开就会直接暴露，必须在放开之前完成本单。
 
 **2. 最小改法**
-- 新建 `app/ingest/egress.py`，作为唯一的麦蕊出口，接口契约见 api-contract §7.11.5。daily_lists 的 `wire` 改为 egress 的私有 transport `_https_get`，`process` 改为通过 `single_egress(engine)` 拿 lease，再调 `mairui_get(...)`。daily_lists 不再直接 import `http.client`。
-- licence 注册时机：采用懒注册，每次调 `mairui_get` 时现读 `user_data_licence_status`（tier/status/expires_on/paused_until/deleted_at），然后 `core.upsert(...)`，再强制 `core.rehydrate(user_id, now)`。bootstrap 不预加载。行不存在、已删除或不是 active 时拒绝外呼。
+- 新建 `app/ingest/egress.py`，作为唯一的麦蕊出口，接口契约见 api-contract §7.11.5（T-A89）。**删除** `daily_lists.wire`（不得保留公开旁路）；`process` 通过 `single_egress(engine)` 拿签发 lease，再调 `mairui_get(...)`，默认 transport 为 egress 私有 `_https_get`。daily_lists 不再直接 import `http.client`，egress 外不得引用 `_https_get`/`HOST`。
+- licence 注册时机：采用懒注册，每次调 `mairui_get` 时在短事务内有界取 `ip_limit` 锁（壁钟 ≤3s，B-1(a)）后读 `user_data_licence_status`（tier/status/expires_on/paused_until/deleted_at），然后 `core.upsert(...)` + 至多一轮 `core.rehydrate(user_id, now)`。bootstrap 不预加载。行不存在、已删除或不是 active 时拒绝外呼。**upsert/rehydrate 不得把 INVALID/PAUSED_BY_ADMIN/EXPIRED 降回 active**；内存与库不一致取更严；102/终态须先写库再处理后续调用，写库失败 fail-closed（M-2 / R17）。
 - 准入：复用 `core.submit` 加 `core.next_call`，不另写准入逻辑。返回 None，或返回的不是本次 Call，都拒绝外呼，并 `scheduler.drop_licence` 清掉本次排队项。完成后一律调 `core.complete(d, signal, now)`。signal 的判定：daily 的 `limited()` 为真时记为 IP_LIMITED，否则用 `upstream.classify`。
 - 103/429 的处理：HALT 文件的写入从 daily 挪进 egress，顺序是先写 HALT，再 `core.complete`（内部 `record_hit` 写 `ops.data_licence_events`）。`upstream_halted` 仍由 daily 写进 master_runs。三步里后一步失败不撤销前一步。
 - L-1：`engine_for` 增加 profile 参数。`profile="ingest"` 时用 NullPool，`connect_args` 设 `connect_timeout=3`、keepalives、`tcp_user_timeout=5000`、`options=-c statement_timeout=5000 -c lock_timeout=2000`。api 和 worker 默认 profile 不变。bootstrap 和 daily 共用 ingest profile。
@@ -3762,33 +3764,51 @@ admin:
 | STOP/HALT 存在 | 拒绝 | 拒绝 `halt_present`，在取任何锁和读库之前判断 |
 | 库 `upstream_halted` | 拒绝（eligible） | 不变，排在 core 之前判断 |
 | 库不可用 | 连库异常，冒泡到 runner | 同样冒泡；如果走到 core，rehydrate 失败会记为已升级，拒绝 `core_denied`；连接最多等 3s（L-1） |
-| 拿不到 single-egress | `busy` | 不变；egress 没有 lease 时拒绝 `single_egress_not_held` |
-| ip_limit 锁超时 | 不涉及 | rehydrate 失败记为已升级，拒绝；最多等 2s |
+| 拿不到 single-egress | `busy` | 不变；egress 没有 lease / 核验失败时拒绝 `single_egress_not_held` |
+| 自造或失效 lease | 不涉及 | 拒绝 `single_egress_not_held`（A6b）；不得仅凭 `held=True` 放行 |
+| ip_limit 锁超时（无 pending） | 不涉及 | 取锁壁钟 ≤3s，超时记为已升级，拒绝 `core_denied`（A6a）；禁止双重 rehydrate |
 | core 未接线 | 照常外呼（缺口） | 拒绝 `core_unavailable` |
-| 没有 licence 或非 active | eligible 拒绝 | 另外在 egress 里拒绝 `licence_unavailable` |
+| 没有 licence 或非 active / INVALID | eligible 拒绝 | 另外在 egress 里拒绝 `licence_unavailable`；upsert 不得降回 active |
+| 上游 102 | 不统一落库 | 先写库为 INVALID，本调用后每一次与重启后都拒绝 `licence_unavailable`；transport 全程只 1 次 |
+| 状态变化写库失败 | 不涉及 | 停止后续外呼（fail-closed），拒绝 `licence_unavailable` 或 `core_denied` |
 | 限流或升级暂停、令牌桶、日额度 | 不检查（缺口） | next_call 返回 None 时拒绝 `core_denied` |
 | 计数写库失败 | 不写（缺口） | 内存 fail-closed 加 pending（L-2/L-6），本批失败，后续调用拒绝 |
 | HTTP 超时或网络错 | 本批失败、不重试 | 同样失败，并 `core.complete(NETWORK)` 进入退避 |
 
 **4. 与 single-egress 锁、停机标志的关系**
 - 检查顺序：`live_budget_issue` → STOP/HALT 文件 → single-egress lease（非阻塞）→ batch 事务内 grant/eligible（含 `upstream_halted`）→ 读密钥、建 TEMP（R13）→ 每个数据集依次：STOP/HALT → 预约事务 eligible → `mairui_get`（HALT → lease → core 注册/rehydrate → next_call → 发 socket 前最后一次 HALT）→ socket → 若限流则 HALT → `core.complete` → `upstream_halted`。
-- 锁的层级：single-egress 会话锁在最外层；`ingest:ip_limit:{user}` 事务锁在内层，有界 2s；batches/master_runs 的 FOR UPDATE 在各自的短事务里。规则：不在持有 ip_limit 锁或任何未提交事务时取 single-egress；`mairui_get` 必须在调用方没有打开事务时调用；不在任何事务内发 HTTP。`tick_ingest_core` 只取 ip_limit 锁、不取 single-egress，所以没有环。worker 侧的 `mairui_daily_outbox`、`master.mairui_risk_snapshot` 锁不在 ingest 进程里，不嵌套。
+- 锁的层级：single-egress 会话锁在最外层（lease 仅由 `single_egress` 签发，mairui_get 核验签发标识与锁仍被本会话持有）；`ingest:ip_limit:{user}` 事务锁在内层，rehydrate 读数前壁钟有界 3s（B-1(a)；引擎 `lock_timeout=2000` 仍保留）；batches/master_runs 的 FOR UPDATE 在各自的短事务里。规则：不在持有 ip_limit 锁或任何未提交事务时取 single-egress；`mairui_get` 必须在调用方没有打开事务时调用；不在任何事务内发 HTTP。`tick_ingest_core` 只取 ip_limit 锁、不取 single-egress，所以没有环。worker 侧的 `mairui_daily_outbox`、`master.mairui_risk_snapshot` 锁不在 ingest 进程里，不嵌套。
 - 停机标志（HALT 文件和库 `upstream_halted`）优先级最高：任何 core 状态（包括 user_reset、换证书）都不能越过它们。egress 和 core 都不清 HALT，解除仍按 runbook ingest-halt.md 由用户本人确认。
 - R13：TEMP 只在拿到 lease 并通过 batch 检查之后创建，任何拒绝路径都由 `process` 的 finally `remove_owned` 清理。残留普通文件替换、非普通文件拒绝的语义不变。egress 不碰 TEMP。
 
-**5. 验收用例（24 条，都要先红后绿；普通模式和 `-O` 都跑；只用假 transport、一次性无网 PG，conftest 屏蔽麦蕊 DNS）**
-- A1 静态守卫：AST 扫描 `src/backend/app/**`，`http.client`/`urllib.request`/`requests`/`httpx`/`socket.create_connection` 加麦蕊域名字面量，只允许出现在 `app/ingest/egress.py`；`master/sources.py` 允许 urllib 但不允许麦蕊域名；`app/` 不导入 probes；dockerignore 白名单不含 probes。基线红在 daily_lists.py:56。
-- A2 core 未接线时拒绝；A3 库里已有 2 条 ip_limited 事件，第 3 次升级后拒绝，transport 0 次；A4 假 103 后写入 `actor=ingest` 的 ip_limited 事件，同时 HALT 和 `upstream_halted` 照常写；A5 rehydrate 时库不可用，拒绝；A6 ip_limit 锁被占时 ≤3s 拒绝；A7 licence 缺失、已删除、非 active 都拒绝；A8 计数写库失败（触发器拒绝 INSERT）时 pending 加暂停，下一次调用拒绝；A9 transport 超时，记 NETWORK、本批失败、TEMP 已清；A10 令牌桶 per_minute=1 时第 2 次拒绝；A11 HALT 存在时拒绝，并断言没有取锁、没有查库；A12 `upstream_halted` 时拒绝且没有调 rehydrate；A13 没有 lease 时调 `mairui_get` 拒绝；A14 R13：TEMP 时序、拒绝路径清理、HALT 不被清除；A15 tick 和 process 两线程并发 10 轮无死锁且有时间上界；A16 拒绝码和日志不含哨兵证书和 URL。
+**5. 验收用例（T-A89 修订后 28 条 = 原 A1–A24 +4；都要先红后绿；普通模式和 `-O` 都跑；只用假 transport、一次性无网 PG，conftest 屏蔽麦蕊 DNS；自测不得有空断言，禁止 `or True` / `assert True` 一类 L-b）**
+
+验收项增删表（相对 T-A87 初版 A1–A24）：
+
+| 动作 | 编号 | 内容 |
+|---|---|---|
+| 扩 | A1 | 原静态守卫保留，**另增 4 种绕过反例**（任一放过即红）：① 从他处 `import _https_get`；② 导入 `egress.HOST` 再配 `http.client`；③ 直接调用 `wire` 一类公开旁路；④ 在 `probes/` 新增第 4 个文件 |
+| 拆 | A6 → A6a、A6b | **A6a**：另一会话持 `ip_limit` 锁且无 pending → ≤3s 拒绝 `core_denied`，transport 0 次。**A6b**：调用方自造 lease，或 lease 已失效 / 锁已释放 → 拒绝 `single_egress_not_held`，transport 0 次 |
+| 增 | A25 | **102 用例**：假 transport 首次返回 102 → 库状态为 INVALID；紧接着下一次与进程重启后再调用都必须拒绝 `licence_unavailable`；全程 transport 只被调 1 次；随后 `upsert`/`rehydrate` 不得把 INVALID 降回 active |
+| 增 | A26 | **状态变化写库失败**：模拟 102/INVALID 落库失败（触发器拒绝或连接断开）→ 本调用拒绝且后续调用拒绝，transport 不增加 |
+| 增 | A27 | **空断言禁令（L-b）**：egress/守卫相关自测与正式用例不得含 `or True`、恒真断言；原 T-A88 L-b 的 `mairui-zero.txt` 证明须改为真实断言 |
+| 保 | A2–A5、A7–A24 | 语义同 T-A87；编号不变（A6 空号，改用 A6a/A6b） |
+
+修订后编号清单（28）：A1（含 4 反例）、A2、A3、A4、A5、A6a、A6b、A7、A8、A9、A10、A11、A12、A13、A14、A15、A16、A17、A18、A19、A20、A21、A22、A23、A24、A25、A26、A27。
+
+- A1 静态守卫：AST 扫描 `src/backend/app/**`，HTTP 库只允许出现在 `app/ingest/egress.py`；`master/sources.py` 只许 urllib 且不得含麦蕊域名；egress 外禁止引用 `_https_get`/`HOST`；不得存在公开旁路（无 `wire`）；`app/` 不导入 probes；`probes/` 按恰好 3 文件白名单扫描；dockerignore 白名单不含 probes。基线红在 daily_lists.py:56；4 种绕过反例见上表。
+- A2 core 未接线时拒绝；A3 库里已有 2 条 ip_limited 事件，第 3 次升级后拒绝，transport 0 次；A4 假 103 后写入 `actor=ingest` 的 ip_limited 事件，同时 HALT 和 `upstream_halted` 照常写；A5 rehydrate 时库不可用，拒绝；A6a / A6b 见上表；A7 licence 缺失、已删除、非 active 都拒绝；A8 计数写库失败（触发器拒绝 INSERT）时 pending 加暂停，下一次调用拒绝；A9 transport 超时，记 NETWORK、本批失败、TEMP 已清；A10 令牌桶 per_minute=1 时第 2 次拒绝；A11 HALT 存在时拒绝，并断言没有取锁、没有查库；A12 `upstream_halted` 时拒绝且没有调 rehydrate；A13 没有 lease 时调 `mairui_get` 拒绝；A14 R13：TEMP 时序、拒绝路径清理、HALT 不被清除；A15 tick 和 process 两线程并发 10 轮无死锁且有时间上界；A16 拒绝码和日志不含哨兵证书和 URL。
 - L-1：A17 用只 accept 不应答的假 TCP 端口当库，`tick_ingest_core` 和 bootstrap ≤8s 返回，bootstrap rc=78（基线红：超过 20s）；A18 ingest profile 的 connect_args 和 NullPool 断言。
 - L-2：A19 格式错误的 URL（含假口令）rc=78，stderr 没有 `Traceback` 和口令；A20 Settings 校验失败时同样 rc=78 且不泄露。
 - L-4：A21 `try_acquire_ip_limit_lock` 已删除，docstring 与实际一致；锁被占时 `_try_flush_pending` ≤2.5s 返回且 pending 保留。
-- A22 回归：tb90（含 [existing_temp] 新语义）、T-T47、T41/T45/tb111–115 全部通过；A23 `-O` 全量；A24 每条用例断言假 transport 的调用计数（0 或预期值），并断言真实 `_https_get` 没有被调用。
+- A22 回归：tb90（含 [existing_temp] 新语义；夹具侧 patch `daily.live_budget_issue`，不改业务默认关闭）、T-T47、T41/T45/tb111–115 全部通过；A23 `-O` 全量；A24 每条用例断言假 transport 的调用计数（0 或预期值），并断言真实 `_https_get` 没有被调用。
+- A25、A26、A27 见上表。
 
-**6. 工作包（按权限边界）**
-- 后端 T-B116（只改 src）：egress.py、daily_lists 改造、core 的 docstring、ip_limit 删死代码、`engine_for` 的 profile、`main` 退出码 78；`src/backend/selfchecks` 里的 tb90 [existing_temp] 和 tb90 的 transport 注入点随之改（selfchecks 在 src 下，归后端）。
-- 测试 T-T49（只改 tests）：A1–A24 正式用例，放在 `tests/backend/unit|integration`；假 TCP 黑洞夹具；在基线 a7ce362 上先证明红。
+**6. 工作包（按权限边界；T-A89 后）**
+- 后端 T-B116b（只改 src，接本契约）：修 T-A88 的 B-1(a)(b)、B-2、B-3、L-a、L-c；实现 M-2（upsert/rehydrate 不降级终态、102 先写库、lease 不可伪造）；删 `wire`；rehydrate 前有界取锁 ≤3s 且每调用至多一轮；tb90 自检夹具改 setup（不改业务默认关闭 DAILY_HTTP_LIMIT）；去掉空断言。
+- 测试 T-T50/T-T51（只改 tests）：按上表把 A1 扩 4 反例、A6 拆 A6a/A6b、补 A25–A27；先在修前 tip 上证明红，再在 T-B116b 上证明绿；普通与 `-O`。
 - 运维 T-O67（只改 deploy/CI）：ci.yml 把新增目录和一次性 PG 服务纳入（沿用 ci-only 口令）；compose 不用改。如果要加 env 形式的超时参数，由后端先定键名。
-- 风控类，须异源复核：R12（本单整体）、R14 检查和锁的顺序及停机优先级、R15 L-1 超时上界与残余、R16 静态守卫白名单；R7、R13 随之复核。
+- 风控类，须异源复核：R12（本单整体）、R14 检查和锁的顺序及停机优先级、R15 L-1 超时上界与残余、R16 静态守卫白名单、**R17（M-2：证书状态以库为准、102/INVALID 后必拒、lease 不可伪造、状态写库失败 fail-closed）**；R7、R13 随之复核。
 
 **未决**：① ip_limit 锁超时或库抖动按 T-A75 一律记为已升级，暂停 1h，代价偏大，是否改成短暂停，需要异源意见；② NullPool 加 `tcp_user_timeout` 防不住「库进程暂停但内核照常 ACK」时语句执行中途的挂起，A17 只覆盖建连阶段，残余风险记在 R15；③ 预算 `DAILY_HTTP_LIMIT` 何时放开、由谁批，不在本单范围。
 

@@ -1,16 +1,19 @@
-# T-B136 做T复测配置（方案 docs/strategies/T-R58/retest_plan.md @ docs/T-R58 5955bf3 §4–§7）
+# T-B136 做T复测配置（方案 docs/strategies/T-R58/retest_plan.md @ docs/T-R58 6814edc §4–§7）
 # 每个值都写出处；「未验证」= 无出处的假设值；「本方案约定」= 方案为可实现而定的工程或统计约定；
 # 「实现约定」= 方案未写明、由后端为可实现而定（列入 reports/T-B136.md 待裁定）。
-plan: {doc: docs/strategies/T-R58/retest_plan.md, commit: 5955bf3}
+plan: {doc: docs/strategies/T-R58/retest_plan.md, commit: 6814edc61ac85db3464d793a28df73191cc7df7e}
 data:
   hf_dir: /workspace/team/data/hf-1min/2022plus          # §2.1；HF neigezhu/china-a-share-1min-ohlcv
   hf_revision: ba589a11534825044fe5a6b84838f50ba8d8d188  # §2.1
   meta_dir: /workspace/team/data/hf-1min/source_meta/metadata  # §2.1
   tdx_dir: /workspace/team/data/tdx-pack                 # §2.1 hsjday、gbbq（2026-11-10 快照）
+  vipdoc_day_dir: /workspace/team/data/tdx-min/day-20260807  # §2.1、§2.7 单日包
+  vipdoc_dir: /workspace/team/data/tdx-min               # §2.1、§2.7 主包与清单
+  calendar_2026: docs/strategies/calendar/trading_calendar_2026.json  # §2.1 预先发布日历
   start: "2022-01-04"                                     # §7 / manifest
-  end: "2026-08-06"                                       # §7.5 研究截止日
+  end: "2026-11-10"                                       # §7.5 研究截止日
 expect:                                                   # §2.1、§7、T-A148 复审 §一 复核数字；不一致即停
-  trading_days: 1112
+  trading_days: 1174
   pool_stocks: 5387
   pool_delisted: 177
   manifest_files: 5714
@@ -19,12 +22,12 @@ expect:                                                   # §2.1、§7、T-A148
 segments:                                                 # §7.1（编排者裁定 ②：5 折自 2023-04-10）；end = embargo 日（§7.2）
   warmup: ["2022-01-04", "2023-04-07"]
   folds:
-    - ["2023-04-10", "2023-09-20"]
-    - ["2023-09-21", "2024-03-14"]
-    - ["2024-03-15", "2024-08-28"]
-    - ["2024-08-29", "2025-02-21"]
-    - ["2025-02-24", "2025-08-06"]
-  holdout: ["2025-08-07", "2026-08-06"]
+    - ["2023-04-10", "2023-10-17"]
+    - ["2023-10-18", "2024-04-23"]
+    - ["2024-04-24", "2024-10-30"]
+    - ["2024-10-31", "2025-05-08"]
+    - ["2025-05-09", "2025-11-10"]
+  holdout: ["2025-11-11", "2026-11-10"]
 rules:                                                    # §4
   entry_start: "09:45"          # catalog §T-01；T-01 卡 §22（hypothesis，未验证）
   entry_end: "14:30"            # T-01 卡 §22 last_entry_hhmm（hypothesis，未验证）

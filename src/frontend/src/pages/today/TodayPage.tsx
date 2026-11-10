@@ -2,7 +2,7 @@ import { Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
-import { useToday } from '../../api/queries';
+import { useDailyReport, useToday } from '../../api/queries';
 import type { TerminalRow, TodayResponse } from '../../api/types';
 import { ActionBadge, ConsensusBadge, DataStatusTag, ErrorBox, Loading } from '../../components/common';
 import { EvidenceChips } from '../../components/EvidenceChips';
@@ -15,6 +15,8 @@ import { fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { WatchlistToggle } from '../../features/watchlist/WatchlistToggle';
 import { WatchlistSection } from '../../features/watchlist/WatchlistSection';
 import { MORE_ROUTE, safeInternalRoute, type TodayListKey as ListKey } from './todayRoutes';
+import { NoSignals, ReportGaps, TodayAccount, TodayStatusBar } from './TodayStatus';
+import { buildReportGaps, hasSuggestion, preReportState, reportDateToFetch, reportState, type GlobalState } from './todayView';
 
 /**
  * T-F08 今日关注（GET /today，契约 v0.2.7 §7.3 ⚖ 及“/today 补充”）。
@@ -22,8 +24,10 @@ import { MORE_ROUTE, safeInternalRoute, type TodayListKey as ListKey } from './t
  * 每个列表最多 50 条，more=true 时按契约“查看全部”去向表给出列表页入口（data_gaps 没有列表页）。
  */
 
-function Section({ title, k, data, testId, empty = '无', children }: {
+function Section({ title, k, data, testId, empty = '无', children, extra = 0, after = null }: {
   title: string; k: ListKey; data: TodayResponse; testId: string; empty?: string; children: ReactNode;
+  /** T-F34：「数据缺口」区并入日报缺口（extra 为其行数，after 为其内容），二者都为空才显示空态 */
+  extra?: number; after?: ReactNode;
 }) {
   const list = data[k];
   const to = MORE_ROUTE[k];
@@ -35,7 +39,8 @@ function Section({ title, k, data, testId, empty = '无', children }: {
         <span className="muted small" data-testid={`${testId}-count`}>{list.more ? `前 ${list.items.length} 条（共 50+ 条）` : `${list.items.length} 条`}</span>
         {list.more && to ? <Link className="small" to={to} data-testid={`${testId}-more`}>查看全部 ›</Link> : null}
       </div>
-      {list.items.length ? children : <div className="muted small today-empty">{empty}</div>}
+      {list.items.length ? children : extra ? null : <div className="muted small today-empty">{empty}</div>}
+      {after}
     </section>
   );
 }
@@ -66,6 +71,9 @@ const focusColumns: ColumnsType<TerminalRow> = [
 
 export function TodayPage() {
   const q = useToday();
+  // T-F34：只有 daily_report.status 为 ready 时才请求 /daily-reports/{date}（其余状态不请求，避免 404）
+  const reportDate = q.data ? reportDateToFetch(q.data) : undefined;
+  const rq = useDailyReport(reportDate);
   if (q.isLoading) return <Loading />;
   // 评审 M1：只有一次都没拿到数据时才整页报错；轮询失败时保留已有数据，只在顶部显示错误条
   if (!q.data) return <div className="page-scroll"><ErrorBox error={q.error ?? new Error('加载失败')} /></div>;
@@ -73,6 +81,14 @@ export function TodayPage() {
   const range = t.market.regime_position_range;
   const rec = RECONCILIATION[t.reconciliation.status];
   const dr = t.daily_report;
+  // T-F34 全局状态（契约 §2.1）：先看不依赖日报的 S1–S5；日报 ready 时由日报 gaps 判 S6–S8/S9；日报未取回前不判定
+  const report = reportDate && rq.data ? rq.data : null;
+  const pre = preReportState(t);
+  // §7 ③：S9 只能来自日报判定（ready 且读取成功）；未 ready 且前置状态都不命中（如 15:00 前）时不判定，不显示状态条与 R2
+  const state: GlobalState | null = pre ?? (report ? reportState(report) : null);
+  const names = new Map([...(report?.stocks ?? []).map((x) => [x.security_code, x.name] as const), ...t.focus.items.map((r) => [r.security_code, r.name] as const)]);
+  const reportGaps = report ? buildReportGaps(report.gaps, state ?? 'S9', (c) => names.get(c) ?? null, new Set(t.data_gaps.items.map((g) => g.key))) : null;
+  const reportGapCount = reportGaps ? reportGaps.securities.length + reportGaps.general.length : 0;
   return (
     <div className="page-scroll today" data-testid="today-page">
       <div className="detail-head">
@@ -93,6 +109,7 @@ export function TodayPage() {
         </div>
       ) : null}
       <CardDisclaimer />
+      <TodayStatusBar state={state} today={t} />
 
       <div className="today-status">
         <section className="today-card" data-testid="today-daily-report" aria-label="盘后日报">
@@ -124,6 +141,7 @@ export function TodayPage() {
             )}
           </span>
         </section>
+        {report ? <TodayAccount report={report} today={t} /> : null}
       </div>
 
       <Section title="重点关注" k="focus" data={t} testId="today-focus">
@@ -132,6 +150,7 @@ export function TodayPage() {
           aria-label="重点关注列表"
         />
       </Section>
+      {state === 'S9' && !hasSuggestion(t) ? <NoSignals /> : null}
 
       <WatchlistSection />
 
@@ -230,7 +249,11 @@ export function TodayPage() {
           </ul>
         </Section>
 
-        <Section title="数据缺口" k="data_gaps" data={t} testId="today-data-gaps" empty="数据完整">
+        <Section title="数据缺口" k="data_gaps" data={t} testId="today-data-gaps" empty="数据完整" extra={reportGapCount}
+          after={<>
+            {reportGaps ? <ReportGaps view={reportGaps} /> : null}
+            {reportDate && rq.isError ? <div className="muted small" data-testid="today-report-gaps-error">日报详情暂时读取失败，分析缺口稍后显示。</div> : null}
+          </>}>
           <ul className="today-list">
             {t.data_gaps.items.map((g) => {
               const route = safeInternalRoute(g.route);

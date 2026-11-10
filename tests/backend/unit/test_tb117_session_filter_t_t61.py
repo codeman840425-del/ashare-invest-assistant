@@ -111,7 +111,10 @@ def test_recalc_run_20261109_220540_session_p95() -> None:
     assert n_sess == 24 and n_excl == 36
     assert thr["ref_p95_s"] == 14.391
     assert thr["basis"] == "ntp_corrected_p95"
+    # 29s 只是探针 suggested_s 建议输出，不是配置值（配置见下一例，仍为 null/30s）
     assert thr["suggested_s"] == 29
+    assert thr["suggested_s"] != 30
+
 
 
 def test_local_ahead_and_rfc5905_offset_opposite() -> None:
@@ -130,3 +133,21 @@ def test_local_ahead_and_rfc5905_offset_opposite() -> None:
     # 本机慢时真实延迟 = lag − local_ahead_s，应大于未修正值
     lag = 10.182
     assert round(lag - ahead, 3) == 10.622
+
+def test_config_stale_threshold_stays_null_default_30s() -> None:
+    """配置维持 stale_threshold_s=null，生效默认 2×quote_interval_s=30s；29s 建议不得写进配置。"""
+    import sys
+
+    import yaml
+
+    sys.path.insert(0, str(ROOT / "src/backend"))
+    from app.config_files import RealtimeConfig
+
+    cfg = RealtimeConfig.model_validate(
+        yaml.safe_load((ROOT / "config/realtime.yaml").read_text(encoding="utf-8"))
+    )
+    assert cfg.intervals.stale_threshold_s is None
+    assert cfg.intervals.quote_interval_s == 15
+    assert cfg.intervals.effective_stale_threshold_s == 30
+    # 与本单重算的建议输出 29s 不是同一处
+    assert cfg.intervals.effective_stale_threshold_s != 29

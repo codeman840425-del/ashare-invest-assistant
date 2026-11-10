@@ -1,0 +1,219 @@
+{
+  "fictitious": true,
+  "task": "T-R42",
+  "param_sources": {
+    "H-01.costs": "docs/strategies/cards/hold_risk_monitor.md:82-88",
+    "H-01.prose_min_commission_and_no_abandon": "hold_risk_monitor.md:20",
+    "S-01.prose_costs": "st_pullback_ma.md:21-22",
+    "plan_2_13_fees": "docs/plan.md:1614（印花税卖出 0.05%、过户费双向 0.001%、佣金最低 5 元、滑点默认 0.1%）"
+  },
+  "gaps": [
+    "cards do not pin a numeric user commission_rate; tests that need a rate declare 【虚构】0.0003 only to exercise the 5-yuan floor",
+    "impact cost not modelled: hold_risk_monitor.md:86-88 impact_adv_days/max_participation_pct/impact_tiers and st_pullback_ma.md:22 冲击成本分档 are not replayed (T-R43, T-A83 L-5)",
+    "no cost-abandon threshold: cards define none; sell is never abandoned for cost (hold_risk_monitor.md:20); former abandon_on_cost branch was dead and removed (T-R43)"
+  ],
+  "cases": [
+    {
+      "id": "CR-H14-1",
+      "card": "H-01",
+      "desc": "【虚构】卖出可成交：费用按卡 stamp/transfer/slippage；佣金用测试费率并触达最低 5 元",
+      "side": "sell",
+      "qty": 1000,
+      "ref_price": "12.50",
+      "commission_rate": "0.0003",
+      "stamp_duty_sell": "0.0005",
+      "transfer_fee": "0.00001",
+      "slippage_bp": "10",
+      "limit_up": "13.75",
+      "limit_down": "11.25",
+      "limit_locked": false,
+      "sellable": 1000,
+      "expect": {
+        "executable": true,
+        "reasons": [],
+        "fees": {
+          "notional": "12500.00",
+          "slippage": "12.50",
+          "transfer_fee": "0.13",
+          "stamp_duty": "6.25",
+          "commission": "5.00",
+          "commission_rate_gap": false
+        }
+      }
+    },
+    {
+      "id": "CR-H14-2",
+      "card": "H-01",
+      "desc": "【虚构】小额卖出：佣金抬到最低 5 元",
+      "side": "sell",
+      "qty": 100,
+      "ref_price": "10.00",
+      "commission_rate": "0.0003",
+      "stamp_duty_sell": "0.0005",
+      "transfer_fee": "0.00001",
+      "slippage_bp": "10",
+      "limit_up": "11.00",
+      "limit_down": "9.00",
+      "limit_locked": false,
+      "sellable": 100,
+      "expect": {
+        "executable": true,
+        "reasons": [],
+        "fees": {
+          "notional": "1000.00",
+          "slippage": "1.00",
+          "transfer_fee": "0.01",
+          "stamp_duty": "0.50",
+          "commission": "5.00",
+          "commission_rate_gap": false
+        }
+      }
+    },
+    {
+      "id": "CR-H14-3",
+      "card": "H-01",
+      "desc": "【虚构】一字跌停锁卖：LIMIT_LOCKED；规则仍可给出卖出信号但不可执行；不因成本放弃",
+      "side": "sell",
+      "qty": 1000,
+      "ref_price": "12.50",
+      "commission_rate": "0.0003",
+      "stamp_duty_sell": "0.0005",
+      "transfer_fee": "0.00001",
+      "slippage_bp": "10",
+      "limit_up": "13.75",
+      "limit_down": "11.25",
+      "limit_locked": true,
+      "sellable": 1000,
+      "expect": {
+        "executable": false,
+        "reasons": [
+          "LIMIT_LOCKED"
+        ],
+        "fees": {
+          "notional": "12500.00",
+          "slippage": "12.50",
+          "transfer_fee": "0.13",
+          "stamp_duty": "6.25",
+          "commission": "5.00",
+          "commission_rate_gap": false
+        }
+      }
+    },
+    {
+      "id": "CR-H14-4",
+      "card": "H-01",
+      "desc": "【虚构】T+1：sellable=0 < qty → T1_NOT_SELLABLE；离场不因成本放弃",
+      "side": "sell",
+      "qty": 2000,
+      "ref_price": "11.50",
+      "commission_rate": "0.0003",
+      "stamp_duty_sell": "0.0005",
+      "transfer_fee": "0.00001",
+      "slippage_bp": "10",
+      "limit_up": "12.65",
+      "limit_down": "10.35",
+      "limit_locked": false,
+      "sellable": 0,
+      "expect": {
+        "executable": false,
+        "reasons": [
+          "T1_NOT_SELLABLE"
+        ],
+        "fees": {
+          "notional": "23000.00",
+          "slippage": "23.00",
+          "transfer_fee": "0.23",
+          "stamp_duty": "11.50",
+          "commission": "6.90",
+          "commission_rate_gap": false
+        }
+      }
+    },
+    {
+      "id": "CR-S14-1",
+      "card": "S-01",
+      "desc": "【虚构】买入可成交：印花税 0；佣金最低 5 元规则",
+      "side": "buy",
+      "qty": 500,
+      "ref_price": "20.00",
+      "commission_rate": "0.0003",
+      "stamp_duty_sell": "0.0005",
+      "transfer_fee": "0.00001",
+      "slippage_bp": "10",
+      "limit_up": "22.00",
+      "limit_down": "18.00",
+      "limit_locked": false,
+      "sellable": null,
+      "expect": {
+        "executable": true,
+        "reasons": [],
+        "fees": {
+          "notional": "10000.00",
+          "slippage": "10.00",
+          "transfer_fee": "0.10",
+          "stamp_duty": "0.00",
+          "commission": "5.00",
+          "commission_rate_gap": false
+        }
+      }
+    },
+    {
+      "id": "CR-S14-2",
+      "card": "S-01",
+      "desc": "【虚构】买入一字涨停锁：LIMIT_LOCKED",
+      "side": "buy",
+      "qty": 500,
+      "ref_price": "20.00",
+      "commission_rate": "0.0003",
+      "stamp_duty_sell": "0.0005",
+      "transfer_fee": "0.00001",
+      "slippage_bp": "10",
+      "limit_up": "22.00",
+      "limit_down": "18.00",
+      "limit_locked": true,
+      "sellable": null,
+      "expect": {
+        "executable": false,
+        "reasons": [
+          "LIMIT_LOCKED"
+        ],
+        "fees": {
+          "notional": "10000.00",
+          "slippage": "10.00",
+          "transfer_fee": "0.10",
+          "stamp_duty": "0.00",
+          "commission": "5.00",
+          "commission_rate_gap": false
+        }
+      }
+    },
+    {
+      "id": "CR-GAP-1",
+      "card": "H-01",
+      "desc": "【虚构】佣金费率卡上未写死：commission=null 且 commission_rate_gap=true；仍可演示其它费用",
+      "side": "sell",
+      "qty": 1000,
+      "ref_price": "12.50",
+      "commission_rate": null,
+      "stamp_duty_sell": "0.0005",
+      "transfer_fee": "0.00001",
+      "slippage_bp": "10",
+      "limit_up": "13.75",
+      "limit_down": "11.25",
+      "limit_locked": false,
+      "sellable": 1000,
+      "expect": {
+        "executable": true,
+        "reasons": [],
+        "fees": {
+          "notional": "12500.00",
+          "slippage": "12.50",
+          "transfer_fee": "0.13",
+          "stamp_duty": "6.25",
+          "commission": null,
+          "commission_rate_gap": true
+        }
+      }
+    }
+  ]
+}

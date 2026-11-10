@@ -3,7 +3,7 @@
 > 正式卡（由 T-R16/S-01_st_pullback_ma.md 草稿正式化；草稿保留过程记录）。导入格式：plan 2.5.14 A 节三个带标签块，导入器只读这三块，正文存为 `narrative`。
 > 夹具全部数值**虚构**；`600000.SH` 为 plan 2.5.14 A 允许的虚构示例代码，不代表任何真实行情。期望值由规则确定性推得（与 T-R15 卡同法）；导入时若 T-B71 fixture 执行器 diff，以实跑为准回修。
 > 结论只由规则决定；AI 只做中文解释。与其他卡结论相反时并列展示，不合并（P4）。
-> **与草稿的差异（v1 正式化裁定，研究员权限内）**：① E1 由截面分位 `rank_pct(pct_change(...))` 改为绝对涨幅阈值 `pct_change(f.close_qfq, 20) >= p.rs_min`——`rank_pct` 在 DSL 白名单内但求值器未实现（src/backend/app/features/pipeline.py「never guess」分支返回 None），截面输入契约属 T-B72；截面分位版待其落地后升 v2。② X4 结构止损（`plan.stop_loss_qfq`，QFQ-1）不进 v1 规则集，止损用入场价比例止损（X2）；QFQ-1 实现后升版补入。其余规则、阈值、参数与草稿复核版一致。
+> **与草稿的差异（v1 正式化裁定，研究员权限内）**：① E1 由截面分位 `rank_pct(pct_change(...))` 改为绝对涨幅阈值 `pct_change(f.close_qfq, 20) >= p.rs_min`——`rank_pct` 在 DSL 白名单内但求值器未实现（src/backend/app/features/pipeline.py「never guess」分支返回 None），截面输入契约属 T-B72；截面分位版待其落地后升 v2。② X4 结构止损（`plan.stop_loss_qfq`，QFQ-1）不进 v1 规则集，止损用入场价比例止损（X2）；QFQ-1 实现后升版补入。其余规则、阈值、参数与草稿复核版一致。 ③ **v1 选股只扫「持仓 ∪ 自选」**（T-R43 注明）：`screen: null`（spec:140），v1 不做全市场扫描；`universe.pool` 所写「全市场」部分待全市场选股 DSL 落地后随升版生效（该 DSL 暂缓，T-A83 ④）。
 
 ## 规则摘要
 - **入场（E1–E4 全部为真才 `entry_ok`）**：E1 20 日涨幅 ≥ `rs_min`（强势）；E2 MA5>MA10>MA20 多头排列；E3 当日最低回踩 MA10 上方 `touch_pct` 以内且收盘不破 MA10；E4 当日成交额 < 5 日均额×`shrink_ratio`（缩量）。
@@ -151,7 +151,7 @@ pass_criteria:
   - {metric: trigger_rate, op: ">", value: 0}
 fixtures:
   - id: S01-FX1
-    desc: 【入场】强势+多头排列+缩量回踩 MA10 不破 → entry_ok/buy
+    desc: 【虚构】入场：强势+多头排列+缩量回踩 MA10 不破 → entry_ok/buy
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -172,7 +172,7 @@ fixtures:
       rule_ids_passed: [E1, E2, E3, E4, F1, F2]
       reason_codes: []
   - id: S01-FX2
-    desc: 【不满足】未回踩（最低价远离 MA10）且未缩量 → not_triggered/wait
+    desc: 【虚构】不满足：未回踩（最低价远离 MA10）且未缩量 → not_triggered/wait
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -193,7 +193,7 @@ fixtures:
       rule_ids_passed: [E1, E2, F1, F2]
       reason_codes: []
   - id: S01-FX3
-    desc: 【缺数据】有效 K 仅 10 根（warmup 25 不足）→ insufficient_data/wait
+    desc: 【虚构】缺数据：有效 K 仅 10 根（warmup 25 不足）→ insufficient_data/wait
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2026-09-15'}
     series:
@@ -214,7 +214,7 @@ fixtures:
       rule_ids_passed: [E3, F2]
       reason_codes: []
   - id: S01-FX4
-    desc: 【维度分歧】入场条件全满足但大盘 downtrend 否决 → vetoed/wait
+    desc: 【虚构】维度分歧：入场条件全满足但大盘 downtrend 否决 → vetoed/wait
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -235,7 +235,7 @@ fixtures:
       rule_ids_passed: [E1, E2, E3, E4, F1, F2, V1]
       reason_codes: []
   - id: S01-FX5
-    desc: 【一字涨停】入场成立但买入方向 LIMIT_LOCKED，不可执行
+    desc: 【虚构】一字涨停：入场成立但买入方向 LIMIT_LOCKED，不可执行
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -257,7 +257,7 @@ fixtures:
       reason_codes: [LIMIT_LOCKED]
       reason_details: {LIMIT_LOCKED: {direction: buy}}
   - id: S01-FX6
-    desc: 【停牌】入场成立但标的停牌，不可执行
+    desc: 【虚构】停牌：入场成立但标的停牌，不可执行
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -279,7 +279,7 @@ fixtures:
       reason_codes: [SUSPENDED]
       reason_details: {SUSPENDED: {direction: buy}}
   - id: S01-FX7
-    desc: 【可卖 0 时卖出信号】持有中跌破止损（X2）与 MA10（X1），当日买入部分 T+1 不可卖
+    desc: 【虚构】可卖 0 时卖出信号：持有中跌破止损（X2）与 MA10（X1），当日买入部分 T+1 不可卖
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -306,7 +306,7 @@ fixtures:
       rule_ids_passed: [F1, F2, I1, X1, X2]
       reason_codes: [T1_NOT_SELLABLE]
   - id: S01-FX8
-    desc: 【时间止损】持有满 time_stop 日未达 1R → exit_signal/sell（可卖充足）
+    desc: 【虚构】时间止损：持有满 time_stop 日未达 1R → exit_signal/sell（可卖充足）
     as_of: '2026-10-30'
     security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
     series:
@@ -331,5 +331,47 @@ fixtures:
       state: exit_signal
       action: sell
       rule_ids_passed: [F1, F2, I1, X1, X3]
+      reason_codes: []
+  - id: S01-FX9
+    desc: 【虚构】反证 C1 正例（T-R43）：强势多头后回踩日单日跌幅 −6.48%（< −5%）且缩量，但收盘跌破 MA10（E3 不成立）→ not_triggered/wait；C1 并列展示、不改结论
+    as_of: '2026-10-30'
+    security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
+    series:
+      f.close_qfq: [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.5, 11.0, 11.5, 12.0, 12.5, 13.0, 13.5, 14.0, 14.5, 13.56]
+      f.low_qfq: [9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 10.4, 10.9, 11.4, 11.9, 12.4, 12.9, 13.4, 13.9, 14.4, 13.51]
+      f.amount: [200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 100000000.0]
+    features:
+      f.list_days: 600
+      f.is_suspended: false
+      f.limit_up_price: 14.92
+      f.limit_down_price: 12.2
+      f.limit_locked_up: false
+      f.limit_locked_down: false
+      f.market_regime_idx: uptrend
+    expect:
+      state: not_triggered
+      action: wait
+      rule_ids_passed: [E1, E2, E4, F1, F2, C1]
+      reason_codes: []
+  - id: S01-FX10
+    desc: 【虚构】反证 C2 正例（T-R43）：同 FX2 走势，as_of 成交额 4 亿 > 20 日均额×1.5（放量）→ E4 不成立 → not_triggered/wait；C2 并列展示、不改结论
+    as_of: '2026-10-30'
+    security: {code: 600000.SH, board: main, list_date: '2020-01-02'}
+    series:
+      f.close_qfq: [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.25, 10.5, 10.75, 11.0, 11.25, 11.5, 11.75, 12.0, 12.25, 12.5]
+      f.low_qfq: [9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 10.15, 10.4, 10.65, 10.9, 11.15, 11.4, 11.65, 11.9, 12.15, 12.4]
+      f.amount: [200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 200000000.0, 400000000.0]
+    features:
+      f.list_days: 600
+      f.is_suspended: false
+      f.limit_up_price: 13.75
+      f.limit_down_price: 11.25
+      f.limit_locked_up: false
+      f.limit_locked_down: false
+      f.market_regime_idx: uptrend
+    expect:
+      state: not_triggered
+      action: wait
+      rule_ids_passed: [E1, E2, F1, F2, C2]
       reason_codes: []
 ```

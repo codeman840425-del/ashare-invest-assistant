@@ -1,4 +1,4 @@
-# ruff: noqa: E501, S101, PLR2004  自检脚本：断言即检查；数字为合成数据
+# ruff: noqa: E501  自检脚本：检查描述保持单行；数字为合成数据
 """T-B136 做T复测引擎自检（只用合成数据，不读样本、不连库、不调用任何外部接口）。
 
 运行：``/workspace/venv-datasrc/bin/python3 src/backend/selfchecks/tb136_retest.py``（需要 numpy）。
@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import itertools
 import sys
 from datetime import date, timedelta
 from decimal import Decimal
@@ -16,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
+
 from retest.t_r58 import features, rules, sim, stats
 
 FAILS: list[str] = []
@@ -249,7 +251,7 @@ def t_deferral() -> None:
     legs = sim.simulate(st, PB, _seg(st))
     first = legs[0] if legs else None
     check("buy_first 封跌停 → 顺延到下一交易日首根可成交 bar", first is not None and first.direction == "buy_first" and first.reason == "deferred" and first.exit_day == 7 and first.exit_slot == 0, str(first))
-    check("L6 顺延期间与了结日不开新 T", all(b.entry_day > a.exit_day for a, b in zip(legs, legs[1:], strict=False) if a.exit_day is not None))
+    check("L6 顺延期间与了结日不开新 T", all(b.entry_day > a.exit_day for a, b in itertools.pairwise(legs) if a.exit_day is not None))
     st_s = _lock_stock(sim.SUSPENDED)
     ls = sim.simulate(st_s, PB, _seg(st_s))
     check("顺延日停牌继续顺延", bool(ls) and ls[0].reason == "deferred" and ls[0].exit_day == 8, str(ls[:1]))
@@ -260,7 +262,8 @@ def t_deferral() -> None:
     st_e = _lock_stock(sim.OK, events=ev)
     le = sim.simulate(st_e, PB, _seg(st_e))
     check("L12 跨除权日 → 无法估值", bool(le) and le[0].reason == "unvaluable_exdate", str(le[:1]))
-    lb = sim.simulate(st, PB, _seg(st, end_idx=6))
+    st_b = _lock_stock(sim.SUSPENDED)
+    lb = sim.simulate(st_b, PB, _seg(st_b, end_idx=7))
     check("L7 段末仍未了结 → 无法估值（embargo）", bool(lb) and lb[0].reason == "unvaluable_embargo" and lb[0].exit_day is None, str(lb[:1]))
     if lb:
         u = lb[0]

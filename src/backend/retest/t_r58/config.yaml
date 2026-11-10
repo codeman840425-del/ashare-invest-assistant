@@ -1,0 +1,71 @@
+# T-B136 做T复测配置（方案 docs/strategies/T-R58/retest_plan.md @ docs/T-R58 5955bf3 §4–§7）
+# 每个值都写出处；「未验证」= 无出处的假设值；「本方案约定」= 方案为可实现而定的工程或统计约定；
+# 「实现约定」= 方案未写明、由后端为可实现而定（列入 reports/T-B136.md 待裁定）。
+plan: {doc: docs/strategies/T-R58/retest_plan.md, commit: 5955bf3}
+data:
+  hf_dir: /workspace/team/data/hf-1min/2022plus          # §2.1；HF neigezhu/china-a-share-1min-ohlcv
+  hf_revision: ba589a11534825044fe5a6b84838f50ba8d8d188  # §2.1
+  meta_dir: /workspace/team/data/hf-1min/source_meta/metadata  # §2.1
+  tdx_dir: /workspace/team/data/tdx-pack                 # §2.1 hsjday、gbbq（2026-11-10 快照）
+  start: "2022-01-04"                                     # §7 / manifest
+  end: "2026-08-06"                                       # §7.5 研究截止日
+expect:                                                   # §2.1、§7、T-A148 复审 §一 复核数字；不一致即停
+  trading_days: 1112
+  pool_stocks: 5387
+  pool_delisted: 177
+  manifest_files: 5714
+  bj_files: 327
+  delisted_all: 180
+segments:                                                 # §7.1（编排者裁定 ②：5 折自 2023-04-10）；end = embargo 日（§7.2）
+  warmup: ["2022-01-04", "2023-04-07"]
+  folds:
+    - ["2023-04-10", "2023-09-20"]
+    - ["2023-09-21", "2024-03-14"]
+    - ["2024-03-15", "2024-08-28"]
+    - ["2024-08-29", "2025-02-21"]
+    - ["2025-02-24", "2025-08-06"]
+  holdout: ["2025-08-07", "2026-08-06"]
+rules:                                                    # §4
+  entry_start: "09:45"          # catalog §T-01；T-01 卡 §22（hypothesis，未验证）
+  entry_end: "14:30"            # T-01 卡 §22 last_entry_hhmm（hypothesis，未验证）
+  confirm: 2                    # catalog §T-01「连续 2 次刷新确认」
+  revert_band: 0.5              # T-01 卡 §22（hypothesis，未验证）；基准 θ 为本方案约定
+  stop_mult: 1.5                # T-01 卡 §22（hypothesis，未验证）
+  trend_abs_pct: 0.05           # T-01 卡 §7 C1、§22（hypothesis，未验证）
+  min_edge_cost_mult: 2.0       # T-01 卡 §18、§22（hypothesis，未验证）
+  time_stop: "14:50"            # T-01 卡 §22（hypothesis，未验证）
+  last_fill: "14:56"            # §4「至 14:56 结束的 bar 仍不可成交」
+  sigma_warmup: 30              # T-01 卡 §5（hypothesis，未验证）
+  bar_check_tol: 0.001          # §2.2 第 3 条（本方案约定）
+  new_listing_days: 5           # §2.3；market_rules.yaml no_limit.registered_ipo_first_days
+costs:                                                    # §6
+  commission_rate: 0.00025      # 编排者 T-A148 裁定 ①：主跑 0.025%，无出处，未验证
+  commission_rate_sens: [0.00015, 0.0003]   # 编排者 T-A148 裁定 ①：敏感性，未验证
+  commission_min_yuan: 5        # 证监发〔2002〕21 号第一条（param_audit §5 R8）
+  stamp_duty: [["2023-04-10", 0.001], ["2023-08-28", 0.0005]]  # 印花税法税目税率表 1‰；财政部 税务总局公告 2023 年第 39 号（§6.1）
+  transfer_rate: 0.00001        # 中国结算 2022-04-28 通知（param_audit §5 R7）
+  slippage_bp: 10               # T-01 卡 §18 estimate；market_rules slippage_default_pct 0.1（未验证）
+  impact_tiers_pct_bp: [[0.1, 0], [0.5, 5], [1.0, 15], [2.0, 30], [null, 60]]  # market_rules impact_cost（编排者默认，未验证）
+  adv_window_days: 20           # market_rules impact_cost.adv_window_days
+  adv_min_days: 5               # §6.2「有效日 < 5 按最高档」
+  notional: 50000               # validation.md §1.4 示例
+  notional_sens: [10000, 200000]  # validation.md §1.4 示例
+grid:                                                     # §5（34 组，入族）
+  A: {k: [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0], floor: [0.0, 0.008, 0.012]}  # T-01 卡 §22；catalog §T-01；待复测
+  B: {d: [0.010, 0.015, 0.020, 0.025, 0.030]}             # 待复测（仅对照）
+  C: {v: [1.0, 1.5, 2.0, 3.0]}                            # 契约 §3.8 口径；待复测
+  min_legs_select: 30                                     # §7.3（validation §4.3 n ≥ 30）
+sens_steps:                                               # §5 末 ±1 步：步长取 T-01 卡 §22 step 列；只在训练窗口跑
+  revert_band: 0.1
+  stop_mult: 0.5
+  trend_abs_pct: 0.01
+  min_edge_cost_mult: 0.5
+latency_fill_delay: 2                                     # §5 末延迟敏感性（未验证）
+stats:
+  bootstrap_block: 5            # §8.2（本方案约定）
+  bootstrap_reps: 2000          # §8.2（本方案约定）
+  r_draws: 20                   # §5 R 组（本方案约定）
+  seed: 136                     # 实现约定：固定随机种子（T-B136 验收「可复现」）
+  min_cover_days: 20            # §8.3 P1（本方案约定）
+  max_bad_exit_share: 0.30      # §8.3 P4（validation §4.3、catalog §T-01）
+  edge_cost_mult_p3: 2.0        # §8.3 P3（validation §4.3）

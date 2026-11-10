@@ -54,9 +54,9 @@
 
 H-01、S-01 仍不能代批（缺证据未清零；不放松「缺证据不得批」）。
 
-G7 计数（合并后实际；S12 / S20 仍按 T-A114 / T-A116 裁定为缺证据，不以测试文件名推断已补证）：**37 一致 / 0 不一致 / 3 缺证据**。仍缺 S12、S20、S18（S18 须用户本人答复）。
+G7 计数（编排者 2026-11-10 裁定：H12 残留解除前不计一致；S12 / S20 仍按 T-A114 / T-A116 裁定为缺证据，不以测试文件名推断已补证）：**36 一致 / 0 不一致 / 4 缺证据**。仍缺 H12、S12、S20、S18（S18 须用户本人答复）。
 
-H12：已具合并条件、合并后实测证据齐；g7_review 中 H12 改一致由策略研究员 T-R52 落文。依据：`3ede1c2` 已含 T-T63（`tests/backend/unit/test_g7_h12_s12_s20_exec_t_t63.py` :134 / :144 / :181）与 T-B119，且 T-T64 已去掉 strict xfail；同基离线亲跑（`env -i`，不连库、不起容器）该文件 13 项及 T-T46 `tests/backend/unit/test_tb113_l1_l10_runner_h12_h17_t_t46.py:240` 均通过。本导航不改 `docs/strategies`。
+H12：仍缺证据（残留未解除）。`3ede1c2` 已含 T-T63 与 T-B119、strict xfail 已去，同基离线亲跑该文件 13 项及 T-T46 `tests/backend/unit/test_tb113_l1_l10_runner_h12_h17_t_t46.py:240` 均通过；但策略研究员 T-R52b（`96e90a6`，暂不合）报 T-T63 :182 / :188 测的是测试内复刻函数（:89-93），未调生产 `src/backend/app/strategy/universe_norm.py:39` 的 `board_in_universe`（调用点 `src/backend/app/signals/service.py:355`），把 :42 改为全放行时现有用例不失败。已派测试 T-T66 补生产路径用例，交回后由架构师 T-A118 复核，解除后再计一致并由策略研究员在 g7_review 落文。本导航不改 `docs/strategies`。
 
 另计未决项（不在上述 40 项计数内）：
 - 步骤 A（库内 G1–G6 结果只读副本）；

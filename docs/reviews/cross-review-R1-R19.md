@@ -344,7 +344,7 @@
   - C 扩展直调 libc 的 connect/getaddrinfo（不触发审计事件）；
   - 篡改钩子闭包（gc、`__closure__`）；
   - ingest 之外的进程（worker、api、用户电脑上的 probes）。
-  - 方案 B（compose 网络拆分）：运维 T-O68 已提交 ops/T-O68=896b6c0，**未合入**，架构师评审结论为「改 1 处后可合」（团队评审记录 T-A96，未入库）。要点：
+  - 方案 B（compose 网络拆分）：运维 T-O68 已提交 ops/T-O68=896b6c0，T-O68b 修订为 ops/T-O68b=72d1f3a，**评审可合，待第 5 批合入**（团队评审记录 T-A96、T-A97，未入库）。要点：
     - 设计：`default` 和 `aia_internal` 都设 `internal: true`；只有 ingest 加挂 `aia_egress`；nginx 加挂 `aia_edge`（关闭 IP masquerade，只发布 127.0.0.1）。CI 守卫为 `scripts/ci/check_compose_networks.py`，用例在 `scripts/ci/tests/test_compose_networks.py`，运维说明在 `deploy/runbooks/networks.md`（以上路径均在该分支上）。
     - 与本节分工一致：方案 A（进程内 netguard）为主，B 为纵深、不阻塞后端。B 兜住了「ingest 以外的容器出网」和「新服务漏写 networks」两类。ingest 自身仍可全网出口，所以本节所列进程内对抗残余、ingest 的 DNS 外泄、同网横向移动，B 都兜不住，仍归 A 与本复核。
     - 阻塞项（守卫对正常写法漏拦）：覆盖层可以新声明一张非 internal 网络并把任意服务挂上去，守卫和 `docker compose config` 都放行。修法是覆盖层只许用四个登记网络名。
@@ -352,7 +352,13 @@
       - 守卫不检查端口发布地址必须为 127.0.0.1；
       - worker 主数据同步现为桩（`src/backend/app/workers/jobs.py:192-195`），解桩前须裁定由谁出网；
       - Docker Desktop 下 `enable_ip_masquerade=false` 未必能挡住 edge 出站（第三方报告），须在用户电脑上实测；
-      - `docs/plan.md` §T-A87 B 段（:3742）和 T-O68 工作包（:3854）写的是「预期 worker 也上 egress」，与实现不一致，待合入后改文档。
+      - ~~`docs/plan.md` §T-A87 B 段和 T-O68 工作包写的是「预期 worker 也上 egress」~~：已按编排者 2026-11-09 裁定改写（`docs/plan.md` :3746、:3858、未决⑥ :3864）——worker、maint-cli 平时不出网，主数据同步解桩时优先放进 ingest，首导需联网用显式一次性 compose profile 接 `aia_egress`，SMTP/LLM 无功能不开，新增出网须经 R19 登记。
+    - T-O68b（72d1f3a）复评：上述阻塞项已修（覆盖层只许四个登记网络名，另加端口必须绑 127.0.0.1 的检查，`deploy/runbooks/networks.md` 补了 ingest 全出口与 Docker Desktop/WSL 实测项）。新登记（对抗性，不阻塞）：`scripts/ci/check_compose_networks.py:134-160`（`_check_overlay_networks`）只查 internal 与 IP masquerade，覆盖层改写登记网络的 name/external/driver 会漏过，`docker compose config` 也通过：
+      - N4：`aia_edge` 设 `external: true, name: bridge`，nginx 与 dev 的 postgres/redis 进入有 masquerade 的默认桥，可出网；
+      - N5：改 `aia_edge` 的 `driver`（如 macvlan）；
+      - N6：把 edge 或 internal 的 `name` 改成 egress 的网络名。
+      - 建议运维加三行检查：覆盖层不得对已登记网络设置 `name`/`external`/`driver`。
+      - `deploy/runbooks/networks.md` 第 6 步（Docker Desktop 是否无视 `enable_ip_masquerade=false`、WSL mirrored）缺可执行命令和判定标准，例如在 nginx 容器内对公网地址做 5 秒超时请求、失败才算通过；第 2 步的 `${NGINX_HTTP_PORT:-8080}` 为 bash 写法，Windows 上须在 WSL/Git Bash 下执行或改用 `curl.exe`。文档改进，不阻塞。
     - 请复核方回答：B 是否还有正常部署会误走的出网路径？ingest 全出口这一事实是否已在运维文档中如实写明（建议 runbook 补一句）？
   - 已知行为（非缺陷）：Python 层 `connect(("localhost", …))` 会被按主机名拒绝；ingest 现无此写法。
 

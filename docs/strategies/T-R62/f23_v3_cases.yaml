@@ -1,4 +1,4 @@
-# T-R62：F23 词表 v3 回归用例（定向核验两处修复 + 防止回退；T-R63 增补 RV-20 两个合成反例与反向护栏）
+# T-R62：F23 词表 v3 回归用例（定向核验两处修复 + 防止回退；T-R63/T-R63b 增补 RV-20/RV-20b 合成反例与反向护栏）
 # 判定：policy_hit = 直接命中；expect_flag 仅对 controller_equity 有意义。
 # 全部标题为 2026-11-06 / 2026-11-09 / 2026-11-10 巨潮公开公告标题（公开信息，非私有样本）。
 version: f23_lexicon_v3
@@ -105,6 +105,30 @@ cases:
     title: 关于控股股东承诺不通过集中竞价减持股份的公告
     policy_hit: false
     note: 单渠道否定且无替代渠道，保持不命中
+  # —— T-R63b 第二轮返修：RV-20b 四个合成反例 + 中间态护栏 ——
+  - id: V3-P15
+    title: 关于本公司债务逾期及参与甲公司破产重整的公告
+    policy_hit: true
+    categories: [insolvency]
+    note: T-R63b P1a：连词不分句时，他方重整只抹掉该事件，不得连带删掉自身债务逾期
+  - id: V3-P16
+    title: 关于参与发行人及其子公司重整投资的公告
+    policy_hit: true
+    categories: [insolvency]
+    note: T-R63b P1b：发行人及其子公司属自身称谓，不得按公司名判为他方
+  - id: V3-P17
+    title: 关于参与破产重整投资的公告
+    policy_hit: true
+    categories: [insolvency]
+    note: T-R63b P1c：对象不明的中间态一律不排除，保守命中
+  - id: V3-N13
+    title: 关于控股股东不通过集中竞价交易减持股份的公告
+    policy_hit: false
+    note: T-R63b P2a：嵌套渠道词「竞价交易」不得被当肯定渠道（整段否定）
+  - id: V3-N14
+    title: 关于控股股东不通过集中竞价、大宗交易、协议转让、盘后定价方式减持股份的公告
+    policy_hit: false
+    note: T-R63b P2b：否定回看不按 16 字截断，须到子句边界（四渠道并列全否）
   # —— 4 条边界观察与 300689 维持排除不动（T-A152 明确）——
   - id: V3-N7
     title: 公司关于公司涉及重大诉讼的进展公告

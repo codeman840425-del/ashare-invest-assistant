@@ -1,5 +1,6 @@
 # F23 词表 v3 参考匹配器（T-R62；T-A152 定向修订，研究侧，确定性；无网络、无麦蕊）。由 match_f23_v2.py 复制，增加 policy_rules（询价转让一律命中且优先于整条排除；控制人/一致行动协议到期或解除 + 权益变动保守命中）。
 # T-R63 返修（RV-20 两个 P1）：① exclude_all_of 作用域收敛到「他方主体」子句（不跨子句吞整类、自身事项不排除）；② 渠道型否定（不通过/未通过/不会通过）只否掉被否渠道，另有真实渠道即命中。词表本体未改。
+# T-R63b 第二轮（RV-20b）：① 排除只抹「他方事件」跨度、不删整个子句（自身风险词保留），自身称谓补「发行人/本公司及关联主体/及其子公司」复合形态，中间态一律不排除；② 渠道否定改为「从否定短语起整段标否定」（嵌套渠道词幂等、回看到子句边界不按字数）。
 # 原注释：由 T-R22/match_f23.py（v1）复制，只改词表文件名并增加 controller_equity 类型与 flags。
 # match(title) -> (hit: bool, categories: list)；match_detail(title) -> (hit, categories, flags)
 import re, unicodedata, pathlib, yaml
@@ -12,30 +13,47 @@ def norm(t):
 SPLIT = re.compile(LEX["clause_split"])
 PREFIX = re.compile(LEX["title_exclude_prefix_regex"])
 # —— T-R63 返修常量（词表未改；作用域与主体判定在匹配器内）——
-SELF_MARKERS = ("本公司", "我公司", "公司自身", "公司本身")
+# T-R63b：自身称谓补复合形态（发行人及其子公司等），中间态一律不排除。
+SELF_MARKERS = ("本公司", "我公司", "公司自身", "公司本身", "发行人",
+                "本公司及其", "本公司及", "公司及子公司", "及其子公司", "及其控股子公司")
 OTHER_MARKERS = ("他方", "对方", "第三方", "其他公司", "他公司", "另一公司", "某公司", "对外", "外部")
 COMPANY_NAME = re.compile(r"[\u4e00-\u9fa5A-Za-z0-9]{1,}(?:股份有限公司|有限责任公司|有限公司|公司)")
 CHANNELS = ("集中竞价交易", "集中竞价", "二级市场", "大宗交易", "协议转让", "询价转让", "集合竞价", "盘后定价", "竞价交易")
+CHANNELS_LONGEST = tuple(sorted(CHANNELS, key=len, reverse=True))
 CHANNEL_NEGS = ("不会通过", "不通过", "未通过", "不曾通过")
-def _channel_negated(clause, pos):
-    """渠道词是否被紧邻的渠道否定词覆盖（支持「不通过A、B方式」并列否定）。"""
-    frag = clause[max(0, pos - 16):pos]
-    for ch in CHANNELS: frag = frag.replace(ch, "")
-    frag = re.sub(r"[、，,和及与\s]", "", frag)
-    return frag.endswith(CHANNEL_NEGS)
+CHANNEL_SEPS = "、，,和及与或"
+def _negated_channel_spans(clause):
+    """T-R63b P2：从每个渠道否定短语起，向右整段标记「分隔符+渠道词」的运行段为否定。
+    嵌套渠道词（「集中竞价交易」里的「竞价交易」）随整段一并标否；回看到否定短语起点，不按字数截断。"""
+    spans = []
+    for neg in CHANNEL_NEGS:
+        start = clause.find(neg)
+        while start >= 0:
+            p = start + len(neg); end = p
+            while True:
+                q = end
+                while q < len(clause) and clause[q] in CHANNEL_SEPS: q += 1
+                hit = next((ch for ch in CHANNELS_LONGEST if clause.startswith(ch, q)), None)
+                if hit is None: break
+                end = q + len(hit)
+            if end > p: spans.append((start, end))
+            start = clause.find(neg, start + 1)
+    return spans
 def _has_affirmative_channel(clause):
-    """同子句内是否存在未被渠道否定词覆盖的渠道词（T-R63 P1②：任一真实减持渠道成立即命中）。"""
+    """同子句内是否存在未被渠道否定段覆盖的渠道词（T-R63b：以子句边界判定，不按 16 字回看）。"""
+    spans = _negated_channel_spans(clause)
     for ch in CHANNELS:
         i = clause.find(ch)
         while i >= 0:
-            if not _channel_negated(clause, i): return True
+            if not any(a <= i < b for a, b in spans): return True
             i = clause.find(ch, i + 1)
     return False
-def _other_party_excluded(clause, groups):
-    """T-R63 P1①：exclude_all_of 只在「他方主体」子句内生效。
-    组 = [动作词, 风险事件词]（v3 词表三条均为「参与/认购 + 破产重整/重整投资」）：
-    取动作词后、事件词前的对象短语——含自身标记 → 自身事项不排除；含他方标记或公司名 → 他方事项排除；
-    对象不明 → 不排除（宁可多报风险，不制造漏报）。"""
+def _mask_other_party(clause, groups):
+    """T-R63b P1a：排除只抹掉「他方事件」跨度（动作词→事件词），不删整个子句——
+    同子句里自身的风险词（如“债务逾期”）仍参与匹配（保守保留中间态）。
+    组 = [动作词, 风险事件词]；只有主体判定为他方才抹：含自身称谓 → 不抹；
+    含他方标记或公司名 → 抹；对象不明 → 不抹（宁误报不漏报，veto 场景有 FP 如实报告兜底）。"""
+    spans = []
     for action, event in groups:
         i = clause.find(action)
         while i >= 0:
@@ -44,12 +62,23 @@ def _other_party_excluded(clause, groups):
                 mid = clause[i + len(action):j]
                 if not any(s in mid for s in SELF_MARKERS) and (
                         any(o in mid for o in OTHER_MARKERS) or COMPANY_NAME.search(mid)):
-                    return True
+                    spans.append((i, j + len(event)))
             i = clause.find(action, i + 1)
-    return False
+    if not spans: return clause
+    merged = []
+    for a, b in sorted(spans):
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    out, last = [], 0
+    for a, b in merged:
+        out.append(clause[last:a]); last = b
+    out.append(clause[last:])
+    return "".join(out)
 def _occ_hit(clause, kw, negs, after=(), resets=(), window=10):
     """关键词在子句内的每次出现：前文（含关键词本身，允许“不减持”“无保留意见”重叠）有否定词且其后没有重置词，或后文有后置否定词 → 该次出现被否定；任一次未被否定 → 命中。
-    T-R63 P1②：否定词是渠道型（以「通过」结尾）时，只要同子句另有无否定的渠道词，就不否定本次出现。"""
+    T-R63b P2：否定词是渠道型（以「通过」结尾）时，只要同子句另有无否定的渠道词，就不否定本次出现。"""
     i = clause.find(kw)
     while i >= 0:
         pre, post = clause[:i + len(kw)], clause[i + len(kw):]
@@ -101,9 +130,10 @@ def match_detail(title):
     rs = LEX.get("negation_resets", [])
     for name, c in LEX["categories"].items():
         negs = c.get("negations_before", []); aft = c.get("negations_after", []); w = c.get("after_window", LEX.get("after_window", 10))
-        # T-R63 P1①：exclude_all_of 只在「他方主体」子句内生效，逐子句过滤（不跨子句吞整类）。
+        # T-R63b P1a：exclude_all_of 只抹掉「他方事件」跨度，不删整个子句（同子句自身风险词仍可命中）。
         exc = c.get("exclude_all_of") or []
-        cat_clauses = [cl for cl in clauses if not (exc and _other_party_excluded(cl, exc))]
+        cat_clauses = [_mask_other_party(cl, exc) for cl in clauses] if exc else clauses
+        cat_clauses = [cl for cl in cat_clauses if cl]
         if not cat_clauses: continue
         if c.get("type") == "controller_equity":
             ok, fl = _controller_equity(t, cat_clauses, c, rs, w)

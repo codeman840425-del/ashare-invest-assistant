@@ -62,6 +62,10 @@ def main() -> int:
     def _flat(obj, prefix=""):
         out = {}
         if isinstance(obj, dict):
+            if not obj:
+                # T-R63b P3：空映射也是结构节点，必须进差异集合（否则「一有一无」会被漏掉）
+                out[prefix] = {}
+                return out
             for k, v in obj.items():
                 out.update(_flat(v, f"{prefix}.{k}" if prefix else str(k)))
         else:

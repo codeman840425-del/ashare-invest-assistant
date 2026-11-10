@@ -23,7 +23,7 @@ import pytest
 from retest.t_r58 import splice
 from retest.t_r58.errors import DataFormatError
 
-pytestmark = pytest.mark.pending_impl  # 接线完成标记沿用（历史 marker；用例本体已全部真实断言）
+# Historical pending markers removed; production runner persistence remains unverified.
 
 CST = zoneinfo.ZoneInfo("Asia/Shanghai")
 MINUTE_BYTES = 32
@@ -182,7 +182,17 @@ class TestFileSelection:
         (tmp_path / "bj" / "minline").mkdir(parents=True, exist_ok=True)
         (tmp_path / "bj" / "minline" / "bj920001.lc1").write_bytes(b"bj excluded")
         pool = splice.selected_lc1(tmp_path)
-        assert set(pool) == {("SH", "600001"), ("SZ", "300001")}  # ETF/指数/B股/北交所全排除
+        assert set(pool) == {("SH", "600001"), ("SZ", "300001")}
+        from retest.t_r58 import data
+        (tmp_path / "manifest_files.csv").write_text(
+            "exchange,symbol,universe_status,is_bj\nSH,600001,L,False\nBJ,920001,L,True\n", encoding="utf-8")
+        assert data.pool(tmp_path) == [("SH", "600001", "L")]
+        hf = HfBuilder()
+        hf.add_day(HF_END, "600000")
+        bad = hf.table().set_column(hf.table().schema.get_field_index("is_bj"), "is_bj", pa.array([True] * 240))
+        with pytest.raises(DataFormatError):
+            splice.check_splice(bad, splice.empty_table(), splice.empty_table(), hf_anchor(),
+                                exchange="SH", symbol="600000", require_overlap=False)
 
     def test_code_prefix_per_main_package_manifest_selection(self, tmp_path: Path) -> None:
         """第 1 条：代码前缀按主包 manifest 的 selection（沪 600/601/603/605/688/689，深 000/001/002/003/300/301/302）。"""
@@ -191,7 +201,10 @@ class TestFileSelection:
         for symbol in ("000001", "001001", "002001", "003001", "300001", "301001", "302001"):
             assert splice.selected_symbol("SZ", symbol), symbol
         for symbol in ("920001", "399001", "510300", "200001", "60000"):  # 北交所/指数/ETF/B股/位数不符
-            assert not splice.selected_symbol("SH", symbol) or not splice.selected_symbol("SZ", symbol)
+            assert not splice.selected_symbol("SH", symbol)
+            assert not splice.selected_symbol("SZ", symbol)
+        assert not splice.selected_symbol("SH", "000001")
+        assert not splice.selected_symbol("SZ", "600000")
         assert not splice.selected_symbol("BJ", "920001")
         with pytest.raises(DataFormatError, match="before reading"):
             splice.decode_lc1(tmp_path / "no.lc1", "BJ", "920001")  # 读前拒绝
@@ -358,7 +371,12 @@ class TestSplicePointChecks:
         tree = synthetic_tree
         table, _ = splice.decode_lc1(Path(tree["vip_root"]) / "single" / "sh" / "minline" / "600000.lc1", "SH", "600000")
         result = splice.check_splice(splice.empty_table(), table, splice.empty_table(), hf_anchor(), exchange="SH", symbol="600000", require_overlap=False)["splice"]
-        assert not result["paired"] and result["ok"]  # 只计数，不失败
+        assert not result["paired"] and result["ok"]
+        bad_anchor = hf_anchor()
+        bad_anchor[VIP_SINGLE_DAY] = splice.DailyBar(20.0, 20.0, 2400000)
+        with pytest.raises(splice.SpliceError):
+            splice.check_splice(splice.empty_table(), table, splice.empty_table(), bad_anchor,
+                                exchange="SH", symbol="600000", require_overlap=False)
 
 
 # ---------------- §2.7 第 5 条：vipdoc 双包一致性 ----------------
@@ -371,6 +389,9 @@ class TestTwoPackageConsistency:
         main_builder: Lc1Builder = tree["main"]
         main_builder.add_day(VIP_SINGLE_DAY)  # 主包合成一份 08-07（先逐字段相同）
         main, _ = splice.decode_lc1(main_builder.write(tmp_path / "main2", "sh", "600000"), "SH", "600000")
+        left = [s for s in single["timestamp"].to_pylist() if s.date() == VIP_SINGLE_DAY]
+        right = [s for s in main["timestamp"].to_pylist() if s.date() == VIP_SINGLE_DAY]
+        assert len(left) == len(right) == 240
         result = splice.check_splice(hf, single, main, hf_anchor(), exchange="SH", symbol="600000", require_overlap=False)["splice"]
         assert result["dual_package"]["state"] == "checked" and result["dual_package"]["ok"]
         # 不同 → 停（SpliceError）
@@ -381,9 +402,18 @@ class TestTwoPackageConsistency:
         with pytest.raises(splice.SpliceError, match="dual_package_mismatch"):
             splice.check_splice(hf, tampered, main, hf_anchor(), exchange="SH", symbol="600000", require_overlap=False)
 
-    def test_main_package_retest_starts_0810(self) -> None:
-        """第 5 条：主包进入复测起始日 = 2026-08-10；更早记录只供第 5、6 条校验，读入先于日期过滤。"""
-        assert splice.MAIN_START == dt.date(2026, 8, 10)
+    def test_main_package_retest_starts_0810(self, tmp_path: Path) -> None:
+        """调用真实合并：08-07 主包根被过滤，08-10 根保留。"""
+        builder = Lc1Builder()
+        builder.add_day(VIP_SINGLE_DAY, base=77)
+        builder.add_day(VIP_MAIN_START, base=12)
+        main, _ = splice.decode_lc1(builder.write(tmp_path, "sh", "600000"), "SH", "600000")
+        merged, checks = splice.merge_sources(splice.empty_table(), splice.empty_table(), main,
+                                              exchange="SH", symbol="600000")
+        assert merged.num_rows == 240
+        assert {s.date() for s in merged["timestamp"].to_pylist()} == {VIP_MAIN_START}
+        assert set(merged["open"].to_pylist()) == {12.0}
+        assert checks["source_rows"]["vipdoc_main"] == 240
 
 
 # ---------------- §2.7 第 6 条：重叠段一致性 ----------------
@@ -421,27 +451,52 @@ class TestOverlapConsistency:
             splice.check_splice(hf, splice.empty_table(), main, hf_anchor(), exchange="SH", symbol="600000", require_overlap=True)
 
     def test_overlap_only_for_choucha_stocks_not_into_retest(self, synthetic_tree: dict[str, Any]) -> None:
-        """第 6 条：主包 5 只抽查股另有 2026-04-24 起记录，只用于重叠核对，不进复测——
-        实现把 OVERLAP_START 之前的主包记录过滤在 merge_sources 内，抽查名单由实现 OVERLAP_CODES 固化。"""
-        assert dt.date(2026, 4, 24) == splice.OVERLAP_START
-        assert "600000" in splice.OVERLAP_CODES and "688001" in splice.OVERLAP_CODES
+        """真实 merge_sources 保留 HF/单日/主包各自区间；主包重叠根不能偷入网格。"""
+        tree = synthetic_tree
+        hf = TestSplicePointChecks._hf_600000()
+        single, _ = splice.decode_lc1(Path(tree["vip_root"]) / "single" / "sh" / "minline" / "600000.lc1", "SH", "600000")
+        builder = tree["main"]
+        builder.add_day(HF_END, base=77.0)  # distinguish source by value, not a constant check
+        main, _ = splice.decode_lc1(builder.write(Path(tree["vip_root"]) / "overlap-source", "sh", "600000"), "SH", "600000")
+        merged, checks = splice.merge_sources(hf, single, main, exchange="SH", symbol="600000")
+        prior = [row for row in merged.to_pylist() if row["timestamp"].date() == HF_END]
+        assert len(prior) == 240 and all(row["open"] == 10.0 for row in prior)
+        assert checks["source_rows"]["vipdoc_main"] == 240
+        with pytest.raises(splice.SpliceError, match="overlap_below_98pct"):
+            splice.check_splice(hf, single, main, hf_anchor(), exchange="SH", symbol="600000", require_overlap=True)
 
 
 # ---------------- §2.7 第 7 条：复权口径 ----------------
 class TestAdjustmentSource:
-    def test_both_sources_raw_and_gbbq_self_computed(self, synthetic_tree: dict[str, Any]) -> None:
-        """第 7 条：两来源均为不复权原始价，复测统一按 §2.4 gbbq 自算；不读任何一方的复权数据。
-        （实现接口：check_splice 的 events 参数只收 gbbq 解码后的 sim.Event，④分母走 rules.ref_price。）"""
-        table, _ = splice.decode_lc1(Path(synthetic_tree["vip_root"]) / "single" / "sh" / "minline" / "600000.lc1", "SH", "600000")
-        assert table.schema.field("open").type == pa.float64()  # 原始价（未复权）直接进表
-        from retest.t_r58 import rules
-        assert callable(rules.ref_price)  # 复权由 gbbq→Event→ref_price 自算链承担
+    def test_both_sources_raw_and_gbbq_self_computed(self, synthetic_tree: dict[str, Any], tmp_path: Path) -> None:
+        """原始价不变；正确除权事件修复分母，去事件或未来事件不能修复当日跳空。"""
+        from retest.t_r58.sim import Event
+        hf = TestSplicePointChecks._hf_600000()
+        builder = Lc1Builder()
+        builder.add_day(VIP_SINGLE_DAY, base=5.0)
+        table, _ = splice.decode_lc1(builder.write(tmp_path, "sh", "600000"), "SH", "600000")
+        anchor = hf_anchor()
+        anchor[VIP_SINGLE_DAY] = splice.DailyBar(5.0, 5.0, 2400000)
+        merged, _ = splice.merge_sources(hf, table, splice.empty_table(), exchange="SH", symbol="600000")
+        prices = {row["timestamp"].date(): row["open"] for row in merged.to_pylist()}
+        assert prices[HF_END] == 10.0 and prices[VIP_SINGLE_DAY] == 5.0
+        good = splice.check_splice(hf, table, splice.empty_table(), anchor, exchange="SH", symbol="600000",
+                                   events=[Event(VIP_SINGLE_DAY, 0, 0, 1, 0)], require_overlap=False)
+        assert good["splice"]["ok"]
+        for events in ([], [Event(VIP_MAIN_START, 0, 0, 1, 0)]):
+            with pytest.raises(splice.SpliceError, match="overnight_price_limit"):
+                splice.check_splice(hf, table, splice.empty_table(), anchor, exchange="SH", symbol="600000",
+                                    events=events, require_overlap=False)
 
 
 # ---------------- §2.7 第 8 条：失败处理与 splice 落点 ----------------
 class TestFailureSemantics:
     def test_format_label_bj_failure_stops(self, tmp_path: Path) -> None:
         """第 8 条：第 1、2 条（格式、标签、北交所）失败 → 停（DataFormatError），不出结果。"""
+        good = Lc1Builder()
+        good.add_day(VIP_SINGLE_DAY)
+        table, _ = splice.decode_lc1(good.write(tmp_path / "valid", "sh", "600001"), "SH", "600001")
+        assert table.num_rows == 240
         (tmp_path / "truncated.lc1").write_bytes(b"x" * 31)
         with pytest.raises(DataFormatError, match="truncated"):
             splice.decode_lc1(tmp_path / "truncated.lc1", "SH", "600001")
@@ -457,6 +512,9 @@ class TestFailureSemantics:
         「无法完成校验」只计数（incomplete_volume_days）；不采用「剔除失败股票后继续」。"""
         tree = synthetic_tree
         hf = TestSplicePointChecks._hf_600000()
+        valid, _ = splice.decode_lc1(Path(tree["vip_root"]) / "single" / "sh" / "minline" / "600000.lc1", "SH", "600000")
+        assert splice.check_splice(hf, valid, splice.empty_table(), hf_anchor(), exchange="SH",
+                                   symbol="600000", require_overlap=False)["splice"]["ok"]
         builder: Lc1Builder = tree["single"]
         builder.add_day(VIP_SINGLE_DAY, base=11.6)  # 跳空超限
         table, _ = splice.decode_lc1(builder.write(tmp_path / "bad", "sh", "600000"), "SH", "600000")
@@ -470,12 +528,19 @@ class TestFailureSemantics:
         tree = synthetic_tree
         table, checks = splice.decode_lc1(Path(tree["vip_root"]) / "single" / "sh" / "minline" / "600000.lc1", "SH", "600000")
         assert checks["non_240_stock_days"] == 0
-        result = splice.check_splice(TestSplicePointChecks._hf_600000(), table.slice(1), splice.empty_table(), hf_anchor(), exchange="SH", symbol="600000", require_overlap=False)["splice"]
-        assert result["incomplete_volume_days"] == 1 and result["ok"]
+        from retest.t_r58 import data
+        builder = Lc1Builder()
+        builder.add_day(VIP_SINGLE_DAY, labels=MORNING[1:] + AFTERNOON)
+        partial, counts = splice.decode_lc1(builder.write(Path(tree["vip_root"]) / "partial", "sh", "600000"), "SH", "600000")
+        assert counts["non_240_stock_days"] == 1 and partial.num_rows == 239
+        grid, checks = data.load_spliced_stock(TestSplicePointChecks._hf_600000(), partial, splice.empty_table(),
+                                               [HF_END, VIP_SINGLE_DAY], hf_anchor(), exchange="SH",
+                                               symbol="600000", require_overlap=False)
+        assert checks["splice"]["incomplete_volume_days"] == 1 and checks["splice"]["ok"]
+        assert not grid["present"][1, 0] and grid["present"][1, 1:].all()
 
-    def test_results_written_to_summary_json_splice(self, synthetic_tree: dict[str, Any]) -> None:
-        """第 8 条：所有结果写入 summary.json 的 ``splice`` 键——check_splice 返回 {"splice": …}、
-        SpliceError.summary = {"splice": …}、load_spliced_stock 的 checks["splice"] 三处落点。"""
+    def test_splice_payload_json_roundtrip_library_boundary(self, synthetic_tree: dict[str, Any]) -> None:
+        """成功/失败 payload 在隔离文件读回；正式 runner 的 summary.json 落盘尚未实现，仍属阻塞。"""
         tree = synthetic_tree
         hf = TestSplicePointChecks._hf_600000()
         table, _ = splice.decode_lc1(Path(tree["vip_root"]) / "single" / "sh" / "minline" / "600000.lc1", "SH", "600000")
@@ -484,3 +549,17 @@ class TestFailureSemantics:
         from retest.t_r58 import data
         grid, checks = data.load_spliced_stock(hf, table, splice.empty_table(), [HF_END, VIP_SINGLE_DAY], hf_anchor(), exchange="SH", symbol="600000", require_overlap=False)
         assert "splice" in checks and checks["splice"]["ok"]
+        # Library serialization boundary only: no production summary writer exists in this SHA.
+        # Writing here verifies the payload is JSON-safe; it does not certify runner output.
+        import json
+        path = Path(tree["vip_root"]) / "summary.json"
+        path.write_text(json.dumps({"splice": checks["splice"]}, allow_nan=False), encoding="utf-8")
+        assert json.loads(path.read_text(encoding="utf-8"))["splice"] == checks["splice"]
+        bad = hf_anchor()
+        bad[VIP_SINGLE_DAY] = splice.DailyBar(20.0, 20.0, 2400000)
+        with pytest.raises(splice.SpliceError) as error:
+            data.load_spliced_stock(hf, table, splice.empty_table(), [HF_END, VIP_SINGLE_DAY], bad,
+                                    exchange="SH", symbol="600000", require_overlap=False)
+        path.write_text(json.dumps(error.value.summary, allow_nan=False), encoding="utf-8")
+        failure = json.loads(path.read_text(encoding="utf-8"))["splice"]
+        assert not failure["ok"] and failure["failures"]

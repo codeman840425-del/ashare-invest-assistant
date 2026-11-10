@@ -127,20 +127,28 @@ export function todayViewReport(date: string, keys: string[], account: DailyRepo
 }
 
 /**
- * T-F36（契约 intraday-bars.md §3.5）：/today 持仓行的 t_view 示例数据。
- * 只给昨日有底仓的股票持仓；data_status 为 partial 的行给不可用示例。默认不带阈值字段（提示位不显示）。
+ * T-F36/T-F36b（契约 intraday-bars.md §3.7）：/today 持仓行的 t_view 示例数据（数值为十进制字符串，dev_pct 为百分数）。
+ * 持仓行一律带 t_view：非 A 股股票为不适用（t_view.security_type）；data_status 为 partial 的行给不可用示例；
+ * 量比为空的行给 partial + t_view.volume_ratio 缺口。默认不带阈值字段（提示位不显示）。
  */
 export function todayTView(row: TerminalRow, i: number): TView | null {
   const h = row.holding;
-  if (!h || (h.security_type !== null && h.security_type !== 'stock')) return null;
-  if (row.data_status === 'partial') {
-    return { vwap: null, dev_pct: null, volume_ratio: null, base_qty: h.qty, sellable_qty: h.sellable_qty, data_status: 'unavailable', as_of: null };
+  if (!h) return null;
+  const none = { vwap: null, dev_pct: null, volume_ratio: null, base_qty: null, sellable_qty: null, as_of: null };
+  if (h.security_type !== null && h.security_type !== 'stock') {
+    return { ...none, data_status: 'unavailable', gaps: [{ key: 't_view.security_type', reason: 'not_applicable', message: '非 A 股股票（示例数据）' }] };
   }
-  const devs = ['0.0059', '-0.0124', '0.0031', '-0.0047'];
+  if (row.data_status === 'partial') {
+    return { ...none, base_qty: h.qty, sellable_qty: h.sellable_qty, data_status: 'unavailable', gaps: [{ key: 't_view', reason: 'no_source', message: '今日分时数据未取到（示例数据）' }] };
+  }
+  const devs = ['0.5900', '-1.2400', '0.3100', '-0.4700'];
   const vrs = ['1.35', '0.82', '1.10', null];
+  const dev = devs[i % devs.length];
+  const vr = vrs[i % vrs.length];
   const price = Number(row.quote?.price ?? '10');
   return {
-    vwap: (price / (1 + Number(devs[i % devs.length]))).toFixed(2), dev_pct: devs[i % devs.length], volume_ratio: vrs[i % vrs.length],
-    base_qty: h.qty, sellable_qty: h.sellable_qty, data_status: vrs[i % vrs.length] === null ? 'partial' : 'fresh', as_of: `${TRADE_DATE}T10:30:00+08:00`,
+    vwap: (price / (1 + Number(dev) / 100)).toFixed(2), dev_pct: dev, volume_ratio: vr,
+    base_qty: h.qty, sellable_qty: h.sellable_qty, data_status: vr === null ? 'partial' : 'fresh', as_of: `${TRADE_DATE}T10:30:00+08:00`,
+    gaps: vr === null ? [{ key: 't_view.volume_ratio', reason: 'no_source', message: '历史分时不足 5 个交易日' }] : [],
   };
 }

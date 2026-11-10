@@ -536,23 +536,23 @@ export interface MarketOverview extends DataStatusBlock {
   turnover_total: Decimal | null;
 }
 
-// ---------- T-A143 intraday-bars.md §3.5：/today 持仓行的做 T 视图 t_view（可空，后端未实现前缺省） ----------
+// ---------- T-A143/T-A145 intraday-bars.md §3.5、§3.7：/today 持仓行的做 T 视图 t_view ----------
 /**
- * 字段名按契约 §3.5：vwap、dev_pct、volume_ratio、base_qty、sellable_qty、data_status、as_of。
- * 契约未给类型与可空性：数值按十进制字符串（与 api-contract 约定一致，也接受 number），除 data_status 外均按可空处理（待裁定）。
- * dev_pct 按 §3.3 定义为比值 (最新收盘 − VWAP) ÷ VWAP（0.01 表示 1%）。
+ * §3.7 ①：数值一律 string(decimal)；只有 data_status 与 gaps 不可空。
+ * dev_pct 与 dev_pct_threshold 为百分数（"0.5900" 表示 0.59%）；volume_ratio 与 volume_ratio_threshold 为倍数。
+ * 阈值字段在后端未验证时缺省（§3.7 ③），前端不内置阈值。
  */
 export interface TView {
-  vwap: Decimal | number | null;
-  dev_pct: Decimal | number | null;
-  volume_ratio: Decimal | number | null;
-  base_qty: Decimal | number | null;
-  sellable_qty: Decimal | number | null;
+  vwap: Decimal | null;
+  dev_pct: Decimal | null;
+  volume_ratio: Decimal | null;
+  base_qty: Decimal | null;
+  sellable_qty: Decimal | null;
+  dev_pct_threshold?: Decimal | null;
+  volume_ratio_threshold?: Decimal | null;
   data_status: DataStatus;
   as_of: DateTime | null;
-  /** 提示位阈值：契约 §3.5 未定义，字段名为前端暂定（待裁定）；缺失或为 null 时不显示对应提示，前端不设默认阈值 */
-  dev_pct_threshold?: Decimal | number | null;
-  volume_ratio_threshold?: Decimal | number | null;
+  gaps: Gap[];
 }
 export type TodayFocusRow = TerminalRow & { t_view?: TView | null };
 

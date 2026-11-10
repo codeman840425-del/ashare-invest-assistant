@@ -116,8 +116,8 @@ function todayBody(): TodayResponse {
   return {
     server_time: NOW, trade_date: TRADE_DATE, session: 'morning',
     market: { regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, data_status: 'fresh' },
-    // T-F36：持仓行带 t_view 示例（契约 intraday-bars.md §3.5，可空）
-    focus: more(TERMINAL_ROWS.filter((r) => r.focus).map((r, i) => (r.holding ? { ...r, t_view: todayTView(r, i) } : r))),
+    // T-F36/T-F36b：持仓行一律带 t_view，非持仓行为 null（契约 intraday-bars.md §3.7 ①）
+    focus: more(TERMINAL_ROWS.filter((r) => r.focus).map((r, i) => ({ ...r, t_view: todayTView(r, i) }))),
     // T-F18：取自计划草案 mock 的当前状态（待确认 + 条件已变）
     pending_plan_drafts: more(draftsNow().filter((d) => d.status === 'pending' || d.status === 'stale').map((d) => ({
       id: d.id, security_code: d.security_code, name: d.name, action: d.action, valid_until: d.valid_until, status: d.status,

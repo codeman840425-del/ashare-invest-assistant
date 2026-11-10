@@ -1,9 +1,10 @@
 # ruff: noqa: S101
-"""T-T71 / T-T71c / T-T71d 第 1 步：daily-snapshot-from-bars.md 实现单 B 验收。
+"""T-T71 / T-T71c / T-T71d：daily-snapshot-from-bars.md 实现单 B 验收。
 
 T-T71 28 例名与契约 §8 一一对应；T-T71c 按 7234aa7 §12 新增 6 例。
-T-T71d 第 1 步按 §11.1 补自选纳入范围的新例（af77bb5 上应为功能缺失红，消息「缺实现：…」）。
-自选只在专用 helper 播种，不进 _seed_b。用例 14 的 Then 与 drafts 本步不动。
+T-T71d 第 1 步按 §11.1 补自选纳入范围的新例；第 2 步在 T-B129=fb34dea 上将用例 14
+Then 改为含 E（另播种已移除 E2），并迁入 T-T70b 被取代的 2 例（本文件只改用例 14）。
+自选只在专用 helper 播种，不进 _seed_b。
 契约新符号一律在用例内部探测：缺失时以 ``assert ..., "缺实现：…"`` 报红，保证本文件可被收集。
 
 临时库与探针复用 tests/backend/daily_bars_t70_support.py（自 T-T70 复制，T-T70 文件不改）：
@@ -39,6 +40,7 @@ from daily_bars_t70_support import (  # noqa: E402
     CODE_C,
     CODE_D,
     CODE_E,
+    CODE_E2,
     CODE_G,
     CODE_H,
     OPEN_06,
@@ -244,12 +246,25 @@ def _seed_u1_watchlist_e(conn: Any, ctx: SimpleNamespace) -> None:
 
 
 
-def _seed_u1_watchlist(conn: Any, ctx: SimpleNamespace, code: str) -> None:
-    """§11.1：只写 u1 有效自选行（证券已在公共或专用种子中）。"""
+def _seed_u1_watchlist(
+    conn: Any, ctx: SimpleNamespace, code: str, *, removed_at: dt.datetime | None = None
+) -> None:
+    """§11.1：写 u1 自选行（证券已在公共或专用种子中）。removed_at 非空表示已移除。"""
     from app.db.tables.research import watchlist_items
 
     conn.execute(insert(watchlist_items).values(
-        id=uuid.uuid4(), user_id=ctx.u1, security_code=code, removed_at=None))
+        id=uuid.uuid4(), user_id=ctx.u1, security_code=code, removed_at=removed_at))
+
+
+def _seed_u1_removed_watchlist_e2(conn: Any, ctx: SimpleNamespace) -> None:
+    """§11.1 :385：已移除自选 E2，不得进入本人 universe / 快照。"""
+    from app.db.tables.market import securities
+    from app.schemas.enums import Board
+
+    conn.execute(insert(securities).values(
+        code=CODE_E2, type="stock", name="合成E2", exchange="SH", listing_status="listed",
+        board=Board.MAIN.value))
+    _seed_u1_watchlist(conn, ctx, CODE_E2, removed_at=_at(OPEN_09, 12))
 
 
 @pytest.fixture
@@ -486,20 +501,20 @@ def test_snapshot_calendar_hole_not_built(b_db: SimpleNamespace) -> None:
 
 
 def test_snapshot_only_owner_universe(b_db: SimpleNamespace) -> None:
-    """§8 :166；§1 :30（Q4）；§11.1：自选 E 只在本例播种。
-
-    af77bb5 的 daily_universe 尚未纳入自选，Then 仍排除 E（与播种前相同，断言不弱化）。
-    T-B129 落地后 Then 才改为含 E；不在本单改期望。
-    """
+    """§8 :166；§11.1 :385：instruments 恰为 A、B、E（另加 omitted 中的 H），不含 C、E2。"""
     _snapshot_mod()
     with b_db.engine.begin() as conn:
         _seed_u1_watchlist_e(conn, b_db)
+        _seed_u1_removed_watchlist_e2(conn, b_db)
         _fetch_three(conn)
-        _sid, _issues, row = _build(conn, b_db)
-        codes = {i["security_code"] for i in row.items["instruments"]} | {
-            o["security_code"] for o in row.items["omitted"]}
-        assert CODE_C not in codes
-        assert CODE_E not in codes
+        _sid, issues, row = _build(conn, b_db)
+        inst = {i["security_code"] for i in row.items["instruments"]}
+        omitted = {o["security_code"] for o in row.items["omitted"]}
+        assert inst == {CODE_A, CODE_B, CODE_E}
+        assert CODE_H in omitted
+        assert f"security_board_missing:{CODE_H}" in issues
+        assert CODE_C not in inst and CODE_C not in omitted
+        assert CODE_E2 not in inst and CODE_E2 not in omitted
 
 
 def test_owned_snapshot_idempotent_rerun(b_db: SimpleNamespace) -> None:
@@ -525,6 +540,8 @@ class _CloseOverrideSource:
         self._code = code
         self._day = day
         self._close = close
+        # DailyBarsSource 契约要求 name；T-B129 的 fetch_and_record 写入 source.name。
+        self.name = inner.name
 
     def fetch(self, codes: Any, start: Any, end: Any, adjust: Any) -> Any:
         import dataclasses

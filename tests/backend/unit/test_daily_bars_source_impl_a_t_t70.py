@@ -52,6 +52,8 @@ CODE_D = "510981.SH"  # etf
 CODE_E = "600981.SH"  # 仅 universe 用例自选
 CODE_F = "600991.SH"  # 仅 universe 用例实例
 CODE_G = "600000.SH"  # 仅 universe 用例：listing_status 为空的持仓股（夹具曾用）
+CODE_E2 = "600002.SH"  # 已移除自选（T-A135 / §8.2）
+CODE_C2 = "600003.SH"  # u2 自选（T-A135 / §8.2）
 OPEN_06 = dt.date(2026, 11, 6)
 CLOSED_07 = dt.date(2026, 11, 7)
 CLOSED_08 = dt.date(2026, 11, 8)
@@ -317,7 +319,34 @@ def _seed_universe_extras(conn: Any, ctx: SimpleNamespace) -> None:
         )
     )
     conn.execute(
+        insert(securities).values(
+            code=CODE_E2, type="stock", name="合成E2", exchange="SH", listing_status="listed"
+        )
+    )
+    conn.execute(
+        insert(securities).values(
+            code=CODE_C2, type="stock", name="合成C2", exchange="SH", listing_status="listed"
+        )
+    )
+    conn.execute(
         insert(watchlist_items).values(id=uuid.uuid4(), user_id=ctx.u1, security_code=CODE_E)
+    )
+    conn.execute(
+        insert(watchlist_items).values(id=uuid.uuid4(), user_id=ctx.u1, security_code=CODE_A)
+    )
+    conn.execute(
+        insert(watchlist_items).values(id=uuid.uuid4(), user_id=ctx.u1, security_code=CODE_D)
+    )
+    conn.execute(
+        insert(watchlist_items).values(
+            id=uuid.uuid4(),
+            user_id=ctx.u1,
+            security_code=CODE_E2,
+            removed_at=dt.datetime(2026, 11, 9, 12, 0, tzinfo=BEIJING),
+        )
+    )
+    conn.execute(
+        insert(watchlist_items).values(id=uuid.uuid4(), user_id=ctx.u2, security_code=CODE_C2)
     )
     from app.db.tables.accounts import broker_position_snapshot_items
 
@@ -599,12 +628,15 @@ def test_no_settings_field_for_window() -> None:
     assert {n for n in names if n.lower().startswith("daily_bars_")} == {"daily_bars_source"}
 
 
-def test_daily_bars_fetch_never_scheduled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """§7 ③ :230。先断言已注册，避免实现前因任务不存在而空过。"""
+def test_daily_bars_fetch_slot_1715_open_day_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-A135 / §8.4：covered 为真时仅 17:15/17:20/17:25 出现；不进 schedule；仍属 LOCKED。"""
     from app.workers import jobs
 
-    assert "daily_bars_fetch" in jobs.TASKS
-    monkeypatch.setattr("app.reports.service.covered", lambda _conn, _d: True)
+    name = "daily_bars_fetch"
+    assert name in jobs.TASKS
+    assert jobs.DAILY_BARS_FETCH_TIME == "17:15"
+    assert name in jobs.LOCKED_TASKS
+    assert name not in jobs.RETRY_TASKS
 
     class _DummyConn:
         def __enter__(self) -> Any:
@@ -622,14 +654,26 @@ def test_daily_bars_fetch_never_scheduled(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr("app.workers.jobs._engine", lambda _settings: _DummyEngine())
     settings = __import__("app.config", fromlist=["Settings"]).Settings()
-    day = dt.datetime(2026, 11, 10, 0, 0, tzinfo=BEIJING)
-    end = dt.datetime(2026, 11, 10, 23, 59, tzinfo=BEIJING)
-    now = day
-    while now <= end:
-        slots = jobs.slot_jobs(settings, now)
-        assert all(item[0] != "daily_bars_fetch" for item in slots)
-        now += dt.timedelta(minutes=5)
-    assert "daily_bars_fetch" not in jobs.schedule(settings)
+    assert name not in jobs.schedule(settings)
+
+    monkeypatch.setattr("app.reports.service.covered", lambda _conn, _d: True)
+    day = OPEN_10
+    hits: list[tuple[int, int, str, dict[str, Any]]] = []
+    for minute in range(0, 24 * 60, 5):
+        now = dt.datetime(day.year, day.month, day.day, minute // 60, minute % 60, tzinfo=BEIJING)
+        for task_name, slot, args in jobs.slot_jobs(settings, now):
+            if task_name == name:
+                hits.append((now.hour, now.minute, slot, args))
+    assert [(h, m) for h, m, _s, _a in hits] == [(17, 15), (17, 20), (17, 25)]
+    expect_slot = f"{day:%Y%m%d}:1715"
+    expect_args = {"trade_date": day.isoformat()}
+    assert all(slot == expect_slot and args == expect_args for _h, _m, slot, args in hits)
+
+    monkeypatch.setattr("app.reports.service.covered", lambda _conn, _d: False)
+    for minute in range(0, 24 * 60, 5):
+        now = dt.datetime(day.year, day.month, day.day, minute // 60, minute % 60, tzinfo=BEIJING)
+        for task_name, _slot, _args in jobs.slot_jobs(settings, now):
+            assert task_name != name
 
 
 def test_fake_default_one_bar_per_code_day() -> None:
@@ -896,17 +940,16 @@ def test_suspended_placeholder_row_written(temp_db: SimpleNamespace) -> None:
     assert run.status == "ok"
 
 
-def test_universe_holdings_only_until_clarified(temp_db: SimpleNamespace) -> None:
-    """A-10 / §7 :348 与 T-A131 补2/补3：列表相等 sorted([A, B])；排除 D/E/F 与 listing_status 为空的 G。"""
+def test_universe_holdings_and_active_watchlist(temp_db: SimpleNamespace) -> None:
+    """T-A135 / §8.2：u1 为 sorted([A, B, E])；排除 E2/D/F/G/C/C2，A 只出现一次。"""
     m = _impl()
     with temp_db.engine.begin() as conn:
         _seed_universe_extras(conn, temp_db)
         got = m.daily_universe(conn, temp_db.u1, OPEN_10)
-    assert got == sorted([CODE_A, CODE_B])
-    assert CODE_D not in got
-    assert CODE_E not in got
-    assert CODE_F not in got
-    assert CODE_G not in got
+    assert got == sorted([CODE_A, CODE_B, CODE_E])
+    for excluded in (CODE_E2, CODE_D, CODE_F, CODE_G, CODE_C, CODE_C2):
+        assert excluded not in got
+    assert got.count(CODE_A) == 1
 
 
 def test_task_user_scope_union_and_single(temp_db: SimpleNamespace) -> None:

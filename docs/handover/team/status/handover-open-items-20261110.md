@@ -6,7 +6,7 @@
 
 - 用户已确认 T-A58 最小方案（四件事：单出口发送锁/公共 STOP/128 台账/名单 3 次每日），并定四个条件：范围只限四件事、提交过复核、先旁路观察、切换强制拦截须用户点头。
 - T-B102 实现链：tb-T-B102（aedab8e+c1c8877+eaa4744，已并入 team-b）→ 返修轮 tb-T-B102b~f，最终候选 **c0b0ba3（tb-T-B102f，未合并）**。
-- **RV-15f 终局：不通过（B×5、M×1）**，报告 F:\wt-backend-T-B102f\docs\handover\team\reports\RV-15f.md（仅本地未提交）。B 级：① send_control.py:126 双侧锁竞态；② send_state.py:184 分钟账覆盖竞态；③ send_governance.py:338 旁路放行已触发 STOP/限流闩锁；④ daily_lists.py:334 批次运行中未感知全局暂停；⑤ 集成头（team-b=33dc4c9）send_governance.py:157 镜像缺探针模块。M×1：test_tb102_lists.py:230 错证书负例未构造错配。
+- **RV-15f 终局：不通过（B×5、M×1）**。原路径（wt-backend-T-B102f 工作树）已随 2026-11-10 批量清理失效，报告现存本地备份：**data\wt-backup\wt-backend-T-B102-RV15.zip**（RV-15）与 **data\wt-backup\wt-backend-T-B102f-RV15f.zip**（RV-15f，复核已验证备份内条目可读）。B 级：① send_control.py:126 双侧锁竞态；② send_state.py:184 分钟账覆盖竞态；③ send_governance.py:338 旁路放行已触发 STOP/限流闩锁；④ daily_lists.py:334 批次运行中未感知全局暂停；⑤ 集成头（team-b=33dc4c9）send_governance.py:157 镜像缺探针模块。M×1：test_tb102_lists.py:230 错证书负例未构造错配。
 - **产品栈现状：跑的是治理合并前的旧代码**（33dc4c9 虽含 eaa4744 首轮实现，但未部署；且按复核意见集成头不完整，不可部署）。enforce 维持 false；旁路观察未发生。
 - T-T34（旁路观察复测）：**未执行-未部署**（前提链断）。
 - T-O49（0029 重启演练）：**未执行**，预案在 docs/handover/team/status/T-O49-drill-plan.md（f564728）。合并令未发、永不再发（停工）。

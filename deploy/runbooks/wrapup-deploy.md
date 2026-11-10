@@ -129,16 +129,72 @@ deploy/scripts/wrapup/verify.sh --apply
 - `http://127.0.0.1:${NGINX_HTTP_PORT:-8080}/health/live` 为 200；抽查 `/`、`/login`
 - 收据卷 `<前缀>_aia_receipts`：目录 `root:root 755`，文件 `root:root 644`，ingest/worker `:ro`。只删收据文件不能恢复出口（`receipts.md`）
 
-## 主数据首次导入（只走脚本）
+## 主数据首次导入与词表（只走指定入口）
 
-栈起来且 `--check` 为 10、并确认本机可访问三所官网之后：
+顺序：先完成第 1 节备份、第 3 节启栈，再执行下面的 `--check`。不要在栈未起来时跑首导或词表重建。不调麦蕊、不把交易所探测以外的流量打出去。
 
 ```bash
 deploy/scripts/master-bootstrap.sh --check; echo "rc=$?"
-deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch
 ```
 
-不要 `compose.sh --profile master-bootstrap run …`（会绕过 `--check`、flock、`--confirm-network-fetch` 和 CI 拒绝，T-A98 B2）。网关对外开放前应看到「已有 status=ok 的主数据同步记录」。不调麦蕊。
+按退出码分支（**其它 rc 一律停止**，不要改库、不要出网；含义见 `master-data.md`）：
+
+- **rc=10**（还没有 `status='ok'` 的 `market.master_runs`）：确认本机可访问上交所、深交所、北交所官网后，一次导入并在合并来源后重建词表（后端 `app.cli master-bootstrap` 默认不写词表，须显式 `--rebuild-search-terms`）：
+
+  ```bash
+  deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch --rebuild-search-terms
+  ```
+
+  不要 `compose.sh --profile master-bootstrap run …`（会绕过 `--check`、flock、`--confirm-network-fetch` 和 CI 拒绝，T-A98 B2）。跑完应看到已有 `status='ok'` 的主数据同步记录，再做下面的只读验证。网关对外开放前须看到该记录。
+
+- **rc=0**（已有成功导入，从 `f82a83b` 升级时常见）。此时再跑 `--run --rebuild-search-terms` 会因脚本幂等在检查阶段跳过，到不了重建。改为在**不出网的 worker**（只挂 `aia_internal`，无 egress）上跑离线 CLI。模块是 `python -m app.cli.security_search_terms`（它不在 `python -m app.cli` 的子命令表里）。默认即 dry-run：校验配置后退出，不访问数据库、不写库；写入须加 `--apply`（依赖容器内已有 `DATABASE_URL`，worker 的 compose 环境已提供）。**不要用 maint-cli。** 先 dry-run，确认输出含 `dry-run` 且退出码 0，再 `--apply`：
+
+  ```bash
+  deploy/scripts/compose.sh run --rm --no-deps -T --entrypoint python worker -m app.cli.security_search_terms
+  deploy/scripts/compose.sh run --rm --no-deps -T --entrypoint python worker -m app.cli.security_search_terms --apply
+  ```
+
+  `terms.rebuild` 只在调用方事务内写词表，幂等、不出网。升级本身不强制重建；本步骤用于补写默认首导未写的词表。
+
+- **其它 rc**（例如 3 未就绪、1 查询失败）：停止，不要继续 `--run` 或离线 `--apply`。
+
+### 只读验证词表
+
+在已启动的 postgres 上跑（只读事务）。词表行数通常大于证券行数（一只证券多条 term）；对齐看去重 `code`：`terms_distinct_codes` 应等于 `securities_distinct_codes`，缺词查询应为空。抽查 `term_kind` 须属于 `name` / `name_initials` / `former_name` / `former_initials` / `former_code`（不是每种都必然出现）。`generator_version` 必须全部为 1。
+
+```bash
+deploy/scripts/compose.sh exec -T postgres \
+  sh -c 'exec psql -X -q -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}"' <<'SQL'
+BEGIN READ ONLY;
+
+SELECT 'securities_rows' AS metric, count(*)::bigint AS n FROM market.securities
+UNION ALL
+SELECT 'securities_distinct_codes', count(DISTINCT code) FROM market.securities
+UNION ALL
+SELECT 'terms_rows', count(*) FROM market.security_search_terms
+UNION ALL
+SELECT 'terms_distinct_codes', count(DISTINCT code) FROM market.security_search_terms;
+
+SELECT s.code
+FROM market.securities s
+LEFT JOIN market.security_search_terms t ON t.code = s.code
+WHERE t.code IS NULL
+ORDER BY 1
+LIMIT 20;
+
+SELECT term_kind, count(*) AS n
+FROM market.security_search_terms
+GROUP BY 1
+ORDER BY 1;
+
+SELECT generator_version, count(*) AS n
+FROM market.security_search_terms
+GROUP BY 1
+ORDER BY 1;
+
+ROLLBACK;
+SQL
+```
 
 ## 授权口径与必须停下来问编排者的情况
 

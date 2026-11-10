@@ -81,24 +81,16 @@ deploy/scripts/wrapup/update-repo.sh --apply --target <批准的完整哈希> --
 deploy/scripts/wrapup/start-stack.sh --apply --backup-dir /data/aia-wrapup-backup/<backup.sh 本轮打印的时间戳>
 ```
 
-顺序（与 `up.sh` / compose `depends_on` 一致，但 **seed 插在 migrate 之后、worker 启动之前**）：
+顺序由 `start-stack.sh --apply` 执行（与 `up.sh` / compose `depends_on` 一致，并在启动 worker 之前插入 engine_policy seed）：
 
 1. postgres、redis（等到 healthy）
 2. **migrate**（`alembic upgrade head`）
 3. timescale-apply
 4. **db-roles**（`apply-roles.sh`）
-5. 按「engine_policy seed」节只读列出现有行并显式跑 seed（`start-stack.sh` 不会代跑）
+5. **engine_policy seed**（脚本执行，见「engine_policy seed」节；不要再手动跑一遍）
 6. 再启 api / worker / beat / ingest / signal-rt / nginx
 
-不要加 `--profile master-bootstrap`。默认 dev/live 不会启动该服务。
-
-`start-stack.sh --apply` 目前会在最后一步把 worker 一并拉起。本轮收口不要一次跑完到 worker：在 postgres / migrate / timescale-apply / db-roles 完成之后先 seed，再：
-
-```bash
-deploy/scripts/compose.sh up -d --build --wait --no-deps api worker beat ingest signal-rt nginx
-```
-
-正式卡 v3 `--apply` 导入目前仍是「待补」，见「engine_policy seed」节。
+不要加 `--profile master-bootstrap`。默认 dev/live 不会启动该服务。正式卡 v3 `--apply` 导入目前仍是「待补」，见「engine_policy seed」节。
 
 ## 4. HALT 目录可写检查
 
@@ -157,11 +149,11 @@ deploy/scripts/master-bootstrap.sh --check; echo "rc=$?"
 
   不要 `compose.sh --profile master-bootstrap run …`（会绕过 `--check`、flock、`--confirm-network-fetch` 和 CI 拒绝，T-A98 B2）。跑完应看到已有 `status='ok'` 的主数据同步记录，再做下面的只读验证。网关对外开放前须看到该记录。
 
-- **rc=0**（已有成功导入，从 `f82a83b` 升级时常见）。此时再跑 `--run --rebuild-search-terms` 会因脚本幂等在检查阶段跳过，到不了重建。改为在**不出网的 worker**（只挂 `aia_internal`，无 egress）上跑离线 CLI。模块是 `python -m app.cli.security_search_terms`（它不在 `python -m app.cli` 的子命令表里）。默认即 dry-run：校验配置后退出，不访问数据库、不写库；写入须加 `--apply`（依赖容器内已有 `DATABASE_URL`，worker 的 compose 环境已提供）。**不要用 maint-cli。** 先 dry-run，确认输出含 `dry-run` 且退出码 0，再 `--apply`：
+- **rc=0**（已有成功导入，从 `f82a83b` 升级时常见）。此时再跑 `--run --rebuild-search-terms` 会因脚本幂等在检查阶段跳过，到不了重建。改为在**不出网的 worker**（只挂 `aia_internal`，无 egress）上跑离线 CLI。模块是 `python -m app.cli.security_search_terms`（它不在 `python -m app.cli` 的子命令表里）。默认即 dry-run：校验配置后退出，不访问数据库、不写库；写入须加 `--apply`（依赖容器内已有 `DATABASE_URL`，worker 的 compose 环境已提供）。保留默认 entrypoint（不要加 `--entrypoint python`，以免绕过 `secret-env.sh`）。**不要用 maint-cli。** 先 dry-run，确认输出含 `dry-run` 且退出码 0，再 `--apply`：
 
   ```bash
-  deploy/scripts/compose.sh run --rm --no-deps -T --entrypoint python worker -m app.cli.security_search_terms
-  deploy/scripts/compose.sh run --rm --no-deps -T --entrypoint python worker -m app.cli.security_search_terms --apply
+  deploy/scripts/compose.sh run --rm --no-deps -T worker sh -c 'python -m app.cli.security_search_terms'
+  deploy/scripts/compose.sh run --rm --no-deps -T worker sh -c 'python -m app.cli.security_search_terms --apply'
   ```
 
   `terms.rebuild` 只在调用方事务内写词表，幂等、不出网。升级本身不强制重建；本步骤用于补写默认首导未写的词表。
@@ -206,9 +198,9 @@ ROLLBACK;
 SQL
 ```
 
-## engine_policy seed（migrate 之后、worker 启动之前）
+## engine_policy seed（由 start-stack.sh 在 migrate/db-roles 之后、worker 启动之前执行）
 
-时机：第 3 节已完成 postgres、migrate、timescale-apply、db-roles 之后，**尚未启动 worker**（以及其他应用服务）之前。seed **不会**在启动或 migrate 时自动执行（`migration_check` 只做同号守卫、缺行放行；`cards-import` 也不调 seed）。要写入的是镜像内现行 `config/engine_policy.yaml` 的 `version_no`（升 3 之后须显式重跑，插入 v3 新行；v1/v2 旧行保留不动，不可删除）。`compose run --no-deps` 只起一次性 worker 容器来跑 seed，不会把常驻 worker 拉起来。
+收口时用第 3 节的 `start-stack.sh --apply`：脚本在 db-roles 之后、启动常驻 worker 之前执行 seed，不要再手工先 seed 再单独 `compose.sh up` worker。seed **不会**在 migrate 或容器启动检查时自动执行（`migration_check` 只做同号守卫、缺行放行；`cards-import` 也不调 seed）。要写入的是镜像内现行 `config/engine_policy.yaml` 的 `version_no`（升 3 之后须在下次 `--apply` 启栈时由脚本重跑，插入 v3 新行；v1/v2 旧行保留不动，不可删除）。脚本用 `compose run --no-deps` 起一次性容器，不会把常驻 worker 提前拉起来。
 
 入口（只读核对 `src/backend/app/engine_policies.py`）：`python -m app.engine_policies --database-url`（`--database-url` 为必填；模块不在 `python -m app.cli` 子命令表里）。CLI 从 `Settings.config_dir` 读取现行 yaml（容器内默认 `/app/config`，worker 已只读挂载）。成功时只打印一行 `engine_policy_seed_inserted=`，值为 `1`（本号不存在，已 INSERT）或 `0`（同号且 `config` 含相同 `content_sha256`，幂等、不写新行）。同号但内容/摘要不同会抛 `ValueError("engine_policy_version_hash_conflict")` 并以非 0 退出，**没有**名为 `hash_conflict` 的输出字段。
 
@@ -235,9 +227,9 @@ SQL
 
 部署前先看现有几行、最大号是多少。不要改这些旧行。
 
-### 2. 在 worker 容器内跑 seed
+### 2. 由 start-stack.sh 在 worker 容器内跑 seed
 
-DSN 只在容器内从环境变量 `DATABASE_URL` 展开（worker 的 compose 环境已提供），**不要**在宿主机命令行写明文 DSN，不要 `echo` / 打印该变量或连接串，不要 `set -x`（默认入口 `deploy/docker/secret-env.sh` 开头也会关掉继承来的 xtrace，避免把密钥或 DSN 打到 stderr）。
+下面是脚本实际执行的命令，不要改写成加 `--entrypoint` 的版本，也不要在脚本之外再跑一遍。DSN 只在容器内从环境变量 `DATABASE_URL` 展开（worker 的 compose 环境已提供），**不要**在宿主机命令行写明文 DSN，不要 `echo` / 打印该变量或连接串，不要 `set -x`（默认入口 `deploy/docker/secret-env.sh` 开头也会关掉继承来的 xtrace，避免把密钥或 DSN 打到 stderr）。
 
 保留 worker 默认 entrypoint（compose 为 `sh /aia/secret-env.sh`）。该脚本注入 `APP_MASTER_KEY` 后执行 `exec "$@"`，会把后面的参数作为命令原样执行。不要加 `--entrypoint sh`（会绕过 secret-env.sh；用户机若 `APP_ENV` 为 staging/production，Settings 会因缺 `APP_MASTER_KEY` 拒绝）。
 
@@ -246,12 +238,14 @@ deploy/scripts/compose.sh run --rm --no-deps -T worker sh -c \
   'python -m app.engine_policies --database-url "$DATABASE_URL"'
 ```
 
+脚本只认标准输出整段为 `engine_policy_seed_inserted=0` 或 `engine_policy_seed_inserted=1`，并把该行写入本轮备份 DEST 的 `engine_policy_seed.txt`（与 manifest、git-head 等同一套本轮收据）。dry-run 只打印这一步，不执行、不写收据。
+
 ### 3. 判定
 
 - 首跑（库中还没有现行 yaml 的 `version_no`）：标准输出为 `engine_policy_seed_inserted=1`，退出码 0。
 - 重跑（同号同摘要）：`engine_policy_seed_inserted=0`，退出码 0。
-- 出现 `engine_policy_version_hash_conflict`（同号异摘要）：**立即停止**，不要重试、不要改旧行、**不要删除旧行**、不要手工 INSERT，问编排者。
-- 其它非 0 退出：同样停止。
+- 出现 `engine_policy_version_hash_conflict`（同号异摘要）：脚本**立即停止，不启动 worker**，不要重试、不要改旧行、**不要删除旧行**、不要手工 INSERT，问编排者。
+- 其它非 0 退出，或输出无法解析为 `engine_policy_seed_inserted=0` / `1`：同样停止，不启动 worker，不删行。
 
 ### 4. 确认最新号与首条建议
 

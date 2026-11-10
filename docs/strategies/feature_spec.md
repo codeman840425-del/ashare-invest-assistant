@@ -325,7 +325,7 @@
 - **来源**：沪深300 指数日线 `/hsindex/history/{code}/{级别}`（T003；指数代码写法与是否复权【待核实】）；F24。
 - **可得时点**：d 日盘后（指数日线 + 宽度都到齐后）。
 - **边界**：指数 MA60 不足 45 根有效 K → null；宽度 20 日均值有效值 < 15 → null；任一 null → `f.market_regime = null`（不得默认为 `range`）。情绪周期 6 阶段在涨停池积累前不输出。
-- **引用**：G-02 产出；RC3、W-01（夹具 `f.market_regime: range`）；P0。
+- **引用**：G-02 产出；RC3；P0。RC3 继续读 F25，不改读 F50（plan.md:984 T-R21 裁定⑦、api-contract.md:1236；T-R51 按架构师 T-A116 ⑤ 更新本行）。F25 与 F50 不是同一量的新旧名：枚举相同，但 F25 含 F24 宽度条件，F50 只用指数，两者取值可能不同。F25 缺失时 RC3 只记 gap、显示「大盘环境未知」、不改门控。W-01 只在 v1 夹具用过 F25（冻结在 `cards/history/sw_ma_trend_pullback.v1.md`）；现行 W-01 v2（V1/I2）与 H-01 v2/v3（C1）已改用 F50。
 
 ### F50 `f.market_regime_idx` — 大盘状态（指数口径，不含宽度；v1.1.13，plan「T-R19 裁定」③）
 - **公式**：枚举 `uptrend / range / downtrend`，判定方式与 F25 一致，只去掉宽度条件：`uptrend` = 000300.SH 收盘 > MA60 且 MA20 > MA60；`downtrend` = 收盘 < MA60 且 MA20 < MA60；其余为 `range`。须**连续 2 日**满足才切换（防抖）；切换之前保持上一个已确认状态，序列开头没有已确认状态时取当日原始判定。MA 为最近 N 根有效指数日 K 的收盘均值。阈值和防抖天数沿用 F25，没有另加条件。
@@ -334,7 +334,7 @@
 - **边界**：MA60 的有效 K < 45 → null；当日指数日线缺失 → null；null 不默认为 `range`。预热：MA60 加防抖需要 61 根（最少 45+1 根）。
 - **单位**：enum（没有数值单位）。
 - **状态**：verified_doc（hszsdata 文档 + T-B81 日线实测，裁定③），最多到 simulating。原 F25 `f.market_regime` 不改，仍为 declared。
-- **引用**：H-01 v2（C1）、W-01 v2（V1、I2、applicability）；P0。
+- **引用**：H-01 v2/v3（C1；v3 见 `cards/hold_risk_monitor.md:111` 规则、:63 data_needs、:129 证伪口径仅分组展示）、W-01 v2（V1、I2、applicability）；P0。
 
 ### F26 `f.sw_l1` — 申万一级行业
 - **公式**：d 日有效的申万一级行业代码（字符串）。

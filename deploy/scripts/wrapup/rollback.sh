@@ -61,7 +61,7 @@ if [ -n "$prefix" ]; then
     esac
     wrapup_log "恢复 $suf 到新卷 $newvol（不 docker volume rm 原卷，不 down -v）"
     wrapup_docker volume create "$newvol" >/dev/null
-    wrapup_docker run --rm --network none -v "$newvol:/v" -v "$WRAPUP_BACKUP_DIR:/in:ro" alpine:3.21 \
+    wrapup_docker run --rm --network none -v "$newvol:/v" -v "$WRAPUP_BACKUP_DIR:/in:ro" alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
       sh -c "umask 077 && tar -C /v -xzf /in/$(basename "$tgz")"
   done
   wrapup_log "新卷已就绪。把 compose 卷名切过去或复制回原卷、以及任何删除数据或卷的操作，必须停下来问编排者。严禁 volume rm 现网卷。"

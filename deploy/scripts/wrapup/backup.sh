@@ -58,7 +58,7 @@ snapshot_vol() {
   base="$(basename "$dest")"
   wrapup_docker run --rm --network none \
     -v "$vol:/v:ro" -v "$DEST:/out" \
-    alpine:3.21 \
+    alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
     sh -c "umask 077 && tar -C /v -czf /out/$base . && chown $(id -u):$(id -g) /out/$base && chmod 600 /out/$base"
   wrapup_log "已快照 $vol -> $base（$(stat -c %s "$dest") bytes, sha256 $(sha256sum "$dest" | awk '{print substr($1,1,16)}')…）"
   echo "$vol $base $(sha256sum "$dest" | awk '{print $1}')" >>"$DEST/volumes.txt"

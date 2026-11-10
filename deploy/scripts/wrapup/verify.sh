@@ -64,7 +64,7 @@ if prefix="$(wrapup_prefix 2>/dev/null)"; then
   vol="${prefix}_aia_receipts"
   if wrapup_docker volume inspect "$vol" >/dev/null 2>&1; then
     wrapup_log "收据卷 $vol："
-    wrapup_docker run --rm --network none --user 0 -v "$vol:/run/aia/receipts:ro" alpine:3.21 \
+    wrapup_docker run --rm --network none --user 0 -v "$vol:/run/aia/receipts:ro" alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
       sh -c 'echo "dir $(stat -c "%U:%G %a %n" /run/aia/receipts)"; ls -la /run/aia/receipts' || fail=1
     wrapup_log "期望目录 root:root 755；文件 root:root 644。只删收据不能恢复出口（receipts.md）。"
   else

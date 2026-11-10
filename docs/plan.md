@@ -3729,11 +3729,17 @@ admin:
 
 缺口：`create-admin` 命令未实现，已排给后端 T-B64；管理员创建步骤实现后再验收。
 
-### T-A87 M-1 IngestCore 外呼接线（status: draft；架构师 2026-11-09；基 integ/B3=a7ce362；T-A89 修订 M-2；风控项须异源复核）
+### T-A87 M-1 IngestCore 外呼接线（status: draft；架构师 2026-11-09；基 integ/B3=a7ce362；T-A89 修订 M-2；T-A91 修订 M-a/M-b/M-c 与两层守卫；风控项须异源复核）
 
 来源：T-A86 中 M-1（R12）。bootstrap 建出的 `IngestCore` 是空壳：没有 licence，生产代码里没有任何 submit/next_call/complete 调用。daily_lists 外呼只靠 STOP/HALT 文件、库内 `upstream_halted` 和 single-egress 锁，103/429 不写 `ops.data_licence_events`，所以契约 §9 v0.2.6「T-A75 按用户累计」在生产外呼路径上不成立。本节同时收 T-A86 的后端 L-1、L-2、L-4。开发和测试全程不得真实调用麦蕊，只用假 transport、mock 上游和一次性 PG。
 
 **T-A89 修订理由（M-2，风控，R17）**：T-A88 评审 be/T-B116=2422107 时实测：① `core.upsert` 每次把库里的 active 写回内存，上游 102→INVALID 后下一次 `mairui_get` 仍放行（transport 共 2 次），违反 state「102 停止全部调用」；② `EgressLease(held=True)` 可被调用方自造绕过 single-egress；③ 另一会话持 `ip_limit` 锁且无 pending 时 rehydrate 不取锁即放行；④ 公开 `daily_lists.wire` 直接拿到 `_https_get`，静态守卫未挡住 4 种绕过。故修订 api-contract §7.11.5 第④条（证书状态以库为准、102/INVALID 后必拒、状态变化先写库、内存与库取更严、解除须人工）与 lease 不可伪造，并补 B-1(a)/B-2 契约；验收由 A1–A24 增至 28 条（A1–A5/A6a/A6b/A7–A27，见下表）。后端 M-2 实现等本契约合入后再接（T-B116b）。
+
+**T-A91 修订理由（M-a/M-b/M-c 与守卫边界，风控，R15/R16/R18/R19）**：T-A90 评审 be/T-B116c=41e517a：B-2′ 静态守卫第三轮仍被 importlib/getattr/相对导入/别名/urllib3/`__import__`＋拆串域名/probes 新文件等变体绕过；M-a 往 `_ISSUED_LEASES`/`_LEASE_LOCK_CONN` 塞假项可放行；M-b 有 pending 且锁争用时准入两轮取锁 3.71s；M-c 102 写库失败后重启即再放行 1 次。静态扫描永远堵不完动态写法，故不再逐轮补绕过，改为**两层**：静态层只守 api-contract §7.11.5①a 的有限清单 S1–S6；动态写法由运行时层①b 兜底，并写明两层各自不负责的写法（①c）。同时修订②（HMAC＋线程绑定＋`pg_locks`）、④（准入单事务 SAVEPOINT、3s 超时对齐、写库失败同时写 HALT、退出码 74）。验收由 28 条增至 **34** 条（见第 5 节 T-A91 表）。
+
+**运行时层方案比较（T-A91 定稿：A 为主、B 为辅）**：
+- **(A) ingest 进程内 `sys.addaudithook`**：能拦住 B-2 真正的威胁——ingest 进程内绕过 egress 的 Python 代码，不论它怎么拿到名字（importlib/getattr/`__import__`/拆串域名/urllib3/requests/socket 直连 IP），因为最终都经过 `socket.getaddrinfo`/`socket.connect` 审计事件；也能拦 `subprocess.Popen`/`os.system`/`os.exec`/`os.posix_spawn`/`ctypes.dlopen`。钩子一经安装不可卸载（优点）。局限：C 扩展/libc 直调不触发事件；安装前已建立的连接不受管（故装在 `main()` 第一行）；同进程代码可篡改钩子闭包（威胁模型外）。DNS：按主机名后缀 `mairuiapi.com` 判定；IP 直连：公网地址默认拒绝，只放行窗口内由 egress 自己解析并登记的 IP（私网/回环/AF_UNIX 放行，供 postgres/redis）。性能：本机离线实测空钩子约 0.16µs/事件，可忽略。可在无网子进程里用假 socket/无网命名空间验证，开发全程不碰麦蕊。
+- **(B) 容器网络只让 ingest 出网**：核对 41e517a 的 `deploy/compose/docker-compose.yml`：**没有任何 `networks:` 定义**，全部服务在默认 bridge 上、都能出网。但 worker 有合法出网需求（主数据同步 `app/workers/jobs.py:192/224` → `app/master/sources.py:518` 访问交易所，及 SMTP），所以「只有 ingest 出网」做不到，worker 至少要留在可出网网络；且 compose 层无法按域名放行。B **拦不住 ingest 进程内的旁路**（B-2 的威胁正在此）。worker/api 不持有证书私钥（`data_licence_seal_private_keys` 只挂 ingest），即使连上麦蕊也没有可用证书，风险较低。故 B 只作容器间纵深防御：postgres/redis/api/signal-rt/beat/migrate/timescale-apply/db-roles/maint-cli 进 `internal: true` 网络，ingest、worker 另加可出网网络，nginx 加边缘网络；各服务实际出网需求由运维逐一核实后定。B 归运维（T-O68），不阻塞 T-B116d 合入。
 
 **1. 麦蕊 HTTP 外呼点（a7ce362 上 `rg` 全库扫描）**
 
@@ -3756,6 +3762,7 @@ admin:
 - L-1：`engine_for` 增加 profile 参数。`profile="ingest"` 时用 NullPool，`connect_args` 设 `connect_timeout=3`、keepalives、`tcp_user_timeout=5000`、`options=-c statement_timeout=5000 -c lock_timeout=2000`。api 和 worker 默认 profile 不变。bootstrap 和 daily 共用 ingest profile。
 - L-2：`main` 用 try 包住 `get_settings()` 和 `bootstrap_ingest_core()`，捕获全部 Exception（包括 ArgumentError 和 pydantic ValidationError），只打印固定文案加异常类型名，退出码 78。不打印 `str(exc)`，因为 ValidationError 会带出 input_value，可能含口令。bootstrap 内 `engine_for` 也要放进 try。
 - L-4：保留阻塞式 `acquire_ip_limit_lock` 加 `lock_timeout` 2s（T-A84 L-7 的公平性，已验收），删除未被调用的 `ip_limit.py:164` `try_acquire_ip_limit_lock`，把 `core.py:103` 的 docstring 改为「有界等待（lock_timeout 2s），不是 try-lock」。
+- **T-A91 补充（后端 T-B116d）**：① 新建 `app/ingest/netguard.py`（`install()`、`_egress_window`、`EgressBlocked`），`workers/ingest.py` `main()` 第一行安装；`_https_get` 在窗口内先解析 `HOST` 并登记 IP，再按 IP 建 TLS（SNI 用域名）。② lease 改为闭包密钥 HMAC（nonce‖thread_id‖lock_pid）＋线程绑定＋`pg_locks` 核验，`_ISSUED_LEASES` 只作释放记录、不再是放行依据。③ 准入合并为一条连接一个事务：取锁→读证书→rehydrate→pending 时 `begin_nested()` SAVEPOINT flush→外层提交后清 pending；deadline 2.8s 驱动 `SET LOCAL lock_timeout/statement_timeout`；ingest profile `connect_timeout` 3→2。④ 102/终态写库失败：写 HALT（`licence_status_persist_failed`）＋拒绝；HALT 也失败 `os._exit(74)`；bootstrap 增停机目录可写探测（不可写 78）。
 
 **3. fail-closed 矩阵（每一行的结果都是 0 次 socket）**
 
@@ -3774,14 +3781,18 @@ admin:
 | 限流或升级暂停、令牌桶、日额度 | 不检查（缺口） | next_call 返回 None 时拒绝 `core_denied` |
 | 计数写库失败 | 不写（缺口） | 内存 fail-closed 加 pending（L-2/L-6），本批失败，后续调用拒绝 |
 | HTTP 超时或网络错 | 本批失败、不重试 | 同样失败，并 `core.complete(NETWORK)` 进入退避 |
+| 状态写库失败（T-A91 M-c） | 不涉及 | 同时写 HALT（`licence_status_persist_failed`）并拒绝 `core_denied`；重启后 `halt_present`；HALT 也写失败 → `os._exit(74)`；停机目录不可写 → 启动 78 |
+| 有 pending 且锁争用（T-A91 M-b） | 不涉及 | 单事务一轮取锁、SAVEPOINT flush，墙钟 ≤3s 拒绝 `core_denied` |
+| 进程内绕过 egress 的动态写法 / 子进程（T-A91） | 不涉及 | netguard 审计钩子抛 `EgressBlocked`，按网络失败处理 |
+| 伪造/跨线程 lease、注册表塞假项（T-A91 M-a） | 不涉及 | HMAC＋线程绑定＋`pg_locks` 核验不过 → `single_egress_not_held` |
 
 **4. 与 single-egress 锁、停机标志的关系**
 - 检查顺序：`live_budget_issue` → STOP/HALT 文件 → single-egress lease（非阻塞）→ batch 事务内 grant/eligible（含 `upstream_halted`）→ 读密钥、建 TEMP（R13）→ 每个数据集依次：STOP/HALT → 预约事务 eligible → `mairui_get`（HALT → lease → core 注册/rehydrate → next_call → 发 socket 前最后一次 HALT）→ socket → 若限流则 HALT → `core.complete` → `upstream_halted`。
-- 锁的层级：single-egress 会话锁在最外层（lease 仅由 `single_egress` 签发，mairui_get 核验签发标识与锁仍被本会话持有）；`ingest:ip_limit:{user}` 事务锁在内层，rehydrate 读数前壁钟有界 3s（B-1(a)；引擎 `lock_timeout=2000` 仍保留）；batches/master_runs 的 FOR UPDATE 在各自的短事务里。规则：不在持有 ip_limit 锁或任何未提交事务时取 single-egress；`mairui_get` 必须在调用方没有打开事务时调用；不在任何事务内发 HTTP。`tick_ingest_core` 只取 ip_limit 锁、不取 single-egress，所以没有环。worker 侧的 `mairui_daily_outbox`、`master.mairui_risk_snapshot` 锁不在 ingest 进程里，不嵌套。
+- 锁的层级：single-egress 会话锁在最外层（lease 仅由 `single_egress` 签发，mairui_get 核验签发标识与锁仍被本会话持有）；`ingest:ip_limit:{user}` 事务锁在内层，准入全程（取锁＋读证书＋rehydrate＋SAVEPOINT flush）在一条连接一个事务内、墙钟 ≤3s（T-A91 M-b；准入路径用 `SET LOCAL` 覆盖引擎级超时，tick 路径仍用引擎级 `lock_timeout=2000`）；batches/master_runs 的 FOR UPDATE 在各自的短事务里。规则：不在持有 ip_limit 锁或任何未提交事务时取 single-egress；`mairui_get` 必须在调用方没有打开事务时调用；不在任何事务内发 HTTP。`tick_ingest_core` 只取 ip_limit 锁、不取 single-egress，所以没有环。worker 侧的 `mairui_daily_outbox`、`master.mairui_risk_snapshot` 锁不在 ingest 进程里，不嵌套。
 - 停机标志（HALT 文件和库 `upstream_halted`）优先级最高：任何 core 状态（包括 user_reset、换证书）都不能越过它们。egress 和 core 都不清 HALT，解除仍按 runbook ingest-halt.md 由用户本人确认。
 - R13：TEMP 只在拿到 lease 并通过 batch 检查之后创建，任何拒绝路径都由 `process` 的 finally `remove_owned` 清理。残留普通文件替换、非普通文件拒绝的语义不变。egress 不碰 TEMP。
 
-**5. 验收用例（T-A89 修订后 28 条 = 原 A1–A24 +4；都要先红后绿；普通模式和 `-O` 都跑；只用假 transport、一次性无网 PG，conftest 屏蔽麦蕊 DNS；自测不得有空断言，禁止 `or True` / `assert True` 一类 L-b）**
+**5. 验收用例（T-A91 修订后 34 条，见本节末 T-A91 表；T-A89 修订后 28 条 = 原 A1–A24 +4；都要先红后绿；普通模式和 `-O` 都跑；只用假 transport、一次性无网 PG，conftest 屏蔽麦蕊 DNS；自测不得有空断言，禁止 `or True` / `assert True` 一类 L-b）**
 
 验收项增删表（相对 T-A87 初版 A1–A24）：
 
@@ -3796,7 +3807,7 @@ admin:
 
 修订后编号清单（28）：A1（含 4 反例）、A2、A3、A4、A5、A6a、A6b、A7、A8、A9、A10、A11、A12、A13、A14、A15、A16、A17、A18、A19、A20、A21、A22、A23、A24、A25、A26、A27。
 
-- A1 静态守卫：AST 扫描 `src/backend/app/**`，HTTP 库只允许出现在 `app/ingest/egress.py`；`master/sources.py` 只许 urllib 且不得含麦蕊域名；egress 外禁止引用 `_https_get`/`HOST`；不得存在公开旁路（无 `wire`）；`app/` 不导入 probes；`probes/` 按恰好 3 文件白名单扫描；dockerignore 白名单不含 probes。基线红在 daily_lists.py:56；4 种绕过反例见上表。
+- A1 静态守卫（T-A91 起由 A1s/A1r 取代，以 T-A91 表为准）：AST 扫描 `src/backend/app/**`，HTTP 库只允许出现在 `app/ingest/egress.py`；`master/sources.py` 只许 urllib 且不得含麦蕊域名；egress 外禁止引用 `_https_get`/`HOST`；不得存在公开旁路（无 `wire`）；`app/` 不导入 probes；`probes/` 按恰好 3 文件白名单扫描；dockerignore 白名单不含 probes。基线红在 daily_lists.py:56；4 种绕过反例见上表。
 - A2 core 未接线时拒绝；A3 库里已有 2 条 ip_limited 事件，第 3 次升级后拒绝，transport 0 次；A4 假 103 后写入 `actor=ingest` 的 ip_limited 事件，同时 HALT 和 `upstream_halted` 照常写；A5 rehydrate 时库不可用，拒绝；A6a / A6b 见上表；A7 licence 缺失、已删除、非 active 都拒绝；A8 计数写库失败（触发器拒绝 INSERT）时 pending 加暂停，下一次调用拒绝；A9 transport 超时，记 NETWORK、本批失败、TEMP 已清；A10 令牌桶 per_minute=1 时第 2 次拒绝；A11 HALT 存在时拒绝，并断言没有取锁、没有查库；A12 `upstream_halted` 时拒绝且没有调 rehydrate；A13 没有 lease 时调 `mairui_get` 拒绝；A14 R13：TEMP 时序、拒绝路径清理、HALT 不被清除；A15 tick 和 process 两线程并发 10 轮无死锁且有时间上界；A16 拒绝码和日志不含哨兵证书和 URL。
 - L-1：A17 用只 accept 不应答的假 TCP 端口当库，`tick_ingest_core` 和 bootstrap ≤8s 返回，bootstrap rc=78（基线红：超过 20s）；A18 ingest profile 的 connect_args 和 NullPool 断言。
 - L-2：A19 格式错误的 URL（含假口令）rc=78，stderr 没有 `Traceback` 和口令；A20 Settings 校验失败时同样 rc=78 且不泄露。
@@ -3804,13 +3815,32 @@ admin:
 - A22 回归：tb90（含 [existing_temp] 新语义；夹具侧 patch `daily.live_budget_issue`，不改业务默认关闭）、T-T47、T41/T45/tb111–115 全部通过；A23 `-O` 全量；A24 每条用例断言假 transport 的调用计数（0 或预期值），并断言真实 `_https_get` 没有被调用。
 - A25、A26、A27 见上表。
 
+**T-A91 验收增删表（相对 T-A89 的 A1–A27，共 28 条 → 34 条）**：
+
+| 动作 | 编号 | 内容 |
+|---|---|---|
+| 拆 | A1 → **A1s**、**A1r** | **A1s 静态**：只测 api-contract §7.11.5①a 的 S1–S6 清单，每项至少 1 正例（基线/现状应报红的写法报红）＋1 负例（登记例外不报红）：S1 probes 冻结清单外新增 `.py`（含子目录、仅 `import probes.common` 的文件）即红、21 个非外呼探针含「麦蕊域名＋HTTP 导入」即红；S2 绝对/相对/别名/`import *`/任意 `.attr` 引用 `_https_get`、`HOST`、`_ISSUED_LEASES`、`_LEASE_LOCK_CONN` 或其他 egress 下划线名即红；S3 `http.client`/`from http import client`/`urllib.request`/`from urllib import request`/`urllib3`/`requests`/`httpx`/`aiohttp`/`socket`/`ssl` 在 egress 外即红，sources 的 urllib、workers/ingest 的 `socket.gethostname`、netguard 的 socket 不红；S4 麦蕊域名字面量；S5 app 内传 `transport=`/`"transport"` 键或调 `process(upstream=…)` 即红、daily_lists `:289` 测试缝不红；S6 app 内 `__import__`/`importlib`/`exec`/`eval`/`compile` 即红，probes/selfchecks 登记项（含 `p11_replay.py:49`）不红、登记外新增即红。**不得**再为清单外的动态写法加静态反例。**A1r 运行时**：每例在子进程中 `netguard.install()` 后执行，`unshare -n` 无网＋conftest 屏蔽 DNS；断言 `EgressBlocked`（被放行会表现为 `gaierror`/`OSError`，即判红）且审计日志无 URL/证书：① `importlib.import_module("app.ingest.egress")._https_get` 无窗口调用；② `getattr(egress, "_https_get")`；③ `__import__("requests")`＋拆开的域名 `"api."+"mairui"+"api.com"`；④ socket 直连公网 IP 字面量（文档地址 203.0.113.x）；⑤ urllib3 `PoolManager` 访问麦蕊域名；⑥ 持有 lease 但窗口外连接；⑦ lease 在 A 线程签发、B 线程进入窗口或连接；⑧ `subprocess.run(["curl", …])`、`os.system`、`os.posix_spawn`；⑨ `ctypes.CDLL("libc.so.6")`。正向：窗口内假解析（monkeypatch 的 getaddrinfo 返回 203.0.113.10）登记后连接被放行（在无网命名空间里得到 `OSError`，而非 `EgressBlocked`）；postgres/redis 私网地址与 AF_UNIX 不受影响；`main()` 第一行已安装（AST＋运行时 `sys.audit` 探测）；重复 `install()` 为 no-op |
+| 增 | A28 | **M-a**：持有一张真 lease 时，① 往 `_ISSUED_LEASES`/`_LEASE_LOCK_CONN` 塞假项（复制 nonce、伪造 conn 对象）；② 改 mac 或 thread_id 的 `dataclasses.replace` 副本；③ 另一线程使用真 lease；④ 锁会话已被 `pg_advisory_unlock` 但对象仍在（`pg_locks` 核验）→ 全部 `single_egress_not_held`，transport 0 次。反例夹具只在子进程运行并带 `# A28-negative` 标记（S2 例外） |
+| 增 | A29 | **M-b**：有 pending 且另一会话反复持有 `ip_limit` 锁 → 从进入 `mairui_get` 到 `core_denied` 墙钟 ≤3.0s（普通/`-O` 各 10 轮取最大值）；断言整次准入只开 1 条连接、只发 1 次 `pg_advisory_xact_lock`；锁空闲时 pending 在 SAVEPOINT 内写入并在外层提交后清除；黑洞库（只 accept 不应答）时准入 ≤3.0s 拒绝 |
+| 增 | A30 | **M-c**：① 102 后状态写库失败（触发器拒绝 UPDATE）→ 本调用 `core_denied`、HALT 文件存在且内容为 `licence_status_persist_failed`、transport 共 1 次；模拟重启（新 core、库仍 active）→ `halt_present`，transport 仍 1 次。② HALT 目录同时不可写 → 子进程退出码 74，stderr 只有固定文案。③ 停机目录不可写时 bootstrap 退出码 78，且未触碰任何已有 HALT 文件 |
+| 改 | A31（原 A22 内 t_t41 L9） | **L9 改为在 flush 上注错**：在 SAVEPOINT 的 `flush_pending_escalation` 处注入失败（不再按连接数 `_BudgetEngine(ok=1)` 注错）→ pending 保留、事件 0 行、`allows=False`；flush 成功时外层提交后 pending 才清除 |
+| 拆 | A32（原 A22 内 tb90 existing_temp 后半段） | existing_temp 后半段独立成例：改用**新交易日**触发第二次批次，不再用 owner 把 failed 改回 requested（生产不可达状态）；断言残留普通文件被替换为 0600 并清掉、非普通文件 `temp_path_not_regular` |
+| 保 | A2–A5、A6a、A6b、A7–A27 | 语义同 T-A89；A22 回归集合去掉已拆出的 L9 与 existing_temp 后半段（改由 A31/A32 承担）；A17 的 bootstrap 上限不变（connect_timeout 改 2 后只会更快） |
+
+修订后编号清单（34）：A1s、A1r、A2、A3、A4、A5、A6a、A6b、A7–A27（21 条）、A28、A29、A30、A31、A32。
+
 **6. 工作包（按权限边界；T-A89 后）**
 - 后端 T-B116b（只改 src，接本契约）：修 T-A88 的 B-1(a)(b)、B-2、B-3、L-a、L-c；实现 M-2（upsert/rehydrate 不降级终态、102 先写库、lease 不可伪造）；删 `wire`；rehydrate 前有界取锁 ≤3s 且每调用至多一轮；tb90 自检夹具改 setup（不改业务默认关闭 DAILY_HTTP_LIMIT）；去掉空断言。
 - 测试 T-T50/T-T51（只改 tests）：按上表把 A1 扩 4 反例、A6 拆 A6a/A6b、补 A25–A27；先在修前 tip 上证明红，再在 T-B116b 上证明绿；普通与 `-O`。
 - 运维 T-O67（只改 deploy/CI）：ci.yml 把新增目录和一次性 PG 服务纳入（沿用 ci-only 口令）；compose 不用改。如果要加 env 形式的超时参数，由后端先定键名。
+- **T-A91 工作包**：
+  - 后端 **T-B116d（只改 src）**：修 T-A90 B-2′ 的方式改为实现 api-contract §7.11.5①b（netguard、窗口、按 IP 建 TLS）并清理 app 内 S3/S6 违规（若有）；M-a（②）；M-b（④ 单事务 SAVEPOINT＋deadline，`connect_timeout` 3→2）；M-c（HALT＋74＋bootstrap 可写探测）；rehydrate 的 `SET LOCAL statement_timeout` 不再固定 5s。不改 tests、deploy。
+  - 测试 **T-T55（只改 tests/selfchecks）**：守卫重写为 A1s 的有限清单（删除逐轮堆叠的变体反例，改为 S1–S6 正负例）；A1r 子进程运行时用例；A28–A32；A22 回归集合调整。先在 41e517a 证明红，再在 T-B116d 上证明绿；普通与 `-O`。
+  - 运维 **T-O68（只改 deploy/CI；方案 B 纵深防御，不阻塞 T-B116d）**：compose 增 `internal: true` 网络与可出网网络，按逐服务核实的出网需求分配（预期 ingest、worker 可出网，nginx 边缘＋内部，其余仅内部）；CI 增检查：非登记服务不得接入可出网网络。不在 compose 内做域名放行。
 - 风控类，须异源复核：R12（本单整体）、R14 检查和锁的顺序及停机优先级、R15 L-1 超时上界与残余、R16 静态守卫白名单、**R17（M-2：证书状态以库为准、102/INVALID 后必拒、lease 不可伪造、状态写库失败 fail-closed）**；R7、R13 随之复核。
+- **T-A91 R 项**：**R15 更新**——由「L-1 超时上界与残余」扩为「准入墙钟 ≤3s 的超时对齐（connect_timeout 2、deadline 2.8s 驱动的 `SET LOCAL lock_timeout/statement_timeout`、单事务 SAVEPOINT）及残余：库冻结而内核照常 ACK、PG 主机名解析阻塞、进程自身长暂停时上限不成立，但准入未完成不放行」。**R16 更新**——由「静态守卫白名单」改为「静态层边界：S1–S6 清单是否完整且无误报、登记例外（sources urllib、workers/ingest `socket.gethostname`、netguard、probes/selfchecks 动态导入登记含 `p11_replay.py:49`）是否最小、①c 排除项是否都有运行时兜底」。**新增 R18**（M-a＋M-c）：lease HMAC/线程绑定/`pg_locks` 核验是否可绕、威胁模型边界表述是否诚实；状态写库失败同时写 HALT、退出码 74、启动可写探测与「双失败后重启至多再 1 次」残余是否可接受。**新增 R19**（运行时层）：审计钩子安装时机与不可卸载性、DNS/公网 IP 默认拒绝规则、放行窗口的线程绑定、子进程与 ctypes 拦截、C 扩展/libc 直调残余、方案 B 的网络划分（随 T-O68）。
 
-**未决**：① ip_limit 锁超时或库抖动按 T-A75 一律记为已升级，暂停 1h，代价偏大，是否改成短暂停，需要异源意见；② NullPool 加 `tcp_user_timeout` 防不住「库进程暂停但内核照常 ACK」时语句执行中途的挂起，A17 只覆盖建连阶段，残余风险记在 R15；③ 预算 `DAILY_HTTP_LIMIT` 何时放开、由谁批，不在本单范围。
+**未决**：① ip_limit 锁超时或库抖动按 T-A75 一律记为已升级，暂停 1h，代价偏大，是否改成短暂停，需要异源意见；② NullPool 加 `tcp_user_timeout` 防不住「库进程暂停但内核照常 ACK」时语句执行中途的挂起，A17 只覆盖建连阶段，残余风险记在 R15；③ 预算 `DAILY_HTTP_LIMIT` 何时放开、由谁批，不在本单范围。④（T-A91）运行时层的公网默认拒绝会同时挡住 ingest 未来其他合法公网出口（目前无），新增时须改 netguard 并经 R19；⑤ 若后端实测某依赖在钩子安装后需要 `ctypes.dlopen`，按库名登记，须 R19 同意；⑥ 方案 B 中 api、signal-rt、beat 是否确无出网需求（如 SMTP、外部回调），由运维 T-O68 逐一核实，核实前不改 compose。
 
 ### 关键路径
 T-O01 → T-O08 → T-B01 → T-B02 → T-B02a → **T-B04a（`ingest`）** → **T-B05（真实证书实测，与 T003 对账）** → T-B06 → T-B07 → T-B35 特征底座 → T-B09 → **T-B20a → T-B20b → T-B20c → T-B32 → T-B33 → T-B34**（与 T-B21 建议引擎、T-B31 风控、T-B36 交易规则并行汇合） → T-B24 盘后日报 →（T-B22 → T-B23 盘中）→ T-B26 通知 → T-B27 跟踪 → M2。T-B08/T-B18/T-B19 导入与 T-B30 分类并行（T-B30 完成前须先完成 T-R11 → T-B30a 分类器特征，挂在 T-B35 之后，v0.2.9 内裁定）；T-B25 LLM 网关独立并行（主线不依赖它，模板兜底）。前端全程按契约 mock 并行。

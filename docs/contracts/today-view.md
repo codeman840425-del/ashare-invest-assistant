@@ -41,8 +41,8 @@
 | S1 | 未导入持仓 | `/today.reconciliation.status` 为 not_imported，且 `focus.items` 中没有任何一行 `holding` 非空 | 还没有导入持仓，导入后才能生成你的日报。 | 按钮「导入交割单」，去向 /portfolio/import |
 | S2 | 已导入但无持仓 | reconciliation 不是 not_imported，且 `focus.items` 中没有任何一行 `holding` 非空 | 当前没有持仓，日报只覆盖你的自选。 | 无 |
 | S3 | 非交易日 | `session` 为 non_trading_day | 今天休市，没有新的日报。 | `trade_date` |
-| S4 | 盘后数据准备中 | 交易日；`daily_report.status` 为 not_yet 或 generating；北京时间在 15:00 到 18:30 之间（含收盘后的 closed 时段） | 盘后数据准备中，日报约 18:30 生成。 | 若已有 `focus` 行带候选信号，追加一句：「候选信号已更新。」 |
-| S5 | 日报逾时未生成 | 交易日；北京时间已过 18:45；`daily_report.status` 仍为 not_yet | 今日日报还没有生成，请稍后再看。 | 无 |
+| S4 | 盘后数据准备中 | 交易日；`daily_report.status` 为 not_yet 或 generating；北京时间 ≥ 15:00（含收盘后的 closed 时段），且不满足 S5（§7 ①，T-A142 修订） | 盘后数据准备中，日报约 17:30 生成。 | 若已有 `focus` 行带候选信号，追加一句：「候选信号已更新。」 |
+| S5 | 日报逾时未生成 | 交易日；北京时间已到 17:45（含）；`daily_report.status` 仍为 not_yet | 今日日报还没有生成，请稍后再看。 | 无 |
 | S6 | 日 K 未就绪 | 日报已生成，且 `gaps` 中有 key 为 `pipeline.daily_bars_not_ready` 的项 | 今日行情数据未就绪，本日报未做策略分析。 | 日报链接 |
 | S7 | 行情源未开通 | 日报 `gaps` 中有 key 为 `pipeline.owned_market_cache_adapter_missing` 的项 | 行情数据源尚未开通，本日报未做策略分析。 | 日报链接 |
 | S8 | 盘后分析无记录 | 日报 `gaps` 中有 key 为 `pipeline.analysis` 的项 | 今日盘后分析没有完成记录。 | 日报链接 |
@@ -106,13 +106,14 @@
 | 开盘前到 15:00 | — | 盘中现有展示；日报区显示「收盘后生成」 |
 | 15:00–17:15 | 等待日 K | S4 |
 | 17:15–17:30 | `daily_bars_fetch`（17:15 槽） | S4 |
-| 17:30–18:30 | analyze（17:30，截止时刻 17:30），候选信号可能已经更新 | S4，带「候选信号已更新」；这一段**不显示分析缺口**，因为它要等日报生成后才能读到 |
-| 18:30 起 | 日报生成（REPORT 18:30） | 读日报，按 S6–S8、A1/A2、R1/R2 与 §2.3 显示 |
-| 18:45 起仍未生成 | — | S5 |
+| 17:30 至日报就绪 | analyze（17:30，截止时刻 17:30），结束后立即生成日报（REPORT 紧跟 analyze，`daily-bars-source.md` §9.1） | S4；analyze 已写出候选信号而日报尚未就绪的短暂间隙里带「候选信号已更新」；**不显示分析缺口** |
+| 日报就绪起 | — | 读日报，按 S6–S8、A1/A2、R1/R2 与 §2.3 显示 |
+| 17:45 起仍为 not_yet | — | S5（generating 仍为 S4，§7 ①） |
 
 - 自选（T-A129 / 契约 Q4）：analyze 的范围是持仓 ∪ 本人有效自选；today 的「重点关注」是持仓 ∪ 重点关注（focus_codes）。
   - 自选里不在重点关注中的证券，它的缺口只在「数据缺口」区出现，不在「重点关注」表里出现。
   - 17:15 之后才加入的自选，当日通常会出现 daily_bars_missing 或 owned_source_security_missing，属正常现象，文案不变。
+  - T-A142：新加的持仓或自选会自动补 3 年历史（`daily-bars-source.md` §9.2），但开市日 17:00–17:45 加入的不补当日；补历史默认不出网（上限常量为 0），today 不为「待补」单独显示状态。
 
 ## 4. 前端验收（mock 直接测，G/W/T）
 
@@ -153,21 +154,22 @@
 ## 5. 后端最小改动
 
 **无。** 可选项（非本闭环，需用户确认后另开单）：
-- 让 `/today` 直接带出当日分析 issue 摘要，使 17:30–18:30 也能显示缺口；
+- ~~让 `/today` 直接带出当日分析 issue 摘要，使 17:30–18:30 也能显示缺口~~（T-A142：日报紧跟 analyze 生成，该时段不复存在，撤销此项）；
 - 把 `/today.alerts` 接到 `/alerts`（T-A127 第 4 项）。
 
 ## 6. 待用户确认（括号内为本契约的保守默认）
 
-- U1：17:30–18:30 是否需要提前显示分析缺口。（不提前显示，等 18:30 日报）
-- U2：S5 的逾时阈值。（18:45）
+- ~~U1：17:30–18:30 是否需要提前显示分析缺口。~~ 结案（T-A142）：用户定「日报提前到17:30」，该时段不复存在。
+- ~~U2：S5 的逾时阈值。~~ 结案（T-A142）：17:45，即 `REPORT_EXPECTED_AT` 17:30 加 15 分钟。
 - U3：缺口区是否显示证券名称。（显示代码和名称，与「重点关注」一致）
 
 ## 7. 补充裁定（T-A140，评审 fe/T-F34=549ecdf 后定）
 
 函数名均指 `pages/today/todayView` 中的同名导出，用例名见 `pages/t-f34.test.tsx`。
 
-**① S4 的时段。** S4 的判定改为：交易日；`daily_report.status` 为 not_yet 或 generating；北京时间 ≥ 15:00；并且不满足 S5。因此 18:30 到逾时阈值之间的 not_yet，以及逾时之后仍为 generating 的情况，都显示 S4。只有「已到逾时阈值且仍为 not_yet」才显示 S5。
-- Given 北京时间 18:40、not_yet / Then 显示 S4。
+**① S4 的时段。** S4 的判定改为：交易日；`daily_report.status` 为 not_yet 或 generating；北京时间 ≥ 15:00；并且不满足 S5。因此 17:30 到逾时阈值之间的 not_yet，以及逾时之后仍为 generating 的情况，都显示 S4。只有「已到逾时阈值且仍为 not_yet」才显示 S5。（T-A142：时刻由 18:30/18:45 改为 17:30/17:45。）
+- Given 北京时间 17:40、not_yet / Then 显示 S4。
+- Given 北京时间 18:40、not_yet / Then 显示 S5。
 - Given 北京时间 19:10、generating / Then 显示 S4，不显示 S5。
 
 **② S1、S3 不请求日报。** S1、S3 下即使 status 为 ready，也不请求 `/daily-reports/{date}`，因此不显示 A1/A2 和日报缺口（见 `reportDateToFetch`）。
@@ -205,9 +207,9 @@
 - Given 日报 gaps 含 `market` / Then 不显示。
 - Given `/today.data_gaps` 与日报 gaps 都含 cash / Then 「未录入现金」只出现一次。
 
-**⑧ 逾时阈值由常量推导。** 「日报约 HH:MM 生成」的时刻只由常量 `REPORT_EXPECTED_AT` 定义（当前为 18:30，U1 日报时刻若改，只改这一处）。逾时阈值为该常量加 15 分钟（`overdueAt`，`REPORT_OVERDUE_GRACE_MIN`），S4 的文案随常量变化（`s4Text`）。
-- Given 默认常量、北京时间 18:44 / Then S4；18:45 / Then S5。
-- Given 常量注入为 17:30 / Then 17:44 为 S4，17:45 为 S5，文案为「日报约 17:30 生成」。
+**⑧ 逾时阈值由常量推导。** 「日报约 HH:MM 生成」的时刻只由常量 `REPORT_EXPECTED_AT` 定义（T-A142 起为 17:30，用户原话「日报提前到17:30」）。逾时阈值为该常量加 15 分钟（`overdueAt`，`REPORT_OVERDUE_GRACE_MIN` 仍为 15），即 17:45。S4 的文案随常量变化（`s4Text`）。
+- Given 默认常量、北京时间 17:44 / Then S4，文案为「日报约 17:30 生成」；17:45 / Then S5（含边界）。
+- Given 常量注入为 18:30（反向验证推导，不是默认值）/ Then 18:44 为 S4，18:45 为 S5，文案为「日报约 18:30 生成」。
 
 **本节新增验收：** 共 12 条（①2、②1、③2、④2、⑤1、⑥1、⑦3），加上 ⑧ 的 2 条已在 t-f34 中实现。其中 ③ 的 15:00 前一条、④ 的 `f.pe` 一条、⑦ 的 user_input_missing 一条和 cash 去重一条，在 549ecdf 上尚未实现，由前端跟进。
 
@@ -239,3 +241,22 @@
 - 所以交易日看到的 ready 一定是**当天**的日报，比如提前或手工生成的；不会出现「前一交易日的日报被当成今天」。前一交易日的日报只会在休市日出现，而休市日是 S3，不请求日报，也不显示 R2。
 - Given 交易日北京时间 10:00、status 为 ready、日报 gaps 无 S6–S8、所有行无候选信号 / Then 显示 R2。
 - Given 休市日、status 为 ready / Then 显示 S3，不请求日报，不显示 R2。
+
+## 9. 日报时刻修订（T-A142）
+
+依据用户答卡 t809s2732「日报提前到17:30」。本节逐条核对 §2–§8 受影响的位置。
+
+- `REPORT_EXPECTED_AT` 改为 17:30，逾时阈值 17:45；`REPORT_OVERDUE_GRACE_MIN` 仍为 15，`overdueAt` 推导不变。S4 文案为「盘后数据准备中，日报约 17:30 生成。」
+- §2.1 S4、S5，§3 时序表，§5 可选项，§6 U1/U2，§7 ①、⑧：已按上文改写。
+- §7 ②–⑦：与时刻无关，不变。
+- §8 a–c：不变。§8 d（15:00 前日报若已 ready）：不变。核实依据仍是 `aggregates/calendar.market_clock` 与 `aggregates/service.today` 只查当天；日报提前不会让前一交易日的日报出现在交易日。
+- 新增注意：17:30 日报可能在取数未完成时生成，此时 gaps 带 `pipeline.daily_bars_not_ready`，显示 S6（文案不变）。17:30 之后才取到的标的不会在当天补进日报。
+- 风险（非阻断）：analyze 若超过 15 分钟仍未结束，17:45 起 status 仍为 not_yet 时会显示 S5。保持 15 分钟，由运维观测 analyze 耗时；若常态超过，再提议调整宽限，不在本单改。
+
+G/W/T（前端单，用例落在 `pages/t-f34.test.tsx`；测试单同步 `today-view.t-t74.test.tsx`）：
+- Given 交易日北京时间 17:29、not_yet / Then S4，文案含「日报约 17:30 生成」。
+- Given 17:40、not_yet、有候选信号 / Then S4 并带「候选信号已更新。」；日报请求数为 0。
+- Given 17:44、not_yet / Then S4；17:45、not_yet / Then S5；18:40、not_yet / Then S5。
+- Given 19:10、generating / Then S4。
+- Given 17:31、status 为 ready、gaps 含 `pipeline.daily_bars_not_ready` / Then S6。
+- Given 机器时区 America/Denver、server_time 2026-11-10T09:44:00Z（北京 17:44）/ Then S4；09:45:00Z / Then S5。

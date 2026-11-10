@@ -109,7 +109,7 @@ wrapup_log "修复后 halt 探测通过"
 
 # ---- 收据卷快照/恢复 ----
 wrapup_docker volume create o69_aia_receipts >/dev/null
-wrapup_docker run --rm --network none --user 0 -v o69_aia_receipts:/run/aia/receipts alpine:3.21 \
+wrapup_docker run --rm --network none --user 0 -v o69_aia_receipts:/run/aia/receipts alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
   sh -c 'install -d -o root -g root -m 0755 /run/aia/receipts
     echo "{\"kind\":\"fictional-receipt\"}" > /run/aia/receipts/probe.json
     chown root:root /run/aia/receipts/probe.json
@@ -140,7 +140,7 @@ fi
 # 卷快照里应有 receipts
 if [ -f "$bdir/aia_receipts.tgz" ]; then
   wrapup_docker volume create o69_aia_receipts_restored >/dev/null
-  wrapup_docker run --rm --network none -v o69_aia_receipts_restored:/v -v "$bdir:/in:ro" alpine:3.21 \
+  wrapup_docker run --rm --network none -v o69_aia_receipts_restored:/v -v "$bdir:/in:ro" alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
     sh -c 'tar -C /v -xzf /in/aia_receipts.tgz && test -f /v/probe.json'
   wrapup_log "收据卷快照恢复通过"
 else

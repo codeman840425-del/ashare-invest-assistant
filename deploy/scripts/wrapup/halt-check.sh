@@ -33,7 +33,7 @@ if ! wrapup_docker volume inspect "$vol" >/dev/null 2>&1; then
 fi
 
 stat_dir() {
-  wrapup_docker run --rm --network none --user 0 -v "$vol:/run/aia/state" alpine:3.21 \
+  wrapup_docker run --rm --network none --user 0 -v "$vol:/run/aia/state" alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
     sh -c 'if [ ! -d /run/aia/state/halt ]; then echo MISSING; exit 0; fi
       stat -c "uid=%u gid=%g mode=%a path=%n" /run/aia/state /run/aia/state/halt'
 }
@@ -41,7 +41,7 @@ stat_dir() {
 probe_as_user() {
   # 与产品相同：O_EXCL 创建 .probe-<pid> 再删除，不碰已有 HALT。不可写则本脚本退出 78。
   wrapup_docker run --rm --network none --user "${WRAPUP_STATE_UID}:${WRAPUP_STATE_UID}" \
-    -v "$vol:/run/aia/state" alpine:3.21 \
+    -v "$vol:/run/aia/state" alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
     sh -c 'd=/run/aia/state/halt
       if [ ! -d "$d" ]; then echo "停机标志目录不可写"; exit 78; fi
       p="$d/.probe-$$"
@@ -52,7 +52,7 @@ probe_as_user() {
 }
 
 repair() {
-  wrapup_docker run --rm --network none --user 0 -v "$vol:/run/aia/state" alpine:3.21 \
+  wrapup_docker run --rm --network none --user 0 -v "$vol:/run/aia/state" alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
     sh -c 'set -e
       install -d -o 10001 -g 10001 -m 700 /run/aia/state /run/aia/state/halt
       chown 10001:10001 /run/aia/state /run/aia/state/halt

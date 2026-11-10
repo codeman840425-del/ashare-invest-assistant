@@ -62,7 +62,10 @@ def test_formal_import_idempotence_generation_queries(
                     strategy_versions.c.id == uuid.UUID(row["version_id"])
                 )
             ).one()
-            assert version.version_no == 2
+            assert (
+                version.version_no
+                == {"hold_risk_monitor": 3, "sw_ma_trend_pullback": 2}[row["key"]]
+            )
             assert version.lifecycle == "draft"
             assert len(version.config["gates_missing"]) == 7
     assert [path.read_bytes() for path in files] == hashes
@@ -235,13 +238,13 @@ def test_formal_v2_real_gates_no_g7(integration: Any, tmp_path: Path) -> None:
             key = conn.execute(
                 select(strategies.c.key).where(strategies.c.id == version.strategy_id)
             ).scalar_one()
-            assert version.version_no == 2
+            assert version.version_no == {"hold_risk_monitor": 3, "sw_ma_trend_pullback": 2}[key]
             assert version.lifecycle == "draft"
             assert version.config["applicability_eval_source"] in {None, "f.market_regime_idx"}
         output.append(
             {
                 "key": key,
-                "version_no": 2,
+                "version_no": {"hold_risk_monitor": 3, "sw_ma_trend_pullback": 2}[key],
                 "verification_review_id_rolled_back": str(identifier),
                 "gates": {k: v["result"] for k, v in gate.items()},
                 "g2_issues": gate["G2"]["detail"]["issues"],

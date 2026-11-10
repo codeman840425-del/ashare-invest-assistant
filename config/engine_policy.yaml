@@ -1,5 +1,5 @@
 # T-A16 initial engine reference: content changes require a new version_no.
-version_no: 2
+version_no: 3
 confidence:
   weights:
     data_completeness: "0.5"
@@ -15,4 +15,4 @@ system_components:
   - {key: gate_tradability, version_no: 1}
   - {key: veto_risk_announcement, version_no: 1}
   - {key: ctx_market_regime, version_no: 1}
-  - {key: hold_risk_monitor, version_no: 2}
+  - {key: hold_risk_monitor, version_no: 3}

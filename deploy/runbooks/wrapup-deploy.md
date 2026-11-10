@@ -255,7 +255,9 @@ seed 成功后再只读复查：`app.engine_policies` 按 `version_no` 降序的
 
 ### 正式卡 v3 `--apply` 导入（待补）
 
-正式卡 v3 的 `--apply` 导入步骤**目前还没有**，此处标为「待补」，不要在本手册里用临时命令凑一套写入路径。实际入口是 `python -m app.cli.cards_import`（`--card` / `--catalog` / `--market-rules` 等；`--apply` 才写库，且从环境变量读 `DATABASE_URL`，缺则拒绝）。镜像不含 `docs/`，导入须另挂正式卡目录。**这一步导入须用户本人授权，不在 `standing-auth-2026-11-08.md` 范围内**；编排者不得在未获用户本人授权时下令 `--apply`。
+正式卡的 `--apply` 导入步骤**目前还没有**，此处标为「待补」，不要在本手册里用临时命令凑一套写入路径。实际入口是 `python -m app.cli.cards_import`（`--card` / `--catalog` / `--market-rules` 等；`--apply` 才写库，且从环境变量读 `DATABASE_URL`，缺则拒绝）。镜像不含 `docs/`，导入须另挂正式卡目录。**这一步导入须用户本人授权，不在 `standing-auth-2026-11-08.md` 范围内**；编排者不得在未获用户本人授权时下令 `--apply`。
+
+**S-01 升到 v2 之前，正式导入清单只能含 `hold_risk_monitor.md`（H-01）和 `sw_ma_trend_pullback.md`（W-01），不得列入 `st_pullback_ma.md`（S-01）。** 只读核对：`src/backend/app/strategy/cards/persistence.py` 在同卡同 `version_no` 且 `fields` 不等时抛 `ValueError("immutable_card_version_conflict")`（:118-120）；`cards_import.py` 的 `--apply` 在 `engine.begin()` 单事务里调用 `import_batch`（:64-71），一张卡冲突会让整批回滚。S-01 在 `version_no=1` 不变的情况下改过内容，再导会触发该冲突，H-01 v3 也会导不进。待研究员把 S-01 升到 v2 并完成导入后，再把 `st_pullback_ma.md` 加回清单。
 
 ### 部署后只读 SQL 验证清单
 

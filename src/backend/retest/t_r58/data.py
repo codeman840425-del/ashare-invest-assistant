@@ -19,7 +19,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
 
-from . import features, sim, splice
+from . import features, sessions, sim, splice
 from .errors import DataFormatError
 
 Summary = dict[str, Any]
@@ -42,15 +42,27 @@ def _date(value: str | date | None) -> date | None:
     return date.fromisoformat(str(value)[:10]) if value else None
 
 
-def calendar(meta_dir: str | Path, start: str | date, end: str | date) -> list[date]:
-    start, end = _date(start), _date(end)
-    return sorted(
-        {
-            _date(r["date"])
-            for r in _rows(Path(meta_dir) / "market_calendar.csv")
-            if r["is_trading_day"] == "True" and start <= _date(r["date"]) <= end
-        }
+def calendar(
+    meta_dir: str | Path,
+    start: str | date,
+    end: str | date,
+    *,
+    calendar_2026: str | Path,
+    index_dates: list[date],
+    expected_days: int | None = 1174,
+) -> list[date]:
+    beginning, ending = _date(start), _date(end)
+    if beginning is None or ending is None:
+        raise DataFormatError("calendar boundaries must be explicit")
+    days, _ = sessions.merged_calendar(
+        Path(meta_dir) / "market_calendar.csv",
+        Path(calendar_2026),
+        beginning,
+        ending,
+        index_dates,
+        expected_days=expected_days,
     )
+    return days
 
 
 def sha256(path: str | Path) -> str:
@@ -371,7 +383,32 @@ def day_kinds(
     return kinds, st, reasons
 
 
-def load_gbbq(tdx_dir: str | Path) -> dict[tuple[str, str], list[sim.Event]]:
+def _verified_archive(root_or_archive: str | Path, name: str, expected_sha256: str | None) -> Path:
+    root = Path(root_or_archive)
+    archive = root if root.suffix.lower() == ".zip" else root / f"{name}.zip"
+    if expected_sha256 is None:
+        evidence = json.loads(
+            (archive.parent / "T-B136-tdx-manifest.json").read_text(encoding="utf-8")
+        )
+        expected_sha256 = evidence[name]["sha256"]
+    if sha256(archive) != expected_sha256:
+        raise DataFormatError(f"{name}: verified archive SHA changed")
+    return archive
+
+
+def load_gbbq(
+    tdx_dir: str | Path,
+    *,
+    expected_sha256: str | None = None,
+) -> dict[tuple[str, str], list[sim.Event]]:
+    archive = _verified_archive(tdx_dir, "gbbq", expected_sha256)
+    with zipfile.ZipFile(archive) as z:
+        content = z.read("gbbq")
+    if len(content) < 4:
+        raise DataFormatError("§2.4 gbbq header truncated")
+    (count,) = struct.unpack_from("<I", content)
+    if count == 0:
+        return {}
     # §2.4：仅借用公开格式表常量，逐块解码；代码字段按 GBK。
     from pytdx.reader.gbbq_reader import GbbqReader
 
@@ -379,9 +416,6 @@ def load_gbbq(tdx_dir: str | Path) -> dict[tuple[str, str], list[sim.Event]]:
         "<" + "I" * (len(bytes.fromhex(GbbqReader.hexdump_keys)) // 4),
         bytes.fromhex(GbbqReader.hexdump_keys),
     )
-    with zipfile.ZipFile(Path(tdx_dir) / "gbbq_20261110.zip") as z:
-        content = z.read("gbbq")
-    (count,) = struct.unpack_from("<I", content)
     if len(content) < 4 + count * 29:
         raise DataFormatError("§2.4 gbbq 文件截断")
     result = defaultdict(list)
@@ -447,12 +481,15 @@ def _day_records(
     }
 
 
-def load_index_close(tdx_dir: str | Path, symbol: str = "sh000300") -> dict[date, float]:
+def load_index_close(
+    tdx_dir: str | Path,
+    symbol: str = "sh000300",
+    *,
+    expected_sha256: str | None = None,
+) -> dict[date, float]:
+    archive = _verified_archive(tdx_dir, "hsjday", expected_sha256)
     return {
-        d: row[0]
-        for d, row in _day_records(
-            Path(tdx_dir) / "hsjday_20261110.zip", symbol[:2], symbol[2:], required=True
-        ).items()
+        d: row[0] for d, row in _day_records(archive, symbol[:2], symbol[2:], required=True).items()
     }
 
 

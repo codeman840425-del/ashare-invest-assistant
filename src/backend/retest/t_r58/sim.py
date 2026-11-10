@@ -44,6 +44,7 @@ class Segment:
     name: str
     start: date
     end: date
+    embargo: bool = True
 
 
 @dataclass
@@ -128,22 +129,25 @@ class Market:
         self.board = rules.board(stock.exchange, stock.symbol)
         self.days = [
             features.day_features(
-                *bars, volume_quantum=100 if stock.dates[d] >= date(2026, 4, 13) else 0,
+                *bars,
+                volume_quantum=100 if stock.dates[d] >= date(2026, 4, 13) else 0,
             )
             for d, bars in enumerate(
                 zip(stock.o, stock.h, stock.l, stock.c, stock.v, stock.a, strict=True)
             )
         ]
-        self.traded = np.array([
-            bool(np.any(day["valid"] & (stock.v[d] > 0)))
-            and stock.day_kind[d] != SUSPENDED
-            for d, day in enumerate(self.days)
-        ])
+        self.traded = np.array(
+            [
+                bool(np.any(day["valid"] & (stock.v[d] > 0))) and stock.day_kind[d] != SUSPENDED
+                for d, day in enumerate(self.days)
+            ]
+        )
         self.v5, self.adv, self.adv_cnt = features.lookbacks(
             stock.dates,
             np.array([day["cumvol"][-1] for day in self.days]),
             np.array([day["cumamt"][-1] for day in self.days]),
-            self.traded, stock.events,
+            self.traded,
+            stock.events,
         )
         self.pc = np.full(len(stock.dates), np.nan)
         self.limits: list[tuple[float, float]] = []
@@ -177,7 +181,8 @@ class Market:
     def vr(self, d: int, t: int) -> Decimal | None:
         return features.vr_rounded(
             float(self.days[d]["cumvol"][t]),
-            features.minutes_elapsed(features.SLOT_END[t]), float(self.v5[d]),
+            features.minutes_elapsed(features.SLOT_END[t]),
+            float(self.v5[d]),
         )
 
     def can_fill(self, d: int, f: int, q: int, buy: bool) -> bool:
@@ -195,45 +200,93 @@ class Market:
         limit = self.limits[d][0 if buy else 1]
         return rules.round_tick(float(s.o[d, f])) != limit
 
+    def fill_slot(self, d: int, after: int, q: int, buy: bool, ordinal: int) -> int:
+        """§5 延迟敏感性：数可成交根数，不能把空根算作第2根。"""
+        if ordinal < 1:
+            raise ValueError("fill ordinal must be positive")
+        for slot in range(after + 1, len(features.SLOT_END)):
+            if self.can_fill(d, slot, q, buy):
+                ordinal -= 1
+                if ordinal == 0:
+                    return slot
+        return len(features.SLOT_END)
+
     def entry(self, segment: Segment, d: int, t: int, direction: str) -> Leg:
         s, p = self.stock, self.params
         q = rules.lot_floor(self.board, p.notional, float(s.c[d, t]))
         planned = q * float(s.c[d, t])
         participation = (
             float(planned / self.adv[d] * 100)
-            if self.adv_cnt[d] >= 5 and not np.isnan(self.adv[d]) else None
+            if self.adv_cnt[d] >= 5 and not np.isnan(self.adv[d])
+            else None
         )
-        f = t + p.fill_delay
+        # 主跑下一根无法入场则放弃；第2根可成交bar的敏感性另按成交资格计数。
+        f = (
+            t + 1
+            if p.fill_delay == 1
+            else self.fill_slot(d, t, q, direction == "buy_first", p.fill_delay)
+        )
         price = float(s.o[d, f]) if 0 <= f < len(features.SLOT_END) else float("nan")
         return Leg(
-            symbol=s.symbol, segment=segment.name, entry_day=d, direction=direction,
-            trigger_slot=t, entry_slot=f, entry_price=price,
-            exit_trigger_day=d, exit_trigger_slot=t, exit_day=None, exit_slot=None,
-            exit_price=None, reason="deferred", q=q, notional=p.notional,
-            planned_amount=planned, participation_pct=participation,
-            impact_bp_frozen=rules.impact_bp(participation), theta=self.theta(d, t),
-            sigma=float(self.days[d]["sigma"][t]), dev=float(self.days[d]["dev"][t]),
-            vr=self.vr(d, t), commission=0.0, stamp=0.0, transfer=0.0, slippage=0.0,
-            impact=0.0, pnl_yuan=0.0, pnl_bp=0.0, cons_pnl_yuan=0.0, cons_pnl_bp=0.0,
-            cons_mark_price=None, prior_anomaly=bool(np.any(~self.days[d]["valid"][:t])),
+            symbol=s.symbol,
+            segment=segment.name,
+            entry_day=d,
+            direction=direction,
+            trigger_slot=t,
+            entry_slot=f,
+            entry_price=price,
+            exit_trigger_day=d,
+            exit_trigger_slot=t,
+            exit_day=None,
+            exit_slot=None,
+            exit_price=None,
+            reason="deferred",
+            q=q,
+            notional=p.notional,
+            planned_amount=planned,
+            participation_pct=participation,
+            impact_bp_frozen=rules.impact_bp(participation),
+            theta=self.theta(d, t),
+            sigma=float(self.days[d]["sigma"][t]),
+            dev=float(self.days[d]["dev"][t]),
+            vr=self.vr(d, t),
+            commission=0.0,
+            stamp=0.0,
+            transfer=0.0,
+            slippage=0.0,
+            impact=0.0,
+            pnl_yuan=0.0,
+            pnl_bp=0.0,
+            cons_pnl_yuan=0.0,
+            cons_pnl_bp=0.0,
+            cons_mark_price=None,
+            prior_anomaly=bool(np.any(~self.days[d]["valid"][:t])),
             exec_anomaly=not bool(self.days[d]["valid"][f]) if 0 <= f < 240 else False,
-            hold_bars=None, board=self.board,
+            hold_bars=None,
+            board=self.board,
         )
 
 
 def _costs(
-    amount: float, day: date, buy: bool, rate: float, impact: int,
+    amount: float,
+    day: date,
+    buy: bool,
+    rate: float,
+    impact: int,
 ) -> tuple[float, float, float, float, float]:
     # §6：仅卖出收印花税，每笔按实际额计费。
     return (
-        rules.commission(amount, rate), 0.0 if buy else rules.stamp_duty_rate(day) * amount,
-        rules.TRANSFER_RATE * amount, rules.SLIPPAGE_BP / 1e4 * amount,
+        rules.commission(amount, rate),
+        0.0 if buy else rules.stamp_duty_rate(day) * amount,
+        rules.TRANSFER_RATE * amount,
+        rules.SLIPPAGE_BP / 1e4 * amount,
         impact / 1e4 * amount,
     )
 
 
 def _settle(m: Market, leg: Leg, d: int, f: int, reason: str) -> None:
-    _mae(m, leg, d, f)
+    # 了结发生在开盘，该bar收盘已在持有期之外。
+    _mae(m, leg, d, f - 1)
     price = float(m.stock.o[d, f])
     leg.exit_day, leg.exit_slot, leg.exit_price, leg.reason = d, f, price, reason
     leg.exec_anomaly |= not bool(m.days[d]["valid"][f])
@@ -242,20 +295,29 @@ def _settle(m: Market, leg: Leg, d: int, f: int, reason: str) -> None:
     leg.pnl_yuan = leg.cons_pnl_yuan = pnl
     leg.pnl_bp = leg.cons_pnl_bp = pnl / leg.notional * 1e4
     leg.cons_mark_price = price
-    if d == leg.entry_day:
-        leg.hold_bars = leg.exit_trigger_slot - leg.trigger_slot
+    leg.hold_bars = (d - leg.entry_day) * len(features.SLOT_END) + f - leg.entry_slot
 
 
 def _account(
-    m: Market, leg: Leg, price: float, exit_date: date,
+    m: Market,
+    leg: Leg,
+    price: float,
+    exit_date: date,
 ) -> tuple[tuple[float, ...], float]:
     buy_entry = leg.direction == "buy_first"
     entry_cost = _costs(
-        leg.entry_price * leg.q, m.stock.dates[leg.entry_day], buy_entry,
-        m.params.commission_rate, leg.impact_bp_frozen,
+        leg.entry_price * leg.q,
+        m.stock.dates[leg.entry_day],
+        buy_entry,
+        m.params.commission_rate,
+        leg.impact_bp_frozen,
     )
     exit_cost = _costs(
-        price * leg.q, exit_date, not buy_entry, m.params.commission_rate, leg.impact_bp_frozen,
+        price * leg.q,
+        exit_date,
+        not buy_entry,
+        m.params.commission_rate,
+        leg.impact_bp_frozen,
     )
     costs = tuple(a + b for a, b in zip(entry_cost, exit_cost, strict=True))
     gross = (price - leg.entry_price) * leg.q * (1 if buy_entry else -1)
@@ -284,25 +346,35 @@ def _mae(m: Market, leg: Leg, last_day: int, last_slot: int) -> None:
         valid = m.days[d]["valid"][start:end]
         close = m.stock.c[d, start:end][valid]
         if close.size:
-            adverse = (leg.entry_price - float(close.max()) if leg.direction == "sell_first"
-                       else float(close.min()) - leg.entry_price)
+            adverse = (
+                leg.entry_price - float(close.max())
+                if leg.direction == "sell_first"
+                else float(close.min()) - leg.entry_price
+            )
             leg.mae_bp = min(leg.mae_bp, adverse * leg.q / leg.notional * 1e4)
 
 
 def _resolve(
-    m: Market, leg: Leg, segment: Segment, *, random: bool = False, h: int | None = None,
+    m: Market,
+    leg: Leg,
+    segment: Segment,
+    *,
+    random: bool = False,
+    h: int | None = None,
 ) -> int:
     """§4、§7.2：返回占用到的最后日索引，顺延了结日也不得重开。"""
     s, p = m.stock, m.params
     d = leg.entry_day
     reason = "deferred"
+    boundary_reason = "unvaluable_embargo" if segment.embargo else "unvaluable_end"
+    remaining = p.fill_delay
     for t in range(leg.entry_slot, len(features.SLOT_END)):
         if not m.days[d]["valid"][t]:
             continue
         leg.exit_trigger_slot = t
         dev, theta = float(m.days[d]["dev"][t]), m.theta(d, t)
         if random:
-            if h is not None and t >= leg.trigger_slot + h:
+            if h is not None and t >= leg.entry_slot + h - 1:
                 reason = "revert"
         elif abs(dev) <= p.revert_band * theta:
             reason = "revert"
@@ -313,15 +385,17 @@ def _resolve(
         if reason != "deferred":
             for f in range(t + 1, len(features.SLOT_END)):
                 if m.can_fill(d, f, leg.q, leg.direction == "sell_first"):
-                    _settle(m, leg, d, f, reason)
-                    return d
+                    remaining -= 1
+                    if remaining == 0:
+                        _settle(m, leg, d, f, reason)
+                        return d
             break
     if s.dates[d] >= segment.end:
-        _unvaluable(m, leg, "unvaluable_embargo", d)
+        _unvaluable(m, leg, boundary_reason, d)
         return d
     for d in range(leg.entry_day + 1, len(s.dates)):
         if s.dates[d] > segment.end:
-            _unvaluable(m, leg, "unvaluable_embargo", d - 1)
+            _unvaluable(m, leg, boundary_reason, d - 1)
             return d - 1
         # §2.4、§4：跨除权立即阻断，包括停牌期间的事件。
         crossed = [e.ex_date for e in s.events if s.dates[leg.entry_day] < e.ex_date <= s.dates[d]]
@@ -331,16 +405,19 @@ def _resolve(
                 last_day -= 1
             _unvaluable(m, leg, "unvaluable_exdate", last_day)
             return d
-        if s.day_kind[d] != SUSPENDED and m.traded[d]:
-            if s.day_kind[d] == EXCLUDED:
-                _unvaluable(m, leg, "unvaluable_excluded", d - 1)
-                return d
+        if s.day_kind[d] == EXCLUDED:
+            _unvaluable(m, leg, "unvaluable_excluded", d - 1)
+            return d
+        if s.day_kind[d] != SUSPENDED:
+            # 不用全天valid/有成交统计决定早盘开盘能否成交；逐根判断。
             for f in range(len(features.SLOT_END)):
                 if m.can_fill(d, f, leg.q, leg.direction == "sell_first"):
-                    _settle(m, leg, d, f, "deferred")
-                    return d
+                    remaining -= 1
+                    if remaining == 0:
+                        _settle(m, leg, d, f, "deferred")
+                        return d
         if s.dates[d] == segment.end:
-            _unvaluable(m, leg, "unvaluable_embargo", d)
+            _unvaluable(m, leg, boundary_reason, d)
             return d
     last = len(s.dates) - 1
     _unvaluable(m, leg, "unvaluable_end", last)
@@ -348,8 +425,11 @@ def _resolve(
 
 
 def simulate(
-    stock: StockInput, params: Params, segments: list[Segment],
-    counters: dict[str, int] | None = None, market: Market | None = None,
+    stock: StockInput,
+    params: Params,
+    segments: list[Segment],
+    counters: dict[str, int] | None = None,
+    market: Market | None = None,
 ) -> list[Leg]:
     # 同一股票多组参数共用逐根特征（与参数无关），只换 params。
     m = market if market is not None else Market(stock, params)
@@ -360,10 +440,20 @@ def simulate(
     legs = []
     occupied_until = -1
     for d, current in enumerate(stock.dates):
-        segment = next((s for s in segments if s.start <= current < s.end), None)
+        segment = next(
+            (
+                s
+                for s in segments
+                if s.start <= current <= s.end and (not s.embargo or current < s.end)
+            ),
+            None,
+        )
         if (
-            d <= occupied_until or stock.day_kind[d] != OK or segment is None
-            or current < date(2023, 4, 10) or np.isnan(m.pc[d])
+            d <= occupied_until
+            or stock.day_kind[d] != OK
+            or segment is None
+            or current < date(2023, 4, 10)
+            or np.isnan(m.pc[d])
         ):
             continue
         confirm = dict.fromkeys(params.directions, 0)
@@ -415,8 +505,13 @@ def simulate(
 
 
 def simulate_random(
-    stock: StockInput, params: Params, segments: list[Segment], legs: list[Leg],
-    draws: int = 20, seed: int = 0, market: Market | None = None,
+    stock: StockInput,
+    params: Params,
+    segments: list[Segment],
+    legs: list[Leg],
+    draws: int = 20,
+    seed: int = 0,
+    market: Market | None = None,
 ) -> list[RLeg]:
     m = market if market is not None else Market(stock, params)
     m.params = params
@@ -428,19 +523,29 @@ def simulate_random(
         for t, hhmm in enumerate(features.SLOT_END):
             if params.entry_start <= hhmm <= params.entry_end and m.days[d]["valid"][t]:
                 q = rules.lot_floor(m.board, params.notional, float(stock.c[d, t]))
-                if q > 0 and m.can_fill(d, t + params.fill_delay, q, real.direction == "buy_first"):
+                f = (
+                    t + 1
+                    if params.fill_delay == 1
+                    else m.fill_slot(d, t, q, real.direction == "buy_first", params.fill_delay)
+                )
+                if q > 0 and m.can_fill(d, f, q, real.direction == "buy_first"):
                     candidates.append(t)
         bp, cons_bp = [], []
-        if candidates:
+        # 无法估值的真实腿没有实际持有时长，不能伪造h后改跑时间止损。
+        if candidates and real.hold_bars is not None:
             rng = np.random.default_rng([seed, index])
             for t in rng.choice(candidates, size=draws, replace=True):
                 leg = m.entry(segment, d, int(t), real.direction)
                 _resolve(m, leg, segment, random=True, h=real.hold_bars)
                 bp.append(leg.pnl_bp)
                 cons_bp.append(leg.cons_pnl_bp)
-        result.append(RLeg(
-            entry_day=d, direction=real.direction,
-            mean_bp=float(np.mean(bp)) if bp else float("nan"),
-            mean_cons_bp=float(np.mean(cons_bp)) if cons_bp else float("nan"), n_ok=len(bp),
-        ))
+        result.append(
+            RLeg(
+                entry_day=d,
+                direction=real.direction,
+                mean_bp=float(np.mean(bp)) if bp else float("nan"),
+                mean_cons_bp=float(np.mean(cons_bp)) if cons_bp else float("nan"),
+                n_ok=len(bp),
+            )
+        )
     return result

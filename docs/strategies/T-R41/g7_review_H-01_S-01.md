@@ -28,52 +28,52 @@
 **对象卡**：
 | card_id | 文件 | key | version_no | 说明 |
 |---|---|---|---|---|
-| H-01 | `docs/strategies/cards/hold_risk_monitor.md` | hold_risk_monitor | 2 | 纯离场系统组件（`mount_policy: system_only`） |
+| H-01 | `docs/strategies/cards/hold_risk_monitor.md` | hold_risk_monitor | 3（T-R49；v1/v2 冻结在 `cards/history/`） | 纯离场系统组件（`mount_policy: system_only`） |
 | S-01 | `docs/strategies/cards/st_pullback_ma.md` | st_pullback_ma | 1 | 短线候选信号卡（正式化自 T-R16 草稿） |
 
 **公共证据（本工作树当前 HEAD，代理本地跑通；非库内 promotion 报告）**：
 | 检查 | 命令/路径 | 结果（代理观测） |
 |---|---|---|
 | 格式+fixtures 虚构标 | `docs/strategies/golden/check_T-R15.py` | PASS（含 H-01 11 fixtures、S-01 10 fixtures；S01-FX9/FX10 为 T-R43 新增 C1/C2 正例） |
-| horizon census | `docs/strategies/P2N-R10/check_horizons.py` | PASS identity=43 / scope 见 R10；T-R42 另增非身份文件 |
-| 相关提交 | `fe2afa5`（T-R40 S-01 FX 标虚构）、`055105a`（T-R25 S-01 正式化）、`e3daf66`/`b752487`（H-01 v2/v1） | 仅文档史；**不是** G7 批准记录 |
+| horizon census | `docs/strategies/P2N-R10/check_horizons.py` | PASS identity=44（T-R49 起含 H-01 v2 冻结身份）/ scope 见 R10；T-R42 另增非身份文件 |
+| 相关提交 | `fe2afa5`（T-R40 S-01 FX 标虚构）、`055105a`（T-R25 S-01 正式化）、`e3daf66`/`b752487`（H-01 v2/v1）、`464edfc`（T-R49 H-01 v3） | 仅文档史；**不是** G7 批准记录 |
 
 ---
 
-## 1. H-01｜hold_risk_monitor v2 逐条核对
+## 1. H-01｜hold_risk_monitor v3 逐条核对（T-R41 按 v2 起稿；T-R50 全部 20 行按 v3 卡行号重核）
 
 | # | 核对主题 | 卡片原文（文件:行） | 规格/规则（文件:行） | 当前证据 | 代理初核 | 用户勾选 |
 |---|---|---|---|---|---|---|
-| H1 | 身份 key/version/card_id | hold_risk_monitor.md:31-36 `key`/`version_no:2`/`card_id:H-01` | strategy-spec:94-95 同 key/version | check_T-R15 key 一致检查；R10 正式身份 record | 一致 | ☐ |
-| H2 | 多周期 horizons | :35 `[intraday_t, short, swing, long]` | spec:97 同列表 | check_T-R15 horizons 枚举；R10 `explicit_multi` | 一致 | ☐ |
-| H3 | 纯离场 / 无开仓 | 文首:3 `mount_policy: system_only`；无 entry 列表 | spec:106-114 仅 exit/weakening/counter/invalidation；action_map 无 buy/add | check_T-R15 纯离场分支；文首自称 G1 豁免依据 | 一致 | ☐ |
-| H4 | 假设 hypothesis | card:39-43（v3：:40 why、:42-43 F1/F2；v2 原文见 `cards/history/hold_risk_monitor.v2.md:39-43`） | （叙述性；无独立 DSL） | T-R42 `hypothesis_structure_check.py` 结构 PASS（why/falsified_by/counter/invalidation 字段在）；T-R47 语义审核见 §1A：与规则对应、反证/失效、时点均满足，但证伪口径不全（:42「显著」无检验口径、:43「超额」无基准、W2/W3/X1 无证伪条件）→ 仍缺证据，缺什么见 §6；T-R48 出 v3 证伪口径差异稿 `T-R48/H-01_v3_falsification_diff.md`（未落卡，H4 仍按现行 v2 判定）；T-A111 :11确认 H4 仍缺证据并给 v3 最低要求；**T-R49 按 T-A112 落 v3**（`cards/hold_risk_monitor.md` version_no 3），按 v3 复审见 §1B：§1A d/e 缺口按 T-A112 §1.8 方案 B 与 P-1~P-7 消除 → 改「一致」，待架构师复核（T-A112 §3：落卡后 H4 仍须架构师再复核） | 一致（T-R49 按 v3，待架构师复核） | ☐ |
-| H5 | 维度 dimensions | card:44-46 technical + sector_market | 规则 dimension 字段 :106-113 | check_T-R15 dimension 枚举 | 一致 | ☐ |
-| H6 | 离场 exit X1/X2 | 正文:8；card exit:52-56 | spec:106-107 expr | check_T-R15 ref↔role；fixtures H01-FX3/FX4 | 一致 | ☐ |
-| H7 | 转弱 weakening W1–W3 | 正文:9；由 exit/weakening 角色体现 | spec:108-110 | W1：H01-FX2/FX6/FX10；W2：FX5；W3：FX9（正例；T-R43 按 T-A83 L-3 由 FX6 更正为 FX9） | 一致 | ☐ |
-| H8 | 反证 counter C1/C2 | card:47-49；正文:10 | spec:111-112 | fixtures H01-FX9；C1 用 `f.market_regime_idx` | 一致 | ☐ |
-| H9 | 失效 invalidation I1 | card:50-51 | spec:113 | fixtures H01-FX9 | 一致 | ☐ |
-| H10 | 参数 schema | — | spec:98-104 ma_long/ma_break_days/… | check_T-R15 param 类型/范围 | 一致 | ☐ |
-| H11 | 数据 data_needs | card:58-65 data_needs（含 qfq、limit、suspended、market_regime_idx 等；:66-73 为 epistemic，T-R43 更正范围） | 规则 required_features 引用同键 | check_T-R15 data_needs∈feature_spec catalog | 一致 | ☐ |
-| H12 | 标的 universe | card:74-77 持仓范围；北交所不含见 a_share | screen:null :118 | 文档层一致；**运行时挂载策略未在本报告核实**；须后端执行链用例，文档不能补（§6） | 缺证据 | ☐ |
-| H13 | A 股约束 | card:89；正文:17 T+1/涨跌停/零股 | fixtures FX4/FX6/FX7/FX10 | check_T-R15 reason_codes/lot_rule | 一致 | ☐ |
-| H14 | 成本滑点 | card:82-88；正文:20 离场不因成本放弃卖出 | validation 成本叙述；plan:1614 | T-R42 `cost_replay.py`+`cost_replay_cases.json` PASS（7【虚构】例：买卖/最低佣金/涨跌停锁/T+1/离场不因成本放弃；佣金费率卡上未钉 → 缺口已标）；T-A111 注：plan 成本行号已漂移，现 plan.md:1618 | 一致（架构师复核通过，T-A111 :4） | ☐ |
-| H15 | 验证/fixtures | validation 块 fixtures H01-FX1..11（:136+）均 `【虚构】` | expect state/action | check_T-R15 PASS（11 fixtures） | 一致 | ☐ |
-| H16 | 合规/禁用词文案 | 卡内无收益承诺句（代理目视） | G7 decision 另有 compliance_lint（契约 api-contract.md:953） | 服务端：`src/backend/app/strategy/reviews.py:317-324` COMPLIANCE_TERMS+`lint()`（NFKC 后匹配，命中 COMPLIANCE_LINT_FAILED :326），`decide()` :351 lint(comment)、:353 approved 时 lint(card_version.fields)（fields 含 narrative，`cards/persistence.py:110`）；拒绝用例 `src/backend/selfchecks/test_tb83b_reauth.py:246`（仅覆盖 comment 路径）。本地：T-R42 `compliance_lint_local.py` 全卡扫描 PASS（同词表；T-R43 起 `--mutate` 为真实植入，exit 1 且原因含卡与命中词）。词表仅 6 词（plan §8.1），card-fields 路径无专门服务端用例；T-A111 注：词表现 plan.md:3366（稿引 :3362 漂移），`decide()` approved lint 在 reviews.py:352-353 | 一致（架构师复核通过，T-A111 :5） | ☐ |
-| H17 | **horizon 多值风险** | horizons 四周期 :35 | 实例/跟踪若缺 horizon → gap（T-R35 README:89/97；T-A74 B2） | 后端定点用例 `test_tb113_h17_missing_horizon_is_gap_not_counted`（`tests/backend/unit/test_tb113_l1_l10_runner_h12_h17_t_t46.py:327-368`，分支 test/T-T46 = 28c3e7da5525e377280a62b609ed1ad7d419d2cc，T-R44 时尚未合入主线；T-R46 复核：已含于 origin/main = a7ce36285f7abd5fdf9ed5053a3bb51fba43a4b1）：H-01 四周期、`version_horizon=None`，一条已知 short 失败 + 一条 horizon=None 失败（horizon_days 同为 5）→ 断言 gaps 含 `sim_fail_horizon_unknown` 且 `metric.value == 1`，即缺 horizon 不按 5 日计入。被测 `src/backend/app/feedback/core.py:60-133` `simulated_failures`（:103-108 缺 horizon 记 gap 并跳过）；该文件在 be/T-B113 = 52d3bee3071fd0532123036f857aa66ad79569f4、c4e0e74 与本分支基线内容相同。T-R44 在临时只读 worktree 不连库亲跑通过，另做两处临时篡改（缺 horizon 默认 short；记 gap 后仍计入）均使该用例失败，已还原。**范围**：只覆盖 RC5 sim_fail 路径；发布资格 n/胜率按映射周期统计尚未实现（T-R35 B5 本期不做），实现时需另补用例。**T-R48 核实提交关系**：用例所在 28c3e7d（T-T46，2026-11-09 16:48 America/Denver）的父提交即 52d3bee3071fd0532123036f857aa66ad79569f4（T-B113「fix(ingest/signals): T-B113 L-1′/L-10/runner tick + H12/S12/H17 自测」，已含于 origin/main），52d3bee 新增同名后端自测 `src/backend/selfchecks/test_tb113_h17_horizon_gap.py`；被测 `feedback/core.py` 未被 52d3bee 修改，其 :103-108 逻辑最后改于 8219665（P2N-08 slice1，已含于 origin/main）。T-B112=810f89a 为 ingest L-6/7/8，不是 H17 证据（T-A111 :6）。T-A111 裁定发布资格 n/胜率未实现不构成本关缺证 | 一致（架构师复核通过，T-A111 :6；范围仅 RC5） | ☐ |
-| H18 | null/gap / insufficient_data | 正文:16 预热不足 `passed=null`；FX8 limit null | fixtures H01-FX8 | 后端正式用例 `test_h18_h01_fx8_null_propagates_to_insufficient_data`（`tests/backend/unit/test_h18_null_propagation_h01_t_t48.py:69-95`，test/T-T48 = bec16804ec221af2431fc4a9acfcbacd731699ec；**已含于 origin/main = a7ce36285f7abd5fdf9ed5053a3bb51fba43a4b1**，本地 main 分支 d32a3f6 未更新）：读本卡 validation 块 H01-FX8【虚构】夹具（:30-45 经 preflight 解析本文件；:74-76 断言 limit 价 null、close 序列 3 根 <62），经 `_run`（:48-66）以夹具 features/series/holding/ctx 调生产 `src/backend/app/strategy/cards/fixtures.py:48` `calculate`（:79-83 `Interpreter(...).evaluate`；:84-101 null 记 essential_unknown；:119-120 system_only 持仓→`insufficient_data`；:157-160 limit null 不记 LIMIT_LOCKED）→ `dsl.py:243-254` `Interpreter.evaluate`（:247 null→None 不转 bool；:190 预热不足取 None；:230-231 比较含 None→None；:209-210/:253-254 窗口/布尔传播 None）；断言 state=insufficient_data、action=hold、rule_ids_passed=[]、无 passed=True、至少一条 passed=None、无 LIMIT_LOCKED，并与夹具 expect 一致（:81-95）。实测规则轨迹 X2/W1/C2/I1=None、W2/W3/C1=False。fixtures.py/dsl.py/preflight.py、本卡、feature_spec.md、config/market_rules.yaml 在 bec1680、origin/main 与本分支基线 blob 相同。T-R46 在临时只读 worktree（bec1680）以 `env -i` 不连库、无凭据亲跑 2 passed；临时篡改 dsl.py:190 预热不足取 0、:231 比较含 null 返回 False、fixtures.py:119 去掉 insufficient_data 分支，三处均使该用例 FAIL（rule_ids_passed=['C2','I1'] 或 state=hold_ok），还原后 PASS，worktree 已删。**缺口**：该链未经 `prepare()`（`features/pipeline.py:125`，实盘取数预处理路径未覆盖；生产入口 `features/evaluation.py:133` prepare→:143 RuleEvaluator→calculate）；用例未逐条钉 X2 等每条规则 passed=None，单独把 :247（非窗口）或 :253（窗口）null 改 False 时因其余规则仍为 null 而结果不变、用例仍 PASS，两者同改才 FAIL。T-R42 `null_propagation_replay.py` 仍**不构成 H18 证据**（不读夹具行情，T-A83 B-1）。**T-A111 后更新**：T-T49=bfa2bbe07b196278d07799965d1ecb0f63dbc271（已含于 origin/main）已补逐条 `passed is None` 断言（同文件 :85）与 null→False/null→0 篡改自证用例（:107、:127），上文「未逐条钉 X2 等」缺口已由其关闭；正式断言现位于 :75-104（上文 :69-95 为 T-T48 时行号）。架构师裁定：`pipeline.py:125` prepare 保留 None、不把 null 填 0，**本关不要求再补 prepare() 路径**；残留：实盘取数无端到端用例 | 一致（架构师复核通过，T-A111 :7） | ☐ |
-| H19 | 不可执行原因码 | FX4 T1_NOT_SELLABLE；FX7 LIMIT_LOCKED；FX10 SUSPENDED | expect.reason_codes | check_T-R15 与 api-contract 原因码表交叉 | 一致 | ☐ |
-| H20 | 选股/入场 | **无**（纯离场，设计如此） | action_map 无 buy | check_T-R15 允许 exitonly | 一致 | ☐ |
+| H1 | 身份 key/version/card_id | hold_risk_monitor.md:31 `key`、:32 `version_no: 3`、:36 `card_id: H-01`（v3） | strategy-spec:94-95 同 key、`version_no: 3` | check_T-R15 key 一致检查；R10 正式身份 record；**T-R50（按 v3 重核）**：卡↔规格自洽（3/3）；本地对 origin/main=e44311a018270d4db2c111ca04015ff3b86c10a8 叠 v3 卡跑生产 `preflight` 无错，card/spec version_no 均 3；R10 当前身份为 `hold_risk_monitor@3`（v1/v2 冻结在 history）。**但 v3 尚未落到后端**：`config/engine_policy.yaml:18` 仍钉 `{key: hold_risk_monitor, version_no: 2}`；`src/backend/selfchecks/test_tb71_import.py:65` 对导入的 H-01/W-01 断言 `version_no == 2`（需隔离 PG，本地 skip），v3 导入后该断言会失败。原证据 check_T-R15 只查 key、不查 version_no，version_no 一致由 preflight 与 R10 引文（:32）佐证。engine_policy 同步 2→3 与导入用例更新是后端导入 v3 时的待办（T-A115 :8，不在 docs/strategies），不属本行「卡↔规格」核对，故不改状态；若编排者要求以导入侧落地为准，本行应改缺证据 | 一致（卡↔规格；后端导入侧仍为 v2，T-A115 :8 待办） | ☐ |
+| H2 | 多周期 horizons | :35 `[intraday_t, short, swing, long]`（v3 未变） | spec:97 同列表 | check_T-R15 horizons 枚举；R10 `explicit_multi`；**T-R50（按 v3 重核）**：行号不变；v3 F1/F2 的 h∈{1,5,20} 按 RC5 口径 B 映射、缺 horizon 记 gap（:42、:133），与四周期一致，结论不变 | 一致 | ☐ |
+| H3 | 纯离场 / 无开仓 | 文首:3、:37 `mount_policy: system_only`；无 entry 列表 | spec:106-113 仅 exit/weakening/counter/invalidation；:114 action_map 无 buy/add | check_T-R15 纯离场分支；文首自称 G1 豁免依据；**T-R50（按 v3 重核）**：v3 删去 why 中「只给出风险方向」，改为风险提示 + 组合风险限额（:40），仍无开仓主张，结论不变 | 一致 | ☐ |
+| H4 | 假设 hypothesis | v3：card:39-43（:40 why、:42-43 F1/F2）、:123-126 v3 变更、:128-151 证伪口径、:153-158 gaps；v2 原文见 `cards/history/hold_risk_monitor.v2.md:39-43` | （叙述性；无独立 DSL） | T-R42 `hypothesis_structure_check.py` 结构 PASS（why/falsified_by/counter/invalidation 字段在）；T-R47 语义审核见 §1A：与规则对应、反证/失效、时点均满足，但证伪口径不全（:42「显著」无检验口径、:43「超额」无基准、W2/W3/X1 无证伪条件）→ 仍缺证据，缺什么见 §6；T-R48 出 v3 证伪口径差异稿 `T-R48/H-01_v3_falsification_diff.md`（未落卡，H4 仍按现行 v2 判定）；T-A111 :11确认 H4 仍缺证据并给 v3 最低要求；**T-R49 按 T-A112 落 v3**（`cards/hold_risk_monitor.md` version_no 3），按 v3 复审见 §1B：§1A d/e 缺口按 T-A112 §1.8 方案 B 与 P-1~P-7 消除 → 改「一致」，T-A112 §3 要求的落卡后架构师再复核已由 T-A115 :3 完成（确认一致）；**T-R50（按 v3 重核）**：只更新行号；架构师 T-A115 :3 复核「H4 结论：确认一致」（按 v3 卡 :40、:23、:42-43、:154、:155），T-R50 据此改「架构师复核通过」 | 一致（架构师复核通过，T-A115 :3） | ☐ |
+| H5 | 维度 dimensions | card:44-46 technical + sector_market | 规则 dimension 字段 :106-113 | check_T-R15 dimension 枚举；**T-R50（按 v3 重核）**：行号不变（:44-46、:106-113），结论不变 | 一致 | ☐ |
+| H6 | 离场 exit X1/X2 | 正文:8；card exit :52-54（X1 :53、X2 :54） | spec:106-107 expr | check_T-R15 ref↔role；fixtures H01-FX3/FX4；**T-R50（按 v3 重核）**：X1/X2 规则与夹具 H01-FX3 :270、FX4 :320 未变；v3 F1 只检验 X2（:42、:140-145），不改离场规则，结论不变 | 一致 | ☐ |
+| H7 | 转弱 weakening W1–W3 | 正文:9；card exit 列表 :55-57（W1–W3） | spec:108-110 | W1：H01-FX2/FX6/FX10；W2：FX5；W3：FX9（正例；T-R43 按 T-A83 L-3 由 FX6 更正为 FX9）；**T-R50（按 v3 重核）**：夹具行：FX2 :220、FX5 :375、FX6 :425、FX9 :564、FX10 :614，内容未变；v3 只把 W2/W3 定为组合风险限额、不作可检验主张（:23、:40），规则不变，结论不变 | 一致 | ☐ |
+| H8 | 反证 counter C1/C2 | card:47-49；正文:10 | spec:111-112 | fixtures H01-FX9；C1 用 `f.market_regime_idx`；**T-R50（按 v3 重核）**：行号不变（card:47-49、正文:10、spec:111-112；FX9 :564），结论不变 | 一致 | ☐ |
+| H9 | 失效 invalidation I1 | card:50-51 | spec:113 | fixtures H01-FX9；**T-R50（按 v3 重核）**：行号不变（card:50-51、spec:113；FX9 :564），结论不变 | 一致 | ☐ |
+| H10 | 参数 schema | — | spec:98-104 ma_long/ma_break_days/… | check_T-R15 param 类型/范围；**T-R50（按 v3 重核）**：spec:98-104 不变，结论不变 | 一致 | ☐ |
+| H11 | 数据 data_needs | card:58-65 data_needs（含 qfq、limit、suspended、market_regime_idx 等；:66-73 为 epistemic，T-R43 更正范围） | 规则 required_features 引用同键 | check_T-R15 data_needs∈feature_spec catalog；**T-R50（按 v3 重核）**：行号不变（:58-65；:66-73 epistemic）。v3 证伪口径 :143 用 `f.amount` 算冲击档，属研究侧模拟跟踪，不是规则输入，所以不进 data_needs；结论不变 | 一致 | ☐ |
+| H12 | 标的 universe | card:74-77 持仓范围；北交所不含见 a_share | screen:null :118 | 文档层一致；**运行时挂载策略未在本报告核实**；须后端执行链用例，文档不能补（§6）；**T-R50（按 v3 重核）**：行号不变（:74-77、spec:118），结论不变。线索：origin/main 已有 `src/backend/selfchecks/test_tb113_h12_s12_screen.py:20`（`screen_membership` 合成 universe），未用本卡 universe、未经执行链；是否足以补证由架构师定 | 缺证据 | ☐ |
+| H13 | A 股约束 | card:89；正文:17 T+1/涨跌停/零股 | fixtures FX4/FX6/FX7/FX10 | check_T-R15 reason_codes/lot_rule；**T-R50（按 v3 重核）**：行号不变（:89、正文:17）；夹具 FX4 :320、FX6 :425、FX7 :476、FX10 :614，结论不变 | 一致 | ☐ |
+| H14 | 成本滑点 | card:82-88；正文:20 离场不因成本放弃卖出 | validation 成本叙述；plan:1614 | T-R42 `cost_replay.py`+`cost_replay_cases.json` PASS（7【虚构】例：买卖/最低佣金/涨跌停锁/T+1/离场不因成本放弃；佣金费率卡上未钉 → 缺口已标）；T-A111 注：plan 成本行号已漂移，现 plan.md:1618；**T-R50（按 v3 重核）**：卡面依据（正文:20、costs :82-88）在 v3 未变，T-A111 :4 复核依据仍成立；`cost_replay.py` 对 v3 PASS。v3 新增 :143 效应门槛 δ 引用同一组成本项、佣金费率未钉记 gaps G4（:157），这部分不在 T-A111 复核范围 | 一致（架构师复核通过，T-A111 :4） | ☐ |
+| H15 | 验证/fixtures | validation 块 :160 起，fixtures :172 起，H01-FX1..11 在 :174/:220/:270/:320/:375/:425/:476/:529/:564/:614/:668，desc 均 `【虚构】` | expect state/action | check_T-R15 PASS（11 fixtures）；**T-R50（按 v3 重核）**：check_T-R15 对 v3 PASS；本地对 e44311a 叠 v3 卡，生产 `preflight` 读出 11 例、全部【虚构】，`selfchecks/test_tb71_formal.py::test_all_golden_independently` 26 例全过（H-01 11 + W-01 15）；夹具与期望值与 v2 相同（gen_T-R15 重跑无变化），结论不变 | 一致 | ☐ |
+| H16 | 合规/禁用词文案 | 卡内无收益承诺句（代理目视） | G7 decision 另有 compliance_lint（契约 api-contract.md:953） | 服务端：`src/backend/app/strategy/reviews.py:317-324` COMPLIANCE_TERMS+`lint()`（NFKC 后匹配，命中 COMPLIANCE_LINT_FAILED :326），`decide()` :351 lint(comment)、:353 approved 时 lint(card_version.fields)（fields 含 narrative，`cards/persistence.py:110`）；拒绝用例 `src/backend/selfchecks/test_tb83b_reauth.py:246`（仅覆盖 comment 路径）。本地：T-R42 `compliance_lint_local.py` 全卡扫描 PASS（同词表；T-R43 起 `--mutate` 为真实植入，exit 1 且原因含卡与命中词）。词表仅 6 词（plan §8.1），card-fields 路径无专门服务端用例；T-A111 注：词表现 plan.md:3366（稿引 :3362 漂移），`decide()` approved lint 在 reviews.py:352-353；**T-R50（按 v3 重核）**：v3 卡面文本已变（:1、:23、:40、:42-43、新增 :123-158）。本地对 e44311a 叠 v3 卡，调生产 `reviews.lint`（:320）检查全文与 preflight 三块，均未命中，植入「稳赚」会报错；`compliance_lint_local.py` 对 v3 PASS。T-A111 :5 复核的是 v2 卡面，**对 v3 需架构师重新复核** | 一致（T-A111 :5 复核针对 v2；对 v3 需架构师重新复核） | ☐ |
+| H17 | **horizon 多值风险** | horizons 四周期 :35 | 实例/跟踪若缺 horizon → gap（T-R35 README:89/97；T-A74 B2） | 后端定点用例 `test_tb113_h17_missing_horizon_is_gap_not_counted`（`tests/backend/unit/test_tb113_l1_l10_runner_h12_h17_t_t46.py:327-368`，分支 test/T-T46 = 28c3e7da5525e377280a62b609ed1ad7d419d2cc，T-R44 时尚未合入主线；T-R46 复核：已含于 origin/main = a7ce36285f7abd5fdf9ed5053a3bb51fba43a4b1）：H-01 四周期、`version_horizon=None`，一条已知 short 失败 + 一条 horizon=None 失败（horizon_days 同为 5）→ 断言 gaps 含 `sim_fail_horizon_unknown` 且 `metric.value == 1`，即缺 horizon 不按 5 日计入。被测 `src/backend/app/feedback/core.py:60-133` `simulated_failures`（:103-108 缺 horizon 记 gap 并跳过）；该文件在 be/T-B113 = 52d3bee3071fd0532123036f857aa66ad79569f4、c4e0e74 与本分支基线内容相同。T-R44 在临时只读 worktree 不连库亲跑通过，另做两处临时篡改（缺 horizon 默认 short；记 gap 后仍计入）均使该用例失败，已还原。**范围**：只覆盖 RC5 sim_fail 路径；发布资格 n/胜率按映射周期统计尚未实现（T-R35 B5 本期不做），实现时需另补用例。**T-R48 核实提交关系**：用例所在 28c3e7d（T-T46，2026-11-09 16:48 America/Denver）的父提交即 52d3bee3071fd0532123036f857aa66ad79569f4（T-B113「fix(ingest/signals): T-B113 L-1′/L-10/runner tick + H12/S12/H17 自测」，已含于 origin/main），52d3bee 新增同名后端自测 `src/backend/selfchecks/test_tb113_h17_horizon_gap.py`；被测 `feedback/core.py` 未被 52d3bee 修改，其 :103-108 逻辑最后改于 8219665（P2N-08 slice1，已含于 origin/main）。T-B112=810f89a 为 ingest L-6/7/8，不是 H17 证据（T-A111 :6）。T-A111 裁定发布资格 n/胜率未实现不构成本关缺证；**T-R50（按 v3 重核）**：卡面依据 :35 未变；用例为合成数据、不读本卡，v3 叠加后 `test_tb113_h17_missing_horizon_is_gap_not_counted` 与 `selfchecks/test_tb113_h17_horizon_gap.py` 均过；v3 F1 :133 同样「缺 horizon 记 gap」，一致。T-A111 :6 复核依据未变 | 一致（架构师复核通过，T-A111 :6；范围仅 RC5） | ☐ |
+| H18 | null/gap / insufficient_data | 正文:16 预热不足 `passed=null`；FX8 limit null | fixtures H01-FX8 | 后端正式用例 `test_h18_h01_fx8_null_propagates_to_insufficient_data`（`tests/backend/unit/test_h18_null_propagation_h01_t_t48.py:69-95`，test/T-T48 = bec16804ec221af2431fc4a9acfcbacd731699ec；**已含于 origin/main = a7ce36285f7abd5fdf9ed5053a3bb51fba43a4b1**，本地 main 分支 d32a3f6 未更新）：读本卡 validation 块 H01-FX8【虚构】夹具（:30-45 经 preflight 解析本文件；:74-76 断言 limit 价 null、close 序列 3 根 <62），经 `_run`（:48-66）以夹具 features/series/holding/ctx 调生产 `src/backend/app/strategy/cards/fixtures.py:48` `calculate`（:79-83 `Interpreter(...).evaluate`；:84-101 null 记 essential_unknown；:119-120 system_only 持仓→`insufficient_data`；:157-160 limit null 不记 LIMIT_LOCKED）→ `dsl.py:243-254` `Interpreter.evaluate`（:247 null→None 不转 bool；:190 预热不足取 None；:230-231 比较含 None→None；:209-210/:253-254 窗口/布尔传播 None）；断言 state=insufficient_data、action=hold、rule_ids_passed=[]、无 passed=True、至少一条 passed=None、无 LIMIT_LOCKED，并与夹具 expect 一致（:81-95）。实测规则轨迹 X2/W1/C2/I1=None、W2/W3/C1=False。fixtures.py/dsl.py/preflight.py、本卡、feature_spec.md、config/market_rules.yaml 在 bec1680、origin/main 与本分支基线 blob 相同。T-R46 在临时只读 worktree（bec1680）以 `env -i` 不连库、无凭据亲跑 2 passed；临时篡改 dsl.py:190 预热不足取 0、:231 比较含 null 返回 False、fixtures.py:119 去掉 insufficient_data 分支，三处均使该用例 FAIL（rule_ids_passed=['C2','I1'] 或 state=hold_ok），还原后 PASS，worktree 已删。**缺口**：该链未经 `prepare()`（`features/pipeline.py:125`，实盘取数预处理路径未覆盖；生产入口 `features/evaluation.py:133` prepare→:143 RuleEvaluator→calculate）；用例未逐条钉 X2 等每条规则 passed=None，单独把 :247（非窗口）或 :253（窗口）null 改 False 时因其余规则仍为 null 而结果不变、用例仍 PASS，两者同改才 FAIL。T-R42 `null_propagation_replay.py` 仍**不构成 H18 证据**（不读夹具行情，T-A83 B-1）。**T-A111 后更新**：T-T49=bfa2bbe07b196278d07799965d1ecb0f63dbc271（已含于 origin/main）已补逐条 `passed is None` 断言（同文件 :85）与 null→False/null→0 篡改自证用例（:107、:127），上文「未逐条钉 X2 等」缺口已由其关闭；正式断言现位于 :75-104（上文 :69-95 为 T-T48 时行号）。架构师裁定：`pipeline.py:125` prepare 保留 None、不把 null 填 0，**本关不要求再补 prepare() 路径**；残留：实盘取数无端到端用例；**T-R50（按 v3 重核）**：用例按文件读本卡（CARD_PATH = cards/hold_risk_monitor.md），上文「本卡 blob 与 origin/main 相同」在 v3 下不再成立（e44311a 仍为 v2）。本地对 e44311a（fixtures.py/dsl.py/preflight.py/feature_spec/market_rules 与本分支 blob 相同）叠 v3 卡、`env -i` 不连库跑 test_h18 三条全过；临时篡改 `fixtures.py:119` 去掉 insufficient_data 分支 → 该用例与 golden FX8 均 FAIL，已还原。FX8（:529）与正文:16 内容未变。T-A111 :7 复核的是 v2 卡文件，卡面依据内容未变，是否需对 v3 重签由架构师定 | 一致（T-A111 :7 复核针对 v2 卡文件；v3 下重跑通过，依据内容未变，待架构师确认） | ☐ |
+| H19 | 不可执行原因码 | FX4 :320 T1_NOT_SELLABLE；FX7 :476 LIMIT_LOCKED；FX10 :614 SUSPENDED | expect.reason_codes | check_T-R15 与 api-contract 原因码表交叉；**T-R50（按 v3 重核）**：夹具期望未变，结论不变 | 一致 | ☐ |
+| H20 | 选股/入场 | **无**（纯离场，设计如此） | :114 action_map 无 buy | check_T-R15 允许 exitonly；**T-R50（按 v3 重核）**：v3 无 entry、无开仓主张，结论不变 | 一致 | ☐ |
 
-> **v3 落卡对本表 H 行的影响（T-R49 评估，不改各行状态）**：v3 只改 `cards/hold_risk_monitor.md` 的 :1 标题、:23 正文一句、:32/:95 `version_no: 3`、:40 why、:42-43 falsified_by，并在 spec 块之后新增 :123-158「v3 变更 / 证伪口径 / 已知缺口」三节；:1-121 其余行号与内容不变，规则、参数、data_needs、夹具与期望值不变。受影响行：**H1**（表内 `version_no:2`，v3 为 3，身份须按 v3 重核）、**H4**（本次复审）、**H15**（validation 块 fixtures 起点由 :136+ 移到 :174+，内容不变）；H2–H3、H5–H14、H16–H20 引用的 :3–:118 行号不变，结论不受文本改动影响。落卡后旧审核（v2）随内容变更失效（stale），不得用 v2 审核晋级 v3；G1–G6 须对 v3 重跑；2026-11-09 书面授权字面写「H-01」，是否覆盖 v3 尚待用户本人确认（编排者在问，T-A109 §1、T-A112 §2）。
+> **v3 重核（T-R50，取代 T-R49 影响说明）**：20 行引用的卡行号均已按 v3 `cards/hold_risk_monitor.md` 校正（v3 :1-121 除 :1、:23、:32、:40、:42-43、:95 外与 v2 相同；新增 :123-158；validation 块 :160 起，夹具 H01-FX1 :174 … FX11 :668）。逐行判断 v3 改动是否改变结论：均未改变，状态无降级。需留意：H1 后端导入侧仍钉 v2（`config/engine_policy.yaml:18`、`selfchecks/test_tb71_import.py:65`，T-A115 :8 后端待办）；H16 卡面文本已变，T-A111 :5 复核针对 v2、对 v3 需重新复核；H18 用例读本卡文件，v3 下重跑通过、依据内容未变，T-A111 :7 是否对 v3 重签待架构师定；H14/H17 的 T-A111 复核依据在 v3 未变。旧审核（v2）随卡内容变更失效（stale），G1–G6 须对 v3 重跑；2026-11-09 书面授权是否覆盖 v3 待用户本人确认（T-A115 :4）。
 
-**H-01 代理小结**：（T-R49：H4 按 v3 改「一致」，待架构师复核；仍缺证据 H12。）（T-R48：H14/H16/H17/H18 已由架构师 T-A111 :4–:7 复核通过；H18 T-A111 裁定本关不再要求 prepare() 路径。）H14/H16 代理初核「一致」（成本回放/服务端+本地合规）；H18 经 T-R43 按 T-A83 B-1 改回缺证据后，T-R46 按 T-T48 正式用例（T-A86 裁定）改「一致」（规则求值层 calculate→Interpreter；未经 prepare()）；H17 经 T-R44 按 T-T46 定点用例改「一致」（仅 RC5 路径；28c3e7d、bec1680 现均含于 origin/main a7ce362）；**仍缺证据** H4（T-R47 已做语义审核，证伪口径不全，§1A）、H12（挂载执行链，后端）。标「一致」的项仍须架构师复核（T-A109 §5）。**不得**据此视为已过 G7。
+**H-01 代理小结**：（T-R50：全部 20 行按 v3 重核，H4 经架构师 T-A115 :3 复核通过；H16 对 v3 需重新复核；仍缺证据仅 H12。）（T-R49：H4 按 v3 改「一致」。）（T-R48：H14/H16/H17/H18 已由架构师 T-A111 :4–:7 复核通过；H18 T-A111 裁定本关不再要求 prepare() 路径。）H14/H16 代理初核「一致」（成本回放/服务端+本地合规）；H18 经 T-R43 按 T-A83 B-1 改回缺证据后，T-R46 按 T-T48 正式用例（T-A86 裁定）改「一致」（规则求值层 calculate→Interpreter；未经 prepare()）；H17 经 T-R44 按 T-T46 定点用例改「一致」（仅 RC5 路径；28c3e7d、bec1680 现均含于 origin/main a7ce362）；**仍缺证据** H12（挂载执行链，后端）。（T-R47 时 H4 亦缺证据，见 §1A，已由 v3 消除，§1B。）标「一致」的项仍须架构师复核（T-A109 §5）。**不得**据此视为已过 G7。
 
 ---
 
 ## 1A. H4 假设语义审核（T-R47，策略研究员；架构师 T-A111 :11 复核：仍缺证据）
 
-对象：`cards/hold_risk_monitor.md`（下称 card）v2 `hypothesis`（card:39-43）与正文:23。
+对象：`cards/hold_risk_monitor.md`（下称 card）v2 `hypothesis`（card:39-43）与正文:23。**本节行号为 v2**，v2 原文见 `cards/history/hold_risk_monitor.v2.md`（同行号）；v3 复审见 §1B。
 
 | 审核点 | 卡片原文依据 | 结论 |
 |---|---|---|
@@ -87,7 +87,7 @@
 
 ---
 
-## 1B. H4 按 v3 复审（T-R49，策略研究员；待架构师复核）
+## 1B. H4 按 v3 复审（T-R49，策略研究员；架构师 T-A115 :3 复核：确认一致）
 
 依据：`docs/reviews/T-A112-h01-v3-rulings.md`（ebdab40）§1、§3。对象：v3 `cards/hold_risk_monitor.md`。
 
@@ -99,7 +99,7 @@
 | d 可量化（T-A111 ①②） | 「显著」：:141-144 单侧精确符号检验、BH q=0.10（P-1）、效应门槛 δ=往返成本中位数 k=1（P-3）、n≥30、不重叠（P-7）；「超额」：:148 相对当日其他持仓等权池、|P_T|<5 记 gap（P-4），:154 沪深300 记 gaps G1；F2 α=0.05 不校正（P-2）；参考价过渡与隔夜非共同项记 gaps G2 :155（P-5） | 满足 |
 | e 覆盖面（T-A111 ③） | 集中度已改为风险限额、不作可检验主张（方案 B，P-8），falsified_by 只留 F1（X2）与 F2（W1），对应 why 中仅有的两条可检验机制；X1 不单列（T-A111）；h=1/5/20 覆盖四周期，缺 horizon 记 gap（:133） | 满足 |
 
-结论：H4 改 **一致（T-R49 按 v3，待架构师复核）**。P-6 方案 B 下不进卡面（T-A112 §1.6）。
+结论：H4 改 **一致（T-R49 按 v3）**；T-A115 :3 复核确认一致（T-R50 同步）。P-6 方案 B 下不进卡面（T-A112 §1.6）。
 
 ---
 
@@ -118,7 +118,7 @@
 | S9 | 退出 X1–X3 | 正文:12；card exit:54-57 | spec exit + stops:137（硬止损公式、time_stop_days:5） | FX7/FX8 | 一致 | ☐ |
 | S10 | 参数 schema | — | spec:95-104 rs_min/touch_pct/… | check_T-R15 | 一致 | ☐ |
 | S11 | 数据 data_needs | card:58-66（:67-77 为 epistemic，T-R43 更正范围） | required_features | check_T-R15∈catalog | 一致 | ☐ |
-| S12 | 标的 universe | card:78-81 全市场优先持仓/自选；bse:false | screen:null | 文档一致；**选股执行链未跑**；须后端执行链用例，文档不能补（§6） | 缺证据 | ☐ |
+| S12 | 标的 universe | card:78-81 全市场优先持仓/自选；bse:false | screen:null | 文档一致；**选股执行链未跑**；须后端执行链用例，文档不能补（§6）；T-R50：卡面 `universe.pool` 字面与卡头:6 ③ 口径差异记 gaps，见 §2B（T-A114 ② 裁定口径可接受，未称运行侧证据已齐） | 缺证据 | ☐ |
 | S13 | A 股约束 | card:86；正文:19 | S01-FX5 涨停锁 LIMIT_LOCKED、FX6 停牌 SUSPENDED、FX7 T1_NOT_SELLABLE（T-R43 更正：S-01 夹具均 board: main，**无科创板夹具正例**；科创板整手/20% 仅卡:19/:86 文字与 config/market_rules.yaml 承载） | check_T-R15；`T-R43/s01_fixture_eval.py` 复算 FX5–FX7 reason_codes 一致；科创板约束由引擎层承载（T-R44 按 T-A85 L-1 补引）：`config/market_rules.yaml:11` star 涨跌幅 20%、`:19-20` 科创板单笔 ≥200 股且 1 股递增、`:23-24` 零股一次性卖出与科创板零股阈值 200；后端用例 `tests/backend/api_app/test_market_rules_lots_t_t19.py:74-76`（科创板股票/CDR 买入单位 200/201/199 等）、`:96-100`（qty_range star=(200,1)）、`:113-116`（科创板零股卖出），该用例只覆盖整手/零股/单笔上限，20% 仅为配置值 | 一致 | ☐ |
 | S14 | 成本滑点 | 正文:21–22（estimate） | validation_summary:87 含 cost_model；plan:1614 | T-R42 `cost_replay.py` CR-S14-* PASS（买入可成交/涨停锁；费用参数同源；佣金费率缺口已标） | 一致（架构师复核通过，T-A111 :8） | ☐ |
 | S15 | 验证/fixtures | validation S01-FX1..10，desc 均以 `【虚构】` 开头（FX1..8 T-R40 fe2afa5；FX9/FX10 T-R43） | expect | check_T-R15 PASS；**改前** d75b0ec/d2e7d51 曾因未标虚构失败 | 一致 | ☐ |
@@ -126,7 +126,7 @@
 | S17 | 与草稿关系 | 卡头:3 由 T-R16 草稿正式化；草稿 `T-R16/S-01_…` 已非「知识卡 vN」身份 | R10：草稿 role=`research_draft_superseded_by_formal_card` | R10 census | 一致 | ☐ |
 | S18 | 正式化差异 E1/X4 | 卡头:6 E1 改绝对涨幅；X4 未进 v1 | 规则无 rank_pct / 无 X4 | 文档自述；需编排者向用户本人确认是否接受缺口（产品取舍，不在 2026-11-09 代办字面范围内，T-A109 §5；§6） | 缺证据（产品接受度） | ☐ |
 | S19 | 不可执行原因 | FX5 LIMIT_LOCKED；FX6 SUSPENDED；FX7 T1_NOT_SELLABLE | expect.reason_codes | check_T-R15 | 一致 | ☐ |
-| S20 | 仓位/选股 screen | screen:null :140；卡头:6 ③ 注明「v1 选股只扫持仓 ∪ 自选」（T-R43） | 无自动筛股 DSL（全市场 DSL 暂缓，T-A83 ④） | 卡面口径已写明；**运行侧**「screen:null 只扫持仓∪自选」用例归后端（与 S12 合并），未见 → 缺证据；文档不能补（§6） | 缺证据 | ☐ |
+| S20 | 仓位/选股 screen | screen:null :140；卡头:6 ③ 注明「v1 选股只扫持仓 ∪ 自选」（T-R43） | 无自动筛股 DSL（全市场 DSL 暂缓，T-A83 ④） | 卡面口径已写明；**运行侧**「screen:null 只扫持仓∪自选」用例归后端（与 S12 合并），未见 → 缺证据；文档不能补（§6）；T-R50：口径差异见 §2B gaps | 缺证据 | ☐ |
 
 **S-01 代理小结**：S14/S16「一致」（T-A111 :8–:9 复核通过）；S7 经 T-R43 补 C1/C2 夹具保持「一致」；S3 经 T-R47 语义审核改「一致」，架构师 T-A111 :10 复核通过（§2A）；**仍缺证据** S12/S20（选股执行链，后端）、S18（E1/X4 产品接受度，须编排者向用户本人确认）。**不得**视为已过 G7。
 
@@ -145,6 +145,15 @@
 | e 只用当时可得数据 | 正文:16「只用 as_of 当日及以前的有效日 K；信号最早 T+1 09:30 执行，模拟入场价 = T+1 开盘价。无未来数据」；data_needs card:59-66 均为 T 日盘后/开盘前/18:00 主数据后可得；证伪所用 5 日后收益只作事后评估标签 | 满足（f.list_days :62 可得时点与盘后批次的排程由后端执行链/G2 承载，不涉及使用未来数据） |
 
 结论：S3 改 **一致**（T-R47）；T-R48 记：架构师 T-A111 :10 复核通过。
+
+---
+
+## 2B. S-01 universe.pool 口径差异（gaps，T-R50 按架构师 T-A114 ②）
+
+| # | 差异 | 依据 | 处理 |
+|---|---|---|---|
+| SG1 | 卡面 yaml `universe.pool: 全市场（持仓 ∪ 自选优先）`（`cards/st_pullback_ma.md:79`）与卡头:6 ③「v1 选股只扫持仓 ∪ 自选」、`screen: null`（:140）字面不一致 | T-A114 ②：口径**可接受**（v1 `screen:null` 只扫「持仓 ∪ 自选」，全市场选股 DSL 暂缓，T-R43/T-A83 ④）；建议卡面改为「持仓 ∪ 自选」并保留「全市场待升版」，或记 gaps；非用户决定项 | **记 gaps，不改卡**：改卡须新 `version_no`、旧审核 stale、G1–G6 重跑；按编排者 T-R50 指示采用记 gaps。下次 S-01 升版（v2）时把 `universe.pool` 改为「持仓 ∪ 自选」并注明「全市场待升版」 |
+| SG2 | 后端允许池仅 `{持仓, 持仓 ∪ 自选}`；按 T-A114 ②，卡面原字面直传仍得 `universe_pool_not_supported`，改写为允许池后放行（T-T63 该例仍绿） | T-A114 ②（代码不必改） | 运行侧证据仍归 S12/S20（缺证据，§6）；口径可接受 ≠ 运行侧用例已齐，S12/S20 状态不变 |
 
 ---
 
@@ -175,7 +184,7 @@
 | 步骤 | 要求 | 当前（代理只读） |
 |---|---|---|
 | A | G1–G6 自动门禁无 `fail`；warn 须 ack（T-A109 §5 步骤 A：编排者在目标环境管理页只读抄录 `gate`/`result`/`stale`，不抄 detail、股东代码或持仓，T-A83 口径） | **仍未决**：本报告未查询库内 `gate_results`（红线不读库） |
-| B | 研究员核对稿缺证据为 0 → 架构师复核 → 编排者引用覆盖该卡的用户本人授权、以管理员可信交互会话代批并留证（T-A109 §2） | **未满足**：仍缺证据 4 项（§6；T-R49 后）+ 步骤 A；H14/H16/H17/H18/S14/S16/S3 已经架构师 T-A111 复核，其余「一致」项未见逐项复核结论 |
+| B | 研究员核对稿缺证据为 0 → 架构师复核 → 编排者引用覆盖该卡的用户本人授权、以管理员可信交互会话代批并留证（T-A109 §2） | **未满足**：仍缺证据 4 项（§6；T-R50 后）+ 步骤 A；H4 已经架构师 T-A115 复核；H14/H16/H17/H18/S14/S16/S3 已经架构师 T-A111 复核（H16 对 v3 需重新复核），其余「一致」项未见逐项复核结论 |
 | C | 编排者 `POST .../lifecycle` `{to:simulating, review_id, password}`；审核须 approved、非 stale、哈希一致；同可信会话+密码（T-A109 §6） | **未执行**（红线：本单不改 lifecycle） |
 | D | 晋级后仅模拟候选信号、标「模拟中」、不生成计划草案 | 取决于 C |
 
@@ -193,15 +202,15 @@
 | S-01 | 20 | 17 | 0 | 3 |
 | 合计 | 40 | 36 | 0 | 4 |
 
-（T-R49 后；T-R48 时 35/0/5，T-R46 时 34/0/6。H4 按 v3 改「一致」，待架构师复核。用户勾选全部默认未勾；最终以架构师复核与系统审计为准。H14/H16/H17/H18/S14/S16/S3 已由架构师 T-A111（团队报告，不入库）:4–:10 复核通过（T-R48 同步）；其余标「一致」的项未见架构师逐项复核结论，保持原状。**§4 步骤 A（库内 G1–G6 结论，编排者只读抄录）不在 40 项内，仍未决**，故代批前提「缺证据为 0」尚不满足。）
+（T-R50 后，计数同 T-R49；T-R48 时 35/0/5，T-R46 时 34/0/6。H4 计入「一致」：架构师 T-A115 :3 复核确认一致、:4 计数 36/0/4 与本表相同；若 H4 不计入一致，则为 35/0/5。T-R50 按 v3 重核 20 个 H 行，无状态降级；H16 对 v3 需架构师重新复核，仍计一致。用户勾选全部默认未勾；最终以架构师复核与系统审计为准。H14/H16/H17/H18/S14/S16/S3 已由架构师 T-A111（团队报告，不入库）:4–:10 复核通过（T-R48 同步）；其余标「一致」的项未见架构师逐项复核结论，保持原状。**§4 步骤 A（库内 G1–G6 结论，编排者只读抄录）不在 40 项内，仍未决**，故代批前提「缺证据为 0」尚不满足。）
 
 ---
 
-## 6. 仍缺证据 4 项 + 步骤 A（T-R49 后；H4 已按 v3 改一致待复核）：缺什么、谁补（T-R47，对照 T-A109 §5）
+## 6. 仍缺证据 4 项 + 步骤 A（T-R50 后；H4 架构师复核通过，T-A115 :3）：缺什么、谁补（T-R47，对照 T-A109 §5）
 
 | # | 缺什么证据 | 谁能补 | 需麦蕊实调 | 需用户本人决定 | 补后复核 |
 |---|---|---|---|---|---|
-| H4 | （已补，T-R49）v3 落卡：证伪口径量化（F1/F2，`cards/hold_risk_monitor.md:128-151`）、集中度改风险限额（:40、:23），缺口记 gaps :153-158；见 §1B | 策略研究员 | 否 | 否 | 架构师（待复核，T-A112 §3） |
+| H4 | （已补，T-R49）v3 落卡：证伪口径量化（F1/F2，`cards/hold_risk_monitor.md:128-151`）、集中度改风险限额（:40、:23），缺口记 gaps :153-158；见 §1B | 策略研究员 | 否 | 否 | 架构师复核通过（T-A115 :3） |
 | H12 | 运行时挂载执行链用例：system_only 只对持仓求值、未持有不出结论、用户实例化 422 `STRATEGY_SYSTEM_ONLY`、北交所不在范围（card:3、:74-77） | 后端（测试配合）；文档不能补 | 否（可用【虚构】夹具离线证明） | 否 | 架构师 |
 | S12 | 选股执行链用例：`screen:null` 只扫持仓 ∪ 自选、bse:false、ST/停牌/F2 排除（card:78-81、:140） | 后端（测试配合）；文档不能补 | 否（同上） | 否 | 架构师 |
 | S18 | 用户本人对「E1 改绝对涨幅、X4 未进 v1」（卡头:6 ①②）是否接受的答复，记入本稿 | 编排者向用户本人确认；产品取舍，不在 2026-11-09 代办字面范围内 | 否 | **是** | 架构师 |
@@ -211,4 +220,4 @@
 
 ---
 
-*文件路径：`docs/strategies/T-R41/g7_review_H-01_S-01.md`｜任务 T-R41｜代理准备；T-R42 仅更新「代理初核/当前证据/§5 计数」列；T-R43 按 T-A83 修 B-1 与 L-1..L-6（H18 改回缺证据，计数 32/0/8）；T-R44 按 T-A85 L-1 补 S13 引用、按 T-T46 改 H17 为一致（计数 33/0/7）；T-R46 按 T-T48/T-A86 改 H18 为一致（计数 34/0/6）；T-R47 按 T-A109 同步 G7 程序表述、做 H4/S3 语义审核（S3 改一致待架构师复核，计数 35/0/5）、新增 §1A/§2A/§6，T-R48 按 T-A111 同步 H14/H16/H17/H18/S14/S16/S3 为架构师复核通过、核实 H17 提交关系、H4 加 v3 差异稿指针（仍缺证据，计数 35/0/5），T-R49 按 T-A112 落 H-01 v3、H4 改一致待架构师复核（计数 36/0/4）、新增 §1B 与 v3 行号影响说明，用户勾选仍未勾*
+*文件路径：`docs/strategies/T-R41/g7_review_H-01_S-01.md`｜任务 T-R41｜代理准备；T-R42 仅更新「代理初核/当前证据/§5 计数」列；T-R43 按 T-A83 修 B-1 与 L-1..L-6（H18 改回缺证据，计数 32/0/8）；T-R44 按 T-A85 L-1 补 S13 引用、按 T-T46 改 H17 为一致（计数 33/0/7）；T-R46 按 T-T48/T-A86 改 H18 为一致（计数 34/0/6）；T-R47 按 T-A109 同步 G7 程序表述、做 H4/S3 语义审核（S3 改一致待架构师复核，计数 35/0/5）、新增 §1A/§2A/§6，T-R48 按 T-A111 同步 H14/H16/H17/H18/S14/S16/S3 为架构师复核通过、核实 H17 提交关系、H4 加 v3 差异稿指针（仍缺证据，计数 35/0/5），T-R49 按 T-A112 落 H-01 v3、H4 改一致待架构师复核（计数 36/0/4）、新增 §1B 与 v3 行号影响说明；T-R50 按 v3 重核全部 20 个 H 行行号与结论、H4 按 T-A115 :3 改架构师复核通过（计数 36/0/4）、新增 §2B 记 S-01 universe.pool 口径 gaps（T-A114 ②），用户勾选仍未勾*

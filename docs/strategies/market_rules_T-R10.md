@@ -168,7 +168,7 @@
 说明：
 - 下面的键名沿用现有 snake_case 风格。标【新增键】的键目前 `config_files.py` 里的 `Lot` / `MarketRuleSegment` 模型（`extra="forbid"`）**还没有**。直接合并会导致配置加载失败，所以**合并前必须先在 pydantic 模型里加字段**。
 - 同样的内容放进 `segments` 里的**两段**（2026-07-06 段和 2023-04-10 段），每段写全，不做继承。只有条号注释不同。
-- 本片段已用 `/tmp/yv/bin/python` 做过 `yaml.safe_load` 校验。
+- 本片段已用本地 Python（私有，不入库）做过 `yaml.safe_load` 校验。
 
 ```yaml
 # ===== 合并到 segments[effective_from: "2026-07-06"]（2023-04-10 段数值相同，注释条号见行尾括号） =====

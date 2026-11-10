@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import insert
 
+from app.aggregates import products
 from app.aggregates.calendar import seed_calendar
 from app.aggregates.models import EmptyBlock, MarketClock, Terminal, TerminalRow
 from app.db.tables.notify import notifications
@@ -156,11 +158,12 @@ def test_routes_real_ownership_unread_and_imported_holdings(
                 triggered_at=dt.datetime.now(dt.UTC),
             )
         )
-    # ce32484 / T-B77 删除 ensure_empty_products，非空 alerts 不再 503；
-    # GET /api/v1/terminal 走 service.terminal，返回 Terminal（data_status=partial）。
-    # terminal() 不读 alerts 表；Terminal 无 alerts 字段（alerts 在 Today）。待 T-A149 契约确认。
+    # ce32484 / T-B77 删除 ensure_empty_products；T-A149（a281095）确认：
+    # /terminal 有没有产品都返回 200；alerts 表不参与 /terminal 聚合。
+    # 没有记录时是空集合：suggestion 为 null，active_reason_count 为 0，max_risk_level 为 null。
     nonempty = client.get("/api/v1/terminal", params={"account_id": account_id})
     assert nonempty.status_code == 200
+    assert "nonempty_products_require_full_aggregation" not in nonempty.text
     body = nonempty.json()
     assert body["account_id"] == account_id
     assert body["data_status"] == "partial"
@@ -170,10 +173,28 @@ def test_routes_real_ownership_unread_and_imported_holdings(
         "300364.SZ",
         "301218.SZ",
     }
-    assert all(
-        row["holding"] and row["quote"] is None and row["suggestion"] is None
-        for row in body["rows"]
-    )
+    now = dt.datetime.now(dt.UTC)
+    with engine.connect() as conn:
+        owned = products.owned_suggestions(conn, user_id, uuid.UUID(account_id), now)
+        reason_counts = Counter(
+            r.security_code
+            for r in products.reasons(conn, user_id, uuid.UUID(account_id), now)
+            if r.status == "active"
+        )
+    for row in body["rows"]:
+        code = row["security_code"]
+        # 本例未写入 suggestions / reasons，应对空集合；与库中实际一致（T-A149）。
+        assert (code in owned) == (row["suggestion"] is not None)
+        assert row["active_reason_count"] == reason_counts[code]
+        if code not in owned:
+            assert row["suggestion"] is None
+        # 无有效 reasons 时 max_risk_level 为 null（T-A149 空集合），与是否有 suggestion 独立。
+        if reason_counts[code] == 0:
+            assert row["max_risk_level"] is None
+        assert row["holding"]
+        assert row["quote"] is None
+    assert not owned
+    assert all(reason_counts[code] == 0 for code in (row["security_code"] for row in body["rows"]))
     assert body["account"]["pnl_day"] is None
     assert {"aggregation", "account.pnl_day"} <= {item["key"] for item in body["gaps"]}
     # 未验证: cash / positions.cost 是否进入 gaps 取决于导入持仓的现金与成本是否可核实，本段不写死。

@@ -144,6 +144,40 @@ def same_auction_session(snap, recv) -> bool:
     return (snap.hour < 12) == (recv.hour < 12)
 
 
+def _as_bj(dt):
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=BJ)
+    return dt.astimezone(BJ)
+
+
+def _canonical_session_anchor(recv):
+    """把收到时刻映射到一个规范连续竞价时刻（最近工作日 13:30，北京时间），供 dry-run 强制盘中使用。"""
+    recv = _as_bj(recv)
+    d = recv.replace(hour=13, minute=30, second=0, microsecond=0)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def in_session_for_threshold(snap, recv, force_session: bool = False) -> bool:
+    """stale_threshold 的同段判定。实盘 = same_auction_session。
+    dry-run 且 FORCE_SESSION、但收到时刻已在盘外时：将 (snap, recv) 平移同一差值，使 recv 落到
+    规范连续竞价时刻后再判定。延迟与日期间隔不变，因此午休冻结/隔夜旧票仍排除，
+    mock 的「当前时刻−数秒」活样本在盘后 dry-run 仍计入。"""
+    if not force_session:
+        return same_auction_session(snap, recv)
+    recv = _as_bj(recv)
+    if recv is not None and is_bj_session(recv):
+        return same_auction_session(snap, recv)
+    if snap is None or recv is None:
+        return False
+    snap = _as_bj(snap)
+    anchor = _canonical_session_anchor(recv)
+    return same_auction_session(snap + (anchor - recv), anchor)
+
+
 def session_lags(samples: list) -> list:
     """samples 中 in_session 且有 lag_s 的延迟秒数。"""
     return [s["lag_s"] for s in samples if s.get("lag_s") is not None and s.get("in_session")]
@@ -682,6 +716,15 @@ def selftest_pure() -> list:
                 same_auction_session(t_live, recv) and not same_auction_session(t_lunch, recv)
                 and not same_auction_session(t_old, recv)
                 and not same_auction_session(t_live, recv.replace(hour=10)), ""))
+    after = datetime(2026, 11, 10, 15, 40, tzinfo=BJ)
+    t_live_ah = after - timedelta(seconds=3)
+    out.append(("dry-run 强制盘中且收到时刻在盘后：延迟数秒的活样本仍计入；午休冻结与隔夜旧票仍排除",
+                not same_auction_session(t_live_ah, after)
+                and in_session_for_threshold(t_live_ah, after, True)
+                and not in_session_for_threshold(t_lunch, after, True)
+                and not in_session_for_threshold(t_old, after, True)
+                and in_session_for_threshold(t_live, recv, True)
+                and not in_session_for_threshold(t_lunch, recv, True), ""))
     # T-B117：w32tm 负值 = 本机慢；探针 local_ahead_s 与 RFC 5905 offset 符号相反，修正公式 lag − local_ahead
     w32 = parse_w32tm("22:05:36, -00.4414716s\n22:05:38, -00.4405399s\n22:05:40, -00.4387174s\n")
     ahead_s = round(sum(w32) / len(w32), 4)
@@ -812,7 +855,8 @@ def item1_latency(res, shared):
                     "i": i + 1, "t": rec.get("t") if rec else None,
                     "recv_bj": recv_dt.isoformat(timespec="milliseconds"),
                     "lag_s": round(t_recv - ts.timestamp(), 3) if ts else None,
-                    "in_session": same_auction_session(ts, recv_dt),
+                    "in_session": in_session_for_threshold(
+                        ts, recv_dt, force_session=bool(ctx.dry_run and FORCE_SESSION)),
                     "rtt_ms": r.ms,
                     "local_minus_server_date_s": round((t_send + t_recv) / 2 - srv, 3) if srv else None})
         if i + 1 < LAT_SAMPLES:

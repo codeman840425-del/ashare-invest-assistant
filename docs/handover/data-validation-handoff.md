@@ -1,6 +1,6 @@
 # 数据验证交接手册（T-A110）
 
-> 2026-11-10 America/Denver。现行基线 `origin/main=00538a1760d704eab6c36789ae36a0784a9566b9`。本文写就基线为 `e44311a018270d4db2c111ca04015ff3b86c10a8`（第 8 批，历史引用）；第 9 批 `3ede1c2c0fbc46da0aca159b337037fd7e32f5e5` 亦为历史引用。只改 `docs/`（不含 `docs/strategies/`）。
+> 2026-11-10 America/Denver。现行基线 `origin/main=bb27e7110942cb277f1760202c291395b076e88b`。本文写就基线为 `e44311a018270d4db2c111ca04015ff3b86c10a8`（第 8 批，历史引用）；第 9 批 `3ede1c2c0fbc46da0aca159b337037fd7e32f5e5` 亦为历史引用。只改 `docs/`（不含 `docs/strategies/`）。
 >
 > 给**没有本团队上下文的新团队**续做 G2 剩余键（F21 / F23 / F14 / F15）、T-B86 复跑与 T-B59 补证。新团队在用户 Windows 电脑运行：仓库路径 `F:\ashare-invest-assistant`，分支前缀 `tb-`，团队分支 `team-b`。电脑靠 VPN，可能掉线。
 >

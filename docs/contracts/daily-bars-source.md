@@ -139,6 +139,7 @@
   - `test_universe_holdings_only_until_clarified`：Given 持仓 2 只、自选 1 只、scope=security 实例 1 个 / When 计算 daily_universe / Then 只返回持仓 2 只（Q4 澄清前）。
 
 ### B｜owned 快照 + 解除 analyze 闸｜中｜依赖 A 的接口，可与 C 并发
+- 实施契约见 `docs/contracts/daily-snapshot-from-bars.md`（T-A133）。本小节和 §2 与它冲突时，以新文件为准。
 - 目标：§2 的 `build_owned_snapshot`、analyze 的三条放行条件、`reports/dimensions.load_inputs` 接受新 schema，以及日报 gap 文案。
 - 文件：
   - 新增 `app/marketdata/daily_snapshot.py`；

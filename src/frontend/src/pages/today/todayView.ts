@@ -122,20 +122,28 @@ export interface GapLine { text: string; route?: string }
 export interface SecurityGapRow { code: string; name: string | null; lines: GapLine[] }
 export interface ReportGapView { securities: SecurityGapRow[]; hiddenCount: number; general: GapLine[] }
 
-const SEC_RE = /^[0-9A-Za-z]+\.[A-Za-z]{2}$/;
+/** 系统证券代码格式（与后端 trades.normalize_code 输出一致）：6 位数字 + .SH/.SZ/.BJ（契约 §7 ④） */
+export const SEC_RE = /^\d{6}\.(?:SH|SZ|BJ)$/;
+export const USER_INPUT_GAP_TEXT = '有信息待补录。';
 const pushLine = (lines: GapLine[], l: GapLine) => { if (!lines.some((x) => x.text === l.text)) lines.push(l); };
 
 /**
  * 把日报 gaps 整理成「数据缺口」区：按证券合并（每只一行，最多 10 只），其余为账户/策略级的通用行。
  * - 未知 pipeline code 一律显示兜底文案，不显示原始 code（参数像证券代码时归到该证券行）；
  * - 已在顶部状态条显示的 S6–S8 不在本区重复；
- * - account / account.pnl_day 由账户总览（A1/A2）表达；stocks.<证券>.<维度>.<键>、stocks.change_from_previous、market 等不在 today 页展示。
+ * - account / account.pnl_day 由账户总览（A1/A2）表达；stocks.<证券>.<维度>.<键>、stocks.change_from_previous、market 等不在 today 页展示；
+ * - §2.3 未列出、reason 为 user_input_missing 的非 pipeline 缺口显示「有信息待补录。」去 /portfolio/import（§7 ⑦）；
+ * - 与 /today.data_gaps 同 key 的项只由 /today 那一行显示（§7 ⑦，如 cash）；
+ * - 证券参数必须完全符合 SEC_RE，否则作通用行，不生成证券链接（§7 ④）。
  */
-export function buildReportGaps(gaps: Gap[], shownState: GlobalState, nameOf: (code: string) => string | null): ReportGapView {
+export function buildReportGaps(
+  gaps: Gap[], shownState: GlobalState, nameOf: (code: string) => string | null, todayKeys: ReadonlySet<string> = new Set(),
+): ReportGapView {
   const bySec = new Map<string, GapLine[]>();
   const general: GapLine[] = [];
   const toSec = (code: string, l: GapLine) => { const lines = bySec.get(code) ?? []; pushLine(lines, l); bySec.set(code, lines); };
   for (const g of gaps) {
+    if (todayKeys.has(g.key)) continue;
     const p = parsePipelineKey(g.key);
     if (p) {
       const def = GAP_CODES[p.code];
@@ -147,7 +155,7 @@ export function buildReportGaps(gaps: Gap[], shownState: GlobalState, nameOf: (c
       }
       if (def.state && def.state === shownState) continue;
       const sec = def.security ? p.param.split(':')[0] : '';
-      if (sec) toSec(sec, { text: def.text, route: def.route });
+      if (SEC_RE.test(sec)) toSec(sec, { text: def.text, route: def.route });
       else pushLine(general, { text: def.text, route: def.route });
       continue;
     }
@@ -156,7 +164,10 @@ export function buildReportGaps(gaps: Gap[], shownState: GlobalState, nameOf: (c
     if (price && SEC_RE.test(price[1])) { toSec(price[1], { text: '缺现价，按成本估算。' }); continue; }
     const stock = g.key.match(/^stocks\.(.+)$/);
     if (stock && SEC_RE.test(stock[1])) { toSec(stock[1], { text: '该股无候选信号。' }); continue; }
-    // 其余非 pipeline 缺口（account、account.pnl_day、stocks 维度键、market 等）today 页不展示
+    // §2.3 已列出但 today 页不展示的：account、account.pnl_day（由 A1/A2 表达）、stocks.* 其余键、market
+    if (g.key === 'account' || g.key === 'account.pnl_day' || g.key === 'market' || g.key.startsWith('market.') || g.key.startsWith('stocks.')) continue;
+    // 其余未列出的：只有 user_input_missing 显示（用户能自己处理，不藏）
+    if (g.reason === 'user_input_missing') pushLine(general, { text: USER_INPUT_GAP_TEXT, route: '/portfolio/import' });
   }
   const all = [...bySec.entries()].map(([code, lines]) => ({ code, name: nameOf(code), lines }));
   return { securities: all.slice(0, GAP_SECURITY_LIMIT), hiddenCount: Math.max(0, all.length - GAP_SECURITY_LIMIT), general };

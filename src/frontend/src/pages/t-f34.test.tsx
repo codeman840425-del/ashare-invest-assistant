@@ -13,7 +13,7 @@ import { server } from '../mocks/server';
 import { TERMINAL_ROWS } from '../mocks/fixtures';
 import { todayViewReport } from '../mocks/todayFixtures';
 import {
-  A1_TEXT, GAP_CODES, R2_TEXT, REPORT_EXPECTED_AT, REPORT_OVERDUE_AT, STATE_TEXT, UNKNOWN_GAP_TEXT, buildReportGaps, overdueAt, parsePipelineKey, preReportState, s4Text, shanghaiMinutes,
+  A1_TEXT, GAP_CODES, R2_TEXT, REPORT_EXPECTED_AT, REPORT_OVERDUE_AT, STATE_TEXT, UNKNOWN_GAP_TEXT, USER_INPUT_GAP_TEXT, buildReportGaps, overdueAt, parsePipelineKey, preReportState, s4Text, shanghaiMinutes,
 } from './today/todayView';
 
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -389,5 +389,115 @@ describe('T-F34 数据缺口区（用例 10–13 与通用断言）', () => {
     expect(within(area).getByTestId('data-gap-user_input_missing:cash')).toHaveTextContent('未录入现金（示例）');
     expect(within(area).getByTestId('today-report-gaps')).toHaveTextContent('交易日历未覆盖今天，未做分析。');
     expect(urls.some((u) => new URL(u).pathname.startsWith('/api/v1/alerts'))).toBe(false);
+  });
+});
+
+describe('T-F34b 契约 §7 补充裁定（12 条）', () => {
+  const cashToday = { items: [{ key: 'cash', reason: 'user_input_missing' as const, scope: 'account' as const, dataset: null, message: '未录入现金（示例）', security_count: 0, securities: [], since: null, route: '/portfolio/import' }], more: false };
+  it('§7①-1：北京 18:40、not_yet → S4', async () => {
+    await setup(today({ server_time: bj('18:40'), daily_report: { date: DATE, status: 'not_yet' } }));
+    await settled(false);
+    expect(barState()).toBe('S4');
+  });
+  it('§7①-2：北京 19:10、generating → S4，不显示 S5', async () => {
+    await setup(today({ server_time: bj('19:10'), daily_report: { date: DATE, status: 'generating' } }));
+    await settled(false);
+    expect(barState()).toBe('S4');
+    expect(screen.queryByText(STATE_TEXT.S5)).toBeNull();
+  });
+  it('§7②：S3 且 status 为 ready → 日报请求 0，无 today-account', async () => {
+    await setup(today({ session: 'non_trading_day', daily_report: { date: DATE, status: 'ready' } }));
+    await settled(false);
+    expect(barState()).toBe('S3');
+    expect(reportRequests()).toHaveLength(0);
+    expect(screen.queryByTestId('today-account')).toBeNull();
+  });
+  it('§7③-1：北京 10:00、not_yet、无候选信号 → 不显示状态条与 R2', async () => {
+    await setup(today({ server_time: bj('10:00'), session: 'morning', daily_report: { date: DATE, status: 'not_yet' } }));
+    await settled(false);
+    expect(screen.queryByTestId('today-status-bar')).toBeNull();
+    expect(screen.queryByTestId('today-no-signals')).toBeNull();
+    expect(screen.queryByText(R2_TEXT)).toBeNull();
+    expect(reportRequests()).toHaveLength(0);
+  });
+  it('§7③-1 边界：北京 14:59 not_yet 不显示 R2；ready 且日报读取成功的 S9 才显示', async () => {
+    await setup(today({ server_time: bj('14:59'), daily_report: { date: DATE, status: 'not_yet' } }));
+    await settled(false);
+    expect(screen.queryByTestId('today-no-signals')).toBeNull();
+  });
+  it('§7③-2：S2、无候选信号 → 不显示 R2', async () => {
+    await setup(today({ focus: { items: [{ ...held, holding: null }], more: false } }));
+    await settled(true);
+    expect(barState()).toBe('S2');
+    expect(screen.queryByTestId('today-no-signals')).toBeNull();
+  });
+  it('§7④-1：pipeline.future_x:000001.SZ → 归到 000001.SZ 行，显示兜底', async () => {
+    await setup(today(), todayViewReport(DATE, ['pipeline.future_x:000001.SZ'], ACCOUNT));
+    await settled(true);
+    expect(screen.getByTestId('report-gap-sec-000001.SZ')).toHaveTextContent(`000001.SZ 示例甲${UNKNOWN_GAP_TEXT}`);
+  });
+  it('§7④-2：pipeline.future_gate:f.pe:missing → 通用行，无 /stocks/f.pe 链接', async () => {
+    const page = await setup(today(), todayViewReport(DATE, ['pipeline.future_gate:f.pe:missing'], ACCOUNT));
+    await settled(true);
+    expect(within(screen.getByTestId('today-report-gaps')).getByTestId('report-gap-general')).toHaveTextContent(UNKNOWN_GAP_TEXT);
+    expect(screen.queryByTestId('report-gap-sec-f.pe')).toBeNull();
+    expect(page.querySelector('a[href="/stocks/f.pe"]')).toBeNull();
+  });
+  it('§7④ 纯函数：只接受 6 位数字 + .SH/.SZ/.BJ；已知 code 的宽松参数也不生成证券行', () => {
+    const v = buildReportGaps(['pipeline.x:000001.SH', 'pipeline.x:830001.BJ', 'pipeline.y:00001.SZ', 'pipeline.y:000001.sz', 'pipeline.y:000001.HK',
+      'pipeline.daily_bars_missing:f.pe', 'account.f.pe.price', 'stocks.f.pe'].map((key) => ({ key, reason: 'no_source' as const, message: '' })), 'S9', () => null);
+    expect(v.securities.map((x) => x.code)).toEqual(['000001.SH', '830001.BJ']);
+    expect(v.general.map((x) => x.text)).toEqual([UNKNOWN_GAP_TEXT, '今日缺少日 K 数据，未参与分析。']);
+  });
+  it('§7⑤：日报 gaps 含 daily_bars_not_ready 与 analysis → 状态条 S6，缺口区有 S8、无 S6', async () => {
+    await setup(today(), todayViewReport(DATE, ['pipeline.daily_bars_not_ready', 'pipeline.analysis'], ACCOUNT));
+    await settled(true);
+    expect(barState()).toBe('S6');
+    const gaps = screen.getByTestId('today-report-gaps');
+    expect(gaps).toHaveTextContent(STATE_TEXT.S8);
+    expect(gaps).not.toHaveTextContent(STATE_TEXT.S6);
+  });
+  it('§7⑥：status ready、日报 404 → 读取失败文案，无 today-no-signals、today-account，/today 块照常', async () => {
+    await setup(today({ data_gaps: cashToday }), null);
+    await settled(true);
+    expect(screen.getByTestId('today-report-gaps-error')).toHaveTextContent('日报详情暂时读取失败，分析缺口稍后显示。');
+    expect(screen.queryByTestId('today-no-signals')).toBeNull();
+    expect(screen.queryByTestId('today-account')).toBeNull();
+    expect(screen.queryByTestId('today-status-bar')).toBeNull();
+    expect(screen.getByTestId('data-gap-cash')).toBeInTheDocument();
+    expect(screen.getByTestId('today-focus')).toBeInTheDocument();
+  });
+  it('§7⑦-1：account.future_field、reason=user_input_missing → 「有信息待补录。」去 /portfolio/import；同 key 去重', async () => {
+    const r = todayViewReport(DATE, [], ACCOUNT);
+    const g = { key: 'account.future_field', reason: 'user_input_missing' as const, message: '示例数据' };
+    await setup(today(), { ...r, gaps: [g, g, { ...g, key: 'profile.future_x' }] });
+    await settled(true);
+    const rows = within(screen.getByTestId('today-report-gaps')).getAllByTestId('report-gap-general');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent(USER_INPUT_GAP_TEXT);
+    expect(within(rows[0]!).getByTestId('report-gap-route')).toHaveAttribute('href', '/portfolio/import');
+  });
+  it('§7⑦-1 纯函数：未列出且 reason 非 user_input_missing 的不显示；已列出不展示的键即使 user_input_missing 也不显示', () => {
+    const v = buildReportGaps([
+      { key: 'account.future_field', reason: 'no_source', message: '' },
+      { key: 'account', reason: 'user_input_missing', message: '' },
+      { key: 'account.pnl_day', reason: 'user_input_missing', message: '' },
+      { key: 'market', reason: 'user_input_missing', message: '' },
+    ], 'S9', () => null);
+    expect(v).toEqual({ securities: [], hiddenCount: 0, general: [] });
+  });
+  it('§7⑦-2：日报 gaps 含 market → 不显示', async () => {
+    await setup(today(), todayViewReport(DATE, ['market'], ACCOUNT));
+    await settled(true);
+    expect(screen.queryByTestId('today-report-gaps')).toBeNull();
+    expect(within(screen.getByTestId('today-data-gaps')).getByText('数据完整')).toBeInTheDocument();
+  });
+  it('§7⑦-3：/today.data_gaps 与日报 gaps 都含 cash → 「未录入现金」只出现一次', async () => {
+    const r = todayViewReport(DATE, [], null);
+    const page = await setup(today({ data_gaps: cashToday }), { ...r, gaps: [{ key: 'cash', reason: 'user_input_missing', message: '示例数据' }] });
+    await settled(true);
+    expect((page.textContent ?? '').split('未录入现金').length - 1).toBe(1);
+    expect(screen.getByTestId('data-gap-cash')).toBeInTheDocument();
+    expect(screen.queryByTestId('today-report-gaps')).toBeNull();
   });
 });

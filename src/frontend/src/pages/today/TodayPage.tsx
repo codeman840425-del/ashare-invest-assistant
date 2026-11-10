@@ -84,9 +84,10 @@ export function TodayPage() {
   // T-F34 全局状态（契约 §2.1）：先看不依赖日报的 S1–S5；日报 ready 时由日报 gaps 判 S6–S8/S9；日报未取回前不判定
   const report = reportDate && rq.data ? rq.data : null;
   const pre = preReportState(t);
-  const state: GlobalState | null = pre ?? (dr.status !== 'ready' ? 'S9' : report ? reportState(report) : null);
+  // §7 ③：S9 只能来自日报判定（ready 且读取成功）；未 ready 且前置状态都不命中（如 15:00 前）时不判定，不显示状态条与 R2
+  const state: GlobalState | null = pre ?? (report ? reportState(report) : null);
   const names = new Map([...(report?.stocks ?? []).map((x) => [x.security_code, x.name] as const), ...t.focus.items.map((r) => [r.security_code, r.name] as const)]);
-  const reportGaps = report ? buildReportGaps(report.gaps, state ?? 'S9', (c) => names.get(c) ?? null) : null;
+  const reportGaps = report ? buildReportGaps(report.gaps, state ?? 'S9', (c) => names.get(c) ?? null, new Set(t.data_gaps.items.map((g) => g.key))) : null;
   const reportGapCount = reportGaps ? reportGaps.securities.length + reportGaps.general.length : 0;
   return (
     <div className="page-scroll today" data-testid="today-page">

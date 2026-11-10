@@ -8,13 +8,13 @@ from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Connection, select
+from sqlalchemy import Connection, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.tables.market import daily_bars, securities, trading_calendar
 from app.db.tables.realtime import pipeline_runs
 from app.db.tables.reviews import data_snapshots
-from app.marketdata.daily_bars import daily_universe
+from app.marketdata.daily_bars import TDX_LOCAL_SOURCE, daily_universe
 from app.replay.baseline import manifest_hash
 from app.reports.service import covered
 
@@ -194,6 +194,8 @@ def _load_bars(conn: Connection, codes: list[str], trade_date: dt.date) -> dict[
             daily_bars.c.code.in_(codes),
             daily_bars.c.adj_type == "none",
             daily_bars.c.trade_date <= trade_date,
+            # daily-bars-tdx §4：通达信行不进 owned 快照 / analyze / 日报；NULL 与 mairui 照旧。
+            or_(daily_bars.c.source.is_(None), daily_bars.c.source != TDX_LOCAL_SOURCE),
         )
         .order_by(daily_bars.c.code, daily_bars.c.trade_date)
     ).all()

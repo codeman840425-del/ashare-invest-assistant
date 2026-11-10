@@ -4,7 +4,7 @@
 
 > T-A46 收口：2026-11-08 MST。当时已合并/推送并部署基线为 7e167f7（历史，T-O35），迁移 head=0027；该次仅补文档与脱敏归档，未执行推送、部署或测试。
 >
-> 当前 `origin/main=bb27e7110942cb277f1760202c291395b076e88b`（2026-11-10，第 11 批）。此前第 10 批 `00538a1760d704eab6c36789ae36a0784a9566b9`、第 9 批 `3ede1c2c0fbc46da0aca159b337037fd7e32f5e5` 仅作历史引用。G7 现状与用户本人决定项见 [START-HERE.md](START-HERE.md)。
+> 当前 `origin/main=43b252ab101cfd632a82e9506ee10ee95fddec52`（2026-11-10，第 12 批）。此前第 11 批 `bb27e7110942cb277f1760202c291395b076e88b`、第 10 批 `00538a1760d704eab6c36789ae36a0784a9566b9`、第 9 批 `3ede1c2c0fbc46da0aca159b337037fd7e32f5e5` 仅作历史引用。G7 现状与用户本人决定项见 [START-HERE.md](START-HERE.md)。
 
 ## 阅读顺序
 先读 [START-HERE.md](START-HERE.md)（必读导航、用户本人决定项与当前卡点）。
@@ -25,7 +25,7 @@
 | 项目 | 已确认内容 / 保留项 |
 |---|---|
 | 本次交接任务 | T-A44；原交接草稿 T-A39（373b680） |
-| 最终合并/推送基线 | 【历史·T-O35/T-A46】7e167f748cb6214432561a4e57f6da34488fc0fa（7e167f7）；当时 origin/main 与用户电脑一致，迁移 head=0027。【历史·第 9 批】`3ede1c2c0fbc46da0aca159b337037fd7e32f5e5`。当前 `origin/main=bb27e7110942cb277f1760202c291395b076e88b`，以 START-HERE 为准 |
+| 最终合并/推送基线 | 【历史·T-O35/T-A46】7e167f748cb6214432561a4e57f6da34488fc0fa（7e167f7）；当时 origin/main 与用户电脑一致，迁移 head=0027。【历史·第 9 批】`3ede1c2c0fbc46da0aca159b337037fd7e32f5e5`。当前 `origin/main=43b252ab101cfd632a82e9506ee10ee95fddec52`，以 START-HERE 为准 |
 | 已知测试冻结/结果 | T-A41（8fdfb11）：05j解释相关55通过；T-A42（3fcb354）：7节点因PG不可用未跑；T-A43（ef090fa）：后端抽测2通过、ACL393项仅state.id差异，现按新裁定解除；T-O33报告原7节点通过 |
 | 运维评审分支/提交 | review/T-O33-candidate：afccd5e；运维修复5a26d17，通过；条件候选不冒充最终合并 |
 | 用户审批 | 交接当时（T-A46）记「G7待用户本人测试后审批」。T-A109（2026-11-10）已修订代批条款，见 plan 2.5.13 与 docs/reviews/T-A109-g7-delegation.md；推送/本机部署授权边界见roles-rules及team/rules/standing-auth-2026-11-08.md，不自动扩展真实麦蕊/其他外部操作或未覆盖卡片的 G7 |

@@ -1,13 +1,13 @@
 # 接手从这里开始
 
 更新约定：每次收口更新本文件，注明更新日期（America/Denver）与基线哈希。
-本次更新：2026-11-10（America/Denver）；基线 `origin/main=bb27e7110942cb277f1760202c291395b076e88b`（第 11 批：`ops/T-O73c=7250c2d`、`strat/T-R53=281f524`、`docs/T-A122=959e255`）。`strat/T-R54=468fb90` 尚未入 main。此前第 10 批 `00538a1760d704eab6c36789ae36a0784a9566b9`、第 9 批 `3ede1c2c0fbc46da0aca159b337037fd7e32f5e5`、第 8 批 `e44311a018270d4db2c111ca04015ff3b86c10a8` 仅作历史引用。
+本次更新：2026-11-10（America/Denver）；基线 `origin/main=43b252ab101cfd632a82e9506ee10ee95fddec52`（第 12 批：`docs/T-A124=f46d6f0`、`strat/T-R55` 链 `2407d8f`、`ops/T-O74=0da58a9`、`be/T-B123=1b10275`）。`strat/T-R56=ac11b96` 尚未入 main（正在评审）。此前第 11 批 `bb27e7110942cb277f1760202c291395b076e88b`、第 10 批 `00538a1760d704eab6c36789ae36a0784a9566b9`、第 9 批 `3ede1c2c0fbc46da0aca159b337037fd7e32f5e5`、第 8 批 `e44311a018270d4db2c111ca04015ff3b86c10a8` 仅作历史引用。
 
 本文是用户 Windows 电脑上新团队（仓库 `F:\ashare-invest-assistant`，分支前缀 `tb-`）第一份必读。未合入 `origin/main` 的文件用 `git show <分支>:<路径>` 阅读，不要当作已在工作树里。
 
 ## 阅读顺序（必读）
 
-1. 本文。建立阅读顺序、用户决定项与当前卡点。状态：已在 `origin/main`（`docs/T-A113=8cfb4bd`，哈希与 G7 状态经 `docs/T-A117` / `T-A117b=34fcd50`、`docs/T-A122=959e255` 合入）；本提交 `docs/T-A124` 再更新至第 11 批，待合入。
+1. 本文。建立阅读顺序、用户决定项与当前卡点。状态：已在 `origin/main`（`docs/T-A113=8cfb4bd`，哈希与 G7 状态经 `docs/T-A117` / `T-A117b=34fcd50`、`docs/T-A122=959e255`、`docs/T-A124=f46d6f0` 合入）；本提交 `docs/T-A126` 再更新至第 12 批，待合入。
 2. [`docs/handover/README.md`](README.md) — 交接手册入口，及其下列出的阅读顺序。状态：已在 `origin/main`；`docs/T-A110=3c0fb54` 所加数据验证第 5 条、`docs/T-A109=ffddab6` 签字栏 G7 表述均已合入。
 3. [`docs/handover/progress-board.md`](progress-board.md) — 判断哪些已落地、哪些仍待复审。状态：已在 `origin/main`；T-A109 的 G7 相关两处已合入。
 4. [`docs/handover/roles-rules.md`](roles-rules.md) — 角色写入边界与审批权限。状态：已在 `origin/main`；T-A109 的 G7 代批表述已合入。
@@ -27,14 +27,14 @@
 13. [`docs/reviews/cross-review-R1-R19.md`](../reviews/cross-review-R1-R19.md) — 异源复核 R1–R19 / B1–B4 交接包。状态：已在 `origin/main`；T-A112 新增两条非阻塞残留已随 `70dcd8c` 合入。
 14. 部署 runbook（`wrapup-deploy` / `master-data` 在 `deploy/runbooks/`，不在 `docs/`）：
     - [`docs/runbook/windows-local.md`](../runbook/windows-local.md) — Windows + WSL 本地启动（已在 `origin/main`）。
-    - `deploy/runbooks/wrapup-deploy.md` — 收口部署红线与步骤（默认 dry-run）。已在 `origin/main`。相关节在 `bb27e71` 实测为 :201（engine_policy seed）、:256（正式卡 `--apply` 导入，待补）、:260（部署后只读 SQL 验证清单）。
-    - `deploy/scripts/wrapup/start-stack.sh` — 启栈脚本。已在 `origin/main`（经 `ops/T-O73c=7250c2d`）。`bb27e71` 上 :115–117 为 db-roles → seed → 启 worker 等；只认 `inserted=0` 或 `1`，失败不启 worker、不删行。
+    - `deploy/runbooks/wrapup-deploy.md` — 收口部署红线与步骤（默认 dry-run）。已在 `origin/main`。相关节在 `43b252a` 实测为 :201（engine_policy seed）、:256（正式卡 `--apply` 导入，待补）、:260–:265（导入清单两阶段）、:267（部署后只读 SQL 验证清单）。
+    - `deploy/scripts/wrapup/start-stack.sh` — 启栈脚本。已在 `origin/main`（经 `ops/T-O73c=7250c2d`）。`43b252a` 上 :115–117 为 db-roles → seed → 启 worker 等；只认 `inserted=0` 或 `1`，失败不启 worker、不删行。
     - `deploy/runbooks/master-data.md` — 证券主数据首次导入与词表校验。
     - `deploy/runbooks/ingest-halt.md` — 停机标志；解除须用户本人确认。
     - `deploy/runbooks/networks.md`、`database.md`、`closeout.md` — 网络拆分、数据库运维、收口预演。
 15. `docs/strategies/`（只引用，由策略研究员维护；已在 `origin/main`）— 策略库目录，入口见 `docs/strategies/catalog.md`，晋级门槛见 `docs/strategies/card_promotion_gates.md`，G7 核对稿见 `docs/strategies/T-R41/g7_review_H-01_S-01.md`。本导航不改该目录。
 16. [`docs/plan.md`](../plan.md) 与 [`docs/api-contract.md`](../api-contract.md)（已在 `origin/main`；T-A109 的 G7 正文修订已合入）。先读 plan §0 结论摘要、§0B 设计原则、§0A MVP 主线、§2.1A 唯一出口、§2.5 策略库（尤其 2.5.0B G1–G7、2.5.13 生命周期）、§7 风险与合规；契约 §1 通用约定、§6 状态机、§7.4–7.6 策略/实例/候选、§7.9 管理端（含 G7 决定）。当前最小切片：[`docs/plan-phase2-next.md`](../plan-phase2-next.md)（已在 `origin/main`；T-A109 的同步已合入）。
-17. T-R54 的 G1–G6 只读抄录表：`docs/strategies/T-R54/g1_g6_transcript_H-01_S-01.md`。该文件**尚未**入 `origin/main=bb27e71`；现行稿在分支 `strat/T-R54=468fb90`（用 `git show 468fb90:docs/strategies/T-R54/g1_g6_transcript_H-01_S-01.md` 阅读）。本导航不改 `docs/strategies`。
+17. T-R54 的 G1–G6 只读抄录表已入 `origin/main=43b252a`，实测路径为 `docs/strategies/T-R54/g1_g6_transcript_H-01_S-01.md`。本导航不改 `docs/strategies`。
 
 ## 用户本人决定项
 
@@ -44,6 +44,7 @@
 - S18（G7 S-01，须用户本人；E1/X4 产品接受度）。
 - G7 代批范围：仅 H-01 / S-01 还是全部卡长期；2026-11-09 授权是否覆盖 H-01 v3 与 S-01 v2。
 - G1–G6 对 H-01 v3 / S-01 v2 重跑结果确认。
+- S-01 的 SG1 / `universe.pool` 改动须升 v3 并重审（编排者裁定：v2 只升版、规则不动；改 pool 属规则变更，推迟到 v3）。
 - `DAILY_HTTP_LIMIT`（不放宽，除非用户本人）。
 - 空匿名卷处理。
 - T-B59 的 7 次补证（是否授权，以及是否计入或独立于次数上限）。
@@ -58,33 +59,34 @@
 
 H-01、S-01 仍不能代批（缺证据未清零；不放松「缺证据不得批」）。**仍不能代批。**
 
-G7 计数 **39 一致 / 0 不一致 / 1 缺证据**（指现行卡文件；H-01 20/0/0，S-01 19/0/1；仅 S18 缺证据，须用户本人答复）。`bb27e71` 上 `docs/strategies/T-R41/g7_review_H-01_S-01.md` §5 实测同为 39/0/1。本导航不改 `docs/strategies`。
+G7 计数 **39 一致 / 0 不一致 / 1 缺证据**（指现行卡文件；H-01 20/0/0，S-01 19/0/1；仅 S18 缺证据，须用户本人答复）。`43b252a` 上 `docs/strategies/T-R41/g7_review_H-01_S-01.md` §5 实测同为 39/0/1。本导航不改 `docs/strategies`。
 
-库内 S-01 v1 评审（T-B100，`docs/handover/team/reports/T-B100.md:9` 的 review `ceac5164-390d-4ff5-a318-6096ac5739b1`）对应 `055105a` 内容，不得用于 G7：其后 `fe2afa5`（T-R40）、`4c00ae7`（T-R43）在 `version_no=1` 下改了 `docs/strategies/cards/st_pullback_ma.md`。导入侧把全文 SHA-256 记入 `source_hash`（`src/backend/app/strategy/cards/importing.py:103`），同号字段比较见 `src/backend/app/strategy/cards/persistence.py:110`、`:118-120`。编排者已裁定 S-01 升 v2，研究员 T-R55 进行中。
+S-01 已升 v2（经 `strat/T-R55` 链 `2407d8f` 入 main）。现行卡 `docs/strategies/cards/st_pullback_ma.md` 的 `version_no` 为 2；v1 冻结在 `docs/strategies/cards/history/st_pullback_ma.v1.md`。在 `43b252a` 用 `prepare_document`（`src/backend/app/strategy/cards/importing.py:103`，与 `sha256sum` 一致）实测：v1 `source_hash=4e784f3b927d96978948660f1929906ee30f0ecbbc9e2b2fb4374b890ccc19df`，v2 `source_hash=3ba41d92c94be49b4a0190cbea9662079d21d82d7417c3fa35d72f9af378aece`。库内 S-01 v1 评审（T-B100，`docs/handover/team/reports/T-B100.md:9` 的 review `ceac5164-390d-4ff5-a318-6096ac5739b1`）对应 `055105a` 内容，不得用于 G7；v2 尚未导入。
 
-engine_policy 顶层与 hold_risk_monitor 组件的 2→3，以及 `src/backend/selfchecks/test_tb71_import.py` 离线 a–d（`test_formal_offline_identities_snapshots_and_policy_digests`），已随第 10 批合入。在 `bb27e71` 上核对：`config/engine_policy.yaml:2` 与 `:18` 均为 3。此项不再列为代批前置。
+engine_policy 顶层与 hold_risk_monitor 组件的 2→3，以及 `src/backend/selfchecks/test_tb71_import.py` 离线 a–d（`test_formal_offline_identities_snapshots_and_policy_digests`），已随第 10 批合入。在 `43b252a` 上核对：`config/engine_policy.yaml:2` 与 `:18` 均为 3。此项不再列为代批前置。
 
-代批前置须按下列顺序（「正式卡 `--apply` 须用户本人授权」「seed 是否属 standing-auth」以本文为准；`docs/strategies/T-R41/g7_review_H-01_S-01.md` 的 H1 行尚未列出这两条，且 H1 行另含 `src/backend/selfchecks/test_tb71_import.py:72`，该行需研究员补，本导航不改 `docs/strategies`）：
-1. S-01 升 v2（现行 v1 冻结入 `docs/strategies/cards/history/`）；
-2. 导入 S-01 v2（须用户本人 `--apply` 授权）；
-3. 对 v2 重跑 G1–G6 并只读抄录；
-4. 用户确认 2026-11-09 授权是否覆盖 S-01 v2 与 H-01 v3。
+代批前置剩余（「正式卡 `--apply` 须用户本人授权」「seed 是否属 standing-auth」入 main 前仍以本文为准；这两条已写在 `strat/T-R56=ac11b96` 的 g7_review H1 行与 §6，该提交尚未入 main、正在评审。`docs/strategies/T-R41/g7_review_H-01_S-01.md` 的 H1 行在 `43b252a` 已补 `src/backend/selfchecks/test_tb71_import.py:72`。本导航不改 `docs/strategies`）：
+1. 导入 S-01 v2（须用户本人 `--apply` 授权）；
+2. 对 v2 重跑 G1–G6 并只读抄录；
+3. 用户确认 2026-11-09 授权是否覆盖 S-01 v2 与 H-01 v3。
 
 其余仍保留、不因上列顺序而取消：
 - 步骤 A（库内既有 G1–G6 结果只读副本）；
 - S18 待用户本人回答；
 - 2026-11-09 13:12:55（America/Denver）那次代批须重做（当时缺证据，不得用于晋级）；
 - 部署时 seed 写配置行是否属 `docs/handover/team/rules/standing-auth-2026-11-08.md`，待用户本人确认；
-- 部署后在用户 Windows 实例上做只读核验（见 `deploy/runbooks/wrapup-deploy.md:260`）。
+- 部署后在用户 Windows 实例上做只读核验（见 `deploy/runbooks/wrapup-deploy.md:267`）。
 
-## 正式导入清单（S-01 升版前）
+`src/backend/selfchecks/test_tb100_delivery.py` 在 `43b252a` 实测：`official_golden_count`（:51，经 `prepare_document` 点现行卡夹具）对三张正式卡合计为 36（H-01 11 + W-01 15 + S-01 10；:54–55 注释写明不再写死 34；:90 用该函数断言；:68 是给 `--card` 逐路径追加的循环，不是字面 36）。另有 9 条库例需 loopback:55498 的 `tb100_test` 库（DSN 见 :42；缺库则 :97 skip），低优先级，不要连该端口。
 
-S-01 升 v2 之前，正式导入只可含 `docs/strategies/cards/hold_risk_monitor.md` 与 `docs/strategies/cards/sw_ma_trend_pullback.md`，不得纳入现行 `docs/strategies/cards/st_pullback_ma.md`（仍为 v1）。`import_batch`（`src/backend/app/strategy/cards/persistence.py:83`）由 `src/backend/app/cli/cards_import.py:64-65` 在单事务中调用；若批次含 v1 的 `st_pullback_ma.md`，会因同号内容已变而冲突，整批回滚，并连带已在同批的 H-01 v3。
+## 正式导入清单（阶段二）
+
+`origin/main=43b252a` 上 S-01 已是 v2。按 `deploy/runbooks/wrapup-deploy.md:260–:265`（阶段二见 :263），正式导入清单可含 `docs/strategies/cards/hold_risk_monitor.md`、`docs/strategies/cards/sw_ma_trend_pullback.md` 与现行 `docs/strategies/cards/st_pullback_ma.md`（v2）。`docs/strategies/cards/history/` 下冻结稿（含 `st_pullback_ma.v1.md`）永不导入。`import_batch`（`src/backend/app/strategy/cards/persistence.py:83`）由 `src/backend/app/cli/cards_import.py:64-71` 在单事务中调用。正式导入仍须用户本人 `--apply` 授权（见该手册 :256）；未授权前不得执行。
 
 ## engine_policy seed
 
-路径（`git ls-files` 已核，均已在 `origin/main=bb27e71`）：`deploy/runbooks/wrapup-deploy.md`、`deploy/scripts/wrapup/start-stack.sh`。启栈顺序见该脚本 :115–117：db-roles 之后、worker 之前执行 seed。手册节次在 `bb27e71` 为 :201 / :256 / :260。部署后 seed 仅认 `inserted=0` 或 `1`；失败不启 worker、不删行。正式卡 `--apply` 须用户本人授权。
+路径（`git ls-files` 已核，均已在 `origin/main=43b252a`）：`deploy/runbooks/wrapup-deploy.md`、`deploy/scripts/wrapup/start-stack.sh`。启栈顺序见该脚本 :115–117：db-roles 之后、worker 之前执行 seed。手册节次在 `43b252a` 为 :201 / :256 / :260–:265 / :267。部署后 seed 仅认 `inserted=0` 或 `1`；失败不启 worker、不删行。正式卡 `--apply` 须用户本人授权。
 
 ## 合并门禁（o61）
 
-今后凡改 `src/backend/app/signals/service.py` 或 `tests/backend/unit/test_g7_board_in_universe_prod_t_t66.py`，合并门禁须在 o61 重跑该文件两条 DB 用例（行号按 `bb27e71` 核对）：`test_write_candidate_persist_excludes_bse_via_service_355`（:372）与 `test_write_candidate_persist_admits_main_board_via_service_355`（:383）。CI 能否跑这两条列为低优先级待办。
+今后凡改 `src/backend/app/signals/service.py` 或 `tests/backend/unit/test_g7_board_in_universe_prod_t_t66.py`，合并门禁须在 o61 重跑该文件两条 DB 用例（行号按 `43b252a` 核对）：`test_write_candidate_persist_excludes_bse_via_service_355`（:372）与 `test_write_candidate_persist_admits_main_board_via_service_355`（:383）。CI 能否跑这两条列为低优先级待办。

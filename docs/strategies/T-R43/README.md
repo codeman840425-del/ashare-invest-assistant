@@ -12,7 +12,7 @@
 | L-5 | 删 `cost_replay.py` abandon_on_cost 死分支；impact_tiers 与成本放弃阈值登记为 gaps | `T-R42/cost_replay*.{py,json}` |
 | L-6 | g7_review §3 去掉仓库外路径 | g7_review §3 |
 | ④ S20 | 卡头:6 ③ 注明 v1 选股只扫「持仓 ∪ 自选」；运行侧用例归后端，初核仍缺证据 | `cards/st_pullback_ma.md:6` |
-| T-R50 gaps（T-A114 ②） | `cards/st_pullback_ma.md:79` `universe.pool: 全市场（持仓 ∪ 自选优先）` 与卡头:6 ③ 不一致；架构师裁定口径可接受，**记 gaps、本期不改卡**（改卡须升 version_no、旧审核 stale、G1–G6 重跑）；S-01 升 v2 时改为「持仓 ∪ 自选」并注「全市场待升版」（**T-R55b：universe.pool 改动推迟到 v3，待用户决定（编排者裁定）**；v2 只升版、规则不动）；S12/S20 仍缺证据 | g7_review §2B |
+| T-R50 gaps（T-A114 ②） | `cards/st_pullback_ma.md:79` `universe.pool: 全市场（持仓 ∪ 自选优先）` 与卡头:6 ③ 不一致；架构师裁定口径可接受，**记 gaps、本期不改卡**（改卡须升 version_no、旧审核 stale、G1–G6 重跑）；S-01 升 v2 时改为「持仓 ∪ 自选」并注「全市场待升版」（**T-R55b：universe.pool 改动推迟到 v3，待用户决定（编排者裁定）**；v2 只升版、规则不动）；S12/S20 现已一致（T-R53/T-R53b），现状 39/0/1，只缺 S18（T-R56 更新） | g7_review §2B |
 | ④ H16/S16 | 补服务端 lint 引用 reviews.py:317-324、:351/:353 与 test_tb83b_reauth.py:246 | g7_review H16/S16 |
 
 计数：合计 40；一致 32 / 不一致 0 / 缺证据 8（H-01 16/0/4：H4/H12/H17/H18；S-01 16/0/4：S3/S12/S18/S20）。

@@ -213,8 +213,8 @@ def test_key_defaults_ingest():
 def test_key_defaults_market_rules():
     d = snap("market_rules")
     assert d["modeled_from"] == "2023-04-10"
-    first, second = d["segments"]
-    assert first["effective_from"] == "2026-07-06" and second["effective_from"] == "2023-04-10"
+    first, second, third = d["segments"]  # T-B135：2023-08-28 印花税减半分段（T-T80 同步）
+    assert first["effective_from"] == "2026-07-06" and second["effective_from"] == "2023-08-28" and third["effective_from"] == "2023-04-10"
     assert first["price_limit_pct"] == {"main_board": 10, "main_board_st": 10, "chinext": 20, "star": 20, "bse": 30}
     assert first["sessions"] == {"call_auction": ["09:15", "09:25"], "morning": ["09:30", "11:30"],
                                  "afternoon": ["13:00", "14:57"], "closing_auction": ["14:57", "15:00"]}
@@ -232,13 +232,17 @@ def test_key_defaults_market_rules():
 
 
 def test_market_rules_second_segment_written_in_full():
-    """第二段“除 main_board_st: 5 外与上一段相同（文件中写全，不做继承）”。"""
-    first, second = snap("market_rules")["segments"]
-    assert set(first) == set(second)
+    """分段“文件中写全，不做继承”（T-B135/T-T80：第二段 2023-08-28 除 main_board_st 外同首段；第三段 2023-04-10 除 stamp_duty_sell_pct 外同第二段）。"""
+    first, second, third = snap("market_rules")["segments"]
+    assert set(first) == set(second) == set(third)
     assert second["price_limit_pct"]["main_board_st"] == 5
     a = {k: v for k, v in first.items() if k != "effective_from"}
     b = {k: v for k, v in second.items() if k != "effective_from"}
     assert diff_paths(a, b) == ["price_limit_pct.main_board_st"]
+    c = {k: v for k, v in second.items() if k != "effective_from"}
+    d = {k: v for k, v in third.items() if k != "effective_from"}
+    assert diff_paths(c, d) == ["fees.stamp_duty_sell_pct"]
+    assert third["fees"]["stamp_duty_sell_pct"] == 0.1 and second["fees"]["stamp_duty_sell_pct"] == 0.05
 
 
 @pytest.mark.parametrize(("day", "st_pct"), [

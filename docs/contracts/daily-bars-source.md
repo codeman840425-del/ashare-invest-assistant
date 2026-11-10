@@ -52,7 +52,7 @@
 - 配置项：`Settings.daily_bars_source: Literal["off","fake","mairui"] = "off"`，环境变量 `DAILY_BARS_SOURCE`，命名沿用 `data_licence_settings_enabled`、`master_snapshot_path` 的扁平 snake_case 风格。
   - fake 只在 `app_env` 为 test 时允许；其他环境由启动校验拒绝，以免假数据流进用户的 `/portfolio`。
   - mairui 另需 §4 的用户授权回执。
-- 新的放行条件，替换 `analyze` 中 `settings.app_env != "test"` 那一支，**三条同时满足才求值**：
+- 新的放行条件，替换 `analyze` 中「app_env 不是 test 就跳过」那一支，**三条同时满足才求值**：
   1. `daily_bars_source` 不是 off；
   2. 当日 `daily_bars.fetch` 运行状态为 ok 或 partial；
   3. 本人当日 owned 快照已构建。新增 `build_owned_snapshot(conn, owner, date) -> uuid`，写 data_snapshots，purpose=report，schema_version=`owned-daily-v1`。instrument 结构与 `replay/baseline.payload` 相同：bars、gaps、sessions 取自 trading_calendar，first_seen_at 取 fetched_at；factors 见 Q2。
@@ -116,6 +116,7 @@
 用例写法：`用例名`：Given 输入 / When 动作 / Then 返回、写库、缺口名、是否出网。“出网=否”统一用 transport 探针和 `ingest/netguard` 计数断言为 0。
 
 ### A｜写入口 + 假源 + 调度｜中
+- 澄清：签名、排程、迁移列、假源注入、停牌用例、测试落点以 §7（T-A130）为准，本小节与 §7 冲突处作废。
 - 目标：§1 的协议、`daily_universe`（澄清前只含持仓，Q4）、`upsert_daily_bars`、`FakeDailyBarsSource`、迁移、`daily_bars_source` 配置。另在 `workers/jobs` 注册 `daily_bars_fetch`：`slot_jobs` 设钟点（时刻见 Q5，澄清前不排程，只能手动入队），加入 `LOCKED_TASKS`。
 - 文件：
   - 新增 `app/marketdata/daily_bars.py`；
@@ -185,3 +186,167 @@
 | Q6 | 基准 000300.SH 的接口与主数据 | plan 标注【待 T003】，指数可能不在主数据中 | 用指数接口；不取，F50 记缺口 | 不取，F50 和基准相关的跟踪保持缺口 |
 | Q7 | `source_licence_id` 是否进主键 | plan 的 per_licence 规则要求进；当前读方都不过滤 | 现在就升主键并让读方过滤；单用户期只加列 | 只加可空列，记录来源，不用于共享 |
 | Q8 | 同键不同值（上游修正）怎么处理 | 覆盖会破坏 PIT；不覆盖可能保留错误值 | 不覆盖并告警；新建版本；人工确认后覆盖 | 不覆盖，记 `daily_bar_conflict` |
+
+## 7. 单 A 澄清（T-A130）
+
+输入是后端 T-B127 预读（`/workspace/team/reports/T-B127-preread.md`）列出的 9 条歧义，编号 ①–⑨ 与该报告一致。本节只补实现单 A；**本节与 §1、§4、§5.A 不一致处以本节为准**。原则：最小可用，与 §6 Q3/Q5/Q7 的保守默认一致。引用只写文件名、函数名和用例名。
+
+### ① 任务签名、入口与用户范围
+
+- 结论：沿用现网任务约定，**不另立签名**。965598b 里还没有 `daily_bars_fetch`；所谓「现网签名」指 `workers/daily.analysis_task` / `report_task` 的 `(settings, trade_date: str, user_id: str | None = None) -> int`，worker 按 `fn(settings, **args)` 调用（`workers/jobs.worker_tick`）。
+  - 任务名常量 `DAILY_BARS_FETCH`，值为 daily_bars_fetch。实现函数 `daily_bars_fetch_task(settings, trade_date: str, user_id: str | None = None, window_trading_days: int | None = None) -> int`，放在 `app/marketdata/daily_bars.py`，由 `workers/jobs.TASKS` 注册，并加入 `LOCKED_TASKS`。**不加入** `RETRY_TASKS`（§1 不允许重试）。
+  - 任务只做三件事：按配置选源、开连接、调用纯函数 `fetch_and_record(conn, source, *, trade_date: date, user_id: uuid.UUID | None, window_trading_days: int | None) -> int`（同模块）。测试用它注入自定义假源，不必经 Settings。
+  - 返回值是本次 `inserted` 行数（与 `jobs.Task` 注释「处理条数」一致）。off、mairui（C 之前）、休市、日历未覆盖时都返回 0。
+  - 用户范围：`user_id` 给定时只取该用户；缺省时取全部 approved 用户（与 `workers/daily.phase` 的 owners 查询同口径），按用户逐个算 `daily_universe` 后去重排序，一次 fetch。
+  - `daily_bars_source=mairui` 而 C 未落地：零写入、不出网、不建 outbox；pipeline_runs 记 skipped 和 issue `daily_bars_http_budget_unset`（`DAILY_BARS_HTTP_LIMIT` 默认 0，C 落地后同名 issue 语义不变）。
+- 理由：调用方（worker、`recover_task` 风格的手动入队）不必改；返回 int 符合 `Task` 类型。无参入口没有现网先例。
+- 迁移路径：无，因为没有旧调用方。
+- G/W/T：
+  - `test_task_registered_locked_not_retried`：Given 导入 `workers/jobs` / Then `TASKS` 中 daily_bars_fetch 指向 `daily_bars_fetch_task`，它在 `LOCKED_TASKS` 中、不在 `RETRY_TASKS` 中；`inspect.signature` 的参数依次为 settings、trade_date、user_id（默认 None）、window_trading_days（默认 None）。
+  - `test_task_user_scope_union_and_single`：Given 用户 u1 持仓 A、B，u2 持仓 C，fake 源 / When 分别以不给 user_id、user_id=u1 执行 / Then 前者写 A、B、C 各 1 行，返回 3；后者在空表上只写 A、B，返回 2。
+  - `test_mairui_before_c_is_inert`：Given app_env=test、`daily_bars_source=mairui` / When 执行任务 / Then 返回 0，daily_bars 零写入，pipeline_runs 一行 skipped，issues 含 `daily_bars_http_budget_unset`，出网=否。
+
+### ② 回填窗口参数与单日取数
+
+- 结论：窗口只作为任务参数 `window_trading_days`，**不进 Settings，无默认值**。
+  - 为 None 时只取 `trade_date` 当日（start=end=trade_date）。这是单日取数，不算回填，与 Q3「没有值就不回填」不冲突。
+  - 为正整数 N 时，取 trading_calendar 中 `date <= trade_date` 且 is_open 的最近 N 天，闭区间 [最早一天, trade_date]，一次 fetch。日历里不足 N 个开市日时，记 `calendar_not_covered`，零写入。
+  - 非正整数在任何写库之前抛 ValueError。
+  - 只有手动入队或测试会传这个参数（见 ③）。
+  - 窗口模式下，同一标的多日缺失只记一条 `daily_bars_missing:<code>`；stats.missing 记（标的，日）对数。
+- 理由：Q3 要求参数化、无默认；单日是 A 验收的基本形态。
+- G/W/T：
+  - `test_single_day_when_no_window`：Given 日历 11-06、11-09、11-10 开市，持仓 1 只 / When 以 trade_date=11-10 执行且不给窗口 / Then 只写 11-10 一行。
+  - `test_window_backfills_open_days_only`：Given 同上 / When window_trading_days=3 / Then 写 11-06、11-09、11-10 三行，周末 11-07、11-08 无行。
+  - `test_window_exceeds_calendar_records_not_covered`：Given 日历只含上述 5 天 / When window_trading_days=10 / Then 零写入，issues 含 `calendar_not_covered`。
+  - `test_window_non_positive_rejected`：Given window_trading_days 为 0 或 -1 / Then ValueError，daily_bars 与 pipeline_runs 都零写入。
+  - `test_no_settings_field_for_window`：Given `Settings.model_fields` / Then 不含任何回填窗口字段。
+
+### ③ slot_jobs 与排程
+
+- 结论：采用预读方案 A。**只登记 `TASKS` 和 `LOCKED_TASKS`，不加入 `slot_jobs`，也不加入 `schedule()`**，不写恒假开关或注释掉的钟点。§5.A 中「slot_jobs 设钟点」一句作废，Q5 澄清后另开单。
+- 理由：`slot_jobs` 一旦列入就会在开市日的钟点窗口入队，`beat_tick` 按间隔入队，两者都违背 Q5「只能手动或测试入队」。
+- G/W/T：
+  - `test_daily_bars_fetch_never_scheduled`：Given 一个已覆盖的开市日，北京时间 00:00–23:59 每 5 分钟取一个 now（`covered` 打桩为 True）/ When 调 `slot_jobs(settings, now)` / Then 结果里从不出现 daily_bars_fetch；同时 `schedule(settings)` 的键不含它。
+
+### ④ 迁移与列缺省
+
+- 结论（采用预读方案 A）：
+  - `pre_close`：MONEY，可空。
+  - `is_suspended`：boolean，可空，无 server_default。旧行保持 NULL；`upsert_daily_bars` 写正常行时写 false，停牌占位行写 true。
+  - `source`：text，**可空**。CHECK：为空，或取 fake、mairui 之一。旧行和既有自检里的直接插入保持 NULL；`upsert_daily_bars` 要求 source 非空，否则在写库前抛 ValueError。§1「source 非空」改为「经写入口写入的行非空」。
+  - `source_licence_id`：uuid，可空，**不加 FK**（先例是 `market.security_reconciliation_diffs.source_licence_id`），不进主键（Q7）。
+  - 复用已有的非空 `fetched_at`，不另加列。
+  - 停牌占位行：OHLC、pre_close、volume、amount 全部为空，只有 `is_suspended=true`。
+  - downgrade：只要有一行 source 非空就拒绝，抛错且不删数据；否则删除上述 4 列和 CHECK。
+- 迁移号：新文件，`down_revision` 为合入时的唯一头。T-A129 的 watchlist 迁移也定为 0031（`docs/contracts/watchlist.md`，分支 docs/T-A129）。**顺延规则**：先合入者用 0031；后合入者把文件名、revision 和 down_revision 顺延到下一个号，并指向先合入者。两边测试都用 alembic `ScriptDirectory.get_current_head()` 动态取头，不写死号码，并断言 `alembic heads` 只有一个。
+- 理由：NOT NULL 会让 `test_ta26_rc1`、`test_tb91_fixes`、`test_p2n03_tracking`、`tb49c` 等直接插入 daily_bars 的自检在迁移后失败，而 A 的文件清单不含这些文件。新增一个 legacy 取值又会污染来源语义。
+- G/W/T：
+  - `test_migration_adds_nullable_columns_single_head`：Given 临时库在 0030 / When upgrade head / Then 4 列存在且都可空，`alembic heads` 只有一个头；插入一行不带 source 的旧式数据成功，插入 source 为非法值的行被 CHECK 拒绝。
+  - `test_upsert_requires_source`：Given source=None / When `upsert_daily_bars` / Then ValueError，零写入。
+  - `test_downgrade_refuses_when_sourced_rows_exist`：Given 已写一行 fake / When downgrade 到上一版 / Then 失败，行和列都还在；表里没有带 source 的行时 downgrade 成功、列被删除。
+  - `test_normal_row_is_suspended_false`：Given fake 正常 bar / When upsert / Then 该行 is_suspended 为 false（不是 NULL）。
+
+### ⑤ UpsertStats、同值比较、issue 和运行状态的落点
+
+- 结论：
+  - `UpsertStats` 是冻结 dataclass，字段为 `inserted: int`、`unchanged: int`、`conflicts: int`、`issues: tuple[str, ...]`（只放 `daily_bar_conflict:<code>:<date>`，按字典序）。
+  - 同值比较列：open、high、low、close、pre_close、volume、amount、is_suspended。先把入参量化到列精度（MONEY 为 4 位小数）再精确比较，NULL 只与 NULL 相等。**不比较** fetched_at、source、source_licence_id：同值但来源不同算 unchanged，保留原行的来源。
+  - 写法：先 `INSERT … ON CONFLICT DO NOTHING RETURNING`；没有插入的键读回比较，分为 unchanged 或 conflict。任何情况都不 UPDATE。
+  - 运行记录：`fetch_and_record` 每次执行（休市日除外，见 ⑧）插入一行 pipeline_runs，kind=daily_batch，step=`daily_bars.fetch`，run_date=trade_date。
+    - stats 只含：user_id、window_trading_days、codes（标的数）、inserted、unchanged、conflicts、missing、suspended、issues（排序后的字符串列表）。
+    - 证券代码可以出现在 issue 字符串里；不得写入数量、成本、账户 id、用户名。
+  - 状态：
+    - off、mairui（C 之前）、日历未覆盖：skipped；
+    - 有 missing 或 conflict：partial；
+    - 其余：ok（范围为空时也是 ok，codes=0）；
+    - 异常：failed，error 只写异常类型名（同 `workers/daily.phase`）。
+  - B 判断「当日就绪」时，取该 run_date 下 started_at 最新的一行（B 的范围，这里只约定 A 不覆盖旧行）。
+- 理由：与验收里的 inserted、unchanged 字样对齐；不 UPDATE 满足 Q8；状态取值都在 `pipeline_runs` 现有 CHECK 内，新 step 名与 tb76.* 共存。
+- G/W/T：
+  - `test_upsert_stats_fields_and_equal_after_quantize`：Given 已有行 close=10.1234，再写 close=10.12340 / Then inserted=0、unchanged=1、conflicts=0。
+  - `test_same_values_different_source_is_unchanged`：Given 已有 fake 行，同值以 source=mairui、licence_id 为一个 uuid 写入 / Then unchanged=1，行的 source 仍为 fake。
+  - `test_run_row_stats_shape`：Given fake 源、3 只中 1 只缺 / When `fetch_and_record` / Then pipeline_runs 新增一行，step 为 daily_bars.fetch，status partial，stats 键集合恰为上列 9 个，issues 含 `daily_bars_missing:<code>`。
+
+### ⑥ 假源的注入方式与合成算法
+
+- 结论：
+  - 构造函数 `FakeDailyBarsSource(*, missing: frozenset[str] = frozenset(), suspended: frozenset[str] = frozenset())`，参数只能按关键字传。
+  - **默认对每个请求的标的、[start, end] 内每个日历日各合成一根**；只为 is_open 日写行由 `fetch_and_record` 过滤，非开市日的 bar 被丢弃且不计数。
+  - missing 中的标的不出 bar，出 `BarGap(reason=no_source, issue=daily_bars_missing:<code>)`。suspended 中的标的出停牌占位 bar，不出 gap。同一标的两边都有时按 missing 处理。
+  - 「全部不出 bar」就是 missing 等于全部标的。不用 json 夹具；§4 提到的 `selfchecks/fixtures/daily_bars_fake.json` 不做。
+  - 合成：种子取 sha256(code + "|" + ISO 日期) 的前 8 字节（不用 Python 内置 hash）。
+    - pre_close 在 5–50 元之间；
+    - close 与 pre_close 的比值在 [0.8, 1.2] 内；
+    - open 落在同一带内；
+    - high = max(open, close) × (1 + 小量)，low = min(open, close) × (1 − 小量)；
+    - 价格量化到 0.01，volume 固定 10000（与 `replay/baseline.payload` 一致），amount = close × volume；
+    - adj_type 固定 none（Q2）。
+    - 各日独立，不做跨日递推：前一日 close 不必等于后一日 pre_close。
+  - 契约不钉死黄金价格。测试只断言：两个实例输出相同；约束成立；同一 (code, date) 结果与调用顺序无关。
+  - 不出指数（Q6，A 的范围不含基准），不写 factor_values（因子留给 B）。
+- 理由：默认出 bar 符合「确定性合成」的原文，也让 A-5 这类幂等用例成立；无参默认加关键字注入，能让 T-T70 的各个场景同时变绿。
+- G/W/T：
+  - `test_fake_default_one_bar_per_code_day`：Given `FakeDailyBarsSource()`，两只标的，start=end=11-10 / Then 2 个 bar，is_suspended 为 false，gaps 为空。
+  - `test_fake_missing_and_suspended_injection`：Given missing 含 A、suspended 含 B、C 正常 / Then A 只有 gap（no_source），B 是 OHLC 为空、is_suspended 为 true 的占位 bar，C 正常。
+  - `test_fake_deterministic_and_bounded`：Given 两个独立实例，同一组 (code, date) / Then 输出完全相同，且 low ≤ min(open, close) ≤ max(open, close) ≤ high，close/pre_close−1 的绝对值不超过 0.2，volume 为 10000。
+
+### ⑦ 停牌验收不依赖 B；suspended 与 GapReason
+
+- 结论：
+  - `test_suspended_placeholder_becomes_gap_not_bar` **移到实现单 B**，A 不导入 `app/marketdata/daily_snapshot.py`。
+  - A 改用 `test_suspended_placeholder_row_written`（见下）。
+  - A 不改 `GapReason`，停牌也不产出 BarGap。快照里「suspended」用哪套字符串空间（`features/pipeline.prepare` 的 gaps 字符串，还是给 `GapReason` 增值）由 B 裁定。
+  - 提醒 B：`tracking/service` 读 daily_bars 时不过滤 close 为空的行，B 需要确认这类读方不受占位行影响。`reports/service` 用 close > 0、`/portfolio` 用 close 非空过滤，不受影响。
+- 理由：派单要求 A 的验收不依赖 B 的模块（快照、解 analyze 闸）。§1 也写明停牌在「快照构建时」才转成 gap。
+- G/W/T：
+  - `test_suspended_placeholder_row_written`：Given fake 源 suspended 含 B，当日开市 / When `fetch_and_record` / Then B 一行：is_suspended 为 true，OHLC、pre_close、volume、amount 全为空，source 为 fake；stats.suspended=1；无 `daily_bars_missing:B`；状态 ok。
+  - `test_impl_a_imports_no_b_module`：Given 静态扫描 `app/marketdata/daily_bars.py` 与 A 的测试文件 / Then 不引用 daily_snapshot 和 `workers/daily`。
+
+### ⑧ covered() 的错误码与休市日运行记录
+
+- 结论：**按现网 `reports/service.covered` 实现，不改 covered**。
+  - covered 返回 False：休市，no-op。不插 pipeline_runs，无 issue，返回 0（与 `workers/daily.phase` 遇到休市时直接返回的做法一致）。
+  - covered 抛 AppError，且错误码为 MAINTENANCE、details 的 issue 为 CALENDAR_NOT_COVERED：视为日历未覆盖。插一行 skipped，issues 为 calendar_not_covered，返回 0。其它 AppError 原样抛出。
+  - §1「抛出 CALENDAR_NOT_COVERED」改读为上述判定；`aggregates/calendar` 的 `ErrorCode.CALENDAR_NOT_COVERED` 不在本路径上。
+  - 判定顺序：off → mairui（C 之前）→ covered → 窗口 → 范围 → fetch → upsert。也就是说，off 在休市日也会记 skipped 和 daily_bars_source_off。
+- 理由：改 covered 会牵动日报和钟点任务，超出 A 的范围。
+- G/W/T：
+  - `test_non_trading_day_noop_and_calendar_not_covered`（覆盖 §5.A 的同名用例）：Given 日历含 11-08 且 is_open 为 false，不含 11-11，fake 源 / When 分别以 11-08、11-11 执行 / Then 11-08：零写入，pipeline_runs 无新增行，返回 0；11-11：零写入，一行 skipped，issues 恰为 calendar_not_covered；两组都不出网。
+  - `test_off_recorded_even_on_closed_day`：Given off，trade_date=11-08 / Then 一行 skipped，issue 为 daily_bars_source_off。
+
+### ⑨ licence_id 的类型
+
+- 结论：采用预读方案 A。签名为 `upsert_daily_bars(conn, result, *, source: str, licence_id: uuid.UUID | None, fetched_at: datetime) -> UpsertStats`。fake 和测试一律传 **None**，原样写入 `source_licence_id`。传入空串或其它非 UUID、非 None 的值时，在写库前抛 TypeError，**不做空串到 None 的规范化**。
+- 理由：列是 uuid；Q7 只加可空列。
+- G/W/T：
+  - `test_licence_id_none_written_as_null`：Given licence_id=None / Then 行的 source_licence_id 为 NULL。
+  - `test_licence_id_empty_string_rejected`：Given 空串 / Then TypeError，零写入。
+
+### 测试落点、临时库与种子（定死）
+
+- **放哪里**：A 的验收只有一套，放在 `tests/backend/unit/test_daily_bars_source_impl_a_t_t70.py`，由测试组 T-T70 维护（测试左移）。
+  - 后端 T-B127 **不新增** `selfchecks/test_tb_dailybars_*.py`；§5.A 文件清单中这一项作废。
+  - 依据：selfchecks 的集成库是 `selfchecks/test_tb70_replay.integration`，它断言 alembic 停在 0020，放不下新列；tests/backend/unit 已有 o61 临时库约定（`tests/backend/pg_o61.py`）。
+  - T-T70 需要按本节调整：
+    - 任务经 `jobs.TASKS` 查到后按 `(settings, trade_date=…, user_id=…)` 调用；
+    - 场景用 `fetch_and_record` 加 `FakeDailyBarsSource(missing=…, suspended=…)`；
+    - licence_id 传 None；
+    - 「返回 0」只断言 int 0；
+    - 停牌加快照的用例移给 B。
+- **临时库先跑迁移**：
+  - 沿用 `pg_o61.guard_temp_pg`（先核端口归属）、`template_db_name()`（默认 o61_tmp_0030）和 `validate_temp_db_name`，以 `CREATE DATABASE <tt70_…> TEMPLATE <模板>` 建库，断言 alembic_version 为 0030。
+  - **然后只对临时库**执行 alembic upgrade head：URL 由 `libpq_sqlalchemy_url(临时库)` 经 `-x url=` 传入，不打印。断言版本等于 `ScriptDirectory.get_current_head()`。
+  - 不升级、不改模板库；finally 里删除临时库；建库失败时 skip（同 `test_ta95_r6_g1_g3_t_t61`）。
+  - 不起新实例，不做端口转发。
+  - 纯单元用例不连库：Settings 校验、静态扫描、假源确定性、slot_jobs/schedule、签名。
+- **种子**：需要，全部虚构，只写进临时库。
+  - trading_calendar：先清空临时库里的这张表，再插 5 行：11-06 开、11-07 休、11-08 休、11-09 开、11-10 开（2026 年）；11-11 不插，用作未覆盖日。
+  - securities：3 只 type=stock、listing_status=listed 的标的 A、B、C（列只填非空列 code、type、name、exchange）；外加 1 只 type=etf 的 D，用于资格过滤。代码沿用仓库已有合成夹具里用过的代码，**不得取自用户持仓文件或任何含股东代码的材料**。
+  - users：u1、u2，都是 approved。
+  - 持仓链（形状同 `test_tb74_candidates.setup`）：每个用户 accounts 1 行 → import_batches 1 行（committed、positions）→ broker_position_snapshots 1 行（version_no=1）→ broker_position_snapshot_items。u1 持 A、B，u2 持 C，D 挂在 u1 下验证资格过滤。
+  - 仅 `test_universe_holdings_only_until_clarified` 额外需要：watchlist_items 1 行（u1、代码 E）和 1 个 scope=security 的 active strategy_instance（代码 F，链路同 `test_tb74_candidates.setup`）；断言只返回 A、B。
+
+### 留给用户（不自行假设）
+
+本节没有新增需要用户定的产品问题。Q3（窗口长度 N）、Q5（钟点）、Q1、Q2、Q4、Q6、Q7、Q8 仍按 §6 的保守做法执行，等用户答复。

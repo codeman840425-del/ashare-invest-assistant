@@ -47,7 +47,8 @@ def entitlement_value(
     )
     if len(values) != 1:
         return None
-    return values[0]
+    found: object = values[0]
+    return found
 
 
 def positive_int_entitlement(

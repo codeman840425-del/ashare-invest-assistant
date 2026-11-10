@@ -17,7 +17,15 @@ from app.ingest import ip_limit as ipl
 from app.ingest.state import LicenceState, Priority
 from app.schemas.enums import DataLicenceStatus, DataLicenceTier
 from pathlib import Path
+import sys
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pg_o61 import (  # noqa: E402
+    PgOwnershipError,
+    require_o61_pg,
+    validate_temp_db_name,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 CFG = IngestConfig.model_validate(
@@ -28,23 +36,37 @@ WINDOW = CFG.ip_limited_escalate.window_s
 PAUSE = CFG.ip_limited_escalate.pause_s
 
 
-def _admin_url() -> str:
-    return "postgresql+psycopg://postgres@127.0.0.1:55461/postgres"
+def _pg_connect_url(dbname: str) -> str:
+    host = os.environ.get("PGHOST", "127.0.0.1")
+    port = os.environ.get("PGPORT", "55461")
+    user = os.environ.get("PGUSER", "postgres")
+    return f"postgresql+psycopg://{user}@{host}:{port}/{dbname}"
+
+
+def _template_db() -> str:
+    """私有模板库名：环境变量 TT51_TEMPLATE_DB，默认 tt51_tpl，经格式校验。"""
+    return validate_temp_db_name(os.environ.get("TT51_TEMPLATE_DB", "tt51_tpl"))
 
 
 @pytest.fixture(scope="module")
 def engine() -> Iterator[Engine]:
-    """o61-pg @ 55461；库名 tt61_ 前缀；模块结束 DROP 并核无残留。"""
-    name = "tt61_r6_" + uuid.uuid4().hex[:8]
-    assert name.startswith("tt61_")
-    admin = create_engine(_admin_url(), isolation_level="AUTOCOMMIT", hide_parameters=True)
+    """仅在核过归属的 o61-pg 上建 tt61_* 临时库；模块结束 DROP 并核无残留。"""
+    host = os.environ.get("PGHOST", "127.0.0.1")
+    port = os.environ.get("PGPORT", "55461")
+    try:
+        require_o61_pg(host, port)
+    except PgOwnershipError as exc:
+        pytest.fail(str(exc))
+    name = validate_temp_db_name("tt61_r6_" + uuid.uuid4().hex[:8])
+    tpl = _template_db()
+    admin = create_engine(_pg_connect_url("postgres"), isolation_level="AUTOCOMMIT", hide_parameters=True)
     try:
         with admin.connect() as conn:
-            conn.execute(text(f"CREATE DATABASE {name} TEMPLATE tt51_tpl"))
+            conn.execute(text(f"CREATE DATABASE {name} TEMPLATE {tpl}"))
     except Exception as exc:  # noqa: BLE001
         admin.dispose()
-        pytest.skip(f"无法在 o61:55461 上创建 {name} 临时库：{type(exc).__name__}")
-    url = "postgresql+psycopg://postgres@127.0.0.1:55461/" + name
+        pytest.skip(f"无法在已核属 o61-pg 的实例上创建临时库：{type(exc).__name__}")
+    url = _pg_connect_url(name)
     eng = create_engine(url, hide_parameters=True)
     try:
         yield eng

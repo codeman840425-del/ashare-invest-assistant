@@ -72,7 +72,7 @@ def test_expected_answers_and_identifiers_cannot_drive_calculation(corpus: Any) 
     assert result.state == "entry_ok"
     assert result.fixture_id == "arbitrary-id"
     inputs = copy.deepcopy(original)
-    inputs["features"]["f.market_regime"] = "downtrend"
+    inputs["features"]["f.market_regime_idx"] = "downtrend"
     actual = calculate(
         block["strategy-card"],
         block["strategy-spec"],

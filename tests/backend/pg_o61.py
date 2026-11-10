@@ -14,6 +14,7 @@ DEFAULT_TEMPLATE_DB = "o61_tmp_0030"
 TEMPLATE_ENV = "TT_O61_TEMPLATE_DB"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 55461
+DEFAULT_USER = "postgres"
 
 
 class PgOwnershipError(RuntimeError):
@@ -144,3 +145,79 @@ def require_o61_pg(host: str | None = None, port: str | int | None = None) -> st
         f"拒绝建库：{h}:{p} 不属于 o61-pg，归属 {shown}（{detail}）。"
         "请把 PGHOST/PGPORT 指到 o61-pg，勿写到 o55/o53/o57/o60。"
     )
+
+
+# ---------------------------------------------------------------------------
+# T-T68：连接参数读 libpq 环境变量；本机缺省核 o61；CI 端口不误拦；禁连 o53/o55/o57/o60
+# ---------------------------------------------------------------------------
+# 规则：
+# 1. 参数来自 PGHOST/PGPORT/PGUSER/PGPASSWORD（与 T-O67 / test_ta95 一致），
+#    缺省回落 127.0.0.1:55461、用户 postgres、无密码。不把口令写进源码、不打印 DSN。
+# 2. 解析结果等于本机缺省（loopback + 55461）时，必须 require_o61_pg，归属不是 o61-pg 则拒绝。
+# 3. 非缺省目标（例如 CI 的 127.0.0.1:5432 或主机名 db:5432）不做 o61 归属校验，以免误拦。
+# 4. 无论是否缺省，主机名或 docker 归属一旦命中 o53/o55/o57/o60，一律拒绝，且不发起连接。
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_FORBIDDEN_MARK = re.compile(r"(?:^|[^a-z0-9])(o53|o55|o57|o60)(?:[^a-z0-9]|$)")
+
+
+def resolve_libpq_params(
+    environ: dict[str, str] | None = None,
+) -> tuple[str, int, str, str | None]:
+    """读取 libpq 环境变量；返回 (host, port, user, password)。password 可能为 None。"""
+    env = environ if environ is not None else os.environ
+    host = env.get("PGHOST") or DEFAULT_HOST
+    port = int(env.get("PGPORT") or DEFAULT_PORT)
+    user = env.get("PGUSER") or DEFAULT_USER
+    raw_pw = env.get("PGPASSWORD")
+    password = raw_pw if raw_pw else None
+    return host, port, user, password
+
+
+def is_local_o61_default(host: str, port: str | int) -> bool:
+    return host in _LOOPBACK_HOSTS and int(port) == DEFAULT_PORT
+
+
+def forbidden_pg_marker(name: str | None) -> str | None:
+    if not name:
+        return None
+    matched = _FORBIDDEN_MARK.search(name.lower().lstrip("/"))
+    return matched.group(1) if matched else None
+
+
+def libpq_sqlalchemy_url(database: str, *, environ: dict[str, str] | None = None):
+    """构造 SQLAlchemy URL；调用方不得打印返回值（可能含口令）。"""
+    from sqlalchemy.engine import URL
+
+    host, port, user, password = resolve_libpq_params(environ)
+    return URL.create(
+        "postgresql+psycopg",
+        username=user,
+        password=password,
+        host=host,
+        port=port,
+        database=database,
+    )
+
+
+def guard_temp_pg(host: str | None = None, port: str | int | None = None) -> str | None:
+    """按 T-T68 规则决定是否允许在该目标上建临时库。不建立连接。"""
+    resolved_host, resolved_port, _user, _password = resolve_libpq_params()
+    h = host if host is not None else resolved_host
+    p = int(port if port is not None else resolved_port)
+    marker = forbidden_pg_marker(h)
+    if marker:
+        raise PgOwnershipError(
+            f"拒绝建库：目标主机命中禁连实例 {marker}（{h}:{p}）。"
+            "绝不能连到 o53/o55/o57/o60。"
+        )
+    if is_local_o61_default(h, p):
+        return require_o61_pg(h, p)
+    owner, detail = lookup_tcp_owner(h, p)
+    marker = forbidden_pg_marker(owner)
+    if marker:
+        shown = owner or "未知"
+        raise PgOwnershipError(
+            f"拒绝建库：{h}:{p} 归属 {shown}（{detail}），命中禁连实例 {marker}。"
+            "绝不能连到 o53/o55/o57/o60。"
+        )
+    return owner.lstrip("/") if owner else None

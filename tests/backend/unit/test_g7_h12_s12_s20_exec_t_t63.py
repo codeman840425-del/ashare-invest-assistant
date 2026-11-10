@@ -11,6 +11,7 @@
 本文件只补缺口：H12 的 422 ``STRATEGY_SYSTEM_ONLY`` 与北交所；S12 的 bse / ST / 停牌 / F2；
 官方卡字段直通（S12/S20 的 screen:null 规范化，以及 H-01 主板键）。
 T-T64：在 T-B119 合入后去掉两条 strict xfail，断言未改、未弱化。
+T-T67：H12/S12 板块三例改为生产 ``board_in_universe``，删除测试内复刻。
 
 对照：``git show 60ce9fd:docs/strategies/T-R41/g7_review_H-01_S-01.md`` §6、
 /workspace/team/reports/T-R47.md、T-A111.md。夹具均为【虚构】；不调麦蕊。
@@ -39,6 +40,7 @@ from app.config_files import MarketRulesConfig
 from app.signals.execution import assess
 from app.signals.models import MarketFacts, SignalInput
 from app.strategy.cards.fixtures import calculate
+from app.strategy.universe_norm import board_in_universe
 from app.strategy.cards.preflight import feature_registry, preflight
 from app.strategy.instances import creation
 
@@ -84,22 +86,6 @@ def feature_keys() -> set[str]:
 
 def _fixture(fixtures: list[dict[str, Any]], fid: str) -> dict[str, Any]:
     return next(fx for fx in fixtures if fx["id"] == fid)
-
-
-def _board_in_universe(universe: dict[str, Any], board: str, security_type: str = "stock") -> bool:
-    """与 service.py persist 中板块/类型判定同一口径（约 :351-:354）。"""
-    return security_type in universe.get("security_types", []) and bool(
-        universe.get("boards", {}).get(board, False)
-    )
-
-
-def _v1_holdings_watch_universe(official_universe: dict[str, Any]) -> dict[str, Any]:
-    """仅用于板块判定：保留官方 boards，补齐 security_types，去掉叙述性 exclude。不是生产改写。"""
-    return {
-        "pool": "持仓 ∪ 自选",
-        "boards": dict(official_universe.get("boards") or {}),
-        "security_types": list(official_universe.get("security_types") or ["stock"]),
-    }
 
 
 def _run_fx(
@@ -174,9 +160,12 @@ def test_h12_user_create_instance_422_strategy_system_only(
 
 def _assert_h12_bse_excluded(universe: dict[str, Any]) -> None:
     assert _FIC_BSE.endswith(".BJ")
-    assert _board_in_universe(universe, "bse") is False
-    assert _board_in_universe(universe, "chinext") is True
-    assert _board_in_universe(universe, "star") is True
+    # 原复刻同时检查 security_types=["stock"] 与 boards；类型检查保留，板块改走生产函数
+    assert "stock" in universe.get("security_types", [])
+    boards = universe.get("boards")
+    assert board_in_universe(boards, "bse") is False
+    assert board_in_universe(boards, "chinext") is True
+    assert board_in_universe(boards, "star") is True
 
 
 def test_h12_bse_not_in_universe(
@@ -188,7 +177,12 @@ def test_h12_bse_not_in_universe(
 def test_h12_main_board_in_universe_via_production_key(
     h01: tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]],
 ) -> None:
-    assert _board_in_universe(h01[0]["universe"], "main_board") is True
+    universe = h01[0]["universe"]
+    assert "stock" in universe.get("security_types", [])
+    boards = universe.get("boards")
+    assert board_in_universe(boards, "main_board") is True
+    # 同一官方卡上北交所仍须排除，避免「一律 True」也能让本例通过
+    assert board_in_universe(boards, "bse") is False
 
 
 def test_h12_tamper_bse_admitted_self_fails(
@@ -213,9 +207,10 @@ def test_s12_bse_false_on_official_boards(
     assert boards["bse"] is False
     assert bool(boards.get("chinext", False)) is True
     assert bool(boards.get("star", False)) is True
-    uni = _v1_holdings_watch_universe(card["universe"])
-    assert _board_in_universe(uni, "bse") is False
-    assert _board_in_universe(uni, "star") is True
+    # 原自造 remapper 补齐 security_types=["stock"] 后再用复刻函数；改为直接断言生产字段与生产门闩
+    assert "stock" in card["universe"].get("security_types", [])
+    assert board_in_universe(boards, "bse") is False
+    assert board_in_universe(boards, "star") is True
 
 
 def test_s12_halt_excluded_s01_fx6(

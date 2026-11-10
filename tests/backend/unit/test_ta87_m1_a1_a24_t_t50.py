@@ -6,7 +6,8 @@ engine_for 无 ingest profile；try_acquire_ip_limit_lock 仍在；
 main 对 ValidationError/ArgumentError 未统一 rc=78 且可能泄露。
 
 只用假 transport；麦蕊 DNS 由 conftest 拦截；env -u MAIRUI_LICENCE。
-隔离 PG：o61-pg 127.0.0.1:55461 临时库（用完删除）。不打印 DSN/密钥。
+隔离 PG：读 PGHOST/PGPORT/PGUSER/PGPASSWORD（缺省 127.0.0.1:55461）；本机缺省须核 o61-pg，CI 非缺省端口不误拦；
+禁连 o53/o55/o57/o60。临时库用完删除。不打印 DSN/密钥。
 """
 
 from __future__ import annotations
@@ -37,7 +38,14 @@ import sys as _sys
 from pathlib import Path as _Path
 
 _sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
-from pg_o61 import PgOwnershipError, require_o61_pg, template_db_name, validate_temp_db_name  # noqa: E402
+from pg_o61 import (  # noqa: E402
+    PgOwnershipError,
+    guard_temp_pg,
+    libpq_sqlalchemy_url,
+    resolve_libpq_params,
+    template_db_name,
+    validate_temp_db_name,
+)
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
@@ -75,16 +83,13 @@ def _cfg():
 
 
 def _require_pg() -> dict[str, str]:
-    host = os.environ.get("PGHOST")
-    port = os.environ.get("PGPORT")
-    user = os.environ.get("PGUSER")
-    if not host or not port or not user:
-        pytest.skip("PGHOST/PGPORT/PGUSER 未齐：T-T50 需 o61-pg 临时库")
+    host, port, user, _password = resolve_libpq_params()
     try:
-        require_o61_pg(host, port)
+        guard_temp_pg(host, port)
     except PgOwnershipError as exc:
         pytest.fail(str(exc))
-    return {"PGHOST": host, "PGPORT": port, "PGUSER": user}
+    # 只回传 libpq 定位键，口令仍走环境变量，不放入返回值以免被打印
+    return {"PGHOST": host, "PGPORT": str(port), "PGUSER": user}
 
 
 def _psql(env: dict[str, str], db: str, sql: str) -> subprocess.CompletedProcess[str]:
@@ -164,7 +169,7 @@ def _temp_db(suffix: str):
         )
         c = _psql(env, "postgres", f"CREATE DATABASE {name} TEMPLATE {tpl};")
         assert c.returncode == 0, c.stderr[-400:]
-        url = f"postgresql+psycopg://{env['PGUSER']}@{env['PGHOST']}:{env['PGPORT']}/{name}"
+        url = libpq_sqlalchemy_url(name)
         eng = create_engine(url, pool_pre_ping=True)
         try:
             yield eng, name, url
@@ -1347,3 +1352,52 @@ def test_a24_transport_counts_and_https_get_unused(tmp_path: Path, monkeypatch: 
         assert len(tr_ok.calls) == 1
         assert getattr(result, "status", None) == 200
     assert real_https_calls == [], f"A24: 真实 _https_get 被调用: {real_https_calls}"
+
+
+def test_tt69_require_pg_ci_like_target_is_not_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CI 形态（db:5432）走 _require_pg / guard_temp_pg，不得误拦，不发起连接。"""
+    monkeypatch.setenv("PGHOST", "db")
+    monkeypatch.setenv("PGPORT", "5432")
+    monkeypatch.setenv("PGUSER", "aia")
+    monkeypatch.delenv("PGPASSWORD", raising=False)
+    monkeypatch.setattr(
+        "pg_o61.lookup_tcp_owner",
+        lambda host, port: (None, "monkeypatch 模拟：CI 无 docker 映射，未连接"),
+    )
+    env = _require_pg()
+    assert env["PGHOST"] == "db"
+    assert env["PGPORT"] == "5432"
+    assert env["PGUSER"] == "aia"
+    assert "PGPASSWORD" not in env
+
+
+def test_tt69_require_pg_refuses_forbidden_without_connecting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_require_pg 对 o53/o55/o57/o60 必须失败，且不发起连接。"""
+
+    def _lookup_must_not_run(host: str, port: int) -> tuple[None, str]:
+        raise AssertionError(f"不应查询或连接 {host}:{port}")
+
+    monkeypatch.setattr("pg_o61.lookup_tcp_owner", _lookup_must_not_run)
+    monkeypatch.setenv("PGPORT", "5432")
+    monkeypatch.setenv("PGUSER", "postgres")
+    for host, mark in (
+        ("o53-p3-pg", "o53"),
+        ("o55-p2-pg", "o55"),
+        ("o57-pg", "o57"),
+        ("o60-pg", "o60"),
+    ):
+        monkeypatch.setenv("PGHOST", host)
+        with pytest.raises(pytest.fail.Exception) as ei:
+            _require_pg()
+        assert mark in str(ei.value)
+        assert "拒绝建库" in str(ei.value)
+    monkeypatch.setattr(
+        "pg_o61.lookup_tcp_owner",
+        lambda host, port: ("o55-p2-pg", "monkeypatch 模拟，未连接该实例"),
+    )
+    monkeypatch.setenv("PGHOST", "127.0.0.1")
+    monkeypatch.setenv("PGPORT", "55494")
+    with pytest.raises(pytest.fail.Exception) as ei:
+        _require_pg()
+    assert "o55" in str(ei.value)
+

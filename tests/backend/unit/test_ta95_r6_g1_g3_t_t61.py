@@ -23,7 +23,9 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pg_o61 import (  # noqa: E402
     PgOwnershipError,
-    require_o61_pg,
+    guard_temp_pg,
+    libpq_sqlalchemy_url,
+    resolve_libpq_params,
     validate_temp_db_name,
 )
 
@@ -36,13 +38,6 @@ WINDOW = CFG.ip_limited_escalate.window_s
 PAUSE = CFG.ip_limited_escalate.pause_s
 
 
-def _pg_connect_url(dbname: str) -> str:
-    host = os.environ.get("PGHOST", "127.0.0.1")
-    port = os.environ.get("PGPORT", "55461")
-    user = os.environ.get("PGUSER", "postgres")
-    return f"postgresql+psycopg://{user}@{host}:{port}/{dbname}"
-
-
 def _template_db() -> str:
     """私有模板库名：环境变量 TT51_TEMPLATE_DB，默认 tt51_tpl，经格式校验。"""
     return validate_temp_db_name(os.environ.get("TT51_TEMPLATE_DB", "tt51_tpl"))
@@ -50,24 +45,30 @@ def _template_db() -> str:
 
 @pytest.fixture(scope="module")
 def engine() -> Iterator[Engine]:
-    """仅在核过归属的 o61-pg 上建 tt61_* 临时库；模块结束 DROP 并核无残留。"""
-    host = os.environ.get("PGHOST", "127.0.0.1")
-    port = os.environ.get("PGPORT", "55461")
+    """按 T-T68 护栏在目标实例上建 tt61_* 临时库；模块结束 DROP 并核无残留。
+
+    模板库名仍读 TT51_TEMPLATE_DB（默认 tt51_tpl）。本机缺省须核 o61-pg；
+    CI 非缺省端口不误拦；禁连 o53/o55/o57/o60。连接读 PGHOST/PGPORT/PGUSER/PGPASSWORD。
+    """
+    host, port, _user, _password = resolve_libpq_params()
     try:
-        require_o61_pg(host, port)
+        guard_temp_pg(host, port)
     except PgOwnershipError as exc:
         pytest.fail(str(exc))
     name = validate_temp_db_name("tt61_r6_" + uuid.uuid4().hex[:8])
     tpl = _template_db()
-    admin = create_engine(_pg_connect_url("postgres"), isolation_level="AUTOCOMMIT", hide_parameters=True)
+    admin = create_engine(
+        libpq_sqlalchemy_url("postgres"),
+        isolation_level="AUTOCOMMIT",
+        hide_parameters=True,
+    )
     try:
         with admin.connect() as conn:
             conn.execute(text(f"CREATE DATABASE {name} TEMPLATE {tpl}"))
     except Exception as exc:  # noqa: BLE001
         admin.dispose()
-        pytest.skip(f"无法在已核属 o61-pg 的实例上创建临时库：{type(exc).__name__}")
-    url = _pg_connect_url(name)
-    eng = create_engine(url, hide_parameters=True)
+        pytest.skip(f"无法在目标实例上创建临时库：{type(exc).__name__}")
+    eng = create_engine(libpq_sqlalchemy_url(name), hide_parameters=True)
     try:
         yield eng
     finally:
@@ -210,3 +211,44 @@ def test_g3_deadline_equal_releases(engine: Engine) -> None:
     assert any(t.event == "resumed" for t in ev), ev
     assert st.status == DataLicenceStatus.ACTIVE
     assert st.allows(Priority.P0, until, user_escalated_until=until) is True
+
+
+def test_tt69_ta95_ci_like_target_is_not_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CI 形态（db:5432 / 127.0.0.1:5432）走与 fixture 相同的 guard_temp_pg，不得误拦。"""
+    monkeypatch.setenv("PGHOST", "db")
+    monkeypatch.setenv("PGPORT", "5432")
+    monkeypatch.setenv("PGUSER", "aia")
+    monkeypatch.setattr(
+        "pg_o61.lookup_tcp_owner",
+        lambda host, port: (None, "monkeypatch 模拟：CI 无 docker 映射，未连接"),
+    )
+    host, port, _user, _password = resolve_libpq_params()
+    assert guard_temp_pg(host, port) is None
+    assert guard_temp_pg("127.0.0.1", 5432) is None
+
+
+def test_tt69_ta95_refuses_forbidden_without_connecting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """o53/o55/o57/o60 必须拒绝，且不发起连接。"""
+
+    def _lookup_must_not_run(host: str, port: int) -> tuple[None, str]:
+        raise AssertionError(f"不应查询或连接 {host}:{port}")
+
+    monkeypatch.setattr("pg_o61.lookup_tcp_owner", _lookup_must_not_run)
+    for host, mark in (
+        ("o53-p3-pg", "o53"),
+        ("o55-p2-pg", "o55"),
+        ("o57-pg", "o57"),
+        ("o60-pg", "o60"),
+    ):
+        with pytest.raises(PgOwnershipError) as ei:
+            guard_temp_pg(host, 5432)
+        assert mark in str(ei.value)
+        assert "拒绝建库" in str(ei.value)
+    monkeypatch.setattr(
+        "pg_o61.lookup_tcp_owner",
+        lambda host, port: ("o55-p2-pg", "monkeypatch 模拟，未连接该实例"),
+    )
+    with pytest.raises(PgOwnershipError) as ei:
+        guard_temp_pg("127.0.0.1", 55494)
+    assert "o55" in str(ei.value)
+

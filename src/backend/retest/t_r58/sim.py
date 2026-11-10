@@ -112,6 +112,17 @@ class Leg:
 
 
 @dataclass
+class EntryOrder:
+    """信号收盘冻结的单笔入场委托；cursor 只按后续 bar 的开盘递增。"""
+
+    leg: Leg
+    segment: Segment
+    remaining: int
+    cursor: int
+    state: str = "pending"
+
+
+@dataclass
 class RLeg:
     entry_day: int
     direction: str
@@ -201,7 +212,7 @@ class Market:
         return rules.round_tick(float(s.o[d, f])) != limit
 
     def fill_slot(self, d: int, after: int, q: int, buy: bool, ordinal: int) -> int:
-        """§5 延迟敏感性：数可成交根数，不能把空根算作第2根。"""
+        """仅供事后 R 候选筛选；真实信号层须用 entry_order/advance_entry。"""
         if ordinal < 1:
             raise ValueError("fill ordinal must be positive")
         for slot in range(after + 1, len(features.SLOT_END)):
@@ -211,8 +222,11 @@ class Market:
                     return slot
         return len(features.SLOT_END)
 
-    def entry(self, segment: Segment, d: int, t: int, direction: str) -> Leg:
+    def entry_order(self, segment: Segment, d: int, t: int, direction: str) -> EntryOrder:
+        """只读信号时点信息；成交槽和价格须由后续开盘逐根揭示。"""
         s, p = self.stock, self.params
+        if p.fill_delay < 1:
+            raise ValueError("fill delay must be positive")
         q = rules.lot_floor(self.board, p.notional, float(s.c[d, t]))
         planned = q * float(s.c[d, t])
         participation = (
@@ -220,21 +234,14 @@ class Market:
             if self.adv_cnt[d] >= 5 and not np.isnan(self.adv[d])
             else None
         )
-        # 主跑下一根无法入场则放弃；第2根可成交bar的敏感性另按成交资格计数。
-        f = (
-            t + 1
-            if p.fill_delay == 1
-            else self.fill_slot(d, t, q, direction == "buy_first", p.fill_delay)
-        )
-        price = float(s.o[d, f]) if 0 <= f < len(features.SLOT_END) else float("nan")
-        return Leg(
+        leg = Leg(
             symbol=s.symbol,
             segment=segment.name,
             entry_day=d,
             direction=direction,
             trigger_slot=t,
-            entry_slot=f,
-            entry_price=price,
+            entry_slot=len(features.SLOT_END),
+            entry_price=float("nan"),
             exit_trigger_day=d,
             exit_trigger_slot=t,
             exit_day=None,
@@ -261,10 +268,42 @@ class Market:
             cons_pnl_bp=0.0,
             cons_mark_price=None,
             prior_anomaly=bool(np.any(~self.days[d]["valid"][:t])),
-            exec_anomaly=not bool(self.days[d]["valid"][f]) if 0 <= f < 240 else False,
+            exec_anomaly=False,
             hold_bars=None,
             board=self.board,
         )
+        return EntryOrder(leg, segment, p.fill_delay, t)
+
+    def advance_entry(self, order: EntryOrder, slot: int) -> str:
+        """只处理紧接 cursor 的一个开盘；失败委托终态出队，不回到旧信号。"""
+        if order.state != "pending":
+            raise ValueError("entry order is terminal")
+        if slot != order.cursor + 1 or not 0 <= slot < len(features.SLOT_END):
+            raise ValueError("entry order cursor must advance one bar")
+        order.cursor = slot
+        leg = order.leg
+        if self.can_fill(leg.entry_day, slot, leg.q, leg.direction == "buy_first"):
+            order.remaining -= 1
+            if order.remaining == 0:
+                leg.entry_slot = slot
+                leg.entry_price = float(self.stock.o[leg.entry_day, slot])
+                leg.exec_anomaly = not bool(self.days[leg.entry_day]["valid"][slot])
+                order.state = "filled"
+        if order.state == "pending" and (
+            self.params.fill_delay == 1
+            or features.SLOT_END[slot] >= self.params.last_fill
+            or slot == len(features.SLOT_END) - 1
+        ):
+            order.state = "abandoned"
+        return order.state
+
+    def entry(self, segment: Segment, d: int, t: int, direction: str) -> Leg:
+        """R 对照与单腿自检入口；沿单个已冻结委托前进，不调用信号选择层。"""
+        order = self.entry_order(segment, d, t, direction)
+        for slot in range(t + 1, len(features.SLOT_END)):
+            if self.advance_entry(order, slot) != "pending":
+                break
+        return order.leg
 
 
 def _costs(
@@ -458,7 +497,20 @@ def simulate(
             continue
         confirm = dict.fromkeys(params.directions, 0)
         day = m.days[d]
+        pending: EntryOrder | None = None
         for t, hhmm in enumerate(features.SLOT_END):
+            # 当前 bar 开盘先处理已冻结委托，再用当前 bar 收盘判断新的信号。
+            if pending is not None:
+                state = m.advance_entry(pending, t)
+                if state == "pending":
+                    continue
+                if state == "filled":
+                    occupied_until = _resolve(m, pending.leg, pending.segment)
+                    legs.append(pending.leg)
+                    break
+                counts["entry_abandoned"] += 1
+                pending = None
+                confirm = dict.fromkeys(params.directions, 0)
             if not day["valid"][t]:
                 confirm = dict.fromkeys(params.directions, 0)
                 continue
@@ -470,6 +522,8 @@ def simulate(
             if (
                 day["nbars"][t] < params.sigma_warmup
                 or not params.entry_start <= hhmm <= params.entry_end
+                or hhmm >= params.last_fill
+                or t == len(features.SLOT_END) - 1
                 or (params.v is not None and (vr is None or vr < Decimal(str(params.v))))
             ):
                 continue
@@ -480,7 +534,8 @@ def simulate(
             if abs(float(stock.c[d, t]) / m.pc[d] - 1) > params.trend_abs_pct:
                 counts["trend_rejected"] += 1
                 continue
-            leg = m.entry(segment, d, t, direction)
+            order = m.entry_order(segment, d, t, direction)
+            leg = order.leg
             if leg.q == 0:
                 continue
             planned = leg.planned_amount
@@ -494,13 +549,7 @@ def simulate(
             if theta * planned < params.min_edge_cost_mult * estimate:
                 counts["gate_rejected"] += 1
                 continue
-            if not m.can_fill(d, leg.entry_slot, leg.q, direction == "buy_first"):
-                counts["entry_abandoned"] += 1
-                confirm = dict.fromkeys(params.directions, 0)
-                continue
-            occupied_until = _resolve(m, leg, segment)
-            legs.append(leg)
-            break
+            pending = order
     return legs
 
 

@@ -88,7 +88,8 @@ x-db-ingest-url: &db-ingest-url postgresql+psycopg://aia_ingest:${AIA_DB_INGEST_
 # 网络拆分（T-O68，契约 §7.11.5 / plan R19 方案 B 的网络层落地；本轮只让 ingest 出网）：
 #   default        ：internal: true。新增服务若漏写 networks，只进这张不能出网的默认网，不会误入可出网桥。
 #   aia_internal   ：internal: true。全部服务共用（postgres/redis/api/worker/beat/signal-rt/ingest/一次性任务/nginx）。
-#   aia_egress     ：可出网，仅 ingest。worker 的交易所同步/预留 SMTP 等需求见运维报告，待编排者裁定，未擅自放开。
+#   aia_egress     ：可出网，仅 ingest，以及 opt-in profile「master-bootstrap」（主数据首导，默认不启动，见该服务注释）。
+#                    worker 交易所同步/SMTP/LLM 按 2026-11-09 编排者裁定不开。
 #   aia_edge       ：非 internal，但关闭 IP masquerade。nginx（及 dev 覆盖里发布端口的 postgres/redis）用它把
 #                    127.0.0.1 端口发到宿主；只挂 internal 网络时 ports: 对宿主通常不可达。无伪装则容器难以对公网做 SNAT。
 # CI：scripts/ci/check_compose_networks.py 检查非登记服务不得接入 aia_egress / aia_edge。
@@ -410,6 +411,45 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+
+  # 主数据首次导入（T-O68 编排者裁定 ④）：平时不出网、不常驻、不调麦蕊。
+  # 仅当需要联网拉上交所/深交所/北交所官网公开 HTTPS 名单时，用显式 profile 一次性接入 aia_egress。
+  # 默认 up 与 AIA_PROFILE=dev|live 都不会启动本服务；跑完容器即删（--rm）。
+  #   deploy/scripts/compose.sh --profile master-bootstrap run --rm --no-deps master-bootstrap [--rebuild-search-terms]
+  # CI 出网白名单（scripts/ci/check_compose_networks.py）仅 ingest 与本 opt-in 服务。
+  master-bootstrap:
+    logging: *default-logging
+    networks:
+      aia_internal:
+      aia_egress:
+    image: *backend-image
+    profiles: ["master-bootstrap"]
+    entrypoint: *secret-env-entrypoint
+    command: ["python", "-m", "app.cli", "master-bootstrap"]
+    restart: "no"
+    environment:
+      <<: *app-env
+      SERVICE_NAME: master-bootstrap
+      # 与 worker 同一数据库角色（aia_api，见 master_bootstrap 模块说明）
+      DATABASE_URL: *db-api-url
+      MASTER_SNAPSHOT_PATH: ${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}
+      AIA_REQUIRE_APP_MASTER_KEY: "1"
+    secrets:
+      - app_master_key
+    volumes:
+      - master:${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}
+      - ../../config:/app/config:ro
+      - *secret-env-mount
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      timescale-apply:
+        condition: service_completed_successfully
+      db-roles:
+        condition: service_completed_successfully
 
   postgres:
     logging: *default-logging

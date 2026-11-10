@@ -89,6 +89,8 @@ SERVICE_SECRETS: dict[str, frozenset[str]] = {
     "ingest": frozenset({PRIVATE_SECRET, PUBLIC_SECRET}),
     "db-roles": frozenset(DB_PW_SECRETS),
     "maint-cli": frozenset({"db_password_aia_maint"}),
+    # T-O68 裁定④：opt-in profile master-bootstrap（主数据首导），与 worker 一样挂 app_master_key；默认不启动。
+    "master-bootstrap": frozenset({MASTER_SECRET}),
     "beat": frozenset(), "signal-rt": frozenset(), "migrate": frozenset(), "timescale-apply": frozenset(),
     "nginx": frozenset(), "postgres": frozenset(), "redis": frozenset(),
 }
@@ -243,9 +245,10 @@ DATA_VOLUMES: dict[str, dict] = {
     "imports": {"allowed": frozenset({"api", "worker", "maint-cli"}),
                 "required": frozenset({"api", "worker", "maint-cli"}),
                 "path_env": "IMPORT_STORAGE_PATH"},
-    # 主数据原始快照只给执行同步/清理的 worker（review-baa4539 M1）。不挂给 api/ingest，避免扩大写入面。
-    "master": {"allowed": frozenset({"worker"}),
-               "required": frozenset({"worker"}),
+    # 主数据原始快照给执行同步/清理的 worker（review-baa4539 M1），以及 T-O68 裁定④ 的一次性
+    # master-bootstrap（opt-in profile，跑完即删）。不挂给 api/ingest，避免扩大写入面。
+    "master": {"allowed": frozenset({"worker", "master-bootstrap"}),
+               "required": frozenset({"worker", "master-bootstrap"}),
                "path_env": "MASTER_SNAPSHOT_PATH"},
 }
 

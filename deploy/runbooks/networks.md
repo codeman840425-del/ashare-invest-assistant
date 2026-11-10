@@ -8,7 +8,7 @@
 |---|---|---|
 | `default` | `internal: true` | 漏写 `networks` 的服务（fail-closed，出不了网） |
 | `<前缀>_internal`（`aia_internal`） | `internal: true` | 全部服务 |
-| `<前缀>_egress`（`aia_egress`） | 默认可出网 | **仅 ingest**（扩表白名单须经编排者裁定） |
+| `<前缀>_egress`（`aia_egress`） | 默认可出网 | **ingest**；以及 opt-in profile `master-bootstrap`（主数据首导，默认不启动） |
 | `<前缀>_edge`（`aia_edge`） | 非 internal，但 `enable_ip_masquerade=false` | nginx；dev 覆盖里发布端口的 postgres / redis |
 
 `internal: true` 的网络通常无法把 `ports:` 发到宿主，所以 nginx（以及本地调试的 postgres/redis）另挂 `aia_edge`。关闭伪装是为了让这张网没有实用的公网 SNAT，不是防火墙域白名单。
@@ -19,7 +19,7 @@ CI：`scripts/ci/check_compose_networks.py`（`secret-boundary` job）。
 
 本仓库开发机没有默认 `bridge` 网，compose 网络无法在那台上完整实测。上线或收口时请在用户 Docker 环境执行（不要 `down -v`、不要删别人的容器/卷）：
 
-1. `deploy/scripts/compose.sh config` 能通过，且输出里各服务的 `networks` 与上表一致，只有 ingest 出现在 `*_egress`。
+1. `deploy/scripts/compose.sh config` 能通过，且输出里各服务的 `networks` 与上表一致；默认 dev/live **只有 ingest** 出现在 `*_egress`。加上 `--profile master-bootstrap` 时该一次性服务也会出现在 egress，仍不得有 worker 等。
 2. 在已启动的栈上（或同等网络）：
    - 从 `api` / `worker` / `beat` / `signal-rt` / `nginx` 容器访问公网（例如 `https://example.com` 或 `1.1.1.1:443`）应失败。
    - 从 `ingest` 容器访问公网应成功（回放模式可改用对非麦蕊地址的探测；live 不要为测网去打麦蕊）。
@@ -33,3 +33,13 @@ CI：`scripts/ci/check_compose_networks.py`（`secret-boundary` job）。
    - WSL mirrored 模式下列表第 2–3 步是否仍成立（端口发布与出站隔离）。
 
 不要把服务改成 `network_mode: host`，否则本拆分全部失效。
+
+## 主数据首导的一次性出网（编排者裁定 ④，2026-11-09）
+
+默认栈与 `maint-cli` 不出网。需要联网从三所官网拉公开 HTTPS 主数据时，才用 opt-in profile（服务加入 `aia_egress`）：
+
+```bash
+deploy/scripts/compose.sh --profile master-bootstrap run --rm --no-deps master-bootstrap
+```
+
+跑完容器即删（`--rm`），不要常驻，不要把该 profile 加进默认 `up.sh`，**不要调麦蕊**。CI 出网白名单只登记 `ingest` 与这个一次性服务。

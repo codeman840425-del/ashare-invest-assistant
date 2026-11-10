@@ -7,6 +7,8 @@
 | 状态根（ingest 独占） | `/run/aia/state/` | 具名卷 `<前缀>_ingest_state`，属主 10001、700 |
 | 停机标志目录 | `/run/aia/state/halt/` | 同上（例：`…/halt/mairui-daily.HALTED`） |
 | 授权收据目录 | `/run/aia/receipts/` | 具名卷 `<前缀>_aia_receipts`，root 属主；ingest/worker **:ro** |
+
+装入收据的步骤见 `receipts.md`。**只删收据文件不能恢复出口**（权威来源是数据库 `upstream_halted` / 停机标志，解除须用户本人确认，见下文）。
 | 解密临时文件 | `/run/aia/tmp/` | ingest **独占 tmpfs**（mode=0700,uid=10001,noexec,nosuid） |
 
 旧路径对照（后端待改）：`/run/aia/mairui-daily.HALTED` → `/run/aia/state/halt/mairui-daily.HALTED`；`/run/aia/mairui-daily.tmp` → `/run/aia/tmp/mairui-daily.tmp`；`/run/aia/authorizations/mairui-daily.json` → `/run/aia/receipts/mairui-daily.json`。

@@ -180,3 +180,15 @@ def test_nginx_ports_must_bind_localhost(repo: Path) -> None:
     )
     errs = ccn.check(repo)
     assert any("nginx" in e and "127.0.0.1" in e for e in errs), errs
+
+
+def test_master_bootstrap_must_join_egress(repo: Path) -> None:
+    """opt-in 首导服务在白名单内，但漏挂 aia_egress 应被拦。"""
+    _sub(
+        repo,
+        BASE,
+        "  master-bootstrap:\n    logging: *default-logging\n    networks:\n      aia_internal:\n      aia_egress:\n",
+        "  master-bootstrap:\n    logging: *default-logging\n    networks:\n      aia_internal:\n",
+    )
+    errs = ccn.check(repo)
+    assert any("master-bootstrap" in e and "必须挂 aia_egress" in e for e in errs), errs

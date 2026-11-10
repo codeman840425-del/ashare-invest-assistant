@@ -321,7 +321,7 @@ def test_whitelist_covers_every_base_service() -> None:
     import yaml
     doc = yaml.safe_load((REPO / ccs.BASE_COMPOSE).read_text(encoding="utf-8"))
     assert set(doc["services"]) <= set(ccs.MASTER_KEY_ALLOC)
-    assert {k for k, v in ccs.MASTER_KEY_ALLOC.items() if v} == {"api", "worker"}
+    assert {k for k, v in ccs.MASTER_KEY_ALLOC.items() if v} == {"api", "worker", "master-bootstrap"}
 
 
 

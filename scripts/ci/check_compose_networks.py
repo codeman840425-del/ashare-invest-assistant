@@ -7,7 +7,7 @@
 
 基础文件必须声明四张网：
   default / aia_internal ：internal: true（漏写 networks 的新服务也出不了网）
-  aia_egress             ：可出网，仅 EGRESS_ALLOWLIST（本轮只有 ingest）
+  aia_egress             ：可出网，仅 EGRESS_ALLOWLIST（ingest + opt-in 的 master-bootstrap）
   aia_edge               ：非 internal，关闭 IP masquerade，只给要向宿主发布端口的服务
 
 每个服务必须用映射式 networks 挂上 aia_internal（compose 合并时才能与覆盖层做键并集，
@@ -40,8 +40,9 @@ NET_DEFAULT = "default"
 REGISTERED_NETWORKS: frozenset[str] = frozenset({NET_DEFAULT, NET_INTERNAL, NET_EGRESS, NET_EDGE})
 MASQ_OPT = "com.docker.network.bridge.enable_ip_masquerade"
 
-# 本轮只让 ingest 出网。扩表白名单须经编排者裁定后再改这里。
-EGRESS_ALLOWLIST: frozenset[str] = frozenset({"ingest"})
+# 默认可出网的只有 ingest。master-bootstrap 是编排者裁定④ 的 opt-in profile（主数据首导），
+# 默认 up 不启动；扩表白名单须再经编排者裁定。
+EGRESS_ALLOWLIST: frozenset[str] = frozenset({"ingest", "master-bootstrap"})
 # 允许挂 aia_edge 的服务（发布 127.0.0.1 端口，无出网伪装）
 EDGE_ALLOWLIST: frozenset[str] = frozenset({"nginx", "postgres", "redis"})
 REQUIRED_ON_EDGE: frozenset[str] = frozenset({"nginx"})

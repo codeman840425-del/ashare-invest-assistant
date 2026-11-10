@@ -11,16 +11,21 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
 from retest.t_r58 import data, inputs, outputs, runner_data, sim, splice
 
 KEY = ("SH", "600001")
 
 
+def _lc1_bytes(day: date, price: float = 10.0) -> bytes:
+    encoded = (day.year - 2004) * 2048 + day.month * 100 + day.day
+    return struct.pack("<HHfffffII", encoded, 571, *([price] * 4), price * 100, 100, 0)
+
+
 def _lc1(root: Path, day: date, price: float = 10.0) -> inputs.VipdocInput:
     root.mkdir()
     path = root / "sh600001.lc1"
-    encoded = (day.year - 2004) * 2048 + day.month * 100 + day.day
-    path.write_bytes(struct.pack("<HHfffffII", encoded, 571, *([price] * 4), price * 100, 100, 0))
+    path.write_bytes(_lc1_bytes(day, price))
     return inputs.VipdocInput(root, {KEY: inputs.Lc1Input(path, data.sha256(path))}, "", "", "")
 
 
@@ -132,3 +137,92 @@ def test_tb136_runner_splice_error_stops_grid_and_keeps_failure_separate(tmp_pat
     assert not target.exists()
     assert {p.name for p in failure.iterdir()} == {"failure.json"}
     assert "single_day.daily_open" in error.value.summary["splice"]["failures"]
+
+
+def _suspension_fixture(
+    tmp_path: Path,
+    symbol: str,
+    *,
+    archive_days: tuple[int, ...] = (20260731, 20260810),
+    shared: bool = True,
+) -> runner_data.Prepared:
+    listed = date(2010, 1, 1)
+    original = _prepared(tmp_path, price=10.5, listed=listed)
+    key = ("SZ", symbol)
+    root = tmp_path / "vipdoc"
+    root.mkdir()
+    lc1 = root / f"sz{symbol}.lc1"
+    lc1.write_bytes(_lc1_bytes(splice.SINGLE_DAY, 10.5) + _lc1_bytes(splice.MAIN_START))
+    source = inputs.Lc1Input(lc1, data.sha256(lc1))
+    with zipfile.ZipFile(original.archive, "w") as z:
+        z.writestr(
+            f"sz/lday/sz{symbol}.day",
+            b"".join(
+                struct.pack("<IIIIIfII", day, 1000, 1000, 1000, 1000, 1000.0, 100, 0)
+                for day in archive_days
+            ),
+        )
+    return replace(
+        original,
+        pool=[(*key, "L")],
+        single=None if shared else inputs.VipdocInput(root, {key: source}, "", "", ""),
+        main=inputs.LocalVipdoc(root, {key: source}, source.sha256)
+        if shared
+        else inputs.VipdocInput(root, {key: source}, "", "", ""),
+        archive_sha256=data.sha256(original.archive),
+        meta={**original.meta, "securities": {}, "coverage": {symbol: {"listing_date": listed}}},
+        st_history={key: [(listed, None, False)]},
+        listing_history={key: [(listed, None, "listed")]},
+    )
+
+
+@pytest.mark.parametrize("symbol", ["000838", "300246", "300333", "300862"])
+def test_tb136_runner_confirmed_suspension_removes_one_day_and_keeps_source_evidence(
+    tmp_path: Path, symbol: str
+) -> None:
+    stock, evidence = next(runner_data.iter_stocks(_suspension_fixture(tmp_path, symbol)))
+    assert np.isnan(stock.o[1]).all()
+    assert stock.day_kind[1] == sim.SUSPENDED
+    assert stock.o[2, 0] == 10
+    checks = evidence["splice"]
+    assert checks["ok"]
+    assert checks["failures"] == []
+    assert checks["single_day"]["state"] == "no_bars"
+    assert checks["pre_splice_exclusions"] == [
+        {
+            "date": "2026-08-07",
+            "reason": "suspension_residual_minutes",
+            "label": "停牌期分钟残留",
+            "rows": 1,
+            "prior_daily_date": "2026-07-31",
+            "next_daily_date": "2026-08-10",
+        }
+    ]
+    assert checks["source_rows"] == {"HF": 0, "vipdoc_single": 0, "vipdoc_main": 1}
+    assert evidence["lc1"]["single"]["rows"] == 1
+    assert evidence["lc1"]["main"]["date_inventory"]["single"]["normalized_rows"] == 1
+
+
+@pytest.mark.parametrize(
+    ("symbol", "archive_days", "shared", "reason"),
+    [
+        ("300247", (20260731, 20260810), True, "single_day.missing_daily_anchor"),
+        ("300246", (20260810,), True, "single_day.missing_daily_anchor"),
+        ("300246", (20260731, 20260810), False, "single_day.missing_daily_anchor"),
+        ("300246", (20260731, 20260807, 20260810), True, "single_day.daily_open"),
+        ("300333", (20260729, 20260813), True, "resume_day.missing_daily_anchor"),
+    ],
+)
+def test_tb136_runner_suspension_exception_preserves_other_splice_failures(
+    tmp_path: Path, symbol: str, archive_days: tuple[int, ...], shared: bool, reason: str
+) -> None:
+    prepared = _suspension_fixture(tmp_path, symbol, archive_days=archive_days, shared=shared)
+    with pytest.raises(splice.SpliceError) as error:
+        next(runner_data.iter_stocks(prepared))
+    checks = error.value.summary["splice"]
+    assert reason in checks["failures"]
+    if symbol == "300333":
+        assert checks["pre_splice_exclusions"][0]["date"] == "2026-08-07"
+        assert checks["resume_day"]["date"] == "2026-08-10"
+    else:
+        assert "pre_splice_exclusions" not in checks

@@ -18,8 +18,11 @@ const DEFAULT_CAPS = { watchlist: 100, focus: 20 };
 const GROUP_MAX = 32;
 const NOTE_MAX = 500;
 const ALLOWED_KEYS = new Set(['security_code', 'group', 'note']);
-/** 与后端 SECURITY_CODE_PATTERN 同口径的写法：600000 / 600000.SH / SH600000，大小写均可 */
-const CODE_RE = /^(?:(SH|SZ|BJ)(\d{6})|(\d{6})(?:\.(SH|SZ|BJ))?)$/i;
+/**
+ * 与后端 trades.SECURITY_CODE_PATTERN 同口径（契约 §5，T-A132）：600000 / 600000.SH / SH600000；
+ * 交易所前后缀只能全大写或全小写（sh600000、600000.sh 合法），大小写混写（Sh600000、600000.Sh）判 invalid
+ */
+const CODE_RE = /^(?:(SH|SZ|BJ|sh|sz|bj)([0-9]{6})|([0-9]{6})(?:\.(SH|SZ|BJ|sh|sz|bj))?)$/;
 
 interface Row { id: string; item: WatchlistItem; removed: boolean }
 interface Idem { body: string; status: number; json: WatchlistItem }

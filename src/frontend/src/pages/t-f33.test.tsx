@@ -89,6 +89,7 @@ describe('mock：/watchlist 五分支', () => {
     expect(codes()).not.toContain('600000.SH');
     expect((await del('600000.SH')).status).toBe(404);
     expect((await del('600002.SH')).status).toBe(404);
+    expect((await del('Sh600001')).status).toBe(400);
     const bad = await del('60000X');
     expect(bad.status).toBe(400);
     expect((JSON.parse(bad.text) as Err).error.details).toEqual({ fields: [{ field: 'security_code', issue: 'invalid' }] });
@@ -98,6 +99,12 @@ describe('mock：/watchlist 五分支', () => {
     expect(await issue({ security_code: '000300.SH' })).toEqual([{ field: 'security_code', issue: 'security_type_not_supported' }]);
     expect(await issue({ security_code: '600999.SH' })).toEqual([{ field: 'security_code', issue: 'unknown_security' }]);
     expect(await issue({ security_code: 'ABC' })).toEqual([{ field: 'security_code', issue: 'invalid' }]);
+    // T-F33c（契约 §5）：交易所前后缀大小写混写判 invalid；全大写、全小写合法
+    for (const mixed of ['Sh600002', 'sH600002', '600002.Sh', '600002.sH']) {
+      expect(await issue({ security_code: mixed })).toEqual([{ field: 'security_code', issue: 'invalid' }]);
+    }
+    expect((await post({ security_code: '600002.sh' })).status).toBe(201);
+    expect((await post({ security_code: 'SH600002' })).status).toBe(409);
     expect(await issue({ security_code: '600002.SH', group: 'x'.repeat(33) })).toEqual([{ field: 'group', issue: 'too_long' }]);
   });
   it('400 请求体层（契约 §5，T-F33b）：未知键 unknown field、缺字段 required、空体 required；类型错只断言 field', async () => {

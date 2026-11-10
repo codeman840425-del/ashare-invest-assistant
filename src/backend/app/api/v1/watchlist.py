@@ -162,9 +162,6 @@ def add_watchlist(
 ) -> object:
     group = _clip(body.group, "group", GROUP_MAX)
     note = _clip(body.note, "note", NOTE_MAX)
-    if READD_RESTORES_GROUP_NOTE:
-        # 保守默认关闭；打开时由后续单改为恢复旧行。本单始终插入新行。
-        pass
 
     def _do() -> tuple[int, Any]:
         now = dt.datetime.now(dt.UTC)

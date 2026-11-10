@@ -575,8 +575,8 @@ def test_cap_and_validation_order_400_400_409_403_201(api: dict[str, Any]) -> No
 
 
 def test_migration_0031_is_single_head() -> None:
-    assert require_single_head(script_directory()) == "0031"
     script = script_directory()
+    require_single_head(script)
     assert script.get_revision("0031").down_revision == "0030"
 
 

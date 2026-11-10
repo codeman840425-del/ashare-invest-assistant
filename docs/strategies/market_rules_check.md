@@ -2,7 +2,7 @@
 
 > 作者：量化策略研究员 · 2026-11-01。只读核实，**未修改** `config/market_rules.yaml`。
 > 核实对象：plan.md §6.1 的 `config/market_rules.yaml` 块（plan 第 2164–2209 行）中"`effective_from: "2026-07-06"` … 沪深主板 ST/*ST 涨跌幅改为 10%（此前段为 5%）【待 T003 补测核实】"，以及 plan 第 1026、1107、2646 行的同一表述。
-> 说明：仓库里**没有独立的 market_rules.yaml 文件**（`rg --files | rg market_rules` 当时只返回 `src/backend/app/market_rules/.gitkeep`），该 yaml 目前只以代码块形式存在于 plan.md §6.1。
+> 说明（2026-11-01 核实时）：当时仓库里**没有独立的 market_rules.yaml 文件**（`rg --files | rg market_rules` 当时只返回 `src/backend/app/market_rules/.gitkeep`），该 yaml 当时只以代码块形式存在于 plan.md §6.1。**现状（T-R46 更新）**：仓库内已存在 `config/market_rules.yaml`（引入提交 f34fcfd82c74fc88a512138df363f43012d66569，T-B01），其 `main_board_st: 10` 注释引用本文件 O1–O8；本文以下核实结论不变。
 
 ---
 

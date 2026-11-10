@@ -51,12 +51,12 @@
 | H14 | 成本滑点 | card:82-88；正文:20 离场不因成本放弃卖出 | validation 成本叙述；plan:1614 | T-R42 `cost_replay.py`+`cost_replay_cases.json` PASS（7【虚构】例：买卖/最低佣金/涨跌停锁/T+1/离场不因成本放弃；佣金费率卡上未钉 → 缺口已标） | 一致 | ☐ |
 | H15 | 验证/fixtures | validation 块 fixtures H01-FX1..11（:136+）均 `【虚构】` | expect state/action | check_T-R15 PASS（11 fixtures） | 一致 | ☐ |
 | H16 | 合规/禁用词文案 | 卡内无收益承诺句（代理目视） | G7 decision 另有 compliance_lint（契约 api-contract.md:953） | 服务端：`src/backend/app/strategy/reviews.py:317-324` COMPLIANCE_TERMS+`lint()`（NFKC 后匹配，命中 COMPLIANCE_LINT_FAILED :326），`decide()` :351 lint(comment)、:353 approved 时 lint(card_version.fields)（fields 含 narrative，`cards/persistence.py:110`）；拒绝用例 `src/backend/selfchecks/test_tb83b_reauth.py:246`（仅覆盖 comment 路径）。本地：T-R42 `compliance_lint_local.py` 全卡扫描 PASS（同词表；T-R43 起 `--mutate` 为真实植入，exit 1 且原因含卡与命中词）。词表仅 6 词（plan §8.1），card-fields 路径无专门服务端用例 | 一致 | ☐ |
-| H17 | **horizon 多值风险** | horizons 四周期 :35 | 实例/跟踪若缺 horizon → gap（T-R35 README:89/97；T-A74 B2） | 后端定点用例 `test_tb113_h17_missing_horizon_is_gap_not_counted`（`tests/backend/unit/test_tb113_l1_l10_runner_h12_h17_t_t46.py:327-368`，分支 test/T-T46 = 28c3e7da5525e377280a62b609ed1ad7d419d2cc，**尚未合入主线**）：H-01 四周期、`version_horizon=None`，一条已知 short 失败 + 一条 horizon=None 失败（horizon_days 同为 5）→ 断言 gaps 含 `sim_fail_horizon_unknown` 且 `metric.value == 1`，即缺 horizon 不按 5 日计入。被测 `src/backend/app/feedback/core.py:60-133` `simulated_failures`（:103-108 缺 horizon 记 gap 并跳过）；该文件在 be/T-B113 = 52d3bee3071fd0532123036f857aa66ad79569f4、c4e0e74 与本分支基线内容相同。T-R44 在临时只读 worktree 不连库亲跑通过，另做两处临时篡改（缺 horizon 默认 short；记 gap 后仍计入）均使该用例失败，已还原。**范围**：只覆盖 RC5 sim_fail 路径；发布资格 n/胜率按映射周期统计尚未实现（T-R35 B5 本期不做），实现时需另补用例 | 一致 | ☐ |
-| H18 | null/gap / insufficient_data | 正文:16 预热不足 `passed=null`；FX8 limit null | fixtures H01-FX8 | T-R42 `null_propagation_replay.py` **不读取夹具行情/特征求值**，只按根数演示参考层逻辑，**不构成 H18 证据**（T-A83 B-1：改 regime/rule_ids_passed 仍 PASS）；缺：按 features 真求值并比对 FX8 `rule_ids_passed=[]` 的复算，及实盘求值器 null 传播（归编排者） | 缺证据 | ☐ |
+| H17 | **horizon 多值风险** | horizons 四周期 :35 | 实例/跟踪若缺 horizon → gap（T-R35 README:89/97；T-A74 B2） | 后端定点用例 `test_tb113_h17_missing_horizon_is_gap_not_counted`（`tests/backend/unit/test_tb113_l1_l10_runner_h12_h17_t_t46.py:327-368`，分支 test/T-T46 = 28c3e7da5525e377280a62b609ed1ad7d419d2cc，T-R44 时尚未合入主线；T-R46 复核：已含于 origin/main = a7ce36285f7abd5fdf9ed5053a3bb51fba43a4b1）：H-01 四周期、`version_horizon=None`，一条已知 short 失败 + 一条 horizon=None 失败（horizon_days 同为 5）→ 断言 gaps 含 `sim_fail_horizon_unknown` 且 `metric.value == 1`，即缺 horizon 不按 5 日计入。被测 `src/backend/app/feedback/core.py:60-133` `simulated_failures`（:103-108 缺 horizon 记 gap 并跳过）；该文件在 be/T-B113 = 52d3bee3071fd0532123036f857aa66ad79569f4、c4e0e74 与本分支基线内容相同。T-R44 在临时只读 worktree 不连库亲跑通过，另做两处临时篡改（缺 horizon 默认 short；记 gap 后仍计入）均使该用例失败，已还原。**范围**：只覆盖 RC5 sim_fail 路径；发布资格 n/胜率按映射周期统计尚未实现（T-R35 B5 本期不做），实现时需另补用例 | 一致 | ☐ |
+| H18 | null/gap / insufficient_data | 正文:16 预热不足 `passed=null`；FX8 limit null | fixtures H01-FX8 | 后端正式用例 `test_h18_h01_fx8_null_propagates_to_insufficient_data`（`tests/backend/unit/test_h18_null_propagation_h01_t_t48.py:69-95`，test/T-T48 = bec16804ec221af2431fc4a9acfcbacd731699ec；**已含于 origin/main = a7ce36285f7abd5fdf9ed5053a3bb51fba43a4b1**，本地 main 分支 d32a3f6 未更新）：读本卡 validation 块 H01-FX8【虚构】夹具（:30-45 经 preflight 解析本文件；:74-76 断言 limit 价 null、close 序列 3 根 <62），经 `_run`（:48-66）以夹具 features/series/holding/ctx 调生产 `src/backend/app/strategy/cards/fixtures.py:48` `calculate`（:79-83 `Interpreter(...).evaluate`；:84-101 null 记 essential_unknown；:119-120 system_only 持仓→`insufficient_data`；:157-160 limit null 不记 LIMIT_LOCKED）→ `dsl.py:243-254` `Interpreter.evaluate`（:247 null→None 不转 bool；:190 预热不足取 None；:230-231 比较含 None→None；:209-210/:253-254 窗口/布尔传播 None）；断言 state=insufficient_data、action=hold、rule_ids_passed=[]、无 passed=True、至少一条 passed=None、无 LIMIT_LOCKED，并与夹具 expect 一致（:81-95）。实测规则轨迹 X2/W1/C2/I1=None、W2/W3/C1=False。fixtures.py/dsl.py/preflight.py、本卡、feature_spec.md、config/market_rules.yaml 在 bec1680、origin/main 与本分支基线 blob 相同。T-R46 在临时只读 worktree（bec1680）以 `env -i` 不连库、无凭据亲跑 2 passed；临时篡改 dsl.py:190 预热不足取 0、:231 比较含 null 返回 False、fixtures.py:119 去掉 insufficient_data 分支，三处均使该用例 FAIL（rule_ids_passed=['C2','I1'] 或 state=hold_ok），还原后 PASS，worktree 已删。**缺口**：该链未经 `prepare()`（`features/pipeline.py:125`，实盘取数预处理路径未覆盖；生产入口 `features/evaluation.py:133` prepare→:143 RuleEvaluator→calculate）；用例未逐条钉 X2 等每条规则 passed=None，单独把 :247（非窗口）或 :253（窗口）null 改 False 时因其余规则仍为 null 而结果不变、用例仍 PASS，两者同改才 FAIL。T-R42 `null_propagation_replay.py` 仍**不构成 H18 证据**（不读夹具行情，T-A83 B-1） | 一致 | ☐ |
 | H19 | 不可执行原因码 | FX4 T1_NOT_SELLABLE；FX7 LIMIT_LOCKED；FX10 SUSPENDED | expect.reason_codes | check_T-R15 与 api-contract 原因码表交叉 | 一致 | ☐ |
 | H20 | 选股/入场 | **无**（纯离场，设计如此） | action_map 无 buy | check_T-R15 允许 exitonly | 一致 | ☐ |
 
-**H-01 代理小结**：H14/H16 代理初核「一致」（成本回放/服务端+本地合规）；H18 经 T-R43 按 T-A83 B-1 **改回缺证据**；H17 经 T-R44 按 T-T46 定点用例改「一致」（仅 RC5 路径，测试分支未合主线）；**仍缺证据** H4（无语义审核）、H12（挂载执行链）、H18（null 真求值）。**不得**据此视为已过 G7。
+**H-01 代理小结**：H14/H16 代理初核「一致」（成本回放/服务端+本地合规）；H18 经 T-R43 按 T-A83 B-1 改回缺证据后，T-R46 按 T-T48 正式用例（T-A86 裁定）改「一致」（规则求值层 calculate→Interpreter；未经 prepare()）；H17 经 T-R44 按 T-T46 定点用例改「一致」（仅 RC5 路径；28c3e7d、bec1680 现均含于 origin/main a7ce362）；**仍缺证据** H4（无语义审核）、H12（挂载执行链）。**不得**据此视为已过 G7。
 
 ---
 
@@ -128,12 +128,12 @@
 
 | 卡 | 项数 | 一致 | 不一致 | 缺证据 |
 |---|---|---|---|---|
-| H-01 | 20 | 17 | 0 | 3 |
+| H-01 | 20 | 18 | 0 | 2 |
 | S-01 | 20 | 16 | 0 | 4 |
-| 合计 | 40 | 33 | 0 | 7 |
+| 合计 | 40 | 34 | 0 | 6 |
 
 （用户勾选全部默认未勾；最终以用户勾选与系统审计为准。）
 
 ---
 
-*文件路径：`docs/strategies/T-R41/g7_review_H-01_S-01.md`｜任务 T-R41｜代理准备；T-R42 仅更新「代理初核/当前证据/§5 计数」列；T-R43 按 T-A83 修 B-1 与 L-1..L-6（H18 改回缺证据，计数 32/0/8）；T-R44 按 T-A85 L-1 补 S13 引用、按 T-T46 改 H17 为一致（计数 33/0/7），用户勾选仍未勾*
+*文件路径：`docs/strategies/T-R41/g7_review_H-01_S-01.md`｜任务 T-R41｜代理准备；T-R42 仅更新「代理初核/当前证据/§5 计数」列；T-R43 按 T-A83 修 B-1 与 L-1..L-6（H18 改回缺证据，计数 32/0/8）；T-R44 按 T-A85 L-1 补 S13 引用、按 T-T46 改 H17 为一致（计数 33/0/7）；T-R46 按 T-T48/T-A86 改 H18 为一致（计数 34/0/6），用户勾选仍未勾*

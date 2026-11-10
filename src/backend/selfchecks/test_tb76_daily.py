@@ -26,6 +26,8 @@ from app.db.tables.strategy import (
     strategy_instances,
     strategy_versions,
 )
+from app.engine_policies import load as load_policy
+from app.engine_policies import seed
 from app.replay.baseline import load
 from app.reports.service import build, covered
 from app.strategy.runtime import runnable
@@ -33,7 +35,7 @@ from app.tracking.worker import TASK as TRACKING
 from app.workers import jobs
 from app.workers.daily import ANALYZE, REPORT, recover_task
 from selfchecks.test_tb70_replay import DB, REDIS, integration, no_network  # noqa: F401
-from selfchecks.test_tb74_candidates import AT, setup  # noqa: F401
+from selfchecks.test_tb74_candidates import AT, ROOT, setup  # noqa: F401
 
 DATE = dt.date(2026, 10, 30)
 
@@ -166,6 +168,8 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
     }
     with engine.begin() as conn:
         load(conn, owner, app_env="test")
+        # 自播种引擎策略，使单跑与四文件合跑都出现 evaluated_input_gaps，而不依赖例 1 的 seed()。
+        seed(conn, load_policy(ROOT / "config"))
         conn.execute(
             insert(strategy_cards).values(
                 id=card,
@@ -221,11 +225,13 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
             .order_by(pipeline_runs.c.started_at.desc())
         ).first()
         outcome = runs.stats["users"][str(owner)]
-        # 待 T-T75 回填 evaluation state 的精确值；本中间头不断言具体 state，以免猜值。
-        assert outcome["evaluations"][0]["rule_refs"]
+        assert outcome["evaluations"][0]["state"] == "hold_ok"
         assert outcome["evaluations"][0]["simulation"] is True
-        entry = next(r for r in outcome["evaluations"][0]["rule_refs"] if r["id"] == "E")
-        assert entry["passed"] is None
+        refs = {r["rule_id"]: r for r in outcome["evaluations"][0]["rule_refs"]}
+        assert set(refs) == {"E", "X", "C", "I"}
+        assert all(refs[key]["passed"] is None for key in ("E", "X", "C", "I"))
+        assert "evaluated_input_gaps:688018.SH" in outcome["issues"]
+        assert "owned_source_or_card_missing" in outcome["issues"]
         assert (
             len(
                 conn.execute(
@@ -243,8 +249,9 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
     assert enqueue(REPORT, owner) == [(REPORT, "ok")]
     response = client.get("/api/v1/daily-reports/2026-10-30")
     assert response.status_code == 200
-    assert response.json()["gaps"]
-    # 待 T-T75 回填 gaps 中的具体 key；本中间头只断言 gaps 非空，不准猜 key。
+    assert "pipeline.evaluated_input_gaps:688018.SH" in [
+        gap["key"] for gap in response.json()["gaps"]
+    ]
 
 
 def test_runtime_boundary_calendar_and_actual_beat_dedupe(setup: Any) -> None:

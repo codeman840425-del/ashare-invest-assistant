@@ -107,6 +107,7 @@ class Leg:
     exec_anomaly: bool
     hold_bars: int | None
     board: str
+    mae_bp: float = 0.0
 
 
 @dataclass
@@ -228,6 +229,7 @@ def _costs(
 
 
 def _settle(m: Market, leg: Leg, d: int, f: int, reason: str) -> None:
+    _mae(m, leg, d, f)
     price = float(m.stock.o[d, f])
     leg.exit_day, leg.exit_slot, leg.exit_price, leg.reason = d, f, price, reason
     leg.exec_anomaly |= not bool(m.days[d]["valid"][f])
@@ -257,6 +259,7 @@ def _account(
 
 
 def _unvaluable(m: Market, leg: Leg, reason: str, last_day: int) -> None:
+    _mae(m, leg, last_day, len(features.SLOT_END) - 1)
     leg.reason = reason
     # §4 S3：阻断日之前的末根有效收盘，embargo/end 则含当日收盘。
     for d in range(last_day, leg.entry_day - 1, -1):
@@ -267,6 +270,19 @@ def _unvaluable(m: Market, leg: Leg, reason: str, last_day: int) -> None:
             _, leg.cons_pnl_yuan = _account(m, leg, price, m.stock.dates[d])
             leg.cons_pnl_bp = leg.cons_pnl_yuan / leg.notional * 1e4
             return
+
+
+def _mae(m: Market, leg: Leg, last_day: int, last_slot: int) -> None:
+    # §8.1：入场至了结或阻断前，含顺延日的有效收盘浮亏，不含费用。
+    for d in range(leg.entry_day, last_day + 1):
+        start = leg.entry_slot if d == leg.entry_day else 0
+        end = last_slot + 1 if d == last_day else len(features.SLOT_END)
+        valid = m.days[d]["valid"][start:end]
+        close = m.stock.c[d, start:end][valid]
+        if close.size:
+            adverse = (leg.entry_price - float(close.max()) if leg.direction == "sell_first"
+                       else float(close.min()) - leg.entry_price)
+            leg.mae_bp = min(leg.mae_bp, adverse * leg.q / leg.notional * 1e4)
 
 
 def _resolve(

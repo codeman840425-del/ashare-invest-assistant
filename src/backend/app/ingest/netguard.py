@@ -200,5 +200,3 @@ _egress_window = egress_window
 def netguard_blocks() -> int:
     """Optional heartbeat counter placeholder; hook logs are the source of truth."""
     return 0
-
-

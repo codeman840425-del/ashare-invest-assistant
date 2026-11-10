@@ -1,12 +1,13 @@
 # ruff: noqa: S101
-"""T-T48 / G7 H18：H-01（hold_risk_monitor）null 传播正式用例。
+"""T-T48/T-T49 / G7 H18：H-01（hold_risk_monitor）null 传播正式用例。
 
 走真实后端求值路径（不得 mock 掉求值本身）：
 - ``app.strategy.cards.fixtures.calculate``（fixtures.py）
 - ``app.strategy.cards.dsl.Interpreter.evaluate`` / ``value``（dsl.py）
 
 夹具：卡内 ``H01-FX8``（desc 含【虚构】；limit 价 null、有效 K 不足）。
-断言：null 按卡规定传播 → ``insufficient_data``，不记通过、不当作 0；不产 LIMIT_LOCKED。
+T-T49：逐条钉住缺数据规则 passed is None；补 null→0 篡改自证；
+使 dsl.py:247 / :253 单点 null→False 均可被抓住。
 """
 
 from __future__ import annotations
@@ -25,6 +26,11 @@ from app.strategy.cards.preflight import feature_registry, preflight
 
 ROOT = Path(__file__).resolve().parents[3]
 CARD_PATH = ROOT / "docs/strategies/cards/hold_risk_monitor.md"
+
+# H01-FX8 实测：预热不足导致的 null 规则（X1 无 plan 被跳过，不在 traces）
+_NULL_RULE_IDS = frozenset({"X2", "W1", "C2", "I1"})
+# 可独立求值、本夹具下为 False（不得变成 True）
+_FALSE_RULE_IDS = frozenset({"W2", "W3", "C1"})
 
 
 @pytest.fixture(scope="module")
@@ -66,60 +72,74 @@ def _run(
     )
 
 
-def test_h18_h01_fx8_null_propagates_to_insufficient_data(
-    h01_corpus: tuple[dict[str, Any], dict[str, Any], dict[str, Any], MarketRulesConfig, set[str]],
-) -> None:
-    """H01-FX8：limit null + 预热不足 → insufficient_data；rule_ids_passed 空；不当 0。"""
-    card, spec, fx8, market_rules, keys = h01_corpus
-    assert fx8["features"]["f.limit_up_price"] is None
-    assert fx8["features"]["f.limit_down_price"] is None
-    assert len(fx8["series"]["f.close_qfq"]) < 62  # 卡：MA60 预热不足
-
-    actual = _run(card, spec, fx8, market_rules, keys)
-
-    # 卡 expect / 正文：不足 → insufficient_data，建议 hold，不记通过
+def _assert_h18(actual: dict[str, Any], fx8: dict[str, Any]) -> None:
+    """H18 正式断言（含 T-T49 逐条 passed is None）。"""
     assert actual["state"] == "insufficient_data"
     assert actual["action"] == "hold"
     assert actual["rule_ids_passed"] == []
-    # null 不记为通过
     assert all(t.passed is not True for t in actual["rule_traces"])
-    # 至少一条规则因缺数据 passed=null（不当作 False/0）
-    assert any(t.passed is None for t in actual["rule_traces"]), [
-        (t.rule_id, t.passed) for t in actual["rule_traces"]
-    ]
-    # limit 价 null 不产生 LIMIT_LOCKED（卡：无涨跌幅日 limit null）
+    by_id = {t.rule_id: t.passed for t in actual["rule_traces"]}
+    # 逐条：缺数据规则必须 None（捕获 dsl :247 / :253 单点 null→False）
+    for rid in _NULL_RULE_IDS:
+        assert rid in by_id, f"缺少规则轨迹 {rid}"
+        assert by_id[rid] is None, f"{rid} passed={by_id[rid]!r}，期望 None"
+    for rid in _FALSE_RULE_IDS:
+        assert rid in by_id
+        assert by_id[rid] is False, f"{rid} passed={by_id[rid]!r}，期望 False"
     assert "LIMIT_LOCKED" not in actual["reason_codes"]
-    # 与卡 expect 对齐
     assert actual["state"] == fx8["expect"]["state"]
     assert actual["action"] == fx8["expect"]["action"]
     assert actual["rule_ids_passed"] == fx8["expect"]["rule_ids_passed"]
+
+
+def test_h18_h01_fx8_null_propagates_to_insufficient_data(
+    h01_corpus: tuple[dict[str, Any], dict[str, Any], dict[str, Any], MarketRulesConfig, set[str]],
+) -> None:
+    """H01-FX8：limit null + 预热不足 → insufficient_data；缺数据规则逐条 passed is None。"""
+    card, spec, fx8, market_rules, keys = h01_corpus
+    assert fx8["features"]["f.limit_up_price"] is None
+    assert fx8["features"]["f.limit_down_price"] is None
+    assert len(fx8["series"]["f.close_qfq"]) < 62
+    actual = _run(card, spec, fx8, market_rules, keys)
+    _assert_h18(actual, fx8)
 
 
 def test_h18_tamper_null_as_false_self_fails(
     h01_corpus: tuple[dict[str, Any], dict[str, Any], dict[str, Any], MarketRulesConfig, set[str]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """篡改自证：把 null 当成 False（跳过/当 0）后，H18 断言必须失败；不改 src 文件。"""
+    """篡改自证：evaluate 层 null→False 后正式断言失败。"""
     card, spec, fx8, market_rules, keys = h01_corpus
-    good = _run(card, spec, fx8, market_rules, keys)
-    assert good["state"] == "insufficient_data"
+    _assert_h18(_run(card, spec, fx8, market_rules, keys), fx8)
 
     real_evaluate = Interpreter.evaluate
 
     def _null_as_false(self: Interpreter, parsed: Any) -> bool | None:
         value = real_evaluate(self, parsed)
-        # 错误语义：缺数据当不通过（False），而不是 None
         return False if value is None else value
 
     monkeypatch.setattr(Interpreter, "evaluate", _null_as_false)
     tampered = _run(card, spec, fx8, market_rules, keys)
-
-    # 证明错误路径会改变结果（否则自证无效）
-    assert tampered["state"] != "insufficient_data", (
-        f"篡改未改变 state={tampered['state']!r}；无法自证"
-    )
-    # 正式断言在错误语义下必须失败
     with pytest.raises(AssertionError):
-        assert tampered["state"] == "insufficient_data"
-        assert tampered["rule_ids_passed"] == []
-        assert any(t.passed is None for t in tampered["rule_traces"])
+        _assert_h18(tampered, fx8)
+
+
+def test_h18_tamper_null_as_zero_self_fails(
+    h01_corpus: tuple[dict[str, Any], dict[str, Any], dict[str, Any], MarketRulesConfig, set[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T-A86 ② / T-T49：value 层符号 null→0 后正式断言必须失败（不改 src）。"""
+    card, spec, fx8, market_rules, keys = h01_corpus
+    _assert_h18(_run(card, spec, fx8, market_rules, keys), fx8)
+
+    real_value = Interpreter.value
+
+    def _null_as_zero(self: Interpreter, node: Any, offset: int = 0) -> Any:
+        value = real_value(self, node, offset)
+        return 0 if value is None else value
+
+    monkeypatch.setattr(Interpreter, "value", _null_as_zero)
+    tampered = _run(card, spec, fx8, market_rules, keys)
+    # 错误语义下通常会让部分规则变 True / state 变化
+    with pytest.raises(AssertionError):
+        _assert_h18(tampered, fx8)

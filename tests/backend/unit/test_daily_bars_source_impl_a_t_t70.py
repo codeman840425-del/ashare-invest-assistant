@@ -952,17 +952,36 @@ def test_universe_holdings_and_active_watchlist(temp_db: SimpleNamespace) -> Non
     assert got.count(CODE_A) == 1
 
 
+def _seed_u2_watchlist_e(conn: Any, ctx: SimpleNamespace) -> None:
+    """§8.2 :464：u2 有效自选 E 只在本例播种，不进公共种子。"""
+    from app.db.tables.market import securities
+    from app.db.tables.research import watchlist_items
+
+    conn.execute(
+        insert(securities).values(
+            code=CODE_E, type="stock", name="合成E", exchange="SH", listing_status="listed"
+        )
+    )
+    conn.execute(
+        insert(watchlist_items).values(
+            id=uuid.uuid4(), user_id=ctx.u2, security_code=CODE_E, removed_at=None
+        )
+    )
+
+
 def test_task_user_scope_union_and_single(temp_db: SimpleNamespace) -> None:
-    """§7 ① :206。"""
+    """§8.2 :464：不给 user_id 时并集写 A、B、C、E；user_id=u1 时不写 E。"""
     from app.db.tables.market import daily_bars
 
+    with temp_db.engine.begin() as conn:
+        _seed_u2_watchlist_e(conn, temp_db)
     settings = _settings(app_env="test", daily_bars_source="fake", database_url=temp_db.url)
     fn = _task_from_jobs()
     n = fn(settings, trade_date=OPEN_10.isoformat())
-    assert n == 3
+    assert n == 4
     with temp_db.engine.connect() as conn:
         codes = {r.code for r in conn.execute(select(daily_bars)).all()}
-    assert codes == {CODE_A, CODE_B, CODE_C}
+    assert codes == {CODE_A, CODE_B, CODE_C, CODE_E}
     with temp_db.engine.begin() as conn:
         conn.execute(text("DELETE FROM market.daily_bars"))
     n2 = fn(settings, trade_date=OPEN_10.isoformat(), user_id=str(temp_db.u1))
@@ -970,6 +989,14 @@ def test_task_user_scope_union_and_single(temp_db: SimpleNamespace) -> None:
     with temp_db.engine.connect() as conn:
         codes = {r.code for r in conn.execute(select(daily_bars)).all()}
     assert codes == {CODE_A, CODE_B}
+    assert CODE_E not in codes
+    with temp_db.engine.begin() as conn:
+        conn.execute(text("DELETE FROM market.daily_bars"))
+    n3 = fn(settings, trade_date=OPEN_10.isoformat(), user_id=str(temp_db.u2))
+    assert n3 == 2
+    with temp_db.engine.connect() as conn:
+        codes = {r.code for r in conn.execute(select(daily_bars)).all()}
+    assert codes == {CODE_C, CODE_E}
 
 
 def test_mairui_before_c_is_inert(temp_db: SimpleNamespace, no_egress: None) -> None:

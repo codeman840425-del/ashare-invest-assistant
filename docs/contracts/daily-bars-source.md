@@ -350,3 +350,61 @@
 ### 留给用户（不自行假设）
 
 本节没有新增需要用户定的产品问题。Q3（窗口长度 N）、Q5（钟点）、Q1、Q2、Q4、Q6、Q7、Q8 仍按 §6 的保守做法执行，等用户答复。
+
+### T-T70 补充裁定（T-A131）
+
+输入是测试 T-T70 报告（`/workspace/team/reports/T-T70.md`，分支 test/T-T70 的 `efc8cb8`）「剩余歧义」一节。该节共 7 条：第 1–6 条是技术歧义，在这里逐条裁定；第 7 条是 Q3/Q5，仍归用户，见文末。本小节只是补充，与 §7 ①–⑨ 和 Q3/Q5 的保守默认（窗口没有默认值、不自动回填；不排程、只能手动入队）一致。本小节与 §5 文首、§7 种子段不一致的地方，以本小节为准。
+
+#### 补1　「回填窗口字段」的名单
+
+- 结论：`Settings.model_fields` 中**任何字段名**（不区分大小写）都不得含有 window、backfill、lookback 这三个子串。另外，以 daily_bars_ 开头的字段只允许 `daily_bars_source` 一个。环境变量由字段名派生，所以不再单列。
+- 理由：§7 ② 规定窗口只是任务参数（`daily_bars_fetch_task` / `fetch_and_record` 的 `window_trading_days`）。965598b 的 `app/config.py` 里现在没有字段含这三个子串，按子串断言不会误伤；只列举名字则会漏掉 `daily_bars_backfill_days` 这类变体。
+- G/W/T：`test_no_settings_field_for_window`：Given `Settings.model_fields` / When 遍历字段名 / Then 没有字段名含 window、backfill、lookback；以 daily_bars_ 开头的字段名集合恰为 {daily_bars_source}。
+
+#### 补2　`daily_universe` 的返回顺序
+
+- 结论：`daily_universe(conn, owner, trade_date) -> list[str]` 返回**去重后按代码字符串升序**排列的列表（Python `sorted` 的顺序）。`fetch_and_record` 在多用户时，取各用户结果的并集，同样去重升序后再 fetch 一次（与 §7 ① 的「去重排序」相同）。
+- 理由：返回值用 list 而不是 set，测试和 stats.codes 才能复现；`api/v1/portfolio` 读 daily_bars 时也用 `sorted(codes)`。
+- G/W/T：`test_universe_holdings_only_until_clarified`：Given §7 种子以及 universe 专用的附加种子 / When `daily_universe(conn, u1, 11-10)` / Then 返回值**列表相等**于 sorted([A, B])，不再只比较集合。
+
+#### 补3　种子里的 listing_status 必须写
+
+- 结论：**必须写**。A、B、C、D 都写 `listing_status=listed`。§7 种子段「列只填非空列 code、type、name、exchange」改读为「填这 4 个非空列，再加 listing_status」。`daily_universe` 的资格过滤与 `workers/daily.analyze` 的 `security_not_eligible` 判定相同：type 为 stock 且 listing_status 为 listed 才纳入。**listing_status 为空也视为不合格**，不按 listed 推断。
+- 理由：`market.securities.listing_status` 是可空列；`workers/daily.analyze` 对空值判为不合格。不写这一列，A、B 会被过滤掉，用例会误红。
+- G/W/T：同一个用例 `test_universe_holdings_only_until_clarified`：Given 附加种子里再加一只证券 G（type=stock，listing_status 为空），并把 G 挂进 u1 的持仓快照 / Then 返回值里没有 G，也没有 D（etf）、E（自选）、F（实例）。
+
+#### 补4　出网探针：测试怎样证明没有出网
+
+- 结论：在单 A 里，「出网=否」只用下面两个探针证明，**不再使用** `ingest/netguard.netguard_blocks()` 的计数（它是恒返回 0 的占位）。测试**不调用** `netguard.install()`，因为钩子装上后无法卸载，会污染同一进程里的其它用例。
+  1. socket 探针（写法同 `selfchecks/test_tb90_daily_pipeline` 的 guarded connect）：monkeypatch `socket.socket.connect` 和 `connect_ex`。放行 AF_UNIX，以及 AF_INET/AF_INET6 下的回环地址（127.0.0.0/8、::1，临时库就在回环上）；其它地址一律记录并抛 OSError。用例结束时断言记录为空。
+  2. 入口探针：monkeypatch `ingest/egress.mairui_get`，改成计数后抛错的桩，断言计数为 0。
+  3. 静态约束：`app/marketdata/daily_bars.py` 不得在模块顶层导入 `app.ingest.egress`、`app.ingest.netguard`、socket、httpx、requests、urllib.request。实现单 C 落地后，选源时需要的 `app/ingest/daily_bars.py` 只能在函数内延迟导入，不在这条禁令的名单里。
+- 理由：单 A 没有 transport（transport 属于实现单 C），§5 文首说的「transport 探针」在 A 里没有对象。netguard 计数不能证明任何事。仓库里已有 guarded connect 的先例。
+- G/W/T：
+  - 所有标「出网=否」的 A 用例：Given 上述两个探针 / When 执行用例 / Then socket 探针的记录为空，并且 mairui_get 计数为 0。
+  - `test_impl_a_has_no_network_imports`（新增，纯静态，不连库）：Given 解析 `app/marketdata/daily_bars.py` 的顶层 import / Then 不含上面列出的模块。
+
+#### 补5　第二次 fetch 的 unchanged 落在哪里
+
+- 结论：`fetch_and_record` 和 `daily_bars_fetch_task` 都**只返回 int（inserted）**，不返回 UpsertStats。`UpsertStats` 只是 `upsert_daily_bars` 的返回值。「第二次 unchanged=全部」写在**第二次运行新插入的那一行 pipeline_runs 的 stats.unchanged**。每次运行都插入新行，不更新旧行（§7 ⑤）。
+- 理由：§7 ① 规定返回值为 int，这符合 `jobs.Task`；§7 ⑤ 已把 unchanged 列为 stats 的 9 个键之一。两处并不冲突，只是读取的位置不同。
+- G/W/T：`test_fake_source_deterministic_and_idempotent`：Given u2（持 C）在 11-10 已用 fake 源跑过一次 / When 在新事务里再跑一次 `fetch_and_record` / Then 返回 0；daily_bars 的（code, trade_date, adj_type, fetched_at）集合不变；最新一行 pipeline_runs 的 stats 中 inserted 为 0、conflicts 为 0、unchanged 等于第一次运行后 daily_bars 的行数，issues 不多于第一次。
+
+#### 补6　任务怎样拿数据库连接
+
+- 结论：沿用 `workers/daily.phase` / `recover_task` 的做法，**不新增 Settings 字段**。
+  - `daily_bars_fetch_task` 在函数体内延迟导入 `app.workers.jobs._engine`，避免与 `jobs.TASKS` 循环导入。它用 `_engine(settings)` 取引擎，连接串来自 `Settings.database_url`；值为 None 时 `_engine` 抛 RuntimeError，此时零写入。
+  - 任务先校验参数，再开连接。参数错误包括 window_trading_days 不是正整数、user_id 不是合法 uuid 字符串，都抛 ValueError，并且两张表都不写。这一步排在 §7 ⑧ 的 off 判定之前。
+  - 校验通过后，任务用一个 `engine.begin()` 事务完成选源、off/mairui 判定和 `fetch_and_record`。bars 和本次 pipeline_runs 行在同一事务里提交。
+  - `fetch_and_record(conn, …)` **不自己 begin 或 commit**，事务由调用方负责，测试就是这样用 `engine.begin()` 包着调用的。
+  - 事务里抛出异常时整体回滚。任务另开一个 `engine.begin()` 写一行 failed，error 只写异常类型名（同 §7 ⑤），然后原样抛出，由 `jobs.worker_tick` 记录。
+  - 不做 advisory lock：并发由 `LOCKED_TASKS` 的 redis 锁负责（§7 ①）；即使重入，upsert 用 ON CONFLICT DO NOTHING，也是幂等的。
+- 理由：仓库里每个任务都通过 `jobs._engine(settings)` 拿连接，引擎按 URL 缓存。测试只要把临时库 URL 传给 `Settings.database_url` 就能指向临时库，不必增加注入点。
+- G/W/T：
+  - `test_task_user_scope_union_and_single`（已有）：Given `Settings(app_env=test, daily_bars_source=fake, database_url=<临时库 URL 的明文字符串>)` / When 经 `jobs.TASKS` 调用 / Then 写入临时库，返回 3。
+  - `test_task_without_database_url_raises_no_write`（新增，不连库）：Given 构造 Settings 时显式传 database_url=None（构造参数优先于环境变量和 .env），daily_bars_source 为 fake / When 调用任务 / Then 抛 RuntimeError。
+  - 测试注意：`Settings.database_url` 是 SecretStr，必须传字符串。传给它的值应是 SQLAlchemy URL 对象 `render_as_string(hide_password=False)` 的结果，不能直接传 URL 对象，也不能用 `str(url)`（会把密码遮成星号）。这个值不打印、不写日志。
+
+#### 留给用户（不变）
+
+Q3（窗口长度 N）和 Q5（取数钟点）仍等用户答复。在答复之前，窗口没有默认值、不自动回填；不进 `slot_jobs`/`schedule()`，只能手动或由测试入队。本小节不新增需要用户决定的问题。

@@ -756,7 +756,8 @@ def test_upsert_stats_fields_and_equal_after_quantize(db: dict[str, Any]) -> Non
     assert stats2.inserted == 0 and stats2.unchanged == 1 and stats2.conflicts == 0
     for stats in (stats1, stats2):
         assert set(stats.__dataclass_fields__) == {"inserted", "unchanged", "conflicts", "issues"}
-        assert stats.issues == []
+        assert isinstance(stats.issues, tuple)
+        assert stats.issues == ()
     assert dataclasses.is_dataclass(mod.UpsertStats)
     assert mod.UpsertStats.__dataclass_params__.frozen is True  # type: ignore[attr-defined]
 
@@ -1175,7 +1176,7 @@ def test_upsert_conflict_never_overwrites(db: dict[str, Any]) -> None:
         )
         row = conn.execute(select(daily_bars).where(daily_bars.c.code == CODE_A)).mappings().one()
         assert stats.conflicts == 1 and stats.inserted == 0 and stats.unchanged == 0
-        assert stats.issues == [f"daily_bar_conflict:{CODE_A}:{DAY_1010.isoformat()}"]
+        assert stats.issues == (f"daily_bar_conflict:{CODE_A}:{DAY_1010.isoformat()}",)
         assert row["close"] == Decimal("10.0000")
 
 

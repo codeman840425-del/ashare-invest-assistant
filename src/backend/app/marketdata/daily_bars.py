@@ -71,7 +71,7 @@ class UpsertStats:
     inserted: int
     unchanged: int
     conflicts: int
-    issues: list[str]
+    issues: tuple[str, ...]
 
 
 class DailyBarsSource(Protocol):
@@ -249,7 +249,7 @@ def upsert_daily_bars(
     inserted = unchanged = conflicts = 0
     issues: list[str] = []
     if not result.bars:
-        return UpsertStats(inserted=0, unchanged=0, conflicts=0, issues=[])
+        return UpsertStats(inserted=0, unchanged=0, conflicts=0, issues=())
 
     values = [
         {
@@ -301,7 +301,7 @@ def upsert_daily_bars(
                 issues.append(f"daily_bar_conflict:{bar.code}:{bar.trade_date.isoformat()}")
     issues.sort()
     return UpsertStats(
-        inserted=inserted, unchanged=unchanged, conflicts=conflicts, issues=issues
+        inserted=inserted, unchanged=unchanged, conflicts=conflicts, issues=tuple(issues)
     )
 
 

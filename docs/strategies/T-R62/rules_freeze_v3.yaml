@@ -1,4 +1,4 @@
-note: T-R62 F23 词表 v3 冻结记录（T-A152 定向修订：controller 否定短语 + insolvency 他方重整排除）。上一冻结记录见 docs/strategies/T-R23/rules_freeze_v2_1.yaml。集成规范见 docs/strategies/f23_lexicon_spec.md（v3 口径）。
+note: T-R62 F23 词表 v3 冻结记录（T-A152 定向修订：controller 否定短语 + insolvency 他方重整排除）。上一冻结记录见 docs/strategies/T-R23/rules_freeze_v2_1.yaml。集成规范见 docs/strategies/f23_lexicon_spec.md（v3 口径）。2026-11-11 T-R63 返修（RV-20 两个 P1）：匹配器作用域修复（① exclude_all_of 收敛到他方主体子句、② 渠道型否定只否被否渠道）；词表本体与哈希未变，仅匹配器哈希更新。
 version: f23_lexicon_v3
 supersedes: {version: f23_lexicon_v2_1, record: docs/strategies/T-R23/rules_freeze_v2_1.yaml}
 frozen_at: '2026-11-10 (Asia/Shanghai)'
@@ -7,10 +7,12 @@ ruling_refs:
   - {id: T-A151, doc: docs/reviews/T-A151-f23-dual-metric-ruling.md, commit: bf4b0ab, scope: '验收误报指标分列：semantic ≤5% 保留为门 + policy 命中差异如实报告不设上限、不作门'}
   - {id: T-A152, scope: 'v3 定向修订授权（只 3 处，其余逐字继承 v2.1）'}
   - {id: T-A153, scope: 'F23 升 verified_doc（ceiling simulating）；FP-3 与 Q-5 扩表并入 v4；两日非连续样本接受，v4 起优先连续日'}
+matcher_repairs:
+  - {id: T-R63, scope: 'RV-20 两个 P1 作用域返修：① exclude_all_of 收敛到他方主体子句（不跨子句吞整类、自身事项不排除）；② 渠道型否定只否被否渠道（另有真实渠道即命中）', regression: 'V3-P11–P14、V3-N11/N12；B 轮归档对照仍 18→16', lexicon_unchanged: true}
 scope_of_change: 仅 3 处——controller_selldown.negations_before、controller_equity.negations_before、insolvency.exclude_all_of；其余逐字继承 v2.1（check_f23_v3.py 断言）
 sha256:
   f23_lexicon_v3.yaml: 8a545da8eef56a30804a998f238d6a18c54469d3544840773d251d15922da05a
-  match_f23_v3.py: d3e930a85d289d12d0d03eef2de6ec597064911a5203922524ed97b89b0348be
+  match_f23_v3.py: 67b0717ba579e3ce89fba4a3024353bf68d4e9380302531c30efd063abbd6704
 unchanged_by_ruling:
   boundary_observations_kept_excluded: ['600136 重大诉讼', '603377 累计诉讼仲裁', '603366 异常波动', '300689 审核问询函回复']
   note: T-A152 明确这 4 条维持排除不动，本单未纳入词表

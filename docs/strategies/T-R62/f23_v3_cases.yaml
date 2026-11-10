@@ -1,4 +1,4 @@
-# T-R62：F23 词表 v3 回归用例（定向核验两处修复 + 防止回退）
+# T-R62：F23 词表 v3 回归用例（定向核验两处修复 + 防止回退；T-R63 增补 RV-20 两个合成反例与反向护栏）
 # 判定：policy_hit = 直接命中；expect_flag 仅对 controller_equity 有意义。
 # 全部标题为 2026-11-06 / 2026-11-09 / 2026-11-10 巨潮公开公告标题（公开信息，非私有样本）。
 version: f23_lexicon_v3
@@ -75,6 +75,36 @@ cases:
     title: 关于收到中国证券监督管理委员会立案告知书的公告
     policy_hit: true
     categories: [investigation]
+  # —— T-R63 返修：P1① 排除作用域 / P1② 渠道否定交互（RV-20 合成反例）——
+  - id: V3-P11
+    title: 关于公开招募投资人参与本公司破产重整的公告
+    policy_hit: true
+    categories: [insolvency]
+    note: RV-20 合成反例①：本公司破产重整，[参与,破产重整] 不得吞掉整类
+  - id: V3-P12
+    title: 关于控股股东不通过集中竞价而通过大宗交易减持股份的公告
+    policy_hit: true
+    categories: [controller_selldown]
+    note: RV-20 合成反例②：否定只否掉被否渠道，另有真实减持渠道即命中
+  - id: V3-P13
+    title: 关于公司被债权人申请破产重整的公告
+    policy_hit: true
+    categories: [insolvency]
+    note: 反向用例：真自身破产必须命中
+  - id: V3-P14
+    title: 关于控股股东通过大宗交易减持股份的公告
+    policy_hit: true
+    categories: [controller_selldown]
+    note: 反向用例：真减持必须命中
+  # —— T-R63 反向护栏：防止修复过度 ——
+  - id: V3-N11
+    title: 关于控股股东不通过集中竞价、大宗交易方式减持股份的公告
+    policy_hit: false
+    note: 两个渠道都被否定，不得因修复②误判为命中
+  - id: V3-N12
+    title: 关于控股股东承诺不通过集中竞价减持股份的公告
+    policy_hit: false
+    note: 单渠道否定且无替代渠道，保持不命中
   # —— 4 条边界观察与 300689 维持排除不动（T-A152 明确）——
   - id: V3-N7
     title: 公司关于公司涉及重大诉讼的进展公告

@@ -1,4 +1,5 @@
 # F23 词表 v3 参考匹配器（T-R62；T-A152 定向修订，研究侧，确定性；无网络、无麦蕊）。由 match_f23_v2.py 复制，增加 policy_rules（询价转让一律命中且优先于整条排除；控制人/一致行动协议到期或解除 + 权益变动保守命中）。
+# T-R63 返修（RV-20 两个 P1）：① exclude_all_of 作用域收敛到「他方主体」子句（不跨子句吞整类、自身事项不排除）；② 渠道型否定（不通过/未通过/不会通过）只否掉被否渠道，另有真实渠道即命中。词表本体未改。
 # 原注释：由 T-R22/match_f23.py（v1）复制，只改词表文件名并增加 controller_equity 类型与 flags。
 # match(title) -> (hit: bool, categories: list)；match_detail(title) -> (hit, categories, flags)
 import re, unicodedata, pathlib, yaml
@@ -10,14 +11,57 @@ def norm(t):
     return re.sub(r"\s+", "", t)
 SPLIT = re.compile(LEX["clause_split"])
 PREFIX = re.compile(LEX["title_exclude_prefix_regex"])
+# —— T-R63 返修常量（词表未改；作用域与主体判定在匹配器内）——
+SELF_MARKERS = ("本公司", "我公司", "公司自身", "公司本身")
+OTHER_MARKERS = ("他方", "对方", "第三方", "其他公司", "他公司", "另一公司", "某公司", "对外", "外部")
+COMPANY_NAME = re.compile(r"[\u4e00-\u9fa5A-Za-z0-9]{1,}(?:股份有限公司|有限责任公司|有限公司|公司)")
+CHANNELS = ("集中竞价交易", "集中竞价", "二级市场", "大宗交易", "协议转让", "询价转让", "集合竞价", "盘后定价", "竞价交易")
+CHANNEL_NEGS = ("不会通过", "不通过", "未通过", "不曾通过")
+def _channel_negated(clause, pos):
+    """渠道词是否被紧邻的渠道否定词覆盖（支持「不通过A、B方式」并列否定）。"""
+    frag = clause[max(0, pos - 16):pos]
+    for ch in CHANNELS: frag = frag.replace(ch, "")
+    frag = re.sub(r"[、，,和及与\s]", "", frag)
+    return frag.endswith(CHANNEL_NEGS)
+def _has_affirmative_channel(clause):
+    """同子句内是否存在未被渠道否定词覆盖的渠道词（T-R63 P1②：任一真实减持渠道成立即命中）。"""
+    for ch in CHANNELS:
+        i = clause.find(ch)
+        while i >= 0:
+            if not _channel_negated(clause, i): return True
+            i = clause.find(ch, i + 1)
+    return False
+def _other_party_excluded(clause, groups):
+    """T-R63 P1①：exclude_all_of 只在「他方主体」子句内生效。
+    组 = [动作词, 风险事件词]（v3 词表三条均为「参与/认购 + 破产重整/重整投资」）：
+    取动作词后、事件词前的对象短语——含自身标记 → 自身事项不排除；含他方标记或公司名 → 他方事项排除；
+    对象不明 → 不排除（宁可多报风险，不制造漏报）。"""
+    for action, event in groups:
+        i = clause.find(action)
+        while i >= 0:
+            j = clause.find(event, i + len(action))
+            if j >= 0:
+                mid = clause[i + len(action):j]
+                if not any(s in mid for s in SELF_MARKERS) and (
+                        any(o in mid for o in OTHER_MARKERS) or COMPANY_NAME.search(mid)):
+                    return True
+            i = clause.find(action, i + 1)
+    return False
 def _occ_hit(clause, kw, negs, after=(), resets=(), window=10):
-    """关键词在子句内的每次出现：前文（含关键词本身，允许“不减持”“无保留意见”重叠）有否定词且其后没有重置词，或后文有后置否定词 → 该次出现被否定；任一次未被否定 → 命中。"""
+    """关键词在子句内的每次出现：前文（含关键词本身，允许“不减持”“无保留意见”重叠）有否定词且其后没有重置词，或后文有后置否定词 → 该次出现被否定；任一次未被否定 → 命中。
+    T-R63 P1②：否定词是渠道型（以「通过」结尾）时，只要同子句另有无否定的渠道词，就不否定本次出现。"""
     i = clause.find(kw)
     while i >= 0:
         pre, post = clause[:i + len(kw)], clause[i + len(kw):]
-        neg_pos = max((pre.rfind(n) for n in negs if n != kw and n in pre), default=-1)
+        neg_pos, neg_tok = -1, None
+        for n in negs:
+            if n == kw: continue
+            p = pre.rfind(n)
+            if p > neg_pos: neg_pos, neg_tok = p, n
         reset_pos = max((pre.rfind(r) for r in resets if r in pre[:i]), default=-1)
         negated = (neg_pos >= 0 and neg_pos > reset_pos) or any(0 <= post.find(x) <= window for x in after)
+        if negated and neg_tok and neg_tok.endswith("通过") and _has_affirmative_channel(clause):
+            negated = False
         if not negated: return True
         i = clause.find(kw, i + 1)
     return False
@@ -57,17 +101,17 @@ def match_detail(title):
     rs = LEX.get("negation_resets", [])
     for name, c in LEX["categories"].items():
         negs = c.get("negations_before", []); aft = c.get("negations_after", []); w = c.get("after_window", LEX.get("after_window", 10))
-        # T-R62（T-A152）：类别级「他方主体」排除——组内所有词都出现时，本条类别不判命中。
+        # T-R63 P1①：exclude_all_of 只在「他方主体」子句内生效，逐子句过滤（不跨子句吞整类）。
         exc = c.get("exclude_all_of") or []
-        if any(all(tok in t for tok in group) for group in exc):
-            continue
+        cat_clauses = [cl for cl in clauses if not (exc and _other_party_excluded(cl, exc))]
+        if not cat_clauses: continue
         if c.get("type") == "controller_equity":
-            ok, fl = _controller_equity(t, clauses, c, rs, w)
+            ok, fl = _controller_equity(t, cat_clauses, c, rs, w)
             if fl: flags[name] = fl
         elif "require_all" in c:
-            ok = any(r in t for r in c["require_any"]) and all(any(_occ_hit(cl, k, negs, aft, rs, w) for cl in clauses) for k in c["require_all"])
+            ok = any(r in t for r in c["require_any"]) and all(any(_occ_hit(cl, k, negs, aft, rs, w) for cl in cat_clauses) for k in c["require_all"])
         else:
-            ok = any(_occ_hit(cl, k, negs, aft, rs, w) for cl in clauses for k in c["keywords"])
+            ok = any(_occ_hit(cl, k, negs, aft, rs, w) for cl in cat_clauses for k in c["keywords"])
         if ok: cats.append(name)
     return bool(cats), cats, flags
 def match(title):

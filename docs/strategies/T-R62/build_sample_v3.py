@@ -22,7 +22,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 V3_MATCHER = HERE / "match_f23_v3.py"
-V3_SHA = "d3e930a85d289d12d0d03eef2de6ec597064911a5203922524ed97b89b0348be"
+V3_SHA = "67b0717ba579e3ce89fba4a3024353bf68d4e9380302531c30efd063abbd6704"
 V21_MATCHER = ROOT / "docs/strategies/T-R23/match_f23_v2_1.py"
 V21_SHA = "68f4a533e6418e0eda06fd8006ef04cbd212e01cadddde1c08783a0320dfcbc0"
 

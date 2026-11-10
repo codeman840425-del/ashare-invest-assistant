@@ -230,8 +230,11 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
         refs = {r["rule_id"]: r for r in outcome["evaluations"][0]["rule_refs"]}
         assert set(refs) == {"E", "X", "C", "I"}
         assert all(refs[key]["passed"] is None for key in ("E", "X", "C", "I"))
-        assert "evaluated_input_gaps:688018.SH" in outcome["issues"]
-        assert "owned_source_or_card_missing" in outcome["issues"]
+        # T-A144 建议 1：T-T75/T-T76 实测恰为两项，改为精确相等。
+        assert outcome["issues"] == [
+            "evaluated_input_gaps:688018.SH",
+            "owned_source_or_card_missing",
+        ]
         assert (
             len(
                 conn.execute(
@@ -246,6 +249,8 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
             for strategy in (row.strategies or [])
         ]
         assert set(actions).isdisjoint({"buy", "sell", "reduce"})
+        # T-A144 建议 2：防止 suggestions 为空时不相交断言空真成立。
+        assert any(action in {"hold", "wait"} for action in actions)
     assert enqueue(REPORT, owner) == [(REPORT, "ok")]
     response = client.get("/api/v1/daily-reports/2026-10-30")
     assert response.status_code == 200

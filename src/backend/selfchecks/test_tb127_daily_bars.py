@@ -588,7 +588,7 @@ def test_migration_adds_nullable_columns_single_head() -> None:
         _upgrade(url, "0030")
         _upgrade(url, "head")
         head = require_single_head(script_directory())
-        assert head == "0032"
+        assert head == "0034"  # T-B133 起单头为 0034（0033 日线 tdx_local、0034 分钟线）
         engine = create_engine(url)
         with engine.begin() as conn:
             cols = {

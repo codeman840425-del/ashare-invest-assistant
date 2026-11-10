@@ -36,6 +36,8 @@ _MONEY_Q = Decimal("0.0001")
 _PRICE_Q = Decimal("0.01")
 _VOLUME = Decimal("10000")
 _ALLOWED_SOURCES = frozenset({"fake", "mairui"})
+# daily-bars-tdx §2 / 0033：通达信本地日线的来源取值；快照侧按 §4 排除。
+TDX_LOCAL_SOURCE: Final[str] = "tdx_local"
 
 
 @dataclass(frozen=True)
@@ -50,7 +52,7 @@ class DailyBar:
     pre_close: Decimal | None
     volume: Decimal | None
     amount: Decimal | None
-    is_suspended: bool
+    is_suspended: bool | None  # 通达信行为空（daily-bars-tdx §2）
 
 
 @dataclass(frozen=True)

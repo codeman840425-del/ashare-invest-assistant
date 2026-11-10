@@ -10,6 +10,8 @@ from app.cli.cards_import import main as cards_import_main
 from app.cli.daily_bars_backfill import main as daily_bars_backfill_main
 from app.cli.delete_user_data import main as delete_user_data_main
 from app.cli.master_bootstrap import main as master_bootstrap_main
+from app.cli.tdx_import import daily_main as tdx_daily_main
+from app.cli.tdx_import import intraday_main as tdx_intraday_main
 
 COMMANDS: dict[str, Callable[[list[str]], int]] = {
     "delete-user-data": delete_user_data_main,
@@ -17,6 +19,8 @@ COMMANDS: dict[str, Callable[[list[str]], int]] = {
     "calendar-seed": calendar_seed_main,
     "daily-bars-backfill": daily_bars_backfill_main,
     "cards-import": cards_import_main,
+    "daily-bars-import-tdx": tdx_daily_main,
+    "intraday-bars-import-tdx": tdx_intraday_main,
 }
 
 
@@ -28,7 +32,11 @@ def main(argv: list[str] | None = None) -> int:
             "      python -m app.cli master-bootstrap [--sources a,b]\n"
             "      python -m app.cli calendar-seed [--apply]\n"
             "      python -m app.cli daily-bars-backfill --years 3 "
-            "[--trade-date YYYY-MM-DD] [--apply]",
+            "[--trade-date YYYY-MM-DD] [--apply]\n"
+            "      python -m app.cli daily-bars-import-tdx --root <dir> --audit-dir <dir> "
+            "--until YYYY-MM-DD [--from YYYY-MM-DD] [--apply]\n"
+            "      python -m app.cli intraday-bars-import-tdx --kind lc1|lc5 --root <dir> "
+            "--audit-dir <dir> [--until YYYY-MM-DD] [--apply]",
             file=sys.stderr,
         )
         return 2

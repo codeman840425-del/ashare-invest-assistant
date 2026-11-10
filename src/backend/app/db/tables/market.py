@@ -378,7 +378,7 @@ daily_bars = Table(
     PrimaryKeyConstraint("code", "trade_date", "adj_type"),
     one_of("adj_type", BarAdjust),
     CheckConstraint(
-        "source IS NULL OR source IN ('fake', 'mairui')",
+        "source IS NULL OR source IN ('fake', 'mairui', 'tdx_local')",
         name="source_allowed",
     ),
     schema=MARKET,
@@ -517,6 +517,9 @@ realtime_quotes = Table(
     comment="hypertable（ts=行情时间，chunk 1 天）；按分钟降采样",
 )
 
+# intraday-bars §1.3：新写入只用 mairui、tdx_local；pro_* 只为兼容基线保留（0034）。
+MINUTE_BAR_SOURCES = ("pro_latest", "pro_history", "mairui", "tdx_local")
+
 minute_bars = Table(
     "minute_bars",
     metadata,
@@ -530,10 +533,32 @@ minute_bars = Table(
     money("amount"),
     txt("source"),
     _now("fetched_at"),
+    uuid_col("source_licence_id"),
     PrimaryKeyConstraint("code", "ts"),
-    one_of("source", ["pro_latest", "pro_history"]),
+    one_of("source", MINUTE_BAR_SOURCES),
     schema=MARKET,
     comment="hypertable（ts，chunk 1 天）；ts 为 bar 结束时间",
+)
+
+# T-B133 / 0034：只存通达信 .lc5 历史；以后的 5 分钟线读取时由 1 分钟聚合（intraday-bars §2.2）。
+minute5_bars = Table(
+    "minute5_bars",
+    metadata,
+    txt("code", nullable=False),
+    ts("ts", nullable=False, comment="bar 结束时间：09:35 表示 09:30–09:35"),
+    money("open"),
+    money("high"),
+    money("low"),
+    money("close"),
+    money("volume"),
+    money("amount"),
+    txt("source"),
+    uuid_col("source_licence_id"),
+    _now("fetched_at"),
+    PrimaryKeyConstraint("code", "ts"),
+    one_of("source", MINUTE_BAR_SOURCES),
+    schema=MARKET,
+    comment="hypertable（ts，chunk 7 天）；ts 为 bar 结束时间；只存通达信 .lc5 历史",
 )
 
 feature_bars_daily = Table(

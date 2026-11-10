@@ -1,4 +1,4 @@
-# ruff: noqa: S101, ANN401, E501, PT018
+# ruff: noqa: S101, E501, PT018
 """T-B135：T-A147 必改 M1–M3（不连库部分）。
 
 - M1：``run_import`` 逐文件写入、逐文件写对账报告，不跨文件攒行。
@@ -14,12 +14,22 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from app.cli import tdx_import
 from app.ingest import tdx_local
-from app.ingest.tdx_local import BEIJING, ExistingBar, parse_day_bytes, parse_lc_bytes, run_import
+from app.ingest.tdx_local import (
+    BEIJING,
+    ExistingBar,
+    TdxBar,
+    parse_day_bytes,
+    parse_lc_bytes,
+    run_import,
+)
 from selfchecks.test_tb133_tdx_local import (
     FakeDeps,
     day_rec,
@@ -44,7 +54,12 @@ def _three_files(tmp: Path) -> Path:
     return root
 
 
-def _run(root: Path, audit: Path, writer, existing=None) -> tdx_local.RunReport:
+def _run(
+    root: Path,
+    audit: Path,
+    writer: Callable[[Sequence[TdxBar]], int] | None,
+    existing: Callable[[str, Sequence[TdxBar]], Mapping[object, ExistingBar]] | None = None,
+) -> tdx_local.RunReport:
     return run_import(
         root=root,
         audit_dir=audit,
@@ -65,7 +80,9 @@ def _run(root: Path, audit: Path, writer, existing=None) -> tdx_local.RunReport:
 # ---------------------------------------------------------------- M1
 
 
-def test_m1_writer_called_once_per_file_with_only_that_file(tmp_path: Path, monkeypatch) -> None:
+def test_m1_writer_called_once_per_file_with_only_that_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = _three_files(tmp_path)
     audit = tmp_path / "audit"
     audit.mkdir()
@@ -79,7 +96,7 @@ def test_m1_writer_called_once_per_file_with_only_that_file(tmp_path: Path, monk
 
     monkeypatch.setattr(Path, "read_bytes", spy_read)
 
-    def writer(bars) -> int:
+    def writer(bars: Sequence[TdxBar]) -> int:
         events.append(("write", tuple(sorted({b.code for b in bars}))))
         return len(bars)
 
@@ -99,13 +116,23 @@ def test_m1_reconcile_lines_flushed_before_next_file(tmp_path: Path) -> None:
     audit = tmp_path / "audit"
     audit.mkdir()
     # 第一个文件（bj920000）D1 已有不同收盘价的行：产生一条差异。
-    existing_bj = {D1: ExistingBar("mairui", Decimal("10"), Decimal("10.2"), Decimal("9.8"), Decimal("9.99"), Decimal(100000), Decimal("1005000"))}
+    existing_bj = {
+        D1: ExistingBar(
+            "mairui",
+            Decimal("10"),
+            Decimal("10.2"),
+            Decimal("9.8"),
+            Decimal("9.99"),
+            Decimal(100000),
+            Decimal("1005000"),
+        )
+    }
     seen: list[list[str]] = []
 
-    def existing(code: str, bars) -> dict[object, ExistingBar]:
+    def existing(code: str, bars: Sequence[TdxBar]) -> dict[object, ExistingBar]:
         return existing_bj if code == "920000.BJ" else {}
 
-    def writer(bars) -> int:
+    def writer(bars: Sequence[TdxBar]) -> int:
         if bars[0].code == "600000.SH":  # 第二个文件写入时，第一个文件的差异已落盘
             parts = sorted(audit.glob("tdx-day-reconcile-*"))
             assert len(parts) == 1
@@ -118,7 +145,11 @@ def test_m1_reconcile_lines_flushed_before_next_file(tmp_path: Path) -> None:
     final = (audit / report.reconcile_name).read_text(encoding="utf-8").splitlines()
     assert json.loads(final[0]) == json.loads(seen[0][0])
     summary = json.loads(final[-1])
-    assert summary["summary"] is True and summary["mismatch_keys"] == 1 and summary["overlap_keys"] == 1
+    assert (
+        summary["summary"] is True
+        and summary["mismatch_keys"] == 1
+        and summary["overlap_keys"] == 1
+    )
     assert report.conflicts == 1 and report.inserted == 4
     assert not list(audit.glob("*.part"))
 
@@ -151,7 +182,11 @@ def test_m2_lc_nan_and_inf_rejected_per_record() -> None:
 
 
 def test_m2_day_nan_amount_rejected_per_record() -> None:
-    data = good_day(D1) + day_rec(D2, 1000, 1020, 980, 1010, math.nan, 100000) + day_rec(D2, 1000, 1020, 980, 1010, math.inf, 100000)
+    data = (
+        good_day(D1)
+        + day_rec(D2, 1000, 1020, 980, 1010, math.nan, 100000)
+        + day_rec(D2, 1000, 1020, 980, 1010, math.inf, 100000)
+    )
     parsed = parse_day_bytes("600000.SH", data)
     assert [b.trade_date for b in parsed.bars] == [D1]
     assert dict(parsed.rejected) == {"non_finite": 2}
@@ -159,7 +194,11 @@ def test_m2_day_nan_amount_rejected_per_record() -> None:
 
 def test_m2_cli_run_survives_nan_record(tmp_path: Path) -> None:
     root = make_root(tmp_path)
-    write(root, "sh/lday/sh600000.day", good_day(D1) + day_rec(D2, 1000, 1020, 980, 1010, math.nan, 100000))
+    write(
+        root,
+        "sh/lday/sh600000.day",
+        good_day(D1) + day_rec(D2, 1000, 1020, 980, 1010, math.nan, 100000),
+    )
     audit = tmp_path / "audit"
     audit.mkdir()
     code, out = run_daily(FakeDeps(), root, audit, "--apply")
@@ -171,7 +210,9 @@ def test_m2_cli_run_survives_nan_record(tmp_path: Path) -> None:
 # ---------------------------------------------------------------- M3
 
 
-def _weekdays(start: dt.date, end: dt.date, closed: frozenset[dt.date] = frozenset()) -> list[dt.date]:
+def _weekdays(
+    start: dt.date, end: dt.date, closed: frozenset[dt.date] = frozenset()
+) -> list[dt.date]:
     return [d for d in open_days(start, end) if d not in closed]
 
 
@@ -213,4 +254,3 @@ def test_m3_no_open_day_unknown() -> None:
 def test_m3_years_matches_contract() -> None:
     # daily-bars-tdx §3.4：backfill_window_days(conn, trade_date, 3)。
     assert tdx_import.MAIRUI_BACKFILL_YEARS == 3
-

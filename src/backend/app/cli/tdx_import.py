@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -55,6 +55,28 @@ from app.workers import jobs as jobs_mod
 MAIRUI_BACKFILL_YEARS = 3
 _PIPELINE_KIND = "daily_batch"
 _REFUSED = 1
+
+
+def _years_back(day: dt.date, years: int) -> dt.date:
+    """与 ``backfill_window_days`` 的窗口起点同口径：2 月 29 日退到 2 月 28 日。"""
+    try:
+        return day.replace(year=day.year - years)
+    except ValueError:
+        return day.replace(year=day.year - years, day=28)
+
+
+def recommended_until(
+    trade_date: dt.date,
+    open_days: Iterable[dt.date],
+    years: int = MAIRUI_BACKFILL_YEARS,
+) -> dt.date | None:
+    """daily-bars-tdx §3.4：D = (start, trade_date] 内第一个开市日的前一开市日；推不出为 None。"""
+    start = _years_back(trade_date, years)
+    days = list(open_days)
+    first = min((d for d in days if start < d <= trade_date), default=None)
+    if first is None:
+        return None
+    return max((d for d in days if d < first), default=None)
 
 
 class TdxDeps(Protocol):
@@ -113,19 +135,21 @@ class DbDeps:
             return None
         if backfill_window_days(self.conn, trade_date, MAIRUI_BACKFILL_YEARS) is None:
             return None
-        try:
-            start = trade_date.replace(year=trade_date.year - MAIRUI_BACKFILL_YEARS)
-        except ValueError:
-            start = trade_date.replace(year=trade_date.year - MAIRUI_BACKFILL_YEARS, day=28)
+        start = _years_back(trade_date, MAIRUI_BACKFILL_YEARS)
         # backfill_window_days 的窗口是 (start, trade_date]：第一个开市日即麦蕊回填起点。
-        first = self.conn.execute(
-            select(func.min(trading_calendar.c.date)).where(
-                trading_calendar.c.date > start,
-                trading_calendar.c.date <= trade_date,
-                trading_calendar.c.is_open.is_(True),
-            )
-        ).scalar_one_or_none()
-        return None if first is None else self.previous_open(first)
+        days = list(
+            self.conn.execute(
+                select(trading_calendar.c.date).where(
+                    trading_calendar.c.date > start,
+                    trading_calendar.c.date <= trade_date,
+                    trading_calendar.c.is_open.is_(True),
+                )
+            ).scalars()
+        )
+        previous = self.previous_open(start + dt.timedelta(days=1))
+        if previous is not None:
+            days.append(previous)
+        return recommended_until(trade_date, days)
 
     def first_mairui_minute_day(self, code: str) -> dt.date | None:
         ts = self.conn.execute(

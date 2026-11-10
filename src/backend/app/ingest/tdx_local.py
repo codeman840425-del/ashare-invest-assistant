@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import struct
@@ -66,6 +67,7 @@ SKIP_NORMALIZE: Final = "normalize_failed"
 SKIP_NON_A_SHARE: Final = "non_a_share"
 SKIP_NOT_LISTED: Final = "not_listed"
 SKIP_OUT_OF_SCOPE: Final = "out_of_scope"
+REJECT_NON_FINITE: Final = "non_finite"
 
 
 class TdxRefused(Exception):  # noqa: N818 - 契约用语「拒绝」
@@ -174,6 +176,9 @@ def parse_day_bytes(code: str, data: bytes) -> ParseResult:
         except ValueError:
             out.rejected["invalid_date"] += 1
             continue
+        if not math.isfinite(amount):  # T-A147 M2：float32 NaN/Inf 按记录拒绝
+            out.rejected[REJECT_NON_FINITE] += 1
+            continue
         prices = [Decimal(x) / DAY_PRICE_DIVISOR for x in (o, h, low, c)]
         bad = _valid_ohlc(*prices)
         if bad:
@@ -199,6 +204,9 @@ def parse_lc_bytes(code: str, data: bytes, kind: Kind) -> ParseResult:
             continue
         if not 0 < minute <= 24 * 60:
             out.rejected["invalid_minute"] += 1
+            continue
+        if not all(math.isfinite(x) for x in (o, h, low, c, amount)):  # T-A147 M2
+            out.rejected[REJECT_NON_FINITE] += 1
             continue
         prices = [Decimal(repr(float(x))).quantize(LC_PRICE_Q) for x in (o, h, low, c)]
         bad = _valid_ohlc(*prices)
@@ -558,64 +566,74 @@ def run_import(
             report.rerun = compare_manifests(previous[1], manifest)
 
     hashes = {e.rel: e.sha256 for e in manifest.entries}
-    diffs: list[dict[str, object]] = []
-    pending: list[TdxBar] = []
-    for cand in scanned.files:
-        data = cand.path.read_bytes()
-        if kind == "day":
-            parsed = parse_day_bytes(cand.code, data)
-        else:
-            parsed = parse_lc_bytes(cand.code, data, kind)
-        # 第 4 步：解析后再算一次 sha256，与清单不同即视为导入中被改写。
-        if (
-            hashlib.sha256(data).hexdigest() != hashes[cand.rel]
-            or file_sha256(cand.path) != hashes[cand.rel]
-        ):
-            report.rejected_files["changed_during_import"] += 1
-            report.issues.append(f"tdx_file_changed:{cand.code}")
-            report.status = "partial"
-            continue
-        report.rejected_records.update(parsed.rejected)
-        if unit_suspect(parsed.bars):
-            report.rejected_files["unit_suspect"] += 1
-            report.issues.append(f"tdx_unit_suspect:{cand.code}")
-            report.status = "partial"
-            continue
-        until = until_for(cand.code)
-        kept: list[TdxBar] = []
-        for bar in parsed.bars:
-            report.parsed_rows += 1
-            if start is not None and bar.trade_date < start:
-                report.before_from += 1
-            elif until is None or bar.trade_date > until:
-                report.after_until += 1
-            else:
-                kept.append(bar)
-        existing = existing_for(cand.code, kept) if kept else {}
-        for bar in kept:
-            row = existing.get(bar_key(bar))
-            if row is None:
-                pending.append(bar)
-                continue
-            report.overlap_rows += 1
-            items = reconcile(bar, row, compare_amount=compare_amount)
-            if items:
-                report.conflicts += 1
-                diffs.extend(items)
-    report.would_insert = len(pending)
-    if writer is not None and pending:
-        report.inserted = writer(pending)
-
+    mismatch_items = 0
     report.reconcile_name = f"tdx-{kind}-reconcile-{stamp}-{run_id}.jsonl"
-    summary = {
-        "summary": True,
-        "overlap_keys": report.overlap_rows,
-        "mismatch_keys": report.conflicts,
-        "mismatch_items": len(diffs),
-        "mismatch_rate": (report.conflicts / report.overlap_rows) if report.overlap_rows else 0.0,
-        "amount_compared": compare_amount,
-    }
-    lines = [json.dumps(item, ensure_ascii=False, sort_keys=True) for item in diffs]
-    lines.append(json.dumps(summary, ensure_ascii=False, sort_keys=True))
-    _write_new(audit / report.reconcile_name, "\n".join(lines) + "\n")
+    reconcile_path = audit / report.reconcile_name
+    reconcile_tmp = reconcile_path.with_name(reconcile_path.name + ".part")
+    with reconcile_tmp.open("x", encoding="utf-8") as reconcile_file:
+        for cand in scanned.files:
+            pending: list[TdxBar] = []
+            data = cand.path.read_bytes()
+            if kind == "day":
+                parsed = parse_day_bytes(cand.code, data)
+            else:
+                parsed = parse_lc_bytes(cand.code, data, kind)
+            # 第 4 步：解析后再算一次 sha256，与清单不同即视为导入中被改写。
+            if (
+                hashlib.sha256(data).hexdigest() != hashes[cand.rel]
+                or file_sha256(cand.path) != hashes[cand.rel]
+            ):
+                report.rejected_files["changed_during_import"] += 1
+                report.issues.append(f"tdx_file_changed:{cand.code}")
+                report.status = "partial"
+                continue
+            report.rejected_records.update(parsed.rejected)
+            if unit_suspect(parsed.bars):
+                report.rejected_files["unit_suspect"] += 1
+                report.issues.append(f"tdx_unit_suspect:{cand.code}")
+                report.status = "partial"
+                continue
+            until = until_for(cand.code)
+            kept: list[TdxBar] = []
+            for bar in parsed.bars:
+                report.parsed_rows += 1
+                if start is not None and bar.trade_date < start:
+                    report.before_from += 1
+                elif until is None or bar.trade_date > until:
+                    report.after_until += 1
+                else:
+                    kept.append(bar)
+            existing = existing_for(cand.code, kept) if kept else {}
+            for bar in kept:
+                row = existing.get(bar_key(bar))
+                if row is None:
+                    pending.append(bar)
+                    continue
+                report.overlap_rows += 1
+                items = reconcile(bar, row, compare_amount=compare_amount)
+                if items:
+                    report.conflicts += 1
+                    mismatch_items += len(items)
+                    for item in items:
+                        reconcile_file.write(
+                            json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n"
+                        )
+            # T-A147 M1：逐文件落盘对账差异、逐文件写入，不跨文件攒行。
+            reconcile_file.flush()
+            report.would_insert += len(pending)
+            if writer is not None and pending:
+                report.inserted += writer(pending)
+
+        summary = {
+            "summary": True,
+            "overlap_keys": report.overlap_rows,
+            "mismatch_keys": report.conflicts,
+            "mismatch_items": mismatch_items,
+            "mismatch_rate": (report.conflicts / report.overlap_rows)
+            if report.overlap_rows
+            else 0.0,
+            "amount_compared": compare_amount,
+        }
+        reconcile_file.write(json.dumps(summary, ensure_ascii=False, sort_keys=True) + "\n")
+    os.replace(reconcile_tmp, reconcile_path)
     return report

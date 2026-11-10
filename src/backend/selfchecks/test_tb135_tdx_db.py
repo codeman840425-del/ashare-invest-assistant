@@ -40,7 +40,9 @@ def _temp_db() -> Iterator[URL]:
     finally:
         assert _SAFE_TMP.fullmatch(name)
         with _admin() as admin:
-            admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
+            admin.execute(
+                sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name))
+            )
 
 
 @pytest.fixture(scope="module")

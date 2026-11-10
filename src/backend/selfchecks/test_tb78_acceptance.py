@@ -25,6 +25,7 @@ from app.db.tables.strategy import engine_policies, strategy_instances, strategy
 from app.db.tables.users import users
 from app.reference_files import CalendarReference, load_reference_file
 from app.replay.baseline import positions_file
+from app.tracking.worker import TASK as TRACKING
 from app.workers import jobs
 from app.workers.daily import ANALYZE, REPORT
 from selfchecks.test_tb70_replay import REDIS, integration, no_network  # noqa: F401
@@ -39,7 +40,8 @@ def run(owner: uuid.UUID, date: str, task: str) -> None:
     try:
         assert client.llen(jobs.QUEUE_KEY) == 0
         jobs._push(client, task, {"trade_date": date, "user_id": str(owner)})
-        assert jobs.worker_tick(settings(), client=client) == [(task, "ok")]
+        expected = [(ANALYZE, "ok"), (TRACKING, "ok")] if task == ANALYZE else [(task, "ok")]
+        assert jobs.worker_tick(settings(), client=client) == expected
     finally:
         client.close()
 

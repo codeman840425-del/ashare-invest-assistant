@@ -10,19 +10,26 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import json
+import logging
+import math
 import os
 import re
 import struct
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Final, Literal
 from zoneinfo import ZoneInfo
+
+from app.db.base import MONEY
+
+logger = logging.getLogger("app.ingest.tdx_local")
 
 BEIJING: Final = ZoneInfo("Asia/Shanghai")
 
@@ -42,6 +49,10 @@ LC_YEAR_SPAN: Final[int] = 2048
 # 分钟价为 float32 元；入库按股票价格位数（app.marketdata.security_types.STOCK_PRICE_DP=2）取整。
 LC_PRICE_Q: Final = Decimal("0.01")
 _MONEY_Q: Final = Decimal("0.0001")  # 与 market 表 Numeric(20,4) 一致
+# 裁定②：写库列 MONEY（Numeric(20,4)）可容纳的整数位，取自类型本身，不另设阈值。
+if MONEY.precision is None or MONEY.scale is None:
+    raise RuntimeError("MONEY must declare precision and scale")
+_MONEY_INT_DIGITS: Final[int] = MONEY.precision - MONEY.scale
 # daily-bars-tdx §3.3 单位自检：额÷量落在 [low, high]（容差 1%），超 5% 整文件拒绝。
 UNIT_TOLERANCE: Final = 0.01
 UNIT_REJECT_RATIO: Final = 0.05
@@ -66,6 +77,8 @@ SKIP_NORMALIZE: Final = "normalize_failed"
 SKIP_NON_A_SHARE: Final = "non_a_share"
 SKIP_NOT_LISTED: Final = "not_listed"
 SKIP_OUT_OF_SCOPE: Final = "out_of_scope"
+REJECT_NON_FINITE: Final = "non_finite"
+REJECT_OUT_OF_RANGE: Final = "out_of_range"
 
 
 class TdxRefused(Exception):  # noqa: N818 - 契约用语「拒绝」
@@ -128,8 +141,19 @@ class Manifest:
 # ---------------------------------------------------------------- 记录解析
 
 
-def _money(value: float) -> Decimal:
-    return Decimal(repr(float(value))).quantize(_MONEY_Q)
+def _quantize(value: float, q: Decimal) -> Decimal | None:
+    """量化 float32 值；量化报错或超出写库列 MONEY 的整数位时返回 None（裁定②，按记录拒绝）。
+
+    「极大」只以实际会不会出错为准：Decimal 默认精度下 quantize 抛 InvalidOperation，或整数位
+    超过 ``MONEY``（Numeric(20,4)，market 各 K 线表价/额列）的 precision - scale；不另设阈值。
+    """
+    try:
+        result = Decimal(repr(float(value))).quantize(q)
+    except InvalidOperation:
+        return None
+    if result.adjusted() + 1 > _MONEY_INT_DIGITS:
+        return None
+    return result
 
 
 def decode_lc_date(value: int) -> dt.date:
@@ -148,10 +172,10 @@ def _bar(
     ts: dt.datetime | None,
     prices: Sequence[Decimal],
     volume: int,
-    amount: float,
+    amount: Decimal,
 ) -> TdxBar:
     o, h, low, c = prices
-    return TdxBar(code, day, ts, o, h, low, c, Decimal(volume), _money(amount))
+    return TdxBar(code, day, ts, o, h, low, c, Decimal(volume), amount)
 
 
 def _valid_ohlc(o: Decimal, h: Decimal, low: Decimal, c: Decimal) -> str | None:
@@ -174,12 +198,19 @@ def parse_day_bytes(code: str, data: bytes) -> ParseResult:
         except ValueError:
             out.rejected["invalid_date"] += 1
             continue
+        if not math.isfinite(amount):  # T-A147 M2：float32 NaN/Inf 按记录拒绝
+            out.rejected[REJECT_NON_FINITE] += 1
+            continue
+        quantized_amount = _quantize(amount, _MONEY_Q)
+        if quantized_amount is None:
+            out.rejected[REJECT_OUT_OF_RANGE] += 1
+            continue
         prices = [Decimal(x) / DAY_PRICE_DIVISOR for x in (o, h, low, c)]
         bad = _valid_ohlc(*prices)
         if bad:
             out.rejected[bad] += 1
             continue
-        out.bars.append(_bar(code, day, None, prices, volume, amount))
+        out.bars.append(_bar(code, day, None, prices, volume, quantized_amount))
     return out
 
 
@@ -200,13 +231,21 @@ def parse_lc_bytes(code: str, data: bytes, kind: Kind) -> ParseResult:
         if not 0 < minute <= 24 * 60:
             out.rejected["invalid_minute"] += 1
             continue
-        prices = [Decimal(repr(float(x))).quantize(LC_PRICE_Q) for x in (o, h, low, c)]
+        if not all(math.isfinite(x) for x in (o, h, low, c, amount)):  # T-A147 M2
+            out.rejected[REJECT_NON_FINITE] += 1
+            continue
+        quantized_prices = [_quantize(x, LC_PRICE_Q) for x in (o, h, low, c)]
+        quantized_amount = _quantize(amount, _MONEY_Q)
+        prices = [x for x in quantized_prices if x is not None]
+        if len(prices) != len(quantized_prices) or quantized_amount is None:  # 裁定②
+            out.rejected[REJECT_OUT_OF_RANGE] += 1
+            continue
         bad = _valid_ohlc(*prices)
         if bad:
             out.rejected[bad] += 1
             continue
         end = dt.datetime.combine(day, dt.time(0), BEIJING) + dt.timedelta(minutes=minute)
-        out.bars.append(_bar(code, day, end, prices, volume, amount))
+        out.bars.append(_bar(code, day, end, prices, volume, quantized_amount))
     return out
 
 
@@ -378,11 +417,20 @@ def latest_manifest(audit_dir: Path, kind: Kind) -> tuple[str, Manifest | None] 
     return name, parse_manifest((audit_dir / name).read_text(encoding="utf-8"))
 
 
-def _write_new(path: Path, text: str) -> None:
+def _write_new(path: Path, text: str, *, run_id: str) -> None:
     tmp = path.with_name(path.name + ".part")
-    with tmp.open("x", encoding="utf-8") as fh:
-        fh.write(text)
-    os.replace(tmp, path)
+    fh = tmp.open("x", encoding="utf-8")
+    try:
+        with fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        # 清单 .part：open("x") 成功后出错则删本次文件并记 warning，原样抛出。
+        # open("x") 失败不进这里，不会删事先已存在的 .part。
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        logger.warning("tdx 导入中途出错，已清理清单临时文件 %s（run_id=%s）", tmp.name, run_id)
+        raise
 
 
 # ---------------------------------------------------------------- 重叠对账（只读）
@@ -549,7 +597,7 @@ def run_import(
     stamp = now.astimezone(BEIJING).strftime("%Y%m%dT%H%M%S")
     report.manifest_name = f"tdx-{kind}-manifest-{stamp}-{run_id}.txt"
     report.manifest_sha256 = manifest.sha256
-    _write_new(audit / report.manifest_name, manifest.text)
+    _write_new(audit / report.manifest_name, manifest.text, run_id=run_id)
     if previous is not None:
         report.previous_manifest = previous[0]
         if previous[1] is None:
@@ -558,64 +606,85 @@ def run_import(
             report.rerun = compare_manifests(previous[1], manifest)
 
     hashes = {e.rel: e.sha256 for e in manifest.entries}
-    diffs: list[dict[str, object]] = []
-    pending: list[TdxBar] = []
-    for cand in scanned.files:
-        data = cand.path.read_bytes()
-        if kind == "day":
-            parsed = parse_day_bytes(cand.code, data)
-        else:
-            parsed = parse_lc_bytes(cand.code, data, kind)
-        # 第 4 步：解析后再算一次 sha256，与清单不同即视为导入中被改写。
-        if (
-            hashlib.sha256(data).hexdigest() != hashes[cand.rel]
-            or file_sha256(cand.path) != hashes[cand.rel]
-        ):
-            report.rejected_files["changed_during_import"] += 1
-            report.issues.append(f"tdx_file_changed:{cand.code}")
-            report.status = "partial"
-            continue
-        report.rejected_records.update(parsed.rejected)
-        if unit_suspect(parsed.bars):
-            report.rejected_files["unit_suspect"] += 1
-            report.issues.append(f"tdx_unit_suspect:{cand.code}")
-            report.status = "partial"
-            continue
-        until = until_for(cand.code)
-        kept: list[TdxBar] = []
-        for bar in parsed.bars:
-            report.parsed_rows += 1
-            if start is not None and bar.trade_date < start:
-                report.before_from += 1
-            elif until is None or bar.trade_date > until:
-                report.after_until += 1
-            else:
-                kept.append(bar)
-        existing = existing_for(cand.code, kept) if kept else {}
-        for bar in kept:
-            row = existing.get(bar_key(bar))
-            if row is None:
-                pending.append(bar)
-                continue
-            report.overlap_rows += 1
-            items = reconcile(bar, row, compare_amount=compare_amount)
-            if items:
-                report.conflicts += 1
-                diffs.extend(items)
-    report.would_insert = len(pending)
-    if writer is not None and pending:
-        report.inserted = writer(pending)
-
+    mismatch_items = 0
     report.reconcile_name = f"tdx-{kind}-reconcile-{stamp}-{run_id}.jsonl"
-    summary = {
-        "summary": True,
-        "overlap_keys": report.overlap_rows,
-        "mismatch_keys": report.conflicts,
-        "mismatch_items": len(diffs),
-        "mismatch_rate": (report.conflicts / report.overlap_rows) if report.overlap_rows else 0.0,
-        "amount_compared": compare_amount,
-    }
-    lines = [json.dumps(item, ensure_ascii=False, sort_keys=True) for item in diffs]
-    lines.append(json.dumps(summary, ensure_ascii=False, sort_keys=True))
-    _write_new(audit / report.reconcile_name, "\n".join(lines) + "\n")
+    reconcile_path = audit / report.reconcile_name
+    reconcile_tmp = reconcile_path.with_name(reconcile_path.name + ".part")
+    reconcile_file = reconcile_tmp.open("x", encoding="utf-8")
+    try:
+        with reconcile_file:
+            for cand in scanned.files:
+                pending: list[TdxBar] = []
+                data = cand.path.read_bytes()
+                if kind == "day":
+                    parsed = parse_day_bytes(cand.code, data)
+                else:
+                    parsed = parse_lc_bytes(cand.code, data, kind)
+                # 第 4 步：解析后再算一次 sha256，与清单不同即视为导入中被改写。
+                if (
+                    hashlib.sha256(data).hexdigest() != hashes[cand.rel]
+                    or file_sha256(cand.path) != hashes[cand.rel]
+                ):
+                    report.rejected_files["changed_during_import"] += 1
+                    report.issues.append(f"tdx_file_changed:{cand.code}")
+                    report.status = "partial"
+                    continue
+                report.rejected_records.update(parsed.rejected)
+                if unit_suspect(parsed.bars):
+                    report.rejected_files["unit_suspect"] += 1
+                    report.issues.append(f"tdx_unit_suspect:{cand.code}")
+                    report.status = "partial"
+                    continue
+                until = until_for(cand.code)
+                kept: list[TdxBar] = []
+                for bar in parsed.bars:
+                    report.parsed_rows += 1
+                    if start is not None and bar.trade_date < start:
+                        report.before_from += 1
+                    elif until is None or bar.trade_date > until:
+                        report.after_until += 1
+                    else:
+                        kept.append(bar)
+                existing = existing_for(cand.code, kept) if kept else {}
+                for bar in kept:
+                    row = existing.get(bar_key(bar))
+                    if row is None:
+                        pending.append(bar)
+                        continue
+                    report.overlap_rows += 1
+                    items = reconcile(bar, row, compare_amount=compare_amount)
+                    if items:
+                        report.conflicts += 1
+                        mismatch_items += len(items)
+                        for item in items:
+                            reconcile_file.write(
+                                json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n"
+                            )
+                # T-A147 M1：逐文件落盘对账差异、逐文件写入，不跨文件攒行。
+                reconcile_file.flush()
+                report.would_insert += len(pending)
+                if writer is not None and pending:
+                    report.inserted += writer(pending)
+
+            summary = {
+                "summary": True,
+                "overlap_keys": report.overlap_rows,
+                "mismatch_keys": report.conflicts,
+                "mismatch_items": mismatch_items,
+                "mismatch_rate": (report.conflicts / report.overlap_rows)
+                if report.overlap_rows
+                else 0.0,
+                "amount_compared": compare_amount,
+            }
+            reconcile_file.write(json.dumps(summary, ensure_ascii=False, sort_keys=True) + "\n")
+        os.replace(reconcile_tmp, reconcile_path)
+    except BaseException:
+        # 裁定③：中途出错删掉本次创建的对账 .part（open("x") 失败不进这里），
+        # 记一条日志后原样抛出。
+        with contextlib.suppress(OSError):
+            reconcile_tmp.unlink(missing_ok=True)
+        logger.warning(
+            "tdx 导入中途出错，已清理对账临时文件 %s（run_id=%s）", reconcile_tmp.name, run_id
+        )
+        raise
     return report

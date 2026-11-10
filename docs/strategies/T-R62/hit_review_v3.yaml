@@ -1,6 +1,6 @@
 # T-R62 命中逐条人工复核（v3 重跑：2026-11-02 + 2026-11-06）
 # 判定标准：docs/strategies/T-R60/sampling_plan.md §3（预注册，事后不改）
-# policy_hit / categories / flags 由冻结匹配器 match_f23_v3.py 给出（T-A153 时 sha d3e930a8…；T-R63/T-R63b 返修后同结果，前后对照 29→29 零变化）。
+# policy_hit / categories / flags 由冻结匹配器 match_f23_v3.py 给出（T-A153 时 sha d3e930a8…；T-R63/T-R63b/T-R63c 返修后同结果，前后对照 29→29 零变化）。
 version: f23_lexicon_v3
 reviewed_at: '2026-11-11 北京时间'
 hits: 29

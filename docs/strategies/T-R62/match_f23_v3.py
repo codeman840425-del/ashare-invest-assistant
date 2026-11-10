@@ -1,6 +1,7 @@
 # F23 词表 v3 参考匹配器（T-R62；T-A152 定向修订，研究侧，确定性；无网络、无麦蕊）。由 match_f23_v2.py 复制，增加 policy_rules（询价转让一律命中且优先于整条排除；控制人/一致行动协议到期或解除 + 权益变动保守命中）。
 # T-R63 返修（RV-20 两个 P1）：① exclude_all_of 作用域收敛到「他方主体」子句（不跨子句吞整类、自身事项不排除）；② 渠道型否定（不通过/未通过/不会通过）只否掉被否渠道，另有真实渠道即命中。词表本体未改。
 # T-R63b 第二轮（RV-20b）：① 排除只抹「他方事件」跨度、不删整个子句（自身风险词保留），自身称谓补「发行人/本公司及关联主体/及其子公司」复合形态，中间态一律不排除；② 渠道否定改为「从否定短语起整段标否定」（嵌套渠道词幂等、回看到子句边界不按字数）。
+# T-R63c 第三轮（RV-20c）：① 抹除改为「屏蔽标记」（等长替换、保留原始位置边界，否定窗口/关键词匹配都在原始坐标上做，不因拼接改变间距）；② 渠道肯定/否定绑定「最近的减持事件」（作用域=该减持动词的修饰段，不跨增持等其他事件）。
 # 原注释：由 T-R22/match_f23.py（v1）复制，只改词表文件名并增加 controller_equity 类型与 flags。
 # match(title) -> (hit: bool, categories: list)；match_detail(title) -> (hit, categories, flags)
 import re, unicodedata, pathlib, yaml
@@ -22,6 +23,8 @@ CHANNELS = ("集中竞价交易", "集中竞价", "二级市场", "大宗交易"
 CHANNELS_LONGEST = tuple(sorted(CHANNELS, key=len, reverse=True))
 CHANNEL_NEGS = ("不会通过", "不通过", "未通过", "不曾通过")
 CHANNEL_SEPS = "、，,和及与或"
+MASK_CHAR = "\ue000"   # T-R63c：等长屏蔽标记（私有区字符，标题不会出现）；不改原文坐标
+EVENT_WORDS = ("减持", "增持", "减少", "增加", "下降", "上升", "提高", "受让", "认购", "变卖")
 def _negated_channel_spans(clause):
     """T-R63b P2：从每个渠道否定短语起，向右整段标记「分隔符+渠道词」的运行段为否定。
     嵌套渠道词（「集中竞价交易」里的「竞价交易」）随整段一并标否；回看到否定短语起点，不按字数截断。"""
@@ -49,10 +52,10 @@ def _has_affirmative_channel(clause):
             i = clause.find(ch, i + 1)
     return False
 def _mask_other_party(clause, groups):
-    """T-R63b P1a：排除只抹掉「他方事件」跨度（动作词→事件词），不删整个子句——
-    同子句里自身的风险词（如“债务逾期”）仍参与匹配（保守保留中间态）。
-    组 = [动作词, 风险事件词]；只有主体判定为他方才抹：含自身称谓 → 不抹；
-    含他方标记或公司名 → 抹；对象不明 → 不抹（宁误报不漏报，veto 场景有 FP 如实报告兜底）。"""
+    """T-R63c P1：排除用「屏蔽标记」等长替换「他方事件」跨度（动作词→事件词），**不删字符、不拼接**——
+    关键词匹配与否定窗口都在原始坐标上进行（避免抹除后间距缩短、把「已解决」漂移进否定窗口）。
+    组 = [动作词, 风险事件词]；只有主体判定为他方才屏蔽：含自身称谓 → 不屏蔽；
+    含他方标记或公司名 → 屏蔽；对象不明 → 不屏蔽（宁误报不漏报，veto 场景有 FP 如实报告兜底）。"""
     spans = []
     for action, event in groups:
         i = clause.find(action)
@@ -71,14 +74,14 @@ def _mask_other_party(clause, groups):
             merged[-1] = (merged[-1][0], max(merged[-1][1], b))
         else:
             merged.append((a, b))
-    out, last = [], 0
+    chars = list(clause)
     for a, b in merged:
-        out.append(clause[last:a]); last = b
-    out.append(clause[last:])
-    return "".join(out)
-def _occ_hit(clause, kw, negs, after=(), resets=(), window=10):
+        for k in range(a, b): chars[k] = MASK_CHAR
+    return "".join(chars)
+def _occ_hit(clause, kw, negs, after=(), resets=(), window=10, scope_words=()):
     """关键词在子句内的每次出现：前文（含关键词本身，允许“不减持”“无保留意见”重叠）有否定词且其后没有重置词，或后文有后置否定词 → 该次出现被否定；任一次未被否定 → 命中。
-    T-R63b P2：否定词是渠道型（以「通过」结尾）时，只要同子句另有无否定的渠道词，就不否定本次出现。"""
+    T-R63c P2：渠道型否定（以「通过」结尾）绑定「最近的减持事件」——否定短语与关键词之间有其他事件词
+    （如增持）时，否定属于更早事件、不适用于本次；否则只在本次事件的修饰段（上一事件词之后）内找肯定渠道。"""
     i = clause.find(kw)
     while i >= 0:
         pre, post = clause[:i + len(kw)], clause[i + len(kw):]
@@ -89,8 +92,16 @@ def _occ_hit(clause, kw, negs, after=(), resets=(), window=10):
             if p > neg_pos: neg_pos, neg_tok = p, n
         reset_pos = max((pre.rfind(r) for r in resets if r in pre[:i]), default=-1)
         negated = (neg_pos >= 0 and neg_pos > reset_pos) or any(0 <= post.find(x) <= window for x in after)
-        if negated and neg_tok and neg_tok.endswith("通过") and _has_affirmative_channel(clause):
-            negated = False
+        if negated and neg_tok and neg_tok.endswith("通过"):
+            if any(clause.find(w, neg_pos + len(neg_tok), i) >= 0 for w in scope_words):
+                negated = False   # 否定绑定更早的事件（如「不通过集中竞价增持而减持」）
+            else:
+                scope_start = 0
+                for w in scope_words:
+                    p = clause.rfind(w, 0, i)
+                    if p >= 0: scope_start = max(scope_start, p + len(w))
+                if _has_affirmative_channel(clause[scope_start:i]):
+                    negated = False
         if not negated: return True
         i = clause.find(kw, i + 1)
     return False
@@ -102,7 +113,7 @@ def _controller_equity(t, clauses, c, resets, w):
     if not subj:
         return False, ("subject_unknown" if "询价转让" in t else None)
     negs = c.get("negations_before", [])
-    if any(_occ_hit(cl, k, negs, (), resets, w) for cl in clauses for k in c["down_words"]):
+    if any(_occ_hit(cl, k, negs, (), resets, w, EVENT_WORDS) for cl in clauses for k in c["down_words"]):
         return True, "direction_down"
     if any(k in t for k in c["up_words"]): return False, "direction_up"
     if any(k in t for k in c["change_terms"]):
@@ -139,7 +150,7 @@ def match_detail(title):
             ok, fl = _controller_equity(t, cat_clauses, c, rs, w)
             if fl: flags[name] = fl
         elif "require_all" in c:
-            ok = any(r in t for r in c["require_any"]) and all(any(_occ_hit(cl, k, negs, aft, rs, w) for cl in cat_clauses) for k in c["require_all"])
+            ok = any(r in t for r in c["require_any"]) and all(any(_occ_hit(cl, k, negs, aft, rs, w, EVENT_WORDS) for cl in cat_clauses) for k in c["require_all"])
         else:
             ok = any(_occ_hit(cl, k, negs, aft, rs, w) for cl in cat_clauses for k in c["keywords"])
         if ok: cats.append(name)

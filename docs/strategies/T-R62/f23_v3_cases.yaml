@@ -1,0 +1,94 @@
+# T-R62：F23 词表 v3 回归用例（定向核验两处修复 + 防止回退）
+# 判定：policy_hit = 直接命中；expect_flag 仅对 controller_equity 有意义。
+# 全部标题为 2026-11-06 / 2026-11-09 / 2026-11-10 巨潮公开公告标题（公开信息，非私有样本）。
+version: f23_lexicon_v3
+cases:
+  # —— FP-2 修复：承诺不减持类不得命中、不得标 direction_down ——
+  - id: V3-N1
+    title: 关于控股股东、上市前员工持股平台自愿承诺未来六个月不通过二级市场主动减持公司股份的公告
+    policy_hit: false
+    note: B 轮 FP-2 原题；否定短语覆盖后应不命中
+  - id: V3-N2
+    title: 关于控股股东自愿承诺不减持公司股份的公告
+    policy_hit: false
+    note: 既有“不减持”整串否定（v2.1 已正确，回归保护）
+  - id: V3-N3
+    title: 关于持股5%以上股东承诺不通过集中竞价方式减持股份的公告
+    policy_hit: false
+    note: 同族否定短语泛化样本（虚构，结构同 N1）
+  # —— FP-1 修复：他方重整/重整投资不得命中 ——
+  - id: V3-N4
+    title: 关于参与山东泰山啤酒股份有限公司破产重整投资的公告
+    policy_hit: false
+    note: B 轮 FP-1 原题；[参与, 破产重整] 排除
+  - id: V3-N5
+    title: 关于参与某公司重整投资的公告
+    policy_hit: false
+    note: 虚构；[参与, 重整投资] 排除
+  - id: V3-N6
+    title: 关于认购某公司重整投资份额的公告
+    policy_hit: false
+    note: 虚构；[认购, 重整投资] 排除
+  # —— 自身重整仍须命中（防止过度排除）——
+  - id: V3-P1
+    title: 关于与产业投资人签署《重整投资协议》暨预重整进展的公告
+    policy_hit: true
+    categories: [insolvency]
+    note: B 轮真命中；自身预重整，不能被 N5 规则误伤
+  - id: V3-P2
+    title: 关于被债权人申请重整的提示性公告
+    policy_hit: true
+    categories: [insolvency]
+  - id: V3-P3
+    title: 龙元建设关于公开招募预重整投资人的公告
+    policy_hit: true
+    categories: [insolvency]
+  - id: V3-P4
+    title: 亿晶光电科技股份有限公司关于公司破产重整具有重大不确定性暨退市风险的提示公告
+    policy_hit: true
+    categories: [insolvency]
+  # —— 其余命中保持（B 轮 16 条真命中抽样回归）——
+  - id: V3-P5
+    title: 关于公司股票进入退市整理期交易的第六次风险提示公告
+    policy_hit: true
+    categories: [delisting_risk]
+  - id: V3-P6
+    title: 关于控股股东及一致行动人部分股份被司法冻结、轮候冻结的公告
+    policy_hit: true
+    categories: [shareholder_pledge_freeze]
+  - id: V3-P7
+    title: 华域汽车关于公司股权收购相关事项监管工作函的回复公告
+    policy_hit: true
+    categories: [regulatory_action]
+    note: 回复类不豁免（T-A151 口径）
+  - id: V3-P8
+    title: 关于实际控制人发生变更暨股东权益变动的进展公告
+    policy_hit: true
+    categories: [controller_equity]
+    expect_flag: direction_unknown
+  - id: V3-P9
+    title: 关于控股股东减持股份的公告
+    policy_hit: true
+    categories: [controller_selldown]
+    note: 虚构；正向减持仍须命中（防止否定词过度覆盖）
+  - id: V3-P10
+    title: 关于收到中国证券监督管理委员会立案告知书的公告
+    policy_hit: true
+    categories: [investigation]
+  # —— 4 条边界观察与 300689 维持排除不动（T-A152 明确）——
+  - id: V3-N7
+    title: 公司关于公司涉及重大诉讼的进展公告
+    policy_hit: false
+    note: 边界观察①（600136），维持排除
+  - id: V3-N8
+    title: 关于累计诉讼、仲裁情况的公告
+    policy_hit: false
+    note: 边界观察②（603377），维持排除
+  - id: V3-N9
+    title: 日出东方控股股份有限公司股票交易异常波动公告
+    policy_hit: false
+    note: 边界观察③（603366），维持排除
+  - id: V3-N10
+    title: 容诚会计师事务所(特殊普通合伙)关于深圳市澄天伟业科技股份有限公司申请向特定对象发行股票的审核问询函的回复报告（修订稿）（豁免版）
+    policy_hit: false
+    note: 边界观察④（300689），审核问询函回复，维持排除

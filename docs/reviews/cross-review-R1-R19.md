@@ -1,7 +1,7 @@
 # 异源复核交接包：R1–R19、B1–B4（T-A95）
 
-> 状态：已入库（架构师 T-A95，2026-11-09 America/Denver），基线 main=0e2e66c（第 4 批：含 be/T-B116f=bda9694、契约 docs/T-A92=8c7780f、test/T-T58=81a4f83、T-B116g=9cccbd7）。T-A99（2026-11-09 America/Denver）按 **main=b6ba5f9**（第 5 批，含 72d1f3a）重核行号，并在 R19 登记 T-A98 三项。
-> 本文行号以 **b6ba5f9** 为准，已逐项复核。相对 0e2e66c，`docs/plan.md` 因 T-A96 在 :114 附近插入 4 行，其后行号均 +4（已改正文引用）；其余已引源码与契约文件未变。标「按 3369d3b」「按 8e847d5」的行号沿用原评审。
+> 状态：已入库（架构师 T-A95，2026-11-09 America/Denver），基线 main=0e2e66c（第 4 批：含 be/T-B116f=bda9694、契约 docs/T-A92=8c7780f、test/T-T58=81a4f83、T-B116g=9cccbd7）。T-A99（2026-11-09 America/Denver）按 **main=b6ba5f9**（第 5 批，含 72d1f3a）重核行号，并在 R19 登记 T-A98 三项。T-A101（2026-11-09 America/Denver）按 **main=b526339**（第 6 批，含 fa487ce、131a0c9、docs/T-A99=2c1942d）重核 R19 运维行号，登记 T-A103① / T-A104 残余，并更新 `docs/plan.md` :3858 状态。
+> 运维文件（`deploy/`、`scripts/ci/`）及 R19 已引的 `sources.py` / `jobs.py` 行号以 **b526339** 为准（已逐项复核）。其余已引源码与契约相对 b6ba5f9 未变。相对 0e2e66c，`docs/plan.md` 因 T-A96 在 :114 附近插入 4 行，其后行号均 +4（已改正文引用）。标「按 3369d3b」「按 8e847d5」的行号沿用原评审。
 > 读者：新团队的复核 Bot。本队口径是「架构师评审 + 测试先红后绿」为合入门槛，下列各项另需不同模型或团队独立复核。
 > 引用规则：只引用仓库内路径。团队内部、尚未入库的评审记录写作「团队评审记录 T-Axx（未入库）」，复核方无法直接查看，只当作背景。
 
@@ -344,8 +344,8 @@
   - C 扩展直调 libc 的 connect/getaddrinfo（不触发审计事件）；
   - 篡改钩子闭包（gc、`__closure__`）；
   - ingest 之外的进程（worker、api、用户电脑上的 probes）。
-  - 方案 B（compose 网络拆分）：运维 T-O68 已提交 ops/T-O68=896b6c0，T-O68b 修订为 ops/T-O68b=72d1f3a，**已随第 5 批合入 main=b6ba5f9**（团队评审记录 T-A96、T-A97，未入库）。后续 2cf67cf/d08b198（master-bootstrap、N4–N6 检查）尚未合入，待 T-O68c。要点：
-    - 设计：`default` 和 `aia_internal` 都设 `internal: true`；只有 ingest 加挂 `aia_egress`；nginx 加挂 `aia_edge`（关闭 IP masquerade，只发布 127.0.0.1）。CI 守卫为 `scripts/ci/check_compose_networks.py`，用例在 `scripts/ci/tests/test_compose_networks.py`，运维说明在 `deploy/runbooks/networks.md`（以上路径均在该分支上）。
+  - 方案 B（compose 网络拆分）：运维 T-O68 已提交 ops/T-O68=896b6c0，T-O68b 修订为 ops/T-O68b=72d1f3a，**已随第 5 批合入 main=b6ba5f9**（团队评审记录 T-A96、T-A97，未入库）。2cf67cf/d08b198（master-bootstrap、N4–N6 检查）经 T-O68c=aa32f65 cherry-pick，随 T-O68d=fa487ce **已随第 6 批合入 main=b526339**（团队评审记录 T-A100、T-A103①）。要点：
+    - 设计：`default` 和 `aia_internal` 都设 `internal: true`；只有 ingest 加挂 `aia_egress`；nginx 加挂 `aia_edge`（关闭 IP masquerade，只发布 127.0.0.1）。CI 守卫为 `scripts/ci/check_compose_networks.py`，用例在 `scripts/ci/tests/test_compose_networks.py`，运维说明在 `deploy/runbooks/networks.md`（以上路径均在 main=b526339 上）。
     - 与本节分工一致：方案 A（进程内 netguard）为主，B 为纵深、不阻塞后端。B 兜住了「ingest 以外的容器出网」和「新服务漏写 networks」两类。ingest 自身仍可全网出口，所以本节所列进程内对抗残余、ingest 的 DNS 外泄、同网横向移动，B 都兜不住，仍归 A 与本复核。
     - 阻塞项（守卫对正常写法漏拦）：覆盖层可以新声明一张非 internal 网络并把任意服务挂上去，守卫和 `docker compose config` 都放行。修法是覆盖层只许用四个登记网络名。
     - 登记项：
@@ -353,16 +353,24 @@
       - worker 主数据同步现为桩（`src/backend/app/workers/jobs.py:192-195`），解桩前须裁定由谁出网；
       - Docker Desktop 下 `enable_ip_masquerade=false` 未必能挡住 edge 出站（第三方报告），须在用户电脑上实测；
       - ~~`docs/plan.md` §T-A87 B 段和 T-O68 工作包写的是「预期 worker 也上 egress」~~：已按编排者 2026-11-09 裁定改写（`docs/plan.md` :3746、:3858、未决⑥ :3864）——worker、maint-cli 平时不出网，主数据同步解桩时优先放进 ingest，首导需联网用显式一次性 compose profile 接 `aia_egress`，SMTP/LLM 无功能不开，新增出网须经 R19 登记。
-    - T-O68b（72d1f3a）复评：上述阻塞项已修（覆盖层只许四个登记网络名，另加端口必须绑 127.0.0.1 的检查，`deploy/runbooks/networks.md` 补了 ingest 全出口与 Docker Desktop/WSL 实测项）。新登记（对抗性，不阻塞）：`scripts/ci/check_compose_networks.py:134-160`（`_check_overlay_networks`）只查 internal 与 IP masquerade，覆盖层改写登记网络的 name/external/driver 会漏过，`docker compose config` 也通过：
+    - T-O68b（72d1f3a）复评：上述阻塞项已修（覆盖层只许四个登记网络名，另加端口必须绑 127.0.0.1 的检查，`deploy/runbooks/networks.md` 补了 ingest 全出口与 Docker Desktop/WSL 实测项）。曾登记（对抗性，不阻塞）：覆盖层改写登记网络的 name/external/driver 会漏过（当时 `_check_overlay_networks` 只查 internal 与 IP masquerade，`docker compose config` 也通过）：
       - N4：`aia_edge` 设 `external: true, name: bridge`，nginx 与 dev 的 postgres/redis 进入有 masquerade 的默认桥，可出网；
       - N5：改 `aia_edge` 的 `driver`（如 macvlan）；
       - N6：把 edge 或 internal 的 `name` 改成 egress 的网络名。
-      - 建议运维加三行检查：覆盖层不得对已登记网络设置 `name`/`external`/`driver`。d08b198 已加此检查，**待 T-O68c 合入后重核本条**。
-      - `deploy/runbooks/networks.md` 第 6 步（Docker Desktop 是否无视 `enable_ip_masquerade=false`、WSL mirrored）缺可执行命令和判定标准，例如在 nginx 容器内对公网地址做 5 秒超时请求、失败才算通过；第 2 步的 `${NGINX_HTTP_PORT:-8080}` 为 bash 写法，Windows 上须在 WSL/Git Bash 下执行或改用 `curl.exe`。文档改进，不阻塞。
-    - T-A98 登记（评审 head=ops/T-O68b=d08b198；ops 文件行号按 d08b198，**待 T-O68c 合入后重核**）：
-      - master-bootstrap 一次性首导服务运行期间挂 `aia_egress`，是全网出口，无 runtime netguard，仅靠代码只访问三所固定 https 地址。`src/backend/app/master/sources.py:545-548`（b6ba5f9 与 d08b198 行号相同）跟随 https 跳转时可到任意主机（只校验 `https://` 前缀）。该服务无麦蕊凭据，不涉及 M-1。缓解：显式一次性 profile、不常驻。建议后续限制跳转到白名单主机。
-      - 守卫 `scripts/ci/check_compose_networks.py:47`（d08b198 的 `EGRESS_ALLOWLIST`；T-A98 所记 :45 为父提交 2cf67cf 行号）对 master-bootstrap 的例外只按服务名放行。去掉 profiles、`restart` 改 always、被 `depends_on`、加端口、覆盖层换 command 五种改法能通过。运维 T-O68c 以结构断言修复（待复评）。
-      - 端口写法 `[::1]` 被守卫拒绝，偏严（误拦方向，非安全风险），记为已知限制。
+      - 上述三行检查已由 d08b198 加入，经 T-O68c=aa32f65 cherry-pick，随 fa487ce **已合入 main=b526339**。现为 `scripts/ci/check_compose_networks.py:139-178`（`_check_overlay_networks`；N4–N6 拦截在 :157-162）。T-A100 验证 N4–N6 均报红。
+      - `deploy/runbooks/networks.md` 第 6 步（:176-188）与第 2 步现有可执行命令和判定标准（5 秒超时；edge 出网失败才算通过）；文首（:22）已说明 `${NGINX_HTTP_PORT:-8080}` 须在 WSL/Git Bash 下执行，或宿主用 `curl.exe`（第 5 步）。该文档缺口已随 T-O68c 合入修好（T-A100）。
+    - T-A98 登记（评审 head 原为 ops/T-O68b=d08b198；ops 文件行号已按 main=b526339 重核）：
+      - master-bootstrap 一次性首导服务运行期间挂 `aia_egress`，是全网出口，无 runtime netguard，仅靠代码只访问三所固定 https 地址。`src/backend/app/master/sources.py:545-548`（b526339 与 b6ba5f9 行号相同）跟随 https 跳转时可到任意主机（只校验 `https://` 前缀）。该服务无麦蕊凭据，不涉及 M-1。缓解：显式一次性 profile、不常驻。建议后续限制跳转到白名单主机。
+      - 守卫 `scripts/ci/check_compose_networks.py:49`（b526339 的 `EGRESS_ALLOWLIST`；d08b198 为 :47）对 master-bootstrap 的例外仍按服务名放行，但已由 T-O68c 结构断言缓解（`_check_master_bootstrap_shape` :232-261、`_check_not_depended_on` :264-272）：去掉 profiles、`restart` 改 always、被 `depends_on`、加端口、覆盖层换 command 五种改法，T-A100 验证均报红。残余：`depends_on: master-bootstrap` 字符串写法守卫不解析（`_depends_on_names` :221-229 只处理 mapping/list），但 `docker compose` 拒绝该写法，fail-closed。
+      - 端口写法 `[::1]` 被守卫拒绝（`_port_binds_localhost` :76-81 只认 `127.0.0.1`），偏严（误拦方向，非安全风险），记为已知限制。
+    - T-A103① 登记（来源 ops/T-O68d=fa487ce，已在 main=b526339）：
+      - 覆盖层改 worker 卷时 `scripts/ci/check_frontend_deploy.py` 看不见（只读基础 compose `deploy/compose/docker-compose.yml`，:67、:75、卷检查 :143-152）；新旧行为相同。
+      - `MASTER_SNAPSHOT_PATH` 环境检查（:151-152、:157-158）可被卷行子串喂绿（`if "MASTER_SNAPSHOT_PATH:" not in …`）；新旧相同。
+    - T-A104 登记（来源 ops/T-O69e=cbabaac，尚未合入，将变基；行号按 cbabaac，**待 T-O69e 合入后重核**）：
+      - 手工指定旧轮时间戳目录或同名符号链接作 `--backup-dir` 仍通过（刻意对抗）。`deploy/scripts/wrapup/lib.sh` 的 `wrapup_require_round_backup`（:181-198）只核 basename 形态与目录内 manifest+dump。
+      - `alembic_version` 表存在但无行时当作空库（`wrapup_alembic_version` :262-279，`wrapup_check_alembic_0029` :234-237）。
+      - `alembic_version` 查询无超时上限（`wrapup_pg_query` :216-221），挂起而非 fail-closed。
+      - 0029 定义比对靠片段匹配（`wrapup_assert_0029_defs` :287-307）。
     - 请复核方回答：B 是否还有正常部署会误走的出网路径？ingest 全出口这一事实是否已在运维文档中如实写明（建议 runbook 补一句）？
   - 已知行为（非缺陷）：Python 层 `connect(("localhost", …))` 会被按主机名拒绝；ingest 现无此写法。
 
@@ -412,7 +420,7 @@
 1. B1、B4：落地代码与用例**未定位**。B2 只定位到 RC5 侧；B3 的锁定用例**未定位**。
 2. R6：G1–G5 边界缺用例（见 R6 表）。
 3. R4：只做了列名匹配加人工判读，未在库内用 pg_catalog 全量核对。
-4. 行号已按 main=b6ba5f9 复核（T-A99，含 `netguard.py` 与 `docs/plan.md` +4 修正）；main 再变动时须重核。
+4. 行号：运维部分已按 main=b526339 复核（T-A101）；其余源码与契约行号仍与 T-A99 / b6ba5f9 一致。main 再变动时须重核。
 5. `docs/reviews/T-A76-tb110-review.md` 的勘误行已随本文同一提交加入（文字见 §1 编号冲突段）。
 
 ## 7. 复核方交付建议

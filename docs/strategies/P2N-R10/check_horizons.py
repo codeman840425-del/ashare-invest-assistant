@@ -108,7 +108,7 @@ def validate(data):
         cols=[c.strip() for c in l.split('|')[1:-1]]
         if len(cols)==7:actual[(path,cols[1],None)]=('catalog_research_not_formal_card',translation[cols[3]])
     rows=data['records'];require(len({r['record_id'] for r in rows})==len(rows))
-    require(len(rows)==len(actual)==44)  # T-R49: +hold_risk_monitor v2 frozen
+    require(len(rows)==len(actual)==45)  # T-R49: +hold_risk_monitor v2 frozen; T-R55: +st_pullback_ma v1 frozen
     for r in rows:
         key=(r['path'],r['key'],r['version_no']);require(key in actual)
         scope,hs=actual[key];require((r['scope'],r['horizons'])==(scope,hs))

@@ -217,7 +217,7 @@ def apply_batch(conn: Connection, bid: uuid.UUID, *, now: dt.datetime, cfg: Any,
     if parent.finished_at is not None:
         return int(parent.stats["applied_run_id"])
     if batch.status == "requested":
-        return parent.id
+        return int(parent.id)
     day = dt.date.fromisoformat(parent.stats["trade_date"])
     delivery = None
     if batch.status == "fetched":

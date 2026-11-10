@@ -257,6 +257,15 @@ def _existing(row: Row[Any]) -> ExistingBar:
     )
 
 
+def _scope(raw: str) -> tuple[str, frozenset[str]]:
+    parts = raw.split(",")
+    if parts[0] not in ("owned", "market") or parts[1:] not in ([], ["exclude-bj"]):
+        raise argparse.ArgumentTypeError(
+            "expected owned or market, optionally followed by ,exclude-bj"
+        )
+    return parts[0], frozenset({"bj"}) if parts[1:] else frozenset()
+
+
 def _parser(prog: str, *, intraday: bool) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog, description="Read-only TDX import; dry-run by default."
@@ -265,7 +274,7 @@ def _parser(prog: str, *, intraday: bool) -> argparse.ArgumentParser:
     parser.add_argument("--audit-dir", dest="audit_dir", required=True, type=Path)
     parser.add_argument("--until", required=not intraday, default=None)
     parser.add_argument("--from", dest="start", default=None)
-    parser.add_argument("--scope", choices=("owned", "market"), default="owned")
+    parser.add_argument("--scope", type=_scope, default="owned")
     if intraday:
         parser.add_argument("--kind", choices=("lc1", "lc5"), required=True)
     parser.add_argument("--apply", action="store_true", help="write rows; default is dry-run")
@@ -329,7 +338,10 @@ def _execute(
     try:
         start = _iso(args.start, "from")
         until = _iso(args.until, "until")
-        if args.scope == "market":
+        scope_name, exclude = args.scope
+        if exclude and not intraday:
+            raise TdxRefused("scope_exclude_bj_intraday_only")
+        if scope_name == "market":
             # 源契约 §9.6 的 RESEARCH_MARKET_SCOPE_ENABLED 在本基线未实现：保守拒绝。
             raise TdxRefused("market_scope_disabled")
         if until is not None:
@@ -377,6 +389,7 @@ def _execute(
             normalize=deps.normalize,
             security_of=deps.security_of,
             scope_codes=scope,
+            exclude=exclude,
             existing_for=lambda code, bars: deps.existing(kind, code, bars),
             writer=writer if args.apply else None,
             now=now,
@@ -385,7 +398,10 @@ def _execute(
             compare_amount=kind == "day",
         )
     except TdxRefused as exc:
-        print(f"refused: {exc.reason}")
+        # T-B133 11:07 裁定②：分钟线缺 bj 目录时提示可显式排除 bj（排除后清单记缺口）。
+        bj_missing = intraday and exc.reason.startswith("root_missing:bj/")
+        hint = "; hint: --scope owned,exclude-bj" if bj_missing else ""
+        print(f"refused: {exc.reason}{hint}")
         return _REFUSED
     if args.apply:
         deps.record_run(report, today)

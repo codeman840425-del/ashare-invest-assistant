@@ -17,7 +17,7 @@ import os
 import re
 import struct
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -237,11 +237,13 @@ def _child_ci(parent: Path, name: str) -> Path | None:
     return None
 
 
-def kind_dirs(root: Path, kind: Kind) -> dict[str, Path]:
-    """--root 下须有 sh/sz/bj 的 <kind 目录>，缺任一即拒绝（daily-bars-tdx §3.3）。"""
+def kind_dirs(root: Path, kind: Kind, exclude: Set[str] = frozenset()) -> dict[str, Path]:
+    """--root 下未排除市场须有 <kind 目录>，缺任一即拒绝（daily-bars-tdx §3.3）。"""
     found: dict[str, Path] = {}
     sub = KIND_DIR[kind]
     for market in MARKETS:
+        if market in exclude:
+            continue
         mdir = _child_ci(root, market)
         kdir = _child_ci(mdir, sub) if mdir is not None else None
         if kdir is None:
@@ -260,11 +262,12 @@ def scan(
     normalize: Callable[[str], str],
     security_of: SecurityOf,
     scope_codes: frozenset[str] | None,
+    exclude: Set[str] = frozenset(),
 ) -> ScanResult:
     """只列目录、看文件名，被过滤的文件不打开、不算哈希。"""
     result = ScanResult()
     suffix = KIND_SUFFIX[kind]
-    for market, kdir in kind_dirs(root, kind).items():
+    for market, kdir in kind_dirs(root, kind, exclude=exclude).items():
         for entry in sorted(kdir.iterdir(), key=lambda p: p.name):
             if not entry.is_file() or not entry.name.lower().endswith(suffix):
                 result.skipped[SKIP_NOT_TARGET] += 1
@@ -305,10 +308,11 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def build_manifest(files: Iterable[Candidate]) -> Manifest:
+def build_manifest(files: Iterable[Candidate], gaps: Iterable[str] = ()) -> Manifest:
     """每行「sha256、字节数、相对路径」（制表符分隔），末行为文件数与清单自身 sha256。"""
     entries = tuple(ManifestEntry(file_sha256(c.path), c.path.stat().st_size, c.rel) for c in files)
     body = "".join(f"{e.sha256}\t{e.size}\t{e.rel}\n" for e in entries)
+    body += "".join(f"gap\t{rel}\texcluded_by_scope\n" for rel in gaps)
     own = hashlib.sha256(body.encode("utf-8")).hexdigest()
     text = body + f"files={len(entries)}\tmanifest_sha256={own}\n"
     return Manifest(entries=entries, text=text, sha256=own)
@@ -328,6 +332,8 @@ def parse_manifest(text: str) -> Manifest | None:
         parts = line.rstrip("\n").split("\t")
         if len(parts) != 3:
             return None
+        if parts[0] == "gap":
+            continue
         entries.append(ManifestEntry(parts[0], int(parts[1]), parts[2]))
     if tail[0] != f"files={len(entries)}":
         return None
@@ -515,6 +521,7 @@ def run_import(
     now: dt.datetime,
     run_id: str,
     compare_amount: bool,
+    exclude: Set[str] = frozenset(),
 ) -> RunReport:
     """daily-bars-tdx §3.3 第 1–5 步；writer 为 None 即 dry-run（零写入）。
 
@@ -525,13 +532,20 @@ def run_import(
     audit = check_audit_dir(root, audit_dir)
     report = RunReport(kind=kind, run_id=run_id, apply=writer is not None)
     scanned = scan(
-        root, kind, normalize=normalize, security_of=security_of, scope_codes=scope_codes
+        root,
+        kind,
+        normalize=normalize,
+        security_of=security_of,
+        scope_codes=scope_codes,
+        exclude=exclude,
     )
     report.skipped.update(scanned.skipped)
     report.files = len(scanned.files)
 
     previous = latest_manifest(audit, kind)
-    manifest = build_manifest(scanned.files)
+    gaps = [f"{market}/{KIND_DIR[kind]}" for market in MARKETS if market in exclude]
+    report.issues.extend(f"tdx_scope_excluded:{rel}" for rel in gaps)
+    manifest = build_manifest(scanned.files, gaps=gaps)
     stamp = now.astimezone(BEIJING).strftime("%Y%m%dT%H%M%S")
     report.manifest_name = f"tdx-{kind}-manifest-{stamp}-{run_id}.txt"
     report.manifest_sha256 = manifest.sha256

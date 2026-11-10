@@ -710,6 +710,65 @@ def test_lc_import_a_share_only_and_manifest(tmp_path: Path) -> None:
     assert out["rerun"] == str({"added": 1, "removed": 0, "changed": 0})
 
 
+HINT_EXCLUDE_BJ = "refused: root_missing:bj/minline; hint: --scope owned,exclude-bj"
+GAP_LINE = "gap\tbj/minline\texcluded_by_scope\n"
+
+
+def _lc_root_without_bj(tmp: Path) -> Path:
+    root = make_root(tmp, "lc1")
+    (root / "bj" / "minline").rmdir()
+    rec = lc_rec(dt.date(2026, 4, 24), 571, 12.34, 12.5, 12.25, 12.4, 12.4 * 1000, 1000)
+    write(root, "sh/minline/sh600000.lc1", rec)
+    return root
+
+
+def test_lc_root_missing_bj_minline_refused_with_scope_hint(tmp_path: Path) -> None:
+    """11:07 裁定②：缺 bj/minline 默认拒绝，提示可用 --scope 显式排除 bj；零写入、无审计文件。"""
+    root = _lc_root_without_bj(tmp_path)
+    audit = _audit(tmp_path)
+    deps = FakeDeps()
+    code, _ = run_intraday(deps, root, audit, "lc1", "--apply")
+    assert code != 0 and _LAST_OUT[-1] == HINT_EXCLUDE_BJ
+    assert deps.written == [] and deps.runs == [] and list(audit.iterdir()) == []
+
+
+def test_lc_scope_exclude_bj_records_manifest_gap(tmp_path: Path) -> None:
+    """11:07 裁定②：--scope owned,exclude-bj 时跳过 bj，清单里记一条缺口，清单仍可自校验。"""
+    root = _lc_root_without_bj(tmp_path)
+    audit = _audit(tmp_path)
+    deps = FakeDeps()
+    code, out = run_intraday(deps, root, audit, "lc1", "--scope", "owned,exclude-bj", "--apply")
+    assert code == 0 and out["files"] == "1" and len(deps.written) == 1
+    assert "tdx_scope_excluded:bj/minline" in out["issues"]
+    text = (audit / out["manifest"]).read_text(encoding="utf-8")
+    assert text.count(GAP_LINE) == 1
+    parsed = tdx_local.parse_manifest(text)
+    assert parsed is not None and len(parsed.entries) == 1
+    assert deps.runs and "tdx_scope_excluded:bj/minline" in deps.runs[0]["issues"]  # type: ignore[operator]
+
+
+def test_lc_scope_exclude_bj_skips_existing_bj_dir(tmp_path: Path) -> None:
+    root = make_root(tmp_path, "lc1")
+    rec = lc_rec(dt.date(2026, 4, 24), 571, 12.34, 12.5, 12.25, 12.4, 12.4 * 1000, 1000)
+    write(root, "sh/minline/sh600000.lc1", rec)
+    write(root, "bj/minline/bj920000.lc1", rec)
+    audit = _audit(tmp_path)
+    code, out = run_intraday(FakeDeps(), root, audit, "lc1", "--scope", "owned,exclude-bj")
+    assert code == 0 and out["files"] == "1" and "dry-run" in out
+    text = (audit / out["manifest"]).read_text(encoding="utf-8")
+    assert "bj/minline/bj920000.lc1" not in text and text.count(GAP_LINE) == 1
+
+
+def test_daily_scope_exclude_bj_refused(tmp_path: Path) -> None:
+    """日线契约 §3.3 缺任一 lday 即拒绝；排除 bj 只适用于分钟线。"""
+    root = make_root(tmp_path)
+    audit = _audit(tmp_path)
+    deps = FakeDeps()
+    code, _ = run_daily(deps, root, audit, "--scope", "owned,exclude-bj")
+    assert code != 0 and _LAST_OUT[-1] == "refused: scope_exclude_bj_intraday_only"
+    assert deps.written == [] and list(audit.iterdir()) == []
+
+
 def test_lc_import_until_before_first_mairui_minute(tmp_path: Path) -> None:
     root = make_root(tmp_path, "lc1")
     days = open_days(dt.date(2026, 11, 2), dt.date(2026, 11, 10))
@@ -977,7 +1036,16 @@ def _lc_view(samples: Path, tmp: Path) -> Path:
 def test_real_lc_root_without_bj_minline_refused(tmp_path: Path) -> None:
     root = _samples()
     code, _ = run_intraday(FakeDeps(securities=REAL_SECURITIES), root, _audit(tmp_path), "lc1")
-    assert code != 0 and _LAST_OUT[-1] == "refused: root_missing:bj/minline"
+    assert code != 0 and _LAST_OUT[-1] == HINT_EXCLUDE_BJ
+
+
+def test_real_lc_scope_exclude_bj_on_sample_root(tmp_path: Path) -> None:
+    root = _samples()
+    deps = FakeDeps(securities=REAL_SECURITIES, owned=frozenset(REAL_SECURITIES))
+    audit = _audit(tmp_path)
+    code, out = run_intraday(deps, root, audit, "lc1", "--scope", "owned,exclude-bj")
+    assert code == 0 and out["files"] == "2" and deps.written == []
+    assert (audit / out["manifest"]).read_text(encoding="utf-8").count(GAP_LINE) == 1
 
 
 def test_real_lc_dry_run_counts_and_index_filter(tmp_path: Path) -> None:

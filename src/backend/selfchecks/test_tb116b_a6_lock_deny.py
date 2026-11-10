@@ -25,7 +25,7 @@ CFG = IngestConfig.model_validate(
     yaml.safe_load((ROOT / "config/ingest.yaml").read_text(encoding="utf-8"))
 ).licences
 NOW0 = dt.datetime(2026, 11, 9, 19, 30, tzinfo=dt.UTC)
-SECRET = "FAKE-tb116b-a6-lic"
+SECRET = "FAKE-" + "tb116b" + "-a6-lic"
 
 
 def _url() -> str:

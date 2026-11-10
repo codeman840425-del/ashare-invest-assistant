@@ -154,3 +154,29 @@ def test_new_service_without_networks_rejected(repo: Path) -> None:
     )
     errs = ccn.check(repo)
     assert any("newsvc" in e and "必须挂 aia_internal" in e for e in errs), errs
+
+
+def test_overlay_cannot_declare_unregistered_network_on_worker(repo: Path) -> None:
+    """T-A96 M12：覆盖层新声明非 internal 网（如 pub）并挂到 worker，必须报错。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "networks:\n"
+        "  pub: {}\n"
+        "services:\n"
+        "  worker:\n"
+        "    networks:\n"
+        "      pub:\n",
+        encoding="utf-8",
+    )
+    errs = ccn.check(repo)
+    assert any("未登记" in e and "pub" in e for e in errs), errs
+
+
+def test_nginx_ports_must_bind_localhost(repo: Path) -> None:
+    _sub(
+        repo,
+        BASE,
+        '"127.0.0.1:${NGINX_HTTP_PORT:-8080}:80"',
+        '"${NGINX_HTTP_PORT:-8080}:80"',
+    )
+    errs = ccn.check(repo)
+    assert any("nginx" in e and "127.0.0.1" in e for e in errs), errs

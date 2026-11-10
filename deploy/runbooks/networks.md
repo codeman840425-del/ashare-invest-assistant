@@ -26,6 +26,10 @@ CI：`scripts/ci/check_compose_networks.py`（`secret-boundary` job）。
    - 宿主 `curl -sS --noproxy '*' http://127.0.0.1:${NGINX_HTTP_PORT:-8080}/health/live`（或项目约定的健康路径）应可达。
    - dev 叠加时宿主应能连 `127.0.0.1:${POSTGRES_HOST_PORT:-55432}` 与 redis 调试端口。
 3. 确认 `aia_edge` 的 `com.docker.network.bridge.enable_ip_masquerade=false` 在本机 Docker 版本上确实挡住出站；若无效，记为残余风险并考虑 iptables / 独立防火墙。
-4. DNS：nginx 已设 `dns: 127.0.0.1`（T-O13）。ingest 走 egress，DNS 查询可能出网，网络层兜不住（见报告残余风险）。
+4. DNS：nginx 已设 `dns: 127.0.0.1`（T-O13）。ingest 走 egress，DNS 查询可能出网，网络层兜不住。
+5. **ingest 自身仍是全网出口**：网络层只限制「哪只容器能出网」，不限制 ingest 出到哪些地址。ingest 被利用后仍可任意外发，靠应用层 netguard（契约 §7.11.5），网络层兜不住。
+6. 在用户电脑（Docker Desktop / WSL）上额外实测下列两项，记入收口记录：
+   - Docker Desktop 是否无视 `enable_ip_masquerade=false`（有第三方报告称 vpnkit 仍会做 NAT，若如此则 nginx 与 dev 的 postgres/redis 所在的 `aia_edge` 仍可能出网，需改用宿主防火墙）。
+   - WSL mirrored 模式下列表第 2–3 步是否仍成立（端口发布与出站隔离）。
 
 不要把服务改成 `network_mode: host`，否则本拆分全部失效。

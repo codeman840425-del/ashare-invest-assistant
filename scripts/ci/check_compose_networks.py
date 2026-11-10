@@ -15,6 +15,9 @@
 或已在出网白名单里的 aia_egress），因为只挂 internal 时宿主通常连不上发布端口。
 
 覆盖文件不得削弱顶层网络属性，也不得把未登记服务挂到 aia_egress / aia_edge。
+覆盖层顶层 networks 与各服务 networks 都只许使用与基础层相同的四个登记名
+（default / aia_internal / aia_egress / aia_edge），禁止另开可出网桥给 worker 等服务。
+发布了 ports 的服务必须绑定 127.0.0.1，不得 0.0.0.0 或省略宿主地址。
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ NET_INTERNAL = "aia_internal"
 NET_EGRESS = "aia_egress"
 NET_EDGE = "aia_edge"
 NET_DEFAULT = "default"
+REGISTERED_NETWORKS: frozenset[str] = frozenset({NET_DEFAULT, NET_INTERNAL, NET_EGRESS, NET_EDGE})
 MASQ_OPT = "com.docker.network.bridge.enable_ip_masquerade"
 
 # 本轮只让 ingest 出网。扩表白名单须经编排者裁定后再改这里。
@@ -62,6 +66,22 @@ def _has_ports(svc: object) -> bool:
         return False
     p = svc.get("ports")
     return bool(p)
+
+
+def _port_binds_localhost(entry: object) -> bool:
+    """短语法必须以 127.0.0.1: 开头；长语法必须 host_ip: 127.0.0.1。"""
+    if isinstance(entry, dict):
+        return str(entry.get("host_ip") or "") == "127.0.0.1"
+    s = str(entry).strip().strip('"').strip("'")
+    return s.startswith("127.0.0.1:")
+
+
+def _check_ports_localhost(where: str, svc: object, errs: list[str]) -> None:
+    if not isinstance(svc, dict):
+        return
+    for i, entry in enumerate(svc.get("ports") or []):
+        if not _port_binds_localhost(entry):
+            errs.append(f"{where}: ports[{i}] 必须绑定 127.0.0.1（不得 0.0.0.0 或省略宿主地址）")
 
 
 def _expect_named(where: str, net: dict[str, Any], suffix: str, errs: list[str]) -> None:
@@ -112,7 +132,13 @@ def _check_base_networks(rel: str, nets: dict[str, Any], errs: list[str]) -> Non
 
 
 def _check_overlay_networks(rel: str, nets: dict[str, Any], errs: list[str]) -> None:
-    """覆盖层若重定义网络，不得削弱基础约束。"""
+    """覆盖层若重定义网络，不得削弱基础约束；不得新声明未登记的网络。"""
+    extra = set(nets) - REGISTERED_NETWORKS
+    if extra:
+        errs.append(
+            f"{rel}: 顶层 networks 有未登记的网络 {sorted(extra)}"
+            f"（只许 {sorted(REGISTERED_NETWORKS)}）"
+        )
     for key in (NET_DEFAULT, NET_INTERNAL):
         net = nets.get(key)
         if net is None:
@@ -140,6 +166,12 @@ def _check_service(
     require_internal: bool,
     errs: list[str],
 ) -> None:
+    unknown = nets - REGISTERED_NETWORKS
+    if unknown:
+        errs.append(
+            f"{where}: 不得接入未登记网络 {sorted(unknown)}"
+            f"（只许 {sorted(REGISTERED_NETWORKS)}）"
+        )
     if require_internal and NET_INTERNAL not in nets:
         errs.append(f"{where}: 必须挂 {NET_INTERNAL}（用映射式 networks，以便与覆盖层合并）")
     if NET_EGRESS in nets and name not in EGRESS_ALLOWLIST:
@@ -204,6 +236,8 @@ def check(repo: Path) -> list[str]:
                 errs.append(f"{where}: networks 必须是映射（不能用列表，覆盖层列表会整段替换、冲掉 {NET_INTERNAL}）")
                 continue
             ports = _has_ports(svc)
+            if ports:
+                _check_ports_localhost(where, svc, errs)
             # 基础文件要求每个服务都挂内部网；覆盖层可以只写增量
             _check_service(
                 where,

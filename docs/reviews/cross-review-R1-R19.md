@@ -1,7 +1,7 @@
 # 异源复核交接包：R1–R19、B1–B4（T-A95）
 
-> 状态：已入库（架构师 T-A95，2026-11-09 America/Denver），基线 main=0e2e66c（第 4 批：含 be/T-B116f=bda9694、契约 docs/T-A92=8c7780f、test/T-T58=81a4f83、T-B116g=9cccbd7）。
-> 本文行号以 **0e2e66c** 为准，已逐项复核。相对 8b9f9f8，`netguard.py` 只删了文件末尾两行空行，另外只改了 `.gitleaksignore` 和一个自检文件，所引行号都没变。标「按 3369d3b」「按 8e847d5」的行号沿用原评审。
+> 状态：已入库（架构师 T-A95，2026-11-09 America/Denver），基线 main=0e2e66c（第 4 批：含 be/T-B116f=bda9694、契约 docs/T-A92=8c7780f、test/T-T58=81a4f83、T-B116g=9cccbd7）。T-A99（2026-11-09 America/Denver）按 **main=b6ba5f9**（第 5 批，含 72d1f3a）重核行号，并在 R19 登记 T-A98 三项。
+> 本文行号以 **b6ba5f9** 为准，已逐项复核。相对 0e2e66c，`docs/plan.md` 因 T-A96 在 :114 附近插入 4 行，其后行号均 +4（已改正文引用）；其余已引源码与契约文件未变。标「按 3369d3b」「按 8e847d5」的行号沿用原评审。
 > 读者：新团队的复核 Bot。本队口径是「架构师评审 + 测试先红后绿」为合入门槛，下列各项另需不同模型或团队独立复核。
 > 引用规则：只引用仓库内路径。团队内部、尚未入库的评审记录写作「团队评审记录 T-Axx（未入库）」，复核方无法直接查看，只当作背景。
 
@@ -177,7 +177,7 @@
 - ① 问题：写失败按已升级处理，单次命中也会落 1h 标记；补写失败的处理；启动时库挂了会把所有用户停 1h。
 - ② 位置：`core.py:103-125`（`_try_flush_pending`：提交成功后才清 pending）、`core.py:127-190`；`ip_limit.py:164`。
 - ③ 请回答：
-  - 1h 暂停在库抖动场景下是否代价过大，是否应改为短暂停？对应 `docs/plan.md` §T-A87「未决」①（:3860）。
+  - 1h 暂停在库抖动场景下是否代价过大，是否应改为短暂停？对应 `docs/plan.md` §T-A87「未决」①（:3864）。
   - 补写语义是否完备？
 - ④ 我方结论（最新）：L-6、L-8 已修，即提交成功后才清 pending、tick 补写、用原始 at、幂等。tick 等锁限 2s；库挂起由 L-1 的 ingest profile 超时兜底（`src/backend/app/db/engine.py:28-45`）。M-b 起准入路径的 flush 在 SAVEPOINT 内（A29、A31）。用例 `test_ta91_a28_a32_t_t55.py` 的 A31 两例，含「flush 成功但外层提交失败 → pending 保留」。
 - ⑤ 残余：重启前未补写则丢失（仅在内存中）；启动时库挂了全员停 1h。
@@ -214,12 +214,12 @@
 
 ## 4. R12–R19（风控重点：ingest 麦蕊统一出口 M-1/M-2/M-a/M-b/M-c 与两层守卫）
 
-共同契约：`docs/api-contract.md` §7.11.5（:1352-1412）。共同方案：`docs/plan.md` §T-A87（:3732-3861）。其中：
-- fail-closed 矩阵 :3767
-- 锁关系 :3789
-- 验收 34 条 :3795、:3818（T-A91 表）、:3832（T-A92 口径裁定表）
-- R 项 :3855-3858
-- 未决 :3860
+共同契约：`docs/api-contract.md` §7.11.5（:1352-1412）。共同方案：`docs/plan.md` §T-A87（:3736-3865）。其中：
+- fail-closed 矩阵 :3771
+- 锁关系 :3793
+- 验收 34 条 :3799、:3822（T-A91 表）、:3836（T-A92 口径裁定表）
+- R 项 :3859-3862
+- 未决 :3864
 
 主要代码：`src/backend/app/ingest/egress.py`、`src/backend/app/ingest/netguard.py`、`src/backend/app/workers/ingest.py`、`src/backend/app/ingest/core.py`、`src/backend/app/ingest/daily_lists.py`。
 提交链（均在 main=0e2e66c）：
@@ -253,14 +253,14 @@
 
 ### R13 TEMP 与 single-egress 锁
 - ① 问题：临时证书文件的创建和 unlink 依赖「已持有 single-egress 锁」的前提。
-- ② 位置：`daily_lists.py:88-128`（temporary、remove_owned）、`:238`、`:352`；契约 §7.11.5 第 4 节末「R13」段（plan :3789 起）。
+- ② 位置：`daily_lists.py:88-128`（temporary、remove_owned）、`:238`、`:352`；契约 §7.11.5 第 4 节末「R13」段（plan :3793 起）。
 - ③ 请回答：若锁前提失效（例如锁会话被服务端断开），TEMP 的竞争删除是否安全？非普通文件拒绝、残留普通文件替换的语义是否充分？
 - ④ 我方结论：A14 覆盖时序、拒绝路径清理、HALT 不被清；A32 覆盖新交易日第二批次、0600 替换和清理、非普通文件 `temp_path_not_regular`。
 - ⑤ 残余：锁会话中途丢失期间与另一实例竞争（单副本下不出现）。
 
 ### R14 检查与锁顺序、停机优先级
 - ① 问题：顺序不得调换：HALT → lease → core → 证书准入 → next_call → HALT → 窗口 transport → 落库/HALT → complete。锁层级：single-egress 会话锁在最外层，ip_limit 事务锁在内层；不在事务内发 HTTP；HALT 与库内 upstream_halted 优先级最高，永不自动清除。
-- ② 位置：`egress.py:469-546`；契约 §7.11.5 第 4、6 条（:1392、:1411）；plan :3789-3793。
+- ② 位置：`egress.py:469-546`；契约 §7.11.5 第 4、6 条（:1392、:1411）；plan :3793-3797。
 - ③ 请回答：
   - 是否存在死锁或锁倒置？tick 只取 ip_limit 锁，是否确实无环？
   - HALT 是否可能被任何路径（user_reset、换证、重启）越过或清除？
@@ -344,7 +344,7 @@
   - C 扩展直调 libc 的 connect/getaddrinfo（不触发审计事件）；
   - 篡改钩子闭包（gc、`__closure__`）；
   - ingest 之外的进程（worker、api、用户电脑上的 probes）。
-  - 方案 B（compose 网络拆分）：运维 T-O68 已提交 ops/T-O68=896b6c0，T-O68b 修订为 ops/T-O68b=72d1f3a，**评审可合，待第 5 批合入**（团队评审记录 T-A96、T-A97，未入库）。要点：
+  - 方案 B（compose 网络拆分）：运维 T-O68 已提交 ops/T-O68=896b6c0，T-O68b 修订为 ops/T-O68b=72d1f3a，**已随第 5 批合入 main=b6ba5f9**（团队评审记录 T-A96、T-A97，未入库）。后续 2cf67cf/d08b198（master-bootstrap、N4–N6 检查）尚未合入，待 T-O68c。要点：
     - 设计：`default` 和 `aia_internal` 都设 `internal: true`；只有 ingest 加挂 `aia_egress`；nginx 加挂 `aia_edge`（关闭 IP masquerade，只发布 127.0.0.1）。CI 守卫为 `scripts/ci/check_compose_networks.py`，用例在 `scripts/ci/tests/test_compose_networks.py`，运维说明在 `deploy/runbooks/networks.md`（以上路径均在该分支上）。
     - 与本节分工一致：方案 A（进程内 netguard）为主，B 为纵深、不阻塞后端。B 兜住了「ingest 以外的容器出网」和「新服务漏写 networks」两类。ingest 自身仍可全网出口，所以本节所列进程内对抗残余、ingest 的 DNS 外泄、同网横向移动，B 都兜不住，仍归 A 与本复核。
     - 阻塞项（守卫对正常写法漏拦）：覆盖层可以新声明一张非 internal 网络并把任意服务挂上去，守卫和 `docker compose config` 都放行。修法是覆盖层只许用四个登记网络名。
@@ -357,8 +357,12 @@
       - N4：`aia_edge` 设 `external: true, name: bridge`，nginx 与 dev 的 postgres/redis 进入有 masquerade 的默认桥，可出网；
       - N5：改 `aia_edge` 的 `driver`（如 macvlan）；
       - N6：把 edge 或 internal 的 `name` 改成 egress 的网络名。
-      - 建议运维加三行检查：覆盖层不得对已登记网络设置 `name`/`external`/`driver`。
+      - 建议运维加三行检查：覆盖层不得对已登记网络设置 `name`/`external`/`driver`。d08b198 已加此检查，**待 T-O68c 合入后重核本条**。
       - `deploy/runbooks/networks.md` 第 6 步（Docker Desktop 是否无视 `enable_ip_masquerade=false`、WSL mirrored）缺可执行命令和判定标准，例如在 nginx 容器内对公网地址做 5 秒超时请求、失败才算通过；第 2 步的 `${NGINX_HTTP_PORT:-8080}` 为 bash 写法，Windows 上须在 WSL/Git Bash 下执行或改用 `curl.exe`。文档改进，不阻塞。
+    - T-A98 登记（评审 head=ops/T-O68b=d08b198；ops 文件行号按 d08b198，**待 T-O68c 合入后重核**）：
+      - master-bootstrap 一次性首导服务运行期间挂 `aia_egress`，是全网出口，无 runtime netguard，仅靠代码只访问三所固定 https 地址。`src/backend/app/master/sources.py:545-548`（b6ba5f9 与 d08b198 行号相同）跟随 https 跳转时可到任意主机（只校验 `https://` 前缀）。该服务无麦蕊凭据，不涉及 M-1。缓解：显式一次性 profile、不常驻。建议后续限制跳转到白名单主机。
+      - 守卫 `scripts/ci/check_compose_networks.py:47`（d08b198 的 `EGRESS_ALLOWLIST`；T-A98 所记 :45 为父提交 2cf67cf 行号）对 master-bootstrap 的例外只按服务名放行。去掉 profiles、`restart` 改 always、被 `depends_on`、加端口、覆盖层换 command 五种改法能通过。运维 T-O68c 以结构断言修复（待复评）。
+      - 端口写法 `[::1]` 被守卫拒绝，偏严（误拦方向，非安全风险），记为已知限制。
     - 请复核方回答：B 是否还有正常部署会误走的出网路径？ingest 全出口这一事实是否已在运维文档中如实写明（建议 runbook 补一句）？
   - 已知行为（非缺陷）：Python 层 `connect(("localhost", …))` 会被按主机名拒绝；ingest 现无此写法。
 
@@ -366,13 +370,13 @@
 
 ## 5. B1–B4（T-A74 对 T-R35 待裁阈值的裁定）
 
-共同来源：`docs/reviews/T-A74-rulings.md:43-46`（提交 docs/T-A74=d6e1580，已在 main）。依据：`docs/strategies/T-R35/README.md:143-155、257-269`，研究员维护，本包只引用不改。落地提交定位方法：只读的 `git log -S/--grep`、`git grep`，查 8b9f9f8（与 0e2e66c 在相关文件上无差异）。
+共同来源：`docs/reviews/T-A74-rulings.md:43-46`（提交 docs/T-A74=d6e1580，已在 main）。依据：`docs/strategies/T-R35/README.md:67-71、:92-97`（b6ba5f9；该文件在 0e2e66c 已是 112 行，原引 :143-155、257-269 已失效），研究员维护，本包只引用不改。落地提交定位方法：只读的 `git log -S/--grep`、`git grep`，查 8b9f9f8（与 0e2e66c 在相关文件上无差异）。
 - 研究员文档的落地：78e551a（T-R36，按 T-A74 定稿 T-R35，涉及 B1–B4）。
 - 代码方面：裁定（d6e1580，2026-11-09 14:23 America/Denver）之后，没有找到专门落实 B1–B4 的后端或测试提交。各条情况分述于下。
 
 ### B1 发布资格窗
 - ① 问题：「统一 20 日复盘窗」与 T+1/5/20 多跟踪期并存。
-- ② 位置：`docs/reviews/T-A74-rulings.md:43`；`docs/api-contract.md:1277`（交易日历口径）；`docs/plan.md:959`、`:780`。
+- ② 位置：`docs/reviews/T-A74-rulings.md:43`；`docs/api-contract.md:1277`（交易日历口径）；`docs/plan.md:963`、`:784`。
 - ③ 请回答：「n_映射≥20 或 模拟交易日≥20，且 verified_live 与管理员批准缺一不可；日历缺日不计天」作为发布门槛是否合理？
 - ④ 我方结论：采纳并补充。「统一 20 日」只指发布资格窗，报表三列照出。
 - 落地：**未定位**。`src/backend/app` 中没有找到按「n_映射≥20 或 模拟交易日≥20」判定发布资格的代码；晋级 published 现在仍硬拒，返回 `PROMOTION_GATES_NOT_MET`（`src/backend/app/strategy/reviews.py:425-431`），与同文 B5「本期不做」一致。
@@ -388,7 +392,7 @@
 
 ### B3 G6 warn 语义
 - ① 问题：G6 warn 是否计入「模拟健康」否决。
-- ② 位置：`docs/reviews/T-A74-rulings.md:45`；`src/backend/app/strategy/reviews.py:467-475`（行号按 8e847d5）；`docs/plan.md:786-792`。
+- ② 位置：`docs/reviews/T-A74-rulings.md:45`；`src/backend/app/strategy/reviews.py:467-475`（行号按 8e847d5）；`docs/plan.md:790-796`。
 - ③ 请回答：warn 经 ack 后不挡信号、不降权、不等同 verified_live，门禁语义是否过松？
 - ④ 我方结论：采纳；代码只要求 warn 被确认。
 - 落地：现状即裁定口径，无需新提交。`ack_warn_gates` 校验见 `src/backend/app/strategy/reviews.py:292-310、375`（0e2e66c；来自 c6ce767 T-B83、5a960e2 T-B83b，均早于裁定）。裁定后专门锁定「不挡信号、不降权」的用例**未定位**。
@@ -408,7 +412,7 @@
 1. B1、B4：落地代码与用例**未定位**。B2 只定位到 RC5 侧；B3 的锁定用例**未定位**。
 2. R6：G1–G5 边界缺用例（见 R6 表）。
 3. R4：只做了列名匹配加人工判读，未在库内用 pg_catalog 全量核对。
-4. 行号已按 main=0e2e66c 复核（含 `netguard.py`）；main 再变动时须重核。
+4. 行号已按 main=b6ba5f9 复核（T-A99，含 `netguard.py` 与 `docs/plan.md` +4 修正）；main 再变动时须重核。
 5. `docs/reviews/T-A76-tb110-review.md` 的勘误行已随本文同一提交加入（文字见 §1 编号冲突段）。
 
 ## 7. 复核方交付建议

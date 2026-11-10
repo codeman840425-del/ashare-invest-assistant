@@ -2,6 +2,7 @@
 
 > 基线 origin/main=8e847d5。只定口径、不改实现；不改 docs/strategies（研究员负责）。
 > 第 ① 项（G7 代批相关修订：plan.md:996、plan.md:3628、契约 T-A18/T-A20）**待用户本人确认，本文未修订、不裁定**；T-R35 §5 第 1 条「G7 代批效力」同样不在本文范围。
+> **T-A109 补记（2026-11-10）**：用户本人已于 2026-11-09 就 H-01/S-01 的 G7 作出代办指示；第 ① 项已由 `docs/reviews/T-A109-g7-delegation.md` 与 plan 2.5.13 / T-B80 / 契约 T-A18/T-A20 修订关闭。T-R35 §5 第 1 条仍由策略研究员在 `docs/strategies/` 同步（T-A109 不改该目录）。
 > 评审对象：strat/T-R35=7695fd0（docs/strategies/T-R35/README.md、metrics_slots.json）；strat/T-R34=cf81d1e。
 
 ## 1. ②(a) H-01 跨四周期、缺 horizon：**不拆版本**

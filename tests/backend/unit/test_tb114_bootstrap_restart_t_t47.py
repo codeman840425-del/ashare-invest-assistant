@@ -148,11 +148,20 @@ def test_tb114_engine_probe_fail_main_returns_78(monkeypatch: pytest.MonkeyPatch
     assert runtime.get_ingest_core() is None
 
 
-def test_tb114_two_starts_escalation_count_persists(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tb114_two_starts_escalation_count_persists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """两次启动后 IP 限流计数仍在（第三击升级）。"""
     url = _require_db()
     monkeypatch.setenv("SERVICE_NAME", "ingest")
     monkeypatch.setenv("APP_ENV", "local")
+
+    # T-B116d/e M-c：bootstrap 会探测 daily_lists.HALT 父目录可写；测试目录不得依赖 /run/aia。
+    import app.ingest.daily_lists as daily_lists
+
+    halt = tmp_path / "halt" / "mairui-daily.HALTED"
+    halt.parent.mkdir()
+    monkeypatch.setattr(daily_lists, "HALT", halt)
 
     from app.db import engine as engine_mod
     from app.ingest import runtime

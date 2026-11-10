@@ -1,0 +1,65 @@
+{
+  "schema": "T-B86/v1-summary",
+  "task": "T-A110",
+  "as_of": "2026-11-10T02:25:00-07:00",
+  "as_of_zone": "America/Denver",
+  "source_count_file": "/workspace/team/runtime/mairui-batch-T-B86.count",
+  "source_note": "共享电脑运行时账本，不在仓库内；本文件只抄录 schema/total/halted 与 records 的 id/segment/interface，不含响应体、证书或原始行情。",
+  "schema_ledger": "T-B86/v1",
+  "total": 5,
+  "cap": 128,
+  "allocated_in_caps": 126,
+  "unallocated_reserve": 2,
+  "halted": false,
+  "records": [
+    {
+      "id": "f21d-688018",
+      "segment": "f21_trading_window",
+      "interface": "transaction"
+    },
+    {
+      "id": "f21d-300364",
+      "segment": "f21_trading_window",
+      "interface": "transaction"
+    },
+    {
+      "id": "f21d-688073",
+      "segment": "f21_trading_window",
+      "interface": "transaction"
+    },
+    {
+      "id": "f21d-301218",
+      "segment": "f21_trading_window",
+      "interface": "transaction"
+    },
+    {
+      "id": "f21d-600519",
+      "segment": "f21_trading_window",
+      "interface": "transaction"
+    }
+  ],
+  "segment_caps_from_tb86_offline": {
+    "history_actions": {
+      "daily": 2,
+      "jnfh": 2
+    },
+    "history_suspension": {
+      "daily": 2
+    },
+    "f23_completeness": {
+      "announcements": 10
+    },
+    "f21_trading_window": {
+      "transaction": 10
+    },
+    "f23_freshness": {
+      "announcements": 100
+    }
+  },
+  "notes": [
+    "F21 d=2026-11-10 15:40 后快照 5 次已计入；d+1 尚未取。",
+    "T-B86-F23-D1（2026-11-10 北京 09:00 前）未跑，0 次，过窗不补，故 freshness 已用 0。",
+    "历史段 0 次。halted=false。",
+    "这 5 次是在共享电脑发出，不是用户 Windows 实例的 egress.mairui_get 审计；续跑后计数以出口审计为准。"
+  ]
+}

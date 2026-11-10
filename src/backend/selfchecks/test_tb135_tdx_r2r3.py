@@ -1,4 +1,4 @@
-# ruff: noqa: S101, E501, PT018
+# ruff: noqa: S101, PT018
 """T-B135 编排者裁定②③（tasks/T-B135.md「编排者裁定（11:55）」）。
 
 - ②：float32 有限但极大的值（量化抛 InvalidOperation，或超出写库列 ``app.db.base.MONEY``
@@ -142,7 +142,9 @@ def test_r3_part_removed_and_logged_on_midrun_error(
     assert not list(audit.glob("tdx-day-reconcile-*"))
     # 清单照常保留（与 latest_manifest 口径一致，不受影响）。
     assert len(list(audit.glob("tdx-day-manifest-*.txt"))) == 1
-    hits = [r for r in caplog.records if r.name == "app.ingest.tdx_local" and ".part" in r.getMessage()]
+    hits = [
+        r for r in caplog.records if r.name == "app.ingest.tdx_local" and ".part" in r.getMessage()
+    ]
     assert len(hits) == 1
     assert str(tmp_path) not in hits[0].getMessage()  # 日志只写文件名，不写宿主路径
 

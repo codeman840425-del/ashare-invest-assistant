@@ -1,6 +1,6 @@
 # 数据验证交接手册（T-A110）
 
-> 2026-11-10 America/Denver。现行基线 `origin/main=3ede1c2c0fbc46da0aca159b337037fd7e32f5e5`。本文写就基线为 `e44311a018270d4db2c111ca04015ff3b86c10a8`（第 8 批，历史引用）。只改 `docs/`（不含 `docs/strategies/`）。
+> 2026-11-10 America/Denver。现行基线 `origin/main=00538a1760d704eab6c36789ae36a0784a9566b9`。本文写就基线为 `e44311a018270d4db2c111ca04015ff3b86c10a8`（第 8 批，历史引用）；第 9 批 `3ede1c2c0fbc46da0aca159b337037fd7e32f5e5` 亦为历史引用。只改 `docs/`（不含 `docs/strategies/`）。
 >
 > 给**没有本团队上下文的新团队**续做 G2 剩余键（F21 / F23 / F14 / F15）、T-B86 复跑与 T-B59 补证。新团队在用户 Windows 电脑运行：仓库路径 `F:\ashare-invest-assistant`，分支前缀 `tb-`，团队分支 `team-b`。电脑靠 VPN，可能掉线。
 >
@@ -12,7 +12,7 @@
 2. 各键的验收口径以仓库内权威文件的 **路径:行** 为准；冲突时新裁定优先于旧描述。
 3. 数字、日期、窗口一律来自已查到的文件。写「未查到 / 待编排者补」的，不要编造，也不要自行补跑过窗段。
 4. 运行栈必须在 **WSL（Linux）** 里操作，不要用 Windows Git Bash / PowerShell / CMD 调 `compose.sh`（见 §3.1）。
-5. G7 代批与 `draft→simulating` **不要改写**，只引用 `docs/reviews/T-A109-g7-delegation.md`（已合入 `origin/main=3ede1c2`，经 `docs/T-A109=ffddab6`）。
+5. G7 代批与 `draft→simulating` **不要改写**，只引用 `docs/reviews/T-A109-g7-delegation.md`（已合入 `origin/main`，经 `docs/T-A109=ffddab6`；现行 main 见文首）。
 
 ### 0.1 权威来源
 
@@ -205,6 +205,7 @@ T-B59 定向补证 7 次（见 §2.4）**不在** T-A19 128 次表内，不要�
 4. **是否把 G7 代批扩到 H-01 / S-01 以外**（现行书面授权只覆盖这两张卡，见 §5 所引 T-A109）。
 5. **是否解除 HALT / 恢复出网**（若实例上已有停机标志或出口闭锁）。不在 2026-11-08 推送/本机部署长期授权范围内。
 6. **2026-11-09 用户授权是否覆盖 H-01 v3**（看板 2026-11-10 03:16 / 03:32 MST 待问用户；书面授权字面未写版本号；随范围卡一并确认）。
+7. **部署时 seed 写配置行是否在 standing-auth-2026-11-08 内**（编排者裁定为在内，收口时请用户本人确认；架构师 T-A121 记录该文件与用户原话未明确涵盖此写入）。完整待用户项清单以 START-HERE 与看板专节为准。
 
 另外须编排者经私密渠道处理、不必写进仓库：把 F21 d 日脱敏快照交给新团队，供 d+1 对比。
 
@@ -212,7 +213,7 @@ T-B59 定向补证 7 次（见 §2.4）**不在** T-A19 128 次表内，不要�
 
 G2 本身通过，并不等于可以代批或晋级。权威条款与步骤在：
 
-**`docs/reviews/T-A109-g7-delegation.md`**（已合入 `origin/main=3ede1c2`，经 `docs/T-A109=ffddab6b3e6e8cc6745946f006a6929532b20f36`）。plan 2.5.13、契约 T-A18/T-A20、`docs/handover/roles-rules.md` 的同步正文也在那次提交里。
+**`docs/reviews/T-A109-g7-delegation.md`**（已合入 `origin/main`，经 `docs/T-A109=ffddab6b3e6e8cc6745946f006a6929532b20f36`；现行 main 见文首）。plan 2.5.13、契约 T-A18/T-A20、`docs/handover/roles-rules.md` 的同步正文也在那次提交里。
 
 本文**不重写**其条款，只提醒接续时必须遵守的要点（详见该文 §1–§6）：
 

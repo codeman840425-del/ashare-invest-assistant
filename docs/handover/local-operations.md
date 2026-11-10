@@ -11,7 +11,7 @@ git status --short
 git rev-parse HEAD
 git log --oneline origin/main..HEAD
 ```
-- 【历史·T-O35/T-A46】当时已确认合并/推送基线 7e167f7，origin/main 与用户电脑一致，迁移 head=0027。当前 `origin/main=3ede1c2c0fbc46da0aca159b337037fd7e32f5e5`。本手册其后文档提交已随第 9 批合入；他人 WIP 不清理、不打包。
+- 【历史·T-O35/T-A46】当时已确认合并/推送基线 7e167f7，origin/main 与用户电脑一致，迁移 head=0027。【历史·第 9 批】`3ede1c2c0fbc46da0aca159b337037fd7e32f5e5`。当前 `origin/main=00538a1760d704eab6c36789ae36a0784a9566b9`。本手册其后文档提交已随第 9、第 10 批合入；他人 WIP 不清理、不打包。engine_policy seed 见 START-HERE 与 `deploy/runbooks/wrapup-deploy.md`；启栈插入 seed 的脚本改动待第 11 批（T-A121 已判可合）。
 - 配置模板是deploy/env/.env.example，实际配置在仓库外/被忽略文件；不要输出实际.env、compose完整解析配置、环境变量全集或服务凭据。
 - 默认本地dev叠加层采用MAIRUI_MODE=replay。既有环境覆盖仍须运维私下核实；切换live不是普通启动选项，必须另获审批，保持唯一获准调用方与采集闭锁。
 
@@ -51,7 +51,7 @@ pnpm -C src/frontend exec tsc --noEmit -p tsconfig.app.json
  # 核对恢复库版本、用户数、表数，校验失败即停；成功才继续
  AIA_CLOSEOUT_DEPLOY=1 deploy/scripts/closeout.sh deploy
 ```
-- 【历史·T-O35】当时目标基线 7e167f7；当前应以已批准的 `origin/main`（见 START-HERE，现为 3ede1c2）为准。部署前先备份，失败按已验证备份恢复方案回滚，禁止自动删卷/破坏现有数据。closeout本身还会再备份，并顺序执行up、容器内角色校验、nginx/HTTP及服务健康检查。
+- 【历史·T-O35】当时目标基线 7e167f7；当前应以已批准的 `origin/main`（见 START-HERE，现为 `00538a1760d704eab6c36789ae36a0784a9566b9`）为准。部署前先备份，失败按已验证备份恢复方案回滚，禁止自动删卷/破坏现有数据。closeout本身还会再备份，并顺序执行up、容器内角色校验、nginx/HTTP及服务健康检查。
 - 现有数据先备份；已有主密钥/证书封装私钥必须匹配，不能重新生成替代。
 - 已知候选链0020→0022→0023→0024→0025→0026→0027，单一head=0027；0021仍不在活动链，不合入暂停迁移补编号。
 - T-B92 d5a9a60已实现历史来源证明、unknown排除新投影与保留事实的可逆降级；旧键冲突条件拒绝，0027维护窗口复验仍待。不可直接套通用downgrade处理业务库。

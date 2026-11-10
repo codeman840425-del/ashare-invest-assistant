@@ -90,7 +90,7 @@ deploy/scripts/wrapup/start-stack.sh --apply --backup-dir /data/aia-wrapup-backu
 5. **engine_policy seed**（脚本执行，见「engine_policy seed」节；不要再手动跑一遍）
 6. 再启 api / worker / beat / ingest / signal-rt / nginx
 
-不要加 `--profile master-bootstrap`。默认 dev/live 不会启动该服务。正式卡 `--apply` 导入目前仍是「待补」，分两个阶段，见「正式卡 `--apply` 导入（待补）」节。
+不要加 `--profile master-bootstrap`。默认 dev/live 不会启动该服务。正式卡 `--apply` 导入见「正式卡 `--apply` 导入」节（须用户本人授权；现行 main 已是阶段二清单）。
 
 ## 4. HALT 目录可写检查
 
@@ -253,16 +253,57 @@ seed 成功后再只读复查：`app.engine_policies` 按 `version_no` 降序的
 
 漏做 seed 的后果（T-A119）：库中完全没有政策行时，全部标的会记 `engine_policy_seed_missing` gap、不出建议；库中只有 v2 时会静默按 v2 运行，与审批的 v3 不符。
 
-### 正式卡 `--apply` 导入（待补）
+### 正式卡 `--apply` 导入
 
-正式卡的 `--apply` 导入步骤**目前还没有**，此处标为「待补」，不要在本手册里用临时命令凑一套写入路径。实际入口是 `python -m app.cli.cards_import`（`--card` / `--catalog` / `--market-rules` 等；`--apply` 才写库，且从环境变量读 `DATABASE_URL`，缺则拒绝）。镜像不含 `docs/`，导入须另挂正式卡目录。**这一步导入须用户本人授权，不在 `standing-auth-2026-11-08.md` 范围内**；编排者不得在未获用户本人授权时下令 `--apply`。
+入口是 `python -m app.cli.cards_import`（`src/backend/app/cli/cards_import.py`）。只读核对参数：`--card` 为必填、可重复（:22）；`--catalog`、`--market-rules` 必填（:23-24）；`--feature-meta` / `--source-matrix` 可省略，默认取 `--catalog` 同目录的 `feature_catalog_meta.yaml` 与 `T-R18_source_matrix.yaml`（:32、:37）；**没有** `--dry-run` 旗标，不加 `--apply` 时只校验、不写库（:28、:58-71）；`--apply` 才写库，DSN 从容器环境变量 `DATABASE_URL` 读取，缺则 `parser.error` 拒绝（:59-61）。成功时 stdout 为 `formal cards validated: N; golden passed: M; lifecycle remains draft; no gates granted`（:76-79），返回 0；导入后仍是 draft，不授予门禁。`--apply` 在 `engine.begin()` 单事务里调用 `import_batch`（:64-71）；同卡同 `version_no` 且 `fields` 不等时 `persistence.py:118-120` 抛 `ValueError("immutable_card_version_conflict")`，整批回滚，进程非 0 退出。夹具不一致则在写库前抛 `formal fixture mismatch; no import or generation`（:56）。
 
-只读核对：`src/backend/app/strategy/cards/persistence.py` 在同卡同 `version_no` 且 `fields` 不等时抛 `ValueError("immutable_card_version_conflict")`（:118-120）；`cards_import.py` 的 `--apply` 在 `engine.begin()` 单事务里调用 `import_batch`（:64-71），一张卡冲突会让整批回滚。S-01（文件 `st_pullback_ma.md`）曾在 `version_no=1` 不变的情况下改过内容，再导 v1 会触发该冲突，H-01 v3 也会导不进。导入清单分两个阶段，**以部署树 / 即将部署的 main 上现行卡 `docs/strategies/cards/st_pullback_ma.md` 的 `version_no` 为准**（不要拣入未入 main 的研究分支）：
+**须用户本人授权，未授权不执行。** 这一步不在 `standing-auth-2026-11-08.md` 范围内；编排者不得在未获用户本人授权时下令 `--apply`。
 
-- **阶段一（S-01 v2 尚未进入 main）**：现行 `st_pullback_ma.md` 仍是 `version_no: 1`。正式导入白名单**只能含** `hold_risk_monitor.md`（H-01）和 `sw_ma_trend_pullback.md`（W-01）。不得列入 `st_pullback_ma.md`，也不得导入 `docs/strategies/cards/history/` 下的冻结稿。
-- **阶段二（S-01 v2 已进入 main）**：现行 `st_pullback_ma.md` 的 `version_no` 为 **2**（v1 冻结在 `docs/strategies/cards/history/st_pullback_ma.v1.md`，只作历史，**不要导入 history 文件**）。导入清单可以加上 `st_pullback_ma.md`（v2）。v2 是新版本行，不会与库内已有 v1 触发同号冲突。导入完成后用下一节「阶段二」只读 SQL 核验。
+导入清单分两个阶段，**以部署树现行卡 `docs/strategies/cards/st_pullback_ma.md` 的 `version_no` 为准**。`history/` 下任何文件**永不导入**。现行 `origin/main`（43b252a）上该文件已是 `version_no: 2`，下面命令按**阶段二**写：`--card` 只列 `hold_risk_monitor.md`、`sw_ma_trend_pullback.md`、`st_pullback_ma.md`。若某棵树仍是 `version_no: 1`，退回阶段一，去掉 `st_pullback_ma.md`（再导 v1 会触发冲突，H-01 v3 也会因单事务回滚而导不进）。
 
-`deploy/` 下没有正式卡导入脚本入口，阶段切换只写在本手册，不靠脚本参数。
+容器内卡片路径：worker 镜像**不含** `docs/`（`deploy/docker/backend.Dockerfile` 只从 `src/backend` COPY `app` 与 `migrations`）；compose 里 worker 只挂 `/app/config`（只读）以及 imports / master / 收据等，**没有** `docs/strategies/cards` 挂载。因此默认 entrypoint 下直接读仓库相对路径会找不到文件。可行写法：不改 compose 文件，在本次 `compose.sh run` 上加一次性只读 `-v`，把仓库的 `docs/strategies` 挂到容器 `/opt/aia/docs/strategies`；`config/market_rules.yaml` 已在 `/app/config/market_rules.yaml`。`compose.sh` 其余参数原样传给 `docker compose`。
+
+顺序：先确认本轮已有 `backup.sh` 的 DEST（stdout 最后一行的时间戳目录）；没有则先跑 `deploy/scripts/wrapup/backup.sh --apply --backup-dir <仓库外父目录>`，记下 DEST。然后在仓库根做 dry-run（不加 `--apply`），通过后再跑 `--apply`。保留 worker 默认 entrypoint（不要加 `--entrypoint`）。DSN 只在容器内由 CLI 从环境读取，不要在宿主机命令行写明文 DSN，不要 `echo` / 打印该变量，不要 `set -x`。一旦出现 `immutable_card_version_conflict` 或退出码非 0，**立即停止，不删任何行**，不要重跑 `--apply` 来「再试一次」。`--apply` 成功后再跑下一节阶段二只读 SQL。
+
+**须用户本人授权，未授权不执行。**
+
+```bash
+# 须用户本人授权，未授权不执行。在仓库根、栈已启动后执行。
+# 不要 set -x，不要打印 DATABASE_URL。
+REPO="$(git rev-parse --show-toplevel)"
+test -f "$REPO/docs/strategies/cards/hold_risk_monitor.md"
+test -f "$REPO/docs/strategies/cards/sw_ma_trend_pullback.md"
+test -f "$REPO/docs/strategies/cards/st_pullback_ma.md"
+# 不要把 docs/strategies/cards/history/ 下任何文件列入 --card
+
+# 1) dry-run：不加 --apply，只校验，不写库
+deploy/scripts/compose.sh run --rm --no-deps -T \
+  -v "$REPO/docs/strategies:/opt/aia/docs/strategies:ro" \
+  worker sh -c 'python -m app.cli.cards_import \
+    --card /opt/aia/docs/strategies/cards/hold_risk_monitor.md \
+    --card /opt/aia/docs/strategies/cards/sw_ma_trend_pullback.md \
+    --card /opt/aia/docs/strategies/cards/st_pullback_ma.md \
+    --catalog /opt/aia/docs/strategies/feature_spec.md \
+    --market-rules /app/config/market_rules.yaml'
+
+# 期望 stdout 含（cards_import.py:76-79，返回 0）：
+# formal cards validated: 3; golden passed: 36; lifecycle remains draft; no gates granted
+# （36 = 本树三张现行卡 validation.fixtures 合计：H-01 11 + W-01 15 + S-01 10）
+# 非 0 或出现 immutable_card_version_conflict：立即停止，不删任何行，不要接着 --apply。
+
+# 2) --apply：须用户本人授权后才执行
+deploy/scripts/compose.sh run --rm --no-deps -T \
+  -v "$REPO/docs/strategies:/opt/aia/docs/strategies:ro" \
+  worker sh -c 'python -m app.cli.cards_import \
+    --card /opt/aia/docs/strategies/cards/hold_risk_monitor.md \
+    --card /opt/aia/docs/strategies/cards/sw_ma_trend_pullback.md \
+    --card /opt/aia/docs/strategies/cards/st_pullback_ma.md \
+    --catalog /opt/aia/docs/strategies/feature_spec.md \
+    --market-rules /app/config/market_rules.yaml \
+    --apply'
+```
+
+`--feature-meta` / `--source-matrix` 未写在命令里，因为 catalog 已在挂载目录内，默认会读到同目录的 `feature_catalog_meta.yaml` 与 `T-R18_source_matrix.yaml`（:32、:37）。`deploy/` 下仍然没有单独的导入脚本入口，本步是手册里的 CLI 调用。
 
 ### 部署后只读 SQL 验证清单
 
@@ -401,13 +442,13 @@ elif command -v python >/dev/null 2>&1; then
   python -c 'from pathlib import Path; import hashlib; p=Path("docs/strategies/cards/st_pullback_ma.md"); print(hashlib.sha256(p.read_text(encoding="utf-8").encode()).hexdigest())'
 else
   echo "需要 python3 或 python" >&2
-  exit 2
+  false
 fi
 ```
 
 判定：
 
-- H-01：`latest_card_version_no` 与 `latest_strategy_version_no` 均为 **3**。若该 key 还没有行，说明正式卡尚未导入（见上文「待补」），不要把空结果当成已通过。
+- H-01：`latest_card_version_no` 与 `latest_strategy_version_no` 均为 **3**。若该 key 还没有行，说明正式卡尚未导入（见上文导入节），不要把空结果当成已通过。
 - 持仓实例：有效版本 `COALESCE(derived_strategy_version_id, strategy_version_id)` 应指向 `version_no=3` 的行。若仍有实例的有效版本为 v2，按 T-A119 会继续跑 v2；记下这些行，不要改 `strategy_version_id` / `derived_strategy_version_id`，问编排者是否接受。
 - G7 审批：`app.strategy_promotion_reviews` 中至少有一行 `decision='approved'`，且 `target_strategy_version_id` 等于 H-01（`key='hold_risk_monitor'`）`version_no=3` 的 `app.strategy_versions.id`。没有这样的行则不要当成已通过（正式卡导入或审批可能尚未完成）。
 - `app.engine_policies` 最大 `version_no` 须为 **3**。
@@ -416,7 +457,7 @@ fi
 
 ## 授权口径与必须停下来问编排者的情况
 
-依据：该文件（`standing-auth-2026-11-08.md`）原话与编排者 2026-11-10 裁定。该文件记载用户本人原话「给你们最高授权，以后类似操作都无需问询」，范围包括「部署到用户本地电脑（先备份数据库，失败回滚，绝不 down -v）」。engine_policy seed 是只插入、幂等的版本配置行，属于上述「部署到用户本地电脑」步骤，因此在该授权范围内，由编排者在收口时下令即可，不必逐步再问用户。出现 `engine_policy_version_hash_conflict` 立即停止，**不删除旧行**，问编排者。正式卡 v3 的 `--apply` 导入**不在**该范围内，仍须用户本人授权；步骤仍为「待补」，编排者不得在未获用户本人授权时下令 `--apply`。
+依据：该文件（`standing-auth-2026-11-08.md`）原话与编排者 2026-11-10 裁定。该文件记载用户本人原话「给你们最高授权，以后类似操作都无需问询」，范围包括「部署到用户本地电脑（先备份数据库，失败回滚，绝不 down -v）」。engine_policy seed 是只插入、幂等的版本配置行，属于上述「部署到用户本地电脑」步骤，因此在该授权范围内，由编排者在收口时下令即可，不必逐步再问用户。出现 `engine_policy_version_hash_conflict` 立即停止，**不删除旧行**，问编排者。正式卡的 `--apply` 导入**不在**该范围内，仍须用户本人授权；编排者不得在未获用户本人授权时下令 `--apply`。出现 `immutable_card_version_conflict` 或导入 CLI 非 0 退出时立即停止，**不删除任何行**，问编排者。
 
 主数据首次导入（三所官网公开 HTTPS）也在 11-08 授权过。因此备份、迁 0029、更新代码、启停服务、halt 目录可写修复（不删已有 HALT）、网络探测、verify-roles、按手册执行的回滚，以及 `master-bootstrap.sh --check` / `--run --confirm-network-fetch`，同样由编排者在收口时下令 `--apply`。解除停机标志或恢复出口不在此列：必须由用户本人确认（与 `ingest-halt.md`、`receipts.md`、契约 1406/1411 一致），编排者不能代为确认。
 

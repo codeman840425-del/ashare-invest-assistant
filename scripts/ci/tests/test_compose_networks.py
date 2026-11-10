@@ -192,3 +192,62 @@ def test_master_bootstrap_must_join_egress(repo: Path) -> None:
     )
     errs = ccn.check(repo)
     assert any("master-bootstrap" in e and "必须挂 aia_egress" in e for e in errs), errs
+
+
+def test_overlay_cannot_set_edge_external_and_name_n4(repo: Path) -> None:
+    """T-A97 N4：叠加层把 aia_edge 改成 external: true, name: bridge，会进有伪装的默认桥。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "networks:\n"
+        "  aia_edge:\n"
+        "    external: true\n"
+        "    name: bridge\n",
+        encoding="utf-8",
+    )
+    errs = ccn.check(repo)
+    assert any(
+        "aia_edge" in e and "name" in e and "external" in e and "不得对已登记网络" in e
+        for e in errs
+    ), errs
+
+
+def test_overlay_cannot_change_edge_driver_n5(repo: Path) -> None:
+    """T-A97 N5：叠加层改 edge 的 driver（如 macvlan）。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "networks:\n"
+        "  aia_edge:\n"
+        "    driver: macvlan\n",
+        encoding="utf-8",
+    )
+    errs = ccn.check(repo)
+    assert any(
+        "aia_edge" in e and "driver" in e and "不得对已登记网络" in e for e in errs
+    ), errs
+
+
+def test_overlay_cannot_rename_registered_network_to_egress_n6(repo: Path) -> None:
+    """T-A97 N6/M5：叠加层把 edge 或 internal 的 name 改成 egress 的网络名。"""
+    egress_name = "${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_egress"
+    for key in ("aia_edge", "aia_internal"):
+        (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+            "networks:\n"
+            f"  {key}:\n"
+            f"    name: {egress_name}\n",
+            encoding="utf-8",
+        )
+        errs = ccn.check(repo)
+        assert any(
+            key in e and "name" in e and "不得对已登记网络" in e for e in errs
+        ), (key, errs)
+
+
+def test_overlay_may_restate_internal_and_empty_driver_opts(repo: Path) -> None:
+    """T-A97：driver_opts: {} 与基础合并、保留原值；重申 internal: true 不应误拦。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "networks:\n"
+        "  aia_internal:\n"
+        "    internal: true\n"
+        "  aia_edge:\n"
+        "    driver_opts: {}\n",
+        encoding="utf-8",
+    )
+    assert ccn.check(repo) == []

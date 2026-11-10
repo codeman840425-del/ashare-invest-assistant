@@ -17,6 +17,8 @@
 覆盖文件不得削弱顶层网络属性，也不得把未登记服务挂到 aia_egress / aia_edge。
 覆盖层顶层 networks 与各服务 networks 都只许使用与基础层相同的四个登记名
 （default / aia_internal / aia_egress / aia_edge），禁止另开可出网桥给 worker 等服务。
+覆盖层不得对已登记网络设置 name / external / driver（T-A97 N4–N6）；
+internal 与 edge 的 IP masquerade 开关仍按下面的削弱检查处理。driver_opts: {} 与基础合并，不拦。
 发布了 ports 的服务必须绑定 127.0.0.1，不得 0.0.0.0 或省略宿主地址。
 """
 
@@ -133,13 +135,29 @@ def _check_base_networks(rel: str, nets: dict[str, Any], errs: list[str]) -> Non
 
 
 def _check_overlay_networks(rel: str, nets: dict[str, Any], errs: list[str]) -> None:
-    """覆盖层若重定义网络，不得削弱基础约束；不得新声明未登记的网络。"""
+    """覆盖层若重定义网络，不得削弱基础约束；不得新声明未登记的网络。
+
+    T-A97 N4–N6：叠加层不得对已登记网络设置 name / external / driver。
+    （N4：external: true + name: bridge 会把服务送进有伪装的默认桥；
+     N5：改 driver，如 macvlan；N6/M5：把 edge/internal 的 name 改成 egress 的网络名。）
+    internal 与 enable_ip_masquerade 已在本函数后续检查，不在这三项里重复定义。
+    """
     extra = set(nets) - REGISTERED_NETWORKS
     if extra:
         errs.append(
             f"{rel}: 顶层 networks 有未登记的网络 {sorted(extra)}"
             f"（只许 {sorted(REGISTERED_NETWORKS)}）"
         )
+    for key in REGISTERED_NETWORKS:
+        net = nets.get(key)
+        if not isinstance(net, dict):
+            continue
+        set_keys = [k for k in ("name", "external", "driver") if k in net]
+        if set_keys:
+            errs.append(
+                f"{rel}: 不得对已登记网络 {key} 设置 {'/'.join(set_keys)}"
+                f"（叠加层不得改 name、external、driver；T-A97 N4–N6）"
+            )
     for key in (NET_DEFAULT, NET_INTERNAL):
         net = nets.get(key)
         if net is None:

@@ -41,8 +41,13 @@ def _row(code: str, day: dt.date, hh: int, mm: int, vol: int, source: str) -> di
     return {
         "code": code,
         "ts": dt.datetime.combine(day, dt.time(hh, mm), BJ),
-        "open": 10, "high": 10, "low": 10, "close": 10,
-        "volume": vol, "amount": vol * 10, "source": source,
+        "open": 10,
+        "high": 10,
+        "low": 10,
+        "close": 10,
+        "volume": vol,
+        "amount": vol * 10,
+        "source": source,
     }
 
 
@@ -52,7 +57,10 @@ def test_t_view_volume_ratio_skips_suspended_days(db: Engine) -> None:
     for i, day in enumerate(PAST):
         if day == dt.date(2026, 11, 5):
             continue  # 停牌：无分钟线，向前顺延
-        rows += [_row("600001", day, 9, 31, 100 * (i + 1), "mairui"), _row("600001", day, 15, 0, 100 * (i + 1), "mairui")]
+        rows += [
+            _row("600001", day, 9, 31, 100 * (i + 1), "mairui"),
+            _row("600001", day, 15, 0, 100 * (i + 1), "mairui"),
+        ]
     rows.append(_row("600001", dt.date(2026, 10, 30), 9, 31, 7, "tdx_local"))  # 只进复测，不进分母
     rows.append(_row("600001", TODAY, 9, 31, 999, "mairui"))  # 当日不进分母
     with db.begin() as conn:
@@ -66,10 +74,14 @@ def test_t_view_volume_ratio_skips_suspended_days(db: Engine) -> None:
 def test_t_view_history_cached_once_per_day(db: Engine) -> None:
     tv._HISTORY.clear()
     with db.begin() as conn:
-        conn.execute(insert(minute_bars), [_row("600002", d, 10, 0, 50, "mairui") for d in PAST[:3]])
+        conn.execute(
+            insert(minute_bars), [_row("600002", d, 10, 0, 50, "mairui") for d in PAST[:3]]
+        )
     with db.connect() as conn:
         first = tv.history_volumes(conn, "600002", TODAY)
-        conn.execute(insert(minute_bars), [_row("600002", d, 10, 0, 50, "mairui") for d in PAST[3:]])
+        conn.execute(
+            insert(minute_bars), [_row("600002", d, 10, 0, 50, "mairui") for d in PAST[3:]]
+        )
         conn.commit()
         assert tv.history_volumes(conn, "600002", TODAY) == first == [Decimal(50)] * 3
         tv._HISTORY.clear()
@@ -78,9 +90,18 @@ def test_t_view_history_cached_once_per_day(db: Engine) -> None:
 
 def test_t_view_ignores_tdx_local(db: Engine) -> None:
     with db.begin() as conn:
-        conn.execute(insert(minute_bars), [_row("600003", TODAY, 9, 31, 100, "tdx_local"), _row("600004", TODAY, 9, 31, 100, "mairui"), _row("600004", TODAY, 9, 33, 100, "mairui")])
+        conn.execute(
+            insert(minute_bars),
+            [
+                _row("600003", TODAY, 9, 31, 100, "tdx_local"),
+                _row("600004", TODAY, 9, 31, 100, "mairui"),
+                _row("600004", TODAY, 9, 33, 100, "mairui"),
+            ],
+        )
     now = dt.datetime.combine(TODAY, dt.time(9, 32, 30), BJ)
     with db.connect() as conn:
         assert tv.today_bars(conn, "600003", TODAY, now) == []
         got = tv.today_bars(conn, "600004", TODAY, now)
-    assert [b.ts for b in got] == [dt.datetime.combine(TODAY, dt.time(9, 31), BJ)]  # 晚于 now 的不计
+    assert [b.ts for b in got] == [
+        dt.datetime.combine(TODAY, dt.time(9, 31), BJ)
+    ]  # 晚于 now 的不计

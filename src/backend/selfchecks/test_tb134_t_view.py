@@ -1,4 +1,4 @@
-# ruff: noqa: S101, E501
+# ruff: noqa: S101, E501, PT018
 """T-B134：/today 持仓行 t_view 的纯函数自检（合成数据，不连库、不出网、不调用麦蕊）。
 
 契约只读参照 ``git show 1fe3ab9:docs/contracts/intraday-bars.md`` §3.7（T-A145）、§3.8（T-A146）。
@@ -67,7 +67,10 @@ def test_t_view_volume_ratio_per_minute_avg_240() -> None:
 
 
 def test_t_view_volume_ratio_minutes_frozen_at_lunch() -> None:
-    assert [tv.minutes_elapsed(at(h, m)) for h, m in [(11, 30), (12, 15), (13, 0), (13, 1), (15, 0), (15, 30)]] == [120, 120, 120, 121, 240, 240]
+    assert [
+        tv.minutes_elapsed(at(h, m))
+        for h, m in [(11, 30), (12, 15), (13, 0), (13, 1), (15, 0), (15, 30)]
+    ] == [120, 120, 120, 121, 240, 240]
     # 12:15 时最后一根仍为 11:30 的 bar：N 按 as_of 取 120
     v = build(bars=bars(120, 100), now=at(12, 15), history=[Decimal(24000)] * 5)
     assert v.as_of == at(11, 30) and v.volume_ratio == "1.00"
@@ -101,15 +104,19 @@ def test_t_view_volume_ratio_zero_history_gap() -> None:
 
 
 def test_t_view_volume_ratio_null_has_gap() -> None:
-    v = build(bars=bars(3, 0))
+    v = build(bars=bars(3, 0), now=at(9, 33, 30))
     assert v.volume_ratio is None
-    assert ("t_view.volume_ratio", GapReason.NO_SOURCE, "今日无成交") in [(g.key, g.reason, g.message) for g in v.gaps]
+    assert ("t_view.volume_ratio", GapReason.NO_SOURCE, "今日无成交") in [
+        (g.key, g.reason, g.message) for g in v.gaps
+    ]
     assert v.data_status is DataStatus.PARTIAL
 
 
 def test_t_view_volume_ratio_half_up_2dp() -> None:
     # 1 根 9:31 量 1 股、V5 = 8 × 1200 → 1 ÷ 8 = 0.125 → 0.13（ROUND_HALF_UP，银行家舍入会得 0.12）
-    assert build(bars=bars(1, 1), now=at(9, 31, 5), history=[Decimal(1920)] * 5).volume_ratio == "0.13"
+    assert (
+        build(bars=bars(1, 1), now=at(9, 31, 5), history=[Decimal(1920)] * 5).volume_ratio == "0.13"
+    )
 
 
 # ---- §3.7 ②⑧ 均价与偏离 ----
@@ -141,7 +148,16 @@ def test_t_view_vwap_2dp_half_up() -> None:
 
 def test_t_view_field_types_and_nullability() -> None:
     out = build().model_dump(mode="json")
-    assert set(out) == {"vwap", "dev_pct", "volume_ratio", "base_qty", "sellable_qty", "data_status", "as_of", "gaps"}
+    assert set(out) == {
+        "vwap",
+        "dev_pct",
+        "volume_ratio",
+        "base_qty",
+        "sellable_qty",
+        "data_status",
+        "as_of",
+        "gaps",
+    }
     for key in ("vwap", "dev_pct", "volume_ratio", "base_qty", "sellable_qty"):
         assert isinstance(out[key], str)
         Decimal(out[key])
@@ -151,7 +167,10 @@ def test_t_view_field_types_and_nullability() -> None:
 
 def test_t_view_thresholds_absent_until_validated() -> None:
     assert tv.THRESHOLDS is None  # 契约 §3.7 ③：本契约不写数值，T-R58 复测前不下发
-    for th in (None, tv.Thresholds(dev_pct=Decimal("1"), volume_ratio=Decimal("1"), validated=False)):
+    for th in (
+        None,
+        tv.Thresholds(dev_pct=Decimal("1"), volume_ratio=Decimal("1"), validated=False),
+    ):
         out = build(thresholds=th).model_dump(mode="json")
         assert "dev_pct_threshold" not in out and "volume_ratio_threshold" not in out
     fixture = tv.Thresholds(dev_pct=Decimal("1.5"), volume_ratio=Decimal("3"), validated=True)
@@ -180,14 +199,25 @@ def test_t_view_sellable_is_base_minus_sold_today() -> None:
     ],
 )
 def test_t_view_sellable_clamped_with_gap(
-    base: int, sold: int, raw: int | None, expect: str, clamped: bool, caplog: pytest.LogCaptureFixture
+    base: int,
+    sold: int,
+    raw: int | None,
+    expect: str,
+    clamped: bool,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.WARNING)
-    v = build(base_qty=Decimal(base), sold_today=Decimal(sold), holding_sellable=None if raw is None else Decimal(raw))
+    v = build(
+        base_qty=Decimal(base),
+        sold_today=Decimal(sold),
+        holding_sellable=None if raw is None else Decimal(raw),
+    )
     assert v.sellable_qty == expect
     gap = [g for g in v.gaps if g.key == "t_view.sellable_qty"]
     if clamped:
-        assert [(g.reason, g.message) for g in gap] == [(GapReason.UPSTREAM_ERROR, "可卖数量与底仓不一致，已按较小值显示")]
+        assert [(g.reason, g.message) for g in gap] == [
+            (GapReason.UPSTREAM_ERROR, "可卖数量与底仓不一致，已按较小值显示")
+        ]
         assert v.data_status is DataStatus.PARTIAL
         assert "t_view_sellable_exceeds_base:600000" in caplog.text
     else:
@@ -205,13 +235,18 @@ def test_t_view_sellable_clamped_with_gap(
         ({"base_qty": Decimal(0)}, "t_view.base_qty"),
         ({"trading_day": False}, "t_view.session"),
         ({"now": at(9, 29, 59), "bars": []}, "t_view.session"),
-        ({"security_type": SecurityType.ETF, "base_qty": Decimal(0), "trading_day": False}, "t_view.security_type"),
+        (
+            {"security_type": SecurityType.ETF, "base_qty": Decimal(0), "trading_day": False},
+            "t_view.security_type",
+        ),
     ],
 )
 def test_t_view_not_applicable_keys(kw: dict[str, object], key: str) -> None:
     v = build(**kw)
     assert v.data_status is DataStatus.UNAVAILABLE
-    assert [(g.key, g.reason) for g in v.gaps] == [(key, GapReason.NOT_APPLICABLE)]  # 只有一项（T-A146）
+    assert [(g.key, g.reason) for g in v.gaps] == [
+        (key, GapReason.NOT_APPLICABLE)
+    ]  # 只有一项（T-A146）
     assert (v.vwap, v.dev_pct, v.volume_ratio, v.base_qty, v.sellable_qty, v.as_of) == (None,) * 6
 
 
@@ -222,9 +257,13 @@ def test_t_view_stale_after_twice_interval_in_session() -> None:
     assert build(now=at(10, 2, 0)).data_status is DataStatus.FRESH  # 恰好 120 秒：不过期
     stale = build(now=at(10, 2, 1))
     assert stale.data_status is DataStatus.STALE and stale.volume_ratio == "2.00"
-    assert build(now=at(10, 10, 0), interval_s=300).data_status is DataStatus.FRESH  # 5 分钟档 600 秒
+    assert (
+        build(now=at(10, 10, 0), interval_s=300).data_status is DataStatus.FRESH
+    )  # 5 分钟档 600 秒
     assert build(now=at(10, 10, 1), interval_s=300).data_status is DataStatus.STALE
-    assert build(now=at(13, 5), bars=bars(120, 100)).data_status is DataStatus.STALE  # 下午已开盘仍停在 11:30
+    assert (
+        build(now=at(13, 5), bars=bars(120, 100)).data_status is DataStatus.STALE
+    )  # 下午已开盘仍停在 11:30
 
 
 def test_t_view_not_stale_lunch_and_after_close() -> None:
@@ -240,3 +279,29 @@ def test_t_view_pending_before_first_bar() -> None:
     u = build(bars=[], now=at(10, 0), scheduled=False)
     assert u.data_status is DataStatus.UNAVAILABLE
     assert [(g.key, g.reason) for g in u.gaps] == [("t_view", GapReason.NO_SOURCE)]
+
+
+def test_t_view_only_on_today_focus_rows() -> None:
+    from app.aggregates import models as m
+
+    assert "t_view" not in m.TerminalRow.model_fields  # /terminal 不变
+    row = {
+        "security_code": "600000",
+        "name": "示例",
+        "in_watchlist": False,
+        "focus": False,
+        "quote": None,
+        "holding": None,
+        "suggestion": None,
+        "active_reason_count": 0,
+        "max_risk_level": None,
+        "data_status": DataStatus.PARTIAL,
+        "data_as_of": None,
+    }
+    focus = m.Focus(
+        items=[m.TodayRow(**row, t_view=build()), m.TodayRow(**row, t_view=None)], more=False
+    )
+    out = focus.model_dump(mode="json")["items"]
+    assert out[1]["t_view"] is None  # 非持仓行为 null（§3.7 ①）
+    assert "dev_pct_threshold" not in out[0]["t_view"]  # 嵌套序列化仍缺省阈值字段
+    assert out[0]["t_view"]["volume_ratio"] == "2.00"

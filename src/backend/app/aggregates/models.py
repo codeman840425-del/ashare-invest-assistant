@@ -107,6 +107,24 @@ class TerminalRow(Model):
     data_as_of: dt.datetime | None
 
 
+class TView(Model):
+    vwap: str | None
+    dev_pct: str | None
+    volume_ratio: str | None
+    base_qty: str | None
+    sellable_qty: str | None
+    # §3.7③：阈值未验证时缺省（不输出该键），而非 null。
+    dev_pct_threshold: str | None = Field(default=None, exclude_if=lambda v: v is None)
+    volume_ratio_threshold: str | None = Field(default=None, exclude_if=lambda v: v is None)
+    data_status: DataStatus
+    as_of: dt.datetime | None
+    gaps: list[Gap]
+
+
+class TodayRow(TerminalRow):
+    t_view: TView | None
+
+
 class MarketIndex(Model):
     security_code: str
     name: str
@@ -201,7 +219,7 @@ class EmptyBlock(Model):
 
 
 class Focus(Model):
-    items: list[TerminalRow] = Field(max_length=50)
+    items: list[TodayRow] = Field(max_length=50)
     more: bool
 
 

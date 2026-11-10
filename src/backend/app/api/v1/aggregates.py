@@ -70,6 +70,8 @@ def today(
             identifier,
             market_clock(conn, now, settings.business.market_rules),
             now,
+            # 持仓属 Tier-1，见 config/realtime.yaml tier1_priority；§3.7⑥ 过期阈值 = 采集间隔 × 2。
+            interval_s=settings.business.realtime.intervals.pro_tier1_interval_s,
         )
     return response(value, if_none_match)
 

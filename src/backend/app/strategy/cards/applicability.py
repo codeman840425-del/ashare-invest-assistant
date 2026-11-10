@@ -9,7 +9,7 @@ def regime_source(card: dict[str, Any], spec: dict[str, Any]) -> str | None:
     criteria = spec.get("applicability", card.get("applicability", {})) or {}
     if "market_regime" not in criteria:
         return None
-    declared = {need["feature_key"] for need in card.get("data_needs", [])}
+    declared: set[str] = {need["feature_key"] for need in card.get("data_needs", [])}
     declared.update(
         key for rule in spec.get("rules", []) for key in rule.get("required_features", [])
     )

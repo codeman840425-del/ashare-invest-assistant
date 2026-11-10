@@ -35,21 +35,43 @@ from app.db.tables.market import (
 )
 from app.db.tables.users import users
 from app.main import create_app
+from app.strategy.cards.persistence import validate_batch
+from app.strategy.cards.preflight import feature_registry
 from selfchecks.test_tb89_full_migrations import deploy_grants
 
 ROOT = Path(__file__).resolve().parents[3]
 DSN = "postgresql+psycopg://postgres@127.0.0.1:55498/tb100_test"
 AT = dt.datetime(2031, 1, 2, 10, tzinfo=dt.UTC)
+OFFICIAL_CARD_KEYS = ("hold_risk_monitor", "sw_ma_trend_pullback", "st_pullback_ma")
+
+
+def official_card_paths() -> list[Path]:
+    return [ROOT / "docs/strategies/cards" / (key + ".md") for key in OFFICIAL_CARD_KEYS]
+
+
+def expected_preflight_summary(card_paths: list[Path], catalog: Path) -> str:
+    """Derive the CLI summary from each card's validation fixtures (not a frozen total).
+
+    34 was H-01 11 + W-01 15 + S-01 8 as of 055105a; current S-01 has FX1–FX10.
+    """
+    staged = validate_batch(
+        [path.read_text(encoding="utf-8") for path in card_paths],
+        feature_registry(catalog.read_text(encoding="utf-8")),
+    )
+    golden = sum(len(item.blocks["validation"]["fixtures"]) for item in staged)
+    return f"formal cards validated: {len(staged)}; golden passed: {golden}"
 
 
 def test_importer_module_executes_three_card_golden_preflight() -> None:
+    cards = official_card_paths()
+    catalog = ROOT / "docs/strategies/feature_spec.md"
     args = [sys.executable, "-m", "app.cli.cards_import"]
-    for key in ("hold_risk_monitor", "sw_ma_trend_pullback", "st_pullback_ma"):
-        args.extend(["--card", str(ROOT / "docs/strategies/cards" / (key + ".md"))])
+    for path in cards:
+        args.extend(["--card", str(path)])
     args.extend(
         [
             "--catalog",
-            str(ROOT / "docs/strategies/feature_spec.md"),
+            str(catalog),
             "--market-rules",
             str(ROOT / "config/market_rules.yaml"),
         ]
@@ -65,7 +87,7 @@ def test_importer_module_executes_three_card_golden_preflight() -> None:
         env={**os.environ, "PYTHONUTF8": "1"},
     )
     assert result.returncode == 0, result.stderr
-    assert "formal cards validated: 3; golden passed: 34" in result.stdout
+    assert expected_preflight_summary(cards, catalog) in result.stdout
     assert "lifecycle remains draft; no gates granted" in result.stdout
 
 

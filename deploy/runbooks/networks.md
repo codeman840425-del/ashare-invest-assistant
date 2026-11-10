@@ -201,12 +201,15 @@ probe_egress nginx http://1.1.1.1; echo rc=$?
 
 ## 主数据首导的一次性出网（编排者裁定 ④，2026-11-09）
 
-默认栈与 `maint-cli` 不出网。需要联网从三所官网拉公开 HTTPS 主数据时，只通过 `deploy/scripts/master-bootstrap.sh` 启动 opt-in 服务（加入 `aia_egress`），以保留 `--check`、flock、`--confirm-network-fetch` 和 CI 拒绝。不要直接 `compose.sh run`。
+默认栈与 `maint-cli` 不出网。需要联网从三所官网拉公开 HTTPS 主数据时，只通过 `deploy/scripts/master-bootstrap.sh` 启动 opt-in 服务（加入 `aia_egress`），以保留 `--check`、flock、`--confirm-network-fetch` 和 CI 拒绝。不要 `compose.sh --profile master-bootstrap run …`。走法与 `wrapup-deploy.md` / `master-data.md`「主数据首次导入与词表」相同，不得分歧：先 `--check`；**其它 rc 一律停止**。
 
 ```bash
 deploy/scripts/master-bootstrap.sh --check; echo "rc=$?"
-# rc=10 且确认本机可访问交易所网站后：
-deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch
+# rc=10：确认本机可访问上交所、深交所、北交所官网后
+deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch --rebuild-search-terms
+# rc=0：已有成功导入，不要再 --run；在不出网 worker 上跑离线 CLI（先 dry-run 再 --apply；不要用 maint-cli）
+deploy/scripts/compose.sh run --rm --no-deps -T --entrypoint python worker -m app.cli.security_search_terms
+deploy/scripts/compose.sh run --rm --no-deps -T --entrypoint python worker -m app.cli.security_search_terms --apply
 ```
 
-跑完容器即删（`--rm`），不要常驻，不要把该 profile 加进默认 `up.sh`，**不要调麦蕊**。CI 出网白名单只登记 `ingest` 与这个一次性服务。
+`--run` 路径跑完容器即删（`--rm`），不要常驻，不要把该 profile 加进默认 `up.sh`，**不要调麦蕊**。CI 出网白名单只登记 `ingest` 与这个一次性服务。

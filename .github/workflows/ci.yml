@@ -451,7 +451,7 @@ jobs:
 
   # 部署配置的密钥边界（T-A07 §5、T-O09）：部署配置不再有全站麦蕊证书变量；不用 env_file；
   # 证书封装私钥（secret / *_PRIVATE_KEYS 变量 / 私钥挂载）只给 ingest；api 只拿公钥。
-  # 正反例在 scripts/ci/tests/test_secret_boundary.py（secret-scan.yml selftest job 运行）。
+  # 正反例在 scripts/ci/tests/test_secret_boundary.py、test_compose_networks.py（secret-scan.yml selftest job 运行）。
   secret-boundary:
     name: secret-boundary (私钥只给 ingest，无全站证书变量)
     runs-on: ubuntu-24.04
@@ -468,6 +468,9 @@ jobs:
       # 日志轮转（T-A04 ③）：每个 compose 服务都 logging: *default-logging（json-file 10m×5）
       - name: check_compose_logging.py
         run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_compose_logging.py
+      # 网络拆分（T-O68）：非登记服务不得接入 aia_egress / aia_edge；发布端口须走无伪装的 aia_edge
+      - name: check_compose_networks.py
+        run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_compose_networks.py
 
   # 源码不得被 .gitignore 误伤（T-O09a）：已跟踪源码被规则命中、相对引用指向被忽略的文件、
   # 敏感词文件名探针（licence.ts 等）被宽规则命中，都失败。正反例在 scripts/ci/tests/test_ignored_sources.py。

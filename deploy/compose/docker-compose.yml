@@ -85,9 +85,19 @@ x-app-depends: &app-depends
 x-db-api-url: &db-api-url postgresql+psycopg://aia_api:${AIA_DB_API_PASSWORD:?请用 deploy/scripts/compose.sh 调用（读 db_password_aia_api）}@postgres:5432/${POSTGRES_DB:-aia}
 x-db-ingest-url: &db-ingest-url postgresql+psycopg://aia_ingest:${AIA_DB_INGEST_PASSWORD:?请用 deploy/scripts/compose.sh 调用（读 db_password_aia_ingest）}@postgres:5432/${POSTGRES_DB:-aia}
 
+# 网络拆分（T-O68，契约 §7.11.5 / plan R19 方案 B 的网络层落地；本轮只让 ingest 出网）：
+#   default        ：internal: true。新增服务若漏写 networks，只进这张不能出网的默认网，不会误入可出网桥。
+#   aia_internal   ：internal: true。全部服务共用（postgres/redis/api/worker/beat/signal-rt/ingest/一次性任务/nginx）。
+#   aia_egress     ：可出网，仅 ingest。worker 的交易所同步/预留 SMTP 等需求见运维报告，待编排者裁定，未擅自放开。
+#   aia_edge       ：非 internal，但关闭 IP masquerade。nginx（及 dev 覆盖里发布端口的 postgres/redis）用它把
+#                    127.0.0.1 端口发到宿主；只挂 internal 网络时 ports: 对宿主通常不可达。无伪装则容器难以对公网做 SNAT。
+# CI：scripts/ci/check_compose_networks.py 检查非登记服务不得接入 aia_egress / aia_edge。
 services:
   nginx:
     logging: *default-logging
+    networks:
+      aia_internal:
+      aia_edge:
     # 与网关冒烟使用同一 nginx 基础镜像（见 frontend.Dockerfile 的最终 FROM）。这里的标签是构建结果，
     # 里面只有前端 dist；nginx.conf / limits 仍由下面的只读挂载提供，不把配置烘焙进镜像。
     image: ${AIA_FRONTEND_IMAGE:-aia-frontend:local}
@@ -121,6 +131,8 @@ services:
 
   api:
     logging: *default-logging
+    networks:
+      aia_internal:
     image: *backend-image
     build: *backend-build
     # 入口以 src/backend/app/main.py 为准；--proxy-headers 信任 nginx 的 X-Forwarded-*
@@ -162,6 +174,8 @@ services:
 
   worker:
     logging: *default-logging
+    networks:
+      aia_internal:
     image: *backend-image
     command: ["python", "-m", "app.workers.worker"]
     restart: unless-stopped
@@ -203,6 +217,9 @@ services:
   # 行情采集服务：全站唯一调用麦蕊、唯一能解密用户证书（plan §2.1A、§2.1B）
   ingest:
     logging: *default-logging
+    networks:
+      aia_internal:
+      aia_egress:
     image: *backend-image
     command: ["python", "-m", "app.workers.ingest"]
     restart: unless-stopped
@@ -241,6 +258,8 @@ services:
   # 盘中信号计算：单实例，无 licence
   signal-rt:
     logging: *default-logging
+    networks:
+      aia_internal:
     image: *backend-image
     command: ["python", "-m", "app.workers.signal_rt"]
     restart: unless-stopped
@@ -257,6 +276,8 @@ services:
   # Celery beat：全站唯一
   beat:
     logging: *default-logging
+    networks:
+      aia_internal:
     image: *backend-image
     command: ["python", "-m", "app.workers.beat"]
     restart: unless-stopped
@@ -278,6 +299,8 @@ services:
   # 一次性：数据库迁移（T-O01b）。成功退出（0）后 timescale-apply 才运行；失败则 api 等服务不会启动。
   migrate:
     logging: *default-logging
+    networks:
+      aia_internal:
     image: *backend-image
     command: ["alembic", "upgrade", "head"]
     restart: "no"
@@ -294,6 +317,8 @@ services:
   # 后端镜像没有 psql，放在 postgres 镜像里经网络直连执行（AIA_PSQL_MODE=direct）；脚本幂等，每次 up 都会重跑。
   timescale-apply:
     logging: *default-logging
+    networks:
+      aia_internal:
     # 与 postgres 服务同一镜像（含 psql）；升级时两处一起改（deploy/scripts/lib/common.sh 的 aia_compose_image 读 postgres 服务那一行）
     image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
     entrypoint: ["bash", "/aia/deploy/scripts/db-apply-timescale.sh"]
@@ -321,6 +346,8 @@ services:
   # 新迁移建的表/列也会被覆盖到）。以属主连接；口令以 secret 文件传入，不经环境变量。
   db-roles:
     logging: *default-logging
+    networks:
+      aia_internal:
     image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
     entrypoint: ["bash", "/aia/deploy/db/roles/apply-roles.sh"]
     command: []
@@ -353,6 +380,8 @@ services:
   #   deploy/scripts/compose.sh --profile maint run --rm --no-deps maint-cli --user-id <uuid> [--execute]
   maint-cli:
     logging: *default-logging
+    networks:
+      aia_internal:
     image: *backend-image
     profiles: ["maint"]
     entrypoint: ["sh", "/aia/secret-env.sh", "python", "-m", "app.cli", "delete-user-data"]
@@ -384,6 +413,8 @@ services:
 
   postgres:
     logging: *default-logging
+    networks:
+      aia_internal:
     # TimescaleDB 2.31.0 + PostgreSQL 16.15（digest 固定 PG 小版本；plan §3A.1 避开 16.5/17.1）
     image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
     restart: unless-stopped
@@ -410,6 +441,8 @@ services:
 
   redis:
     logging: *default-logging
+    networks:
+      aia_internal:
     image: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
@@ -439,6 +472,22 @@ volumes:
     name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_ingest_state
   aia_receipts:
     name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_aia_receipts
+
+# 网络同样带卷前缀命名（T-O68），避免工作树互相连上。语义见文件头注释。
+networks:
+  default:
+    name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_default
+    internal: true
+  aia_internal:
+    name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_internal
+    internal: true
+  aia_egress:
+    name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_egress
+  aia_edge:
+    name: ${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_edge
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
 
 # 证书封装密钥（T-O09）：由 deploy/scripts/seal-keygen.sh 生成在仓库外的 AIA_SECRETS_DIR（compose.sh 解析，
 # 默认 ~/.config/aia/secrets/<卷前缀>）。私钥 600、属主为容器用户；不入库、不进镜像、不进 .env。

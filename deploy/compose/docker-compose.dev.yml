@@ -7,7 +7,7 @@
 #      worker/beat/ingest/signal-rt 已用后端镜像的真实入口（T-O01b），改代码后 `compose.sh restart <服务>` 生效；
 #      migrate 也挂源码，新加的迁移不用重建镜像即可在下次 up 时执行。
 #      注意：改 pyproject/uv.lock 后需重新构建镜像（up.sh 默认带 --build）。
-#   3) 便于调试：postgres / redis 只在 127.0.0.1 上暴露端口。
+#   3) 便于调试：postgres / redis 只在 127.0.0.1 上暴露端口。这两服务在叠加层额外加入 aia_edge（关闭伪装、不可出网），否则只挂 internal 时宿主端口通常不可达。
 # 需要真实联调时（仅"当前唯一调用方"主机）：AIA_PROFILE=live deploy/scripts/up.sh（不叠加本文件）。
 
 # 日志轮转（T-A04 ③）：所有容器统一 json-file，单文件 10m、保留 5 个（每容器最多约 50MB）。
@@ -86,10 +86,16 @@ services:
 
   postgres:
     logging: *default-logging
+    # 与基础文件的 aia_internal 合并（映射式，不会冲掉内部网）。
+    networks:
+      aia_edge:
     ports:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
 
   redis:
     logging: *default-logging
+    # 与基础文件的 aia_internal 合并（映射式，不会冲掉内部网）。
+    networks:
+      aia_edge:
     ports:
       - "127.0.0.1:${REDIS_HOST_PORT:-56379}:6379"

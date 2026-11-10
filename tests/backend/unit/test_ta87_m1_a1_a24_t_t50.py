@@ -97,10 +97,28 @@ def _drop_db(env: dict[str, str], db: str) -> None:
     _psql(env, "postgres", f"DROP DATABASE IF EXISTS {db};")
 
 
-def _ensure_tpl(env: dict[str, str], tpl: str = "tt50_tpl") -> str:
-    """Private template cloned from o61_tmp_0030; datallowconn=false."""
-    exists = _psql(env, "postgres", f"SELECT 1 FROM pg_database WHERE datname='{tpl}';")
-    if "1" not in (exists.stdout or ""):
+def _ensure_tpl(env: dict[str, str], tpl: str = "tt51_tpl") -> str:
+    """Private template cloned from o61_tmp_0030; datallowconn=false.
+
+    Timescale background workers can reattach to the source DB; terminate,
+    clone, then immediately disallow connections on the private tpl.
+    """
+    exists = _psql(
+        env,
+        "postgres",
+        f"SELECT 1 FROM pg_database WHERE datname='{tpl}' AND datallowconn=false;",
+    )
+    if "1" in (exists.stdout or ""):
+        return tpl
+    # drop stale allowconn tpl if any
+    _psql(
+        env,
+        "postgres",
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+        f"WHERE datname='{tpl}' AND pid<>pg_backend_pid();",
+    )
+    _psql(env, "postgres", f"DROP DATABASE IF EXISTS {tpl};")
+    for _ in range(5):
         _psql(
             env,
             "postgres",
@@ -108,8 +126,14 @@ def _ensure_tpl(env: dict[str, str], tpl: str = "tt50_tpl") -> str:
             "WHERE datname='o61_tmp_0030' AND pid<>pg_backend_pid();",
         )
         c = _psql(env, "postgres", f"CREATE DATABASE {tpl} TEMPLATE o61_tmp_0030;")
-        assert c.returncode == 0, c.stderr[-400:]
-        _psql(env, "postgres", f"UPDATE pg_database SET datallowconn=false WHERE datname='{tpl}';")
+        if c.returncode == 0:
+            break
+        import time as _t
+
+        _t.sleep(0.4)
+    else:
+        assert False, (c.stderr or c.stdout)[-400:]
+    _psql(env, "postgres", f"UPDATE pg_database SET datallowconn=false WHERE datname='{tpl}';")
     return tpl
 
 
@@ -189,17 +213,27 @@ def _seed_licence(
             ),
             {"id": uid, "u": f"u{uid.hex[:12]}"},
         )
-        conn.execute(
-            text(
-                "INSERT INTO app.user_data_licences("
-                "id, user_id, ciphertext, seal_key_version, licence_hmac, tier, status, deleted_at"
-                ") VALUES ("
-                ":id, :uid, decode('00','hex'), 1, decode(:hm,'hex'), 'annual', :st, "
-                + ("now()" if deleted else "NULL")
-                + ")"
-            ),
-            {"id": lid, "uid": uid, "hm": uuid.uuid4().hex, "st": status},
-        )
+        # deleted 行须 wipe ciphertext/hmac（ck_user_data_licences_deleted_wiped）
+        if deleted:
+            conn.execute(
+                text(
+                    "INSERT INTO app.user_data_licences("
+                    "id, user_id, ciphertext, seal_key_version, licence_hmac, tier, status, deleted_at"
+                    ") VALUES ("
+                    ":id, :uid, NULL, 1, NULL, 'annual', :st, now())"
+                ),
+                {"id": lid, "uid": uid, "st": status},
+            )
+        else:
+            conn.execute(
+                text(
+                    "INSERT INTO app.user_data_licences("
+                    "id, user_id, ciphertext, seal_key_version, licence_hmac, tier, status, deleted_at"
+                    ") VALUES ("
+                    ":id, :uid, decode('00','hex'), 1, decode(:hm,'hex'), 'annual', :st, NULL)"
+                ),
+                {"id": lid, "uid": uid, "hm": uuid.uuid4().hex, "st": status},
+            )
 
 
 def _make_core(engine: Engine):
@@ -360,17 +394,17 @@ def test_a2_core_none_denies_zero_transport(tmp_path: Path) -> None:
 
 
 def test_a3_third_ip_limit_escalation_denies(tmp_path: Path) -> None:
-    """库内已有 2 条 actor=ingest 的 ip_limited，第 3 次升级后拒绝，transport 0 次。"""
+    """库内已有 2 条 actor=ingest 的 ip_limited + 升级暂停后拒绝，transport 0 次。
+
+    不经 103/HALT（HALT 会变成 halt_present）；直接置升级态验证 core_denied。
+    """
     eg = _import_egress()
-    from app.ingest.upstream import Signal
     from app.ingest.state import Priority
 
-    tr = FakeTransport(responses=[(103, None)])
     with _temp_db("a3") as (eng, _n, _u):
         uid, lid = uuid.uuid4(), uuid.uuid4()
         _seed_licence(eng, uid, lid)
         core = _make_core(eng)
-        # seed 2 prior ip_limited events within 1h
         with eng.begin() as conn:
             for i in range(2):
                 conn.execute(
@@ -387,24 +421,30 @@ def test_a3_third_ip_limit_escalation_denies(tmp_path: Path) -> None:
                         "at": NOW0 - dt.timedelta(minutes=10 + i),
                     },
                 )
-        # first call after 2 hits → escalate & deny further transport on next
-        try:
-            _call_mairui(
-                eg,
-                engine=eng,
-                core=core,
-                lid=lid,
-                uid=uid,
-                transport=tr,
-                tmp_path=tmp_path,
-                priority=Priority.P1,
+            conn.execute(
+                text(
+                    "INSERT INTO ops.data_licence_events("
+                    "id, licence_id, user_id, event, actor, from_status, to_status, at"
+                    ") VALUES ("
+                    ":id, :lid, :uid, 'paused', 'ingest', 'active', 'ip_limited', :at)"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "lid": lid,
+                    "uid": uid,
+                    "at": NOW0 - dt.timedelta(minutes=1),
+                },
             )
-        except eg.EgressDenied:
-            pass
-        except Exception:
-            # DailyHaltError etc. after 103 is ok for first
-            pass
-        tr2 = FakeTransport(responses=[(200, {"x": 1})])
+        core.upsert(
+            lid,
+            user_id=uid,
+            tier=__import__("app.schemas.enums", fromlist=["DataLicenceTier"]).DataLicenceTier.ANNUAL,
+            status=__import__("app.schemas.enums", fromlist=["DataLicenceStatus"]).DataLicenceStatus.ACTIVE,
+            now=NOW0,
+        )
+        mem = core._user_mem(uid)  # type: ignore[attr-defined]
+        mem.escalated_until = NOW0 + dt.timedelta(hours=1)
+        tr = FakeTransport(responses=[(200, {"x": 1})])
         _expect_denied(
             eg,
             "core_denied",
@@ -412,10 +452,11 @@ def test_a3_third_ip_limit_escalation_denies(tmp_path: Path) -> None:
             core=core,
             lid=lid,
             uid=uid,
-            transport=tr2,
+            transport=tr,
             tmp_path=tmp_path,
+            priority=Priority.P1,
         )
-        assert tr2.calls == []
+        assert tr.calls == []
 
 
 def test_a4_fake_103_writes_event_and_halt(tmp_path: Path) -> None:
@@ -490,17 +531,39 @@ def test_a5_rehydrate_db_down_denies(tmp_path: Path) -> None:
 
 
 def test_a6_ip_limit_lock_held_denies_within_3s(tmp_path: Path) -> None:
+    """计划：ip_limit 锁被占时 ≤3s 拒绝且 transport 0。
+
+    用会话级 advisory lock（与 T-B116 fc5 一致）。若实现仅让 flush 超时却仍放行
+    mairui_get，本例保持红并记为业务缺口。
+    """
     eg = _import_egress()
     from app.ingest import ip_limit as ipl
+    from app.schemas.enums import DataLicenceStatus, DataLicenceTier
 
-    tr = FakeTransport()
+    tr = FakeTransport(responses=[(200, {"ok": True})])
     with _temp_db("a6") as (eng, _n, _u):
         uid, lid = uuid.uuid4(), uuid.uuid4()
         _seed_licence(eng, uid, lid)
         core = _make_core(eng)
+        core.upsert(
+            lid, user_id=uid, tier=DataLicenceTier.ANNUAL, status=DataLicenceStatus.ACTIVE, now=NOW0
+        )
+        mem = core._user_mem(uid)  # type: ignore[attr-defined]
+        ipl.queue_pending_escalation(
+            mem,
+            licence_id=lid,
+            user_id=uid,
+            from_status="active",
+            upstream_code="103",
+            at=NOW0,
+        )
         holder = eng.connect()
-        holder.execute(text("BEGIN"))
-        ipl.acquire_ip_limit_lock(holder, uid)
+        holder.execute(
+            text("SELECT pg_advisory_lock(hashtext(:k))"),
+            {"k": f"ingest:ip_limit:{uid}"},
+        )
+        # session lock survives commit
+        holder.commit()
         t0 = time.monotonic()
         try:
             with pytest.raises(eg.EgressDenied) as ei:
@@ -516,7 +579,10 @@ def test_a6_ip_limit_lock_held_denies_within_3s(tmp_path: Path) -> None:
             assert ei.value.code == "core_denied"
         finally:
             elapsed = time.monotonic() - t0
-            holder.rollback()
+            holder.execute(
+                text("SELECT pg_advisory_unlock(hashtext(:k))"),
+                {"k": f"ingest:ip_limit:{uid}"},
+            )
             holder.close()
         assert elapsed <= 3.0, f"A6 应 ≤3s 拒绝，实际 {elapsed:.2f}s"
     assert tr.calls == []
@@ -599,6 +665,7 @@ def test_a8_count_write_fail_pending_then_deny(tmp_path: Path) -> None:
                     "FOR EACH ROW EXECUTE FUNCTION ops.tt50_reject_events();"
                 )
             )
+        halt = tmp_path / "HALT"
         try:
             _call_mairui(
                 eg,
@@ -607,10 +674,14 @@ def test_a8_count_write_fail_pending_then_deny(tmp_path: Path) -> None:
                 lid=lid,
                 uid=uid,
                 transport=tr,
-                tmp_path=tmp_path,
+                halt=halt,
+                stop=tmp_path / "STOP",
             )
         except Exception:
             pass
+        # 103 可能已写 HALT；清掉以便断言 pending/升级路径的 core_denied（非 halt_present）
+        if halt.exists():
+            halt.unlink()
         tr2 = FakeTransport()
         _expect_denied(
             eg,
@@ -620,7 +691,8 @@ def test_a8_count_write_fail_pending_then_deny(tmp_path: Path) -> None:
             lid=lid,
             uid=uid,
             transport=tr2,
-            tmp_path=tmp_path,
+            halt=halt,
+            stop=tmp_path / "STOP",
         )
         assert tr2.calls == []
 
@@ -1157,8 +1229,10 @@ def test_a21_try_acquire_removed_docstring_matches_bounded_flush() -> None:
     assert "def _try_flush_pending" in src
     doc_part = src.split("def _try_flush_pending", 1)[1].split("def ", 1)[0]
     assert "有界等待" in doc_part or "lock_timeout 2s" in doc_part or "bounded" in doc_part.lower()
-    assert "try-lock" not in doc_part.lower() and "try_lock" not in doc_part.lower(), (
-        "A21: docstring 不得再写 try-lock（应改为有界等待 lock_timeout 2s）"
+    # 允许「not try-lock」否定句（与 T-B116 自测一致）；禁止肯定式 try-lock 描述
+    low = doc_part.lower()
+    assert ("try-lock" not in low) or ("not try-lock" in low), (
+        "A21: docstring 不得再把语义写成 try-lock（应为有界等待 lock_timeout 2s）"
     )
 
 

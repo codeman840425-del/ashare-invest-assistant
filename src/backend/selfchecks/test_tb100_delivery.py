@@ -35,8 +35,7 @@ from app.db.tables.market import (
 )
 from app.db.tables.users import users
 from app.main import create_app
-from app.strategy.cards.persistence import validate_batch
-from app.strategy.cards.preflight import feature_registry
+from app.strategy.cards.importing import prepare_document
 from selfchecks.test_tb89_full_migrations import deploy_grants
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -49,29 +48,29 @@ def official_card_paths() -> list[Path]:
     return [ROOT / "docs/strategies/cards" / (key + ".md") for key in OFFICIAL_CARD_KEYS]
 
 
-def expected_preflight_summary(card_paths: list[Path], catalog: Path) -> str:
-    """Derive the CLI summary from each card's validation fixtures (not a frozen total).
+def official_golden_count(card_paths: list[Path]) -> int:
+    """Sum validation.fixtures on each official card via prepare_document (T-A125③).
 
-    34 was H-01 11 + W-01 15 + S-01 8 as of 055105a; current S-01 has FX1–FX10.
+    34 was hardcoded in f640b55 as H-01 11 + W-01 15 + S-01 8; 4c00ae7 added
+    S-01 FX9/FX10, so the live total is 11+15+10. Do not freeze that constant.
     """
-    staged = validate_batch(
-        [path.read_text(encoding="utf-8") for path in card_paths],
-        feature_registry(catalog.read_text(encoding="utf-8")),
-    )
-    golden = sum(len(item.blocks["validation"]["fixtures"]) for item in staged)
-    return f"formal cards validated: {len(staged)}; golden passed: {golden}"
+    total = 0
+    for path in card_paths:
+        item = prepare_document(path.read_text(encoding="utf-8"))
+        assert item is not None
+        total += len(item.blocks["validation"]["fixtures"])
+    return total
 
 
 def test_importer_module_executes_three_card_golden_preflight() -> None:
     cards = official_card_paths()
-    catalog = ROOT / "docs/strategies/feature_spec.md"
     args = [sys.executable, "-m", "app.cli.cards_import"]
     for path in cards:
         args.extend(["--card", str(path)])
     args.extend(
         [
             "--catalog",
-            str(catalog),
+            str(ROOT / "docs/strategies/feature_spec.md"),
             "--market-rules",
             str(ROOT / "config/market_rules.yaml"),
         ]
@@ -87,7 +86,8 @@ def test_importer_module_executes_three_card_golden_preflight() -> None:
         env={**os.environ, "PYTHONUTF8": "1"},
     )
     assert result.returncode == 0, result.stderr
-    assert expected_preflight_summary(cards, catalog) in result.stdout
+    assert "formal cards validated: 3" in result.stdout
+    assert f"golden passed: {official_golden_count(cards)}" in result.stdout
     assert "lifecycle remains draft; no gates granted" in result.stdout
 
 

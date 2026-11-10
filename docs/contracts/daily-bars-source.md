@@ -422,6 +422,8 @@
 
 ### 8.1 Q1：不设每日上限
 
+> **T-A142 修订：** 本节的哨兵 `DAILY_BARS_HTTP_UNLIMITED`、`DAILY_BARS_HTTP_LIMIT` 与 `daily_bars_http_budget` 由 §9.3 的两个每批上限常量取代（单 C2）。「不设每日上限」本身不变：每日总量仍不封顶，靠每批上限加自动续接完成。回执校验（下文 ②）不变。
+
 - 用户原话：不设置上限。表达方式：**一个显式的「不限」取值，而不是把默认值改成不限**。
 - 配置名与位置（沿用 `master/daily_delivery.DAILY_HTTP_LIMIT` 的模块常量写法，不进 Settings，不读环境变量或回执）：放在单 C 的 `app/ingest/daily_bars.py`。
   - `DAILY_BARS_HTTP_UNLIMITED`：哨兵常量，值为字符串 unlimited。
@@ -553,7 +555,7 @@
   - 若 17:30 时取数事务还没提交，analyze 看不到运行记录，记 `daily_bars_not_ready`。compose 里 worker 未设 replicas（默认 1），按 FIFO 执行；单副本时 analyze 会排在取数之后，此时走上一条。
 - 重试与锁：失败不重试（不进 `RETRY_TASKS`，`_after_failure` 对它无动作）；运行中又到达同名任务时 worker 返回 locked 并丢弃，不重排。当日错过即为如实缺口，次日钟点照常。
 - 快照仍由 analyze 惰性生成：`daily_bars_ready`、`build_owned_snapshot` 不注册任务、不进 `slot_jobs`/`schedule()`（`daily-snapshot-from-bars.md` §1 不变）。
-- 「此前卡上的 18:30 作废」指此前卡里「每天 18:30 取数」那个选项。它**不改变** `slot_jobs` 里 `REPORT` 的 18:30 钟点，也不改变 `CODE_MAP_TIME`。日报实际几点生成，见 §8.6 U1。
+- 「此前卡上的 18:30 作废」指此前卡里「每天 18:30 取数」那个选项。`CODE_MAP_TIME` 不变。~~它不改变 `REPORT` 的 18:30 钟点~~：用户 11-10 答卡「日报提前到17:30」，`REPORT` 改为紧跟 analyze 生成，见 §9.1。
 - 17:15 时麦蕊当日数据是否已经完整，没有实测（【待 T003】）。首次实调时由运维记录，结果不符再报编排者。
 - G/W/T：
   - `test_daily_bars_fetch_slot_1715_open_day_only`（取代 `test_daily_bars_fetch_never_scheduled`；后端 `selfchecks/test_tb127_daily_bars.py` 里的同名副本一并改）：Given `covered` 打桩为 True、`_engine` 打桩，北京时间 00:00–23:59 每 5 分钟一个 now / When `slot_jobs(settings, now)` / Then daily_bars_fetch 恰在 17:15、17:20、17:25 三个 now 出现，slot 为「当日 YYYYMMDD:1715」，args 恰为 {trade_date}；`covered` 为 False 时一次也不出现；`schedule(settings)` 的键不含它。
@@ -573,8 +575,139 @@
 
 ### 8.6 只有用户能定的（本单新增）
 
+> **T-A142：** U1、U2、U3 已由用户 11-10 答卡 t809s2732 答复，落地见 §9.1、§9.2、§9.3。下表只作历史记录。
+
 | # | 问题 | 答复前做法 |
 |---|---|---|
 | U1 | 用户原文是「analyze / 日报仍在 17:30 出」。但现网 `slot_jobs` 里 analyze 在 17:30，`REPORT`（daily_report 生成）在 18:30。日报保持 18:30 生成，还是要求提前？ | 不改 `REPORT` 的 18:30 |
 | U2 | 新进入范围的标的（新买入、新加自选）要不要自动补近 3 年历史？ | 不自动；手动 `daily-bars-backfill` |
 | U3 | 在「不设每日上限」之外，要不要再加一道数值型「每批防失控上限」（一次运行超过若干次调用就停）？架构建议加，作为兜底，数值由用户定 | 不加；只靠结构上界和 STOP/103/429 停止规则 |
+
+## 9. 用户 11-10 答卡落地（T-A142）
+
+依据：`rules/daily-bars-user-decisions-2026-11-10.md` 末节，用户答卡 t809s2732 原话：「日报提前到17:30」「新加的股票自动补3年历史」「按不突破上限设置，然后多次续接」。编排者裁定与原话的出入见 `reports/T-A142.md`；本节以原话为准。
+
+**不变的红线：** 真实调用仍不放开。§8.1 的四个前提仍须同时满足，其中「开放」只能由开放单 D 的一次经评审的代码提交完成，并且单 D 须用户本人批准首次实调后才开。本节所有新增常量的默认值都使默认部署 0 次出网。
+
+### 9.1 日报 17:30：REPORT 紧跟 analyze
+
+- 时序（北京时间，开市日）：17:15 `daily_bars_fetch`（§8.4 不变）→ 17:30 analyze（`ANALYZE_AS_OF` 17:30、`FINAL_AFTER` 17:10 不变）→ analyze 结束后立即 REPORT。
+- 依赖：REPORT 读 analyze 的结果，所以必须在 analyze **结束之后**运行；两者仍是两个任务，不合并。理由：`reports/service.build` 与 analyze 的事务、幂等、`recover_task` 的恢复都按两个任务设计，合并改动更大。
+- 最小改动（`workers/jobs.py`）：
+  - `slot_jobs` 的日终分支只保留 17:30 一个窗口；REPORT 的钟点由 18:30 改为 17:30，`beat_slots` 仍在 17:30 对 ANALYZE 与 REPORT 各调一次 `record_intent`（恢复用），但**只推 ANALYZE**，不直接推 REPORT。
+  - `worker_tick` 里 analyze 结束时（成功，或失败但已转入重试/最终失败，二者都算）推一次 REPORT，参数取 analyze 的 trade_date 与 user_id；成功时照旧再推 TRACKING。analyze 的重试后来成功时，再推一次 REPORT，日报按既有指纹规则生成新修订或不变。
+  - 为什么不让 beat 在 17:30 同时推两个：worker 多副本时 REPORT 可能先于 analyze 完成，日报会误记 `pipeline.analysis`。链式推送在单副本、多副本下都成立。
+  - 推链若丢失（worker 在推 REPORT 前崩溃），由已有的 REPORT intent 与 `recover_task` 补推。
+- 17:30 时取数未完成或失败（与 §8.4、`daily-snapshot-from-bars.md` §11.3 一致，不另设规则）：日报照常生成，不等取数，不重跑 analyze。
+  - 取数事务未提交或失败：analyze 记 `daily_bars_not_ready`，日报 gaps 有 `pipeline.daily_bars_not_ready`（today S6）。
+  - 取数在 17:30 后才完成的标的：记 `daily_bars_after_asof:<code>`，当日不求值，当天不回填进日报；这些行仍是完成版，次日作为历史 bar。
+  - 不采用「等取数完成再出日报」：会让 17:30 日报变成不定时，且与 as_of 截止口径冲突。
+- 容量提示（非阻断，运维观测）：实测串行约 1.85 秒/次，17:15–17:30 的 15 分钟最多约 480 次。日常范围（持仓 ∪ 自选）超过约 480 只时，超出部分必然落入 `daily_bars_after_asof`，属于如实缺口。
+- 日报 17:30 只改钟点，不改 `CODE_MAP_TIME`（18:30，每月一次的北交所代码对照）。
+
+G/W/T（新单 N1，后端）：
+- `test_report_slot_is_1730_chained_after_analyze`（新）：Given `covered` 为 True，北京时间每 5 分钟一个 now / When `slot_jobs` / Then ANALYZE 与 REPORT 只在 17:30、17:35、17:40 出现，slot 为「当日 YYYYMMDD:1730」；18:30 窗口里没有 REPORT（只剩月初的 SYNC_CODE_MAP）。
+- `test_beat_1730_pushes_analyze_only_records_both_intents`（新）：Given 假 Redis、开市日 17:31 / When `beat_slots` 两次 / Then 队列只有一个 ANALYZE；ANALYZE 与 REPORT 的 intent 各一条。
+- `test_worker_pushes_report_after_analyze_ok_or_failed`（新）：Given 队列里一个 ANALYZE，分别让它成功、抛错 / When `worker_tick` / Then 成功时队列为 TRACKING 与 REPORT；失败时队列有 REPORT，`jobs:delayed` 有 ANALYZE 的重试。
+- `test_report_1730_with_fetch_not_done_lists_gap`（新，连库，归测试隔离库）：Given 当日无取数运行记录 / When analyze 与 REPORT 依次运行 / Then 日报 ready，gaps 含 `pipeline.daily_bars_not_ready`，没有等待或重跑。
+
+### 9.2 新加持仓、自选自动补 3 年历史
+
+- 触发点：`confirm_import`（导入持仓确认成功，事务提交后）与 `add_watchlist`（POST /watchlist 返回 201 后）。只对「本次新进入 `daily_universe` 的代码」触发；导入撤销、自选删除不触发。
+- 入队：复用 `daily_bars_fetch` 任务，不新增任务名。`daily_bars_fetch_task` 新增可选参数 codes（已规范化的代码列表，非空时只取这些代码，且须是该 owner `daily_universe` 的子集，否则任务记 `ValueError` 失败，不出网）。参数为：
+  - trade_date：取「最近一个已可取的开市日」，即复用 `cli/daily_bars_backfill._default_trade_date` 的规则（开市日 17:45 前取前一开市日）。所以开市日 17:00–17:45 期间加入的股票**不补当日**，当日 bar 由 17:15 批或次日批负责；
+  - window_trading_days：`backfill_window_days(conn, trade_date, 3)`；日历不足 3 年时为 None，此时不入队，记一条 skipped 运行，issue 为 `calendar_not_covered`；
+  - user_id：本人；codes：新代码；trigger：import 或 watchlist。
+- 时间窗：开市日北京时间 [17:00, 17:45) 内触发的，不立即入队，放进 `jobs:delayed`，到 17:45 再放出；这一窗口与 17:15 批共用串行单连接（§9.3），避免把 17:15 批挤成 locked。回填批在开市日运行到 17:00 时，剩余标的按 §9.3 顺延到 17:45。
+- 去重（已有足够历史不重复补）：新增 `backfill_ready(conn, code, trade_date, window)`，满足任一即视为已就绪、不入队、不请求：
+  - daily_bars 里该代码在窗口内每个开市日都有行（停牌行也算）；
+  - 该代码已有一次 ok 的回填运行覆盖同一窗口，且最早一行晚于窗口起点（上市晚于窗口，源已确认没有更早历史）。
+  - 同一代码同一 trade_date 的入队另用 Redis `SET NX` 去重键，TTL 同 `SLOT_TTL_S`，防止反复添加删除自选导致重复入队。
+- 默认 LIMIT=0、源为 off 或不出网时：照常入队；任务记 skipped 运行，issue 为 `daily_bars_source_off` 或 `daily_bars_http_budget_unset`，stats 带 codes 与 window。这条运行记录就是「待补」记录；API 不报错、不改变 201 或确认结果，也不出网。单 D 开放后，待补项不靠另一张表：由 `backfill_ready` 从数据推出，运维跑一次 `daily-bars-backfill --years 3 --apply` 即可补齐，已就绪的自动跳过。
+- 无新迁移。
+
+G/W/T（单 A2，后端）：
+- `test_confirm_import_enqueues_backfill_for_new_codes_only`（新）：Given 已有持仓 A 的完整 3 年行，导入新增 B / When `confirm_import` 成功 / Then 队列恰有一个 daily_bars_fetch，codes 只含 B，window 等于 `backfill_window_days` 的结果。
+- `test_add_watchlist_enqueues_single_code_backfill`（新）：Given 开市日 16:00 / When POST /watchlist 加 C / Then 201，队列有一个 daily_bars_fetch，codes 只含 C，trade_date 为前一开市日。
+- `test_backfill_trigger_1700_1745_delayed_not_today`（新）：Given 开市日 17:10 加自选 / Then 队列为空，`jobs:delayed` 一条，放出时刻为当日 17:45，trade_date 为前一开市日；17:44:59 仍在 delayed，17:45:00 放出。
+- `test_backfill_ready_skips_enqueue`（新）：Given C 的窗口行齐全，或已有 ok 回填运行且最早行晚于窗口起点 / Then 不入队。
+- `test_backfill_dedupe_key_once_per_day`（新）：Given 同日两次添加、删除、再添加 C / Then 只入队一次。
+- `test_backfill_limit_zero_records_pending_no_network`（新）：Given 源为 mairui、上限常量为 0 / When 运行 / Then transport 0 次、`egress.mairui_get` 0 次，skipped 运行带 codes 与 `daily_bars_http_budget_unset`；POST /watchlist 仍为 201。
+- `test_fetch_task_codes_must_be_universe_subset`（新）：Given codes 含不在本人范围内的代码 / Then 任务失败为 ValueError，transport 0 次。
+
+### 9.3 每批上限与断点续跑（取代 §8.1 哨兵与 §8.6 U3 的保守默认）
+
+- 用户原话「按不突破上限设置，然后多次续接」。落地为：**每批**有上限，**每日**仍不封顶（Q1 不变），一批用完自动接下一批。
+- 常量（`app/ingest/daily_bars.py` 模块常量，不进 Settings，不读环境变量、回执或 CLI 参数）：
+  - `DAILY_BARS_BATCH_LIMIT`：默认整数 0；开放后的值为 500。17:15 日常批、§9.2 新股补历史、`daily-bars-backfill --apply` 回填批、§9.6 全市场回填批**共用这一个上限**。
+  - 硬上界 `DAILY_BARS_BATCH_CEILING` 为 500。
+  - 为什么只有一个 500：用户被告知的方案是「每批 500 次上限，自动续接下一批……全市场 3 年 5,577 次约 12 批」（5,577 ÷ 500 ≈ 12），用户据此答「按不突破上限设置，然后多次续接」。编排者另写的「回填每批 ≤2,000」用户没有见过，不采用（出入见 `reports/T-A142.md`）。
+- 删除：`DAILY_BARS_HTTP_UNLIMITED`、`DAILY_BARS_HTTP_LIMIT`、`daily_bars_http_budget`、`DailyBarsBudget` 的 unlimited 分支。不再有「不限」取值。
+- 判定（纯函数 `daily_bars_batch_budget(value) -> DailyBarsBudget`，两种结果）：
+  - 正整数 n 且 n 不超过 `DAILY_BARS_BATCH_CEILING`：**capped(n)**；
+  - 其他一切（0、负数、布尔、None、字符串、浮点、超过硬上界的整数）：**unset**，不建 outbox，transport 0 次，记 `daily_bars_http_budget_unset`，运行 skipped。超过硬上界不截断，而是拒绝。
+- 开放：单 D 以一次经评审的代码提交，把 `DAILY_BARS_BATCH_LIMIT` 从 0 改为 500；须用户本人批准首次实调，提交说明引用本节与用户原话。其他任何途径都不能改变它。
+- 「直到做完」：续接不设批数上限。唯一的停止条件是做完、STOP/HALT/103/429，或下文的「无进展」保护（防空转，不是额度）。
+- 一批的执行：
+  - 串行、单连接：日常批、补历史批、回填批共用同一把锁（`LOCKED_TASKS` 里的 daily_bars_fetch 锁），同一时刻只有一个批在出网；`ingest.yaml` 并发仍为 1。
+  - 计数单位是 transport 调用次数，不是标的数。回填标的的计划次数为 ceil(W/k)（§8.3）；只有剩余额度不少于该标的的计划次数时才开始它，否则它和其后的标的都顺延，避免半个标的。
+  - 结构上界保留：一批的调用次数不超过 min(计划次数, 上限)。
+  - 遇 STOP、HALT、103、429：整批立即停，不重试，写 HALT，剩余标的记 `daily_bars_upstream_halted`；**不续接**，HALT 由运维人工清除后才恢复（§8.1 规则不变）。
+- 达到上限：剩余标的记 `daily_bars_quota_deferred`（沿用现有 issue），运行状态 partial。
+- 断点续跑（幂等）：
+  - 不存游标。每一批开始时按代码排序（`daily_universe` 的顺序，补2）重新算「未就绪」集合，只请求未就绪的：日常批的就绪是该代码当日已有完成版行；回填批的就绪是 `backfill_ready`。已就绪的不再请求；写入仍是 DO NOTHING 幂等。
+  - 续接：一批以 `daily_bars_quota_deferred` 结束，且本批至少让一个标的变为就绪、没有 HALT 时，`worker_tick` 立即推下一批（同参数，另带 batch_seq 加 1）。本批没有任何进展时不续接，记一条 issue `daily_bars_resume_stalled`，防止空转。
+  - 开市日 17:00–17:45 窗口内不跑回填批与补历史批：运行中到 17:00 时剩余标的顺延（issue 同上），续接批放进 `jobs:delayed`，17:45 放出。日常批不受此限。
+  - 日常批续接到 17:30 之后取到的行，按 §9.1 当日不进日报，次日作为历史。
+- fetched_at 口径（§8.4）、回执校验（§8.1 ②）、`DAILY_HTTP_LIMIT` 为 1 与 `live_budget_issue()`：都不变。
+
+G/W/T（单 C2，后端）：
+- `test_batch_limits_default_zero`（取代 `test_daily_http_limit_unchanged` 中关于 `DAILY_BARS_HTTP_LIMIT` 与哨兵的断言，其余断言不动）：Given 导入模块 / Then `DAILY_BARS_BATCH_LIMIT` 为 0，`DAILY_BARS_BATCH_CEILING` 为 500，模块里没有 `DAILY_BARS_HTTP_UNLIMITED`；`DAILY_HTTP_LIMIT` 为 1，`live_budget_issue()` 不变。单 D 合入时同一提交把第一项期望改为 500。
+- `test_batch_budget_resolution_table`（取代 `test_http_budget_resolution_table`）：Given 0、1、500、501、2000、-1、True、None、字符串 500、500.0 / Then 1 为 capped(1)，500 为 capped(500)，其余 unset。
+- `test_batch_cap_defers_rest_and_continues`（取代 `test_budget_cap_reached_defers_rest`）：Given monkeypatch 日常上限为 3，5 个标的 / When 第一批 / Then transport 3 次，2 条 `daily_bars_quota_deferred`，队列有续接批；续接批 transport 2 次，前 3 个不再请求，合计写 5 行。
+- `test_resume_skips_ready_codes_idempotent`（新）：Given 5 个标的里 3 个当日已有完成版行 / When 一批 / Then transport 恰 2 次。
+- `test_resume_stalled_no_infinite_loop`（新）：Given 假 transport 始终返回空数据 / Then 不续接，记 `daily_bars_resume_stalled`。
+- `test_batch_halts_on_stop_halt_103_429_no_continue`（取代 `test_unlimited_still_halts_on_stop_103_429` 与 T-T73 的三条 `test_unlimited_halts_on_*`）：Given 上限 monkeypatch 为 5，四组分别为运行前有 STOP、有 HALT、第 2 次 103、第 2 次 429 / Then STOP 与 HALT 组 0 次，103、429 组恰 2 次，剩余记 `daily_bars_upstream_halted`，不续接、不重试。
+- `test_backfill_whole_code_or_defer`（新）：Given 上限 monkeypatch 为 3，每标的计划 2 次 / Then 第一批只做 1 个标的（2 次），第 2 个顺延。
+- `test_backfill_batch_stops_at_1700_resumes_1745`（新）：Given 开市日 16:59:58 开始的回填批，假时钟每次调用推进 1 秒 / Then 到 17:00 停，剩余顺延，续接批在 `jobs:delayed`，放出时刻 17:45。
+- `test_limit_not_widened_by_env_or_receipt`（改）：断言对象换成两个上限常量，其余不动。
+- `test_calls_never_exceed_plan_or_cap`（取代 `test_unlimited_no_cap_calls_equal_planned`）：Given 上限 10、5 个标的单日 / Then transport 恰 5 次。
+
+### 9.4 运维（单 D 之前可做的只读准备，及单 D 内容）
+
+- 固定出口 IP：ingest 出网只走一个固定出口，避免 60 秒内超过 2 个 IP 触发 103；Windows 部署上同样只允许一个出网进程。
+- 单连接：`ingest.yaml` 并发保持 1。
+- 单 D 的批准内容须写明：每批上限 500、首次实调的次数与时段、`DAILY_BARS_SOURCE` 设为 mairui、回执安装。用户本人批准后才开单。
+
+### 9.5 §8.6 的 U1–U3 结案
+
+- U1：日报 17:30，见 §9.1。U2：自动补 3 年，见 §9.2。U3：每批上限加续接，见 §9.3。
+- 仍未答：Q2 复权因子（保守不变）；全市场「只存不推」（卡片 t811s2739，见 §9.6，未确认前不做全市场）；5 次小实调与退市股（单 D 前置）。
+- 通达信融合另见 `daily-bars-tdx.md`。
+
+### 9.6 全市场数据只存不推（待用户确认，卡片 t811s2739）
+
+- 含义：全市场（market 主数据里 stock 且 listed 的全部代码）的日 K 只进 `market.daily_bars`，只供策略复测等研究用途；**不进** Q4 的日报范围，不进 analyze、owned 快照、日报、today。
+- 边界（不随数据量变化）：
+  - 日报范围只由 `daily_universe`（持仓 ∪ 本人有效自选）决定，本节不改它；
+  - `build_owned_snapshot` 与 `_load_bars` 只按 `daily_universe` 的代码读，库里多出的代码不进快照；
+  - `reports/service.build` 与 `aggregates/service.today` 不新增任何按全库扫描 daily_bars 的读取；
+  - 不新增读取全市场日 K 的 API；研究读取入口另开单定。
+- 写入入口：`daily-bars-backfill` 新增参数 scope，取值 owned（默认）或 market。market 由模块常量 `RESEARCH_MARKET_SCOPE_ENABLED`（默认 False）把关，为 False 时 CLI 拒绝，退出码非 0，不入队。用户确认本节后，以一次评审提交改为 True。经麦蕊写入还须单 D；经通达信离线导入不需要单 D（`daily-bars-tdx.md`）。
+- 规模（T-A136）：5,577 只 × 3 年，1 次/只，约 12 批（每批 500）。
+- G/W/T（单 A2 / 测试）：
+  - `test_market_rows_not_in_snapshot_report_today`（新，连库，测试隔离库）：Given 库里有不在本人范围内的代码 Z 的完成版行 / When analyze、REPORT、GET /today / Then 快照 instruments、日报 body、today 响应里都没有 Z。
+  - `test_backfill_scope_market_refused_by_default`（新，不连库）：Given 常量为 False / When `daily-bars-backfill --scope market --apply` / Then 退出码非 0，队列为空。
+  - `test_daily_universe_unchanged_by_market_rows`（新）：Given 同上 / Then `daily_universe` 的结果与没有 Z 时相同。
+
+### 9.7 哪些现在就能做，哪些要等单 D
+
+「现在」指离线、fake 源或打桩 transport 下可开发可测，默认部署 0 次出网；「单 D 后」指用户本人批准首次实调之后。
+
+| 项 | 现在就能做 | 单 D 后才能做 |
+| --- | --- | --- |
+| §9.1 日报 17:30（N1） | 全部：`slot_jobs`、`beat_slots`、`worker_tick` 链式推送、today 常量 | — |
+| §9.2 自动补 3 年（A2） | 触发、入队、`backfill_ready` 去重、17:00–17:45 延后、LIMIT=0 记待补 | 真实补齐（运维跑一次 `daily-bars-backfill --years 3 --apply`） |
+| §9.3 每批上限与续接（C2） | 常量与判定、续接与幂等、停止规则，全部用打桩 transport 测 | 把 `DAILY_BARS_BATCH_LIMIT` 改为 500；固定出口 IP 的实网核验 |
+| §9.6 全市场只存不推 | 边界与拒绝用例 | 经麦蕊写全市场（另须用户确认 §9.6 并改 `RESEARCH_MARKET_SCOPE_ENABLED`） |
+| 通达信（`daily-bars-tdx.md`） | 迁移、离线导入、核对 CLI（对 fake 行或已有行） | 与真实麦蕊行的交叉核对；「麦蕊回填被拒」兜底的实际触发 |

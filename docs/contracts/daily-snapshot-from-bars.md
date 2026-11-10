@@ -235,7 +235,7 @@ instrument（每个 `daily_universe` 标的一个，除非被 omitted）：
   - 删除「查不到证书就跳过这半句」的分支（cb96fba 报告该半句当前被跳过，属静默）。B 实现不读证书表，不受影响。
 - **J10 `slot_jobs` / `schedule`：**
   - `schedule(settings)` 是纯函数，须实际调用，断言其键与 `TASKS` 中对应函数都不来自 daily_snapshot 模块。
-  - `slot_jobs` 在 17:30、18:00、18:30 窗口内会连库，保留源码静态检查。
+  - `slot_jobs` 在 17:15、17:30、18:00 窗口（以及月初 `CODE_MAP_TIME` 18:30）内会连库，保留源码静态检查。（T-A142：REPORT 已移到 17:30 并紧跟 analyze，见 `daily-bars-source.md` §9.1。）
   - 补一条：对 `workers/jobs.py` 全文静态扫描，不出现 build_owned_snapshot、daily_bars_ready、daily_snapshot。理由：只比 `__module__` 会漏掉在 jobs 里包一层的任务。
 - **J11 日报「估值不取该日」的观测面：** 观测 `reports/service.build` 写出的 daily_reports 行。
   - Given：仅本例内去掉 u1 的 H 持仓行，使账户估值可计算。（**已由 T-A137 细化**：持仓明细只追加，改为本例内追加一份 version_no=2 的持仓快照，只含 A、B，同时去掉 H 和无行情的 ETF D；`build` 的 now 须满足 §12.3。）
@@ -411,7 +411,7 @@ instrument（每个 `daily_universe` 标的一个，除非被 omitted）：
 
 ### 11.5 只有用户能定的
 
-- 新增的 U1（日报生成时刻）、U2（新标的自动补历史）、U3（每批防失控上限）列在 `daily-bars-source.md` §8.6。Q2 仍待定，维持保守。
+- 新增的 U1（日报生成时刻）、U2（新标的自动补历史）、U3（每批防失控上限）列在 `daily-bars-source.md` §8.6。（T-A142：三项均已由用户答复，见 `daily-bars-source.md` §9.5。）Q2 仍待定，维持保守。
 
 ## 12. 无行情标的与测试前置条件（T-A137）
 
@@ -463,3 +463,11 @@ T-T71b 歧义 1 里的「v2」是用例 28 追加的 **version_no=2 持仓快照
 - 测试（非阻断）：e41967a 的 `_seed_b` 在公共种子里给 u1 加了有效自选 E。af77bb5 的 `daily_universe` 只取持仓，所以当前 28/28 绿；但 §11.1 规定公共种子不加自选行，A 补丁单让 `daily_universe` 纳入自选后，用例 4、20、22 等会因多出 E 而变红。须在 A 补丁单落地之前，把 E 的自选行移到用例 14 和 §11.1 列出的新用例里。
 - 测试（非阻断）：§10.3 原先没有写播种 feature_catalog 这一步，T-T71b 自行补做，现已写入 12.2。
 - 不归本契约（非阻断，既有）：`selfchecks/test_tb76_assembly`、`test_tb76_daily` 里三例在 50835e3 与 af77bb5 上同样失败（worker 在 ANALYZE 成功后同一 tick 执行 TRACKING；只有 entry 规则的卡被 conclusion 的反证/失效校验打断）。须另开允许改 selfchecks 的后端单处理。
+
+## 13. 用户 11-10 答卡对快照的影响（T-A142）
+
+- 日报 17:30（`daily-bars-source.md` §9.1）：REPORT 在 analyze 结束后由 `worker_tick` 推出。快照仍由 analyze 首次过闸时惰性生成；REPORT 不触发快照，也不重建快照。§11.3 的晚到规则不变：17:30 后才取到的行当日记 `daily_bars_after_asof:<code>`，当天不回填进日报，次日作为历史 bar。
+- 自动补历史（§9.2）与每批续接（§9.3）只往 daily_bars 写完成版历史行，DO NOTHING 幂等；快照按 `daily_bars_ready` 与 `build_owned_snapshot` 的既有口径读取，不新增字段，`OWNED_VERSION` 不变。
+- 开市日 17:00–17:45 不跑补历史与回填批，所以 analyze 的 17:30 读取不会与回填写入并发。
+- 静态扫描（§10 J10）照旧：新加的 REPORT 链式推送与续接代码里不得出现 build_owned_snapshot、daily_bars_ready、daily_snapshot 字样。
+- G/W/T（测试）：`test_daily_snapshot_not_a_task`（不变）；`test_late_fetch_row_used_as_history_next_day`（不变）；`test_backfill_rows_visible_next_snapshot`（新）：Given B 在 11-09 由补历史写入 3 年行 / When 以 11-10 build / Then B 的 bars 含补入的历史开市日行，且都为完成版。

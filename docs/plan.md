@@ -708,7 +708,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
    - 日报行文字：`highlights` = 当前建议各策略 `reasons` 去重后前 3 条；`invalidation` = 各策略 `invalidation` 去重；`next_watch` 在 MVP 恒为 `[]`，列入 T-B79。没有建议的行三项都是 `[]`，不写模板套话。
    - `SuggestionSummary`：`actions[]` 增加 `lifecycle`，`simulating` 时前端标“模拟中”（T-A14 第 4 条）；`top_score` = 各策略 `score` 的最大非 null 值，全为 null 时为 null。
    - `/today.focus`：从本人全部行中取（不受 `/terminal` 300 行截断影响）持仓 ∪ 重点关注，持仓按 `weight_pct` 降序在前，重点关注按加入时间；最多 50 条，超出时 `more=true`。终端被截断时不再 503。
-   - `/terminal`、`/today` 不再用 503 表示“未接线”：没有记录就是空集合，有记录按契约 §7.3 既有定义聚合。保留的 503 只有 T-A12 的 `CALENDAR_NOT_COVERED`。
+   - `/terminal`、`/today` 不再用 503 表示“未接线”：没有记录就是空集合，有记录按契约 §7.3 既有定义聚合。保留的 503 只有 T-A12 的 `CALENDAR_NOT_COVERED`。另有一处配置缺失时的 503：`aggregates.calendar` 的 `market_clock` 在交易日找不到 market_rules 分段时返回 `503 MAINTENANCE`（details.issue=`market_rule_segment_missing`），属规则配置缺口，不是“未接线”，与产品有无无关（T-A149 核对 be/T-B133=7d161ad）。
    - 日历覆盖起点之前没有前一开市日：`change_from_previous` 按第 4 条处理；补 2025 年末前序开市日由研究员按 T-R16 同一受审流程补，不阻塞 MVP。
    - T-B78 增加断言：置信度可由 `components` 按本条公式重算；`engine_policy` 非空且与库中版本一致；`important_count` 与 `/reconciliation` 重算一致；跨日 `change_from_previous` 的 new/changed/unchanged/removed 与无基准 null 各一例；“模拟中”标记可见。
 6. **需用户决定的产品问题**：无。权重 0.5/0.3/0.2 与分级阈值沿用本节已定公式，本裁定只补定义。

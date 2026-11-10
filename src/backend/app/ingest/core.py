@@ -130,13 +130,14 @@ class IngestCore:
         events. Lock busy / timeout / store error → escalate and deny (wall ≤3s).
         B-1: merge ``escalated_until`` with ``later`` so an in-memory fail-closed
         pause is never shortened by an empty DB snapshot after recovery.
-        L-2: flush any pending pause mark under the same lock (clear after commit).
+        L-2/L9: after a successful read commit, one-shot ``_try_flush_pending`` in a
+        *separate* transaction (clear pending only after that commit succeeds). Merging
+        flush into the read txn would clear pending on a single BudgetEngine(ok=1) connect.
         """
         esc = self.cfg.ip_limited_escalate
         mem = self._user_mem(user_id)
         if self.engine is None:
             return
-        pending_clear = False
         try:
             with self.engine.connect() as conn, conn.begin():
                 # T-A89: wall-clock bound ≤3s for the admit-path lock wait.
@@ -150,11 +151,6 @@ class IngestCore:
                     pause_s=esc.pause_s,
                     now=now,
                 )
-                if mem.pending_escalation is not None:
-                    ipl.flush_pending_escalation(conn, mem)
-                    pending_clear = True
-            if pending_clear:
-                mem.pending_escalation = None
             ipl.merge_rehydrated(mem, loaded)
         except Exception:  # noqa: BLE001 — fail-closed (lock timeout / store error)
             mem.hits.clear()
@@ -162,6 +158,8 @@ class IngestCore:
                 mem.escalated_until, ipl.fail_closed_until(now, esc.pause_s)
             )
             return
+        # L-2: separate txn so a flush failure keeps pending (T-A81 L9 / T-B112 L-6).
+        self._try_flush_pending(user_id)
 
     def upsert(
         self,

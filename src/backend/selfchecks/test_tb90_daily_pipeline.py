@@ -40,6 +40,9 @@ from app.db.tables.notify import notifications
 from app.db.tables.users import users
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.ingest import daily_lists as ingest
+
+# Bound before any monkeypatch so multi-run_synthetic tests wrap the real body.
+_REAL_PROCESS = ingest.process
 from app.ingest.vault import LicenceVault
 from app.licences.seal import seal_licence
 from app.main import create_app
@@ -227,10 +230,10 @@ def run_synthetic(
             return response
         return 200, [{"dm": code[:6], "mc": name} for code, name in NAMES.items()]
 
-    original = ingest.process
-
     def injected(engine: Any, ident: uuid.UUID, grant: daily.Grant | None, **_: Any) -> str:
-        return original(
+        # Always call the real process (not a prior injected wrapper from an earlier
+        # run_synthetic in the same test — those ignore new wire/temp/halt closures).
+        return _REAL_PROCESS(
             engine,
             ident,
             grant,
@@ -504,10 +507,21 @@ def test_existing_temp_replaced_and_halt_preserved(
     assert halt.read_bytes() == b"limit_103_or_429"
     assert temp.read_text() == "other-process-synthetic-file"
     # Second run without halt: leftover regular TEMP is replaced (T-B115) then cleaned.
+    # Fixture note (T-B116c): daily.request is same-day idempotent and returns the failed
+    # batch; publish_pending only xadds status=requested. Re-arm after clearing HALT so
+    # tick actually runs process → temporary() unlinks residue then remove_owned cleans.
+    # (Business temporary() already implements T-B115 replace+clean; HALT is never auto-cleared.)
     halt.unlink()
     temp.write_text("stale-again")
     temp.chmod(0o600)
+    with e.owner.begin() as conn:
+        conn.execute(
+            update(batches)
+            .where(batches.c.id == bid)
+            .values(status="requested", error_code=None)
+        )
     bid2 = new_batch(e)
+    assert bid2 == bid
     state2, calls2, _ = run_synthetic(e, bid2, monkeypatch)
     assert state2 == "fetched"
     assert len(calls2) == 3

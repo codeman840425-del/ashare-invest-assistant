@@ -48,12 +48,12 @@ probe_egress() {
 }
 
 # 容器内无 wget/curl/python 时（例如 dev 的 postgres/redis）：不改服务镜像，共用其网络命名空间。
-# 镜像与 database.md 相同，用 alpine:3.21（含 wget）。若本机没有该标签，先在有出网的环境下
-# docker pull alpine:3.21，不要对业务镜像 --pull always。
+# 镜像与 database.md 相同，用 alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab（含 wget）。若本机没有该标签，先在有出网的环境下
+# docker pull alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab，不要对业务镜像 --pull always。
 probe_egress_sidecar() {
   local svc="$1" url="${2:-http://1.1.1.1}" cid
   cid="$(deploy/scripts/compose.sh ps -q "$svc")"
-  docker run --rm --network "container:${cid}" alpine:3.21 wget -T 5 -q -O - "$url"
+  docker run --rm --network "container:${cid}" alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab wget -T 5 -q -O - "$url"
 }
 ```
 

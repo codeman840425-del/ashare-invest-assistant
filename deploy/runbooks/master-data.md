@@ -19,11 +19,15 @@ deploy/scripts/up.sh                                           # 正常部署（
 deploy/scripts/master-bootstrap.sh --check; echo "rc=$?"       # 只读：0 不需要 / 10 需要 / 3 未就绪
 # rc=10 时，确认这台主机可以访问交易所网站后：
 deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch
+# 若还要在合并来源后重建公开检索词条（后端默认关闭；不另启外呼）：
+deploy/scripts/master-bootstrap.sh --rebuild-search-terms      # 默认 dry-run：不联网、不写库
+deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch --rebuild-search-terms
 ```
 
 - `--check` 不联网、不改库：查 `market.master_runs` 是否存在、是否已有成功记录，以及镜像里有没有 CLI 模块。
 - `--run` 不带 `--confirm-network-fetch` 一律拒绝；`CI` / `GITHUB_ACTIONS` 非空时拒绝。
-- `--run` 用 opt-in profile 跑 compose 服务 `master-bootstrap`（`compose.sh --profile master-bootstrap run --rm --no-deps -T`，不走 worker、不启动 ingest），
+- `--rebuild-search-terms` 对应后端已有入口 `python -m app.cli master-bootstrap --rebuild-search-terms`（T-B97：默认 `False`，只在显式开关下于合并同事务后重建词条，不联网另呼）。单独给该开关是 dry-run，脚本只打印将要传递的参数，不调用 compose、不写库。真正写入必须同时带 `--run --confirm-network-fetch`；缺确认或在 CI 里同样拒绝。
+- `--run` 用 opt-in profile 跑 compose 服务 `master-bootstrap`（`compose.sh --profile master-bootstrap run --rm --no-deps -T`，需要时在服务名后附加 `--rebuild-search-terms`；不走 worker、不启动 ingest），
   结束后再查一次：必须出现 `status='ok'` 的记录才算成功；失败可直接重跑。不要绕过本脚本直接 `compose run`。
 
 ## 3. 退出码与处理

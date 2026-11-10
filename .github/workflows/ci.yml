@@ -507,6 +507,8 @@ jobs:
       # 网络拆分（T-O68）：非登记服务不得接入 aia_egress / aia_edge；发布端口须走无伪装的 aia_edge
       - name: check_compose_networks.py
         run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_compose_networks.py
+      - name: check_alpine_pin.py
+        run: python3 scripts/ci/check_alpine_pin.py
 
   # 源码不得被 .gitignore 误伤（T-O09a）：已跟踪源码被规则命中、相对引用指向被忽略的文件、
   # 敏感词文件名探针（licence.ts 等）被宽规则命中，都失败。正反例在 scripts/ci/tests/test_ignored_sources.py。

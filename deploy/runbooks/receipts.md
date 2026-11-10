@@ -13,7 +13,7 @@ prefix="$(deploy/scripts/compose.sh --get AIA_VOLUME_PREFIX)"
 # 虚构示例内容；真实收据由授权流程产生，不要把证书明文写进手册或提交进仓库。
 docker run --rm --network none --user 0 \
   -v "${prefix}_aia_receipts:/run/aia/receipts" \
-  alpine:3.21 \
+  alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
   sh -c 'set -e
     install -d -o root -g root -m 0755 /run/aia/receipts
     cat > /run/aia/receipts/mairui-daily.json <<EOF
@@ -30,7 +30,7 @@ EOF
 prefix="$(deploy/scripts/compose.sh --get AIA_VOLUME_PREFIX)"
 docker run --rm --network none --user 0 \
   -v "${prefix}_aia_receipts:/run/aia/receipts:ro" \
-  alpine:3.21 \
+  alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
   sh -c 'set -e
     echo "dir $(stat -c "%U:%G %a %n" /run/aia/receipts)"
     echo "file $(stat -c "%U:%G %a %n" /run/aia/receipts/mairui-daily.json)"

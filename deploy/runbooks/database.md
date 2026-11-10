@@ -86,7 +86,7 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
 - **原始导入文件卷 `<卷前缀>_imports` 要和 dump 一起备份**（评审 8cf9771 n4）：`app.import_files` 只存元数据，
   文件本体（用主密钥派生密钥加密）在卷里；只恢复 dump 不恢复卷，导入记录会指向不存在的文件。
   ```bash
-  docker run --rm --network none -v <卷前缀>_imports:/v:ro -v /data/backup:/out alpine:3.21 \
+  docker run --rm --network none -v <卷前缀>_imports:/v:ro -v /data/backup:/out alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
     sh -c 'umask 077 && tar -C /v -czf /out/imports-<UTC>.tgz . && chmod 600 /out/imports-<UTC>.tgz'
   stat -c '%a %n' /data/backup/imports-<UTC>.tgz    # 应为 600（T-A04 ⑨：umask + chmod 实际执行，不只是注释）
   ```
@@ -124,7 +124,7 @@ deploy/scripts/db-restore.sh <dump> --db aia_restore_check --drop-existing
    restore 之后旧数据的 HMAC 与加密文件全部失效，而且不会报错。
 3. `db-restore.sh` 恢复数据；**再恢复导入文件卷**（评审 8cf9771 n4；顺序：主密钥 → 库 → 导入卷）：
    ```bash
-   docker run --rm --network none -v <卷前缀>_imports:/v -v /data/backup:/in:ro alpine:3.21 \
+   docker run --rm --network none -v <卷前缀>_imports:/v -v /data/backup:/in:ro alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab \
      sh -c 'tar -C /v -xzf /in/imports-<UTC>.tgz && chown -R 10001:10001 /v && chmod 700 /v'
    ```
    恢复前卷必须是空的（新主机上第 2 步起的空卷）；不要解压到已有文件的卷上。

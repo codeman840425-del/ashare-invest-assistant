@@ -144,6 +144,45 @@ def test_run_lock_prevents_concurrency(fake: Path) -> None:
     assert "python -m app.cli.master_bootstrap" not in _calls(fake)
 
 
+def test_rebuild_search_terms_default_is_dry_run(fake: Path) -> None:
+    r = _run(fake, "--rebuild-search-terms")
+    assert r.returncode == 0, r.stderr
+    assert "dry-run" in r.stderr and "--rebuild-search-terms" in r.stderr
+    assert "不会联网" in r.stderr or "不会写库" in r.stderr
+    assert _calls(fake) == ""
+    assert not (fake / "ran").exists()
+
+
+def test_rebuild_search_terms_run_requires_confirm(fake: Path) -> None:
+    r = _run(fake, "--run", "--rebuild-search-terms")
+    assert r.returncode == 4 and "--confirm-network-fetch" in r.stderr
+    assert _calls(fake) == ""
+    assert not (fake / "ran").exists()
+
+
+@pytest.mark.parametrize("var", ["CI", "GITHUB_ACTIONS"])
+def test_rebuild_search_terms_refused_in_ci(fake: Path, var: str) -> None:
+    r = _run(fake, "--run", "--confirm-network-fetch", "--rebuild-search-terms", **{var: "true"})
+    assert r.returncode == 4 and "CI" in r.stderr
+    assert _calls(fake) == ""
+    assert not (fake / "ran").exists()
+
+
+def test_run_passes_rebuild_search_terms_to_cli(fake: Path) -> None:
+    r = _run(fake, "--run", "--confirm-network-fetch", "--rebuild-search-terms")
+    assert r.returncode == 0, r.stderr
+    calls = _calls(fake)
+    assert "--profile master-bootstrap" in calls
+    assert "master-bootstrap" in calls and "--rebuild-search-terms" in calls
+    assert (fake / "ran").exists()
+
+
+def test_run_without_rebuild_flag_does_not_pass_it(fake: Path) -> None:
+    r = _run(fake, "--run", "--confirm-network-fetch")
+    assert r.returncode == 0, r.stderr
+    assert "--rebuild-search-terms" not in _calls(fake)
+
+
 def test_usage_errors(fake: Path) -> None:
     assert _run(fake).returncode == 2
     assert _run(fake, "--check", "--run").returncode == 2

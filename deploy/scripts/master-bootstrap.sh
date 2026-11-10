@@ -3,6 +3,9 @@
 # 首次导入要联网拉交易所公开名单，所以是**显式的手动步骤**：up.sh、compose 服务、CI 都不调用本脚本（CI 测试守着）。
 #   master-bootstrap.sh --check                                # 只读：判断是否需要执行（不联网、不改库）
 #   master-bootstrap.sh --run --confirm-network-fetch          # 需要时执行一次；已完成则跳过（幂等）
+#   master-bootstrap.sh --rebuild-search-terms                 # 默认 dry-run：只说明将把该开关传给 CLI，不联网、不写库
+#   master-bootstrap.sh --run --confirm-network-fetch --rebuild-search-terms
+#        在首次导入合并来源后显式重建检索词条（后端 app.cli master-bootstrap --rebuild-search-terms，默认关闭）
 # --check 退出码：0 = 不需要（已有 status='ok' 的 master_runs）；10 = 需要；3 = 未就绪（表不存在 / CLI 未交付）；其余 = 出错。
 # --run：先做 --check；不需要就直接成功退出；需要才用 opt-in profile 跑 master-bootstrap 服务
 #        （compose.sh --profile master-bootstrap run --rm --no-deps -T，不启动 ingest、不走 worker），
@@ -18,17 +21,26 @@ CLI_MODULE="app.cli.master_bootstrap"
 die() { echo "master-bootstrap: $1" >&2; exit "${2:-2}"; }
 log() { echo "master-bootstrap: $*" >&2; }
 
-mode=""; confirm=0
+mode=""; confirm=0; rebuild_terms=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) [ -z "$mode" ] || die "--check 与 --run 只能选一个"; mode=check; shift ;;
     --run) [ -z "$mode" ] || die "--check 与 --run 只能选一个"; mode=run; shift ;;
     --confirm-network-fetch) confirm=1; shift ;;
-    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+    --rebuild-search-terms) rebuild_terms=1; shift ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) die "未知参数：$1" ;;
   esac
 done
-[ -n "$mode" ] || die "用法：master-bootstrap.sh --check | --run --confirm-network-fetch"
+if [ -z "$mode" ]; then
+  if [ "$rebuild_terms" = 1 ]; then
+    log "dry-run：--rebuild-search-terms 已识别，不会联网、不会写库"
+    log "真正写入须：master-bootstrap.sh --run --confirm-network-fetch --rebuild-search-terms"
+    log "后端入口：python -m app.cli master-bootstrap --rebuild-search-terms（默认关闭；只在显式开关下重建词条，不另启外呼）"
+    exit 0
+  fi
+  die "用法：master-bootstrap.sh --check | --run --confirm-network-fetch [--rebuild-search-terms] | --rebuild-search-terms"
+fi
 
 # 统一入口（测试可替换 COMPOSE）
 cmp() { "$COMPOSE" "$@"; }
@@ -86,7 +98,13 @@ case "$rc" in
   *) exit "$rc" ;;
 esac
 
+cli_args=()
+if [ "$rebuild_terms" = 1 ]; then
+  cli_args+=(--rebuild-search-terms)
+  log "将向 CLI 传递 --rebuild-search-terms（合并来源后显式重建检索词条）"
+fi
 log "开始首次导入（profile master-bootstrap，--rm --no-deps，不走 worker）"
-cmp --profile master-bootstrap run --rm --no-deps -T master-bootstrap || die "$CLI_MODULE 失败；查看上面的输出后重试（幂等）" 1
+cmp --profile master-bootstrap run --rm --no-deps -T master-bootstrap "${cli_args[@]}" \
+  || die "$CLI_MODULE 失败；查看上面的输出后重试（幂等）" 1
 [ "$(db_state)" = done ] || die "CLI 退出 0 但没有 status='ok' 的 master_runs 记录，视为失败" 1
 log "完成：已有 status='ok' 的主数据同步记录，可以开放服务"

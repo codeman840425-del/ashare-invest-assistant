@@ -110,7 +110,7 @@ job_gateway-limits()  {  # 与 CI 同步（T-O10/T-O13）：静态规则 + 有 d
   pyrun scripts/ci/check_gateway_limits.py || return 1
   if docker info >/dev/null 2>&1; then bash scripts/ci/nginx_limits_smoke.sh both; else echo "（没有 docker，跳过 nginx_limits_smoke.sh；CI 会跑）"; fi
 }
-job_secret-boundary() { pyrun scripts/ci/check_secret_boundary.py && pyrun scripts/ci/check_compose_logging.py; }
+job_secret-boundary() { pyrun scripts/ci/check_secret_boundary.py && pyrun scripts/ci/check_compose_logging.py && python3 scripts/ci/check_alpine_pin.py; }
 job_secret-scan() {
   gitleaks_bin
   if [ -n "$base_sha" ] && git merge-base --is-ancestor "$base_sha" "$sha" && [ "$base_sha" != "$sha" ]; then

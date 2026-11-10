@@ -1349,7 +1349,7 @@ evidence: Evidence[]
 3. 通知 refs 只按显式历史关系建立；不补通知、不重置已读、不虚增 merged_count/version。
 4. 降级必须完全可逆；0025 不得固定抛错冒充回滚，0026 降级前保留完整 refs，再升恢复；旧键冲突条件拒绝并保持事务/事实，不静默合并或丢数据。0027 维护窗口升降级复验仍为发布门槛。
 
-#### 7.11.5 ingest 麦蕊统一出口（内部接口，status: draft；T-A87 / M-1，T-A89 修订 M-2，T-A91 修订 M-a/M-b/M-c 与两层守卫；风控，须异源复核 R12/R14–R19）
+#### 7.11.5 ingest 麦蕊统一出口（内部接口，status: draft；T-A87 / M-1，T-A89 修订 M-2，T-A91 修订 M-a/M-b/M-c 与两层守卫，T-A92 补运行时层缺口与验收口径；风控，须异源复核 R12/R14–R19）
 
 不是 HTTP 接口，是 ingest 进程内的 Python 契约，实现见 plan.md「T-A87 M-1 IngestCore 外呼接线」。T-A89 修订第④条（证书状态以库为准、lease 不可伪造）并补 B-1(a)/B-2 契约要求。T-A91 修订：①拆成静态层（有限清单 S1–S6）与运行时层（`sys.addaudithook`，方案 A）两层并写明各自不负责的写法；②lease 改为 HMAC＋线程绑定＋`pg_locks` 核验（M-a）；④补准入 3s 时限与超时对齐（M-b）、状态写库失败同时写 HALT 与退出码 74（M-c）。
 
@@ -1357,6 +1357,7 @@ evidence: Evidence[]
    - **①a 静态层（A1s，AST 全量解析；只管下列 S1–S6，清单的增删须架构师改本条）**：
      - **S1 probes 冻结清单**：`src/backend/probes/` 下的 `.py` 文件以 41e517a 的 24 个文件为冻结清单（由守卫内常量逐一列出），清单外出现任何 `.py`（含子目录）即红。其中只有 `probes/common.py`、`probes/tb81.py`、`probes/tb86_history.py` 3 个文件允许同时含麦蕊域名与 HTTP 客户端导入；其余 21 个出现两者同现即红。（订正：T-A89 文案「恰好 3 个白名单文件、新增即红」指能外呼的 3 个文件；若按「3 个之外任何 .py 即红」，现存 21 个探针会全部误红，故改为冻结清单。）`app/` 不得导入 `probes`；dockerignore 白名单不含 probes。
      - **S2 egress 私有名**：egress 外（`app/`、`probes/`、`selfchecks/` 中的非测试代码）以任何静态形式——绝对导入、相对导入（`from .egress import …`）、别名（`import app.ingest.egress as E` 后 `E.X`）、`from … import *`、任意表达式上的 `.attr`——引用 `_https_get`、`HOST`、`_ISSUED_LEASES`、`_LEASE_LOCK_CONN`、`_lease_key`/签发闭包，或 egress 中任何下划线开头的名字，即红。测试文件（`tests/**`、`selfchecks/test_*`）可 monkeypatch `transport`，但不得读写上述私有名（A28 的反例夹具除外，须带 `# A28-negative` 标记且只在子进程中运行）。
+     - **S2b netguard 窗口 API（T-A92）**：egress 外（同上范围）以任何静态形式引用 `app.ingest.netguard` 的 `egress_window`、`_egress_window`、`register_resolved_ip` 或 netguard 中任何下划线名即红；`app/workers/ingest.py` 只许 `install`，egress 只许上述窗口 API 与 `EgressBlocked`。测试文件只能在子进程中使用（A1r 正向）。
      - **S3 网络库导入**：`app/` 内除 `app/ingest/egress.py` 外，静态导入（`import x` / `from x import y` / 相对导入解析后）下列模块即红：`http.client`（含 `from http import client`）、`urllib.request`（含 `from urllib import request`）、`urllib3`、`requests`、`httpx`、`aiohttp`、`socket`、`ssl`。**登记例外（穷举）**：`app/master/sources.py` 只许 `urllib.request`/`urllib.error`/`urllib.parse`（交易所，worker 侧）；`app/workers/ingest.py` 只许 `import socket` 且只用 `socket.gethostname`（AST 断言除 `.gethostname` 外无其他 `socket.` 属性）；`app/ingest/netguard.py`（①b 新建）只许 `socket`、`ipaddress`。数据库/Redis 客户端库（psycopg、redis）不在本清单内。
      - **S4 麦蕊域名字面量**：`app/` 内除 egress（及 netguard 的域名常量）外，任何字符串常量（含 f-string 片段、bytes）匹配 `mairuiapi`（大小写不敏感）即红；`app/master/sources.py` 同样不得出现。
      - **S5 transport 注入**：`app/` 内（egress 之外）向 `mairui_get` 注入 transport（`transport=` 关键字，或经 `**kwargs` 字典的 `"transport"` 键）即红。**登记例外（唯一）**：`app/ingest/daily_lists.py` 的 `process(upstream=…)` 测试缝（41e517a `:273-289`，`get_kwargs["transport"] = upstream`）；同时 `app/` 内任何调用 `process(...)` 时传 `upstream` 即红（只有 `tests/**`、`selfchecks/test_*` 可传）。生产只用默认 `_https_get`。
@@ -1364,11 +1365,15 @@ evidence: Evidence[]
    - **①b 运行时层（A1r；ingest 进程内，T-A91 选定方案 A 为主）**：新建 `app/ingest/netguard.py`，在 `app/workers/ingest.py` 的 `main()` **第一行**（`legacy_licence_present()` 之前、导入 `app.config`/sqlalchemy 连接之前）调用 `netguard.install()`，用 `sys.addaudithook` 安装一次（重复调用为 no-op；钩子不可卸载）。钩子的状态（域名集合、放行窗口、已批准 IP）只保存在 `install()` 的闭包里，不设模块级可写全局。判定规则：
      - `socket.getaddrinfo` / `socket.gethostbyname(_ex)`：主机名（去尾点、小写、IDNA 解码后）等于 `mairuiapi.com` 或以 `.mairuiapi.com` 结尾 → 仅当**当前线程**处于 egress 放行窗口时允许，否则拒绝。
      - `socket.connect` / `socket.connect_ex`（`socket.create_connection`、http.client、urllib3、requests、httpx 都经过它）：`AF_UNIX`、回环、RFC1918/ULA 私网地址（compose 内 postgres/redis）直接允许；**公网地址一律默认拒绝**，除非当前线程处于放行窗口且该 IP 是本窗口内由 egress 解析麦蕊域名得到、并已登记进窗口的地址。这样 IP 字面量直连、拆串域名解析后直连都被拒。
+     - **（T-A92 补）** 同一规则适用于 `socket.sendto` / `socket.sendmsg` 中带目的地址的调用（UDP、TCP Fast Open 不经 connect）。`connect`/`sendto` 的地址若不是 IP 字面量（主机名，由 C 层自行解析、**不**触发 `socket.getaddrinfo` 审计事件）→ 一律拒绝（窗口内亦然；egress 只按 IP 建连，redis/http.client 经 `create_connection` 先解析再按 IP 连接，不受影响）。T-A92 实测 ab7ec5b：`s.connect(("<解析到公网的任意主机名>", 443))` 越过钩子直达内核 connect。
      - `subprocess.Popen`、`os.system`、`os.exec`、`os.posix_spawn`、`os.spawn`、`os.fork`（及 `os.forkpty`）：ingest 进程安装钩子后一律拒绝（ingest 无合法子进程需求，41e517a 上 `app/ingest`、`app/workers/ingest.py` 无 subprocess 调用）。
      - `ctypes.dlopen`：安装后默认拒绝（psycopg 为 `[binary]` C 扩展，不经 ctypes）；如后端实测有合法加载，须在 netguard 中按库名穷举登记并经 R19 复核。
+     - **（T-A92 补）** `install()` 在 `sys.addaudithook` 之前先 `import ctypes`（让 `pythonapi` 的 `dlopen(None)` 在钩子前完成）；安装后 `ctypes.dlopen` **含 `None`** 一律拒绝（`CDLL(None)` 可取到已加载 libc 的 `connect`）；`ctypes.dlsym` 只放行 `Py`/`_Py` 前缀符号（挡 `pythonapi.connect` 一类）。T-A92 实测 ab7ec5b：`ctypes.CDLL(None).connect` 可取得。
      - **放行窗口**：只有 egress 能开，形式为 `with _egress_window(lease):`，只包住第⑦步 transport 调用；窗口绑定 `threading.get_ident()` 与 lease 的签发线程，进入时再核一次 lease（②），退出（含异常）即关闭并清空已批准 IP。`_https_get` 在窗口内先自行 `getaddrinfo(HOST)` 并把结果登记进窗口，再按 IP 建连（SNI/Host 仍用域名）。
+     - **（T-A92 补）窗口不得默认放行**：`egress_window(lease, validate)` 的 `validate` 为必填，缺失或返回假即 `EgressBlocked`，不设 `lambda: True` 一类默认值；`register_resolved_ip` 只在本线程已开窗口时生效。T-A92 实测 ab7ec5b：`egress_window(None)` 无核验即开窗，再登记任意公网 IP 即可连接。
      - **拒绝**：钩子抛 `EgressBlocked(RuntimeError)`（新异常类，定义在 netguard，不属于 §7.11.5③ 的 `EgressDenied` code 集合）。同时写一行审计日志（logger `app.ingest.netguard`，WARNING，字段只有：事件名、目标类别 `mairui_dns`/`public_ip`/`subprocess`/`ctypes`、线程是否持窗口；**不写** URL、路径、证书、完整 IP 或调用栈原文），并计数到心跳的 `netguard_blocks`（可选，键名由后端定）。拒绝不写 HALT（不是上游限流），但调用方按 transport 失败处理（`core.complete(NETWORK)`，本批失败）。
      - **测试方式**：钩子不可卸载，所以 A1r 每个用例在**子进程**（`python -c`，或 `-X importtime` 无关）里先 `netguard.install()` 再执行绕过写法；整套在 `unshare -n` 无网命名空间 + conftest 屏蔽 DNS 下运行。被拦 ⇒ 子进程看到 `EgressBlocked`；被放行 ⇒ 看到 `gaierror`/`OSError`（无网），以此区分，**全程不可能真实连到麦蕊**。性能：钩子对每个审计事件都会调用，本机实测空钩子约 0.16µs/事件，判定只对上述事件做字符串/IP 比较，可忽略。
+     - **（T-A92 澄清）测试安全网不得遮蔽钩子**：子进程中的防误连措施**不得**在 Python 层替换 `socket.getaddrinfo`、`socket.socket.connect` 等函数（替换后 C 层审计事件不再触发，测到的是测试自己的拦截）；改为在 `netguard.install()` **之后**再 `sys.addaudithook` 追加测试钩子（审计钩子按注册顺序执行，产品钩子先判，放行后才轮到测试钩子抛 OSError），或用 `unshare -n` / `--network none`。正向窗口用例必须经 `_https_get` 的解析登记或显式 `register_resolved_ip` 后再连，并传入 `validate`。
    - **①c 静态层与运行时层都不负责（明确排除；A1r 只覆盖其中可由钩子拦截的部分）**：
      - 静态层**不负责**：`importlib.import_module`/`__import__`/`getattr`/`vars()`/`globals()` 取名、`exec`/`eval` 构造代码（app/ 内只由 S6 登记报红，目标不判断）、拼接或拆开的域名字符串、`sys.modules` 反射、pickle/codecs 等间接执行、C 扩展、`ctypes`、子进程（`subprocess` 起 curl/wget/python）、socket 直连 IP 字面量、第三方库内部发起的连接。这些由①b 在运行时拦截，A1r 逐项给出反例。
      - 运行时层**也拦不住**（残余，归 R19，由评审与威胁模型说明兜底）：C 扩展或已加载的共享库直接调用 libc `connect`/`getaddrinfo`（不触发 Python 审计事件）；安装钩子之前已经建立的连接或已加载的扩展（故必须在 `main()` 第一行安装）；钩子闭包被同进程代码通过 `gc`/`__closure__` 篡改；ingest 之外的进程（worker、api、用户电脑上的 probes）。容器间纵深防御见①b 之外的方案 B（运维，plan §T-A87 第 6 节）。
@@ -1376,6 +1381,7 @@ evidence: Evidence[]
    - `EgressLease` **只能**由 `single_egress` 签发。**核验不得只看「在不在注册表里」或对象身份**（T-A90 M-a：往 `_ISSUED_LEASES`/`_LEASE_LOCK_CONN` 塞假项即可放行）。T-A91 要求：
      - 签发方持有进程内随机密钥（`secrets.token_bytes(32)`，进程启动时生成，只保存在签发/核验函数共享的闭包里，不落盘、不出现在模块级名字、不进日志）。lease 携带 `nonce`、`thread_id`（签发线程 `threading.get_ident()`）、`lock_pid`（锁会话的 `pg_backend_pid()`）和 `mac = HMAC-SHA256(key, nonce‖thread_id‖lock_pid)`。
      - `mairui_get` 核验全部满足才放行：① mac 用 `hmac.compare_digest` 校验通过；② 当前线程 == `thread_id`（**lease 绑定线程**，跨线程复用即拒）；③ 签发方内部记录中该 nonce 仍未释放；④ 在锁会话上查询 `pg_locks`（`locktype='advisory' AND pid=pg_backend_pid() AND granted`，objid 对应 `hashtext('ingest:single-egress')`），确认锁仍由本会话持有；该查询受④的同一 3s 预算约束，超时按不通过处理。任一不通过 → `single_egress_not_held`（沿用既有 5 个 code，不新增）。
+     - **（T-A92 补）** ④ 的 `pg_locks` 查询在锁会话上以短事务执行：先 `SET LOCAL statement_timeout = 剩余预算`，查完立即提交/回滚，锁会话在 transport 期间不得处于 idle in transaction（§4「不在任何事务内发 HTTP」）。
      - 公开字段可以保留 `held: bool`，但**不得**仅凭 `held` 放行。
    - **威胁模型边界（不承诺达不到的保证）**：本条防的是仓库内代码（包括误写、偷懒的旁路）自造、复制、跨线程复用或往注册表塞项来绕过 single-egress。**同进程任意代码执行**（读取闭包密钥、`gc` 遍历对象、ctypes 改内存、替换 egress 函数）属于威胁模型之外，HMAC 只抬高门槛，不构成对它的保证；这一类由①b 运行时层（网络/子进程拦截）与代码评审兜底（R18/R19）。
 3. **出口函数**：`mairui_get(*, lease: EgressLease, core: IngestCore | None, engine: Engine, licence_id: UUID, user_id: UUID, path: str, secret: str, priority: Priority, clock: Callable[[], datetime], stop: Path, halt: Path, transport: Callable[[str, str], tuple[int, object]] = _https_get) -> EgressResult`。
@@ -1392,7 +1398,7 @@ evidence: Evidence[]
    - 终态 / 暂停态集合：`INVALID`、`PAUSED_BY_ADMIN`、`EXPIRED`（以及契约既有的 `invalid` / `ip_limited` 等非 active 取值）。`core.upsert` 与 `core.rehydrate` **不得**把这些状态降回 active；若内存状态与库不一致，取更严的一方（任一为终态/暂停 → 按不可用处理）。
    - 上游返回 **102**，或本地判定进入 `INVALID` / `PAUSED_BY_ADMIN` / `EXPIRED`：状态变化必须**先写库，再处理后续调用**；写库成功后本调用照常 `core.complete`，以后每次拒绝 `licence_unavailable`。
    - **状态写库失败（M-c，T-A91）**：102 或终态的状态写库失败时，必须**同时写 HALT 标志**（`/run/aia/state/halt/` 下的停机标志，内容固定为 `licence_status_persist_failed`，O_EXCL、0600、fsync；已存在视为成功），内存标记 INVALID，并拒绝本调用 `core_denied`，transport 不再增加。
-     - 重启后 HALT 仍在（ingest 独占具名卷 `ingest_state`），第①步即 `halt_present`，所以库里仍是 active 也不会再放行（T-A90 实测 41e517a 重启后第 2 次 transport 的缺口由此关闭）。
+     - 同进程的下一次调用与重启后，HALT 都仍在（ingest 独占具名卷 `ingest_state`），第①步即 `halt_present`（T-A92 澄清：A26 的后续期望值即 `halt_present`，不是 `licence_unavailable`/`core_denied`），所以库里仍是 active 也不会再放行（T-A90 实测 41e517a 重启后第 2 次 transport 的缺口由此关闭）。
      - **HALT 也写失败**：写一行固定文案（`ingest 致命：证书状态与停机标志均无法持久化`，不含路径、证书、异常原文）到 stderr，随即 `os._exit(74)`（sysexits `EX_IOERR`）。不用 `sys.exit`/异常，因为 transport 外层有 `except BaseException`（L-c），异常可能被吞。退出码约定核对（41e517a）：`78`（EX_CONFIG）已用于启动拒绝（`MAIRUI_LICENCE`/`APP_MASTER_KEY`/Settings/engine 不可用，`workers/ingest.py:40`），`74` 未被占用，专用于「运行中安全状态无法持久化」，与启动拒绝区分。
      - 配套启动检查：`bootstrap_ingest_core` 在 engine 探测之后，对停机标志目录做一次可写探测（O_EXCL 创建 `.probe-<pid>` 再删除，不触碰任何 HALT 文件），不可写 → 退出码 78 拒绝启动。因此「HALT 不可写」的容器在 `restart: unless-stopped` 下只会反复 78，不会外呼。
      - 残余（R18）：库写入失败与 HALT 写入失败同时发生、且重启时两者都已恢复，库仍为 active、HALT 不存在 → 重启后最多再发 1 次外呼（上游会再回 102，此时按正常路径落库）。

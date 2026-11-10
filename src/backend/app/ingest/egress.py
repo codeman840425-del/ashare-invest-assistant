@@ -49,6 +49,7 @@ EGRESS_DENIED_CODES = frozenset(
     }
 )
 ADMIT_BUDGET_S = 2.8
+WINDOW_RECHECK_BUDGET_S = 0.5  # T-A93: ⑦ lease re-check, independent of admit deadline
 HALT_PERSIST_FAILED = b"licence_status_persist_failed"
 HALT_LIMIT = b"limit_103_or_429"
 _FATAL_HALT_MESSAGE = "ingest 致命：证书状态与停机标志均无法持久化"
@@ -164,8 +165,8 @@ def _conn_holds_single_egress(conn: object, deadline: float | None = None) -> bo
         return False
     commit = getattr(conn, "commit", None)
     rollback = getattr(conn, "rollback", None)
-    # Admit path (②): remaining admit budget. Window re-check (⑦ entry, after
-    # admit): no admit budget left to share, so bound by ADMIT_BUDGET_S.
+    # Admit path (②) passes the admit deadline. Window re-check (⑦) passes an
+    # independent 0.5s deadline (T-A93); SET LOCAL uses the remaining budget.
     remain = ADMIT_BUDGET_S if deadline is None else deadline - time.monotonic()
     if remain < 0.2:
         return False
@@ -501,7 +502,7 @@ def mairui_get(
         raise EgressDenied("halt_present")
 
     try:
-        with ng.egress_window(lease, lambda: _lease_is_valid(lease, deadline)):
+        with ng.egress_window(lease, lambda: _lease_is_valid(lease, time.monotonic() + WINDOW_RECHECK_BUDGET_S)):
             status_code, body = transport(path, secret)
     except ng.EgressBlocked:
         core.complete(dispatched, Signal.NETWORK, clock())

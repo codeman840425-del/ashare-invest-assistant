@@ -169,6 +169,8 @@ def _bind() -> tuple[
         # Contract (T-A92): validate is required; missing or false → EgressBlocked.
         # No default lambda: True. A None lease is also refused (A1r ⑬).
         if lease is None or validate is None or not validate():
+            # T-A93: window refusal is category=lease (closed set). Not in a window yet.
+            _audit_log("egress_window", "lease", in_window=False)
             raise EgressBlocked("lease")
         tid = threading.get_ident()
         windows[tid] = set()

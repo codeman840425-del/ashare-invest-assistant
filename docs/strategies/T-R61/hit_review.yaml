@@ -1,0 +1,120 @@
+# T-R61 命中逐条人工复核（policy_hit → semantic_truth）
+# 判定标准：docs/strategies/T-R60/sampling_plan.md §3（预注册，事后不改）
+# 本文件由研究员逐条判定；policy_hit / categories / flags 由冻结匹配器给出。
+# semantic_truth ∈ {true, false, undetermined}；undetermined 不计 FP/FN，单列。
+version: 1
+reviewed_at: '2026-11-10 北京时间'
+matcher_sha256: 68f4a533e6418e0eda06fd8006ef04cbd212e01cadddde1c08783a0320dfcbc0
+lexicon_version: f23_lexicon_v2_1
+hits: 18
+false_positives: 2
+undetermined: 0
+rows:
+  - ann_id: '1225662730'
+    code: '600537'
+    title: 亿晶光电科技股份有限公司关于公司破产重整具有重大不确定性暨退市风险的提示公告
+    categories: [insolvency]
+    semantic_truth: true
+    note: 破产重整不确定性 + 退市风险提示，实质风险
+  - ann_id: '1225664188'
+    code: '300892'
+    title: 关于参与山东泰山啤酒股份有限公司破产重整投资的公告
+    categories: [insolvency]
+    semantic_truth: false
+    note: '【FP-1】本公司作为投资方参与他方破产重整，非自身破产；标题含“破产重整”即命中，属关键词越界'
+  - ann_id: '1225663947'
+    code: '300598'
+    title: 关于控股股东、上市前员工持股平台自愿承诺未来六个月不通过二级市场主动减持公司股份的公告
+    categories: [controller_selldown, controller_equity]
+    semantic_truth: false
+    note: '【FP-2】承诺不减持（利好/中性），被误判为减持：否定词表只含“不减持/未减持”整串，“不通过二级市场主动减持”未覆盖；direction_down 亦错'
+  - ann_id: '1225664419'
+    code: '002081'
+    title: 关于子公司被列入失信被执行人名单及银行账户部分资金被冻结的公告
+    categories: [shareholder_pledge_freeze]
+    semantic_truth: true
+    note: 失信被执行人 + 账户冻结，实质风险
+  - ann_id: '1225664401'
+    code: '300716'
+    title: 关于控股股东及一致行动人部分股份被司法冻结、轮候冻结的公告
+    categories: [shareholder_pledge_freeze]
+    semantic_truth: true
+    note: 控股股东股份司法冻结/轮候冻结
+  - ann_id: '1225664262'
+    code: '002124'
+    title: 关于与产业投资人签署《重整投资协议》暨预重整进展的公告
+    categories: [insolvency]
+    semantic_truth: true
+    note: 预重整进展（自身）
+  - ann_id: '1225664261'
+    code: '002124'
+    title: 关于收到法院延长预重整期限决定书的公告
+    categories: [insolvency]
+    semantic_truth: true
+    note: 预重整期限延长（自身）
+  - ann_id: '1225664232'
+    code: '002731'
+    title: 关于公司股票进入退市整理期交易的第六次风险提示公告
+    categories: [delisting_risk]
+    semantic_truth: true
+    note: 退市整理期风险提示
+  - ann_id: '1225664151'
+    code: '603377'
+    title: 关于被债权人申请重整及预重整的进展公告
+    categories: [insolvency]
+    semantic_truth: true
+    note: 被申请重整进展（自身）
+  - ann_id: '1225663461'
+    code: '000712'
+    title: 关于股东股份被司法拍卖的进展公告
+    categories: [shareholder_pledge_freeze]
+    semantic_truth: true
+    note: 股东股份司法拍卖
+  - ann_id: '1225663460'
+    code: '000752'
+    title: 关于普通破产债权确认纠纷诉讼（2026）藏01民初37号案件的公告
+    categories: [insolvency]
+    semantic_truth: true
+    note: 破产债权确认纠纷诉讼（重大诉讼且与破产相关）
+  - ann_id: '1225663459'
+    code: '000785'
+    title: 关于实际控制人发生变更暨股东权益变动的进展公告
+    categories: [controller_equity]
+    semantic_truth: true
+    note: 实控人变更属治理重大变动，按既定保守口径计入（direction_unknown）
+  - ann_id: '1225663346'
+    code: '600491'
+    title: 龙元建设关于公开招募预重整投资人的公告
+    categories: [insolvency]
+    semantic_truth: true
+    note: 预重整招募投资人（自身）
+  - ann_id: '1225663292'
+    code: '600741'
+    title: 华域汽车关于公司股权收购相关事项监管工作函的回复公告
+    categories: [regulatory_action]
+    semantic_truth: true
+    note: 监管工作函（回复类不豁免，按 T-A151 口径计入）
+  - ann_id: '1225663038'
+    code: '000838'
+    title: 关于控股股东部分股份第三次司法拍卖结果的提示性公告
+    categories: [shareholder_pledge_freeze]
+    semantic_truth: true
+    note: 控股股东股份司法拍卖结果
+  - ann_id: '1225663035'
+    code: '002191'
+    title: 关于控股股东所持部分股份被司法拍卖的提示性公告
+    categories: [shareholder_pledge_freeze]
+    semantic_truth: true
+    note: 控股股东股份被司法拍卖
+  - ann_id: '1225665172'
+    code: '300147'
+    title: 关于被债权人申请重整的提示性公告
+    categories: [insolvency]
+    semantic_truth: true
+    note: 被债权人申请重整（自身）
+  - ann_id: '1225665173'
+    code: '300147'
+    title: 关于被债权人申请重整的专项自查报告
+    categories: [insolvency]
+    semantic_truth: true
+    note: 同事件的衍生披露，事件本身为实质风险（按 nr 去重规则各自计 1）

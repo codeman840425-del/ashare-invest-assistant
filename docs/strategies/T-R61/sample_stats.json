@@ -1,0 +1,18 @@
+{
+  "files": 54,
+  "rows_raw": 1620,
+  "dup_ids": 0,
+  "rows_dedup": 1620,
+  "non_a_share": 130,
+  "rows_kept": 1490,
+  "per_date": {
+    "2026-11-09": {
+      "rows": 360
+    },
+    "2026-11-10": {
+      "rows": 1260
+    }
+  },
+  "hits": 18,
+  "seed": 20261110
+}

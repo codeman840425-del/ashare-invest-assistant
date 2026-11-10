@@ -13,8 +13,8 @@ import { currentUser } from './session';
 
 const API = '/api/v1';
 const DEMO_UID = uid(2);
-/** 示例上限：沿用 fixtures 的演示值（契约 U3：真实默认取 config/realtime.yaml，前端不写死） */
-const DEFAULT_CAPS = { ...WATCHLIST.caps };
+/** 示例上限：与后端回落值 config/realtime.yaml 一致（watchlist.per_user_cap 100、watchlist.focus_cap 20，契约 ⑩/U3）；前端界面只读 caps，不写死 */
+const DEFAULT_CAPS = { watchlist: 100, focus: 20 };
 const GROUP_MAX = 32;
 const NOTE_MAX = 500;
 const ALLOWED_KEYS = new Set(['security_code', 'group', 'note']);
@@ -116,9 +116,13 @@ export const watchlistHandlers = [
 
   http.post(`${API}/watchlist`, async ({ request }) => {
     const u = currentUser()!;
+    // 契约 §5（T-A132）：请求体层 issue 对齐后端实测——空体 required、缺字段 required、未知键 unknown field；
+    // 其余请求体层 issue 是 pydantic 英文原句，mock 不复刻，前端只按状态码、错误码和 field 处理
+    const textBody = await request.text();
+    if (!textBody) return bad('body', 'required');
     let raw: unknown;
     try {
-      raw = await request.json();
+      raw = JSON.parse(textBody);
     } catch {
       return bad('body', 'invalid');
     }
@@ -133,8 +137,8 @@ export const watchlistHandlers = [
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return bad('body', 'invalid');
     const b = raw as Record<string, unknown>;
     const unknownKey = Object.keys(b).find((k) => !ALLOWED_KEYS.has(k));
-    if (unknownKey) return bad(unknownKey, 'extra_forbidden');
-    if (!('security_code' in b)) return bad('security_code', 'missing');
+    if (unknownKey) return bad(unknownKey, 'unknown field');
+    if (!('security_code' in b)) return bad('security_code', 'required');
     const group = textField(b.group, GROUP_MAX);
     if (!group.ok) return bad('group', group.issue);
     const note = textField(b.note, NOTE_MAX);

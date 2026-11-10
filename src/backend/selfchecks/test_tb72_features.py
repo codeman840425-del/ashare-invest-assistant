@@ -42,6 +42,7 @@ def inputs(n: int = 70) -> tuple[dict[str, Any], list[str], list[dict[str, Any]]
             {
                 "trade_date": day,
                 "first_seen_at": day + "T08:00:00+00:00",
+                "open": str(100 + i),
                 "close": str(100 + i),
                 "high": str(102 + i),
                 "low": str(98 + i),

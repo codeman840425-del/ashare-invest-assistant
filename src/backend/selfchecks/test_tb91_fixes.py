@@ -35,7 +35,26 @@ from selfchecks.test_p2n07_plans import payload
 
 SOCKET = "/tmp/tb70-tb91-owned-socket"
 REDIS = "unix:///tmp/tb91-owned-redis/redis.sock?db=0"
-AT = dt.datetime(2026, 11, 9, 10, tzinfo=SH)
+
+
+def _evaluation_clock() -> dt.datetime:
+    """10:00 Asia/Shanghai session used as the evaluation instant.
+
+    f28727d froze this at 2026-11-09 10:00+08, then one day ahead of the
+    commit. After that instant passed, HTTP/DB inserts had created_at > AT
+    and the PIT filter in plans/worker.py hid every plan. Keep the original
+    frozen value when it is still in the future; otherwise use tomorrow
+    10:00 so wall-clock created_at stays visible. Date-condition cases keep
+    their own November 2026 literals (16th 09:00, etc.).
+    """
+    frozen = dt.datetime(2026, 11, 9, 10, tzinfo=SH)
+    now = dt.datetime.now(SH)
+    if now < frozen:
+        return frozen
+    return (now + dt.timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+
+
+AT = _evaluation_clock()
 
 
 @pytest.fixture(scope="module")
@@ -98,6 +117,40 @@ def quote(
         prev_close=Decimal(prev) if prev else None,
         is_suspended=suspended,
     )
+
+
+def test_plan_created_after_evaluation_clock_is_excluded(env: Any) -> None:
+    """PIT canary for plans/worker.py: created_at <= at must hide later plans.
+
+    Temporarily dropping that predicate (uncommitted) must turn this test red.
+    """
+    engine, client, _, owner, _, settings = env
+    response = client.post(
+        "/api/v1/plans",
+        json=payload(
+            conditions=[
+                {
+                    "kind": "trigger",
+                    "type": "price_above",
+                    "params": {"price": "10"},
+                    "description": "合成",
+                }
+            ]
+        ),
+    )
+    assert response.status_code == 201, response.text
+    pid = response.json()["id"]
+    later = AT + dt.timedelta(seconds=1)
+    with engine.begin() as conn:
+        days(conn, AT.date(), AT.date())
+        lid = licence(conn, owner)
+        quote(conn, settings, lid, "11", "10")
+        conn.execute(
+            update(action_plans).where(action_plans.c.id == uuid.UUID(pid)).values(created_at=later)
+        )
+        result = check(conn, owner, AT, app_env="production")
+        assert all(o["plan_id"] != pid for o in result["observations"])
+        assert result["triggered"] == []
 
 
 def test_reviewed_synthetic_operands_only() -> None:
@@ -672,6 +725,22 @@ def test_actual_rc1_beat_to_worker_trigger_clear_replay_readonly(
     monkeypatch.setattr(jobs, "schedule", lambda s: {TASK: original(s)[TASK]})
     clock = [at]
     monkeypatch.setattr(jobs, "_now", lambda: clock[0])
+    # 49c6c79 (after T-B91) folds RC6 source gaps into stop_take extras, so an
+    # uncovered plan history leaves stop_take "unknown" and record() will not
+    # clear. This case is about RC1 beat/trigger/clear, so isolate RC6 here.
+    import app.risk.worker as risk_worker
+    from app.suggestions import risk as risk_settings
+
+    inner = risk_settings.effective_config
+
+    def without_rc6(conn: Any, user_id: Any, defaults: Any) -> Any:
+        cfg = inner(conn, user_id, defaults)
+        payload = cfg.model_dump()
+        payload["rc6_plan_violation"]["enabled"] = False
+        return type(cfg).model_validate(payload)
+
+    monkeypatch.setattr(risk_settings, "effective_config", without_rc6)
+    monkeypatch.setattr(risk_worker, "effective_config", without_rc6)
     r = redis.Redis.from_url(REDIS)
     try:
         r.delete(jobs.QUEUE_KEY, jobs.DUE_PREFIX + TASK)

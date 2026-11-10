@@ -164,6 +164,8 @@ def prepare(setup: Any) -> uuid.UUID:
 
 def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: Any) -> None:
     engine, client, stranger, owner, *_ = setup
+    expected = load_policy(ROOT / "config")
+    alternate_version = expected.version_no + 1
     instance = prepare(setup)
     assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok")]
     with engine.connect() as conn:
@@ -175,7 +177,7 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: An
         snapshot = conn.execute(
             select(data_snapshots).where(data_snapshots.c.id == candidate.snapshot_id)
         ).one()
-        assert snapshot.items["engine_policy_version_no"] == 1
+        assert snapshot.items["engine_policy_version_no"] == expected.version_no
         assert snapshot.items["content_sha256"]
         assert Decimal(snapshot.items["market_facts"]["price"]) > 0
         sid, cid = str(row.id), str(candidate.id)
@@ -223,14 +225,14 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: An
             select(data_snapshots).where(data_snapshots.c.id == row.snapshot_id)
         ).one()
         raw = load_policy(ROOT / "config").model_dump()
-        raw["version_no"] = 2
-        raw["system_components"][0]["version_no"] = 2
+        raw["version_no"] = alternate_version
+        raw["system_components"][0]["version_no"] += 1
         policy = EnginePolicyReference.model_validate(raw)
         seed(conn, policy)
         from app.db.tables.strategy import engine_policies
 
         pid = conn.execute(
-            select(engine_policies.c.id).where(engine_policies.c.version_no == 2)
+            select(engine_policies.c.id).where(engine_policies.c.version_no == alternate_version)
         ).scalar_one()
         content = SuggestionInput.model_validate(
             {**original.items["input"], "engine_policy_id": pid, "snapshot_id": uuid.uuid4()}

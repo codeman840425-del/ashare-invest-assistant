@@ -18,6 +18,11 @@ from selfchecks.test_tb70_replay import integration, no_network  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[3]
 FORMAL_REV = "3895963"
+POLICY_V2_REV = "3ede1c2"
+OFFICIAL_CARDS = (
+    ("hold_risk_monitor.md", "hold_risk_monitor", "H-01", 3),
+    ("sw_ma_trend_pullback.md", "sw_ma_trend_pullback", "W-01", 2),
+)
 
 
 def formal_catalog() -> str:
@@ -153,6 +158,52 @@ def test_version_local_applicability_unknown_and_no_cross_version_fallback() -> 
         assert result["matched"] is expected
     with pytest.raises(ValueError, match="mixed"):
         regime_source({"data_needs": old["data_needs"] + new["data_needs"]}, spec)
+
+
+def test_formal_offline_identities_snapshots_and_policy_digests(tmp_path: Path) -> None:
+    docs = [
+        (ROOT / "docs/strategies/cards" / name).read_text(encoding="utf-8")
+        for name, *_ in OFFICIAL_CARDS
+    ]
+    staged = validate_batch(docs, feature_registry(formal_catalog()))
+    by_key = {item.identity.key: item for item in staged}
+    assert len(by_key) == len(OFFICIAL_CARDS)
+    for _name, key, card_id, version_no in OFFICIAL_CARDS:
+        item = by_key[key]
+        card = item.blocks["strategy-card"]
+        spec = item.blocks["strategy-spec"]
+        assert card["card_id"] == card_id
+        assert item.identity.version_no == version_no
+        assert card["version_no"] == version_no
+        assert spec["version_no"] == version_no
+
+    generated = tmp_path / "generated"
+    files = generate_files(staged, generated)
+    assert {path.name for path in files} == {f"{key}.yaml" for _, key, *_ in OFFICIAL_CARDS}
+    for path in files:
+        committed = ROOT / "config/strategies" / path.name
+        assert path.read_bytes() == committed.read_bytes()
+
+    from app.engine_policies import load as load_policy
+
+    policy = load_policy(ROOT / "config")
+    assert policy.version_no == 3
+    hold = next(
+        component for component in policy.system_components if component.key == "hold_risk_monitor"
+    )
+    assert hold.version_no == by_key["hold_risk_monitor"].identity.version_no
+
+    historic_dir = tmp_path / "engine_policy_v2"
+    historic_dir.mkdir()
+    (historic_dir / "engine_policy.yaml").write_bytes(
+        subprocess.check_output(  # noqa: S603 - fixed approved local revision, no remote access
+            ["/usr/bin/git", "show", POLICY_V2_REV + ":config/engine_policy.yaml"],
+            cwd=ROOT,
+        )
+    )
+    historic = load_policy(historic_dir)
+    assert historic.version_no == 2
+    assert policy.digest() != historic.digest()
 
 
 def test_formal_v2_real_gates_no_g7(integration: Any, tmp_path: Path) -> None:

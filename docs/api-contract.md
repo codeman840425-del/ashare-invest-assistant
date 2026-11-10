@@ -393,7 +393,6 @@
 | `registration_mode` | `closed`（V1 默认）`invite` `open`（保留，V1 不用） |
 | `notification_target_type` | `suggestion` `candidate_signal` `plan_draft` `plan` `daily_report` `import_batch` `reconciliation` `strategy_version` `none` |
 | `notification_kind` | `suggestion_change` `invalidation` `daily_report` `alert` `import` `system` `reason_released` `plan_draft_ready` `plan_triggered` `strategy_health` `data_licence` |
-| `notification_ref_type` | `signal` `plan_condition`（`refs[].type`；`signal` 的 `id` = `signal_events.id`，`plan_condition` 的 `id` = `plan_conditions.id`，见 §7.8 通知合并） |
 | `severity` | `info` `attention` `important` |
 | `channel` | `in_app` `email` `wecom_app`（预留） |
 | `data_status` | `fresh` `stale` `pending` `partial` `unavailable`（含义见 1.1） |

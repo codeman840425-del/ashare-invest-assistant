@@ -90,7 +90,7 @@ deploy/scripts/wrapup/start-stack.sh --apply --backup-dir /data/aia-wrapup-backu
 5. **engine_policy seed**（脚本执行，见「engine_policy seed」节；不要再手动跑一遍）
 6. 再启 api / worker / beat / ingest / signal-rt / nginx
 
-不要加 `--profile master-bootstrap`。默认 dev/live 不会启动该服务。正式卡 v3 `--apply` 导入目前仍是「待补」，见「engine_policy seed」节。
+不要加 `--profile master-bootstrap`。默认 dev/live 不会启动该服务。正式卡 `--apply` 导入目前仍是「待补」，分两个阶段，见「正式卡 `--apply` 导入（待补）」节。
 
 ## 4. HALT 目录可写检查
 
@@ -253,15 +253,20 @@ seed 成功后再只读复查：`app.engine_policies` 按 `version_no` 降序的
 
 漏做 seed 的后果（T-A119）：库中完全没有政策行时，全部标的会记 `engine_policy_seed_missing` gap、不出建议；库中只有 v2 时会静默按 v2 运行，与审批的 v3 不符。
 
-### 正式卡 v3 `--apply` 导入（待补）
+### 正式卡 `--apply` 导入（待补）
 
 正式卡的 `--apply` 导入步骤**目前还没有**，此处标为「待补」，不要在本手册里用临时命令凑一套写入路径。实际入口是 `python -m app.cli.cards_import`（`--card` / `--catalog` / `--market-rules` 等；`--apply` 才写库，且从环境变量读 `DATABASE_URL`，缺则拒绝）。镜像不含 `docs/`，导入须另挂正式卡目录。**这一步导入须用户本人授权，不在 `standing-auth-2026-11-08.md` 范围内**；编排者不得在未获用户本人授权时下令 `--apply`。
 
-**S-01 升到 v2 之前，正式导入清单只能含 `hold_risk_monitor.md`（H-01）和 `sw_ma_trend_pullback.md`（W-01），不得列入 `st_pullback_ma.md`（S-01）。** 只读核对：`src/backend/app/strategy/cards/persistence.py` 在同卡同 `version_no` 且 `fields` 不等时抛 `ValueError("immutable_card_version_conflict")`（:118-120）；`cards_import.py` 的 `--apply` 在 `engine.begin()` 单事务里调用 `import_batch`（:64-71），一张卡冲突会让整批回滚。S-01 在 `version_no=1` 不变的情况下改过内容，再导会触发该冲突，H-01 v3 也会导不进。待研究员把 S-01 升到 v2 并完成导入后，再把 `st_pullback_ma.md` 加回清单。
+只读核对：`src/backend/app/strategy/cards/persistence.py` 在同卡同 `version_no` 且 `fields` 不等时抛 `ValueError("immutable_card_version_conflict")`（:118-120）；`cards_import.py` 的 `--apply` 在 `engine.begin()` 单事务里调用 `import_batch`（:64-71），一张卡冲突会让整批回滚。S-01（文件 `st_pullback_ma.md`）曾在 `version_no=1` 不变的情况下改过内容，再导 v1 会触发该冲突，H-01 v3 也会导不进。导入清单分两个阶段，**以部署树 / 即将部署的 main 上现行卡 `docs/strategies/cards/st_pullback_ma.md` 的 `version_no` 为准**（不要拣入未入 main 的研究分支）：
+
+- **阶段一（S-01 v2 尚未进入 main）**：现行 `st_pullback_ma.md` 仍是 `version_no: 1`。正式导入白名单**只能含** `hold_risk_monitor.md`（H-01）和 `sw_ma_trend_pullback.md`（W-01）。不得列入 `st_pullback_ma.md`，也不得导入 `docs/strategies/cards/history/` 下的冻结稿。
+- **阶段二（S-01 v2 已进入 main）**：现行 `st_pullback_ma.md` 的 `version_no` 为 **2**（v1 冻结在 `docs/strategies/cards/history/st_pullback_ma.v1.md`，只作历史，**不要导入 history 文件**）。导入清单可以加上 `st_pullback_ma.md`（v2）。v2 是新版本行，不会与库内已有 v1 触发同号冲突。导入完成后用下一节「阶段二」只读 SQL 核验。
+
+`deploy/` 下没有正式卡导入脚本入口，阶段切换只写在本手册，不靠脚本参数。
 
 ### 部署后只读 SQL 验证清单
 
-在已启动的 postgres 上跑（只读事务）。表名、列名和 `decision` 状态值以 `src/backend/app/db/tables/strategy.py`、`realtime.py` 与迁移 0001 为准。正式卡对外编号是 **H-01**，库里头表键是 `app.strategy_cards.key` / `app.strategies.key` = `'hold_risk_monitor'`（文档字段 `card_id: H-01` 在版本 `fields` 里，**不是** `strategy_card_versions.card_id` 列——该列是指向头表的 UUID）。
+在已启动的 postgres 上跑（只读事务）。表名、列名和 `decision` 状态值以 `src/backend/app/db/tables/strategy.py`、`realtime.py` 与迁移 0001 为准。正式卡对外编号是 **H-01** / **W-01** / **S-01**，库里头表键分别是 `hold_risk_monitor` / `sw_ma_trend_pullback` / `st_pullback_ma`（文档字段 `card_id` 在版本 `fields` 里，**不是** `strategy_card_versions.card_id` 列——该列是指向头表的 UUID）。H-01 各项在每次收口都核。S-01 的三项（`version_no=2`、`source_hash` 与 v2 文件一致、v1 审核不再作数）**只在阶段二、v2 已导入之后**再核；阶段一不要把「没有 S-01 v2 行」当成失败。
 
 ```bash
 deploy/scripts/compose.sh exec -T postgres \
@@ -328,8 +333,68 @@ LEFT JOIN app.engine_policies ep ON ep.id = s.engine_policy_id
 ORDER BY s.created_at DESC
 LIMIT 5;
 
+-- ----- 阶段二才跑：S-01 v2 -----
+-- S-01 最新版须为 2（库内 key=st_pullback_ma）
+SELECT c.key,
+       max(cv.version_no) AS latest_card_version_no,
+       max(sv.version_no) AS latest_strategy_version_no
+FROM app.strategy_cards c
+JOIN app.strategy_card_versions cv ON cv.card_id = c.id
+LEFT JOIN app.strategy_versions sv ON sv.card_version_id = cv.id
+WHERE c.key = 'st_pullback_ma'
+GROUP BY c.key;
+
+-- v2 行的 source_hash。导入器写法是
+-- hashlib.sha256(Path.read_text(encoding="utf-8").encode()).hexdigest()
+-- （cards_import.py:30，importing.py:103），存在 strategy_card_versions.fields->>'source_hash'。
+-- 这与 reviews.py:35 的 content_sha256（卡字段+策略配置的 JSON 摘要）不是同一个值。
+SELECT cv.version_no,
+       cv.fields->>'source_hash' AS source_hash
+FROM app.strategy_cards c
+JOIN app.strategy_card_versions cv ON cv.card_id = c.id
+WHERE c.key = 'st_pullback_ma'
+  AND cv.version_no = 2;
+
+-- v1 审核「不再作数」：strategy_promotion_reviews 没有 voided / 作废列，
+-- decision 取值仍只有 pending、approved、rejected、changes_requested（strategy.py:416）。
+-- 读时由 reviews.py:86-113 计算 stale：current_version 取该卡
+-- version_no 降序的最新 strategy_versions.id；binding.version_id 与之不等则为
+-- stale_reason='new_version'，require_approved 会拒绝用它晋级。
+-- 阶段二导入 v2 后，指向 version_no=1 的行 is_current_target 必须为 false。
+-- 不要 UPDATE / DELETE 这些旧行。指向 v2 的新 G7 是另一次审核，没有 approved 行
+-- 只说明 v2 尚未批准，并不表示 v1 审核仍可作数。
+SELECT r.id,
+       r.decision,
+       r.target_strategy_version_id,
+       r.card_version_id,
+       r.reviewed_at,
+       sv.version_no AS target_version_no,
+       r.compliance_lint->'binding'->>'version_id' AS bound_version_id,
+       cur.id AS current_strategy_version_id,
+       (r.target_strategy_version_id = cur.id) AS is_current_target
+FROM app.strategy_promotion_reviews r
+JOIN app.strategy_versions sv ON sv.id = r.target_strategy_version_id
+JOIN app.strategies s ON s.id = sv.strategy_id
+CROSS JOIN LATERAL (
+  SELECT sv2.id
+  FROM app.strategy_versions sv2
+  JOIN app.strategy_card_versions cv2 ON cv2.id = sv2.card_version_id
+  JOIN app.strategy_cards c2 ON c2.id = cv2.card_id
+  WHERE c2.key = 'st_pullback_ma'
+  ORDER BY cv2.version_no DESC, sv2.version_no DESC, sv2.id DESC
+  LIMIT 1
+) cur
+WHERE s.key = 'st_pullback_ma'
+ORDER BY sv.version_no, r.reviewed_at NULLS LAST, r.created_at;
+
 ROLLBACK;
 SQL
+```
+
+在同一台已挂出仓库树的机器上，用与导入器相同的方式算 v2 文件摘要，再和上面 `source_hash` 比对（只哈希现行 `docs/strategies/cards/st_pullback_ma.md`，不要用 `history/st_pullback_ma.v1.md`；先确认该文件 `version_no` 为 2）：
+
+```bash
+python -c 'from pathlib import Path; import hashlib; p=Path("docs/strategies/cards/st_pullback_ma.md"); print(hashlib.sha256(p.read_text(encoding="utf-8").encode()).hexdigest())'
 ```
 
 判定：
@@ -339,6 +404,7 @@ SQL
 - G7 审批：`app.strategy_promotion_reviews` 中至少有一行 `decision='approved'`，且 `target_strategy_version_id` 等于 H-01（`key='hold_risk_monitor'`）`version_no=3` 的 `app.strategy_versions.id`。没有这样的行则不要当成已通过（正式卡导入或审批可能尚未完成）。
 - `app.engine_policies` 最大 `version_no` 须为 **3**。
 - 首条**新**建议的 `engine_policy_version_no` 须为 **3**（在下一轮作业之后再核）。
+- **阶段二 / S-01**：`latest_card_version_no` 与 `latest_strategy_version_no` 均为 **2**。v2 行的 `fields->>'source_hash'` 必须与上面这条 Python 命令对现行 `st_pullback_ma.md` 的输出一致。指向 `target_version_no=1` 的审核行 `is_current_target` 必须为 **false**（即已 stale，`stale_reason` 为 `new_version`），这就是库内「v1 审核不再作数」的表示——不是改 `decision`、也没有作废列。不要删改这些旧行。若还没有指向 v2 的 `decision='approved'` 行，只说明 v2 的 G7 尚未完成，不得把 v1 的已批准行当成现行审核。
 
 ## 授权口径与必须停下来问编排者的情况
 

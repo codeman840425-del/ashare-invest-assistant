@@ -55,9 +55,8 @@ CODES = (
     "600014.SH",
 )
 AT = dt.datetime(2026, 11, 10, 15, 0, tzinfo=BEIJING)
-# 回执 kind 集中在此常量，架构师尚未确认字面量；日后只需改这一处。
-# 暂按 §4 outbox kind / 41259c0 实现取值 "mairui_daily_bars"（T-B130-review B1：「kind 用日 K 专用值」）。
-# 7234aa7 未写出回执 kind 字面量。
+# 回执 kind 集中在此常量。编排者已确认字面量为 "mairui_daily_bars"
+#（与 §4 outbox kind、日 K 回执共用）。7234aa7 未写出字面量。
 RECEIPT_KIND = "mairui_daily_bars"
 # 合成 id，不是真实 licence，也不打印。
 _FAKE_LICENCE_ID = uuid.UUID("cccccccc-cccc-cccc-cccc-ccccccccccc1")
@@ -365,7 +364,7 @@ def test_expired_receipt_no_network(
 def test_wrong_kind_receipt_no_network(
     temp_db: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§8.1 :437、§4 :91–:94；kind 须为日 K 专用值（见模块常量 RECEIPT_KIND，架构师尚未确认字面量）。错 kind 不得出网。
+    """§8.1 :437、§4 :91–:94；kind 须为日 K 专用值（见已确认的模块常量 RECEIPT_KIND）。错 kind 不得出网。
 
     红因（121a17c）：缺实现：B1 不解析 JSON、不校验 kind。
     """
@@ -532,6 +531,77 @@ def test_backfill_cli_refuses_trade_date_not_past_open_day(temp_db: SimpleNamesp
             failures.append(why_future + f"（exit={code}, queued={client.llen(jobs_mod.QUEUE_KEY)}）")
         if code2 == 0 or client2.llen(jobs_mod.QUEUE_KEY) != 0:
             failures.append(why_closed + f"（exit={code2}, queued={client2.llen(jobs_mod.QUEUE_KEY)}）")
+        assert not failures, "；".join(failures)
+    finally:
+        _forget_jobs_engine(temp_db.url)
+
+def test_backfill_cli_today_174459_refuse_174500_allow(temp_db: SimpleNamespace) -> None:
+    """§8.3 :493：显式 --trade-date 为今天（开市日）时，北京时间 17:44:59 拒绝、17:45:00 起放行。
+
+    既有 test_backfill_cli_refuses_today_before_1745 只用 16:00，不覆盖秒级边界；
+    T-T72 dry-run / apply 用 20:00 与 18:00，只覆盖「已过 17:45」，不是 17:45:00 含端点。
+    本例固定时钟钉住 17:44:59 与 17:45:00。放行侧用 dry-run 断言 exit 0 且输出当天日期，
+    避免与「17:00–17:45 --apply 锁窗」（实现为闭区间含 17:45:00）缠在一起。
+    拒绝侧同时跑 dry-run 与 --apply，确认不入队。
+    """
+    from app.workers import jobs as jobs_mod
+
+    settings = _cli_settings(temp_db.url)
+    today = OPEN_10.isoformat()
+    refuse_at = dt.datetime(2026, 11, 10, 17, 44, 59, tzinfo=BEIJING)
+    allow_at = dt.datetime(2026, 11, 10, 17, 45, 0, tzinfo=BEIJING)
+    why_refuse = (
+        "缺实现：显式 --trade-date 为今天、北京时间 17:44:59 应被拒（退出码非零、不入队）"
+    )
+    why_allow = (
+        "缺实现：显式 --trade-date 为今天、北京时间 17:45:00 应放行（dry-run 退出码 0，输出当天日期）"
+    )
+    try:
+        with temp_db.engine.begin() as conn:
+            conn.execute(text("TRUNCATE market.trading_calendar"))
+            _seed_calendar_span(conn, dt.date(2023, 11, 1), dt.date(2026, 11, 20))
+
+        dry = _MemRedis()
+        code_dry, _out_dry = _run_cli(
+            ["--years", "3", "--trade-date", today],
+            settings=settings,
+            now=refuse_at,
+            redis_client=dry,
+        )
+        apply_client = _MemRedis()
+        code_apply, _out_apply = _run_cli(
+            ["--years", "3", "--trade-date", today, "--apply"],
+            settings=settings,
+            now=refuse_at,
+            redis_client=apply_client,
+        )
+        allow_client = _MemRedis()
+        code_allow, out_allow = _run_cli(
+            ["--years", "3", "--trade-date", today],
+            settings=settings,
+            now=allow_at,
+            redis_client=allow_client,
+        )
+
+        failures: list[str] = []
+        if code_dry == 0 or dry.llen(jobs_mod.QUEUE_KEY) != 0:
+            failures.append(
+                why_refuse + f"（dry-run exit={code_dry}, queued={dry.llen(jobs_mod.QUEUE_KEY)}）"
+            )
+        if code_apply == 0 or apply_client.llen(jobs_mod.QUEUE_KEY) != 0:
+            failures.append(
+                why_refuse
+                + f"（--apply exit={code_apply}, queued={apply_client.llen(jobs_mod.QUEUE_KEY)}）"
+            )
+        if (
+            code_allow != 0
+            or f"trade_date={today}" not in out_allow
+            or allow_client.llen(jobs_mod.QUEUE_KEY) != 0
+        ):
+            failures.append(
+                why_allow
+                + f"（exit={code_allow}, queued={allow_client.llen(jobs_mod.QUEUE_KEY)}）"
+            )
         assert not failures, "；".join(failures)
     finally:
         _forget_jobs_engine(temp_db.url)

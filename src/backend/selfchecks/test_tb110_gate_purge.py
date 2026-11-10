@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
 from alembic.config import Config
@@ -31,9 +32,40 @@ def test_0030_file_pins_and_does_not_touch_0029_objects() -> None:
 
 
 def test_migration_heads_single_0030() -> None:
+    """只有一个 head，且迁移链连续。不写死编号。"""
     cfg = Config()
     cfg.set_main_option("script_location", str(ROOT / "src/backend/migrations"))
-    assert ScriptDirectory.from_config(cfg).get_heads() == ["0030"]
+    script = ScriptDirectory.from_config(cfg)
+    heads = script.get_heads()
+    assert len(heads) == 1, f"期望单头，实际 {heads}"
+    head = heads[0]
+    revisions = {rev.revision: rev for rev in script.walk_revisions()}
+    assert revisions, "迁移链为空"
+    bases: list[str] = []
+    downs: list[str] = []
+    for rev in revisions.values():
+        down = rev.down_revision
+        if down is None:
+            bases.append(rev.revision)
+            continue
+        assert isinstance(down, str), f"{rev.revision} 的 down_revision 不是单值：{down!r}"
+        assert down in revisions, f"{rev.revision} 的 down_revision={down} 不在迁移链中"
+        downs.append(down)
+    assert len(bases) == 1, f"期望唯一 base，实际 {bases}"
+    shared = {k: v for k, v in Counter(downs).items() if v > 1}
+    assert not shared, f"分叉：多个 revision 指向同一 down_revision {shared}"
+    children = {
+        rev.down_revision: rev.revision
+        for rev in revisions.values()
+        if isinstance(rev.down_revision, str)
+    }
+    cursor = bases[0]
+    seen = [cursor]
+    while cursor in children:
+        cursor = children[cursor]
+        seen.append(cursor)
+    assert cursor == head, f"从 base 出发到达 {cursor}，不是 head {head}"
+    assert set(seen) == set(revisions), "存在无法从 base 沿唯一链到达 head 的 revision"
 
 
 def test_cli_excludes_ingest_private_fk_scan_and_allowlists_gate_trigger() -> None:

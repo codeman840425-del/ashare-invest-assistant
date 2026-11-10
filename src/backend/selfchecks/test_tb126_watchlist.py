@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 import subprocess
@@ -179,7 +180,7 @@ def _seed_master(conn: Any) -> None:
         insert(security_code_history).values(
             code=NEW_BJ,
             old_code=OLD_BJ,
-            valid_from=__import__("datetime").date(2020, 1, 1),
+            valid_from=dt.date(2020, 1, 1),
             source="bse_code_map",
         )
     )
@@ -208,7 +209,7 @@ def world() -> Iterator[dict[str, Any]]:
         _upgrade(url, "head")
         engine = create_engine(url, hide_parameters=True)
         ids = [uuid.uuid4(), uuid.uuid4(), uuid.uuid4()]
-        now = __import__("datetime").datetime.now(__import__("datetime").UTC)
+        now = dt.datetime.now(dt.UTC)
         with engine.begin() as conn:
             _seed_master(conn)
             for i, ident in enumerate(ids):

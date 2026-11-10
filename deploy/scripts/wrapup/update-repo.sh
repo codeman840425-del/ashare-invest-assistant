@@ -18,6 +18,10 @@ git -C "$AIA_ROOT" cat-file -t "$WRAPUP_TARGET" >/dev/null 2>&1 \
 wrapup_log "模式=$(wrapup_mode)。目标 $WRAPUP_TARGET。当前 HEAD=$(git -C "$AIA_ROOT" rev-parse HEAD)"
 wrapup_log "出处：用户机若仍停在 $WRAPUP_KNOWN_OLD_HEAD，run_all.py --dry-run 可能以退出码 1 失败（T-B117：运行树与当前基线不一致；T-B05-run-howto 要求 dry-run 必须 rc=0）。"
 
+if [ "$WRAPUP_APPLY" -eq 1 ]; then
+  wrapup_require_round_backup "$WRAPUP_BACKUP_DIR"
+fi
+
 # 收集未跟踪 0029（可能不止一个匹配）
 mapfile -t UNTRACKED_0029 < <(git -C "$AIA_ROOT" ls-files --others --exclude-standard -- 'src/backend/migrations/versions/0029_*.py' || true)
 
@@ -52,9 +56,11 @@ plan_update() {
 if ! wrapup_need_apply "迁出未跟踪 0029 并更新到 $WRAPUP_TARGET"; then
   plan_move
   plan_update
+  wrapup_log "dry-run：--apply 时必须把 --backup-dir 指到 backup.sh 本轮打印的 DEST 时间戳目录"
   exit 0
 fi
 
+wrapup_require_round_backup "$WRAPUP_BACKUP_DIR"
 mkdir -p "$WRAPUP_BACKUP_DIR/0029-untracked"
 chmod 700 "$WRAPUP_BACKUP_DIR" 2>/dev/null || true
 for rel in "${UNTRACKED_0029[@]+"${UNTRACKED_0029[@]}"}"; do

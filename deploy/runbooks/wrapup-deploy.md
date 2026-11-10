@@ -22,13 +22,15 @@
 
 ```bash
 deploy/scripts/wrapup/wrapup.sh preflight
-deploy/scripts/wrapup/backup.sh --apply --backup-dir <仓库外目录>
-deploy/scripts/wrapup/update-repo.sh --apply --target <批准哈希> --backup-dir <同上>
-deploy/scripts/wrapup/start-stack.sh --apply
-deploy/scripts/wrapup/halt-check.sh --apply          # 不可写则 rc=78；修复加 --repair
+deploy/scripts/wrapup/backup.sh --apply --backup-dir <仓库外父目录>
+# 标准输出最后一行是本轮 DEST，例如 /data/aia-wrapup-backup/20261110T061858Z
+# 后续 --apply 必须把 --backup-dir 指到这个时间戳目录，不能指父目录或兄弟旧轮。
+deploy/scripts/wrapup/update-repo.sh --apply --target <批准哈希> --backup-dir <本轮 DEST 时间戳目录>
+deploy/scripts/wrapup/start-stack.sh --apply --backup-dir <本轮 DEST 时间戳目录>
+deploy/scripts/wrapup/halt-check.sh --apply          # 不可写则 rc=78；修复加 --repair（不删已有 HALT）
 deploy/scripts/wrapup/net-verify.sh --apply          # 只打 1.1.1.1 / example.com
 deploy/scripts/wrapup/verify.sh --apply
-deploy/scripts/wrapup/rollback.sh --apply --backup-dir <本轮备份>   # 由编排者下令；失败须停下来问编排者
+deploy/scripts/wrapup/rollback.sh --apply --backup-dir <本轮 DEST 时间戳目录>   # 由编排者下令；失败须停下来问编排者
 ```
 
 公共选项：`--volume-prefix`、`--container`、`--db`、`--volume`、`--rollback-head`（默认即上面的 f82a83b）。
@@ -64,7 +66,7 @@ deploy/scripts/wrapup/rollback.sh --apply --backup-dir /data/aia-wrapup-backup/<
 先停 api / worker / ingest（热重载），postgres / redis 可留。再：
 
 ```bash
-deploy/scripts/wrapup/update-repo.sh --apply --target <批准的完整哈希> --backup-dir /data/aia-wrapup-backup
+deploy/scripts/wrapup/update-repo.sh --apply --target <批准的完整哈希> --backup-dir /data/aia-wrapup-backup/<backup.sh 本轮打印的时间戳>
 ```
 
 脚本会：未跟踪 0029 若 hash 等于已知 blob，先**复制到仓库外**再从工作区移走（不删除唯一副本、不 reset）；其它脏文件停手；`git fetch` 后若可快进则 `merge --ff-only`，否则**新建 worktree** 检出目标哈希，原工作树不动。新工作树必须沿用原来的 `COMPOSE_PROJECT_NAME` / `AIA_VOLUME_PREFIX`（只看 `deploy/env/.env`，不要把含密钥的文件贴进工单）。
@@ -76,7 +78,7 @@ deploy/scripts/wrapup/update-repo.sh --apply --target <批准的完整哈希> --
 `internal` / `egress` / `edge` 在 `compose up` 时创建，不要为「换网」而 `down -v`。
 
 ```bash
-deploy/scripts/wrapup/start-stack.sh --apply
+deploy/scripts/wrapup/start-stack.sh --apply --backup-dir /data/aia-wrapup-backup/<backup.sh 本轮打印的时间戳>
 ```
 
 顺序（与 `up.sh` / compose `depends_on` 一致）：
@@ -100,7 +102,7 @@ deploy/scripts/wrapup/halt-check.sh --apply          # uid 10001 探测（建完
 deploy/scripts/wrapup/halt-check.sh --apply --repair
 ```
 
-修复用一次性 root 容器 `install -d -o 10001 -m 700`，**不删除**已有停机标志。解除停机由编排者在收口时下令，见 `ingest-halt.md`。
+修复用一次性 root 容器 `install -d -o 10001 -m 700`，**不删除**已有停机标志。解除停机标志（以及恢复出口）必须由用户本人确认后再做，见 `ingest-halt.md`、`receipts.md` 与契约（`docs/api-contract.md` 约 1406 / 1411 行）。只删收据文件或停机标志文件都不能恢复出口；编排者不能代替用户本人确认解除。
 
 ## 5. 网络实测
 
@@ -140,7 +142,7 @@ deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch
 
 ## 授权口径与必须停下来问编排者的情况
 
-依据 `standing-auth-2026-11-08.md`：用户已长期授权收口时部署到其电脑（先备份，失败回滚，绝不 `down -v`），主数据首次导入（三所官网公开 HTTPS）也在 11-08 授权过。因此备份、迁 0029、更新代码、启停服务、halt 修复、网络探测、verify-roles、按手册执行的回滚，以及 `master-bootstrap.sh --check` / `--run --confirm-network-fetch`，都由编排者在收口时下令，不必逐步再问用户。
+依据 `standing-auth-2026-11-08.md`：用户已长期授权收口时部署到其电脑（先备份，失败回滚，绝不 `down -v`），主数据首次导入（三所官网公开 HTTPS）也在 11-08 授权过。因此备份、迁 0029、更新代码、启停服务、halt 目录可写修复（不删已有 HALT）、网络探测、verify-roles、按手册执行的回滚，以及 `master-bootstrap.sh --check` / `--run --confirm-network-fetch`，都由编排者在收口时下令 `--apply`，不必逐步再问用户。解除停机标志或恢复出口不在此列：必须由用户本人确认（与 `ingest-halt.md`、`receipts.md`、契约 1406/1411 一致），编排者不能代为确认。
 
 下列情况**仍然必须停下来问编排者**后再继续：
 

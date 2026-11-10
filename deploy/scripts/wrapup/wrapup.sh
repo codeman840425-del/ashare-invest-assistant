@@ -75,12 +75,19 @@ preflight() {
 preflight
 if [ "$cmd" = "all" ]; then
   wrapup_log "all：按手册顺序干跑/执行各步（本命令不会自动 rollback）"
-  "$WRAPUP_DIR/backup.sh" "$@"
   if [ "$WRAPUP_APPLY" -eq 1 ]; then
-    wrapup_require_round_backup "$WRAPUP_BACKUP_DIR"
+    dest="$("$WRAPUP_DIR/backup.sh" "$@")"
+    dest="$(printf '%s\n' "$dest" | tail -n 1)"
+    [ -n "$dest" ] || wrapup_die "backup.sh 未在标准输出打印本轮 DEST"
+    wrapup_require_round_backup "$dest"
+    wrapup_log "本轮 DEST=$dest；后续 --apply 一律指向该时间戳目录"
+    "$WRAPUP_DIR/update-repo.sh" "$@" --backup-dir "$dest"
+    "$WRAPUP_DIR/start-stack.sh" "$@" --backup-dir "$dest"
+  else
+    "$WRAPUP_DIR/backup.sh" "$@"
+    "$WRAPUP_DIR/update-repo.sh" "$@"
+    "$WRAPUP_DIR/start-stack.sh" "$@"
   fi
-  "$WRAPUP_DIR/update-repo.sh" "$@"
-  "$WRAPUP_DIR/start-stack.sh" "$@"
   "$WRAPUP_DIR/halt-check.sh" "$@"
   "$WRAPUP_DIR/net-verify.sh" "$@"
   "$WRAPUP_DIR/verify.sh" "$@"

@@ -8,7 +8,7 @@ WRAPUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 . "$WRAPUP_DIR/lib.sh"
 
-usage() { echo "用法：start-stack.sh [--apply]"; echo "顺序：postgres/redis → migrate → timescale-apply → db-roles → 其余服务。不启动 master-bootstrap profile。"; }
+usage() { echo "用法：start-stack.sh [--apply] [--backup-dir 本轮DEST时间戳目录]"; echo "顺序：核对本轮 DEST（manifest+dump）→ postgres/redis → 只读 alembic_version → migrate → timescale-apply → db-roles → 其余服务。不启动 master-bootstrap profile。--apply 的 --backup-dir 必须是 backup.sh 本轮打印的 DEST，不能是父目录。"; }
 wrapup_parse_common "$@" || { [ $? -eq 99 ] && usage && exit 0; exit 1; }
 
 wrapup_log "模式=$(wrapup_mode)。新网络层（internal / egress / edge）随 compose up 创建，不要 down -v，不要 prune。"

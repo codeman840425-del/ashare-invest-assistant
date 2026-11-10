@@ -176,28 +176,41 @@ wrapup_pg_restore_to() {
   wrapup_docker exec "$c" rm -f "$tmp" >/dev/null 2>&1 || true
 }
 
-# 本轮备份必须同时有 manifest 和体积非空的 dump，否则拒绝后续写入（T-A102 B1）。
+# 本轮备份只认 backup.sh 打印的 DEST 时间戳目录本身（20YYMMDDTHHMMSSZ），
+# 不得在父目录里挑选任意旧的 20* 兄弟轮次（T-A103② B1）。
 wrapup_require_round_backup() {
-  local dir="${1:-$WRAPUP_BACKUP_DIR}" man="" cand d
-  [ -n "$dir" ] || wrapup_die "没有备份目录：本轮没有 manifest 和 dump，拒绝后续写入步骤"
-  if [ -f "$dir/manifest.json" ]; then
-    man="$dir/manifest.json"
-  else
-    for cand in "$dir"/20*; do
-      [ -f "$cand/manifest.json" ] || continue
-      man="$cand/manifest.json"
-    done
-  fi
-  [ -n "$man" ] || wrapup_die "本轮没有 manifest 和 dump，拒绝后续写入步骤"
-  d="$(dirname "$man")"
-  cand=""
-  for cand in "$d"/*.dump; do
+  local dir="${1:-$WRAPUP_BACKUP_DIR}" base cand
+  [ -n "$dir" ] || wrapup_die "没有本轮 DEST：本轮没有 manifest 和 dump，拒绝后续写入步骤"
+  base="$(basename "$dir")"
+  case "$base" in
+    20[0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z) ;;
+    *) wrapup_die "本轮备份必须是 backup.sh 打印的 DEST 时间戳目录，不能把父目录或旧轮 20* 当本轮（收到：$base）" ;;
+  esac
+  [ -d "$dir" ] || wrapup_die "本轮 DEST 目录不存在：$dir"
+  [ -f "$dir/manifest.json" ] || wrapup_die "本轮 DEST 里没有 manifest.json，拒绝后续写入步骤"
+  for cand in "$dir"/*.dump; do
     [ -f "$cand" ] || continue
     [ -s "$cand" ] || continue
-    wrapup_log "本轮备份已核到 manifest 与 dump：$(basename "$d")"
+    wrapup_log "本轮备份已核到 manifest 与 dump：$(basename "$dir")"
     return 0
   done
-  wrapup_die "本轮没有可用的 pg dump，拒绝后续写入步骤"
+  wrapup_die "本轮 DEST 里没有可用的 pg dump，拒绝后续写入步骤"
+}
+
+wrapup_refuse_windows_selftest() {
+  local sys
+  sys="$(uname -s 2>/dev/null || true)"
+  case "$sys" in
+    MINGW*|MSYS*|CYGWIN*|Windows_NT*)
+      wrapup_die "selftest --apply 拒绝在 Windows 上运行（只许共享运维电脑）"
+      ;;
+  esac
+  if [ -n "${WINDIR:-}${SYSTEMROOT:-}" ]; then
+    wrapup_die "selftest --apply 拒绝在 Windows 上运行（只许共享运维电脑）"
+  fi
+  if [ -r /proc/version ] && grep -qiE 'microsoft|wsl' /proc/version; then
+    wrapup_die "selftest --apply 拒绝在 Windows/WSL 上运行（只许共享运维电脑）"
+  fi
 }
 
 wrapup_pg_query() {
@@ -218,9 +231,9 @@ wrapup_check_alembic_0029() {
       wrapup_die "拒绝在系统库 $db 上做 0029 业务对象比对；请给出业务库名"
       ;;
   esac
-  ver="$(wrapup_pg_query "$c" "$db" "SELECT version_num FROM alembic_version" 2>/dev/null || true)"
+  ver="$(wrapup_alembic_version "$c" "$db")"
   if [ -z "$ver" ]; then
-    wrapup_log "只读 alembic_version：空或不存在（可能是空库），继续"
+    wrapup_log "只读 alembic_version：表不存在或为空（空库），继续"
     return 0
   fi
   wrapup_log "只读 alembic_version=$ver"
@@ -228,19 +241,68 @@ wrapup_check_alembic_0029() {
     wrapup_log "当前不是 0029，不在此做 T-A70 对象比对"
     return 0
   fi
-  wrapup_log "库已在 0029，开始只读比对 ingest_private / 触发器 / 函数（T-A70）"
-  schema="$(wrapup_pg_query "$c" "$db" "SELECT 1 FROM information_schema.schemata WHERE schema_name='ingest_private'" || true)"
-  tables="$(wrapup_pg_query "$c" "$db" "SELECT tablename FROM pg_tables WHERE schemaname='ingest_private' ORDER BY 1" || true)"
-  funcs="$(wrapup_pg_query "$c" "$db" "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='ingest_private' ORDER BY 1" || true)"
-  trig="$(wrapup_pg_query "$c" "$db" "SELECT t.tgname FROM pg_trigger t JOIN pg_class r ON r.oid=t.tgrelid JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname='app' AND r.relname='user_data_licences' AND NOT t.tgisinternal AND t.tgname='mairui_gate_on_licence_deletion'" || true)"
-  if [ "$schema" = "1" ] \
-      && printf '%s\n' "$tables" | grep -qx 'mairui_gate_bindings' \
-      && printf '%s\n' "$tables" | grep -qx 'mairui_gate_scopes' \
-      && printf '%s\n' "$funcs" | grep -qx 'mairui_gate_licence_deleted' \
-      && printf '%s\n' "$funcs" | grep -qx 'prune_mairui_gate_bindings' \
-      && [ "$trig" = "mairui_gate_on_licence_deletion" ]; then
-    wrapup_log "0029 对象与入链定义一致，可以继续（不 stamp、不 downgrade）"
-    return 0
+  wrapup_log "库已在 0029，开始只读比对 ingest_private / 触发器 / 函数定义（T-A70）"
+  schema="$(wrapup_pg_query "$c" "$db" "SELECT 1 FROM information_schema.schemata WHERE schema_name='ingest_private'")"
+  tables="$(wrapup_pg_query "$c" "$db" "SELECT tablename FROM pg_tables WHERE schemaname='ingest_private' ORDER BY 1")"
+  funcs="$(wrapup_pg_query "$c" "$db" "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='ingest_private' ORDER BY 1")"
+  trig="$(wrapup_pg_query "$c" "$db" "SELECT t.tgname FROM pg_trigger t JOIN pg_class r ON r.oid=t.tgrelid JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname='app' AND r.relname='user_data_licences' AND NOT t.tgisinternal AND t.tgname='mairui_gate_on_licence_deletion'")"
+  if [ "$schema" != "1" ] \
+      || ! printf '%s\n' "$tables" | grep -qx 'mairui_gate_bindings' \
+      || ! printf '%s\n' "$tables" | grep -qx 'mairui_gate_scopes' \
+      || ! printf '%s\n' "$funcs" | grep -qx 'mairui_gate_licence_deleted' \
+      || ! printf '%s\n' "$funcs" | grep -qx 'prune_mairui_gate_bindings' \
+      || [ "$trig" != "mairui_gate_on_licence_deletion" ]; then
+    wrapup_die "库已在 0029，但 ingest_private/触发器/函数与入链 0029 不一致；停手，不 stamp、不 downgrade、不 migrate（T-A70）。必须停下来问编排者。"
   fi
-  wrapup_die "库已在 0029，但 ingest_private/触发器/函数与入链 0029 不一致；停手，不 stamp、不 downgrade、不 migrate（T-A70）。必须停下来问编排者。"
+  wrapup_assert_0029_defs "$c" "$db"
+  wrapup_log "0029 对象与入链定义一致，可以继续（不 stamp、不 downgrade）"
+}
+
+# 连接/查询失败 fail-closed；仅「关系 alembic_version 不存在」视为空库。
+wrapup_alembic_version() {
+  local c="$1" db="$2" err out rc
+  err="$(mktemp)"
+  set +e
+  out="$(wrapup_pg_query "$c" "$db" "SELECT version_num FROM alembic_version" 2>"$err")"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    if grep -Eq 'relation "alembic_version" does not exist|alembic_version.*does not exist' "$err"; then
+      rm -f "$err"
+      return 0
+    fi
+    wrapup_redact <"$err" >&2 || true
+    rm -f "$err"
+    wrapup_die "只读 alembic_version 连接或查询失败（不是缺表），拒绝 migrate（fail-closed）"
+  fi
+  rm -f "$err"
+  printf '%s' "$out"
+}
+
+wrapup_norm_sql() {
+  tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//'
+}
+
+# 在名称核过之后，再核函数体与触发器定义中的关键片段。
+wrapup_assert_0029_defs() {
+  local c="$1" db="$2" fprune fdel tdef
+  fprune="$(wrapup_pg_query "$c" "$db" "SELECT pg_get_functiondef('ingest_private.prune_mairui_gate_bindings()'::regprocedure)")"
+  fdel="$(wrapup_pg_query "$c" "$db" "SELECT pg_get_functiondef('ingest_private.mairui_gate_licence_deleted()'::regprocedure)")"
+  tdef="$(wrapup_pg_query "$c" "$db" "SELECT pg_get_triggerdef(t.oid, true) FROM pg_trigger t JOIN pg_class r ON r.oid=t.tgrelid JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname='app' AND r.relname='user_data_licences' AND NOT t.tgisinternal AND t.tgname='mairui_gate_on_licence_deletion'")"
+  fprune="$(printf '%s' "$fprune" | wrapup_norm_sql)"
+  fdel="$(printf '%s' "$fdel" | wrapup_norm_sql)"
+  tdef="$(printf '%s' "$tdef" | wrapup_norm_sql)"
+  case "$fprune" in
+    *"delete from ingest_private.mairui_gate_bindings where expires_at <= now()"*) ;;
+    *) wrapup_die "0029 函数 prune_mairui_gate_bindings 定义与入链不一致；停手问编排者（T-A70）" ;;
+  esac
+  case "$fdel" in
+    *"licence_id=old.id"*"perform ingest_private.prune_mairui_gate_bindings()"*|*"licence_id = old.id"*"perform ingest_private.prune_mairui_gate_bindings()"*) ;;
+    *) wrapup_die "0029 函数 mairui_gate_licence_deleted 定义与入链不一致；停手问编排者（T-A70）" ;;
+  esac
+  case "$tdef" in
+    *"after update of deleted_at, paused_until, status or delete on app.user_data_licences"*"ingest_private.mairui_gate_licence_deleted()"*) ;;
+    *"after update of deleted_at,paused_until,status or delete on app.user_data_licences"*"ingest_private.mairui_gate_licence_deleted()"*) ;;
+    *) wrapup_die "0029 触发器 mairui_gate_on_licence_deletion 定义与入链不一致；停手问编排者（T-A70）" ;;
+  esac
 }

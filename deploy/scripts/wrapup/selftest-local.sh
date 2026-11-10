@@ -54,6 +54,8 @@ if [ "$WRAPUP_APPLY" -eq 0 ]; then
   exit 0
 fi
 
+wrapup_refuse_windows_selftest
+
 # T-A102 B3：先固定独立 mktemp 目录，再设 trap；trap 只删这个目录，绝不 rm 用户或默认备份根。
 SELFTEST_TMP="$(mktemp -d /tmp/o69-wrapup-selftest.XXXXXX)"
 chmod 700 "$SELFTEST_TMP"

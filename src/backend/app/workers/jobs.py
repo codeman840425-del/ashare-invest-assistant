@@ -63,6 +63,7 @@ from app.feedback.worker import TASK as RC5_EXPIRY
 from app.feedback.worker import task as rc5_expiry_task
 from app.intraday.engine import TASK as INTRADAY_UPDATED
 from app.intraday.engine import task as intraday_updated_task
+from app.marketdata.daily_bars import DAILY_BARS_FETCH, daily_bars_fetch_task
 from app.master.mairui_snapshot import TASK as MAIRUI_SNAPSHOT
 from app.plans.worker import TASK as PLAN_CONDITIONS
 from app.plans.worker import task as plan_conditions_task
@@ -408,6 +409,7 @@ TASKS: Final[dict[str, Task]] = {
     RECONCILE_VENDOR: reconcile_vendor_task,
     RECONCILE_VENDOR_APPLY: reconcile_vendor_apply_task,
     VENDOR_SWEEP: vendor_sweep_task,
+    DAILY_BARS_FETCH: daily_bars_fetch_task,
 }
 #: 失败重试（10 分钟后，共 3 次）且执行时持锁的任务 → 重试用尽时的处理
 RETRY_TASKS: Final[dict[str, Callable[[Settings, dict[str, Any], BaseException], None]]] = {
@@ -431,6 +433,7 @@ LOCKED_TASKS: Final = frozenset(
         PURGE_SNAPSHOTS,
         RECONCILE_VENDOR,
         VENDOR_SWEEP,
+        DAILY_BARS_FETCH,
     }
 )
 

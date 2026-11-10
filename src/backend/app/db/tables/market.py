@@ -370,9 +370,17 @@ daily_bars = Table(
     money("close"),
     money("volume"),
     money("amount"),
+    money("pre_close"),
+    boolean("is_suspended"),
+    txt("source"),
+    uuid_col("source_licence_id"),
     _now("fetched_at"),
     PrimaryKeyConstraint("code", "trade_date", "adj_type"),
     one_of("adj_type", BarAdjust),
+    CheckConstraint(
+        "source IS NULL OR source IN ('fake', 'mairui')",
+        name="source_allowed",
+    ),
     schema=MARKET,
     comment="hypertable（trade_date，chunk 1 年）",
 )

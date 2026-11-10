@@ -519,6 +519,9 @@ class Settings(BaseSettings):
     #: 是否开放。未设置时 production 关闭、其余环境开启；ingest 每证书调度（T-B04a-x）完成前
     #: 生产不要打开。见 :attr:`licence_settings_enabled`。
     data_licence_settings_enabled: bool | None = None
+    #: T-B127 / 契约 daily-bars-source §7：日 K 来源。默认 off；fake 仅 APP_ENV=test。
+    #: 环境变量 ``DAILY_BARS_SOURCE``。mairui 在单 C 完成前为惰性（不拉、不写、不建连）。
+    daily_bars_source: Literal["off", "fake", "mairui"] = "off"
 
     # 认证（plan §3.6 / 契约 §1.3，T-B03）：注册模式与会话 Cookie 的 Secure 标记
     #: ``REGISTRATION_MODE``：closed（默认，``/auth/register`` → 503）/ invite / open
@@ -630,6 +633,8 @@ class Settings(BaseSettings):
         # review-T-B03 S6 / T-A05：只有 local/test 允许关闭 Cookie 的 Secure 标记
         if not self.session_cookie_secure and self.app_env not in _DEV_ENVS:
             raise ValueError("SESSION_COOKIE_SECURE=false 只允许在 APP_ENV=local/test 使用")
+        if self.daily_bars_source == "fake" and self.app_env != "test":
+            raise ValueError("DAILY_BARS_SOURCE=fake 只允许在 APP_ENV=test 使用")
         return self
 
     @property

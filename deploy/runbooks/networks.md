@@ -25,7 +25,7 @@ CI：`scripts/ci/check_compose_networks.py`（`secret-boundary` job）。
 
 ### 探测命令（容器内没有 wget 时的替代）
 
-`nginx` 镜像健康检查已用 `wget`；`api` / `worker` / `ingest` 等后端镜像有 `python`。下面函数按 wget → curl → python3 → python 依次尝试，5 秒超时。退出码 0 算出网成功（拿到了任意 HTTP 响应，含非 200）；非 0 算失败/超时；`2` 表示容器里没有这些客户端，改用同网络命名空间的一次性探测。
+`nginx` 镜像健康检查已用 `wget`；`api` / `worker` / `ingest` 等后端镜像有 `python`。下面函数按 wget → curl → python3 → python 依次尝试，5 秒超时。退出码 0 算出网成功（拿到了任意 HTTP 响应，含非 200）；非 0 通常算失败/超时。容器里没有客户端时函数会打印 `NO_HTTP_CLIENT` 再退出；**不要只看 rc=2**（wget/curl 自身也可能返回 2），看到该文本再改用 sidecar。
 
 ```bash
 probe_egress() {
@@ -48,11 +48,12 @@ probe_egress() {
 }
 
 # 容器内无 wget/curl/python 时（例如 dev 的 postgres/redis）：不改服务镜像，共用其网络命名空间。
-# 若本机没有 busybox 镜像，先在有出网的环境下 docker pull busybox，不要对业务镜像 --pull always。
+# 镜像与 database.md 相同，用 alpine:3.21（含 wget）。若本机没有该标签，先在有出网的环境下
+# docker pull alpine:3.21，不要对业务镜像 --pull always。
 probe_egress_sidecar() {
   local svc="$1" url="${2:-http://1.1.1.1}" cid
   cid="$(deploy/scripts/compose.sh ps -q "$svc")"
-  docker run --rm --network "container:${cid}" busybox wget -T 5 -q -O - "$url"
+  docker run --rm --network "container:${cid}" alpine:3.21 wget -T 5 -q -O - "$url"
 }
 ```
 
@@ -129,26 +130,47 @@ curl -sS -m 5 --noproxy '*' --connect-timeout 5 \
   http://<lan-ip>:${NGINX_HTTP_PORT:-8080}/health/live
 # 判定：连接失败或超时 → 通过。若成功，端口暴露到局域网 → 不通过。
 
-# Linux / WSL 核对监听地址（dev 再看 55432 / 56379，按 .env 调整）：
+# Linux / WSL 核对监听地址（dev 再看 55432 / 56379，按 .env 调整）。
+# Docker Desktop 下，WSL 里的 ss/netstat 常常看不到 Windows 宿主的监听；
+# 这种情况以 PowerShell 的 Get-NetTCPConnection 为准，不要只看 ss 为空就判失败。
 ss -ltn | grep -E ":${NGINX_HTTP_PORT:-8080}\b|:5432\b|:6379\b|:55432\b|:56379\b" || true
-# 判定：应看到 127.0.0.1:端口，不应出现 0.0.0.0: 或 *:端口。
+# 若 ss 有输出：应看到 127.0.0.1:端口，不应出现 0.0.0.0: 或 *:端口。
 ```
 
-dev 叠加时宿主还应能连调试口：
+探测 TCP 是否在 127.0.0.1 上打开（不要用 `curl telnet://` 配 `-m`：超时退出码 28，容易误判）。
+Git Bash 通常没有 `nc`，按下面顺序使用找得到的工具：
 
 ```bash
-# 只探测端口开着即可，不必登录：
-curl -sS -m 5 --noproxy '*' -o /dev/null telnet://127.0.0.1:${POSTGRES_HOST_PORT:-55432} || \
-  (command -v nc >/dev/null && nc -z -w 5 127.0.0.1 "${POSTGRES_HOST_PORT:-55432}")
-nc -z -w 5 127.0.0.1 "${REDIS_HOST_PORT:-56379}"
+probe_tcp() {  # probe_tcp 127.0.0.1 55432
+  local host="$1" port="$2"
+  if command -v nc >/dev/null 2>&1; then
+    nc -z -w 5 "$host" "$port"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c "import socket,sys; s=socket.create_connection((sys.argv[1], int(sys.argv[2])), 5); s.close()" "$host" "$port"
+  elif command -v python >/dev/null 2>&1; then
+    python -c "import socket,sys; s=socket.create_connection((sys.argv[1], int(sys.argv[2])), 5); s.close()" "$host" "$port"
+  elif [ -n "${BASH_VERSION:-}" ]; then
+    timeout 5 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null
+  else
+    echo "NO_TCP_CLIENT"; return 2
+  fi
+}
+# dev 叠加时宿主还应能连调试口（不必登录）：
+probe_tcp 127.0.0.1 "${POSTGRES_HOST_PORT:-55432}"; echo pg_rc=$?
+probe_tcp 127.0.0.1 "${REDIS_HOST_PORT:-56379}"; echo redis_rc=$?
 # 判定：127.0.0.1 上 TCP 接通 → 通过；对 <lan-ip> 同样端口应失败。
+# 输出含 NO_TCP_CLIENT 时换工具，不要当成端口失败。
 ```
 
-PowerShell（仅宿主编译，容器内探测仍走 WSL / Git Bash）：
+PowerShell（仅宿主编译与监听核对；容器内探测仍走 WSL / Git Bash）：
 
 ```powershell
 curl.exe -sS -m 5 --noproxy * -o NUL -w "%{http_code}`n" http://127.0.0.1:8080/health/live
 # 再用本机局域网 IP 替换 127.0.0.1，应连接失败。
+# Docker Desktop：在 Windows 侧看监听（不要只依赖 WSL 里的 ss）：
+Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -in 8080,55432,56379 } |
+  Select-Object LocalAddress, LocalPort
+# 判定：LocalAddress 应为 127.0.0.1，不应为 0.0.0.0 或 ::。
 ```
 
 ### 6. Docker Desktop 对 `enable_ip_masquerade=false` 的实际效果
@@ -179,10 +201,12 @@ probe_egress nginx http://1.1.1.1; echo rc=$?
 
 ## 主数据首导的一次性出网（编排者裁定 ④，2026-11-09）
 
-默认栈与 `maint-cli` 不出网。需要联网从三所官网拉公开 HTTPS 主数据时，才用 opt-in profile（服务加入 `aia_egress`）：
+默认栈与 `maint-cli` 不出网。需要联网从三所官网拉公开 HTTPS 主数据时，只通过 `deploy/scripts/master-bootstrap.sh` 启动 opt-in 服务（加入 `aia_egress`），以保留 `--check`、flock、`--confirm-network-fetch` 和 CI 拒绝。不要直接 `compose.sh run`。
 
 ```bash
-deploy/scripts/compose.sh --profile master-bootstrap run --rm --no-deps master-bootstrap
+deploy/scripts/master-bootstrap.sh --check; echo "rc=$?"
+# rc=10 且确认本机可访问交易所网站后：
+deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch
 ```
 
 跑完容器即删（`--rm`），不要常驻，不要把该 profile 加进默认 `up.sh`，**不要调麦蕊**。CI 出网白名单只登记 `ingest` 与这个一次性服务。

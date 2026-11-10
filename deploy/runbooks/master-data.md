@@ -6,7 +6,8 @@
 ## 1. 原则
 
 - **手动、显式**：首次导入要联网拉上交所、深交所、北交所的公开名单（含深交所改名表、北交所代码对照）。
-  `up.sh`、compose 服务、CI 都**不会**触发它（`scripts/ci/tests/test_master_bootstrap.py` 守着）。
+  `up.sh`、默认 compose 栈、CI 都**不会**触发它。不要直接 `compose.sh run`；只走下面的
+  `master-bootstrap.sh`，以保留 `--check`、flock、`--confirm-network-fetch` 和 CI 拒绝（`scripts/ci/tests/test_master_bootstrap.py` 守着）。
 - **不调用麦蕊**：首次导入只用交易所公开列表；麦蕊对账由 beat 日常任务经 `ingest` 做，不属于本步骤。
 - **幂等**：库里已有 `status='ok'` 的 `market.master_runs` 记录就跳过；脚本用 flock 防同一项目并发。
 - **完成前不开放服务**（plan §4.6.6）：网关对外开放前必须看到“完成”。
@@ -22,8 +23,8 @@ deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch
 
 - `--check` 不联网、不改库：查 `market.master_runs` 是否存在、是否已有成功记录，以及镜像里有没有 CLI 模块。
 - `--run` 不带 `--confirm-network-fetch` 一律拒绝；`CI` / `GITHUB_ACTIONS` 非空时拒绝。
-- `--run` 在一次性 worker 容器（`compose.sh run --rm --no-deps`，不启动 ingest）里执行 CLI，
-  结束后再查一次：必须出现 `status='ok'` 的记录才算成功；失败可直接重跑。
+- `--run` 用 opt-in profile 跑 compose 服务 `master-bootstrap`（`compose.sh --profile master-bootstrap run --rm --no-deps -T`，不走 worker、不启动 ingest），
+  结束后再查一次：必须出现 `status='ok'` 的记录才算成功；失败可直接重跑。不要绕过本脚本直接 `compose run`。
 
 ## 3. 退出码与处理
 

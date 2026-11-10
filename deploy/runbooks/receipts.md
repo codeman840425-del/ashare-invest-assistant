@@ -13,7 +13,7 @@ prefix="$(deploy/scripts/compose.sh --get AIA_VOLUME_PREFIX)"
 # 虚构示例内容；真实收据由授权流程产生，不要把证书明文写进手册或提交进仓库。
 docker run --rm --network none --user 0 \
   -v "${prefix}_aia_receipts:/run/aia/receipts" \
-  alpine:latest \
+  alpine:3.21 \
   sh -c 'set -e
     install -d -o root -g root -m 0755 /run/aia/receipts
     cat > /run/aia/receipts/mairui-daily.json <<EOF
@@ -30,7 +30,7 @@ EOF
 prefix="$(deploy/scripts/compose.sh --get AIA_VOLUME_PREFIX)"
 docker run --rm --network none --user 0 \
   -v "${prefix}_aia_receipts:/run/aia/receipts:ro" \
-  alpine:latest \
+  alpine:3.21 \
   sh -c 'set -e
     echo "dir $(stat -c "%U:%G %a %n" /run/aia/receipts)"
     echo "file $(stat -c "%U:%G %a %n" /run/aia/receipts/mairui-daily.json)"
@@ -57,11 +57,12 @@ deploy/scripts/compose.sh exec ingest ls -la /run/aia/receipts
 
 ## 主数据首次导入的一次性出网（编排者裁定 ④，2026-11-09）
 
-`maint-cli` 与默认栈**平时不出网**。主数据首导若要联网拉上交所/深交所/北交所官网的公开 HTTPS 名单，使用显式 opt-in profile `master-bootstrap`（加入 `aia_egress`），跑完即删、不常驻、**不调麦蕊**：
+`maint-cli` 与默认栈**平时不出网**。主数据首导若要联网拉上交所/深交所/北交所官网的公开 HTTPS 名单，只通过 `deploy/scripts/master-bootstrap.sh` 启动 opt-in 服务（加入 `aia_egress`），以保留 `--check`、flock、`--confirm-network-fetch` 和 CI 拒绝。跑完容器即删、不常驻、**不调麦蕊**。不要直接 `compose.sh run`。
 
 ```bash
-deploy/scripts/compose.sh --profile master-bootstrap run --rm --no-deps master-bootstrap
-# 可选： --rebuild-search-terms
+deploy/scripts/master-bootstrap.sh --check; echo "rc=$?"
+# rc=10 且确认本机可访问交易所网站后：
+deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch
 ```
 
 不要把该 profile 写进默认 `up.sh` / `AIA_PROFILE=dev|live`。worker 上的每日交易所同步与 SMTP、api/worker 直调 LLM 均未放开出网。

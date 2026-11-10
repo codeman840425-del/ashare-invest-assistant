@@ -20,6 +20,8 @@
 覆盖层不得对已登记网络设置 name / external / driver（T-A97 N4–N6）；
 internal 与 edge 的 IP masquerade 开关仍按下面的削弱检查处理。driver_opts: {} 与基础合并，不拦。
 发布了 ports 的服务必须绑定 127.0.0.1，不得 0.0.0.0 或省略宿主地址。
+master-bootstrap 必须带 profiles、restart 为 "no"、不得发布端口；
+其它服务不得 depends_on 它；覆盖层不得替换它的 command（T-A98 B1）。
 """
 
 from __future__ import annotations
@@ -212,6 +214,64 @@ def _check_service(
         )
 
 
+
+MASTER_BOOTSTRAP = "master-bootstrap"
+
+
+def _depends_on_names(svc: object) -> set[str]:
+    if not isinstance(svc, dict):
+        return set()
+    deps = svc.get("depends_on")
+    if isinstance(deps, dict):
+        return {str(k) for k in deps}
+    if isinstance(deps, list):
+        return {str(x) for x in deps}
+    return set()
+
+
+def _check_master_bootstrap_shape(
+    rel: str, name: str, svc: object, *, is_base: bool, errs: list[str]
+) -> None:
+    """T-A98 B1 / ①：opt-in 首导服务的结构约束。
+
+    「没有 depends_on」指其它服务不得把它列为依赖（被默认栈拉起），
+    不是禁止本服务自己写 depends_on（run --no-deps 会忽略）。
+    """
+    if name != MASTER_BOOTSTRAP or not isinstance(svc, dict):
+        return
+    profiles = svc.get("profiles")
+    if is_base or profiles is not None:
+        raw = profiles if isinstance(profiles, list) else ([profiles] if profiles else [])
+        plist = [str(p) for p in raw]
+        if MASTER_BOOTSTRAP not in plist:
+            errs.append(
+                f"{rel}: 服务 {MASTER_BOOTSTRAP} 必须声明 profiles: "
+                f'["{MASTER_BOOTSTRAP}"]（默认 up 不得启动）'
+            )
+    restart = svc.get("restart")
+    if is_base or restart is not None:
+        if str(restart or "") != "no":
+            errs.append(
+                f"{rel}: 服务 {MASTER_BOOTSTRAP} 的 restart 必须是 \"no\""
+                f"（不得 always / unless-stopped）"
+            )
+    if svc.get("ports"):
+        errs.append(f"{rel}: 服务 {MASTER_BOOTSTRAP} 不得发布 ports")
+    if not is_base and "command" in svc:
+        errs.append(f"{rel}: 覆盖层不得替换服务 {MASTER_BOOTSTRAP} 的 command")
+
+
+def _check_not_depended_on(rel: str, services: dict[str, Any], errs: list[str]) -> None:
+    for name, svc in services.items():
+        if name == MASTER_BOOTSTRAP:
+            continue
+        if MASTER_BOOTSTRAP in _depends_on_names(svc):
+            errs.append(
+                f"{rel}: 服务 {name} 不得 depends_on {MASTER_BOOTSTRAP}"
+                f"（不得被默认栈或其他服务拉起）"
+            )
+
+
 def check(repo: Path) -> list[str]:
     errs: list[str] = []
     files = sorted((repo / COMPOSE_DIR).glob("*.y*ml"))
@@ -248,8 +308,10 @@ def check(repo: Path) -> list[str]:
         if not isinstance(services, dict):
             errs.append(f"{rel}: services 必须是映射")
             continue
+        _check_not_depended_on(rel, services, errs)
         for name, svc in services.items():
             where = f"{rel}: 服务 {name}"
+            _check_master_bootstrap_shape(rel, name, svc, is_base=is_base, errs=errs)
             nets = _nets(svc)
             if nets is None:
                 errs.append(f"{where}: networks 必须是映射（不能用列表，覆盖层列表会整段替换、冲掉 {NET_INTERNAL}）")

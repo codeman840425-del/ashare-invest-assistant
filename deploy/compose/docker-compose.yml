@@ -416,7 +416,7 @@ services:
   # 主数据首次导入（T-O68 编排者裁定 ④）：平时不出网、不常驻、不调麦蕊。
   # 仅当需要联网拉上交所/深交所/北交所官网公开 HTTPS 名单时，用显式 profile 一次性接入 aia_egress。
   # 默认 up 与 AIA_PROFILE=dev|live 都不会启动本服务；跑完容器即删（--rm）。
-  #   deploy/scripts/compose.sh --profile master-bootstrap run --rm --no-deps master-bootstrap [--rebuild-search-terms]
+  #   只经 deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch 启动（保留 --check / flock / CI 拒绝）。
   # CI 出网白名单（scripts/ci/check_compose_networks.py）仅 ingest 与本 opt-in 服务。
   master-bootstrap:
     logging: *default-logging

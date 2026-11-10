@@ -80,6 +80,13 @@ if ! git -C "$AIA_ROOT" cat-file -t "$WRAPUP_TARGET" >/dev/null 2>&1; then
     || wrapup_die "fetch 后仍没有 $WRAPUP_TARGET；停手，不要用别的 tip 代替"
 fi
 
+# 快进或新建 worktree 之前先核对目标树里的 0029
+if git -C "$AIA_ROOT" cat-file -e "$WRAPUP_TARGET:$WRAPUP_0029_REL" 2>/dev/null; then
+  thash="$(git -C "$AIA_ROOT" rev-parse "$WRAPUP_TARGET:$WRAPUP_0029_REL")"
+  [ "$thash" = "$WRAPUP_BLOB_0029" ] || wrapup_die "目标树 $WRAPUP_TARGET 的 0029 blob=$thash，与已知 $WRAPUP_BLOB_0029 不一致；冻结（T-A70），不 ff、不 reset"
+  wrapup_log "更新前核对：目标树已跟踪 0029，且 blob 一致"
+fi
+
 HEAD_NOW="$(git -C "$AIA_ROOT" rev-parse HEAD)"
 CHECK_ROOT="$AIA_ROOT"
 if git -C "$AIA_ROOT" merge-base --is-ancestor "$HEAD_NOW" "$WRAPUP_TARGET"; then

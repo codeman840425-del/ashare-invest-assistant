@@ -29,6 +29,7 @@ WRAPUP_PG_CONTAINER="${AIA_PG_CONTAINER:-}"
 WRAPUP_PG_DB="${AIA_WRAPUP_DB:-}"
 WRAPUP_VOLUME="${AIA_WRAPUP_VOLUME:-}"
 WRAPUP_REPAIR=0
+WRAPUP_PRECHECK_ONLY=0
 WRAPUP_ARGS=()
 
 wrapup_log() { printf '[%s] %s\n' "$(date +'%Y-%m-%d %H:%M:%S %Z')" "$*" >&2; }
@@ -36,7 +37,9 @@ wrapup_log() { printf '[%s] %s\n' "$(date +'%Y-%m-%d %H:%M:%S %Z')" "$*" >&2; }
 wrapup_rollback_hint() {
   cat >&2 <<'HINT'
 失败。不要 down -v，不要 prune，不要 git reset / --force / rebase，不要删别人的卷或受保护实例。
-回滚见 deploy/runbooks/wrapup-deploy.md「回滚」，用户本人确认后再执行：
+收口部署已由 2026-11-08 长期授权覆盖（先备份，失败回滚，绝不 down -v），--apply 由编排者在收口时下令，不必逐步再问用户。
+若遇到 0029 分叉、任何删除数据或卷的操作、或回滚失败：必须停下来问编排者后再继续。
+回滚见 deploy/runbooks/wrapup-deploy.md「回滚」：
   deploy/scripts/wrapup/rollback.sh --apply --backup-dir <本轮备份目录>
 HINT
 }
@@ -67,6 +70,7 @@ wrapup_parse_common() {
       --db) WRAPUP_PG_DB="$2"; shift 2 ;;
       --volume) WRAPUP_VOLUME="$2"; shift 2 ;;
       --repair) WRAPUP_REPAIR=1; shift ;;
+      --precheck-only) WRAPUP_PRECHECK_ONLY=1; shift ;;
       --out-dir) WRAPUP_BACKUP_DIR="$2"; shift 2 ;;
       -h|--help) return 99 ;;
       --) shift; WRAPUP_ARGS+=("$@"); break ;;
@@ -170,4 +174,73 @@ wrapup_pg_restore_to() {
     wrapup_die "pg_restore 失败（目标库 $newdb 可能不完整，不要改其它库）"
   fi
   wrapup_docker exec "$c" rm -f "$tmp" >/dev/null 2>&1 || true
+}
+
+# 本轮备份必须同时有 manifest 和体积非空的 dump，否则拒绝后续写入（T-A102 B1）。
+wrapup_require_round_backup() {
+  local dir="${1:-$WRAPUP_BACKUP_DIR}" man="" cand d
+  [ -n "$dir" ] || wrapup_die "没有备份目录：本轮没有 manifest 和 dump，拒绝后续写入步骤"
+  if [ -f "$dir/manifest.json" ]; then
+    man="$dir/manifest.json"
+  else
+    for cand in "$dir"/20*; do
+      [ -f "$cand/manifest.json" ] || continue
+      man="$cand/manifest.json"
+    done
+  fi
+  [ -n "$man" ] || wrapup_die "本轮没有 manifest 和 dump，拒绝后续写入步骤"
+  d="$(dirname "$man")"
+  cand=""
+  for cand in "$d"/*.dump; do
+    [ -f "$cand" ] || continue
+    [ -s "$cand" ] || continue
+    wrapup_log "本轮备份已核到 manifest 与 dump：$(basename "$d")"
+    return 0
+  done
+  wrapup_die "本轮没有可用的 pg dump，拒绝后续写入步骤"
+}
+
+wrapup_pg_query() {
+  local c="$1" db="$2" sql="$3" port
+  port="$(wrapup_pg_port "$c")"
+  wrapup_docker exec -e PGPORT="$port" -e PGHOST=/var/run/postgresql "$c" \
+    psql -X -q -At -U "${POSTGRES_USER:-postgres}" -d "$db" -v ON_ERROR_STOP=1 -c "$sql"
+}
+
+# 只读核对 alembic_version；已是 0029 则比对 ingest_private / 触发器 / 函数（T-A70 / T-A102 B2）。
+wrapup_check_alembic_0029() {
+  local c="$1" db="$2" ver schema tables funcs trig
+  if [ -z "$c" ] || [ -z "$db" ]; then
+    wrapup_die "0029 预检需要 postgres 容器和库名"
+  fi
+  case "$db" in
+    postgres|template0|template1)
+      wrapup_die "拒绝在系统库 $db 上做 0029 业务对象比对；请给出业务库名"
+      ;;
+  esac
+  ver="$(wrapup_pg_query "$c" "$db" "SELECT version_num FROM alembic_version" 2>/dev/null || true)"
+  if [ -z "$ver" ]; then
+    wrapup_log "只读 alembic_version：空或不存在（可能是空库），继续"
+    return 0
+  fi
+  wrapup_log "只读 alembic_version=$ver"
+  if [ "$ver" != "0029" ]; then
+    wrapup_log "当前不是 0029，不在此做 T-A70 对象比对"
+    return 0
+  fi
+  wrapup_log "库已在 0029，开始只读比对 ingest_private / 触发器 / 函数（T-A70）"
+  schema="$(wrapup_pg_query "$c" "$db" "SELECT 1 FROM information_schema.schemata WHERE schema_name='ingest_private'" || true)"
+  tables="$(wrapup_pg_query "$c" "$db" "SELECT tablename FROM pg_tables WHERE schemaname='ingest_private' ORDER BY 1" || true)"
+  funcs="$(wrapup_pg_query "$c" "$db" "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='ingest_private' ORDER BY 1" || true)"
+  trig="$(wrapup_pg_query "$c" "$db" "SELECT t.tgname FROM pg_trigger t JOIN pg_class r ON r.oid=t.tgrelid JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname='app' AND r.relname='user_data_licences' AND NOT t.tgisinternal AND t.tgname='mairui_gate_on_licence_deletion'" || true)"
+  if [ "$schema" = "1" ] \
+      && printf '%s\n' "$tables" | grep -qx 'mairui_gate_bindings' \
+      && printf '%s\n' "$tables" | grep -qx 'mairui_gate_scopes' \
+      && printf '%s\n' "$funcs" | grep -qx 'mairui_gate_licence_deleted' \
+      && printf '%s\n' "$funcs" | grep -qx 'prune_mairui_gate_bindings' \
+      && [ "$trig" = "mairui_gate_on_licence_deletion" ]; then
+    wrapup_log "0029 对象与入链定义一致，可以继续（不 stamp、不 downgrade）"
+    return 0
+  fi
+  wrapup_die "库已在 0029，但 ingest_private/触发器/函数与入链 0029 不一致；停手，不 stamp、不 downgrade、不 migrate（T-A70）。必须停下来问编排者。"
 }

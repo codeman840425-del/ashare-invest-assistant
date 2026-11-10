@@ -12,7 +12,7 @@ WRAPUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() { echo "用法：rollback.sh --apply --backup-dir DIR [--container C] [--db 新库名] [--rollback-head SHA]"; echo "回滚到备份当时的提交（默认 $WRAPUP_KNOWN_OLD_HEAD）并恢复 0029 未跟踪副本。禁止 down -v / prune / 覆盖主库。"; }
 wrapup_parse_common "$@" || { [ $? -eq 99 ] && usage && exit 0; exit 1; }
 
-[ "$WRAPUP_APPLY" -eq 1 ] || wrapup_die "rollback 必须显式 --apply，并且须用户本人确认后再跑"
+[ "$WRAPUP_APPLY" -eq 1 ] || wrapup_die "rollback 必须显式 --apply，并由编排者在收口时下令；若回滚失败必须停下来问编排者"
 [ -d "$WRAPUP_BACKUP_DIR" ] || wrapup_die "找不到备份目录 $WRAPUP_BACKUP_DIR"
 # 允许传入时间戳子目录或包含 manifest 的目录
 MAN="$WRAPUP_BACKUP_DIR/manifest.json"
@@ -64,7 +64,7 @@ if [ -n "$prefix" ]; then
     wrapup_docker run --rm --network none -v "$newvol:/v" -v "$WRAPUP_BACKUP_DIR:/in:ro" alpine:3.21 \
       sh -c "umask 077 && tar -C /v -xzf /in/$(basename "$tgz")"
   done
-  wrapup_log "新卷已就绪。把 compose 卷名切过去或人工复制回原卷前，须用户本人确认。严禁 volume rm 现网卷。"
+  wrapup_log "新卷已就绪。把 compose 卷名切过去或复制回原卷、以及任何删除数据或卷的操作，必须停下来问编排者。严禁 volume rm 现网卷。"
 fi
 
 # 代码：新 worktree 指向旧头，把 0029 未跟踪副本放回去
@@ -88,4 +88,4 @@ if [ -n "$src0029" ]; then
   wrapup_log "已把 0029 以未跟踪文件放回，hash=$hash（期望 $WRAPUP_BLOB_0029）"
   [ "$hash" = "$WRAPUP_BLOB_0029" ] || wrapup_die "放回的 0029 与已知 blob 不一致"
 fi
-wrapup_log "回滚代码与数据副本次已就绪。切换服务、改库连接、停新栈须用户本人确认。不要 down -v。"
+wrapup_log "回滚代码与数据副本次已就绪。切换服务与改库连接由编排者在收口时下令；若回滚失败或要删除数据/卷，必须停下来问编排者。不要 down -v。"

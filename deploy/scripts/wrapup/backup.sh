@@ -120,20 +120,23 @@ else
     DUMP="$("$AIA_ROOT/deploy/scripts/db-backup.sh" --out-dir "$DEST")"
     wrapup_log "dump 完成：$(basename "$DUMP")"
   else
-    wrapup_log "WARN: 没有可用的 postgres 容器，跳过 pg_dump（卷快照仍会做）"
+    wrapup_die "没有可用的 postgres 容器，无法写出 pg dump。本轮没有 dump，拒绝继续写入（T-A102 B1）"
   fi
 fi
 
-prefix="$(wrapup_prefix 2>/dev/null || true)"
-if [ -n "$prefix" ]; then
-  wrapup_log "卷前缀 $prefix"
-  echo "$prefix" >"$DEST/volume-prefix.txt"
-  for suf in "${WRAPUP_VOL_SUFFIXES[@]}"; do
-    snapshot_vol "${prefix}_${suf}" "$DEST/${suf}.tgz"
-  done
-else
-  wrapup_log "WARN: 未解析到卷前缀，跳过具名卷快照（可加 --volume-prefix）"
+if [ -z "${DUMP:-}" ] || [ ! -s "${DUMP:-/}" ]; then
+  wrapup_die "本轮没有写出 pg dump，拒绝写 manifest 与后续步骤（T-A102 B1）"
 fi
+
+prefix="$(wrapup_prefix 2>/dev/null || true)"
+if [ -z "$prefix" ]; then
+  wrapup_die "未解析到卷前缀，拒绝跳过具名卷快照（可加 --volume-prefix）（T-A102 B1）"
+fi
+wrapup_log "卷前缀 $prefix"
+echo "$prefix" >"$DEST/volume-prefix.txt"
+for suf in "${WRAPUP_VOL_SUFFIXES[@]}"; do
+  snapshot_vol "${prefix}_${suf}" "$DEST/${suf}.tgz"
+done
 
 write_manifest "$DEST" "$DUMP"
 # 只记主密钥 sha256（若文件存在），不输出密钥本身

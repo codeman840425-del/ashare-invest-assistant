@@ -10,6 +10,7 @@ WRAPUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$WRAPUP_DIR/lib.sh"
 
 # 本机可做的干跑与 o69_ 前缀模拟。不碰 o53/o55/o57/o60/o61 容器本身，不 drop 它们的已有库，不删匿名卷。
+# --apply 只应在共享运维电脑上跑（依赖本机 o61-pg:55461），不要在用户 Windows 上执行。
 # 用法：selftest-local.sh [--apply]   # 默认只 bash -n / 脚本 dry-run；--apply 才建 o69_ 临时卷和库并在结束时删除
 usage() { echo "用法：selftest-local.sh [--apply]"; }
 wrapup_parse_common "$@" || { [ $? -eq 99 ] && usage && exit 0; exit 1; }
@@ -49,15 +50,20 @@ wrapup_log "bash -n 已跑完 ${#scripts[@]} 个脚本"
 
 if [ "$WRAPUP_APPLY" -eq 0 ]; then
   [ "$fail" -eq 0 ] || wrapup_die "dry-run 自检有失败"
-  wrapup_log "dry-run 自检通过。加 --apply 才会创建并清理 o69_ 临时卷/库。"
+  wrapup_log "dry-run 自检通过。加 --apply 才会创建并清理 o69_ 临时卷/库（仅共享运维电脑，不要在用户 Windows 上跑）。"
   exit 0
 fi
 
+# T-A102 B3：先固定独立 mktemp 目录，再设 trap；trap 只删这个目录，绝不 rm 用户或默认备份根。
+SELFTEST_TMP="$(mktemp -d /tmp/o69-wrapup-selftest.XXXXXX)"
+chmod 700 "$SELFTEST_TMP"
+WRAPUP_BACKUP_DIR="$SELFTEST_TMP"
+export AIA_WRAPUP_BACKUP_DIR="$SELFTEST_TMP"
 cleanup() {
   set +e
   wrapup_log "清理 o69_ 临时资源（不碰受保护实例）"
   if command -v psql >/dev/null; then
-    for db in o69_wrapup_src o69_wrapup_dst o69_rollback_dst; do
+    for db in o69_wrapup_src o69_wrapup_dst o69_rollback_dst o69_b2_fork; do
       psql -h 127.0.0.1 -p 55461 -U postgres -d postgres -v ON_ERROR_STOP=1 \
         -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$db' AND pid<>pg_backend_pid();" >/dev/null 2>&1
       psql -h 127.0.0.1 -p 55461 -U postgres -d postgres -v ON_ERROR_STOP=1 \
@@ -71,10 +77,16 @@ cleanup() {
     wrapup_assert_temp_volume "$v"
     wrapup_docker volume rm "$v" >/dev/null 2>&1 || wrapup_log "WARN: 未能删除临时卷 $v"
   done
-  rm -rf "$WRAPUP_BACKUP_DIR"
+  case "$SELFTEST_TMP" in
+    /tmp/o69-wrapup-selftest.*) rm -rf "$SELFTEST_TMP" ;;
+    *) wrapup_log "WARN: 拒绝删除非自检 mktemp 目录，未执行 rm" ;;
+  esac
   set -e
 }
 trap cleanup EXIT
+if [ "${WRAPUP_SELFTEST_FAIL_AFTER_TRAP:-}" = "1" ]; then
+  wrapup_die "负向自检：trap 已设，故意失败（不应删除用户备份目录）"
+fi
 
 # ---- HALT 目录 ----
 wrapup_docker volume create o69_ingest_state >/dev/null
@@ -100,10 +112,7 @@ wrapup_docker run --rm --network none --user 0 -v o69_aia_receipts:/run/aia/rece
     echo "{\"kind\":\"fictional-receipt\"}" > /run/aia/receipts/probe.json
     chown root:root /run/aia/receipts/probe.json
     chmod 0644 /run/aia/receipts/probe.json'
-WORKDIR_BACKUP="$WRAPUP_DIR/../../../deploy/backups/wrapup-selftest-$$"
-# 用独立目录，避免污染默认 backups
-WRAPUP_BACKUP_DIR="$WORKDIR_BACKUP"
-export AIA_WRAPUP_BACKUP_DIR="$WORKDIR_BACKUP"
+WORKDIR_BACKUP="$SELFTEST_TMP"
 
 # ---- 库 dump / restore ----
 wrapup_assert_temp_db_name o69_wrapup_src

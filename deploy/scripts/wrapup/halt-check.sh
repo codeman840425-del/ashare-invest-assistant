@@ -45,7 +45,8 @@ probe_as_user() {
     sh -c 'd=/run/aia/state/halt
       if [ ! -d "$d" ]; then echo "停机标志目录不可写"; exit 78; fi
       p="$d/.probe-$$"
-      if ! (umask 077; : >"$p"); then echo "停机标志目录不可写"; exit 78; fi
+      # set -C：不覆盖已有文件，等价于 O_EXCL，避免误截断已有 HALT
+      if ! (umask 077; set -C; : >"$p"); then echo "停机标志目录不可写"; exit 78; fi
       rm -f "$p"
       echo PROBE_OK'
 }

@@ -76,6 +76,9 @@ preflight
 if [ "$cmd" = "all" ]; then
   wrapup_log "all：按手册顺序干跑/执行各步（本命令不会自动 rollback）"
   "$WRAPUP_DIR/backup.sh" "$@"
+  if [ "$WRAPUP_APPLY" -eq 1 ]; then
+    wrapup_require_round_backup "$WRAPUP_BACKUP_DIR"
+  fi
   "$WRAPUP_DIR/update-repo.sh" "$@"
   "$WRAPUP_DIR/start-stack.sh" "$@"
   "$WRAPUP_DIR/halt-check.sh" "$@"

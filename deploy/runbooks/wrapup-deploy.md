@@ -4,7 +4,7 @@
 
 **Windows：下列命令在 WSL 或 Git Bash 里执行**（不要用 cmd.exe）。`${NGINX_HTTP_PORT:-8080}` 是 bash 写法。
 
-本方案**未经用户批准不得在用户电脑上 --apply**。本任务只在本机工作树写文档和脚本，不部署、不指向用户电脑。
+依据 `/workspace/team/rules/standing-auth-2026-11-08.md`：用户已长期授权收口时部署到其电脑（先备份，失败回滚，绝不 `down -v`），主数据拉取也在 11-08 授权过。`--apply` 不再需要用户逐步确认，改为收口时由编排者下令。本工作树任务本身仍只写文档和脚本，不直接在用户电脑上执行。
 
 ## 红线
 
@@ -28,12 +28,12 @@ deploy/scripts/wrapup/start-stack.sh --apply
 deploy/scripts/wrapup/halt-check.sh --apply          # 不可写则 rc=78；修复加 --repair
 deploy/scripts/wrapup/net-verify.sh --apply          # 只打 1.1.1.1 / example.com
 deploy/scripts/wrapup/verify.sh --apply
-deploy/scripts/wrapup/rollback.sh --apply --backup-dir <本轮备份>   # 须用户本人确认
+deploy/scripts/wrapup/rollback.sh --apply --backup-dir <本轮备份>   # 由编排者下令；失败须停下来问编排者
 ```
 
 公共选项：`--volume-prefix`、`--container`、`--db`、`--volume`、`--rollback-head`（默认即上面的 f82a83b）。
 
-## 当天只读确认（先做，须用户同意后再 --apply）
+## 当天只读确认（先做；--apply 由编排者在收口时下令）
 
 在用户机仓库（WSL 路径）里：
 
@@ -51,13 +51,13 @@ deploy/scripts/wrapup/backup.sh --apply --backup-dir /data/aia-wrapup-backup
 
 会做：`db-backup.sh` 的 `pg_dump -Fc` + `.meta.json`；具名卷快照（`ingest_state`、`aia_receipts`、`imports`、`master`、`redisdata`，**不对运行中的 pgdata 打原始包**）；记录当前提交、`git status`、镜像 tag，以及主密钥 **sha256 摘要**（密钥本身不进备份目录，见 `database.md` §4）。
 
-回滚（**须用户本人确认**）：
+回滚（由编排者在收口时下令；若回滚失败必须停下来问编排者）：
 
 ```bash
 deploy/scripts/wrapup/rollback.sh --apply --backup-dir /data/aia-wrapup-backup/<时间戳>
 ```
 
-完整步骤：dump 恢复到**新库名**（绝不 `--drop-existing` 主库）；卷恢复到**新卷名**（不 `volume rm` 现网卷、不 down -v）；在新 worktree 检出 `f82a83b1817ed2c2388a09602f213a34aa0b93f9`（或备份当时的 HEAD），把 0029 未跟踪副本放回工作区（不丢失、不 reset 原树）。然后人工把服务切回旧工作树 / 新库名，只重启必要服务。0029 有绑定行时降级会被永久拒绝（T-A70），不能指望 downgrade 回滚。
+完整步骤：dump 恢复到**新库名**（绝不 `--drop-existing` 主库）；卷恢复到**新卷名**（不 `volume rm` 现网卷、不 down -v）；在新 worktree 检出 `f82a83b1817ed2c2388a09602f213a34aa0b93f9`（或备份当时的 HEAD），把 0029 未跟踪副本放回工作区（不丢失、不 reset 原树）。然后由编排者下令把服务切回旧工作树 / 新库名，只重启必要服务。若要删除数据或卷，必须先停下来问编排者。0029 有绑定行时降级会被永久拒绝（T-A70），不能指望 downgrade 回滚。
 
 ## 2. 仓库太旧（dry-run 退出 1）时如何更新
 
@@ -100,7 +100,7 @@ deploy/scripts/wrapup/halt-check.sh --apply          # uid 10001 探测（建完
 deploy/scripts/wrapup/halt-check.sh --apply --repair
 ```
 
-修复用一次性 root 容器 `install -d -o 10001 -m 700`，**不删除**已有停机标志。解除停机必须用户本人确认，见 `ingest-halt.md`。
+修复用一次性 root 容器 `install -d -o 10001 -m 700`，**不删除**已有停机标志。解除停机由编排者在收口时下令，见 `ingest-halt.md`。
 
 ## 5. 网络实测
 
@@ -138,19 +138,21 @@ deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch
 
 不要 `compose.sh --profile master-bootstrap run …`（会绕过 `--check`、flock、`--confirm-network-fetch` 和 CI 拒绝，T-A98 B2）。网关对外开放前应看到「已有 status=ok 的主数据同步记录」。不调麦蕊。
 
-## 需要用户本人确认的步骤
+## 授权口径与必须停下来问编排者的情况
 
-- 在用户电脑上开始本收口（本方案纸面通过后）
-- 任何 `--apply`（备份、迁 0029、更新代码、启停服务、修复 halt 目录、网络探测、verify-roles、回滚）
-- 解除停机标志（`ingest-halt.md`）
-- 把回滚产生的新库名 / 新卷切成现网连接
-- 删除旧的 `<前缀>_aia_run` 卷（若还在；T-O66b 已不再挂载）
+依据 `standing-auth-2026-11-08.md`：用户已长期授权收口时部署到其电脑（先备份，失败回滚，绝不 `down -v`），主数据首次导入（三所官网公开 HTTPS）也在 11-08 授权过。因此备份、迁 0029、更新代码、启停服务、halt 修复、网络探测、verify-roles、按手册执行的回滚，以及 `master-bootstrap.sh --check` / `--run --confirm-network-fetch`，都由编排者在收口时下令，不必逐步再问用户。
+
+下列情况**仍然必须停下来问编排者**后再继续：
+
+- 0029 分叉（库已在 0029 且 ingest_private / 触发器 / 函数与入链文件不一致，T-A70）
+- 任何删除数据或卷的操作（包括把回滚产生的新库/新卷切成现网之前若涉及删除现网数据或卷；删除旧 `<前缀>_aia_run` 卷）
+- 回滚失败
 
 ## 本机自检
 
 ```bash
 deploy/scripts/wrapup/selftest-local.sh           # bash -n、shellcheck、各脚本 dry-run
-deploy/scripts/wrapup/selftest-local.sh --apply   # 另在 o69_ 临时卷/库上模拟 HALT 与备份恢复，结束即删
+deploy/scripts/wrapup/selftest-local.sh --apply   # 只在共享运维电脑上跑；不要在用户 Windows 上执行
 ```
 
-`selftest-local.sh --apply` 只用 `o69_` 前缀的卷和库，以及已有的 `o61-pg`（`127.0.0.1:55461`）建临时库；不停止受保护容器，不 drop `o61_tmp_0030` / `tt51_tpl` 等，不删匿名卷。
+`selftest-local.sh --apply` **只应在共享运维电脑上跑**，不要在用户 Windows 上执行。它只用 `o69_` 前缀的卷和库，以及已有的 `o61-pg`（`127.0.0.1:55461`）建临时库；不停止受保护容器，不 drop `o61_tmp_0030` / `tt51_tpl` 等，不删匿名卷。自检目录用独立 `mktemp`，trap 只删该目录。

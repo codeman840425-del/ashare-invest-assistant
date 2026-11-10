@@ -2914,7 +2914,7 @@ segments:
       stamp_duty_sell_pct: 0.05       # 印花税仅卖出
       transfer_fee_pct: 0.001         # 过户费双向
       commission_rate_default_pct: null   # 佣金按用户费率；null = 未设置时由导入成交反推，仍无则提示用户填写
-      commission_min_yuan: 5          # 单笔最低（券商常见做法，以用户实际为准）
+      commission_min_yuan: 5          # 单笔最低 5 元：证监发〔2002〕21 号《关于调整证券交易佣金收取标准的通知》第一条（A 股每笔佣金不足 5 元按 5 元收取；证监会法规库 2026-11-10 查为现行有效）；费率由券商自定（同文第六条），以用户实际为准
       slippage_default_pct: 0.1       # 模板参数默认值
     impact_cost:                      # 【编排者默认，用户可否决；初值待校准】第 9 节 C(7)
       adv_basis: amount               # 【已定 T-A02】成交额口径：参与率 = 拟成交额（计划数量 × 参考价）÷ 近 N 个有效交易日日成交额均值（停牌日不计），与 _template.md §18 一致
@@ -2934,7 +2934,7 @@ segments:
       applies_to_boards: [main_board, chinext]  # 50 万股上限的适用板块；科创板不适用（沪第 4.4.1、6.14 条）；北交所 V1 不扫描（C(8)）
       limit_order_only: true          # 只能限价申报：仅沪 4.4.9；深交所 2026 规则未见同类条款
       limit_order_only_exchanges: [SH]  # T-A03 新增键：limit_order_only 只作用于沪市证券；本产品不下单，只用于草案与通知文案“请使用限价委托”
-  - effective_from: "2023-04-10"      # 2023-04-10 ～ 2026-07-05：除 main_board_st: 5 外与上一段相同（文件中写全，不做继承）。起始日取沪深主板注册制新股首批上市日，依据 O9、O10 第 10.9 条（日历日期由政府网转载证监会信息确认，交易所原页未找到）；【已定 2026-11-01】更早的规则（创业板 2020-08-24 前为 10%、主板新股首日按发行价 144%/64% 等）不建模
+  - effective_from: "2023-08-28"      # 2023-08-28 ～ 2026-07-05：除 main_board_st: 5 外与上一段相同（文件中写全，不做继承）。起始日为证券交易印花税减半征收施行日（财政部 税务总局公告 2023 年第 39 号；T-A148 §二 B4 已核对财政部网站与国家税务总局法规库）
     price_limit_pct:                  # 同上一段
       main_board: 10
       main_board_st: 5                # 【已核实】2026-07-06 之前沪深主板 ST/*ST 为 5%（出处同上一段）
@@ -2971,10 +2971,70 @@ segments:
       unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
       data_source: null                             # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）
     fees:
-      stamp_duty_sell_pct: 0.05       # 印花税仅卖出
+      stamp_duty_sell_pct: 0.05       # 印花税仅卖出；2023-08-28 起减半征收为 0.05%（财政部 税务总局公告 2023 年第 39 号）
       transfer_fee_pct: 0.001         # 过户费双向
       commission_rate_default_pct: null   # 佣金按用户费率；null = 未设置时由导入成交反推，仍无则提示用户填写
-      commission_min_yuan: 5          # 单笔最低（券商常见做法，以用户实际为准）
+      commission_min_yuan: 5          # 单笔最低 5 元：证监发〔2002〕21 号《关于调整证券交易佣金收取标准的通知》第一条（A 股每笔佣金不足 5 元按 5 元收取；证监会法规库 2026-11-10 查为现行有效）；费率由券商自定（同文第六条），以用户实际为准
+      slippage_default_pct: 0.1       # 模板参数默认值
+    impact_cost:                      # 【编排者默认，用户可否决；初值待校准】第 9 节 C(7)
+      adv_basis: amount
+      adv_window_days: 20
+      tiers:                          # 参与率上界（%，含） → 成本（bp）
+        - {max_participation_pct: 0.1, bp: 0}    # I1
+        - {max_participation_pct: 0.5, bp: 5}    # I2
+        - {max_participation_pct: 1.0, bp: 15}   # I3
+        - {max_participation_pct: 2.0, bp: 30}   # I4
+        - {max_participation_pct: null, bp: 60}  # I5（> 2%）
+    unfillable:
+      one_price_limit_up_blocks_buy: true
+      one_price_limit_down_blocks_sell: true
+      skip_suspended: true
+    risk_warning:
+      daily_buy_cap_shares: 500000    # 适用（沪 2023 第 4.4.12 条，仅竞价 + 大宗；深 2023 第 4.5.4 条）；只影响回看，不影响当前草案
+      applies_to_boards: [main_board, chinext]  # 科创板不适用
+      limit_order_only: true
+      limit_order_only_exchanges: [SH]
+  - effective_from: "2023-04-10"      # 2023-04-10 ～ 2023-08-27：除 stamp_duty_sell_pct: 0.1 外与上一段相同（文件中写全，不做继承）。起始日取沪深主板注册制新股首批上市日，依据 O9、O10 第 10.9 条（日历日期由政府网转载证监会信息确认，交易所原页未找到）；【已定 2026-11-01】更早的规则（创业板 2020-08-24 前为 10%、主板新股首日按发行价 144%/64% 等）不建模
+    price_limit_pct:                  # 同上一段
+      main_board: 10
+      main_board_st: 5                # 【已核实】2026-07-06 之前沪深主板 ST/*ST 为 5%（出处同上一段）
+      chinext: 20                     # 创业板（含风险警示）
+      star: 20                        # 科创板（含风险警示）
+      bse: 30                         # 北交所（含风险警示）
+    no_limit:                         # 无涨跌幅限制的情形（以交易所规则为准）
+      registered_ipo_first_days: 5    # 沪深注册制新股上市前 5 个交易日
+      bse_ipo_first_days: 1
+      delisting_period_first_day: true
+    lot:
+      buy_lot: 100                    # 沪/深主板、创业板、ETF 竞价买入为 100 股（份）或其整数倍（沪 3.3.8 / 深 3.3.8，已核实）
+      star_min_buy: 200               # 科创板股票/CDR 单笔 ≥ 200 股，买卖均适用（沪 2023 第 6.1.7 条，已核实）
+      star_step: 1                    # 200 股以上按 1 股递增【部分核实：规则无明文，依沪 6.1/6.1.7 + 上交所投教 O32–O34（T-R10）】
+      bse_min_buy: 100                # 北交所 ≥ 100 股，按 1 股递增【未核实；V1 不扫描北交所】
+      bse_step: 1                     # 【未核实】
+      odd_lot_sell_all: true          # 卖出时余额不足一个申报单位的部分须一次性申报卖出（沪 3.3.8、6.1.7；深 3.3.8；已核实，T-R10）
+      star_odd_lot_threshold: 200     # 科创板零股阈值 = 200（沪 2023 第 6.1.7 条末句；已核实）；其他板块阈值 = buy_lot
+      max_order_qty: 1000000          # 竞价单笔上限 100 万股（份）（沪 3.3.9 / 深 3.3.9；已核实）
+      star_max_limit_order: 100000    # 科创板限价单笔 ≤ 10 万股（沪 2023 第 6.1.7 条；已核实）
+      star_max_market_order: 50000    # 科创板市价单笔 ≤ 5 万股（沪 2023 第 6.1.7 条；已核实）
+      star_max_after_hours: 1000000   # 科创板盘后固定价格单笔 ≤ 100 万股（沪 2023 第 6.2.6 条；已核实）
+      chinext_max_limit_order: 300000 # 创业板限价单笔 ≤ 30 万股（深 3.3.9；已核实）
+      chinext_max_market_order: 150000  # 创业板市价单笔 ≤ 15 万股（深 3.3.9；已核实）
+    sessions:                         # 北京时间
+      call_auction: ["09:15", "09:25"]
+      morning: ["09:30", "11:30"]
+      afternoon: ["13:00", "14:57"]
+      closing_auction: ["14:57", "15:00"]
+    t_plus: 1
+    t0_round_trip:                    # 实行当日回转交易的品种（沪 3.1.5 / 深 3.1.5；类别已核实，无官方代码清单；T-R10 §3）
+      fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
+      cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
+      unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
+      data_source: null                             # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）
+    fees:
+      stamp_duty_sell_pct: 0.1        # 印花税仅卖出；2023-08-28 减半前为 0.1%（《中华人民共和国印花税法》所附《印花税税目税率表》证券交易栏：成交金额的千分之一，2022-07-01 起施行；对出让方征收，见同法第三条；T-A148 复审 S9）；减半施行日见财政部 税务总局公告 2023 年第 39 号
+      transfer_fee_pct: 0.001         # 过户费双向
+      commission_rate_default_pct: null   # 佣金按用户费率；null = 未设置时由导入成交反推，仍无则提示用户填写
+      commission_min_yuan: 5          # 单笔最低 5 元：证监发〔2002〕21 号《关于调整证券交易佣金收取标准的通知》第一条（A 股每笔佣金不足 5 元按 5 元收取；证监会法规库 2026-11-10 查为现行有效）；费率由券商自定（同文第六条），以用户实际为准
       slippage_default_pct: 0.1       # 模板参数默认值
     impact_cost:                      # 【编排者默认，用户可否决；初值待校准】第 9 节 C(7)
       adv_basis: amount

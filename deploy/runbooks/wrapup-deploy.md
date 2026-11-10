@@ -1,0 +1,156 @@
+# 收口部署（T-O69 / T-O69c）
+
+把 `/workspace/team/reports/T-O57-deploy-plan.md` 更新到当前主线后的可执行方案。脚本在 `deploy/scripts/wrapup/`。默认**干跑**；会写入或有破坏性的步骤必须加 `--apply`。失败即停，并打印回滚提示。不要打印密钥、DSN、证书。
+
+**Windows：下列命令在 WSL 或 Git Bash 里执行**（不要用 cmd.exe）。`${NGINX_HTTP_PORT:-8080}` 是 bash 写法。
+
+本方案**未经用户批准不得在用户电脑上 --apply**。本任务只在本机工作树写文档和脚本，不部署、不指向用户电脑。
+
+## 红线
+
+不要 `down -v`，不要 `prune`，不要 `git reset` / `--force` / rebase，不要删别人的卷，不要动受保护实例（o53 / o55 / o57 / o60 / o61）或收口用的空匿名卷。不要调麦蕊。不要 stamp / downgrade 来「对齐」0029 分叉（T-A70）。主数据首次导入**只许**走 `deploy/scripts/master-bootstrap.sh`（保留 `--check`、flock、`--confirm-network-fetch`、CI 拒绝），不要直接 `compose.sh run`。
+
+## 已知环境与出处
+
+- 用户电脑（2026-11-09 memory / T-O57 方案）：WIN-SPD6GD4H42E，`F:\ashare-invest-assistant`，compose 项目 `aia-local`，经 WSL。当时 HEAD 为 team-b 的 `f82a83b1817ed2c2388a09602f213a34aa0b93f9`，有未跟踪 `src/backend/migrations/versions/0029_*.py`，`git hash-object` 应为 `05774fed18ab70e4ff506c3178107d03b854d31c`（T-O58 已核）。
+- **停机目录不可写退出 78**：`docs/api-contract.md`（T-A91 M-c：bootstrap 对停机目录 O_EXCL 探测，不可写则 78）；实现 `src/backend/app/workers/ingest.py` 中 `_probe_halt_directory` / `main`；报告 T-A91、T-B116d、T-T56、T-T57。目录为 `/run/aia/state/halt/`，卷 `<前缀>_ingest_state`，属主 10001、权限 700。文案含「停机标志目录不可写」，不碰已有 HALT 文件。
+- **仓库太旧时 dry-run 退出 1**：`src/backend/probes/run_all.py --dry-run` 在当前基线上应为退出 0（T-B05-run-howto、T-T61）。T-B117 记录过退出码 1：当时运行树/环境与已合入基线不一致，两条 p13 mock 失败；在当前基线复跑为 0。用户机若仍停在 `f82a83b`，直接跑 dry-run 可能得到退出码 1，须先按第 2 步更新代码，不能 reset。
+
+收口头哈希由编排者在合入后批准，脚本用 `--target <完整哈希>`，不要用活的分支名代替。
+
+## 脚本一览
+
+```bash
+deploy/scripts/wrapup/wrapup.sh preflight
+deploy/scripts/wrapup/backup.sh --apply --backup-dir <仓库外目录>
+deploy/scripts/wrapup/update-repo.sh --apply --target <批准哈希> --backup-dir <同上>
+deploy/scripts/wrapup/start-stack.sh --apply
+deploy/scripts/wrapup/halt-check.sh --apply          # 不可写则 rc=78；修复加 --repair
+deploy/scripts/wrapup/net-verify.sh --apply          # 只打 1.1.1.1 / example.com
+deploy/scripts/wrapup/verify.sh --apply
+deploy/scripts/wrapup/rollback.sh --apply --backup-dir <本轮备份>   # 须用户本人确认
+```
+
+公共选项：`--volume-prefix`、`--container`、`--db`、`--volume`、`--rollback-head`（默认即上面的 f82a83b）。
+
+## 当天只读确认（先做，须用户同意后再 --apply）
+
+在用户机仓库（WSL 路径）里：
+
+1. `git rev-parse HEAD`、`git status`。是否仍有未跟踪 `0029_*.py`；`git hash-object` 是否等于 `05774fe…`。其它脏文件先停手。
+2. 只读看库 `alembic_version`、`ingest_private` 是否存在（只计数）。若库已在 0029 而定义与将要合入的链不一致 → **停手**（T-A70），不 stamp、不 downgrade、不 down -v。
+3. 记录卷前缀、镜像 tag、磁盘空间；不要改 `.env`，不要把 `.env` 贴进工单。
+4. 跑一遍脚本 **不带** `--apply`，确认打印的计划正确。
+
+## 1. 备份与回滚
+
+```bash
+# 建议 --backup-dir 放在仓库外（deploy/backups/ 已 gitignore，但仍以仓库外为佳）
+deploy/scripts/wrapup/backup.sh --apply --backup-dir /data/aia-wrapup-backup
+```
+
+会做：`db-backup.sh` 的 `pg_dump -Fc` + `.meta.json`；具名卷快照（`ingest_state`、`aia_receipts`、`imports`、`master`、`redisdata`，**不对运行中的 pgdata 打原始包**）；记录当前提交、`git status`、镜像 tag，以及主密钥 **sha256 摘要**（密钥本身不进备份目录，见 `database.md` §4）。
+
+回滚（**须用户本人确认**）：
+
+```bash
+deploy/scripts/wrapup/rollback.sh --apply --backup-dir /data/aia-wrapup-backup/<时间戳>
+```
+
+完整步骤：dump 恢复到**新库名**（绝不 `--drop-existing` 主库）；卷恢复到**新卷名**（不 `volume rm` 现网卷、不 down -v）；在新 worktree 检出 `f82a83b1817ed2c2388a09602f213a34aa0b93f9`（或备份当时的 HEAD），把 0029 未跟踪副本放回工作区（不丢失、不 reset 原树）。然后人工把服务切回旧工作树 / 新库名，只重启必要服务。0029 有绑定行时降级会被永久拒绝（T-A70），不能指望 downgrade 回滚。
+
+## 2. 仓库太旧（dry-run 退出 1）时如何更新
+
+先停 api / worker / ingest（热重载），postgres / redis 可留。再：
+
+```bash
+deploy/scripts/wrapup/update-repo.sh --apply --target <批准的完整哈希> --backup-dir /data/aia-wrapup-backup
+```
+
+脚本会：未跟踪 0029 若 hash 等于已知 blob，先**复制到仓库外**再从工作区移走（不删除唯一副本、不 reset）；其它脏文件停手；`git fetch` 后若可快进则 `merge --ff-only`，否则**新建 worktree** 检出目标哈希，原工作树不动。新工作树必须沿用原来的 `COMPOSE_PROJECT_NAME` / `AIA_VOLUME_PREFIX`（只看 `deploy/env/.env`，不要把含密钥的文件贴进工单）。
+
+更新后再跑 `python run_all.py --dry-run`（`env -u MAIRUI_LICENCE`）应为退出 0。这不是收口必跑，但可解释「太旧 → 退出 1」。
+
+## 3. 新网络层在 Windows Docker Desktop 上的启动顺序
+
+`internal` / `egress` / `edge` 在 `compose up` 时创建，不要为「换网」而 `down -v`。
+
+```bash
+deploy/scripts/wrapup/start-stack.sh --apply
+```
+
+顺序（与 `up.sh` / compose `depends_on` 一致）：
+
+1. postgres、redis（等到 healthy）
+2. **migrate**（`alembic upgrade head`）
+3. timescale-apply
+4. **db-roles**（`apply-roles.sh`）
+5. api / worker / beat / ingest / signal-rt / nginx
+
+不要加 `--profile master-bootstrap`。默认 dev/live 不会启动该服务。
+
+## 4. HALT 目录可写检查
+
+卷 `<前缀>_ingest_state` 挂到 `/run/aia/state/`，`halt/` 须为 uid **10001**、模式 **700**。不可写时 ingest 启动退出 **78**。
+
+```bash
+deploy/scripts/wrapup/halt-check.sh                  # dry-run：只 stat
+deploy/scripts/wrapup/halt-check.sh --apply          # uid 10001 探测（建完即删 .probe-*，不碰 HALT）
+# 若 rc=78：
+deploy/scripts/wrapup/halt-check.sh --apply --repair
+```
+
+修复用一次性 root 容器 `install -d -o 10001 -m 700`，**不删除**已有停机标志。解除停机必须用户本人确认，见 `ingest-halt.md`。
+
+## 5. 网络实测
+
+按 `deploy/runbooks/networks.md`（第 1–8 步）。可先：
+
+```bash
+deploy/scripts/wrapup/net-verify.sh --apply
+```
+
+脚本覆盖能自动跑的部分。其余（服务名 DNS、局域网 IP 不可达、Docker Desktop 伪装开关、WSL mirrored、`Get-NetTCPConnection`）以手册命令和判定为准。
+
+只许探测 `http://1.1.1.1` 或 `https://example.com`。**绝不调麦蕊。** 无客户端时看输出是否含 `NO_HTTP_CLIENT`，不要只看 rc=2。
+
+## 6. 验证清单
+
+```bash
+deploy/scripts/wrapup/verify.sh --apply
+```
+
+须同时满足：
+
+- `verify-roles.sh`：有 OK 行，**FAIL 0、SKIP 0**，退出码 0
+- `alembic heads` 只有一个 head，且 `current` 指向它
+- `http://127.0.0.1:${NGINX_HTTP_PORT:-8080}/health/live` 为 200；抽查 `/`、`/login`
+- 收据卷 `<前缀>_aia_receipts`：目录 `root:root 755`，文件 `root:root 644`，ingest/worker `:ro`。只删收据文件不能恢复出口（`receipts.md`）
+
+## 主数据首次导入（只走脚本）
+
+栈起来且 `--check` 为 10、并确认本机可访问三所官网之后：
+
+```bash
+deploy/scripts/master-bootstrap.sh --check; echo "rc=$?"
+deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch
+```
+
+不要 `compose.sh --profile master-bootstrap run …`（会绕过 `--check`、flock、`--confirm-network-fetch` 和 CI 拒绝，T-A98 B2）。网关对外开放前应看到「已有 status=ok 的主数据同步记录」。不调麦蕊。
+
+## 需要用户本人确认的步骤
+
+- 在用户电脑上开始本收口（本方案纸面通过后）
+- 任何 `--apply`（备份、迁 0029、更新代码、启停服务、修复 halt 目录、网络探测、verify-roles、回滚）
+- 解除停机标志（`ingest-halt.md`）
+- 把回滚产生的新库名 / 新卷切成现网连接
+- 删除旧的 `<前缀>_aia_run` 卷（若还在；T-O66b 已不再挂载）
+
+## 本机自检
+
+```bash
+deploy/scripts/wrapup/selftest-local.sh           # bash -n、shellcheck、各脚本 dry-run
+deploy/scripts/wrapup/selftest-local.sh --apply   # 另在 o69_ 临时卷/库上模拟 HALT 与备份恢复，结束即删
+```
+
+`selftest-local.sh --apply` 只用 `o69_` 前缀的卷和库，以及已有的 `o61-pg`（`127.0.0.1:55461`）建临时库；不停止受保护容器，不 drop `o61_tmp_0030` / `tt51_tpl` 等，不删匿名卷。

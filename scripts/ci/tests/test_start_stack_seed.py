@@ -224,18 +224,21 @@ def test_dry_run_prints_seed_and_does_not_execute(fake: Path) -> None:
 
 
 def test_hash_conflict_rc0_stops_without_starting_worker(fake: Path) -> None:
-    """T-A121：冲突字样出现在输出里且 rc=0 时，也必须停下且不启 worker（不能只靠 rc 分支兜住）。"""
+    """T-A121 / T-A125⑦：stdout 为合法 inserted=1，同时 stderr 带冲突标记且 rc=0。
+    必须走冲突检查并停下；若 OUT 为空会误走「无法解析」，去掉冲突检查后用例仍绿。
+    """
     r = _run(
         fake,
         "--apply",
-        FAKE_SEED_OUT="",
+        FAKE_SEED_OUT="engine_policy_seed_inserted=1\n",
         FAKE_SEED_ERR="ValueError: engine_policy_version_hash_conflict\n",
         FAKE_SEED_RC="0",
     )
     assert r.returncode != 0, r.stderr
-    assert "engine_policy_version_hash_conflict" in r.stderr
+    assert "engine_policy_version_hash_conflict：立即停止" in r.stderr
     assert "不启动 worker" in r.stderr
     assert "不删除旧行" in r.stderr
+    assert "无法解析" not in r.stderr
     assert _receipt(fake) is None
     log = _compose_log(fake)
     assert _seed_run(log)

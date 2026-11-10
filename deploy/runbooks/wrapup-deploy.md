@@ -394,7 +394,15 @@ SQL
 在同一台已挂出仓库树的机器上，用与导入器相同的方式算 v2 文件摘要，再和上面 `source_hash` 比对（只哈希现行 `docs/strategies/cards/st_pullback_ma.md`，不要用 `history/st_pullback_ma.v1.md`；先确认该文件 `version_no` 为 2）：
 
 ```bash
-python -c 'from pathlib import Path; import hashlib; p=Path("docs/strategies/cards/st_pullback_ma.md"); print(hashlib.sha256(p.read_text(encoding="utf-8").encode()).hexdigest())'
+# WSL Ubuntu 默认没有 python 命令；优先 python3，没有再回落到 python（同 networks.md 出网探测写法）
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c 'from pathlib import Path; import hashlib; p=Path("docs/strategies/cards/st_pullback_ma.md"); print(hashlib.sha256(p.read_text(encoding="utf-8").encode()).hexdigest())'
+elif command -v python >/dev/null 2>&1; then
+  python -c 'from pathlib import Path; import hashlib; p=Path("docs/strategies/cards/st_pullback_ma.md"); print(hashlib.sha256(p.read_text(encoding="utf-8").encode()).hexdigest())'
+else
+  echo "需要 python3 或 python" >&2
+  exit 2
+fi
 ```
 
 判定：

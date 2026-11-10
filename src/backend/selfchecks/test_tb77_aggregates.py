@@ -156,11 +156,28 @@ def test_routes_real_ownership_unread_and_imported_holdings(
                 triggered_at=dt.datetime.now(dt.UTC),
             )
         )
+    # ce32484 / T-B77 删除 ensure_empty_products，非空 alerts 不再 503；
+    # GET /api/v1/terminal 走 service.terminal，返回 Terminal（data_status=partial）。
+    # terminal() 不读 alerts 表；Terminal 无 alerts 字段（alerts 在 Today）。待 T-A149 契约确认。
     nonempty = client.get("/api/v1/terminal", params={"account_id": account_id})
-    assert nonempty.status_code == 503
-    assert (
-        nonempty.json()["error"]["details"]["issue"] == "nonempty_products_require_full_aggregation"
+    assert nonempty.status_code == 200
+    body = nonempty.json()
+    assert body["account_id"] == account_id
+    assert body["data_status"] == "partial"
+    assert {row["security_code"] for row in body["rows"]} == {
+        "688018.SH",
+        "688073.SH",
+        "300364.SZ",
+        "301218.SZ",
+    }
+    assert all(
+        row["holding"] and row["quote"] is None and row["suggestion"] is None
+        for row in body["rows"]
     )
+    assert body["account"]["pnl_day"] is None
+    assert {"aggregation", "account.pnl_day"} <= {item["key"] for item in body["gaps"]}
+    # 未验证: cash / positions.cost 是否进入 gaps 取决于导入持仓的现金与成本是否可核实，本段不写死。
+    # 未验证: trade_date、session、total_assets、unread_notifications 的具体取值本段不新写死。
     from fastapi.testclient import TestClient
 
     with TestClient(client.app) as anonymous:

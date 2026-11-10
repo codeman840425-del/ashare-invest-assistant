@@ -1,0 +1,32 @@
+# 草稿：T-T71c ③。T-B129 未交（be/T-B129 仍停在 af77bb5，无实现提交，见 reports/T-B129.md），
+# 本文件不被收集（不叫 test_*.py；pytest.ini python_files=test_*.py）。
+# 旧文件 tests/backend/unit/test_daily_bars_source_impl_a_t_t70.py 一字未改。
+# 以下两例按 T-A135 / daily-bars-source.md §8.2、§8.4 写新期望，待 T-B129 落地后在其头上迁入并验证。
+# 不得用 skip / xfail。
+#
+# 取代：
+#   test_daily_bars_fetch_never_scheduled      → test_daily_bars_fetch_slot_1715_open_day_only
+#   test_universe_holdings_only_until_clarified → test_universe_holdings_and_active_watchlist
+
+"""§8.4 / T-A135：test_daily_bars_fetch_slot_1715_open_day_only
+
+Given covered 打桩为 True、_engine 打桩，北京时间 00:00–23:59 每 5 分钟一个 now
+When slot_jobs(settings, now)
+Then daily_bars_fetch 恰在 17:15、17:20、17:25 三个 now 出现，
+     slot 为「当日 YYYYMMDD:1715」，args 恰为 {trade_date}；
+     covered 为 False 时一次也不出现；
+     schedule(settings) 的键不含它。
+另：常量 DAILY_BARS_FETCH_TIME 值为 17:15；任务仍在 LOCKED_TASKS、不在 RETRY_TASKS，不进 schedule()。
+
+在 af77bb5 上本应红：现行 slot_jobs 只有 17:30 ANALYZE / 18:30 REPORT / 18:00 快照，没有 17:15 分支。
+"""
+
+"""§8.2 / T-A135：test_universe_holdings_and_active_watchlist
+
+Given §7 种子与补3 的 G；u1 另有自选 E（stock、listed，有效）、E2（stock、listed，removed_at 有值）、
+     A（与持仓重复）、D（etf）；u2 自选 C2（stock、listed）；实例 F
+When daily_universe(conn, u1, 11-10)
+Then 列表相等于 sorted([A, B, E])：无 E2、D、F、G、C、C2，A 只出现一次。
+
+在 af77bb5 上本应红：现行 daily_universe 只取合格持仓，返回 sorted([A, B])，不含 E。
+"""

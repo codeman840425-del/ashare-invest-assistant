@@ -1,9 +1,9 @@
 # ruff: noqa: S101
-"""T-T71：docs/contracts/daily-snapshot-from-bars.md（docs/T-A128=9065767）§8 实现单 B 验收，共 28 例。
+"""T-T71 / T-T71c：daily-snapshot-from-bars.md 实现单 B 验收。
 
-基线 be/T-B127=50835e3（实现单 B 尚未落地）。用例名与契约 §8 :153–:180 一一对应。
-契约新符号（app.marketdata.daily_snapshot 及 fetch_and_record 的 fetched_at 参数）
-一律在用例内部探测：缺失时以 ``assert ..., "缺实现：…"`` 报红，保证本文件可被收集。
+T-T71 28 例名与契约 §8 一一对应；T-T71c 按 7234aa7 §12 / T-A137 新增 6 例（名与 :432–:457 一一对应）。
+自选 E 只在专用用例播种（§11.1），不进 _seed_b。
+契约新符号一律在用例内部探测：缺失时以 ``assert ..., "缺实现：…"`` 报红，保证本文件可被收集。
 
 临时库与探针复用 tests/backend/daily_bars_t70_support.py（自 T-T70 复制，T-T70 文件不改）：
 guard_temp_pg → TEMPLATE o61_tmp_0030 → upgrade head（动态单头）→ §7 种子 + H + tb76 链 → DROP。
@@ -38,6 +38,7 @@ from daily_bars_t70_support import (  # noqa: E402
     CODE_C,
     CODE_D,
     CODE_E,
+    CODE_G,
     CODE_H,
     OPEN_06,
     OPEN_09,
@@ -158,7 +159,6 @@ def _analyze(conn: Any, ctx: SimpleNamespace, *, app_env: str = "test", source: 
 def _seed_b(conn: Any, ctx: SimpleNamespace) -> None:
     from app.db.tables.accounts import broker_position_snapshot_items
     from app.db.tables.market import securities
-    from app.db.tables.research import watchlist_items
     from app.db.tables.strategy import (
         feature_catalog,
         strategies,
@@ -175,10 +175,6 @@ def _seed_b(conn: Any, ctx: SimpleNamespace) -> None:
         conn.execute(update(securities).where(securities.c.code == code).values(board=board.value))
     conn.execute(insert(securities).values(
         code=CODE_H, type="stock", name="合成H", exchange="BJ", listing_status="listed", board=None))
-    conn.execute(insert(securities).values(
-        code=CODE_E, type="stock", name="合成E", exchange="SH", listing_status="listed",
-        board=Board.MAIN.value))
-    conn.execute(insert(watchlist_items).values(id=uuid.uuid4(), user_id=ctx.u1, security_code=CODE_E))
     conn.execute(insert(broker_position_snapshot_items).values(
         id=uuid.uuid4(), snapshot_id=ctx.snap1, security_code=CODE_H, quantity=100,
         sellable_quantity=100))
@@ -230,6 +226,20 @@ def _seed_b(conn: Any, ctx: SimpleNamespace) -> None:
         id=instance, user_id=ctx.u1, strategy_version_id=version, scope="account",
         account_id=ctx.acc1, status="active", origin="user", horizon="swing"))
     ctx.instance = instance
+
+
+
+def _seed_u1_watchlist_e(conn: Any, ctx: SimpleNamespace) -> None:
+    """§11.1：自选行只加在专用用例，不进公共种子。"""
+    from app.db.tables.market import securities
+    from app.db.tables.research import watchlist_items
+    from app.schemas.enums import Board
+
+    conn.execute(insert(securities).values(
+        code=CODE_E, type="stock", name="合成E", exchange="SH", listing_status="listed",
+        board=Board.MAIN.value))
+    conn.execute(insert(watchlist_items).values(
+        id=uuid.uuid4(), user_id=ctx.u1, security_code=CODE_E))
 
 
 @pytest.fixture
@@ -466,9 +476,14 @@ def test_snapshot_calendar_hole_not_built(b_db: SimpleNamespace) -> None:
 
 
 def test_snapshot_only_owner_universe(b_db: SimpleNamespace) -> None:
-    """§8 :166；§1 :30（Q4）。"""
+    """§8 :166；§1 :30（Q4）；§11.1：自选 E 只在本例播种。
+
+    af77bb5 的 daily_universe 尚未纳入自选，Then 仍排除 E（与播种前相同，断言不弱化）。
+    T-B129 落地后 Then 才改为含 E；不在本单改期望。
+    """
     _snapshot_mod()
     with b_db.engine.begin() as conn:
+        _seed_u1_watchlist_e(conn, b_db)
         _fetch_three(conn)
         _sid, _issues, row = _build(conn, b_db)
         codes = {i["security_code"] for i in row.items["instruments"]} | {
@@ -907,3 +922,154 @@ def test_placeholder_rows_ignored_by_price_readers(b_db: SimpleNamespace) -> Non
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         assert report.body["account"]["total_assets"] == format(total, "f")
         assert all(g.get("key") != "account." + CODE_B + ".price" for g in (report.gaps or []))
+
+
+# ---------------------------------------------------------------------------
+# T-T71c / §12（T-A137）6 例，名与 7234aa7 :432–:457 一一对应
+# ---------------------------------------------------------------------------
+
+
+def _seed_ineligible_g(conn: Any, ctx: SimpleNamespace) -> None:
+    from app.db.tables.accounts import broker_position_snapshot_items
+    from app.db.tables.market import securities
+
+    conn.execute(insert(securities).values(
+        code=CODE_G, type="stock", name="合成G", exchange="SH", listing_status=None))
+    conn.execute(insert(broker_position_snapshot_items).values(
+        id=uuid.uuid4(), snapshot_id=ctx.snap1, security_code=CODE_G,
+        quantity=100, sellable_quantity=100))
+
+
+def _insert_fake_bars(conn: Any, codes: tuple[str, ...], day: dt.date = OPEN_10) -> None:
+    from app.marketdata.daily_bars import FakeDailyBarsSource, upsert_daily_bars
+    from app.schemas.enums import BarAdjust
+
+    result = FakeDailyBarsSource().fetch(list(codes), day, day, BarAdjust.NONE)
+    upsert_daily_bars(
+        conn, result, source="fake", licence_id=None, fetched_at=_at(day, 17, 15),
+    )
+
+
+def test_snapshot_excludes_ineligible_codes_silently(b_db: SimpleNamespace) -> None:
+    """§12.1 :432。"""
+    _snapshot_mod()
+    with b_db.engine.begin() as conn:
+        _seed_ineligible_g(conn, b_db)
+        _fetch_three(conn)
+        _insert_fake_bars(conn, (CODE_D, CODE_G))
+        _sid, issues, row = _build(conn, b_db)
+        inst_codes = {i["security_code"] for i in row.items["instruments"]}
+        omitted_codes = {o["security_code"] for o in row.items["omitted"]}
+        assert CODE_D not in inst_codes and CODE_G not in inst_codes
+        assert CODE_D not in omitted_codes and CODE_G not in omitted_codes
+        blob = " ".join(str(x) for x in issues)
+        assert CODE_D not in blob and CODE_G not in blob
+
+
+def test_analyze_ineligible_holding_not_evaluated(
+    b_db: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§12.1 :433。"""
+    _snapshot_mod()
+    with b_db.engine.begin() as conn:
+        _seed_ineligible_g(conn, b_db)
+        _insert_fake_bars(conn, (CODE_D, CODE_G))
+        out, _ = _full_analyze(conn, b_db, monkeypatch)
+    ev_codes = {e.get("security_code") for e in out["evaluations"]}
+    assert f"security_not_eligible:{CODE_D}" in out["issues"]
+    assert f"security_not_eligible:{CODE_G}" in out["issues"]
+    assert f"owned_source_security_missing:{CODE_D}" not in out["issues"]
+    assert CODE_D not in ev_codes and CODE_G not in ev_codes
+
+
+def test_report_account_null_when_holding_unpriced_uncosted(b_db: SimpleNamespace) -> None:
+    """§12.1 :434。守护现状：持仓含无价无成本的 D 时 account 为 null。"""
+    from app.db.tables.realtime import daily_reports
+    from app.reports.service import build
+
+    with b_db.engine.begin() as conn:
+        far = dt.datetime(2030, 1, 1, tzinfo=dt.UTC)
+        rid = build(conn, b_db.u1, OPEN_10, far)
+        report = conn.execute(select(daily_reports).where(daily_reports.c.id == rid)).one()
+    assert report.body["account"] is None
+    assert any(g.get("key") == "account" for g in (report.body.get("gaps") or report.gaps or []))
+
+
+def test_analyze_empty_catalog_rejects_run(b_db: SimpleNamespace) -> None:
+    """§12.2 :446。虚构卡无 source_hash；空目录整次 ANALYZE 被拒。"""
+    from app.workers.daily import analysis_task
+
+    mod = _snapshot_mod()
+    with b_db.engine.begin() as conn:
+        conn.execute(text("DELETE FROM app.feature_catalog"))
+        _fetch_three(conn)
+        before_sugg = _suggestion_count(conn)
+    settings = _settings(app_env="test", daily_bars_source="fake", database_url=b_db.url)
+    with pytest.raises(ValueError, match="dsl_unknown_symbol"):
+        analysis_task(settings, OPEN_10.isoformat(), user_id=str(b_db.u1))
+    with b_db.engine.connect() as conn:
+        run = conn.execute(text(
+            "SELECT status, error FROM app.pipeline_runs "
+            "WHERE step='tb76.daily_analysis' ORDER BY started_at DESC LIMIT 1"
+        )).one()
+        assert run.status == "failed"
+        assert run.error == "ValueError"
+        assert len(_owned_rows(conn, b_db.u1, mod.OWNED_VERSION)) == 0
+        assert _suggestion_count(conn) == before_sugg == 0
+
+
+def test_analyze_missing_catalog_with_source_hash_is_gate_issue(b_db: SimpleNamespace) -> None:
+    """§12.2 :447。"""
+    import copy
+
+    from app.db.tables.strategy import strategy_instances, strategy_versions
+
+    _snapshot_mod()
+    with b_db.engine.begin() as conn:
+        conn.execute(text("DELETE FROM app.feature_catalog"))
+        version_id = conn.execute(
+            select(strategy_instances.c.strategy_version_id).where(
+                strategy_instances.c.id == b_db.instance
+            )
+        ).scalar_one()
+        config = copy.deepcopy(conn.execute(
+            select(strategy_versions.c.config).where(strategy_versions.c.id == version_id)
+        ).scalar_one())
+        config["source_hash"] = "tt71c-synthetic-source-hash"
+        for rule in config["rules"]:
+            rule["required_features"] = ["f.close_qfq"]
+        conn.execute(
+            update(strategy_versions)
+            .where(strategy_versions.c.id == version_id)
+            .values(config=config)
+        )
+        _fetch_three(conn)
+        out = _analyze(conn, b_db)
+    ev_codes = {e.get("security_code") for e in out["evaluations"]}
+    assert "runtime_source_gate:f.close_qfq:feature_not_verified_doc_or_live" in out["issues"]
+    assert ev_codes == set()
+
+
+def test_report_build_now_before_ledger_nulls_account(b_db: SimpleNamespace) -> None:
+    """§12.3 :457。now 早于 ledger_at 时不抛错，account 置空，持仓标的不出现。"""
+    from app.db.tables.accounts import broker_position_snapshots
+    from app.db.tables.realtime import daily_reports
+    from app.reports.service import build
+
+    with b_db.engine.begin() as conn:
+        t = conn.execute(
+            select(broker_position_snapshots.c.created_at).where(
+                broker_position_snapshots.c.id == b_db.snap1
+            )
+        ).scalar_one()
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=dt.UTC)
+        rid = build(conn, b_db.u1, OPEN_10, t - dt.timedelta(hours=1))
+        report = conn.execute(select(daily_reports).where(daily_reports.c.id == rid)).one()
+    assert report.body["account"] is None
+    gaps = report.body.get("gaps") or report.gaps or []
+    assert any(g.get("key") == "account" for g in gaps)
+    stocks = report.body.get("stocks") or []
+    codes = {s.get("security_code") for s in stocks}
+    assert CODE_A not in codes and CODE_B not in codes
+    assert stocks == []

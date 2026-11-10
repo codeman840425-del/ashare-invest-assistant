@@ -126,16 +126,23 @@ class IngestCore:
     def rehydrate(self, user_id: uuid.UUID, now: dt.datetime) -> None:
         """Fill user IP-limit memory from the store; fail-closed → escalated.
 
+        T-A89 B-1(a)/L-a: take ``ingest:ip_limit:{user}`` (lock_timeout 3s) before reading
+        events. Lock busy / timeout / store error → escalate and deny (wall ≤3s).
         B-1: merge ``escalated_until`` with ``later`` so an in-memory fail-closed
         pause is never shortened by an empty DB snapshot after recovery.
-        L-2: after a successful read, one-shot flush of any pending pause mark.
+        L-2: flush any pending pause mark under the same lock (clear after commit).
         """
         esc = self.cfg.ip_limited_escalate
         mem = self._user_mem(user_id)
         if self.engine is None:
             return
+        pending_clear = False
         try:
-            with self.engine.connect() as conn:
+            with self.engine.connect() as conn, conn.begin():
+                # T-A89: wall-clock bound ≤3s for the admit-path lock wait.
+                conn.execute(text("SET LOCAL lock_timeout = '2000'"))
+                conn.execute(text("SET LOCAL statement_timeout = '5000'"))
+                ipl.acquire_ip_limit_lock(conn, user_id)
                 loaded = ipl.rehydrate(
                     conn,
                     user_id,
@@ -143,15 +150,18 @@ class IngestCore:
                     pause_s=esc.pause_s,
                     now=now,
                 )
+                if mem.pending_escalation is not None:
+                    ipl.flush_pending_escalation(conn, mem)
+                    pending_clear = True
+            if pending_clear:
+                mem.pending_escalation = None
             ipl.merge_rehydrated(mem, loaded)
-        except Exception:  # noqa: BLE001 — fail-closed
+        except Exception:  # noqa: BLE001 — fail-closed (lock timeout / store error)
             mem.hits.clear()
             mem.escalated_until = ipl.later(
                 mem.escalated_until, ipl.fail_closed_until(now, esc.pause_s)
             )
             return
-        # L-2/L-7: one attempt under the same advisory lock; L-6 clear after commit.
-        self._try_flush_pending(user_id)
 
     def upsert(
         self,
@@ -163,6 +173,7 @@ class IngestCore:
         expires_on: dt.date | None = None,
         per_minute_override: int | None = None,
         now: dt.datetime | None = None,
+        hydrate: bool = True,
     ) -> None:
         rate = self.per_minute(tier, per_minute_override)
         lic = self.licences.get(licence_id)
@@ -172,11 +183,25 @@ class IngestCore:
                 TokenBucket(rate),
                 user_id,
             )
-            if now is not None:
-                self.rehydrate(user_id, now)
-            elif self.engine is not None:
-                self.rehydrate(user_id, dt.datetime.now(dt.UTC))
+            # T-A88 L-a: callers that will rehydrate once (mairui_get) pass hydrate=False.
+            if hydrate:
+                if now is not None:
+                    self.rehydrate(user_id, now)
+                elif self.engine is not None:
+                    self.rehydrate(user_id, dt.datetime.now(dt.UTC))
             return
+        # T-A89 M-2: never downgrade INVALID / PAUSED_BY_ADMIN / EXPIRED back to active.
+        _strict = (
+            DataLicenceStatus.INVALID,
+            DataLicenceStatus.PAUSED_BY_ADMIN,
+            DataLicenceStatus.EXPIRED,
+        )
+        if lic.state.status in _strict and status == DataLicenceStatus.ACTIVE:
+            status = lic.state.status
+        elif status in _strict:
+            pass  # escalate to terminal/pause from DB is fine
+        elif lic.state.status in _strict:
+            status = lic.state.status  # memory stricter
         lic.state.tier, lic.state.expires_on, lic.state.status = tier, expires_on, status
         lic.user_id = user_id
         lic.bucket.set_rate(rate)

@@ -64,6 +64,8 @@ def classify(
             return {"101": Signal.QUOTA, "102": Signal.INVALID, "103": Signal.IP_LIMITED}[
                 m.group(1)
             ]
+    if http_status == 102:
+        return Signal.INVALID
     if http_status == 429:
         return Signal.IP_LIMITED
     if http_status == 503:

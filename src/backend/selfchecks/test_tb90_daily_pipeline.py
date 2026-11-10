@@ -157,6 +157,11 @@ def env(
     monkeypatch.setattr(jobs, "_now", lambda: AT)
     monkeypatch.setattr(daily, "read_grant", lambda: grant)
     monkeypatch.setattr(ingest, "read_grant", lambda: grant)
+    # T-B116b / T-T51: collection selfchecks use fake transport; open the seam for
+    # daily.request (new_batch) AND ingest.process. Do NOT change DAILY_HTTP_LIMIT /
+    # live_budget_issue production body — test_tb90_http_budget keeps asserting the gate.
+    monkeypatch.setattr(daily, "live_budget_issue", lambda: None)
+    monkeypatch.setattr(ingest, "live_budget_issue", lambda: None)
     yield SimpleNamespace(
         owner=owner,
         worker=worker,
@@ -239,8 +244,8 @@ def run_synthetic(
         )
 
     monkeypatch.setattr(ingest, "process", injected)
-    # T-B116: collection seam uses egress+IngestCore; open budget only inside this helper.
-    # Production DAILY_HTTP_LIMIT / live_budget_issue unchanged (see test_tb90_http_budget).
+    # T-B116/b: collection seam uses egress+IngestCore. Budget already opened in env for
+    # daily.request; keep ingest patch here for defense in depth. DAILY_HTTP_LIMIT unchanged.
     import yaml
     from app.config_files import IngestConfig
     from app.ingest.core import IngestCore
@@ -249,6 +254,7 @@ def run_synthetic(
     cfg = IngestConfig.model_validate(
         yaml.safe_load((ROOT / "config/ingest.yaml").read_text(encoding="utf-8"))
     ).licences
+    monkeypatch.setattr(daily, "live_budget_issue", lambda: None)
     monkeypatch.setattr(ingest, "live_budget_issue", lambda: None)
     runtime.set_ingest_core(IngestCore(cfg, engine=e.collector))
     daily.publish_pending(e.worker, e.rds)
@@ -489,12 +495,14 @@ def test_existing_temp_replaced_and_halt_preserved(
     temp.chmod(0o600)
     halt.write_bytes(b"limit_103_or_429")
     halt.chmod(0o600)
-    state, calls, _ = run_synthetic(e, bid, monkeypatch)
+    # HALT path refuses before TEMP cleanup; keep planted residue for assertion below.
+    state, calls, _ = run_synthetic(e, bid, monkeypatch, preserve_existing=True)
     # HALT present → refuse before HTTP; halt file must remain (never auto-cleared).
     assert state == "failed"
     assert calls == []
     assert halt.exists()
     assert halt.read_bytes() == b"limit_103_or_429"
+    assert temp.read_text() == "other-process-synthetic-file"
     # Second run without halt: leftover regular TEMP is replaced (T-B115) then cleaned.
     halt.unlink()
     temp.write_text("stale-again")
@@ -652,12 +660,14 @@ def test_unread_actual_auth_ownership_read_empty_and_static_route(env: Any) -> N
 
 
 @pytest.mark.parametrize("status", [200, 302, 103, 429, 500])
-def test_wire_single_attempt_no_redirect_and_sanitized_failure(
+def test_egress_https_get_single_attempt_no_redirect_and_sanitized_failure(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
+    """B-2: wire deleted; exercise egress private transport with fake HTTPSConnection."""
     assert ingest.limited(200, {"code": 103.0})
     assert ingest.limited(200, [{"error_code": "429"}])
     assert not ingest.limited(200, [{"dm": CODES[0][:6], "mc": "合成103"}])
+    assert not hasattr(ingest, "wire")
     value = secrets.token_urlsafe(16)
     calls: list[str] = []
     closed: list[bool] = []
@@ -691,15 +701,14 @@ def test_wire_single_attempt_no_redirect_and_sanitized_failure(
 
     from app.ingest import egress as eg
 
-    monkeypatch.setattr(ingest, "live_budget_issue", lambda: None)
     monkeypatch.setattr(eg.http.client, "HTTPSConnection", connection)
     if status == 500:
         with pytest.raises(ingest.DailyHaltError) as caught:
-            ingest.wire("/synthetic/", value)
+            eg._https_get("/synthetic/", value)
         assert value not in str(caught.value)
         assert caught.value.__suppress_context__
     else:
-        code, _ = ingest.wire("/synthetic/", value)
+        code, _ = eg._https_get("/synthetic/", value)
         assert code == status
     assert calls == ["GET"]
     assert closed == [True]

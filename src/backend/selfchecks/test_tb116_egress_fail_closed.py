@@ -12,6 +12,7 @@ import os
 import socket
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -78,6 +79,22 @@ def _calls_transport(box: list[str]):
     return transport
 
 
+
+@contextmanager
+def _issued_lease(engine: Engine):
+    with eg.single_egress(engine) as lease:
+        assert lease is not None, "single-egress not acquired in selfcheck"
+        yield lease
+
+
+def _mg(*, engine: Engine, **kwargs):  # noqa: ANN003
+    """mairui_get under an issued lease. Pass lease= to exercise deny paths."""
+    if "lease" in kwargs:
+        return eg.mairui_get(engine=engine, **kwargs)
+    with _issued_lease(engine) as lease:
+        return eg.mairui_get(lease=lease, engine=engine, **kwargs)
+
+
 # ---- FC1 HALT/STOP before lock/DB ----
 
 
@@ -124,7 +141,7 @@ def test_tb116_fc4_no_lease_and_fc6_core_none(tmp_path: Path, monkeypatch: pytes
     calls: list[str] = []
     engine = create_engine("sqlite+pysqlite:///:memory:")
     with pytest.raises(eg.EgressDenied) as e1:
-        eg.mairui_get(
+        _mg(
             lease=None,
             core=IngestCore(CFG),
             engine=engine,
@@ -139,11 +156,28 @@ def test_tb116_fc4_no_lease_and_fc6_core_none(tmp_path: Path, monkeypatch: pytes
             transport=_calls_transport(calls),
         )
     assert e1.value.code == "single_egress_not_held"
-    with pytest.raises(eg.EgressDenied) as e2:
-        eg.mairui_get(
+    # B-1(b): forged held=True → single_egress_not_held (not core_unavailable).
+    with pytest.raises(eg.EgressDenied) as e_forge:
+        _mg(
             lease=eg.EgressLease(held=True),
             core=None,
             engine=engine,
+            licence_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            path="/x/",
+            secret=SENTINEL,
+            priority=Priority.P1,
+            clock=_clock(NOW0),
+            stop=stop,
+            halt=halt,
+            transport=_calls_transport(calls),
+        )
+    assert e_forge.value.code == "single_egress_not_held"
+    pg = create_engine(_url(), hide_parameters=True)
+    with pytest.raises(eg.EgressDenied) as e2:
+        _mg(
+            core=None,
+            engine=pg,
             licence_id=uuid.uuid4(),
             user_id=uuid.uuid4(),
             path="/x/",
@@ -172,8 +206,7 @@ def test_tb116_fc7_licence_unavailable(tmp_path: Path, monkeypatch: pytest.Monke
     calls: list[str] = []
     core = IngestCore(CFG, engine=engine)
     with pytest.raises(eg.EgressDenied) as ei:
-        eg.mairui_get(
-            lease=eg.EgressLease(held=True),
+        _mg(
             core=core,
             engine=engine,
             licence_id=lid,
@@ -189,8 +222,7 @@ def test_tb116_fc7_licence_unavailable(tmp_path: Path, monkeypatch: pytest.Monke
     assert ei.value.code == "licence_unavailable"
     # missing row
     with pytest.raises(eg.EgressDenied) as e2:
-        eg.mairui_get(
-            lease=eg.EgressLease(held=True),
+        _mg(
             core=core,
             engine=engine,
             licence_id=uuid.uuid4(),
@@ -227,8 +259,7 @@ def test_tb116_happy_and_fc8_token_bucket_and_fc10_network(
     # mairui_get upserts without override; instead call twice with per_minute=1 by patching core.per_minute
     monkeypatch.setattr(core, "per_minute", lambda tier, override=None: 1)
 
-    r1 = eg.mairui_get(
-        lease=eg.EgressLease(held=True),
+    r1 = _mg(
         core=core,
         engine=engine,
         licence_id=lid,
@@ -245,8 +276,7 @@ def test_tb116_happy_and_fc8_token_bucket_and_fc10_network(
     assert len(calls) == 1
 
     with pytest.raises(eg.EgressDenied) as ei:
-        eg.mairui_get(
-            lease=eg.EgressLease(held=True),
+        _mg(
             core=core,
             engine=engine,
             licence_id=lid,
@@ -280,8 +310,7 @@ def test_tb116_happy_and_fc8_token_bucket_and_fc10_network(
         now=t2,
     )
     with pytest.raises(DailyHaltError, match="transport_or_response_failed_no_retry"):
-        eg.mairui_get(
-            lease=eg.EgressLease(held=True),
+        _mg(
             core=core,
             engine=engine,
             licence_id=lid,
@@ -332,8 +361,7 @@ def test_tb116_fc3_escalation_blocks_transport(
     calls: list[str] = []
     core = IngestCore(CFG, engine=engine)
     with pytest.raises(eg.EgressDenied) as ei:
-        eg.mairui_get(
-            lease=eg.EgressLease(held=True),
+        _mg(
             core=core,
             engine=engine,
             licence_id=lid,
@@ -418,8 +446,7 @@ def test_tb116_fc9_event_insert_fail_pending_then_deny(
         return 429, None
 
     # First IP_LIMITED with boom write → fail-closed pending in memory
-    eg.mairui_get(
-        lease=eg.EgressLease(held=True),
+    _mg(
         core=core,
         engine=engine,  # load licence still uses real engine
         licence_id=lid,
@@ -434,13 +461,12 @@ def test_tb116_fc9_event_insert_fail_pending_then_deny(
     )
     if halt.exists():
         halt.unlink()
-    mem = core.user_ip[uid]
+    mem = core._user_mem(uid)
     assert mem.escalated_until is not None or mem.pending_escalation is not None
     # Subsequent call while escalated → core_denied, no transport
     n = len(calls)
     with pytest.raises(eg.EgressDenied) as ei:
-        eg.mairui_get(
-            lease=eg.EgressLease(held=True),
+        _mg(
             core=core,
             engine=engine,
             licence_id=lid,
@@ -502,8 +528,9 @@ def test_tb116_fc5_rehydrate_lock_timeout_fail_closed(
             tier=DataLicenceTier.ANNUAL,
             status=DataLicenceStatus.ACTIVE,
             now=NOW0,
+            hydrate=False,  # L-a: tick flush is the lock-wait under test
         )
-        mem = core.user_ip[uid]
+        mem = core._user_mem(uid)
         mem.escalated_until = NOW0 + dt.timedelta(hours=1)
         ipl.queue_pending_escalation(
             mem,
@@ -534,8 +561,8 @@ def test_tb116_deny_codes_no_secret_or_url(tmp_path: Path, monkeypatch: pytest.M
     stop, halt = tmp_path / "S", tmp_path / "H"
     halt.touch()
     with pytest.raises(eg.EgressDenied) as ei:
-        eg.mairui_get(
-            lease=eg.EgressLease(held=True),
+        _mg(
+            lease=eg.EgressLease(held=True),  # halt checked before lease; avoid sqlite advisory
             core=IngestCore(CFG),
             engine=create_engine("sqlite+pysqlite:///:memory:"),
             licence_id=uuid.uuid4(),
@@ -564,4 +591,7 @@ def test_tb116_https_get_not_used_in_selfchecks(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(eg, "_https_get", forbidden)
     # default transport is _https_get — calling without override would hit forbidden;
     # ensure our tests always pass transport= (spot-check one deny path uses explicit transport)
-    assert eg.mairui_get.__defaults__ is not None or True
+    # transport is keyword-only → lives in __kwdefaults__, not __defaults__
+    assert eg.mairui_get.__kwdefaults__ is not None
+    # __kwdefaults__ keeps the original function object; name must stay _https_get.
+    assert eg.mairui_get.__kwdefaults__["transport"].__name__ == "_https_get"

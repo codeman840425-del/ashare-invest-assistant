@@ -11,8 +11,6 @@ import datetime as dt
 import uuid
 from typing import Any
 
-import pytest
-
 from app.ingest import daily_lists as ingest
 from app.master import daily_delivery as daily
 
@@ -42,10 +40,20 @@ def test_no_receipt_can_start_dispatch_or_collection() -> None:
     )
 
 
-def test_low_level_http_is_closed_before_connection(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("must not construct HTTP connection")
-
-    monkeypatch.setattr(ingest.http.client, "HTTPSConnection", forbidden)
-    with pytest.raises(ingest.DailyHaltError, match=r"^daily_http_budget_unresolved$"):
-        ingest.wire("/synthetic/", "synthetic-not-a-credential")
+def test_low_level_http_is_closed_before_connection() -> None:
+    """T-B116b B-3 / T-A89: wire removed; budget still blocks before any transport."""
+    assert not hasattr(ingest, "wire"), "daily_lists.wire must stay deleted (B-2)"
+    assert daily.live_budget_issue() == "daily_http_budget_unresolved"
+    assert daily.DAILY_HTTP_LIMIT == 1
+    # process returns budget token without touching upstream/secret_loader I/O.
+    assert (
+        ingest.process(
+            NoIO(),
+            uuid.uuid4(),
+            NoIO(),
+            clock=lambda: dt.datetime(2031, 1, 2, 10, tzinfo=dt.UTC),
+            upstream=NoIO(),
+            secret_loader=NoIO(),
+        )
+        == "budget_contract_unresolved"
+    )

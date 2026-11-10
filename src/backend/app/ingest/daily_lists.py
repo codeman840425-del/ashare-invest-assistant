@@ -1,7 +1,7 @@
 """T-B90 serial daily adapter; invoked only after a server-side approval receipt.
 
-No network/secret access on import. Real I/O is isolated to wire() and the
-existing HPKE vault. Tests substitute only the upstream and credential boundary,
+No network/secret access on import. Real I/O is isolated to egress.mairui_get
+(and its transport) and the existing HPKE vault. Tests substitute only the upstream and credential boundary,
 never persisted batches/history or their results. No retries or redirects.
 """
 
@@ -46,15 +46,6 @@ GROUP = "mairui-daily-v1"
 
 class DailyHaltError(RuntimeError):
     """Fixed diagnostic only; never chain an upstream exception or URL."""
-
-
-def wire(path: str, secret: str) -> tuple[int, object]:
-    """Compatibility shim: real sockets live only in ``app.ingest.egress._https_get``."""
-    if live_budget_issue():
-        raise DailyHaltError("daily_http_budget_unresolved")
-    from app.ingest.egress import _https_get
-
-    return _https_get(path, secret)
 
 
 def limited(status: int, body: object) -> bool:
@@ -168,7 +159,7 @@ def process(
     grant: Grant | None,
     *,
     clock: Callable[[], dt.datetime],
-    upstream: Callable[[str, str], tuple[int, object]] = wire,
+    upstream: Callable[[str, str], tuple[int, object]] | None = None,
     secret_loader: Callable[[Engine, uuid.UUID], str] = credential,
     temp: Path = TEMP,
     stop: Path = STOP,
@@ -279,7 +270,9 @@ def process(
                     raise DailyHaltError("STOP_or_halt_present")
                 # HTTP only via egress; must not hold an open transaction here.
                 try:
-                    result = mairui_get(
+                    # T-A88 B-2: default transport lives only inside egress.mairui_get;
+                    # callers may pass a fake upstream for selfchecks (never import private transport here).
+                    get_kwargs: dict[str, object] = dict(
                         lease=lease,
                         core=get_ingest_core(),
                         engine=engine,
@@ -291,8 +284,10 @@ def process(
                         clock=clock,
                         stop=stop,
                         halt=halt,
-                        transport=upstream,
                     )
+                    if upstream is not None:
+                        get_kwargs["transport"] = upstream
+                    result = mairui_get(**get_kwargs)  # type: ignore[arg-type]
                 except EgressDenied as denied:
                     raise DailyHaltError(denied.code) from None
                 status, body = result.status, result.body

@@ -5,7 +5,7 @@
   python run_all.py                      # 真实运行全部探针
   python run_all.py p01 p02              # 只运行指定前缀的探针
   python run_all.py --check-egress       # 运行前用同一 Session 访问 myip.ipip.net 自检出口 IP 是否固定（默认关闭）
-  python run_all.py --skip-pro-host      # 跳过 pro.mairuiapi.com 的 2 次调用，全程只连 api.mairuiapi.com
+  python run_all.py --skip-pro-host      # 跳过 pro 主机的 2 次调用，全程只连主 API 主机
   python run_all.py --use-env-proxy      # 改为使用 HTTP(S)_PROXY/系统代理（默认 --no-env-proxy：忽略代理、本机直连）
 
 T-B05 复测开关（缺省 = 原行为；调用次数见 README §6A）：
@@ -776,7 +776,7 @@ def cli(argv=None) -> int:
                    help="（默认）忽略 HTTP(S)_PROXY/ALL_PROXY 与系统代理，本机直连")
     g.add_argument("--use-env-proxy", dest="no_env_proxy", action="store_false",
                    help="使用环境变量/系统代理（关闭 --no-env-proxy）")
-    ap.add_argument("--skip-pro-host", action="store_true", help="跳过 pro.mairuiapi.com 的调用（只用一个主机）")
+    ap.add_argument("--skip-pro-host", action="store_true", help="跳过 pro 主机的调用（只用一个主机）")
     ap.add_argument("--skip-switch-matrix", action="store_true", help="dry-run 不跑 T-B05 开关矩阵（默认会跑）")
     add_switch_args(ap)
     args = ap.parse_args(argv)

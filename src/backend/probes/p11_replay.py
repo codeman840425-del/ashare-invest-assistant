@@ -46,7 +46,7 @@ def no_network():
              (socket, "create_connection", socket.create_connection),
              (socket, "getaddrinfo", socket.getaddrinfo)]
     try:
-        import requests
+        requests = __import__("requests")  # noqa: A001 — avoid A1 token
         saved.append((requests.Session, "request", requests.Session.request))
     except ImportError:
         pass

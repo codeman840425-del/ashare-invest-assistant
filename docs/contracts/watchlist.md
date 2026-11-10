@@ -50,6 +50,11 @@
 
 裁定：方案 A。本人已有同一规范化代码的**有效行**（removed_at 为空）→ `409 CONFLICT`，`details` 为 `{field: "security_code", existing_id: uuid}`（与 candidates 同形），不新增行。并发两次插入时以数据库部分唯一索引（⑧）兜底，捕获 IntegrityError 后同样返回 409。
 
+T-A132 补充：`existing_id` 的类型为 `uuid | null`。业务判重命中时为该有效行的 id；并发兜底分支（部分唯一索引报 IntegrityError 后重查本人有效行，`api/v1/watchlist._duplicate`）重查不到时为 null（例如对方请求随后已软删）。**前端不得依赖 `existing_id` 非空**：409 CONFLICT 一律显示"已在自选"并重拉 `GET /watchlist`，按钮状态以列表为准，不用 `existing_id` 定位条目。mock 可以总是给字符串，但前端类型须声明可为 null。
+
+- Given 并发兜底分支重查不到本人有效行，When POST 返回 409 CONFLICT，Then `details.field` 为 security_code，`details` 含 `existing_id` 键且值可为 null，响应仍是 409（不是 500）。
+- Given 前端收到 409 CONFLICT 且 `existing_id` 为 null，When 显示结果，Then 文案为"已在自选"、随后重拉列表，不报错、不崩溃（前端用例用 mock 覆盖返回 null 的分支）。
+
 `Idempotency-Key`（§1 通例）照常支持，作用域名 `watchlist:add`，用 `common/idempotency.run`；同键同体重放返回首次的 201 结果（先于业务判重），同键异体 → `409 IDEMPOTENCY_CONFLICT`。
 
 理由：与仓库已有的唯一冲突先例一致；前端可把 409 显示为"已在自选中"。
@@ -179,5 +184,40 @@
 
 - U1 指数（如沪深 300）能否加入自选？默认：不能（400 security_type_not_supported）。
 - U2 已退市证券能否加入自选？默认：不能；退市整理期、风险警示可以。
-- U3 每人自选上限取多少？默认：沿用 `config/realtime.yaml` 的 100（前端 mock 写的是 50，仅为演示数据）；数值待 T003。
+- U3 每人自选上限取多少？默认：沿用 `config/realtime.yaml` 的 100（focus 上限 20）；数值待 T003。T-A132 裁定：前端 mock 的 `caps` 改为与后端回落值一致（watchlist 100、focus 20），不再用演示值 50/10；前端用例需要小上限时用测试辅助函数临时改，不改默认值。
 - U4 删除后再加入，是否保留原分组和备注？默认：不保留，按本次请求的值（新行）。
+
+## 5. POST 400 的 issue 一览（T-A132，以实现为准）
+
+核对对象：be/T-B126 `08e47de` 的 `api/v1/watchlist`（`WatchlistCreate`、`_clip`、`_qualify`），T-B127 头 `832faa2` 中该文件只删了一段空分支，行为不变；请求体层的 issue 由全局 `common/errors.validation_details`（`_issue`、`_field_name`）生成，JSON 解码失败先经 `auth/body_order` 判鉴权与 CSRF。以下均为 `400 VALIDATION_ERROR`，`details` 为 `{fields:[{field, issue}]}`。
+
+| 层 | 触发条件 | field | issue |
+|---|---|---|---|
+| 请求体（全局） | 请求体为空 | body | required |
+| 请求体（全局） | JSON 解码失败（鉴权、CSRF 先判） | 出错的字符位置（数字串） | JSON decode error |
+| 请求体（全局） | 顶层不是对象（数组、字符串等，或非 JSON 内容类型） | body | Input should be a valid dictionary or object to extract fields from |
+| 请求体（全局） | 缺 `security_code` | security_code | required |
+| 请求体（全局） | 未知键（`extra="forbid"`，如 focus） | 该键名 | unknown field |
+| 请求体（全局） | `security_code` 不是字符串（含 null、数字） | security_code | Input should be a valid string |
+| 请求体（全局） | `group` / `note` 不是字符串也不是 null | group / note | Input should be a valid string |
+| 长度（本模块） | `group` 超 32 个码点 / `note` 超 500 个码点 | group / note | too_long |
+| 代码（本模块） | 不匹配 `SECURITY_CODE_PATTERN`（含带空白、大小写混写如 Sh600000），或裸 6 位推断不出市场 | security_code | invalid |
+| 代码（本模块） | 北交所旧代码 | security_code | superseded（元素另带 `superseded_by`） |
+| 代码（本模块） | 主数据中不存在 | security_code | unknown_security |
+| 代码（本模块） | 类型为 index（U1） | security_code | security_type_not_supported |
+| 代码（本模块） | listing_status 为 delisted（U2） | security_code | delisted |
+
+规则：
+- 判定顺序：请求体（全局）→ 长度 → 代码，与 ⑩ 一致；代码层按表中自上而下判定，只返回第一个。
+- 请求体（全局）层可能一次返回多个元素（例如同时缺 `security_code` 又带未知键），顺序跟随 pydantic；本模块层每次只返回一个元素。前端只取第一个元素选文案，不得依赖元素个数或顺序。
+- 本契约 ⑤⑥ 只承诺"返回 400"和本模块层的 issue 名；请求体（全局）层的 issue 是 pydantic 的英文原句，属全局通例（`docs/api-contract.md` §4 示例 `must be <= 200` 同源），随依赖版本可能变化。前端和测试不得按这几句英文做分支，只断言状态码、错误码和 field；本模块层的 6 个 issue 名可以断言。
+- 前端 mock 的 issue 名与本表对齐：未知键用 unknown field、缺字段用 required（不用 extra_forbidden、missing）。
+- DELETE 路径参数格式非法同样是 `{field:"security_code", issue:"invalid"}`（③）。
+
+- Given 已登录已批准且带 CSRF，When POST `{security_code: "600002.SH", focus: true}`，Then 400，`fields` 含 `{field: "focus", issue: "unknown field"}`，无新行。
+- Given 同上，When POST `{}`，Then 400，`fields` 含 `{field: "security_code", issue: "required"}`。
+- Given 同上，When POST `{security_code: 600000}`（数字），Then 400，`fields[0].field` 为 security_code（不断言 issue 原句）。
+- Given 同上，When POST `{security_code: "600002.SH", group: 1}`，Then 400，`fields[0].field` 为 group。
+- Given 同上，When POST 顶层为数组，Then 400，`fields[0].field` 为 body。
+- Given 同上，When POST `{security_code: "Sh600000"}`，Then 400，issue 为 invalid。
+- Given 未登录，When POST 非法 JSON，Then 401 AUTH_REQUIRED（不是 400）。

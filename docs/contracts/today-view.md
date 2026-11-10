@@ -161,3 +161,52 @@
 - U1：17:30–18:30 是否需要提前显示分析缺口。（不提前显示，等 18:30 日报）
 - U2：S5 的逾时阈值。（18:45）
 - U3：缺口区是否显示证券名称。（显示代码和名称，与「重点关注」一致）
+
+## 7. 补充裁定（T-A140，评审 fe/T-F34=549ecdf 后定）
+
+函数名均指 `pages/today/todayView` 中的同名导出，用例名见 `pages/t-f34.test.tsx`。
+
+**① S4 的时段。** S4 的判定改为：交易日；`daily_report.status` 为 not_yet 或 generating；北京时间 ≥ 15:00；并且不满足 S5。因此 18:30 到逾时阈值之间的 not_yet，以及逾时之后仍为 generating 的情况，都显示 S4。只有「已到逾时阈值且仍为 not_yet」才显示 S5。
+- Given 北京时间 18:40、not_yet / Then 显示 S4。
+- Given 北京时间 19:10、generating / Then 显示 S4，不显示 S5。
+
+**② S1、S3 不请求日报。** S1、S3 下即使 status 为 ready，也不请求 `/daily-reports/{date}`，因此不显示 A1/A2 和日报缺口（见 `reportDateToFetch`）。
+- Given S3、status 为 ready / Then 日报请求数为 0，页面没有 today-account。
+
+**③ R2 的显示条件。** R2 只在全局状态为 S9 时显示，其他状态（包括 S2）都不显示。
+- 补充：S9 必须来自日报判定（`reportState`），也就是 status 为 ready 且日报读取成功。
+- 交易日 15:00 之前，status 尚未 ready 时，前置状态都不命中，**不显示状态条，也不显示 R2**，因为当日盘后批次还没有跑。
+- Given 北京时间 10:00、not_yet、所有行无候选信号 / Then 不显示「今天没有新的候选信号。」
+- Given S2、无候选信号 / Then 不显示 R2。
+
+**④ 未知 code 的归属。** 对未知 code，只有当参数的第一段**完全符合系统证券代码格式**（6 位数字，加 .SH、.SZ 或 .BJ，与后端 `trades.normalize_code` 的输出一致）时，才归到该证券行；否则作为通用行。两种情况都只显示兜底文案。
+- 不接受宽松格式。例如特征路径 `f.pe` 不能被当成证券，也不能生成 /stocks 链接。
+- 已知 code 的证券参数由后端生成，按 §2.3 表中「（证券）」的位置取值。
+- Given `pipeline.future_x:000001.SZ` / Then 归到 000001.SZ 行，显示兜底文案。
+- Given `pipeline.future_gate:f.pe:missing` / Then 是一条通用行，页面上没有 /stocks/f.pe 链接。
+
+**⑤ 状态条与缺口区不重复。** S6、S7、S8 中已在状态条显示的那一条，不在缺口区重复；没有显示的（优先级较低，或者被 S1–S5 压住），仍进入缺口区的通用行（见 `buildReportGaps` 的 shownState 参数）。
+- Given 日报 gaps 同时含 daily_bars_not_ready 与 analysis / Then 状态条显示 S6，缺口区有 S8 文案、没有 S6 文案。
+
+**⑥ 日报读取失败。** status 为 ready，但 `/daily-reports/{date}` 返回 404 或出错时：
+- 不判定 S6–S9，不显示状态条、R2、A1/A2；
+- 缺口区显示「日报详情暂时读取失败，分析缺口稍后显示。」
+- `/today` 自身的块照常显示。
+- Given status 为 ready、日报 404 / Then 显示上述文案，页面没有 today-no-signals 和 today-account。
+
+**⑦ 非 pipeline 缺口。** §2.3 没有列出的非 pipeline 日报缺口，today 页默认不显示，但有一个例外：reason 为 user_input_missing 的项必须显示为通用行「有信息待补录。」，并附「去处理 ›」，去向 /portfolio/import。这是为了不藏掉用户自己能处理的缺口。
+- 与 `/today.data_gaps` 同 key 的项只显示一次，例如 cash 不能在同一区里出现两遍。
+- 已列出的项仍按 §2.3 显示：
+  - `cash`：「未录入现金。」，可操作；
+  - `account.<证券>.price`：「缺现价，按成本估算。」；
+  - `stocks.<证券>`：「该股无候选信号。」；
+  - account、account.pnl_day 由 A1/A2 表达。
+- Given 日报 gaps 含 key 为 `account.future_field`、reason 为 user_input_missing 的项 / Then 显示「有信息待补录。」并带去向 /portfolio/import。
+- Given 日报 gaps 含 `market` / Then 不显示。
+- Given `/today.data_gaps` 与日报 gaps 都含 cash / Then 「未录入现金」只出现一次。
+
+**⑧ 逾时阈值由常量推导。** 「日报约 HH:MM 生成」的时刻只由常量 `REPORT_EXPECTED_AT` 定义（当前为 18:30，U1 日报时刻若改，只改这一处）。逾时阈值为该常量加 15 分钟（`overdueAt`，`REPORT_OVERDUE_GRACE_MIN`），S4 的文案随常量变化（`s4Text`）。
+- Given 默认常量、北京时间 18:44 / Then S4；18:45 / Then S5。
+- Given 常量注入为 17:30 / Then 17:44 为 S4，17:45 为 S5，文案为「日报约 17:30 生成」。
+
+**本节新增验收：** 共 12 条（①2、②1、③2、④2、⑤1、⑥1、⑦3），加上 ⑧ 的 2 条已在 t-f34 中实现。其中 ③ 的 15:00 前一条、④ 的 `f.pe` 一条、⑦ 的 user_input_missing 一条和 cash 去重一条，在 549ecdf 上尚未实现，由前端跟进。

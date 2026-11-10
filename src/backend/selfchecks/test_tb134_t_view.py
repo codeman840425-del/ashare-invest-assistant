@@ -305,3 +305,36 @@ def test_t_view_only_on_today_focus_rows() -> None:
     assert out[1]["t_view"] is None  # 非持仓行为 null（§3.7 ①）
     assert "dev_pct_threshold" not in out[0]["t_view"]  # 嵌套序列化仍缺省阈值字段
     assert out[0]["t_view"]["volume_ratio"] == "2.00"
+
+
+# ---- T-B134b：§3.8 T-A149 ④ 只有快照、没有成交流水（契约 a281095 intraday-bars.md §3.8 ④）----
+
+
+def test_t_view_base_qty_from_snapshot_without_trades() -> None:
+    # 无流水、快照时点为当日 10:00：可能含今日买入
+    v = build(base_qty=Decimal(800), base_source="snapshot", snapshot_as_of=at(10, 0))
+    assert v.base_qty == "800"
+    base_gaps = [g for g in v.gaps if g.key == "t_view.base_qty"]
+    assert len(base_gaps) == 1
+    assert base_gaps[0].reason is GapReason.USER_INPUT_MISSING
+    assert base_gaps[0].message == "未导入今日成交流水，底仓按持仓快照计，可能含今日买入"
+    assert v.data_status is DataStatus.PARTIAL
+    # 快照时点为空同样加 gap
+    assert any(
+        g.key == "t_view.base_qty"
+        for g in build(base_source="snapshot", snapshot_as_of=None).gaps
+    )
+
+
+def test_t_view_base_qty_snapshot_before_open_no_gap() -> None:
+    # 快照时点为上一交易日 15:30：即上一交易日收盘持有量，不加 gap
+    prev = dt.datetime(2026, 11, 9, 15, 30, tzinfo=BJ)
+    v = build(base_qty=Decimal(800), base_source="snapshot", snapshot_as_of=prev)
+    assert v.base_qty == "800"
+    assert all(g.key != "t_view.base_qty" for g in v.gaps)
+    assert v.data_status is DataStatus.FRESH
+    # 边界：当日 09:30 整算「09:30 及以后」
+    assert any(
+        g.key == "t_view.base_qty"
+        for g in build(base_source="snapshot", snapshot_as_of=at(9, 30)).gaps
+    )

@@ -14,8 +14,10 @@ from typing import Any
 
 import pytest
 import redis
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, event, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as upsert
+from sqlalchemy.engine import Engine
+from sqlalchemy.sql.dml import Insert
 
 from app.db.tables.licences import user_data_licences
 from app.db.tables.market import daily_bars, realtime_quotes, trading_calendar
@@ -37,24 +39,47 @@ SOCKET = "/tmp/tb70-tb91-owned-socket"
 REDIS = "unix:///tmp/tb91-owned-redis/redis.sock?db=0"
 
 
-def _evaluation_clock() -> dt.datetime:
-    """10:00 Asia/Shanghai session used as the evaluation instant.
+AT = dt.datetime(2026, 11, 9, 10, tzinfo=SH)
 
-    f28727d froze this at 2026-11-09 10:00+08, then one day ahead of the
-    commit. After that instant passed, HTTP/DB inserts had created_at > AT
-    and the PIT filter in plans/worker.py hid every plan. Keep the original
-    frozen value when it is still in the future; otherwise use tomorrow
-    10:00 so wall-clock created_at stays visible. Date-condition cases keep
-    their own November 2026 literals (16th 09:00, etc.).
-    """
-    frozen = dt.datetime(2026, 11, 9, 10, tzinfo=SH)
-    now = dt.datetime.now(SH)
-    if now < frozen:
-        return frozen
-    return (now + dt.timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+# Tables whose created_at is consulted by plans/RC1 PIT filters. versions and
+# snapshots are append-only (triggers reject UPDATE), so the clock must be
+# written at INSERT. Listeners skip statements that already set created_at
+# (licence, record_quote, explicit test values).
+_PIT_CREATED_AT = frozenset(
+    {
+        "action_plans",
+        "plan_versions",
+        "data_snapshots",
+        "suggestions",
+        "strategy_instances",
+        "accounts",
+    }
+)
 
 
-AT = _evaluation_clock()
+def _insert_has_created_at(stmt: Insert) -> bool:
+    for key in stmt._values or ():
+        name = key if isinstance(key, str) else getattr(key, "key", None)
+        if name == "created_at":
+            return True
+    return False
+
+
+def _pin_created_at(
+    conn: Any,
+    clauseelement: Any,
+    multiparams: Any,
+    params: Any,
+    execution_options: Any,
+) -> tuple[Any, Any, Any]:
+    if (
+        isinstance(clauseelement, Insert)
+        and clauseelement.table.name in _PIT_CREATED_AT
+        and "created_at" in clauseelement.table.c
+        and not _insert_has_created_at(clauseelement)
+    ):
+        clauseelement = clauseelement.values(created_at=AT)
+    return clauseelement, multiparams, params
 
 
 @pytest.fixture(scope="module")
@@ -68,6 +93,16 @@ def database() -> Any:
         with suppress(StopIteration):
             next(gen)
         base.SOCKET, base.REDIS = old
+
+
+@pytest.fixture(scope="module", autouse=True)
+def pin_created_at_on_insert() -> Any:
+    """Stamp PIT rows at AT on insert so tests do not depend on the wall clock."""
+    event.listen(Engine, "before_execute", _pin_created_at, retval=True)
+    try:
+        yield
+    finally:
+        event.remove(Engine, "before_execute", _pin_created_at)
 
 
 def days(conn: Any, start: dt.date, end: dt.date) -> None:
@@ -122,7 +157,9 @@ def quote(
 def test_plan_created_after_evaluation_clock_is_excluded(env: Any) -> None:
     """PIT canary for plans/worker.py: created_at <= at must hide later plans.
 
-    Temporarily dropping that predicate (uncommitted) must turn this test red.
+    Insert pinning writes versions/snapshots at AT (those tables cannot be
+    UPDATEd). Only the mutable action_plans.created_at is moved to AT+1s.
+    Temporarily dropping the worker predicate (uncommitted) must turn this red.
     """
     engine, client, _, owner, _, settings = env
     response = client.post(
@@ -251,7 +288,7 @@ def test_zero_pct_and_past_date_are_400_without_writes(env: Any) -> None:
     for kind, params in [
         ("pct_change", {"pct": "0"}),
         ("pct_change", {"pct": "-0.0000"}),
-        ("date", {"on": str(dt.datetime.now(SH).date() - dt.timedelta(days=1))}),
+        ("date", {"on": str(AT.date() - dt.timedelta(days=1))}),
     ]:
         response = client.post(
             "/api/v1/plans",

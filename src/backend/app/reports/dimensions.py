@@ -85,7 +85,7 @@ def load_inputs(
     cutoff = min(now, dt.datetime.combine(day, dt.time.max, BEIJING))
     if registry is None:
         registry = catalog(conn)
-    from app.marketdata.daily_snapshot import OWNED_VERSION
+    from app.marketdata.daily_snapshot import FINAL_AFTER, OWNED_VERSION
 
     sources = []
     raw, factors, scalars, sessions = None, [], [], []
@@ -133,7 +133,7 @@ def load_inputs(
             if r.get("is_final") is True
             and instant(r["first_seen_at"]) <= cutoff
             and instant(r["first_seen_at"])
-            >= dt.datetime.combine(dt.date.fromisoformat(r["trade_date"]), dt.time(17, 10), BEIJING)
+            >= dt.datetime.combine(dt.date.fromisoformat(r["trade_date"]), FINAL_AFTER, BEIJING)
         ],
     )
     frame = None

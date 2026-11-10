@@ -1099,7 +1099,7 @@ def test_load_inputs_accepts_owned_schema_same_day(temp_db: Engine) -> None:
         _seed_core(conn)
         _fetch_bars(conn)
         snap.build_owned_snapshot(conn, U1, DAY_1010)
-        now = dt.datetime(2026, 11, 10, 23, 0, tzinfo=BEIJING)
+        now = dt.datetime.now(BEIJING) + dt.timedelta(seconds=1)
         same = dimensions.load_inputs(conn, U1, CODE_A, DAY_1010, now)
         assert same["sources"]
         assert same["sources"][0]["kind"] == snap.OWNED_VERSION
@@ -1307,7 +1307,7 @@ def test_snapshot_watchlist_change_new_id(temp_db: Engine) -> None:
             )
         ).scalars().all()
         assert first in rows and second in rows
-        now = dt.datetime(2026, 11, 10, 23, 0, tzinfo=BEIJING)
+        now = dt.datetime.now(BEIJING) + dt.timedelta(seconds=1)
         loaded = dimensions.load_inputs(conn, U1, CODE_A, DAY_1010, now)
         assert loaded["sources"]
         assert loaded["sources"][0]["id"] == str(second)

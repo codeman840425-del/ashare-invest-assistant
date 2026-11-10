@@ -5,7 +5,7 @@
 expect.rule_ids_passed；它只按 K 线**根数**演示「预热不足 → passed=null →
 insufficient_data」与「limit 价 null 不产生 LIMIT_LOCKED」这一参考层逻辑。
 因此改动夹具 regime 或 rule_ids_passed 时本脚本**不会**失败（见输出 not_detected_by_design）。
-G7 核对表 H18 据此保持「缺证据」；实盘/求值器 null 传播归编排者派后端。
+本脚本不支撑 H18；H18 自 T-R46 起以后端正式用例 test_h18_h01_fx8_null_propagates_to_insufficient_data（T-T48）为证据。
 
 输入：null_propagation_fixtures.json（从卡 validation 抽出的 H01-FX8 / S01-FX3，均【虚构】）。
 `--mutate <name>`：对输入做真实篡改后走同一校验，须 exit 1 且原因对应被篡改项。

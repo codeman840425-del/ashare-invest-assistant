@@ -1,13 +1,13 @@
 # 日 K 生成本人快照 + 解除 analyze 闸（实现单 B 实施契约，T-A133）
 
-状态：draft，架构契约，不代表已实现。基点 docs/T-A128 `04178d0`（契约 `daily-bars-source.md` §5.B、§7），源码按 be/T-B127 `832faa2` 核对（其后 `fc798cc` 只改 selfchecks，不影响本文）。**本文件与 `daily-bars-source.md` §2、§5.B 不一致处以本文件为准。** 引用只写文件路径、函数名、用例名。原则：最小可用；不编造、不推断数据；Q2/Q3/Q4/Q5 保守默认不变。
+状态：draft，架构契约，不代表已实现。基点 docs/T-A128 `04178d0`（契约 `daily-bars-source.md` §5.B、§7），源码按 be/T-B127 `832faa2` 核对（其后 `fc798cc` 只改 selfchecks，不影响本文）。**本文件与 `daily-bars-source.md` §2、§5.B 不一致处以本文件为准。** 引用只写文件路径、函数名、用例名。原则：最小可用；不编造、不推断数据；Q2/Q3/Q4/Q5 保守默认不变。**用户本人已裁定 Q1、Q3、Q4、Q5 与 QB1，落地见 §11（T-A135）；本文其余各节与 §11 冲突处以 §11 为准。Q2 仍保守。**
 
 ## 0. 核对结论（决定本单形状的事实）
 
 - 闸在 `workers/daily.analyze` 的实例循环里，位于 `runnable` 之后；放行后 `require_isolated` 只认 `tb70_` 库，并只取 schema_version 为 `replay/baseline.VERSION` 的快照。
 - `features/evaluation.evaluate_snapshot` 经 `replay/baseline.read` 读快照；`read` 只接受 `VERSION`，其他 schema 一律 NOT_FOUND。所以只改闸不够，`read` 也必须接受新 schema。
 - `evaluate_snapshot` 还要读 instrument 的 `board`（`strategy/cards/fixtures.calculate` → `market_rules/lots.lot_spec`）。`securities.board` 可空；为空时 `lot_spec` 会按主板处理，这是推断，本单不允许。
-- `features/pipeline.prepare` 只收 `is_final` 为真且 `first_seen_at <= as_of` 的 bar。`analyze` 的 as_of 写死为交易日 17:30（北京）。`reports/dimensions.load_inputs` 另要求 `first_seen_at >= 当日 17:10`。单 A 的 `first_seen_at` 就是 `daily_bars.fetched_at`，等于取数时的墙钟时间。**结论：当日 bar 只有在 17:10–17:30（北京）之间取到才对 analyze 可见**，见 §9 QB1。
+- `features/pipeline.prepare` 只收 `is_final` 为真且 `first_seen_at <= as_of` 的 bar。`analyze` 的 as_of 写死为交易日 17:30（北京）。`reports/dimensions.load_inputs` 另要求 `first_seen_at >= 当日 17:10`。单 A 的 `first_seen_at` 就是 `daily_bars.fetched_at`，等于取数时的墙钟时间。**结论：当日 bar 只有在 17:10–17:30（北京）之间取到才对 analyze 可见**，见 §9 QB1（**已由 T-A135 裁定**：交易日 17:15 取数，时点不改，见 §11.3）。
 - `prepare` 遇到同一天既有 bar 又有 suspended gap 会抛 `suspension_or_listing_conflict`，所以停牌占位行只能进 gaps，不能进 bars。
 - `reports/service.build` 把 analyze 的每个 issue 都转成 `pipeline.<issue>` 缺口，文案通用。新 issue 不必改 `reports/service`。
 - `phase` 先调 `covered`：休市日直接返回 0，日历未覆盖时整次运行 failed 后抛出。analyze 和 report 在这两种日子都不会执行，本单不改。
@@ -15,7 +15,7 @@
 
 ## 1. 入口与调用关系
 
-- 新模块 `app/marketdata/daily_snapshot.py`，只放纯函数，**不注册任务**：不进 `workers/jobs.TASKS`、`LOCKED_TASKS`、`RETRY_TASKS`，不进 `slot_jobs`、`schedule()`（Q5 保守）。
+- 新模块 `app/marketdata/daily_snapshot.py`，只放纯函数，**不注册任务**：不进 `workers/jobs.TASKS`、`LOCKED_TASKS`、`RETRY_TASKS`，不进 `slot_jobs`、`schedule()`（Q5 保守；T-A135 裁定 Q5 后仍成立，进 `slot_jobs` 的只是单 A 的取数任务）。
 - `OWNED_VERSION`：常量，值为 owned-daily-v1。
 - `ANALYZE_AS_OF`：常量，值为北京时间 17:30。`workers/daily.analyze` 改为引用它，不再写死时刻（数值不变）。
 - `FINAL_AFTER`：常量，值为北京时间 17:10，与 `reports/dimensions.load_inputs` 的阈值相同。
@@ -27,7 +27,7 @@
   - 返回（快照 id 或 None，issue 元组）。issue 是 omitted 中的 issue（排序去重）；sessions 区间有日历空洞时返回 (None, (calendar_not_covered,))。
   - 不 begin、不 commit，事务由调用方负责（同单 A 的 `fetch_and_record`）。
   - 先调 `reports/service.covered`：休市返回 (None, ())、零写入；CALENDAR_NOT_COVERED 原样抛出（正常路径上 `phase` 已先拦住）。
-  - 范围：`marketdata/daily_bars.daily_universe(conn, owner, trade_date)`（只取持仓，Q4）。范围为空时返回 (None, ())、零写入。
+  - 范围：`marketdata/daily_bars.daily_universe(conn, owner, trade_date)`（~~只取持仓，Q4~~ **已由 T-A135 取代**：持仓 + 本人有效自选，见 §11.1）。范围为空时返回 (None, ())、零写入。
   - 构造 §2 的 items，按 §5 写入或复用，返回快照 id。
 - 调用关系（`workers/daily.analyze` 内，替换「app_env 不是 test 就跳过」那一支，其余逻辑不动）：
   1. `daily_bars_source` 为 off：app_env 不是 test 时记 `owned_market_cache_adapter_missing` 并跳过，与现状一致；app_env 为 test 时走原 tb70 路径（`require_isolated` + `VERSION`），一字不改。
@@ -165,7 +165,7 @@ instrument（每个 `daily_universe` 标的一个，除非被 omitted）：
 11. `test_snapshot_mairui_rows_unbound_in_b`：Given A 当日行 source 为 mairui / Then A 进 omitted（`owned_snapshot_licence_unbound:A`），快照 licence_id 为空。
 12. `test_snapshot_closed_day_returns_none`：Given 11-08 / Then 返回 (None, ())，data_snapshots 零新增。
 13. `test_snapshot_calendar_hole_not_built`：Given 删掉日历里 11-09 这一行 / Then 返回 (None, (calendar_not_covered,))，零写入；analyze 的 issues 含 `calendar_not_covered`。
-14. `test_snapshot_only_owner_universe`：Then u1 的快照不含 C（u2 的持仓），也不含 u1 的自选代码（Q4）。
+14. `test_snapshot_only_owner_universe`（**Then 已由 T-A135 取代**，见 §11.1）：~~Then u1 的快照不含 C（u2 的持仓），也不含 u1 的自选代码（Q4）。~~
 15. `test_owned_snapshot_idempotent_rerun`：Given 日 K 不变 / When build 两次、analyze 两次 / Then id 相同，data_snapshots 中该 schema 只有一行，suggestions 不重复归档。
 16. `test_snapshot_conflict_keeps_first_row`：Given 同键不同 close 的第二次 upsert / Then 快照 hash 不变，analyze issues 含 `daily_bar_conflict:<code>:<date>`。（见 T-A134 J5：第二次须经 `fetch_and_record`）
 17. `test_analyze_off_keeps_legacy_issue_and_report`：Given app_env 为 local、源为 off / When 依次跑 daily_analysis、daily_report / Then evaluations 为空，issues 含 `owned_market_cache_adapter_missing`，日报照出且 gaps 含该项，data_snapshots 零新增。（见 T-A134 J6：零新增指 analyze 阶段）
@@ -187,12 +187,12 @@ instrument（每个 `daily_universe` 标的一个，除非被 omitted）：
 
 | # | 问题 | 澄清前保守默认 |
 |---|---|---|
-| QB1 | analyze 用固定的 17:30（北京）作为时点，而日 K 要 17:10 之后取到才算完成版；当日 bar 只有在 17:10–17:30 之间取到才会被用到。是要定在这个窗口里取数（并入 Q5），还是把 analyze 的时点后移、改成随取数时间走？ | 不改时点。窗口外取到的当日行，对应标的进 omitted，不求值 |
+| QB1（**已裁定，T-A135**：交易日北京时间 17:15 取数，analyze 时点不改，见 §11.3） | analyze 用固定的 17:30（北京）作为时点，而日 K 要 17:10 之后取到才算完成版；当日 bar 只有在 17:10–17:30 之间取到才会被用到。是要定在这个窗口里取数（并入 Q5），还是把 analyze 的时点后移、改成随取数时间走？ | 不改时点。窗口外取到的当日行，对应标的进 omitted，不求值 |
 | Q2 | 复权因子（原问题） | 不写因子，qfq 全为缺口 |
-| Q4 | 自选或实例标的是否进快照（原问题） | 只取持仓；自选代码记 `owned_source_security_missing` |
-| Q5 | 取数钟点（原问题，与 QB1 相关） | 不排程 |
+| Q4（**已裁定，T-A135**：自选进快照，实例标的不进，见 §11.1） | 自选或实例标的是否进快照（原问题） | 只取持仓；自选代码记 `owned_source_security_missing` |
+| Q5（**已裁定，T-A135**：17:15 进 `slot_jobs`，见 `daily-bars-source.md` §8.4） | 取数钟点（原问题，与 QB1 相关） | 不排程 |
 
-单 B 合入以后，在 QB1 和 Q2 澄清之前，正式环境就算开了源，也拿不到有效的 qfq 特征。这是如实的缺口，不是故障。
+单 B 合入以后，在 ~~QB1 和~~ Q2 澄清之前，正式环境就算开了源，也拿不到有效的 qfq 特征。这是如实的缺口，不是故障。（QB1 已由 T-A135 裁定。）
 
 ## 10. T-T71 裁定（T-A134）
 
@@ -368,4 +368,47 @@ instrument（每个 `daily_universe` 标的一个，除非被 omitted）：
 
 ### 10.5 只有用户能定的
 
-本节无新增。QB1、Q2、Q4、Q5 维持 §9 的保守默认。
+本节无新增。~~QB1、Q2、Q4、Q5 维持 §9 的保守默认。~~ **已由 T-A135 取代**：QB1、Q4、Q5 已裁定（§11）；Q2 维持保守。
+
+## 11. 用户裁定落地（T-A135）
+
+依据：`/workspace/team/rules/daily-bars-user-decisions-2026-11-10.md`；取数侧的全部细节在 `daily-bars-source.md` §8，本节只写对单 B 的影响。源码按 be/T-B128 `af77bb5` 核对。Q2 不变：不写 factors，缺因子走 `adjust_factor_missing`，不补 1。
+
+### 11.1 Q4：快照范围随 `daily_universe` 扩大到本人有效自选
+
+- `build_owned_snapshot` 的签名和流程不变，范围仍取 `daily_universe(conn, owner, trade_date)`；该函数改为「合格持仓 ∪ 本人 `removed_at IS NULL` 的合格自选」（`daily-bars-source.md` §8.2）。所以自选代码按 §2 的同一套规则建 instrument：board 为空照样 omitted，当日无行照样 `daily_bars_missing:<code>`。
+- `analyze` 对 account 范围实例本来就遍历「持仓 ∪ 有效自选」（`workers/daily.analyze` 的 codes）。范围扩大后，自选代码有了 instrument，正常求值，不再记 `owned_source_security_missing:<code>`。scope=security 的实例只在代码属于持仓或自选时求值，不变。
+- `daily_bars_ready` 带出 issue 的「owner 当日 universe」同样包含自选代码。
+- 幂等：持仓、自选和日 K 都不变时 hash 与 id 不变；同日内自选变化会得到新的 hash 和新 id，旧快照保留，analyze 用本次返回的 id（§5 规则不变）。
+- 种子：自选行只加在下面列出的用例里，§8 的公共种子不加，免得改动用例 4、20、22 等的期望。
+- G/W/T：
+  - 用例 14 `test_snapshot_only_owner_universe`（改 Then）：Given u1 有效自选 E（stock、listed、board 有值）、已移除自选 E2；u2 持有 C / Then u1 快照的 instruments 恰为 A、B、E（另加 omitted 中的 H），不含 C、E2。
+  - `test_analyze_watchlist_code_evaluated`（新）：Given 源为 fake、u1 有效自选 E 当日有行、u1 的 account 范围实例 / When 跑 analyze / Then E 有 evaluation，source_hash 等于快照 hash；issues 不含 `owned_source_security_missing:E`。
+  - `test_ready_carries_only_owner_issues`（加一组）：Given u1 有效自选 C、partial 运行 issues 含 `daily_bars_missing:C` / Then u1 拿到该条。
+  - `test_snapshot_watchlist_change_new_id`（新）：Given 同日先 build 一次，再给 u1 加有效自选 E 后 build / Then 两个 id 不同，第一行仍在，`load_inputs(u1, A, 当日)` 取后者。
+
+### 11.2 Q3：回填行进入快照的口径
+
+- 不改 §2。回填行的 fetched_at 是回填运行时刻，晚于各自 trade_date 的 17:10，所以 `is_final` 为真；入选截止按快照日 17:30（§10 J14），所以回填之后的快照会带上这些历史 bar。
+- 回填不得在开市日 17:45 之前把当日也取进来（`daily-bars-source.md` §8.3 的 CLI 规则），否则当日行非完成版且不可覆盖，当日只能记 `daily_bars_not_final:<code>`。
+- 体积提醒：sessions 从最早入选行算起，3 年回填后每只约 730 根 bar，每个快照随 N 线性变大，每日一行。是否把 sessions 截到卡的最长 lookback，另开单，本单不改（见 reports/T-A135.md 的风险）。
+- G/W/T：
+  - `test_snapshot_includes_backfilled_history`（新）：Given 先以 trade_date=11-09、`window_trading_days=2`、`fetched_at`=11-09 北京 20:00 调 `fetch_and_record`，写入 11-06、11-09；再以 trade_date=11-10、`fetched_at`=11-10 北京 17:15 取当日 / When 以 11-10 build / Then 11-06、11-09、11-10 三根 bar 都入选且 is_final 为真；omitted 不含 A、B。
+  - 用例 10 `test_snapshot_today_bar_outside_final_window_omitted`（不变）。
+
+### 11.3 Q5 / QB1：17:15 取数，analyze 仍 17:30
+
+- `ANALYZE_AS_OF`（17:30）、`FINAL_AFTER`（17:10）不变；analyze 仍在 `slot_jobs` 的 17:30 钟点。取数在 17:15 由 `slot_jobs` 排程（`daily-bars-source.md` §8.4）。
+- 快照**仍由 analyze 首次过闸时惰性生成**，不注册任务、不进 `slot_jobs`/`schedule()`。
+- 正常路径：17:15 取到的行在 [17:10, 17:30] 内，当日可见。取数拖过 17:30 时，晚到的标的记 `daily_bars_after_asof:<code>`，次日作为历史 bar 入选；取数事务在 analyze 时尚未提交，则记 `daily_bars_not_ready`。都不求值、不补跑。
+- G/W/T：
+  - 用例 26 `test_daily_snapshot_not_a_task`（不变）。§10 J10 对 `workers/jobs.py` 的静态扫描照旧：新加的 17:15 分支和常量里不得出现 build_owned_snapshot、daily_bars_ready、daily_snapshot 字样，注释也算。
+  - `test_late_fetch_row_used_as_history_next_day`（新）：Given A 在 11-09 的行 fetched_at 为 11-09 17:35 / When 以 11-09 build，再以 11-10 build / Then 前者 omitted 含 `daily_bars_after_asof:A`；后者 A 的 bars 含 11-09 且 is_final 为真。
+
+### 11.4 Q1：对单 B 无影响
+
+- B 仍是麦蕊 0 调用（§6 不变）。上限常量和开放条件只在单 C 与开放单 D，B 不读。
+
+### 11.5 只有用户能定的
+
+- 新增的 U1（日报生成时刻）、U2（新标的自动补历史）、U3（每批防失控上限）列在 `daily-bars-source.md` §8.6。Q2 仍待定，维持保守。

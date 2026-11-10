@@ -294,11 +294,32 @@
   - 认可现行实现。
 - ④ 只有持仓快照、没有成交流水的账户：
   - base_qty 取最新持仓快照的数量。
-  - 快照时点（`broker_position_snapshots.as_of`）早于当日 09:30（北京时间）时，就是上一交易日收盘的持有量，不加 gap。
-  - 快照时点在当日 09:30 及以后，或时点为空时，可能含今日买入：
+  - 快照时点（`broker_position_snapshots.as_of`，按北京时间比较）早于当日 09:15 时，快照里的股份都是此前交易日买入的，不加 gap。（T-B134b 确认改：原文写的是 09:30。但开盘集合竞价 09:25 就撮合，09:25–09:30 之间的快照可能已含今日买入。所以界限改取开盘集合竞价的起点 09:15，见 `config/market_rules.yaml` 的 `sessions.call_auction`。不取 09:25，是为了避开撮合时刻前后几秒的歧义，属保守约定。）
+  - 快照时点在当日 09:15 及以后，或时点为空时，可能含今日买入：
     - gaps 加一项，key 为 t_view.base_qty，reason 为 user_input_missing，message 为「未导入今日成交流水，底仓按持仓快照计，可能含今日买入」；
     - data_status 至少为 partial。
-  - sellable_qty 仍按 §3.7 ④ 截断。快照没有可卖数量时，sellable_qty 为 null，并加 gap（key 为 t_view.sellable_qty，reason 为 user_input_missing）。不能核实 T+1 时不给可卖数（fail closed）。
+  - sellable_qty 仍按 §3.7 ④ 截断。快照没有可卖数量、且不能核实 T+1 时，sellable_qty 为 null 并加 gap（fail closed）；开盘前快照的例外见下面的「T-B134b 确认」。
+  - **T-B134b 确认（架构，回应 reports/T-B134b.md 待裁定 1、2）**：快照里有可卖数量时，仍按 §3.7 ④ 截断，不变。快照**没有**可卖数量时，按快照时点分两种：
+    - 时点为空，或在当日 09:15 及以后（可能含今日买入，无法核实 T+1）：
+      - sellable_qty 为 null；
+      - gaps 加一项，key 为 t_view.sellable_qty，reason 为 user_input_missing，message 为「持仓快照没有可卖数量，无法核实今日可卖，暂不提供可卖数」（定稿；文案不出现任何数量，不暗示可卖）；
+      - data_status 至少为 partial。无分钟线分支（unavailable 或 pending）同样带上这项 gap，状态不变。
+    - 时点早于当日 09:15（开盘前的快照）：**放宽**，按 T+1 推导可卖数。
+      - 推导：快照里的股份都在此前交易日买入，按 T+1 今日都可卖。本情形只出现在没有流水的账户，今日卖出无从得知，所以 sellable_qty = base_qty。只用快照里的持有量推导，不用任何今日的数据。
+      - 标注来源与置信：gaps 加一项，key 为 t_view.sellable_qty，reason 为 user_input_missing，message 为「可卖数按开盘前持仓快照推算（T+1），未扣今日卖出和冻结、限售股份」；data_status 至少为 partial。
+      - 与 `/portfolio` 的关系：只在「快照非当日」时一致。`/portfolio` 对非当日快照取 qty 作为 `sellable_qty`，所以推导出的值与同一行的 `holding.sellable_qty` 相同，§3.7 ④ 的截断不会触发。如果快照是当日的、在 09:15 及以后、又没有可卖数量，`/portfolio` 现在也取 qty，与本节的 null 不一致，而且可能含今日买入。这一处不在本节范围，已列入 reports/T-B134b-arch.md 待裁定，本节不改 `/portfolio`。
+    - 任何情况下，今日买入（包括在 09:15 及以后的快照里出现的数量）都不得计入可卖。
+    - 实现要求：
+      - 快照时点的界限 09:15 单独定义，不复用分钟线的开盘常量（09:30），也不改变分钟线与时段的判断。
+      - as_of 与界限都换到北京时间后再比较；as_of 没有时区时按「时点为空」处理，不进入推算。
+  - null 的含义：t_view.sellable_qty 为 null 表示「不知道」，不表示「不限」。
+    - 前端显示「—」并附 `GapNote`，不得用 `holding.sellable_qty`、base_qty 或其他数补位。
+    - 任何调用方都不得把 null 当作 `market_rules/lots.check_qty` 的 `sellable_qty=None` 传入，因为 None 在 `check_qty` 里表示不校验上界。卖出一侧在可卖数未知时不生成卖出数量。
+  - 新增用例：
+    - `test_t_view_sellable_null_gap_when_snapshot_lacks_sellable`：Given 无流水、快照时点为当日 10:00（另一例时点为空）、快照该代码可卖数量为空 / Then sellable_qty 为 null，gaps 含 t_view.sellable_qty，message 为上面的定稿文案，data_status 为 partial；
+    - `test_t_view_sellable_from_preopen_snapshot_t_plus_1`：Given 无流水、快照时点为上一交易日 15:30、可卖数量为空 / Then sellable_qty 等于 base_qty，gaps 含 t_view.sellable_qty，message 为推算文案，data_status 为 partial；
+    - `test_t_view_snapshot_boundary_call_auction`：Given 快照时点分别为当日 09:14:59、09:15:00、09:26:00 / Then 09:14:59 时不加 base_qty gap，可卖按推算给出；09:15:00 和 09:26:00 时加 base_qty gap，可卖为空时 sellable_qty 为 null。原用例 `test_t_view_base_qty_snapshot_before_open_no_gap` 的整点边界随之从 09:30 改为 09:15。
+  - 不在本节范围：快照比上一交易日更早时（多日未更新），base_qty 本身可能已经过期。是否另加 stale 类 gap，由编排者另定，本节不改。
   - 对 T-B134 的影响：在现行实现上补「快照时点」的判断和上面两项 gap。新增用例：
     - `test_t_view_base_qty_from_snapshot_without_trades`：Given 无流水、快照时点为当日 10:00 / Then base_qty 为快照数量，gaps 含 t_view.base_qty，data_status 为 partial；
     - `test_t_view_base_qty_snapshot_before_open_no_gap`：Given 快照时点为上一交易日 15:30 / Then 不加 t_view.base_qty 的 gap。

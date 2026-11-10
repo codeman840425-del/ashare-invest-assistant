@@ -334,7 +334,7 @@
 - **边界**：MA60 的有效 K < 45 → null；当日指数日线缺失 → null；null 不默认为 `range`。预热：MA60 加防抖需要 61 根（最少 45+1 根）。
 - **单位**：enum（没有数值单位）。
 - **状态**：verified_doc（hszsdata 文档 + T-B81 日线实测，裁定③），最多到 simulating。原 F25 `f.market_regime` 不改，仍为 declared。
-- **引用**：H-01 v2（C1）、W-01 v2（V1、I2、applicability）；P0。
+- **引用**：H-01 v2/v3（C1；v3 见 `cards/hold_risk_monitor.md:111` 规则、:63 data_needs、:129 证伪口径仅分组展示）、W-01 v2（V1、I2、applicability）；P0。
 
 ### F26 `f.sw_l1` — 申万一级行业
 - **公式**：d 日有效的申万一级行业代码（字符串）。

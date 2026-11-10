@@ -56,22 +56,23 @@
 
 H-01、S-01 仍不能代批（缺证据未清零；不放松「缺证据不得批」）。
 
-G7 计数暂按编排者口径 **37 一致 / 0 不一致 / 3 缺证据**（待架构师评审 T-R53 后再改）。仍缺 H12、S12（待策略研究员 T-R53b 在 g7_review 落文、架构师评审通过后计一致）、S18（须用户本人答复）。S20 按该口径已一致。本导航不改 `docs/strategies`。
+G7 计数 **39 一致 / 0 不一致 / 1 缺证据**（H-01 20/0/0，S-01 19/0/1；仅 S18 缺证据，须用户本人答复）。T-R53（`b66059f`+`281f524`）经 T-A122② 判可合，待入 main 后 g7_review 即为 39/0/1；当前 main 上 g7_review 仍为 36/0/4。本导航不改 `docs/strategies`。
 
 engine_policy 顶层与 `hold_risk_monitor` 组件的 2→3，以及 `src/backend/selfchecks/test_tb71_import.py` 离线 a–d（`test_formal_offline_identities_snapshots_and_policy_digests`），已随第 10 批合入（`bf28d6e` / `894a882`）。在 `00538a1` 上核对：`config/engine_policy.yaml:2` 与 `:18` 均为 3。此项不再列为代批前置。
 
-代批前置（收窄后，见团队报告 T-A120 ③；其中 T-O73b (i)–(iii) 已由 T-A121 判收口，待随第 11 批入 main）：
-- 步骤 A（库内 G1–G6 结果只读副本），并对 v3 重跑 G1–G6；
+代批前置（收窄后，见团队报告 T-A120 ③；T-O73b (i)–(iii) 已由 T-A121 判收口，待随第 11 批入 main）。**仍不能代批。**
+- 步骤 A（库内 G1–G6 结果只读副本）；
+- 对 v3 重跑 G1–G6；
 - 用户确认 2026-11-09 授权是否覆盖 v3，以及是否覆盖 H-01 / S-01 以外；
 - S18 待用户本人回答；
 - 2026-11-09 13:12:55（America/Denver）那次代批须重做（当时缺证据，不得用于晋级）；
 - 正式卡 v3 `--apply` 导入步骤待补，且须用户本人授权；
-- T-O73b (i)–(iii) 已由 T-A121 判收口，待入 main；
+- 部署时 seed 写配置行是否属 `standing-auth-2026-11-08`，待用户本人确认；
 - 部署后在用户 Windows 实例上做只读核验（含「G7 批此行」）。
 
 ## engine_policy seed
 
-路径（`git ls-files` 已核）：`deploy/runbooks/wrapup-deploy.md`（第 10 批已含 seed 节）、`deploy/scripts/wrapup/start-stack.sh`。将 seed 插入启栈顺序、只认 `inserted=0/1`、失败不启 worker 且不删行，以及手册授权口径修正，在 `ops/T-O73b=695078b` / `ops/T-O73c=7250c2d`；二者尚未入 main，已由架构师 T-A121 判可合、将随第 11 批入 main。顺序见 `7250c2d` 上 `start-stack.sh` :115–117：db-roles 之后、worker 之前执行 seed。部署后 seed 仅认 `inserted=0` 或 `1`；失败不启 worker、不删行。正式卡 `--apply` 须用户本人授权。
+路径（`git ls-files` 已核）：`deploy/runbooks/wrapup-deploy.md`（第 10 批已含 seed 节）、`deploy/scripts/wrapup/start-stack.sh`。将 seed 插入启栈顺序、只认 `inserted=0/1`、失败不启 worker 且不删行，以及手册授权口径修正，在 `ops/T-O73b=695078b` / `ops/T-O73c=7250c2d`；二者尚未入 main，已由架构师 T-A121 判可合、将随第 11 批入 main。顺序见 `7250c2d` 上 `start-stack.sh` :115–117：db-roles 之后、worker 之前执行 seed。手册相关节在 `00538a1` 为 :202 / :253 / :257，`7250c2d` 合入后变为 :201 / :256 / :260。部署后 seed 仅认 `inserted=0` 或 `1`；失败不启 worker、不删行。正式卡 `--apply` 须用户本人授权。
 
 ## 合并门禁（o61）
 

@@ -210,3 +210,32 @@
 - Given 常量注入为 17:30 / Then 17:44 为 S4，17:45 为 S5，文案为「日报约 17:30 生成」。
 
 **本节新增验收：** 共 12 条（①2、②1、③2、④2、⑤1、⑥1、⑦3），加上 ⑧ 的 2 条已在 t-f34 中实现。其中 ③ 的 15:00 前一条、④ 的 `f.pe` 一条、⑦ 的 user_input_missing 一条和 cash 去重一条，在 549ecdf 上尚未实现，由前端跟进。
+
+## 8. 补充裁定 a–d（T-A140 续，复审 fe/T-F34=3ff17df 后定）
+
+**a. 已知 code 的证券参数格式不符。** 已知 code 的证券参数如果不符合 §7 ④ 的严格格式（`SEC_RE`），按通用行显示该 code 原有的文案，不生成 /stocks 链接。
+- Given `pipeline.daily_bars_missing:abc` / Then 是一条通用行，文案为「今日缺少日 K 数据，未参与分析。」，没有 /stocks/abc 链接。
+
+**b. 同 key 去重与待补录合并。** §7 ⑦ 的「同 key 去重」按 key 完全相等判断。`/today.data_gaps` 的 key 与日报 gap 的 key 同源，例如 cash 由 `aggregates/service.today` 与 `reports/service.build` 用同一个键产生。多条「有信息待补录。」在同一个位置只显示一行，也只带一个「去处理 ›」（见 `buildReportGaps`）。
+- Given 日报 gaps 含两条不同 key、reason 都为 user_input_missing 的未列出项 / Then 通用行中「有信息待补录。」只出现一次。
+
+**c. §2.3 已列出、today 不展示的键遇到 user_input_missing。** 逐键判定。判定依据：用户能否在系统内补齐；today 页是否已经在别处表达。
+
+| 键 | 用户能否补齐 | today 是否已在别处表达 | 结论 |
+| --- | --- | --- | --- |
+| account | 能（导入持仓、录入现金） | 能。`reports/service.build` 只在账户不可算时写这个键，此时 `account` 为 null，A1 显示，并在 `/today.data_gaps` 有导入去向时带「去补录 ›」（`TodayAccount`） | 不重复显示 |
+| account.pnl_day | 不能（缺上日基准，系统自行补齐） | A2 显示「—」（`TodayAccount`） | 不显示 |
+| market 及 market.* | 不能（市场数据不由用户录入） | 页头的大盘环境与数据状态标签 | 不显示 |
+| stocks.<证券>.<维度>.<键> | 视 reason 而定。为 user_input_missing 时，通常是持仓成本之类，可经导入补齐 | 不一定。`/today.data_gaps` 只带 `aggregates/service.terminal` 产生的账户级缺口，不覆盖各维度 | **c 在这个键上不成立**：reason 为 user_input_missing 时，在该证券行（证券段符合 `SEC_RE`）显示「有信息待补录。」，并附去向 /portfolio/import；其他 reason 仍不显示 |
+| stocks.change_from_previous | 不能 | — | 不显示 |
+
+- 现状：`reports/dimensions.missing` 的 reason 默认为 no_source，`reports/service.build` 里只有 cash 一项是 user_input_missing。所以 stocks 维度键这一条目前不会触发，是面向以后的规则。
+- Given 日报 gaps 含 `stocks.000001.SZ.technical.cost`、reason 为 user_input_missing / Then 000001.SZ 行显示「有信息待补录。」，并带去向 /portfolio/import。
+- Given 同一个键、reason 为 no_source / Then 不显示。
+- Given 日报 gaps 含 key 为 account、reason 为 user_input_missing，且 `account` 为 null / Then 只显示 A1，缺口区没有「有信息待补录。」
+
+**d. 15:00 前日报已为 ready。** 交易日 15:00 前，如果 status 已为 ready，S9 由日报判定，照常按 R2 规则显示。
+- 核实：`aggregates/calendar.market_clock` 在交易日返回当天的 trade_date，在休市日返回前一开市日并标记 non_trading_day；`aggregates/service.today` 只查 `clock.trade_date` 那一天的日报。
+- 所以交易日看到的 ready 一定是**当天**的日报，比如提前或手工生成的；不会出现「前一交易日的日报被当成今天」。前一交易日的日报只会在休市日出现，而休市日是 S3，不请求日报，也不显示 R2。
+- Given 交易日北京时间 10:00、status 为 ready、日报 gaps 无 S6–S8、所有行无候选信号 / Then 显示 R2。
+- Given 休市日、status 为 ready / Then 显示 S3，不请求日报，不显示 R2。

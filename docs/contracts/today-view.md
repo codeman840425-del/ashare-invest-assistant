@@ -260,3 +260,8 @@ G/W/T（前端单，用例落在 `pages/t-f34.test.tsx`；测试单同步 `today
 - Given 19:10、generating / Then S4。
 - Given 17:31、status 为 ready、gaps 含 `pipeline.daily_bars_not_ready` / Then S6。
 - Given 机器时区 America/Denver、server_time 2026-11-10T09:44:00Z（北京 17:44）/ Then S4；09:45:00Z / Then S5。
+
+## 10. 做 T 视图 t_view 的状态显示（T-A145 交叉引用）
+
+- 持仓行的 t_view 字段与状态以 `intraday-bars.md` §3.7 为准。它与本契约的 S1–S9 状态条互不影响：状态条仍只由 `/today` 与日报判定；t_view 的 stale、pending、partial、不适用只作用在该行的做 T 视图里。
+- 显示复用既有的 `DataStatusTag` 与 `GapNote`，文案与本页其他数据状态一致（已过期、拉取中、部分缺失、不适用）。

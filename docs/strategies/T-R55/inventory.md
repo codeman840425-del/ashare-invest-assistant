@@ -20,7 +20,7 @@
 | 5 | `src/backend/app/strategy/universe_norm.py:8` | 文档字符串说明 screen 为空时 v1 不扫全市场，引用 S-01 卡与 T-A83 ④ | 否（指能力阶段，不是 version_no） | 无 |
 | 6 | `src/frontend/src/mocks/strategyHandlers.ts:24-25` | 前端演示用 mock：st_pullback_ma 的当前版本号写为 1、生命周期写为已发布 | 演示数据，不连后端、不进库 | 可选：前端随后对齐；不影响导入与门禁 |
 | 7 | `src/frontend/src/pages/t-f22.test.tsx:234-239`、`t-f22a.test.tsx:219-260` | 前端用例按 key 取 mock 模板并检查启用开关 | 否（只用 key） | 无 |
-| 8 | `deploy/runbooks/wrapup-deploy.md:94`、`:253` | 部署手册只写了正式卡 v3 导入「待补」（指 H-01），未出现 S-01 | 否；但**缺 S-01 v2 导入步骤** | 归运维/编排者：收口部署时补 S-01 v2 导入与部署后只读 SQL（S-01 最新版本号为 2、v2 上 G1–G6 结果） |
+| 8 | `deploy/runbooks/wrapup-deploy.md:93`、`:256`（T-R56b 按 main 43b252a 刷新行号；原 :94、:253） | 部署手册只写了正式卡 v3 导入「待补」（指 H-01），未出现 S-01 | 否；但**缺 S-01 v2 导入步骤** | 归运维/编排者：收口部署时补 S-01 v2 导入与部署后只读 SQL（S-01 最新版本号为 2、v2 上 G1–G6 结果） |
 | 9 | `config/`（含 `config/strategies/`、`config/engine_policy.yaml`） | 无 S-01 条目；`config/strategies/` 只有 H-01、W-01 两个文件 | 否 | 无 |
 
 误命中已排除：`tests/backend/unit/import_cases.json:356` 的用例编号含 S-01 字样（持仓用例编号），`tests/backend/api_app/test_contract_v028_t_t23.py:514` 以 S-01 作模板 id 测 ETF 拒绝，均不涉版本。

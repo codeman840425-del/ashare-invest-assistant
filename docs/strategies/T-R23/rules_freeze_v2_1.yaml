@@ -1,4 +1,6 @@
-note: T-R23 F23 词表 v2.1 规则冻结（编排者保守否决裁定后，研究员 2026-11-07）。上一冻结记录 rules_freeze.yaml（v2）及其文件原样保留。
+note: T-R23 F23 词表 v2.1 规则冻结（编排者保守否决裁定后，研究员 2026-11-07）。上一冻结记录 rules_freeze.yaml（v2）及其文件原样保留。2026-11-10 按架构师 T-A151 裁定补验收双指标口径（只改 criteria 表述与裁定引用，不改词表、匹配器、哈希与 not_executed 状态）。
+ruling_refs:
+  - {id: T-A151, doc: docs/reviews/T-A151-f23-dual-metric-ruling.md, commit: bf4b0ab, scope: '验收误报指标分列：semantic ≤5% 保留为门 + policy 命中差异如实报告不设上限'}
 version: f23_lexicon_v2_1
 supersedes: {version: f23_lexicon_v2, record: rules_freeze.yaml}
 frozen_at: '2026-11-07 (America/Denver)'
@@ -12,4 +14,4 @@ holdout_acceptance:
   exclude_ids: holdout_exclusion_ids.txt
   sample_source: 待编排者从正常网页逐页采集提供；研究员不自行采集、不代造
   labels: ['semantic_truth（语义真风险，人工）与 policy_hit（规则命中）分列；不得以政策命中充当语义真值']
-  criteria: ['≥1000 条不按关键词筛的连续交易日全量标题', '全部命中逐条人工复核；误报率（政策命中但语义非风险）如实报告，不设上限', '未命中固定随机种子抽 100 条逐条独立标注，漏报 0', '与开发样本不重叠', '单轮执行，失败即停止', '另报：样本公告命中率不能替代策略否决率；W-01 若几乎无法买入须上报']
+  criteria: ['≥1000 条不按关键词筛的连续交易日全量标题', 'semantic 误报率 ≤5%（验收门）：仅统计语义规则命中但语义非风险的比例，T-R22 裁定① 原意不变（T-A151 裁定 1）', 'policy 命中差异如实报告、不设上限、不作门：政策规则（inquiry_transfer_policy 询价转让一律命中 / concert_change_policy 一致行动保守命中）命中但语义非风险的条数与占比单列报告首页；净效果由 G6 否决率观察项与「W-01 几乎无法买入须上报」承接（T-A151 裁定 2）', '未命中固定随机种子抽 100 条逐条独立标注，漏报 0（政策规则只增命中不减命中，口径不变；T-A151 裁定 3）', 'semantic_truth 与 policy_hit 分列人工标注，不得以政策命中充当语义真值（T-A151 裁定 4）', '与开发样本不重叠', '单轮执行，失败即停止', '另报：样本公告命中率不能替代策略否决率；W-01 若几乎无法买入须上报']

@@ -3,7 +3,7 @@
  * 全部为示例：标题与条件文字只陈述“发生了什么”，不含动作建议；只读，不下单。
  */
 import type { DataGapScope, GapReason, Severity } from '../api/enums';
-import type { DailyReport, Evidence, Gap, RiskFlag, TodayAlert, TodayDataGap, TodayPlanTrigger } from '../api/types';
+import type { DailyReport, Evidence, TView, TerminalRow, Gap, RiskFlag, TodayAlert, TodayDataGap, TodayPlanTrigger } from '../api/types';
 import { DAILY_REPORTS, NOW, SUGGESTIONS, TERMINAL_ROWS, TRADE_DATE, uid } from './fixtures';
 
 const nameOf = (code: string) => TERMINAL_ROWS.find((r) => r.security_code === code)?.name ?? code;
@@ -124,4 +124,23 @@ export function todayViewReport(date: string, keys: string[], account: DailyRepo
   const base = DAILY_REPORTS[0]!;
   const gaps: Gap[] = keys.map((key) => ({ key, reason: 'not_yet_published', message: '示例数据' }));
   return { ...base, date, account, gaps };
+}
+
+/**
+ * T-F36（契约 intraday-bars.md §3.5）：/today 持仓行的 t_view 示例数据。
+ * 只给昨日有底仓的股票持仓；data_status 为 partial 的行给不可用示例。默认不带阈值字段（提示位不显示）。
+ */
+export function todayTView(row: TerminalRow, i: number): TView | null {
+  const h = row.holding;
+  if (!h || (h.security_type !== null && h.security_type !== 'stock')) return null;
+  if (row.data_status === 'partial') {
+    return { vwap: null, dev_pct: null, volume_ratio: null, base_qty: h.qty, sellable_qty: h.sellable_qty, data_status: 'unavailable', as_of: null };
+  }
+  const devs = ['0.0059', '-0.0124', '0.0031', '-0.0047'];
+  const vrs = ['1.35', '0.82', '1.10', null];
+  const price = Number(row.quote?.price ?? '10');
+  return {
+    vwap: (price / (1 + Number(devs[i % devs.length]))).toFixed(2), dev_pct: devs[i % devs.length], volume_ratio: vrs[i % vrs.length],
+    base_qty: h.qty, sellable_qty: h.sellable_qty, data_status: vrs[i % vrs.length] === null ? 'partial' : 'fresh', as_of: `${TRADE_DATE}T10:30:00+08:00`,
+  };
 }

@@ -536,6 +536,26 @@ export interface MarketOverview extends DataStatusBlock {
   turnover_total: Decimal | null;
 }
 
+// ---------- T-A143 intraday-bars.md §3.5：/today 持仓行的做 T 视图 t_view（可空，后端未实现前缺省） ----------
+/**
+ * 字段名按契约 §3.5：vwap、dev_pct、volume_ratio、base_qty、sellable_qty、data_status、as_of。
+ * 契约未给类型与可空性：数值按十进制字符串（与 api-contract 约定一致，也接受 number），除 data_status 外均按可空处理（待裁定）。
+ * dev_pct 按 §3.3 定义为比值 (最新收盘 − VWAP) ÷ VWAP（0.01 表示 1%）。
+ */
+export interface TView {
+  vwap: Decimal | number | null;
+  dev_pct: Decimal | number | null;
+  volume_ratio: Decimal | number | null;
+  base_qty: Decimal | number | null;
+  sellable_qty: Decimal | number | null;
+  data_status: DataStatus;
+  as_of: DateTime | null;
+  /** 提示位阈值：契约 §3.5 未定义，字段名为前端暂定（待裁定）；缺失或为 null 时不显示对应提示，前端不设默认阈值 */
+  dev_pct_threshold?: Decimal | number | null;
+  volume_ratio_threshold?: Decimal | number | null;
+}
+export type TodayFocusRow = TerminalRow & { t_view?: TView | null };
+
 // ---------- §7.3 /today 首页聚合（ETag） ----------
 export interface MoreList<T> { items: T[]; more: boolean }
 export interface TodayResponse {
@@ -543,7 +563,7 @@ export interface TodayResponse {
   trade_date: DateStr;
   session: MarketSession;
   market: { regime: MarketRegime | null; regime_position_range: RegimePositionRange | null; data_status: DataStatus };
-  focus: MoreList<TerminalRow>;
+  focus: MoreList<TodayFocusRow>;
   pending_plan_drafts: MoreList<{ id: Uuid; security_code: string; name: string; action: Action; valid_until: DateTime | null; status: PlanDraftStatus }>;
   released_reasons: MoreList<{ reason_id: Uuid; signal_id: Uuid; code: ReasonCode; security_code: string; name: string; released_at: DateTime }>;
   risk_flags: MoreList<RiskFlag & { security_code: string | null; name: string | null; risk_event_id: Uuid | null }>;

@@ -3,7 +3,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useDailyReport, useToday } from '../../api/queries';
-import type { TerminalRow, TodayResponse } from '../../api/types';
+import type { TodayFocusRow, TodayResponse } from '../../api/types';
 import { ActionBadge, ConsensusBadge, DataStatusTag, ErrorBox, Loading } from '../../components/common';
 import { EvidenceChips } from '../../components/EvidenceChips';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
@@ -14,6 +14,7 @@ import {
 import { fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { WatchlistToggle } from '../../features/watchlist/WatchlistToggle';
 import { WatchlistSection } from '../../features/watchlist/WatchlistSection';
+import { TViewCell } from './tView';
 import { MORE_ROUTE, safeInternalRoute, type TodayListKey as ListKey } from './todayRoutes';
 import { NoSignals, ReportGaps, TodayAccount, TodayStatusBar } from './TodayStatus';
 import { buildReportGaps, hasSuggestion, preReportState, reportDateToFetch, reportState, type GlobalState } from './todayView';
@@ -48,7 +49,7 @@ function Section({ title, k, data, testId, empty = '无', children, extra = 0, a
 const stockLink = (code: string | null, name: string | null) =>
   code ? <Link to={`/stocks/${encodeURIComponent(code)}`}><span className="mono">{code}</span> {name}</Link> : <span className="muted">账户级</span>;
 
-const focusColumns: ColumnsType<TerminalRow> = [
+const focusColumns: ColumnsType<TodayFocusRow> = [
   { title: '证券', key: 'sec', width: 150, render: (_, r) => stockLink(r.security_code, r.name) },
   { title: '现价', key: 'price', width: 80, align: 'right', render: (_, r) => <span className={`num ${pctClass(r.quote?.change_pct)}`}>{fmtNum(r.quote?.price)}</span> },
   { title: '涨跌幅', key: 'chg', width: 80, align: 'right', render: (_, r) => <span className={`num ${pctClass(r.quote?.change_pct)}`}>{r.quote ? `${signed(r.quote.change_pct)}%` : '—'}</span> },
@@ -62,6 +63,8 @@ const focusColumns: ColumnsType<TerminalRow> = [
       </Link>
     ) : <span className="muted">无</span>),
   },
+  // T-F36：做 T 视图（只对持仓行；只展示指标，不给动作或数量建议）
+  { title: '分时（做T视图）', key: 'tv', width: 300, render: (_, r) => (r.holding ? <TViewCell code={r.security_code} t={r.t_view} /> : <span className="muted">—</span>) },
   { title: '不可执行原因', key: 'rs', width: 96, align: 'right', render: (_, r) => (r.active_reason_count ? <span className="num">{r.active_reason_count}</span> : <span className="muted">0</span>) },
   { title: '风险', key: 'risk', width: 70, render: (_, r) => (r.max_risk_level ? <Tag color={RISK_LEVEL[r.max_risk_level].color}>{RISK_LEVEL[r.max_risk_level].text}</Tag> : <span className="muted">—</span>) },
   { title: '数据', key: 'ds', width: 120, render: (_, r) => <DataStatusTag status={r.data_status} asOf={r.data_as_of} /> },
@@ -145,7 +148,7 @@ export function TodayPage() {
       </div>
 
       <Section title="重点关注" k="focus" data={t} testId="today-focus">
-        <Table<TerminalRow>
+        <Table<TodayFocusRow>
           size="small" pagination={false} rowKey="security_code" dataSource={t.focus.items} columns={focusColumns}
           aria-label="重点关注列表"
         />

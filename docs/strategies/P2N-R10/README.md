@@ -2,6 +2,8 @@
 
 ## 枚举范围与结论
 
+> **T-R49 刷新（T-A112）**：H-01 落 v3，`cards/hold_risk_monitor.md` 由 v2 改为 v3，v2 冻结为 `cards/history/hold_risk_monitor.v2.md`（新增历史身份）。现计 **44 个身份记录、22 个源文件**（historical_frozen 3、current_formal 3、多值 9），scope 124；`check_horizons.py` 身份常量 43→44，历史文件匹配由仅 `.v1` 改为任意 `.vN`。下文「43」「H-01 v2」等为 P2N-R10 当时记录。
+
 枚举docs/strategies下全部90个既有文件路径；不执行这些文件。按plan §2.5.14的正式strategy-card/spec围栏、知识卡标题/身份行、catalog §2目录表分别定位。**43个独立文档身份记录，21个源文件**，不等于43个生产策略：当前正式卡含L2规格2、冻结历史版本2、T-R16不可导入研究知识卡16、目录研究条目23。相同key的不同版本/不同文档分别保留；目录文档版本0.3.8不是策略version_no，策略版本未知写null。
 
 当前两项：W-01 v2明确horizons=[swing]，审计唯一周期为swing；H-01 v2为system_only且明确支持四周期，**没有唯一版本周期，horizon=null**。文档中的L2规格不证明实际published/observing；未读数据库/真实账户，不声称可运行状态已经验证，生命周期均null。导入不等于启用，simulating也不是可创建普通可运行实例的published/observing。
@@ -14,7 +16,8 @@
 |---|---|---|---|---|---|
 | cards/history/hold_risk_monitor.v1.md | hold_risk_monitor | v1 | intraday_t,short,swing,long | null：不强选 | 冻结历史 |
 | cards/history/sw_ma_trend_pullback.v1.md | sw_ma_trend_pullback | v1 | swing | swing | 冻结历史 |
-| cards/hold_risk_monitor.md | hold_risk_monitor | v2 | intraday_t,short,swing,long | null：不强选 | 当前正式卡+L2规格（上线未核实） |
+| cards/history/hold_risk_monitor.v2.md | hold_risk_monitor | v2 | intraday_t,short,swing,long | null：不强选 | 冻结历史（T-R49） |
+| cards/hold_risk_monitor.md | hold_risk_monitor | v3（T-R49；原 v2） | intraday_t,short,swing,long | null：不强选 | 当前正式卡+L2规格（上线未核实） |
 | cards/sw_ma_trend_pullback.md | sw_ma_trend_pullback | v2 | swing | swing | 当前正式卡+L2规格（上线未核实） |
 | T-R16/L-01_lt_value.md | lt_value | v1 | long | long | 研究知识卡/不可导入 |
 | T-R16/L-02_lt_quality_growth.md | lt_quality_growth | v1 | long | long | 研究知识卡/不可导入 |
@@ -61,7 +64,8 @@
 | 来源与版本 | 周期集合 | 原因/解除条件 |
 |---|---|---|
 | cards/history/hold_risk_monitor.v1.md / hold_risk_monitor / v1 | intraday_t,short,swing,long | 四周期通用持仓风控，无唯一版本周期；具体建议的该版本结论horizon缺失时不得猜；结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则 |
-| cards/hold_risk_monitor.md / hold_risk_monitor / v2 | intraday_t,short,swing,long | 四周期通用持仓风控，无唯一版本周期；具体建议的该版本结论horizon缺失时不得猜；结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则 |
+| cards/hold_risk_monitor.md / hold_risk_monitor / v3（T-R49；原 v2） | intraday_t,short,swing,long | 四周期通用持仓风控，无唯一版本周期；具体建议的该版本结论horizon缺失时不得猜；结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则 |
+| cards/history/hold_risk_monitor.v2.md / hold_risk_monitor / v2（T-R49 冻结） | intraday_t,short,swing,long | 四周期通用持仓风控，无唯一版本周期；具体建议的该版本结论horizon缺失时不得猜；结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则 |
 | catalog.md / gate_tradability / 0.3.8 | intraday_t,short,swing,long | 通用/跨周期研究条目，没有单一策略版本周期；不以标题、触发频率或观察窗替代；若另派制成正式卡，先由权威规格明确版本周期/结论绑定及生命周期；本轮不新建策略 |
 | catalog.md / ctx_market_regime / 0.3.8 | intraday_t,short,swing,long | 通用/跨周期研究条目，没有单一策略版本周期；不以标题、触发频率或观察窗替代；若另派制成正式卡，先由权威规格明确版本周期/结论绑定及生命周期；本轮不新建策略 |
 | catalog.md / hold_risk_monitor / 0.3.8 | intraday_t,short,swing,long | 通用/跨周期研究条目，没有单一策略版本周期；不以标题、触发频率或观察窗替代；若另派制成正式卡，先由权威规格明确版本周期/结论绑定及生命周期；本轮不新建策略 |

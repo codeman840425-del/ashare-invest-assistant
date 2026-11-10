@@ -514,7 +514,7 @@ def test_ta81_l9_flush_then_restart_still_refuses() -> None:
 
 
 def test_ta81_l9_flush_fail_keeps_pending() -> None:
-    """恢复后补写再失败：pending 保留、allows=False、库内无升级行。"""
+    """T-A91 A31：在 flush 上注错后 pending 保留、allows=False、库内无升级行。"""
     url = _require_tt41_db()
     real = create_engine(url, hide_parameters=True)
     uid, lid = uuid.uuid4(), uuid.uuid4()
@@ -527,9 +527,19 @@ def test_ta81_l9_flush_fail_keeps_pending() -> None:
     assert any(t.event == "ip_limited_escalated" for t in tr)
     mem = core.user_ip[uid]
     assert getattr(mem, "pending_escalation", None) is not None
-    # 第 1 次 begin=回填读成功；第 2 次 begin=补写失败 → pending 保留
-    core.engine = _BudgetEngine(real, ok=1)  # type: ignore[assignment]
-    core.user_reset(lid, NOW0 + dt.timedelta(seconds=5))
+    # T-A91 A31 / L9：在 flush_pending_escalation 上注错（不再按连接数 BudgetEngine(ok=1)）
+    import app.ingest.ip_limit as ipl
+
+    def _boom(conn, mem_):  # noqa: ANN001
+        raise RuntimeError("l9_flush_injected")
+
+    orig = ipl.flush_pending_escalation
+    ipl.flush_pending_escalation = _boom  # type: ignore[assignment]
+    try:
+        core.user_reset(lid, NOW0 + dt.timedelta(seconds=5))
+        core.rehydrate(uid, NOW0 + dt.timedelta(seconds=5))
+    finally:
+        ipl.flush_pending_escalation = orig  # type: ignore[assignment]
     assert getattr(mem, "pending_escalation", None) is not None
     assert core.allows(lid, Priority.P0, NOW0 + dt.timedelta(seconds=5), verify=True) is False
     with real.connect() as conn:

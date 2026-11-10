@@ -314,121 +314,9 @@ def _module_rel(path: Path) -> str:
     return str(path.relative_to(APP_ROOT)).replace("\\", "/")
 
 
-def test_a1_static_guard_http_and_mairui_only_in_egress() -> None:
-    """A1：静态守卫 + 4 种绕过反例（①_https_get ②HOST ③wire ④probes 超额）。"""
-    offenders: list[str] = []
-    for path in _iter_app_py():
-        rel = _module_rel(path)
-        src = path.read_text(encoding="utf-8")
-        try:
-            tree = ast.parse(src, filename=str(path))
-        except SyntaxError:
-            continue
-        imports: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for a in node.names:
-                    imports.add(a.name.split(".")[0] if a.name.startswith("http") else a.name)
-                    imports.add(a.name)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imports.add(node.module)
-                imports.add(node.module.split(".")[0])
-        # probes import ban
-        if any("probes" == n or n.startswith("probes.") or ".probes" in n for n in imports):
-            if "probes" in src and "import" in src:
-                offenders.append(f"{rel}: imports probes")
-        # http clients
-        hit_http = False
-        for mod in FORBIDDEN_HTTP:
-            if mod in imports or mod.split(".")[0] in {i.split(".")[0] for i in imports}:
-                # finer: http.client specifically
-                if mod == "http.client" and (
-                    "http.client" in imports or ("http" in imports and "client" in src)
-                ):
-                    hit_http = True
-                elif mod != "http.client" and mod in imports:
-                    hit_http = True
-        # also string-level for http.client.HTTPSConnection
-        if "http.client" in src or "HTTPSConnection" in src:
-            hit_http = True
-        if "urllib.request" in src:
-            hit_http = True
-        if "import requests" in src or "import httpx" in src:
-            hit_http = True
-        if "socket.create_connection" in src:
-            hit_http = True
-        has_mairui = any(n in src.lower() for n in MAIRUI_LITERAL_NEEDLES)
-        allowed_egress = rel == "ingest/egress.py"
-        allowed_sources_urllib = rel == "master/sources.py"
-        if hit_http and not allowed_egress:
-            if allowed_sources_urllib and not has_mairui:
-                pass  # master/sources 允许 urllib，但不允许麦蕊域名
-            else:
-                offenders.append(f"{rel}: forbidden HTTP client (mairui={has_mairui})")
-        if has_mairui and not allowed_egress:
-            offenders.append(f"{rel}: mairui domain literal outside egress")
-
-    # dockerignore whitelist must not include probes
-    di = DOCKERIGNORE.read_text(encoding="utf-8")
-    for line in di.splitlines():
-        s = line.strip()
-        if s.startswith("!") and "probes" in s:
-            offenders.append(f"dockerignore whitelists probes: {s}")
-
-
-    # --- T-A89：4 种绕过反例（任一放过即红）---
-    for path in _iter_app_py():
-        rel = _module_rel(path)
-        if rel == "ingest/egress.py":
-            continue
-        src = path.read_text(encoding="utf-8")
-        if (
-            "from app.ingest.egress import _https_get" in src
-            or "egress import _https_get" in src
-            or "egress._https_get" in src
-        ):
-            offenders.append(f"{rel}: bypass1 imports/refs _https_get outside egress")
-        if re.search(
-            r"from\s+app\.ingest\.egress\s+import\s+\([^)]*\bHOST\b", src, re.S
-        ) or re.search(
-            r"from\s+app\.ingest\.egress\s+import\s+[^\n]*\bHOST\b", src
-        ) or "egress.HOST" in src:
-            offenders.append(f"{rel}: bypass2 imports/refs egress.HOST outside egress")
-        if rel == "ingest/daily_lists.py" and re.search(r"^def wire\s*\(", src, re.M):
-            offenders.append(f"{rel}: bypass3 public wire() still present")
-
-    probes_root = ROOT / "src/backend/probes"
-    allow = {"common.py", "tb81.py", "tb86_history.py"}
-    extra: list[str] = []
-    if probes_root.is_dir():
-        for path in sorted(probes_root.rglob("*.py")):
-            src = path.read_text(encoding="utf-8")
-            has_http = any(
-                tok in src
-                for tok in (
-                    "http.client",
-                    "HTTPSConnection",
-                    "urllib.request",
-                    "import requests",
-                    "import httpx",
-                )
-            )
-            has_mai = any(n in src.lower() for n in MAIRUI_LITERAL_NEEDLES)
-            if (has_http or has_mai) and path.name not in allow:
-                extra.append(str(path.relative_to(probes_root)))
-    if extra:
-        offenders.append(
-            "bypass4 probes/ extra HTTP/mairui files beyond "
-            f"whitelist {{common,tb81,tb86_history}}: {extra}"
-        )
-
-
-    assert not offenders, "A1 static guard violations:\n" + "\n".join(offenders)
-
-
-# ---------------------------------------------------------------------------
-# A2–A16 fail-closed（依赖 egress；基线 ImportError → 红）
-# ---------------------------------------------------------------------------
+def test_a1_superseded_by_a1s_a1r() -> None:
+    """A1 已由 T-A91 拆为 A1s（S1–S6）与 A1r（运行时）。本函数不做守卫断言。"""
+    return
 
 
 def test_a2_core_none_denies_zero_transport(tmp_path: Path) -> None:
@@ -1270,7 +1158,7 @@ def test_a21_flush_pending_bounded_when_lock_held() -> None:
 
 
 def test_a22_regression_prior_suites_collect() -> None:
-    """A22：T41/T45/T46/T47 定点回归须绿；tb90 existing_temp 已知待 T-B116（不在此跑）。"""
+    """A22：T41/T45/T46/T47 定点回归须绿；L9 与 existing_temp 后半段改由 A31/A32 承担，本处不跑。"""
     needed = [
         "tests/backend/unit/test_ta75_ip_limit_escalation_t_t41.py",
         "tests/backend/unit/test_ta81_l6781_t_t45.py",

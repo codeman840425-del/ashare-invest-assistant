@@ -15,6 +15,7 @@ import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { applyFieldErrors } from '../../lib/formErrors';
 import { TERM } from '../../i18n/statementTerms';
 import { SECURITY_TYPE } from '../../i18n/labels';
+import { WatchlistToggle } from '../../features/watchlist/WatchlistToggle';
 
 type TabKey = 'positions' | 'trades' | 'imports' | 'reconciliation';
 const TABS: TabKey[] = ['positions', 'trades', 'imports', 'reconciliation'];
@@ -170,6 +171,11 @@ function PositionsTab({ accountId }: { accountId: string }) {
           {
             title: '仓位%', dataIndex: 'weight_pct', align: 'right',
             render: (v: string, r) => <span className="mono" data-testid={est(r) ? `est-weight-${r.security_code}` : undefined}>{fmtNum(v)}%{est(r) ? estTag : null}</span>,
+          },
+          {
+            // T-F33：不在证券主数据中的持仓（如可转债）后端会返回 400 unknown_security，不给入口
+            title: '自选', key: 'wl',
+            render: (_: unknown, r) => (r.security_type === null ? null : <WatchlistToggle code={r.security_code} securityType={r.security_type} testId={`watchlist-pos-${r.security_code}`} />),
           },
         ]}
       />

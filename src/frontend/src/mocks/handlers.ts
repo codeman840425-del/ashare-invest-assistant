@@ -15,6 +15,7 @@ import { resetStrategies, strategyHandlers } from './strategyHandlers';
 import { reasonsNow, resetSignals, signalHandlers, signalsNow } from './signalHandlers';
 import { draftsNow, planHandlers, resetPlanDrafts } from './planHandlers';
 import { candidateHandlers, resetCandidates } from './candidateHandlers';
+import { resetWatchlist, watchlistHandlers } from './watchlistHandlers';
 import { planAlertHandlers, resetPlansAlerts } from './planAlertHandlers';
 import { errorBody, jsonWithEtag, notFound, page, validation } from './handlerUtils';
 import { allNotifications, findNotification, markAllNotificationsRead, markNotificationRead, resetNotificationStore } from './notificationStore';
@@ -27,7 +28,7 @@ import type { DataStatus } from '../api/enums';
 import type { Gap } from '../api/types';
 import {
   ACCOUNT_ID, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOW, PORTFOLIO, QUOTES,
-  SIGNAL_EVENTS, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, WATCHLIST, dailyBars, intradayBars,
+  SIGNAL_EVENTS, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, dailyBars, intradayBars,
 } from './fixtures';
 import {
   ETF_QUOTES, INDEX_SPECS, MARKET_OVERVIEW, announcements, announcementsMeta, factors, financials, fundFlows, indexBars, searchSecurities, sectorFlows,
@@ -66,6 +67,7 @@ export function resetMockState() {
   resetSignals();
   resetPlanDrafts();
   resetCandidates();
+  resetWatchlist();
   resetPlansAlerts();
   resetIngestAlertsMock();
 }
@@ -179,7 +181,8 @@ const routeHandlers = [
     return HttpResponse.json(page(riskEvents().filter((e) => (!st || e.status === st) && (!control || e.control === control) && (!code || e.security_code === code) && (!since || Date.parse(e.triggered_at) >= Date.parse(since))), url));
   }),
   http.get(`${API}/market/overview`, () => HttpResponse.json(degrade(MARKET_OVERVIEW, 'market.overview'))),
-  http.get(`${API}/watchlist`, () => HttpResponse.json(WATCHLIST)),
+  // 自选股 GET/POST/DELETE（T-F33，见 watchlistHandlers.ts）
+  ...watchlistHandlers,
   http.get(`${API}/horizon-assessments`, async ({ request }) => {
     await lag();
     const code = new URL(request.url).searchParams.get('security_code');

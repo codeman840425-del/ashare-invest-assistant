@@ -17,7 +17,6 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 from urllib.parse import quote
 
 from sqlalchemy import Engine, select, text
@@ -218,6 +217,3 @@ def mairui_get(
     transitions = core.complete(dispatched, signal, clock())
     return EgressResult(status=status_code, body=body, signal=signal, transitions=transitions)
 
-
-# Silence unused-Any noise for TYPE_CHECKING-free helpers.
-_: Any

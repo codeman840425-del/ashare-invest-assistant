@@ -62,7 +62,7 @@ def test_tb114_bootstrap_sets_core_with_engine(monkeypatch: pytest.MonkeyPatch) 
         database_url = SecretStr("sqlite+pysqlite:///:memory:")
         business = SimpleNamespace(ingest=_BizIngest())
 
-    def _fake_engine_for(url: str) -> Any:
+    def _fake_engine_for(url: str, profile: str = "default") -> Any:
         assert "sqlite" in url
         return engine
 

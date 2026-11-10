@@ -30,22 +30,25 @@ def minutes_elapsed(hhmm: str) -> int:
 
 def bar_ok(
     o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,  # noqa: E741  §1 接口字段
-    v: np.ndarray, a: np.ndarray,
+    v: np.ndarray, a: np.ndarray, *, volume_quantum: float | np.ndarray = 0,
 ) -> np.ndarray:
-    present = ~np.isnan(np.stack((o, h, l, c, v, a))).any(axis=0)
-    avg = np.divide(a, v, out=np.full_like(a, np.nan, dtype=float), where=v > 0)
-    # §2.2 第 3 条：仅对正成交量检查额量价，零量必须零额。
+    present = np.isfinite(np.stack((o, h, l, c, v, a))).all(axis=0)
+    # T-R58d §2.2: the format's one-step quantity uncertainty applies only to
+    # positive volume; zero-volume bars still require exactly zero turnover.
+    lower_volume = np.maximum(v - volume_quantum, 0)
+    upper_volume = v + volume_quantum
     return present & (
         ((v == 0) & (a == 0))
-        | ((v > 0) & (avg >= l * (1 - 0.001)) & (avg <= h * (1 + 0.001)))
+        | ((v > 0) & (a >= l * (1 - 0.001) * lower_volume)
+           & (a <= h * (1 + 0.001) * upper_volume))
     )
 
 
 def day_features(
     o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,  # noqa: E741  §1 接口字段
-    v: np.ndarray, a: np.ndarray,
+    v: np.ndarray, a: np.ndarray, *, volume_quantum: float = 0,
 ) -> dict[str, np.ndarray]:
-    valid = bar_ok(o, h, l, c, v, a)
+    valid = bar_ok(o, h, l, c, v, a, volume_quantum=volume_quantum)
     cumvol = np.cumsum(np.where(valid, v, 0.0))
     cumamt = np.cumsum(np.where(valid, a, 0.0))
     nbars = np.cumsum(valid)

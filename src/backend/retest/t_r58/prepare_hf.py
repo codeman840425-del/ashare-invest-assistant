@@ -8,6 +8,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -127,11 +128,31 @@ def compare_manifest(kit: Path, raw: Path, out: Path) -> dict[str, Any]:
     return result
 
 
+def wait_for_inputs(raw: Path, expected: Path, timeout_seconds: int = 14400) -> None:
+    """Background pipeline only: keep the download untouched; hash before any conversion."""
+    paths = [(raw / line.split(None, 1)[1].strip()).resolve()
+             for line in expected.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if len(paths) != 5801 or any(not p.is_relative_to(raw.resolve()) for p in paths):
+        raise ValueError("invalid raw input list")
+    paths += [raw / "metadata" / name for name in (
+        "coverage_by_instrument.csv", "market_calendar.csv",
+        "no_bar_day_classification.csv", "absent_instruments.csv",
+    )]
+    deadline = time.monotonic() + timeout_seconds
+    print(json.dumps({"stage": "waiting_for_download_inputs"}), flush=True)
+    while not all(path.is_file() for path in paths):
+        if time.monotonic() >= deadline:
+            raise TimeoutError("download inputs still incomplete; preserve all partial files")
+        time.sleep(30)
+    print(json.dumps({"stage": "download_inputs_present"}), flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kit", required=True, type=Path)
     parser.add_argument("--data-root", required=True, type=Path)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--wait-for-download", action="store_true")
     args = parser.parse_args()
     root, kit = args.data_root.resolve(), args.kit.resolve()
     raw, out = root / "hf-1min" / "raw", root / "hf-1min" / "2022plus"
@@ -140,6 +161,8 @@ def main() -> None:
         or not 1 <= args.workers <= 8
     ):
         raise ValueError("invalid preparation roots or worker count")
+    if args.wait_for_download:
+        wait_for_inputs(raw, kit / "raw_expected_sha256.txt")
     check = verify_raw(raw, kit / "raw_expected_sha256.txt", args.workers)
     if (out / "manifest.json").exists() or any(out.glob("*/*.parquet")):
         raise ValueError("conversion destination already populated; preserve and inspect first")

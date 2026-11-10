@@ -127,8 +127,12 @@ class Market:
         self.params = params
         self.board = rules.board(stock.exchange, stock.symbol)
         self.days = [
-            features.day_features(*bars)
-            for bars in zip(stock.o, stock.h, stock.l, stock.c, stock.v, stock.a, strict=True)
+            features.day_features(
+                *bars, volume_quantum=100 if stock.dates[d] >= date(2026, 4, 13) else 0,
+            )
+            for d, bars in enumerate(
+                zip(stock.o, stock.h, stock.l, stock.c, stock.v, stock.a, strict=True)
+            )
         ]
         self.traded = np.array([
             bool(np.any(day["valid"] & (stock.v[d] > 0)))

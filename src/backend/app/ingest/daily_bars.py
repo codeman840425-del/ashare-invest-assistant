@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import json
 import os
 import stat
 import uuid
@@ -39,6 +41,9 @@ DAILY_BARS_HTTP_UNLIMITED = "unlimited"
 DAILY_BARS_HTTP_LIMIT: int = 0
 AUTHORIZATION = Path("/run/aia/receipts/mairui-daily-bars.json")
 HALT = Path("/run/aia/state/halt/mairui-daily-bars.HALTED")
+# 契约 outbox kind=`mairui_daily_bars`；名单回执与 outbox 共用同一 KIND。
+# 评审要求日 K 专用值，不用 mairui_daily_snapshot。
+KIND = "mairui_daily_bars"
 
 
 def persist_halt(halt: Path, payload: bytes = HALT_LIMIT) -> bool:
@@ -87,11 +92,18 @@ def _transport_disabled(code: str, start: dt.date, end: dt.date) -> tuple[int, D
     raise RuntimeError("daily bars HTTP transport is not enabled")
 
 
-def read_daily_bars_grant(path: Path = AUTHORIZATION) -> object | None:
-    """按 ``read_grant`` 的 root / 0444 / 目录不可写规则读回执，不读证书。
+@dataclass(frozen=True)
+class DailyBarsGrant:
+    user_id: uuid.UUID
+    licence_id: uuid.UUID
+    receipt_id: uuid.UUID
+    start: dt.datetime
+    end: dt.datetime
+    digest: str
 
-    缺文件或校验失败时返回 None。回执里的 limit 字段不被读取、不能放宽限额。
-    """
+
+def _receipt_permission_ok(path: Path) -> bool:
+    """root 属主、0444 常规文件、目录不可写、拒绝符号链接目录。"""
     try:
         parent = path.parent.stat()
         if (
@@ -99,18 +111,74 @@ def read_daily_bars_grant(path: Path = AUTHORIZATION) -> object | None:
             or parent.st_uid != 0
             or stat.S_IMODE(parent.st_mode) & 0o022
         ):
+            return False
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return False
+    try:
+        st = os.fstat(fd)
+        return bool(
+            stat.S_ISREG(st.st_mode) and st.st_uid == 0 and stat.S_IMODE(st.st_mode) == 0o444
+        )
+    finally:
+        os.close(fd)
+
+
+def _parse_daily_bars_grant(
+    raw: bytes, *, now: dt.datetime, user_id: uuid.UUID
+) -> DailyBarsGrant | None:
+    """按 ``read_grant`` 解析 JSON，并用注入的 clock 与 user_id 绑定校验。不读证书。"""
+    if len(raw) > 8192:
+        return None
+    try:
+        obj = json.loads(raw)
+        if (
+            set(obj) != {"kind", "user_id", "licence_id", "receipt_id", "not_before", "expires_at"}
+            or obj["kind"] != KIND
+        ):
             return None
+        start, end = (
+            dt.datetime.fromisoformat(obj["not_before"]),
+            dt.datetime.fromisoformat(obj["expires_at"]),
+        )
+        if start.tzinfo is None or end.tzinfo is None or start >= end:
+            return None
+        if now.tzinfo is None or not (start <= now < end):
+            return None
+        uid = uuid.UUID(obj["user_id"])
+        if uid != user_id:
+            return None
+        return DailyBarsGrant(
+            uid,
+            uuid.UUID(obj["licence_id"]),
+            uuid.UUID(obj["receipt_id"]),
+            start,
+            end,
+            hashlib.sha256(raw).hexdigest(),
+        )
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
+
+
+def read_daily_bars_grant(
+    path: Path = AUTHORIZATION,
+    *,
+    now: dt.datetime,
+    user_id: uuid.UUID,
+) -> DailyBarsGrant | None:
+    """按 ``read_grant`` 的规则读日 K 回执：root / 0444 / 目录不可写 / JSON / 有效期 / user_id。
+
+    不读证书。回执里的额外字段（含 limit）会使集合校验失败，不能放宽限额。
+    """
+    if not _receipt_permission_ok(path):
+        return None
+    try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except OSError:
         return None
     try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or stat.S_IMODE(st.st_mode) != 0o444:
-            return None
         raw = os.read(fd, 8193)
-        if len(raw) > 8192:
-            return None
-        return True if raw else None
+        return _parse_daily_bars_grant(raw, now=now, user_id=user_id)
     finally:
         os.close(fd)
 
@@ -133,13 +201,19 @@ def fetch_mairui_daily_bars(
     grant_reader: GrantReader | None = None,
     clock: Clock | None = None,
     window_trading_days: int | None = None,
+    receipt_path: Path | None = None,
 ) -> int:
     """按预算与停止规则拉取一日（或窗口）日 K。不读证书，默认不出网。"""
     send = transport if transport is not None else _transport_disabled
     stop = stop_path if stop_path is not None else LISTS_STOP
     halt = halt_path if halt_path is not None else HALT
-    reader = grant_reader if grant_reader is not None else (lambda: read_daily_bars_grant())
     now = clock if clock is not None else (lambda: dt.datetime.now(dt.UTC))
+    receipt = receipt_path if receipt_path is not None else AUTHORIZATION
+
+    def _default_grant_reader() -> DailyBarsGrant | None:
+        return read_daily_bars_grant(receipt, now=_stamp(now), user_id=user_id)
+
+    reader = grant_reader if grant_reader is not None else _default_grant_reader
 
     budget = daily_bars_http_budget(DAILY_BARS_HTTP_LIMIT)
     if budget.kind == "unset":
@@ -260,9 +334,7 @@ def fetch_mairui_daily_bars(
         written = upsert.inserted + upsert.unchanged
         issues.extend(upsert.issues)
 
-    run_status = "ok" if last_received is not None or (bars and not halted) else "skipped"
-    if last_received is not None or bars:
-        run_status = "ok"
+    run_status = "ok" if last_received is not None or bars else "skipped"
     _record_run(
         conn,
         trade_date,

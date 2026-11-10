@@ -102,10 +102,13 @@ def main(
     with engine.connect() as conn:
         chosen: dt.date | None
         if args.trade_date:
-            chosen = dt.date.fromisoformat(args.trade_date)
-            cutoff = dt.datetime.combine(bj.date(), _FINAL_CUTOFF, bj.tzinfo)
-            if chosen == bj.date() and bj < cutoff:
-                print("refused: explicit trade-date is today before 17:45 Beijing")
+            try:
+                chosen = dt.date.fromisoformat(args.trade_date)
+            except ValueError:
+                print("refused: --trade-date must be a past open trading day")
+                return 1
+            if chosen >= bj.date() or not _is_open(conn, chosen):
+                print("refused: --trade-date must be a past open trading day")
                 return 1
         else:
             chosen = _default_trade_date(conn, bj)

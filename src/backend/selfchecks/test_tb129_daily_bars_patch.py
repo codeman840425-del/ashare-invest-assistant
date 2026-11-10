@@ -740,7 +740,7 @@ def test_backfill_cli_dry_run_default_no_enqueue(temp_db: Engine) -> None:
         _seed_cli_world(conn)
     now = dt.datetime(2026, 11, 10, 20, 0, tzinfo=BEIJING)
     code, out = _run_cli(
-        ["--years", "3", "--trade-date", "2026-11-10"],
+        ["--years", "3", "--trade-date", "2026-11-09"],
         settings=settings,
         now=now,
         redis_client=client,
@@ -758,13 +758,14 @@ def test_backfill_cli_dry_run_default_no_enqueue(temp_db: Engine) -> None:
 def test_backfill_cli_apply_enqueues_once(temp_db: Engine) -> None:
     settings = _settings(temp_db.url)
     client = _MemRedis()
+    past = dt.date(2026, 11, 9)
     with temp_db.begin() as conn:
         _seed_cli_world(conn)
-        window = _import_impl().backfill_window_days(conn, DAY_1010, 3)
+        window = _import_impl().backfill_window_days(conn, past, 3)
         assert window is not None
     now = dt.datetime(2026, 11, 10, 18, 0, tzinfo=BEIJING)
     code, _out = _run_cli(
-        ["--years", "3", "--trade-date", "2026-11-10", "--apply"],
+        ["--years", "3", "--trade-date", "2026-11-09", "--apply"],
         settings=settings,
         now=now,
         redis_client=client,
@@ -773,14 +774,14 @@ def test_backfill_cli_apply_enqueues_once(temp_db: Engine) -> None:
     assert client.llen(jobs_mod.QUEUE_KEY) == 1
     body = json.loads(client.lrange(jobs_mod.QUEUE_KEY, 0, 0)[0])
     assert body["task"] == "daily_bars_fetch"
-    assert body["args"] == {"trade_date": "2026-11-10", "window_trading_days": window}
+    assert body["args"] == {"trade_date": "2026-11-09", "window_trading_days": window}
     # 日历不足
     with temp_db.begin() as conn:
         conn.execute(text("TRUNCATE market.trading_calendar"))
         _seed_calendar_span(conn, dt.date(2025, 1, 1), DAY_1010)
     client2 = _MemRedis()
     code2, out2 = _run_cli(
-        ["--years", "3", "--trade-date", "2026-11-10", "--apply"],
+        ["--years", "3", "--trade-date", "2026-11-09", "--apply"],
         settings=settings,
         now=now,
         redis_client=client2,
@@ -821,3 +822,31 @@ def test_backfill_cli_refuses_today_before_1745(temp_db: Engine) -> None:
     )
     assert code2 == 0
     assert str(prev) in out2 or f"trade_date={prev.isoformat()}" in out2
+
+
+
+def test_backfill_cli_trade_date_must_be_past_open_day(temp_db: Engine) -> None:
+    """--trade-date 必须是过去的开市日：今天、未来、休市日一律拒绝。"""
+    settings = _settings(temp_db.url)
+    client = _MemRedis()
+    with temp_db.begin() as conn:
+        _seed_cli_world(conn)
+    now = dt.datetime(2026, 11, 10, 20, 0, tzinfo=BEIJING)
+    for value in ("2026-11-10", "2026-11-11", "2026-11-08"):
+        code, out = _run_cli(
+            ["--years", "3", "--trade-date", value],
+            settings=settings,
+            now=now,
+            redis_client=client,
+        )
+        assert code != 0, value
+        assert "past open" in out or "过去" in out or "refused" in out
+        assert client.llen(jobs_mod.QUEUE_KEY) == 0
+    code_ok, out_ok = _run_cli(
+        ["--years", "3", "--trade-date", "2026-11-09"],
+        settings=settings,
+        now=now,
+        redis_client=client,
+    )
+    assert code_ok == 0
+    assert "trade_date=2026-11-09" in out_ok

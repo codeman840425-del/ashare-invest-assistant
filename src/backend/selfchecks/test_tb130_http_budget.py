@@ -619,3 +619,140 @@ def test_mairui_fetched_at_not_before_last_response(
     stamps = list(db.execute(select(daily_bars.c.fetched_at)).scalars().all())
     assert stamps and all(ts >= last for ts in stamps)
     assert no_egress["mairui_get"] == 0
+
+
+GRANT_CLOCK = dt.datetime(2026, 11, 10, 17, 20, tzinfo=BEIJING)
+
+
+def _receipt_payload(*, kind: str, user_id: uuid.UUID, start: dt.datetime, end: dt.datetime) -> dict[str, str]:
+    return {
+        "kind": kind,
+        "user_id": str(user_id),
+        "licence_id": str(uuid.uuid4()),
+        "receipt_id": str(uuid.uuid4()),
+        "not_before": start.isoformat(),
+        "expires_at": end.isoformat(),
+    }
+
+
+def _write_receipt(path: Path, payload: object) -> Path:
+    path.write_text(
+        payload if isinstance(payload, str) else json.dumps(payload),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _fetch_with_receipt(
+    conn: Any,
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object,
+    user_id: uuid.UUID = OWNER,
+    clock: dt.datetime = GRANT_CLOCK,
+) -> tuple[int, list[Any]]:
+    from app.ingest import daily_bars as ibars
+
+    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+    monkeypatch.setattr(ibars, "_receipt_permission_ok", lambda _path: True)
+    receipt = _write_receipt(tmp_path / "mairui-daily-bars.json", payload)
+    calls: list[Any] = []
+    written = ibars.fetch_mairui_daily_bars(
+        conn,
+        trade_date=DAY,
+        user_id=user_id,
+        transport=_ok_transport(calls),
+        stop_path=tmp_path / "STOP",
+        halt_path=tmp_path / "HALT",
+        receipt_path=receipt,
+        clock=lambda: clock,
+    )
+    return written, calls
+
+
+def _valid_receipt(*, user_id: uuid.UUID = OWNER) -> dict[str, str]:
+    from app.ingest.daily_bars import KIND
+
+    return _receipt_payload(
+        kind=KIND,
+        user_id=user_id,
+        start=dt.datetime(2026, 11, 10, 17, 0, tzinfo=BEIJING),
+        end=dt.datetime(2026, 11, 10, 18, 0, tzinfo=BEIJING),
+    )
+
+
+def test_receipt_expired_is_rejected(
+    world: Any, db: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_egress: Any
+) -> None:
+    from app.ingest.daily_bars import KIND
+
+    payload = _receipt_payload(
+        kind=KIND,
+        user_id=OWNER,
+        start=dt.datetime(2026, 11, 10, 16, 0, tzinfo=BEIJING),
+        end=dt.datetime(2026, 11, 10, 17, 20, tzinfo=BEIJING),
+    )
+    written, calls = _fetch_with_receipt(db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload)
+    assert written == 0 and calls == []
+    assert "data_licence_unavailable" in _issues(db)
+    assert _bar_count(db) == 0
+    assert no_egress["mairui_get"] == 0
+
+
+def test_receipt_wrong_kind_is_rejected(
+    world: Any, db: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_egress: Any
+) -> None:
+    payload = _receipt_payload(
+        kind="mairui_daily_snapshot",
+        user_id=OWNER,
+        start=dt.datetime(2026, 11, 10, 17, 0, tzinfo=BEIJING),
+        end=dt.datetime(2026, 11, 10, 18, 0, tzinfo=BEIJING),
+    )
+    written, calls = _fetch_with_receipt(db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload)
+    assert written == 0 and calls == []
+    assert "data_licence_unavailable" in _issues(db)
+    assert _bar_count(db) == 0
+    assert no_egress["mairui_get"] == 0
+
+
+def test_receipt_non_json_is_rejected(
+    world: Any, db: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_egress: Any
+) -> None:
+    written, calls = _fetch_with_receipt(
+        db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload="this is not json{"
+    )
+    assert written == 0 and calls == []
+    assert "data_licence_unavailable" in _issues(db)
+    assert _bar_count(db) == 0
+    assert no_egress["mairui_get"] == 0
+
+
+def test_receipt_user_mismatch_is_rejected(
+    world: Any, db: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_egress: Any
+) -> None:
+    from app.ingest.daily_bars import KIND
+
+    payload = _receipt_payload(
+        kind=KIND,
+        user_id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2"),
+        start=dt.datetime(2026, 11, 10, 17, 0, tzinfo=BEIJING),
+        end=dt.datetime(2026, 11, 10, 18, 0, tzinfo=BEIJING),
+    )
+    written, calls = _fetch_with_receipt(db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload)
+    assert written == 0 and calls == []
+    assert "data_licence_unavailable" in _issues(db)
+    assert _bar_count(db) == 0
+    assert no_egress["mairui_get"] == 0
+
+
+def test_valid_receipt_still_allows_unlimited_fetch(
+    world: Any, db: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_egress: Any
+) -> None:
+    """对照：字段齐全、kind 正确、在有效期内且绑定本人时，unlimited 仍可按计划取数。"""
+    written, calls = _fetch_with_receipt(
+        db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=_valid_receipt()
+    )
+    assert len(calls) == 5
+    assert written == 5
+    assert no_egress["mairui_get"] == 0

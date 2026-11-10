@@ -22,3 +22,8 @@ e31ed6c76d48738c14e48148057de20808bab95d:src/backend/selfchecks/test_ta13_featur
 3b2c8ecc0fa93755b92f1b42b136804c03a16366:tests/backend/milestone/tt21_mainline.json:generic-api-key:7
 # 6fb2f46 docs/strategies/check_p2n01_dimension_mapping.py 第 33 行：因子字段名误报，编排者掩码核对 2026-11-08
 6fb2f46a5560a7a7ba4edc654600154b3f31b327:docs/strategies/check_p2n01_dimension_mapping.py:generic-api-key:33
+# T-O68⓪（编排者裁定，2026-11-09）：221c28d src/backend/selfchecks/test_tb116b_a6_lock_deny.py 第 28 行 S2-secret-assign 误报。
+#   来源：第 4 批推送扫描命中；是 tb116b A6 自检的虚构常量（变量 SECRET，值以 FAKE- 开头，只用于自检断言），不是密钥。
+#   确认方式：check_real_secrets 本机真实值精确比对 0 命中（运维核对）；T-B116g 起改为非字面量写法。历史不改写，故按指纹豁免。
+#   详见 reports/T-O68.md「⓪ 指纹豁免」；需 CODEOWNERS 评审。
+221c28df040c46d63d43620dfb9e5ab6f3ce798b:src/backend/selfchecks/test_tb116b_a6_lock_deny.py:S2-secret-assign:28

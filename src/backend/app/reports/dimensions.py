@@ -85,20 +85,26 @@ def load_inputs(
     cutoff = min(now, dt.datetime.combine(day, dt.time.max, BEIJING))
     if registry is None:
         registry = catalog(conn)
+    from app.marketdata.daily_snapshot import OWNED_VERSION
+
     sources = []
     raw, factors, scalars, sessions = None, [], [], []
+    accepted = (VERSION, OWNED_VERSION)
     for row in conn.execute(
         select(data_snapshots)
         .where(
             data_snapshots.c.user_id == owner,
             data_snapshots.c.purpose == "report",
             data_snapshots.c.created_at <= now,
-            data_snapshots.c["items"]["schema_version"].astext == VERSION,
+            data_snapshots.c["items"]["schema_version"].astext.in_(accepted),
         )
         .order_by(data_snapshots.c.created_at.desc(), data_snapshots.c.id.desc())
     ):
         body = row._mapping["items"]
-        if body.get("schema_version") != VERSION:
+        schema = body.get("schema_version")
+        if schema not in accepted:
+            continue
+        if schema == OWNED_VERSION and body.get("trade_date") != day.isoformat():
             continue
         if digest(body) != row.hash:
             raise ValueError("owned_source_hash_conflict")
@@ -109,7 +115,7 @@ def load_inputs(
                 raw.get("scalars", []),
                 body["sessions"],
             )
-            sources.append({"kind": VERSION, "id": str(row.id), "hash": row.hash})
+            sources.append({"kind": schema, "id": str(row.id), "hash": row.hash})
             break
     no_owned_source = raw is None
     if raw is None:

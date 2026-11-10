@@ -68,7 +68,8 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(scope="module")
 def database() -> Iterator[str]:
-    assert Path(SOCKET + "/.s.PGSQL.5432").exists()
+    if not Path(SOCKET + "/.s.PGSQL.5432").exists():
+        pytest.skip("dedicated networkless PostgreSQL socket not provisioned")
     name = "tb70_p2n02_" + uuid.uuid4().hex
     url = "postgresql+psycopg://postgres@/" + name + "?host=" + SOCKET
     with psycopg.connect(dbname="postgres", user="postgres", host=SOCKET, autocommit=True) as admin:

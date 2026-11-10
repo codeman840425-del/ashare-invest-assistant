@@ -49,6 +49,15 @@ watchlist_items = Table(
     ts("removed_at"),
     schema=APP,
 )
+# T-B126 / T-A129：本人同一证券至多一条有效自选（removed_at IS NULL）；并发 POST 由索引兜底。
+Index(
+    "uq_watchlist_items_user_code_active",
+    watchlist_items.c.user_id,
+    watchlist_items.c.security_code,
+    unique=True,
+    postgresql_where=text("removed_at IS NULL"),
+)
+
 
 strategy_runs = Table(
     "strategy_runs",

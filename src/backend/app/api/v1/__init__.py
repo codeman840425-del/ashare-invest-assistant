@@ -28,6 +28,7 @@ from app.api.v1 import (
     strategy_cards,
     suggestions,
     trades,
+    watchlist,
 )
 from app.plans.api import router as plans_router
 from app.plans.drafts import router as drafts_router
@@ -46,6 +47,7 @@ router.include_router(admin.router)
 router.include_router(accounts.router)
 router.include_router(imports.router)
 router.include_router(trades.router)
+router.include_router(watchlist.router)
 router.include_router(portfolio.router)
 router.include_router(horizon.router)
 router.include_router(candidates.router)

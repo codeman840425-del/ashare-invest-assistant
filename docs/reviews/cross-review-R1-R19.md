@@ -1,7 +1,7 @@
 # 异源复核交接包：R1–R19、B1–B4（T-A95）
 
-> 状态：已入库（架构师 T-A95，2026-11-09 America/Denver），基线 main=0e2e66c（第 4 批：含 be/T-B116f=bda9694、契约 docs/T-A92=8c7780f、test/T-T58=81a4f83、T-B116g=9cccbd7）。T-A99（2026-11-09 America/Denver）按 **main=b6ba5f9**（第 5 批，含 72d1f3a）重核行号，并在 R19 登记 T-A98 三项。T-A101（2026-11-09 America/Denver）按 **main=b526339**（第 6 批，含 fa487ce、131a0c9、docs/T-A99=2c1942d）重核 R19 运维行号，登记 T-A103① / T-A104 残余，并更新 `docs/plan.md` :3858 状态。
-> 运维文件（`deploy/`、`scripts/ci/`）及 R19 已引的 `sources.py` / `jobs.py` 行号以 **b526339** 为准（已逐项复核）。其余已引源码与契约相对 b6ba5f9 未变。相对 0e2e66c，`docs/plan.md` 因 T-A96 在 :114 附近插入 4 行，其后行号均 +4（已改正文引用）。标「按 3369d3b」「按 8e847d5」的行号沿用原评审。
+> 状态：已入库（架构师 T-A95，2026-11-09 America/Denver），基线 main=0e2e66c（第 4 批：含 be/T-B116f=bda9694、契约 docs/T-A92=8c7780f、test/T-T58=81a4f83、T-B116g=9cccbd7）。T-A99（2026-11-09 America/Denver）按 **main=b6ba5f9**（第 5 批，含 72d1f3a）重核行号，并在 R19 登记 T-A98 三项。T-A101（2026-11-09 America/Denver）按 **main=b526339**（第 6 批，含 fa487ce、131a0c9、docs/T-A99=2c1942d）重核 R19 运维行号，登记 T-A103① / T-A104 残余，并更新 `docs/plan.md` :3858 状态。T-A106（2026-11-10 America/Denver）按 **main=713958e**（第 7 批，含 ops/T-O69e-rb=d17e005、ops/T-O70=2dc2b21、docs/T-A101=81819eb、ops/T-O70b=b86e083）重核 T-A104 行号，登记 T-A105 残余与从 f82a83b 升级时的词表重建建议。
+> 运维文件（`deploy/`、`scripts/ci/`）及 R19 已引的 `sources.py` / `jobs.py` 行号以 **713958e** 为准（T-A106 已逐项复核）。相对 b526339：`lib.sh` 与 `check_compose_networks.py` / `check_frontend_deploy.py` 未改；`networks.md` 仅 :48-56 附近钉 alpine digest，已引的 :22、:176-188 未漂。其余已引源码与契约相对 b6ba5f9 未变。相对 0e2e66c，`docs/plan.md` 因 T-A96 在 :114 附近插入 4 行，其后行号均 +4（已改正文引用）。标「按 3369d3b」「按 8e847d5」的行号沿用原评审。
 > 读者：新团队的复核 Bot。本队口径是「架构师评审 + 测试先红后绿」为合入门槛，下列各项另需不同模型或团队独立复核。
 > 引用规则：只引用仓库内路径。团队内部、尚未入库的评审记录写作「团队评审记录 T-Axx（未入库）」，复核方无法直接查看，只当作背景。
 
@@ -345,7 +345,7 @@
   - 篡改钩子闭包（gc、`__closure__`）；
   - ingest 之外的进程（worker、api、用户电脑上的 probes）。
   - 方案 B（compose 网络拆分）：运维 T-O68 已提交 ops/T-O68=896b6c0，T-O68b 修订为 ops/T-O68b=72d1f3a，**已随第 5 批合入 main=b6ba5f9**（团队评审记录 T-A96、T-A97，未入库）。2cf67cf/d08b198（master-bootstrap、N4–N6 检查）经 T-O68c=aa32f65 cherry-pick，随 T-O68d=fa487ce **已随第 6 批合入 main=b526339**（团队评审记录 T-A100、T-A103①）。要点：
-    - 设计：`default` 和 `aia_internal` 都设 `internal: true`；只有 ingest 加挂 `aia_egress`；nginx 加挂 `aia_edge`（关闭 IP masquerade，只发布 127.0.0.1）。CI 守卫为 `scripts/ci/check_compose_networks.py`，用例在 `scripts/ci/tests/test_compose_networks.py`，运维说明在 `deploy/runbooks/networks.md`（以上路径均在 main=b526339 上）。
+    - 设计：`default` 和 `aia_internal` 都设 `internal: true`；只有 ingest 加挂 `aia_egress`；nginx 加挂 `aia_edge`（关闭 IP masquerade，只发布 127.0.0.1）。CI 守卫为 `scripts/ci/check_compose_networks.py`，用例在 `scripts/ci/tests/test_compose_networks.py`，运维说明在 `deploy/runbooks/networks.md`（以上路径均在 main=713958e 上，相对 b526339 未漂）。
     - 与本节分工一致：方案 A（进程内 netguard）为主，B 为纵深、不阻塞后端。B 兜住了「ingest 以外的容器出网」和「新服务漏写 networks」两类。ingest 自身仍可全网出口，所以本节所列进程内对抗残余、ingest 的 DNS 外泄、同网横向移动，B 都兜不住，仍归 A 与本复核。
     - 阻塞项（守卫对正常写法漏拦）：覆盖层可以新声明一张非 internal 网络并把任意服务挂上去，守卫和 `docker compose config` 都放行。修法是覆盖层只许用四个登记网络名。
     - 登记项：
@@ -366,11 +366,20 @@
     - T-A103① 登记（来源 ops/T-O68d=fa487ce，已在 main=b526339）：
       - 覆盖层改 worker 卷时 `scripts/ci/check_frontend_deploy.py` 看不见（只读基础 compose `deploy/compose/docker-compose.yml`，:67、:75、卷检查 :143-152）；新旧行为相同。
       - `MASTER_SNAPSHOT_PATH` 环境检查（:151-152、:157-158）可被卷行子串喂绿（`if "MASTER_SNAPSHOT_PATH:" not in …`）；新旧相同。
-    - T-A104 登记（来源 ops/T-O69e=cbabaac，尚未合入，将变基；行号按 cbabaac，**待 T-O69e 合入后重核**）：
-      - 手工指定旧轮时间戳目录或同名符号链接作 `--backup-dir` 仍通过（刻意对抗）。`deploy/scripts/wrapup/lib.sh` 的 `wrapup_require_round_backup`（:181-198）只核 basename 形态与目录内 manifest+dump。
-      - `alembic_version` 表存在但无行时当作空库（`wrapup_alembic_version` :262-279，`wrapup_check_alembic_0029` :234-237）。
+    - T-A104 登记（来源 ops/T-O69e，已随第 7 批以 ops/T-O69e-rb=d17e005 合入 main=713958e；行号对照 `git show 713958e:deploy/scripts/wrapup/lib.sh`，与 cbabaac / d17e005 相同）：
+      - 手工指定旧轮时间戳目录或同名符号链接作 `--backup-dir` 仍通过（刻意对抗）。`wrapup_require_round_backup`（:181-198）只核 basename 形态与目录内 manifest+dump。
+      - `alembic_version` 表存在但无行时当作空库（`wrapup_alembic_version` :262-280，`wrapup_check_alembic_0029` :234-237）。
       - `alembic_version` 查询无超时上限（`wrapup_pg_query` :216-221），挂起而非 fail-closed。
-      - 0029 定义比对靠片段匹配（`wrapup_assert_0029_defs` :287-307）。
+      - 0029 定义比对靠片段匹配（`wrapup_assert_0029_defs` :287-308）。
+    - T-A105 登记（来源 ops/T-O70=2dc2b21，已随第 7 批合入 main=713958e；b86e083 只把 wrapup 脚本中 8 处 `alpine:3.21` 钉成同一 digest，**未改** `scripts/ci/check_alpine_pin.py`。下列漏报在 713958e 上用该守卫的临时副本核实，仍然成立；真实 `deploy/` 现已全部钉死，守卫对仓库为绿）：
+      - 守卫只扫 `deploy/`（`iter_deploy_files` :21-32，`check` :35-53），正则只认词边界上的 `alpine:3.`（`ALPINE_TAG` / `ALPINE_PINNED` :16-17）。因此不拦裸 `alpine`、`alpine:latest`、`FROM alpine`、`library/alpine`、`docker run alpine`、大小写 `Alpine:3.21`、busybox 替代；`deploy/` 以外路径里的 `alpine:3.21` 也不扫。
+      - lookbehind 把 `-` 当词字符，`${VAR:-alpine:3.21}` 漏报（:16）。
+      - 不校验 digest 是否等于钦定值 `sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab`（任意 64 位小写 hex 即绿）；65 位 hex 只要前 64 位合法即被 `ALPINE_PINNED` 放行（:17、:49）。
+      - 该 digest 是否为多架构 index，仅凭运维 2026-11-09 23:41:48 MST 的 `imagetools inspect` 记录，T-A105 与本单均未联网复核。
+    - T-A105 / T-A106 登记（词表重建）：已有 `market.master_runs.status='ok'` 时，`deploy/scripts/master-bootstrap.sh --run --confirm-network-fetch --rebuild-search-terms` 在 `check()` 返回 0 后于 :94-96 直接「跳过（幂等）」退出，到不了 :101-108 向 CLI 传递该开关（`db_state` :52-61 只看是否已有 ok 行）。
+      - 对照 f82a83b→713958e：`security_search_terms` 表已在 0019（两端迁移与 `src/backend/app/db/tables/market.py` 相同），0029/0030 不改该表、无回填；`GENERATOR_VERSION` 仍为 1；`terms.py` 仅 T-A65 把 pypinyin `errors=` 回调提成 `_pypinyin_errors_keep_chars`（:28-34、:48、:60），运行时仍是 `list(chunk)`，生成规则未变。`search.py`、`cli/security_search_terms.py`、`cli/master_bootstrap.py` 未变。因此**升级本身不因结构或规则变化而强制重建**。
+      - 但默认首导不会写词表（`rebuild_search_terms` 默认 False，`src/backend/app/master/sync.py:765,802-805`）；T-B97 本就要求首导后跑离线 CLI。从 f82a83b 升级时若库里已有成功导入，不能靠 `master-bootstrap.sh --run --rebuild`。建议：在备份与启栈之后，先 `master-bootstrap.sh --check`。若 rc=10（尚无成功导入），用 `--run --confirm-network-fetch --rebuild-search-terms` 一次完成。若 rc=0（从 f82a83b 升级的常见情况），在无出网的 **worker**（只挂 `aia_internal`，角色 `aia_api`）上跑离线 CLI；不要用 maint-cli（入口写死 `delete-user-data`，角色是 `aia_maint`）。先 dry-run：`deploy/scripts/compose.sh run --rm --no-deps -T --entrypoint python worker -m app.cli.security_search_terms`；再写入时同一命令加 `--apply`（依赖 worker 已有的 `DATABASE_URL`；`terms.rebuild` :127-185 只读库、调用者事务内、幂等、不另 commit、不出网）。
+      - 只读验证（在已启动的 postgres 上 `BEGIN READ ONLY`）：比较 `market.securities` 与 `market.security_search_terms` 的行数 / 去重 code 数，抽查一只已知代码的 `term_kind`，`generator_version` 应为 1。`deploy/runbooks/wrapup-deploy.md` 主数据段（:132-141）尚未写该离线步骤或 `--rebuild-search-terms`，列为运维待办（本单不改 deploy/）。
     - 请复核方回答：B 是否还有正常部署会误走的出网路径？ingest 全出口这一事实是否已在运维文档中如实写明（建议 runbook 补一句）？
   - 已知行为（非缺陷）：Python 层 `connect(("localhost", …))` 会被按主机名拒绝；ingest 现无此写法。
 
@@ -420,7 +429,7 @@
 1. B1、B4：落地代码与用例**未定位**。B2 只定位到 RC5 侧；B3 的锁定用例**未定位**。
 2. R6：G1–G5 边界缺用例（见 R6 表）。
 3. R4：只做了列名匹配加人工判读，未在库内用 pg_catalog 全量核对。
-4. 行号：运维部分已按 main=b526339 复核（T-A101）；其余源码与契约行号仍与 T-A99 / b6ba5f9 一致。main 再变动时须重核。
+4. 行号：运维部分已按 main=713958e 复核（T-A106）；T-A104 四条与 cbabaac 相同（仅把函数闭合行补进 :262-280、:287-308）。其余源码与契约行号仍与 T-A99 / b6ba5f9 一致。main 再变动时须重核。
 5. `docs/reviews/T-A76-tb110-review.md` 的勘误行已随本文同一提交加入（文字见 §1 编号冲突段）。
 
 ## 7. 复核方交付建议

@@ -16,6 +16,7 @@ from typing import Any
 from app.schemas.enums import Dimension, Horizon, RuleRole
 from app.strategy.cards.dsl import CONTEXT, parse, symbol
 from app.strategy.cards.importing import _block, prepare_documents
+from app.strategy.universe_norm import normalize_universe
 
 
 def feature_registry(document: str) -> dict[str, dict[str, Any]]:
@@ -83,6 +84,21 @@ def check_adjust(tree: ast.expr, registry: dict[str, dict[str, Any]]) -> None:
     basis(tree)
 
 
+def _runtime_universe(item: Any, spec: dict[str, Any]) -> None:
+    """Apply v1 official-card universe rewrite onto the staged card block."""
+    card = item.blocks.get("strategy-card") or {}
+    universe = card.get("universe")
+    if not isinstance(universe, dict):
+        return
+    if "screen" in spec:
+        screen = spec.get("screen")
+    elif "screen" in card:
+        screen = card.get("screen")
+    else:
+        screen = None
+    card["universe"] = normalize_universe(universe, screen=screen)
+
+
 def preflight(
     documents: list[str], registry: dict[str, dict[str, Any]]
 ) -> tuple[list[Any], list[dict[str, str]]]:
@@ -137,6 +153,7 @@ def preflight(
         ):
             fail("hypothesis", "required_falsified_by")
         if not spec:
+            _runtime_universe(item, spec)
             continue  # L1-only cards are legal, never runnable
         params = spec.get("params_schema") or spec.get("params") or {}
         if isinstance(params, list):
@@ -245,4 +262,5 @@ def preflight(
                     fail(f"validation.fixtures[{index}]", "reason_direction_required")
         # No G1–G7 success is implied by this check. G2 live data, G5 wiring,
         # G6 history/quota, G7 administrator review are independent gates.
+        _runtime_universe(item, spec)
     return staged, errors

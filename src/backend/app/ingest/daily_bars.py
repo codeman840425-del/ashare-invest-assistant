@@ -41,8 +41,7 @@ DAILY_BARS_HTTP_UNLIMITED = "unlimited"
 DAILY_BARS_HTTP_LIMIT: int = 0
 AUTHORIZATION = Path("/run/aia/receipts/mairui-daily-bars.json")
 HALT = Path("/run/aia/state/halt/mairui-daily-bars.HALTED")
-# 契约 outbox kind=`mairui_daily_bars`；名单回执与 outbox 共用同一 KIND。
-# 评审要求日 K 专用值，不用 mairui_daily_snapshot。
+# 日 K 回执与日 K outbox 共用。
 KIND = "mairui_daily_bars"
 
 

@@ -536,6 +536,26 @@ export interface MarketOverview extends DataStatusBlock {
   turnover_total: Decimal | null;
 }
 
+// ---------- T-A143/T-A145 intraday-bars.md §3.5、§3.7：/today 持仓行的做 T 视图 t_view ----------
+/**
+ * §3.7 ①：数值一律 string(decimal)；只有 data_status 与 gaps 不可空。
+ * dev_pct 与 dev_pct_threshold 为百分数（"0.5900" 表示 0.59%）；volume_ratio 与 volume_ratio_threshold 为倍数。
+ * 阈值字段在后端未验证时缺省（§3.7 ③），前端不内置阈值。
+ */
+export interface TView {
+  vwap: Decimal | null;
+  dev_pct: Decimal | null;
+  volume_ratio: Decimal | null;
+  base_qty: Decimal | null;
+  sellable_qty: Decimal | null;
+  dev_pct_threshold?: Decimal | null;
+  volume_ratio_threshold?: Decimal | null;
+  data_status: DataStatus;
+  as_of: DateTime | null;
+  gaps: Gap[];
+}
+export type TodayFocusRow = TerminalRow & { t_view?: TView | null };
+
 // ---------- §7.3 /today 首页聚合（ETag） ----------
 export interface MoreList<T> { items: T[]; more: boolean }
 export interface TodayResponse {
@@ -543,7 +563,7 @@ export interface TodayResponse {
   trade_date: DateStr;
   session: MarketSession;
   market: { regime: MarketRegime | null; regime_position_range: RegimePositionRange | null; data_status: DataStatus };
-  focus: MoreList<TerminalRow>;
+  focus: MoreList<TodayFocusRow>;
   pending_plan_drafts: MoreList<{ id: Uuid; security_code: string; name: string; action: Action; valid_until: DateTime | null; status: PlanDraftStatus }>;
   released_reasons: MoreList<{ reason_id: Uuid; signal_id: Uuid; code: ReasonCode; security_code: string; name: string; released_at: DateTime }>;
   risk_flags: MoreList<RiskFlag & { security_code: string | null; name: string | null; risk_event_id: Uuid | null }>;

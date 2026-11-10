@@ -35,7 +35,7 @@ import {
   etfNotApplicable, isEtf, securityProfile, toWeekly,
 } from './marketFixtures';
 import { ENUMS } from '../api/enums';
-import { TODAY_EVIDENCE, riskEvents, todayAlerts, todayDataGaps, todayPlanTriggers, todaySamples } from './todayFixtures';
+import { TODAY_EVIDENCE, riskEvents, todayAlerts, todayDataGaps, todayPlanTriggers, todaySamples, todayTView } from './todayFixtures';
 
 /**
  * T-F26（契约 v0.2.9 内 #33 ②，SecurityHit.quote_missing）：按当前用户本人证书给值。
@@ -116,7 +116,8 @@ function todayBody(): TodayResponse {
   return {
     server_time: NOW, trade_date: TRADE_DATE, session: 'morning',
     market: { regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, data_status: 'fresh' },
-    focus: more(TERMINAL_ROWS.filter((r) => r.focus)),
+    // T-F36/T-F36b：持仓行一律带 t_view，非持仓行为 null（契约 intraday-bars.md §3.7 ①）
+    focus: more(TERMINAL_ROWS.filter((r) => r.focus).map((r, i) => ({ ...r, t_view: todayTView(r, i) }))),
     // T-F18：取自计划草案 mock 的当前状态（待确认 + 条件已变）
     pending_plan_drafts: more(draftsNow().filter((d) => d.status === 'pending' || d.status === 'stale').map((d) => ({
       id: d.id, security_code: d.security_code, name: d.name, action: d.action, valid_until: d.valid_until, status: d.status,

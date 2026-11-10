@@ -3777,7 +3777,7 @@ admin:
 | core 未接线 | 照常外呼（缺口） | 拒绝 `core_unavailable` |
 | 没有 licence 或非 active / INVALID | eligible 拒绝 | 另外在 egress 里拒绝 `licence_unavailable`；upsert 不得降回 active |
 | 上游 102 | 不统一落库 | 先写库为 INVALID，本调用后每一次与重启后都拒绝 `licence_unavailable`；transport 全程只 1 次 |
-| 状态变化写库失败 | 不涉及 | 停止后续外呼（fail-closed），拒绝 `licence_unavailable` 或 `core_denied` |
+| 状态变化写库失败 | 不涉及 | 本调用拒绝 `core_denied`；同时写 HALT（M-c），同进程后续与重启后均 `halt_present`（T-A92 澄清，原「`licence_unavailable` 或 `core_denied`」作废） |
 | 限流或升级暂停、令牌桶、日额度 | 不检查（缺口） | next_call 返回 None 时拒绝 `core_denied` |
 | 计数写库失败 | 不写（缺口） | 内存 fail-closed 加 pending（L-2/L-6），本批失败，后续调用拒绝 |
 | HTTP 超时或网络错 | 本批失败、不重试 | 同样失败，并 `core.complete(NETWORK)` 进入退避 |
@@ -3829,6 +3829,21 @@ admin:
 
 修订后编号清单（34）：A1s、A1r、A2、A3、A4、A5、A6a、A6b、A7–A27（21 条）、A28、A29、A30、A31、A32。
 
+**T-A92 验收口径裁定（编号不变，仍 34 条；只改子项与断言口径）**：
+
+| 编号 | 裁定 | 内容 |
+|---|---|---|
+| A1s | 用例改 | S5 补 `mairui_get(**{"transport": …})` 字面量与 `**变量`（变量字典含 `"transport"` 键）两种正例（T-A92 实测 T-T55 两种都漏报）；增 S2b 正负例 |
+| A1r | 用例改＋产品改 | 安全网改为 install 之后追加的审计钩子（见 api-contract ①b 测试方式），①②③⑤ 由此测到产品钩子；⑦ 须在 A 线程开窗、B 线程连已登记 IP；正向须登记 IP 且传 `validate`。新增子例：⑩ 非麦蕊主机名直连（`--add-host`/hosts 映射到 203.0.113.x）；⑪ `ctypes.CDLL(None)`、`pythonapi.connect`；⑫ `sendto` UDP/TCP Fast Open 到公网；⑬ `egress_window` 无 `validate` 或 `None` lease |
+| A17/A19/A20 | 用例改 | 调 `main()` 的用例一律在子进程中运行（钩子不可卸，同进程会误伤后续 subprocess 用例）；产品不提供卸载或关闭开关 |
+| A26 | 用例改 | 首次调用断言 `core_denied` 且 HALT 内容为 `licence_status_persist_failed`（不得 `except: pass`）；后续断言 `halt_present`；transport 不增加 |
+| A28 | 用例改 | 字段名按契约为 `nonce`；不加 `_nonce` 别名；④ 取不到锁会话须报错而不是继续 |
+| A29 | 用例改 | 连接数从进入 `mairui_get` 起算，必须 `== 1`；`single_egress` 锁会话不计入（它在调用方、最外层）；墙钟可从 `_call_mairui` 起算（更严） |
+| A30③ | 用例改 | 不加环境变量入口（可把 HALT 改指到易失目录，削弱 M-c）；子进程内改 `app.ingest.daily_lists.HALT` 指向不可写目录，并给一次性库让 engine 探测通过，再断言 78、文案、已有 HALT 不变 |
+| A31 | 接受＋补例 | 41e517a 上注入「失败也清 pending」可红；补「flush 成功但外层提交失败 → pending 保留」子例（T-A92 注入「提交前清 pending」现有两例均不红） |
+| A32 | 接受＋补断言 | 41e517a 上注入去掉非普通文件检查、`remove_owned` 空操作、权限 0644 均红；补显式 0600 断言 |
+
+
 **6. 工作包（按权限边界；T-A89 后）**
 - 后端 T-B116b（只改 src，接本契约）：修 T-A88 的 B-1(a)(b)、B-2、B-3、L-a、L-c；实现 M-2（upsert/rehydrate 不降级终态、102 先写库、lease 不可伪造）；删 `wire`；rehydrate 前有界取锁 ≤3s 且每调用至多一轮；tb90 自检夹具改 setup（不改业务默认关闭 DAILY_HTTP_LIMIT）；去掉空断言。
 - 测试 T-T50/T-T51（只改 tests）：按上表把 A1 扩 4 反例、A6 拆 A6a/A6b、补 A25–A27；先在修前 tip 上证明红，再在 T-B116b 上证明绿；普通与 `-O`。
@@ -3839,6 +3854,7 @@ admin:
   - 运维 **T-O68（只改 deploy/CI；方案 B 纵深防御，不阻塞 T-B116d）**：compose 增 `internal: true` 网络与可出网网络，按逐服务核实的出网需求分配（预期 ingest、worker 可出网，nginx 边缘＋内部，其余仅内部）；CI 增检查：非登记服务不得接入可出网网络。不在 compose 内做域名放行。
 - 风控类，须异源复核：R12（本单整体）、R14 检查和锁的顺序及停机优先级、R15 L-1 超时上界与残余、R16 静态守卫白名单、**R17（M-2：证书状态以库为准、102/INVALID 后必拒、lease 不可伪造、状态写库失败 fail-closed）**；R7、R13 随之复核。
 - **T-A91 R 项**：**R15 更新**——由「L-1 超时上界与残余」扩为「准入墙钟 ≤3s 的超时对齐（connect_timeout 2、deadline 2.8s 驱动的 `SET LOCAL lock_timeout/statement_timeout`、单事务 SAVEPOINT）及残余：库冻结而内核照常 ACK、PG 主机名解析阻塞、进程自身长暂停时上限不成立，但准入未完成不放行」。**R16 更新**——由「静态守卫白名单」改为「静态层边界：S1–S6 清单是否完整且无误报、登记例外（sources urllib、workers/ingest `socket.gethostname`、netguard、probes/selfchecks 动态导入登记含 `p11_replay.py:49`）是否最小、①c 排除项是否都有运行时兜底」。**新增 R18**（M-a＋M-c）：lease HMAC/线程绑定/`pg_locks` 核验是否可绕、威胁模型边界表述是否诚实；状态写库失败同时写 HALT、退出码 74、启动可写探测与「双失败后重启至多再 1 次」残余是否可接受。**新增 R19**（运行时层）：审计钩子安装时机与不可卸载性、DNS/公网 IP 默认拒绝规则、放行窗口的线程绑定、子进程与 ctypes 拦截、C 扩展/libc 直调残余、方案 B 的网络划分（随 T-O68）。
+- **T-A92 R 项**：**R19 扩**——主机名直连、`sendto`/TCP Fast Open、`CDLL(None)`/`dlsym`、窗口默认放行四处缺口与修法；残余增「ctypes 由裸地址构造函数指针（`ctypes.cast`）」「钩子前已导入模块持有的 socket」。**R16 扩**——S2b netguard 窗口 API 与 S5 `**` 两种写法。**R15 扩**——lease `pg_locks` 核验受同一 deadline 且不留 idle in transaction。
 
 **未决**：① ip_limit 锁超时或库抖动按 T-A75 一律记为已升级，暂停 1h，代价偏大，是否改成短暂停，需要异源意见；② NullPool 加 `tcp_user_timeout` 防不住「库进程暂停但内核照常 ACK」时语句执行中途的挂起，A17 只覆盖建连阶段，残余风险记在 R15；③ 预算 `DAILY_HTTP_LIMIT` 何时放开、由谁批，不在本单范围。④（T-A91）运行时层的公网默认拒绝会同时挡住 ingest 未来其他合法公网出口（目前无），新增时须改 netguard 并经 R19；⑤ 若后端实测某依赖在钩子安装后需要 `ctypes.dlopen`，按库名登记，须 R19 同意；⑥ 方案 B 中 api、signal-rt、beat 是否确无出网需求（如 SMTP、外部回调），由运维 T-O68 逐一核实，核实前不改 compose。
 

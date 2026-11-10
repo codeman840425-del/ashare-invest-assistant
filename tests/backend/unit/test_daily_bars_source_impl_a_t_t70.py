@@ -1,33 +1,72 @@
 # ruff: noqa: S101
-"""T-T70：按 docs/contracts/daily-bars-source.md 实现单 A 的 10 个验收用例先写测试。
+"""T-T70：docs/contracts/daily-bars-source.md 实现单 A 验收（以 §7 / T-A130 为准）。
 
-基线 docs/T-A128=1d6bb8a。实现尚不存在。本文件按契约接口名导入（app.marketdata.daily_bars
-等），导入失败即红；不用 xfail。理由：左移后一旦实现落地，断言立刻执行，不必再摘 xfail，
-也不会把半成品实现继续藏在 xfailed 里。导入放在各例内部，收集本文件与其他测试互不影响。
+基线 docs/T-A128=4a81876。实现尚不存在。按契约接口名导入，导入失败或符号缺失即红；
+不用 xfail。理由：左移后一旦实现落地，断言立刻执行，不必再摘 xfail，也不会把半成品
+藏在 xfailed 里。导入放在各例内部，收集本文件与其他测试互不影响。
 
-假源按契约应从 app.marketdata.daily_bars.FakeDailyBarsSource 导入（实现由后端写在该模块）。
-本测试不提供生产复刻，也不出网（env -u MAIRUI_LICENCE；出网=否用 netguard 计数）。
-需要库时走 tests/backend/pg_o61.py，且仅在契约符号导入成功之后建库，用完 DROP。
+假源用 FakeDailyBarsSource(missing=, suspended=)，经 fetch_and_record 注入。
+任务经 jobs.TASKS 取 daily_bars_fetch_task(settings, trade_date, user_id=None,
+window_trading_days=None)。licence_id 传 None；空串应 TypeError。
+停牌用例为 test_suspended_placeholder_row_written，不导入 daily_snapshot。
 
-歧义与 TODO 见各例注释及 reports/T-T70.md。
+临时库：guard_temp_pg → TEMPLATE o61_tmp_0030 → 断言版本 0030 → 仅对该库
+alembic upgrade head → 播种 → finally DROP。建库失败 skip。麦蕊 0。
 """
 
 from __future__ import annotations
 
 import ast
 import datetime as dt
+import inspect
 import uuid
+from argparse import Namespace
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import create_engine, func, select, text
+from alembic import command
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, func, insert, select, text
 from sqlalchemy.engine import Engine
 
 ROOT = Path(__file__).resolve().parents[3]
 APP_ROOT = ROOT / "src/backend/app"
+MIGRATIONS = ROOT / "src/backend/migrations"
 CONTRACT_MOD = "app.marketdata.daily_bars"
+BEIJING = ZoneInfo("Asia/Shanghai")
+
+# 代码取自仓库已有合成夹具（test_expected_json / test_contract_v028 / T-T66），
+# 不得取自用户持仓或股东代码材料。
+CODE_A = "600001.SH"
+CODE_B = "301002.SZ"
+CODE_C = "002001.SZ"
+CODE_D = "510981.SH"  # etf
+CODE_E = "600981.SH"  # 仅 universe 用例自选
+CODE_F = "600991.SH"  # 仅 universe 用例实例
+OPEN_06 = dt.date(2026, 11, 6)
+CLOSED_07 = dt.date(2026, 11, 7)
+CLOSED_08 = dt.date(2026, 11, 8)
+OPEN_09 = dt.date(2026, 11, 9)
+OPEN_10 = dt.date(2026, 11, 10)
+UNCOVERED_11 = dt.date(2026, 11, 11)
+STATS_KEYS = frozenset(
+    {
+        "user_id",
+        "window_trading_days",
+        "codes",
+        "inserted",
+        "unchanged",
+        "conflicts",
+        "missing",
+        "suspended",
+        "issues",
+    }
+)
 _A_SYMBOLS = (
     "DailyBarsSource",
     "DailyBarsResult",
@@ -37,11 +76,12 @@ _A_SYMBOLS = (
     "FakeDailyBarsSource",
     "daily_universe",
     "upsert_daily_bars",
+    "daily_bars_fetch_task",
+    "fetch_and_record",
 )
 
 
 def _impl() -> Any:
-    """导入实现单 A 在契约中点名的模块与符号，缺一即失败。"""
     module = __import__(CONTRACT_MOD, fromlist=list(_A_SYMBOLS))
     missing = [name for name in _A_SYMBOLS if not hasattr(module, name)]
     if missing:
@@ -49,54 +89,199 @@ def _impl() -> Any:
     return module
 
 
-def _daily_bars_fetch_entry() -> Any:
-    """契约只要求在 workers/jobs 注册任务名 daily_bars_fetch，未给出可调用签名。
+def _task_from_jobs() -> Any:
+    from app.workers import jobs
 
-    这里不发明新名字：只在已点名的模块与 jobs 上查找同名可调用物；找不到即红。
-    """
-    module = _impl()
-    for candidate in (
-        getattr(module, "daily_bars_fetch", None),
-        getattr(__import__("app.workers.jobs", fromlist=["daily_bars_fetch"]), "daily_bars_fetch", None),
-    ):
-        if callable(candidate):
-            return candidate
-    raise ImportError(
-        "找不到可调用的 daily_bars_fetch（契约 §5.A 只给出任务注册名，未立函数签名）"
-    )
+    fn = jobs.TASKS.get("daily_bars_fetch")
+    if not callable(fn):
+        raise ImportError("workers/jobs.TASKS 未注册 daily_bars_fetch")
+    return fn
 
 
-def _assert_no_egress(before: int) -> None:
+def _assert_no_egress(before: int = 0) -> None:
     from app.ingest.netguard import netguard_blocks
 
-    # TODO(T-T70 歧义): netguard_blocks 在现网是占位、恒返回 0（netguard.py:200-202）。
+    # TODO(T-T70 剩余): netguard_blocks 现网恒返回 0（netguard.py 约 :200–202），
+    # 与契约「transport 和 netguard 计数」只有名义对齐（§5 文首、§7 未改探针）。
     assert netguard_blocks() == before == 0
 
 
-def _count_daily_bars(engine: Engine) -> int:
+def _count(engine: Engine, table: Any) -> int:
+    with engine.connect() as conn:
+        return int(conn.execute(select(func.count()).select_from(table)).scalar_one())
+
+
+def _daily_bar_count(engine: Engine) -> int:
     from app.db.tables.market import daily_bars
 
-    with engine.connect() as conn:
-        return int(conn.execute(select(func.count()).select_from(daily_bars)).scalar_one())
+    return _count(engine, daily_bars)
 
 
-def _pipeline_mentions_issue(engine: Engine, issue: str) -> bool:
-    """契约未规定 issue 写在 pipeline_runs 哪一列/JSON 键；只断言该字符串出现在运行记录中。"""
+def _pipeline_rows(engine: Engine) -> list[Any]:
     from app.db.tables.realtime import pipeline_runs
 
     with engine.connect() as conn:
-        rows = conn.execute(
-            select(pipeline_runs.c.stats, pipeline_runs.c.error, pipeline_runs.c.status)
-        ).all()
-    for stats, error, status in rows:
-        blob = f"{stats!s} {error!s} {status!s}"
-        if issue in blob:
-            return True
-    return False
+        return list(conn.execute(select(pipeline_runs).order_by(pipeline_runs.c.started_at)).all())
 
 
-def _temp_engine() -> Iterator[Engine]:
-    """o61 临时库；调用方必须先完成契约导入。不打印 DSN/口令。"""
+def _latest_run(engine: Engine) -> Any:
+    rows = _pipeline_rows(engine)
+    assert rows, "expected a pipeline_runs row"
+    return rows[-1]
+
+
+def _alembic_config(url_str: str) -> Config:
+    cfg = Config()
+    cfg.set_main_option("script_location", str(MIGRATIONS))
+    cfg.cmd_opts = Namespace(x=["url=" + url_str])
+    return cfg
+
+
+def _current_head() -> str:
+    cfg = Config()
+    cfg.set_main_option("script_location", str(MIGRATIONS))
+    heads = ScriptDirectory.from_config(cfg).get_heads()
+    assert len(heads) == 1, "alembic heads 必须单头"
+    return ScriptDirectory.from_config(cfg).get_current_head()
+
+
+def _seed_core(conn: Any, ctx: SimpleNamespace) -> None:
+    from app.db.tables.accounts import (
+        accounts,
+        broker_position_snapshot_items,
+        broker_position_snapshots,
+        import_batches,
+    )
+    from app.db.tables.market import securities, trading_calendar
+    from app.db.tables.users import users
+
+    conn.execute(text("DELETE FROM market.trading_calendar"))
+    conn.execute(
+        insert(trading_calendar),
+        [
+            {"date": OPEN_06, "is_open": True},
+            {"date": CLOSED_07, "is_open": False},
+            {"date": CLOSED_08, "is_open": False},
+            {"date": OPEN_09, "is_open": True},
+            {"date": OPEN_10, "is_open": True},
+        ],
+    )
+    # listing_status=listed 按 §7 :345「type=stock、listing_status=listed」写入；
+    # 同条又写「列只填非空列 code、type、name、exchange」，见报告剩余歧义。
+    conn.execute(
+        insert(securities),
+        [
+            {"code": CODE_A, "type": "stock", "name": "合成A", "exchange": "SH", "listing_status": "listed"},
+            {"code": CODE_B, "type": "stock", "name": "合成B", "exchange": "SZ", "listing_status": "listed"},
+            {"code": CODE_C, "type": "stock", "name": "合成C", "exchange": "SZ", "listing_status": "listed"},
+            {"code": CODE_D, "type": "etf", "name": "合成D", "exchange": "SH", "listing_status": "listed"},
+        ],
+    )
+    as_of = dt.datetime(2026, 11, 10, 15, 0, tzinfo=BEIJING)
+    for uname, uid, acc_id, batch_id, snap_id, items in (
+        ("tt70_u1", ctx.u1, ctx.acc1, ctx.batch1, ctx.snap1, [(CODE_A, 100), (CODE_B, 100), (CODE_D, 100)]),
+        ("tt70_u2", ctx.u2, ctx.acc2, ctx.batch2, ctx.snap2, [(CODE_C, 100)]),
+    ):
+        conn.execute(
+            insert(users).values(
+                id=uid,
+                username=uname,
+                password_hash="tt70-unused-hash",
+                role="user",
+                status="approved",
+            )
+        )
+        conn.execute(insert(accounts).values(id=acc_id, user_id=uid, name="合成账户"))
+        conn.execute(
+            insert(import_batches).values(
+                id=batch_id,
+                user_id=uid,
+                account_id=acc_id,
+                status="committed",
+                kind="positions",
+            )
+        )
+        conn.execute(
+            insert(broker_position_snapshots).values(
+                id=snap_id,
+                account_id=acc_id,
+                import_batch_id=batch_id,
+                as_of=as_of,
+                version_no=1,
+            )
+        )
+        conn.execute(
+            insert(broker_position_snapshot_items),
+            [
+                {
+                    "id": uuid.uuid4(),
+                    "snapshot_id": snap_id,
+                    "security_code": code,
+                    "quantity": qty,
+                    "sellable_quantity": qty,
+                }
+                for code, qty in items
+            ],
+        )
+
+
+def _seed_universe_extras(conn: Any, ctx: SimpleNamespace) -> None:
+    from app.db.tables.market import securities
+    from app.db.tables.research import watchlist_items
+    from app.db.tables.strategy import strategies, strategy_instances, strategy_versions
+
+    conn.execute(
+        insert(securities).values(
+            code=CODE_E, type="stock", name="合成E", exchange="SH", listing_status="listed"
+        )
+    )
+    conn.execute(
+        insert(securities).values(
+            code=CODE_F, type="stock", name="合成F", exchange="SH", listing_status="listed"
+        )
+    )
+    conn.execute(
+        insert(watchlist_items).values(id=uuid.uuid4(), user_id=ctx.u1, security_code=CODE_E)
+    )
+    # 链路形状同 test_tb74_candidates.setup（§7 :348）
+    tmpl, ver, inst = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    conn.execute(
+        insert(strategies).values(
+            id=tmpl,
+            key="tt70_synthetic_" + tmpl.hex,
+            name="合成模板",
+            owner_user_id=ctx.u1,
+            horizons=["swing"],
+        )
+    )
+    conn.execute(
+        insert(strategy_versions).values(
+            id=ver,
+            strategy_id=tmpl,
+            version_no=1,
+            config={"spec": {}, "universe": {"pool": "持仓"}},
+            config_hash=tmpl.hex,
+            lifecycle="published",
+            param_hash=tmpl.hex,
+        )
+    )
+    conn.execute(
+        insert(strategy_instances).values(
+            id=inst,
+            user_id=ctx.u1,
+            strategy_version_id=ver,
+            scope="security",
+            security_code=CODE_F,
+            account_id=ctx.acc1,
+            status="active",
+            origin="user",
+            horizon="swing",
+        )
+    )
+
+
+def _open_temp_db() -> Iterator[SimpleNamespace]:
+    """o61 临时库：模板 0030 → upgrade head → 播种；失败 skip；finally DROP。不打印 DSN。"""
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -116,22 +301,46 @@ def _temp_engine() -> Iterator[Engine]:
         pytest.fail(str(exc))
     name = validate_temp_db_name("tt70_" + uuid.uuid4().hex[:8])
     tpl = template_db_name()
-    admin = create_engine(
-        libpq_sqlalchemy_url("postgres"),
-        isolation_level="AUTOCOMMIT",
-        hide_parameters=True,
-    )
+    admin_url = libpq_sqlalchemy_url("postgres")
+    db_url = libpq_sqlalchemy_url(name)
+    admin = create_engine(admin_url, isolation_level="AUTOCOMMIT", hide_parameters=True)
+    engine: Engine | None = None
     try:
-        with admin.connect() as conn:
-            conn.execute(text(f"CREATE DATABASE {name} TEMPLATE {tpl}"))
-    except Exception as exc:  # noqa: BLE001
-        admin.dispose()
-        pytest.skip(f"无法在目标实例上创建临时库：{type(exc).__name__}")
-    engine = create_engine(libpq_sqlalchemy_url(name), hide_parameters=True)
-    try:
-        yield engine
+        try:
+            with admin.connect() as conn:
+                conn.execute(text(f"CREATE DATABASE {name} TEMPLATE {tpl}"))
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"无法在目标实例上创建临时库：{type(exc).__name__}")
+        engine = create_engine(db_url, hide_parameters=True)
+        with engine.connect() as conn:
+            ver = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            assert ver == "0030"
+        url_str = db_url.render_as_string(hide_password=False)
+        cfg = _alembic_config(url_str)
+        command.upgrade(cfg, "head")
+        head = _current_head()
+        with engine.connect() as conn:
+            ver = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            assert ver == head
+        ctx = SimpleNamespace(
+            engine=engine,
+            name=name,
+            url=db_url,
+            u1=uuid.uuid4(),
+            u2=uuid.uuid4(),
+            acc1=uuid.uuid4(),
+            acc2=uuid.uuid4(),
+            batch1=uuid.uuid4(),
+            batch2=uuid.uuid4(),
+            snap1=uuid.uuid4(),
+            snap2=uuid.uuid4(),
+        )
+        with engine.begin() as conn:
+            _seed_core(conn, ctx)
+        yield ctx
     finally:
-        engine.dispose()
+        if engine is not None:
+            engine.dispose()
         with admin.connect() as conn:
             conn.execute(
                 text(
@@ -144,47 +353,74 @@ def _temp_engine() -> Iterator[Engine]:
         admin.dispose()
 
 
-# ---------------------------------------------------------------------------
-# A-1 … A-10  与契约 §5.A 验收用例一一对应
-# ---------------------------------------------------------------------------
+@pytest.fixture
+def temp_db() -> Iterator[SimpleNamespace]:
+    yield from _open_temp_db()
 
 
-def test_daily_bars_default_off_no_writes() -> None:
-    """A-1 / 契约 :129。
-
-    依赖：Settings.daily_bars_source（默认 off，环境变量 DAILY_BARS_SOURCE）；
-    任务 daily_bars_fetch（workers/jobs 注册）；表 market.daily_bars、app.pipeline_runs；
-    缺口名 daily_bars_source_off。
-    """
+def _settings(*, app_env: str = "test", daily_bars_source: str | None = None, database_url: Any = None):
     from app.config import Settings
-    from app.ingest.netguard import netguard_blocks
 
-    # 配置键已立约（:52）；字段不存在即红
     assert "daily_bars_source" in Settings.model_fields
-    assert Settings.model_fields["daily_bars_source"].default == "off"
+    payload: dict[str, Any] = {"app_env": app_env}
+    if daily_bars_source is not None:
+        payload["daily_bars_source"] = daily_bars_source
+    if database_url is not None:
+        payload["database_url"] = database_url
+    return Settings(**payload)
 
-    _impl()
-    fetch_job = _daily_bars_fetch_entry()
-    before = netguard_blocks()
-    engines = _temp_engine()
-    engine = next(engines)
+
+# ---------------------------------------------------------------------------
+# 临时库 fixture 自证（非契约验收名；应绿）
+# ---------------------------------------------------------------------------
+
+
+def test_tt70_temp_db_fixture_lifecycle() -> None:
+    """自证：建库、断言 0030、upgrade head、播种 5 行日历，退出后库已删。"""
+    gen = _open_temp_db()
+    ctx = next(gen)
+    dropped_name = ctx.name
     try:
-        # TODO(T-T70 歧义): daily_bars_fetch 的参数表未立约（是否要 conn/date/owner？）；
-        # 「返回 0」未说明是 inserted、整份 UpsertStats 还是退出码。
-        result = fetch_job()
-        assert result == 0 or getattr(result, "inserted", None) == 0
-        assert _count_daily_bars(engine) == 0
-        assert _pipeline_mentions_issue(engine, "daily_bars_source_off")
-        _assert_no_egress(before)
+        from app.db.tables.market import securities, trading_calendar
+        from app.db.tables.users import users
+
+        assert _count(ctx.engine, trading_calendar) == 5
+        with ctx.engine.connect() as conn:
+            dates = {r.date for r in conn.execute(select(trading_calendar)).all()}
+            assert dates == {OPEN_06, CLOSED_07, CLOSED_08, OPEN_09, OPEN_10}
+            assert _count(ctx.engine, securities) == 4
+            assert _count(ctx.engine, users) == 2
+            ver = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            assert ver == _current_head() == "0030" or ver == _current_head()
     finally:
-        engines.close()
+        try:
+            next(gen)
+        except StopIteration:
+            pass
+    # 确认已 DROP（只读 postgres 库，不打印 DSN）
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from pg_o61 import libpq_sqlalchemy_url
+
+    admin = create_engine(libpq_sqlalchemy_url("postgres"), hide_parameters=True)
+    try:
+        with admin.connect() as conn:
+            exists = conn.execute(
+                text("SELECT 1 FROM pg_database WHERE datname=:n"), {"n": dropped_name}
+            ).scalar()
+        assert exists is None
+    finally:
+        admin.dispose()
+
+
+# ---------------------------------------------------------------------------
+# 纯单元（不连库）
+# ---------------------------------------------------------------------------
 
 
 def test_fake_source_refused_outside_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A-2 / 契约 :130。
-
-    依赖：Settings 启动校验；DAILY_BARS_SOURCE；app_env；表 market.daily_bars。
-    """
+    """A-2 / §5.A :131；§7 ① 配置校验。"""
     from pydantic import ValidationError
 
     from app.config import Settings
@@ -194,316 +430,681 @@ def test_fake_source_refused_outside_test_env(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("DAILY_BARS_SOURCE", "fake")
     with pytest.raises(ValidationError):
         Settings()
-    # 校验失败不得写库；本例在实现落地前于字段缺失处已红，不先建模库。
-    _assert_no_egress(0)
-
-
-def test_fake_no_bars_for_day() -> None:
-    """A-3 / 契约 :131（无数据）。
-
-    依赖：FakeDailyBarsSource.fetch；可能经 daily_bars_fetch / upsert_daily_bars；
-    表 market.daily_bars、app.pipeline_runs；缺口 daily_bars_missing:<code>；
-    GapReason.no_source；运行状态 partial。
-    """
-    from app.ingest.netguard import netguard_blocks
-    from app.schemas.enums import BarAdjust, GapReason
-
-    m = _impl()
-    before = netguard_blocks()
-    source = m.FakeDailyBarsSource()
-    # TODO(T-T70 歧义): 「全部标的都不出 bar」如何注入 FakeDailyBarsSource 未立约；
-    # 「无数据」与停牌占位、休市、日历未覆盖的边界只在 §1 :43-47 部分描述。
-    codes = ["600001.SH", "600002.SH"]
-    day = dt.date(2026, 11, 9)
-    result = source.fetch(codes, day, day, BarAdjust.NONE)
-    engines = _temp_engine()
-    engine = next(engines)
-    try:
-        with engine.begin() as conn:
-            stats = m.upsert_daily_bars(
-                conn, result, source="fake", licence_id="", fetched_at=dt.datetime.now(dt.UTC)
-            )
-        assert _count_daily_bars(engine) == 0
-        for code in codes:
-            issue = f"daily_bars_missing:{code}"
-            # TODO: issue 落在 DailyBarsResult.gaps、pipeline_runs.stats 还是二者都有，未统一。
-            in_result = any(issue in f"{g.reason} {g.issue} {g!s}" for g in getattr(result, "gaps", []) or [])
-            assert in_result or _pipeline_mentions_issue(engine, issue)
-        assert GapReason.NO_SOURCE.value == "no_source"
-        # TODO: 「运行状态 partial」写在 pipeline_runs.status 还是 UpsertStats，未立约。
-        assert _pipeline_mentions_issue(engine, "partial") or getattr(stats, "status", None) == "partial"
-        _assert_no_egress(before)
-    finally:
-        engines.close()
-
-
-def test_fake_partial_codes_missing() -> None:
-    """A-4 / 契约 :132。
-
-    依赖：FakeDailyBarsSource.fetch、upsert_daily_bars；表 market.daily_bars；
-    缺口 daily_bars_missing:<code>；状态 partial。
-    """
-    from app.ingest.netguard import netguard_blocks
-    from app.schemas.enums import BarAdjust
-
-    m = _impl()
-    before = netguard_blocks()
-    source = m.FakeDailyBarsSource()
-    # TODO(T-T70 歧义): 3 个标的中指定 1 个无 bar 的注入方式未立约。
-    codes = ["600001.SH", "600002.SH", "600003.SH"]
-    day = dt.date(2026, 11, 9)
-    result = source.fetch(codes, day, day, BarAdjust.NONE)
-    engines = _temp_engine()
-    engine = next(engines)
-    try:
-        with engine.begin() as conn:
-            m.upsert_daily_bars(
-                conn, result, source="fake", licence_id="", fetched_at=dt.datetime.now(dt.UTC)
-            )
-        # 写 2 个标的的行（行数是否按 adj_type 再拆，未另述）
-        assert _count_daily_bars(engine) >= 2
-        found_missing = False
-        for code in codes:
-            if _pipeline_mentions_issue(engine, f"daily_bars_missing:{code}"):
-                found_missing = True
-        if not found_missing:
-            gaps = getattr(result, "gaps", []) or []
-            found_missing = any("daily_bars_missing:" in f"{g.issue}" for g in gaps)
-        assert found_missing
-        _assert_no_egress(before)
-    finally:
-        engines.close()
-
-
-def test_fake_source_deterministic_and_idempotent() -> None:
-    """A-5 / 契约 :133。
-
-    依赖：FakeDailyBarsSource、upsert_daily_bars（幂等键 code, trade_date, adj_type）；
-    表 market.daily_bars；UpsertStats（inserted / unchanged 仅在验收原文出现）。
-    """
-    from app.schemas.enums import BarAdjust
-
-    m = _impl()
-    source = m.FakeDailyBarsSource()
-    codes = ["600001.SH"]
-    day = dt.date(2026, 11, 9)
-    first = source.fetch(codes, day, day, BarAdjust.NONE)
-    second = source.fetch(codes, day, day, BarAdjust.NONE)
-    # 确定性：同一 (code, trade_date) 种子应得到相同结果
-    assert first == second or (first.bars == second.bars and first.gaps == second.gaps)
-
-    engines = _temp_engine()
-    engine = next(engines)
-    try:
-        fetched_at = dt.datetime(2026, 11, 9, 8, 0, tzinfo=dt.UTC)
-        with engine.begin() as conn:
-            m.upsert_daily_bars(conn, first, source="fake", licence_id="", fetched_at=fetched_at)
-        with engine.connect() as conn:
-            from app.db.tables.market import daily_bars
-
-            row1 = conn.execute(select(daily_bars)).all()
-            seen = {r.fetched_at for r in row1}
-        with engine.begin() as conn:
-            stats = m.upsert_daily_bars(
-                conn, second, source="fake", licence_id="", fetched_at=dt.datetime(2026, 11, 9, 9, 0, tzinfo=dt.UTC)
-            )
-        # TODO(T-T70 歧义): UpsertStats 字段未在 §1 定义；验收原文要求 inserted=0、unchanged=全部。
-        assert getattr(stats, "inserted", None) == 0
-        with engine.connect() as conn:
-            from app.db.tables.market import daily_bars
-
-            row2 = conn.execute(select(daily_bars)).all()
-        assert len(row2) == len(row1)
-        assert {r.fetched_at for r in row2} == seen
-    finally:
-        engines.close()
-
-
-def test_upsert_conflict_never_overwrites() -> None:
-    """A-6 / 契约 :134。
-
-    依赖：upsert_daily_bars；表 market.daily_bars（主键 code, trade_date, adj_type；
-    列 close、fetched_at）；缺口 daily_bar_conflict:<code>:<date>。无独立冲突表。
-    """
-    m = _impl()
-    day = dt.date(2026, 11, 9)
-    code = "600001.SH"
-    t0 = dt.datetime(2026, 11, 9, 8, 0, tzinfo=dt.UTC)
-    bar_kw = dict(
-        code=code,
-        trade_date=day,
-        open=10,
-        high=11,
-        low=9,
-        close=10,
-        pre_close=10,
-        volume=1,
-        amount=10,
-        adj_type="none",
-        is_suspended=False,
-    )
-    first = m.DailyBarsResult(bars=[m.DailyBar(**bar_kw)], gaps=[], halted=None)
-    second_kw = dict(bar_kw)
-    second_kw["close"] = 12
-    second = m.DailyBarsResult(bars=[m.DailyBar(**second_kw)], gaps=[], halted=None)
-    engines = _temp_engine()
-    engine = next(engines)
-    try:
-        with engine.begin() as conn:
-            m.upsert_daily_bars(conn, first, source="fake", licence_id="", fetched_at=t0)
-        with engine.begin() as conn:
-            stats = m.upsert_daily_bars(
-                conn, second, source="fake", licence_id="", fetched_at=dt.datetime(2026, 11, 9, 9, 0, tzinfo=dt.UTC)
-            )
-        with engine.connect() as conn:
-            from app.db.tables.market import daily_bars
-
-            row = conn.execute(
-                select(daily_bars).where(
-                    daily_bars.c.code == code,
-                    daily_bars.c.trade_date == day,
-                    daily_bars.c.adj_type == "none",
-                )
-            ).one()
-        assert row.close is not None and str(row.close).startswith("10")
-        assert row.fetched_at == t0 or row.fetched_at == t0.replace(tzinfo=None)
-        issue = f"daily_bar_conflict:{code}:{day}"
-        # TODO(T-T70 歧义): 契约未定义独立冲突表或字段，只要求记 issue 字符串（:31/:134/:187）。
-        # 持久化位置未立约，故 pipeline_runs 或 upsert 返回值任一出现该字符串即视为已记。
-        assert _pipeline_mentions_issue(engine, issue) or issue in f"{stats}"
-    finally:
-        engines.close()
+    _assert_no_egress()
 
 
 def test_only_writer_inserts_daily_bars() -> None:
-    """A-7 / 契约 :135。
-
-    依赖：upsert_daily_bars；扫描范围 src/backend/app；表 market.daily_bars。
-    """
+    """A-7 / §5.A :136。须存在 upsert_daily_bars 且其函数体含写语句，避免实现前空过。"""
     m = _impl()
     assert callable(m.upsert_daily_bars)
-    writers: list[str] = []
     write_pat = (
         "insert(daily_bars",
         "update(daily_bars",
         "delete(daily_bars",
         "daily_bars.insert",
-        "daily_bars.update",
-        "daily_bars.delete",
         "INSERT INTO market.daily_bars",
         "insert into market.daily_bars",
+        "pg_insert(daily_bars",
     )
+    writers: list[str] = []
     for path in APP_ROOT.rglob("*.py"):
-        text_src = path.read_text(encoding="utf-8")
-        rel = path.relative_to(APP_ROOT).as_posix()
-        hits = [p for p in write_pat if p.lower() in text_src.lower() or p in text_src]
-        if not hits:
-            continue
-        writers.append(rel)
-    # 只允许 app/marketdata/daily_bars.py 中的 upsert_daily_bars 写该表
-    assert writers == ["marketdata/daily_bars.py"] or (
-        writers and all(w == "marketdata/daily_bars.py" for w in writers)
-    )
-    # 函数体本身须含写语句，避免「目录里完全没有写者」被误判为通过
-    src = ast.parse((APP_ROOT / "marketdata/daily_bars.py").read_text(encoding="utf-8"))
+        src = path.read_text(encoding="utf-8")
+        if any(p.lower() in src.lower() for p in write_pat):
+            writers.append(path.relative_to(APP_ROOT).as_posix())
+    assert writers == ["marketdata/daily_bars.py"]
+    text_src = (APP_ROOT / "marketdata/daily_bars.py").read_text(encoding="utf-8")
+    tree = ast.parse(text_src)
     fn = next(
-        n for n in src.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "upsert_daily_bars"
+        n
+        for n in tree.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "upsert_daily_bars"
     )
-    body = ast.get_source_segment((APP_ROOT / "marketdata/daily_bars.py").read_text(encoding="utf-8"), fn) or ""
-    assert any(p.lower() in body.lower() or p in body for p in write_pat)
+    body = ast.get_source_segment(text_src, fn) or ""
+    assert any(p.lower() in body.lower() for p in write_pat)
 
 
-def test_non_trading_day_noop_and_calendar_not_covered() -> None:
-    """A-8 / 契约 :136。
+def test_task_registered_locked_not_retried() -> None:
+    """§7 ① :205。"""
+    from app.workers import jobs
 
-    依赖：daily_bars_fetch 或经 reports/service.covered；表 market.trading_calendar、
-    market.daily_bars、app.pipeline_runs；缺口 calendar_not_covered。
-    """
-    from app.ingest.netguard import netguard_blocks
-
-    _impl()
-    fetch_job = _daily_bars_fetch_entry()
-    before = netguard_blocks()
-    engines = _temp_engine()
-    engine = next(engines)
-    try:
-        # TODO(T-T70 歧义): 任务入参未立约；休市日 vs 未覆盖日如何传给 fetch 未立约。
-        # covered() 现网在缺行时抛 AppError(MAINTENANCE, issue=CALENDAR_NOT_COVERED)
-        # （service.py:37-38），与契约「抛出 CALENDAR_NOT_COVERED」（:42）的字面不完全一致。
-        closed = dt.date(2026, 11, 8)  # 需测试夹具保证其为 is_open=false 的已覆盖日
-        missing = dt.date(2099, 1, 1)
-        fetch_job()  # TODO: 传入 closed / missing
-        _ = closed, missing
-        assert _count_daily_bars(engine) == 0
-        # 休市日无 issue、未覆盖日记 calendar_not_covered——两组应分开跑；此处先列契约原文断言。
-        # TODO: 如何在同一例中隔离两组 pipeline_runs 未说明。
-        assert _pipeline_mentions_issue(engine, "calendar_not_covered")
-        _assert_no_egress(before)
-    finally:
-        engines.close()
+    fn = jobs.TASKS.get("daily_bars_fetch")
+    m = _impl()
+    assert fn is m.daily_bars_fetch_task
+    assert "daily_bars_fetch" in jobs.LOCKED_TASKS
+    assert "daily_bars_fetch" not in jobs.RETRY_TASKS
+    params = list(inspect.signature(fn).parameters)
+    assert params[:4] == ["settings", "trade_date", "user_id", "window_trading_days"]
+    sig = inspect.signature(fn)
+    assert sig.parameters["user_id"].default is None
+    assert sig.parameters["window_trading_days"].default is None
 
 
-def test_suspended_placeholder_becomes_gap_not_bar() -> None:
-    """A-9 / 契约 :137。
+def test_no_settings_field_for_window() -> None:
+    """§7 ② :223。窗口不进 Settings。本断言在实现前已成立（负向）。"""
+    from app.config import Settings
 
-    依赖：FakeDailyBarsSource、upsert_daily_bars；表 market.daily_bars（列 is_suspended、
-    open/high/low/close）；构建快照后 gaps.reason=suspended，不进 bars。
-    """
+    names = set(Settings.model_fields)
+    assert "window_trading_days" not in names
+    # TODO(T-T70 剩余): §7 :223 写「不含任何回填窗口字段」，未列字段名单。
+
+
+def test_daily_bars_fetch_never_scheduled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """§7 ③ :230。先断言已注册，避免实现前因任务不存在而空过。"""
+    from app.workers import jobs
+
+    assert "daily_bars_fetch" in jobs.TASKS
+    monkeypatch.setattr("app.reports.service.covered", lambda _conn, _d: True)
+
+    class _DummyConn:
+        def __enter__(self) -> Any:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            return None
+
+    class _DummyEngine:
+        def connect(self) -> _DummyConn:
+            return _DummyConn()
+
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.workers.jobs._engine", lambda _settings: _DummyEngine())
+    settings = __import__("app.config", fromlist=["Settings"]).Settings()
+    day = dt.datetime(2026, 11, 10, 0, 0, tzinfo=BEIJING)
+    end = dt.datetime(2026, 11, 10, 23, 59, tzinfo=BEIJING)
+    now = day
+    while now <= end:
+        slots = jobs.slot_jobs(settings, now)
+        assert all(item[0] != "daily_bars_fetch" for item in slots)
+        now += dt.timedelta(minutes=5)
+    assert "daily_bars_fetch" not in jobs.schedule(settings)
+
+
+def test_fake_default_one_bar_per_code_day() -> None:
+    """§7 ⑥ :290。"""
     from app.schemas.enums import BarAdjust
 
     m = _impl()
+    src = m.FakeDailyBarsSource()
+    result = src.fetch([CODE_A, CODE_B], OPEN_10, OPEN_10, BarAdjust.NONE)
+    assert len(result.bars) == 2
+    assert all(b.is_suspended is False for b in result.bars)
+    assert list(result.gaps) == []
+
+
+def test_fake_missing_and_suspended_injection() -> None:
+    """§7 ⑥ :291。"""
+    from app.schemas.enums import BarAdjust, GapReason
+
+    m = _impl()
+    src = m.FakeDailyBarsSource(missing=frozenset({CODE_A}), suspended=frozenset({CODE_B}))
+    result = src.fetch([CODE_A, CODE_B, CODE_C], OPEN_10, OPEN_10, BarAdjust.NONE)
+    gaps_a = [g for g in result.gaps if g.code == CODE_A]
+    assert len(gaps_a) == 1
+    assert gaps_a[0].reason == GapReason.NO_SOURCE or gaps_a[0].reason == "no_source"
+    assert gaps_a[0].issue == f"daily_bars_missing:{CODE_A}"
+    assert not any(b.code == CODE_A for b in result.bars)
+    bar_b = next(b for b in result.bars if b.code == CODE_B)
+    assert bar_b.is_suspended is True
+    assert bar_b.open is None and bar_b.high is None and bar_b.low is None and bar_b.close is None
+    bar_c = next(b for b in result.bars if b.code == CODE_C)
+    assert bar_c.is_suspended is False
+    assert bar_c.close is not None
+
+
+def test_fake_deterministic_and_bounded() -> None:
+    """§7 ⑥ :292。只断言约束，不钉黄金价格。"""
+    from app.schemas.enums import BarAdjust
+
+    m = _impl()
+    a = m.FakeDailyBarsSource()
+    b = m.FakeDailyBarsSource()
+    ra = a.fetch([CODE_A], OPEN_10, OPEN_10, BarAdjust.NONE)
+    rb = b.fetch([CODE_A], OPEN_10, OPEN_10, BarAdjust.NONE)
+    assert ra == rb or (ra.bars == rb.bars and ra.gaps == rb.gaps)
+    bar = ra.bars[0]
+    assert bar.low <= min(bar.open, bar.close) <= max(bar.open, bar.close) <= bar.high
+    assert abs(bar.close / bar.pre_close - 1) <= 0.2
+    assert bar.volume == 10000
+
+
+def test_impl_a_imports_no_b_module() -> None:
+    """§7 ⑦ :304。"""
+    path = APP_ROOT / "marketdata/daily_bars.py"
+    assert path.is_file()
+    src = path.read_text(encoding="utf-8")
+    assert "daily_snapshot" not in src
+    assert "workers.daily" not in src and "workers/daily" not in src
+    here = Path(__file__).read_text(encoding="utf-8")
+    assert "daily_snapshot" not in here
+    assert "workers.daily" not in here and "from app.workers import daily" not in here
+
+
+# ---------------------------------------------------------------------------
+# 需要临时库的验收
+# ---------------------------------------------------------------------------
+
+
+def test_daily_bars_default_off_no_writes(temp_db: SimpleNamespace) -> None:
+    """A-1 / §5.A :130；「返回 0」只断言 int 0（§7 :335）。"""
+    settings = _settings(app_env="test", daily_bars_source="off", database_url=temp_db.url)
+    fn = _task_from_jobs()
+    before = len(_pipeline_rows(temp_db.engine))
+    result = fn(settings, trade_date=OPEN_10.isoformat())
+    assert result == 0
+    assert isinstance(result, int)
+    assert _daily_bar_count(temp_db.engine) == 0
+    run = _latest_run(temp_db.engine)
+    assert run.status == "skipped"
+    issues = (run.stats or {}).get("issues") or []
+    assert "daily_bars_source_off" in issues
+    assert len(_pipeline_rows(temp_db.engine)) == before + 1
+    _assert_no_egress()
+
+
+def test_fake_no_bars_for_day(temp_db: SimpleNamespace) -> None:
+    """A-3 / §5.A :132。missing 等于全部标的（§7 :277）。"""
+    m = _impl()
+    source = m.FakeDailyBarsSource(missing=frozenset({CODE_A, CODE_B, CODE_C, CODE_D}))
+    with temp_db.engine.begin() as conn:
+        inserted = m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u1, window_trading_days=None
+        )
+    assert inserted == 0
+    assert _daily_bar_count(temp_db.engine) == 0
+    run = _latest_run(temp_db.engine)
+    assert run.status == "partial"
+    issues = (run.stats or {}).get("issues") or []
+    for code in (CODE_A, CODE_B):
+        assert f"daily_bars_missing:{code}" in issues
+    _assert_no_egress()
+
+
+def test_fake_partial_codes_missing(temp_db: SimpleNamespace) -> None:
+    """A-4 / §5.A :133。"""
+    m = _impl()
+    source = m.FakeDailyBarsSource(missing=frozenset({CODE_B}))
+    with temp_db.engine.begin() as conn:
+        m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u1, window_trading_days=None
+        )
+    # u1 持 A、B、D；D 为 etf 应被资格过滤，B missing，故只写 A
+    with temp_db.engine.connect() as conn:
+        from app.db.tables.market import daily_bars
+
+        rows = conn.execute(select(daily_bars)).all()
+    codes = {r.code for r in rows}
+    assert CODE_A in codes
+    assert CODE_B not in codes
+    run = _latest_run(temp_db.engine)
+    assert run.status == "partial"
+    issues = (run.stats or {}).get("issues") or []
+    assert f"daily_bars_missing:{CODE_B}" in issues
+    _assert_no_egress()
+
+
+def test_fake_source_deterministic_and_idempotent(temp_db: SimpleNamespace) -> None:
+    """A-5 / §5.A :134。"""
+    m = _impl()
     source = m.FakeDailyBarsSource()
-    # TODO(T-T70 歧义): 假源如何「报告当日停牌」未立约；
-    # 「构建快照」的函数是 §2 / 实现单 B 的 build_owned_snapshot
-    # （app/marketdata/daily_snapshot.py），但本例写在实现单 A 验收里。
-    # GapReason 现网枚举无 suspended（enums.py:293-300）。
-    day = dt.date(2026, 11, 9)
-    result = source.fetch(["600001.SH"], day, day, BarAdjust.NONE)
-    engines = _temp_engine()
-    engine = next(engines)
-    try:
-        with engine.begin() as conn:
+    with temp_db.engine.begin() as conn:
+        first = m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u2, window_trading_days=None
+        )
+    assert first >= 1
+    with temp_db.engine.connect() as conn:
+        from app.db.tables.market import daily_bars
+
+        rows1 = conn.execute(select(daily_bars)).all()
+        seen = {(r.code, r.trade_date, r.adj_type, r.fetched_at) for r in rows1}
+    issues_after_first = set(((_latest_run(temp_db.engine).stats or {}).get("issues") or []))
+    with temp_db.engine.begin() as conn:
+        second = m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u2, window_trading_days=None
+        )
+    assert second == 0
+    with temp_db.engine.connect() as conn:
+        from app.db.tables.market import daily_bars
+
+        rows2 = conn.execute(select(daily_bars)).all()
+    assert {(r.code, r.trade_date, r.adj_type, r.fetched_at) for r in rows2} == seen
+    # TODO(T-T70 剩余): 「unchanged=全部」落在返回 int 还是须另调 upsert，§5.A 与 §7 返回 int 并立。
+    run = _latest_run(temp_db.engine)
+    assert int((run.stats or {}).get("unchanged") or 0) == len(rows1)
+    assert int((run.stats or {}).get("inserted") or 0) == 0
+    new_issues = set((run.stats or {}).get("issues") or []) - issues_after_first
+    assert not new_issues
+
+
+def test_upsert_conflict_never_overwrites(temp_db: SimpleNamespace) -> None:
+    """A-6 / §5.A :135。"""
+    m = _impl()
+    t0 = dt.datetime(2026, 11, 10, 8, 0, tzinfo=dt.UTC)
+    bar_kw = dict(
+        code=CODE_A,
+        trade_date=OPEN_10,
+        open=10,
+        high=11,
+        low=9,
+        close=10,
+        pre_close=10,
+        volume=10000,
+        amount=100000,
+        adj_type="none",
+        is_suspended=False,
+    )
+    first = m.DailyBarsResult(bars=[m.DailyBar(**bar_kw)], gaps=[], halted=None)
+    second_kw = dict(bar_kw, close=12)
+    second = m.DailyBarsResult(bars=[m.DailyBar(**second_kw)], gaps=[], halted=None)
+    with temp_db.engine.begin() as conn:
+        m.upsert_daily_bars(conn, first, source="fake", licence_id=None, fetched_at=t0)
+    with temp_db.engine.begin() as conn:
+        stats = m.upsert_daily_bars(
+            conn,
+            second,
+            source="fake",
+            licence_id=None,
+            fetched_at=dt.datetime(2026, 11, 10, 9, 0, tzinfo=dt.UTC),
+        )
+    with temp_db.engine.connect() as conn:
+        from app.db.tables.market import daily_bars
+
+        row = conn.execute(
+            select(daily_bars).where(
+                daily_bars.c.code == CODE_A,
+                daily_bars.c.trade_date == OPEN_10,
+                daily_bars.c.adj_type == "none",
+            )
+        ).one()
+    assert str(row.close).startswith("10")
+    assert row.fetched_at == t0 or row.fetched_at == t0.replace(tzinfo=None)
+    issue = f"daily_bar_conflict:{CODE_A}:{OPEN_10}"
+    assert issue in tuple(stats.issues)
+
+
+def test_non_trading_day_noop_and_calendar_not_covered(temp_db: SimpleNamespace) -> None:
+    """A-8 / §5.A :137；§7 ⑧ :315。"""
+    settings = _settings(app_env="test", daily_bars_source="fake", database_url=temp_db.url)
+    fn = _task_from_jobs()
+    before = len(_pipeline_rows(temp_db.engine))
+    closed = fn(settings, trade_date=CLOSED_08.isoformat())
+    assert closed == 0
+    assert _daily_bar_count(temp_db.engine) == 0
+    assert len(_pipeline_rows(temp_db.engine)) == before
+    missing = fn(settings, trade_date=UNCOVERED_11.isoformat())
+    assert missing == 0
+    assert _daily_bar_count(temp_db.engine) == 0
+    run = _latest_run(temp_db.engine)
+    assert run.status == "skipped"
+    assert (run.stats or {}).get("issues") == ["calendar_not_covered"]
+    _assert_no_egress()
+
+
+def test_suspended_placeholder_row_written(temp_db: SimpleNamespace) -> None:
+    """§7 ⑦ :303（取代 §5.A :138 的快照用例，不导入 B）。"""
+    m = _impl()
+    source = m.FakeDailyBarsSource(suspended=frozenset({CODE_B}))
+    with temp_db.engine.begin() as conn:
+        m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u1, window_trading_days=None
+        )
+    with temp_db.engine.connect() as conn:
+        from app.db.tables.market import daily_bars
+
+        row = conn.execute(
+            select(daily_bars).where(daily_bars.c.code == CODE_B, daily_bars.c.trade_date == OPEN_10)
+        ).one()
+    assert row.is_suspended is True
+    assert row.open is None and row.high is None and row.low is None and row.close is None
+    assert row.pre_close is None and row.volume is None and row.amount is None
+    assert row.source == "fake"
+    run = _latest_run(temp_db.engine)
+    assert int((run.stats or {}).get("suspended") or 0) == 1
+    issues = (run.stats or {}).get("issues") or []
+    assert f"daily_bars_missing:{CODE_B}" not in issues
+    assert run.status == "ok"
+
+
+def test_universe_holdings_only_until_clarified(temp_db: SimpleNamespace) -> None:
+    """A-10 / §5.A :139；§7 :348 断言只返回 A、B。"""
+    m = _impl()
+    with temp_db.engine.begin() as conn:
+        _seed_universe_extras(conn, temp_db)
+        got = m.daily_universe(conn, temp_db.u1, OPEN_10)
+    # TODO(T-T70 剩余): 返回顺序未立约，本例只比集合。
+    assert set(got) == {CODE_A, CODE_B}
+
+
+def test_task_user_scope_union_and_single(temp_db: SimpleNamespace) -> None:
+    """§7 ① :206。"""
+    from app.db.tables.market import daily_bars
+
+    settings = _settings(app_env="test", daily_bars_source="fake", database_url=temp_db.url)
+    fn = _task_from_jobs()
+    n = fn(settings, trade_date=OPEN_10.isoformat())
+    assert n == 3
+    with temp_db.engine.connect() as conn:
+        codes = {r.code for r in conn.execute(select(daily_bars)).all()}
+    assert codes == {CODE_A, CODE_B, CODE_C}
+    with temp_db.engine.begin() as conn:
+        conn.execute(text("DELETE FROM market.daily_bars"))
+    n2 = fn(settings, trade_date=OPEN_10.isoformat(), user_id=str(temp_db.u1))
+    assert n2 == 2
+    with temp_db.engine.connect() as conn:
+        codes = {r.code for r in conn.execute(select(daily_bars)).all()}
+    assert codes == {CODE_A, CODE_B}
+
+
+def test_mairui_before_c_is_inert(temp_db: SimpleNamespace) -> None:
+    """§7 ① :207。"""
+    settings = _settings(app_env="test", daily_bars_source="mairui", database_url=temp_db.url)
+    fn = _task_from_jobs()
+    result = fn(settings, trade_date=OPEN_10.isoformat())
+    assert result == 0
+    assert _daily_bar_count(temp_db.engine) == 0
+    run = _latest_run(temp_db.engine)
+    assert run.status == "skipped"
+    assert "daily_bars_http_budget_unset" in ((run.stats or {}).get("issues") or [])
+    _assert_no_egress()
+
+
+def test_single_day_when_no_window(temp_db: SimpleNamespace) -> None:
+    """§7 ② :219。持仓 1 只用 u2。"""
+    from app.db.tables.market import daily_bars
+
+    m = _impl()
+    source = m.FakeDailyBarsSource()
+    with temp_db.engine.begin() as conn:
+        m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u2, window_trading_days=None
+        )
+    with temp_db.engine.connect() as conn:
+        rows = conn.execute(select(daily_bars)).all()
+    assert len(rows) == 1
+    assert rows[0].trade_date == OPEN_10
+    assert rows[0].code == CODE_C
+
+
+def test_window_backfills_open_days_only(temp_db: SimpleNamespace) -> None:
+    """§7 ② :220。"""
+    from app.db.tables.market import daily_bars
+
+    m = _impl()
+    source = m.FakeDailyBarsSource()
+    with temp_db.engine.begin() as conn:
+        m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u2, window_trading_days=3
+        )
+    with temp_db.engine.connect() as conn:
+        dates = {r.trade_date for r in conn.execute(select(daily_bars)).all()}
+    assert dates == {OPEN_06, OPEN_09, OPEN_10}
+
+
+def test_window_exceeds_calendar_records_not_covered(temp_db: SimpleNamespace) -> None:
+    """§7 ② :221。"""
+    m = _impl()
+    source = m.FakeDailyBarsSource()
+    with temp_db.engine.begin() as conn:
+        n = m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u2, window_trading_days=10
+        )
+    assert n == 0
+    assert _daily_bar_count(temp_db.engine) == 0
+    issues = (_latest_run(temp_db.engine).stats or {}).get("issues") or []
+    assert "calendar_not_covered" in issues
+
+
+def test_window_non_positive_rejected(temp_db: SimpleNamespace) -> None:
+    """§7 ② :222。"""
+    m = _impl()
+    source = m.FakeDailyBarsSource()
+    before = len(_pipeline_rows(temp_db.engine))
+    for n in (0, -1):
+        with pytest.raises(ValueError):
+            with temp_db.engine.begin() as conn:
+                m.fetch_and_record(
+                    conn, source, trade_date=OPEN_10, user_id=temp_db.u2, window_trading_days=n
+                )
+        assert _daily_bar_count(temp_db.engine) == 0
+        assert len(_pipeline_rows(temp_db.engine)) == before
+
+
+def test_migration_adds_nullable_columns_single_head(temp_db: SimpleNamespace) -> None:
+    """§7 ④ :245。fixture 已 upgrade head；本例断言 4 列与 CHECK。"""
+    with temp_db.engine.connect() as conn:
+        cols = {
+            r[0]: r
+            for r in conn.execute(
+                text(
+                    "SELECT column_name, is_nullable, data_type "
+                    "FROM information_schema.columns "
+                    "WHERE table_schema='market' AND table_name='daily_bars'"
+                )
+            ).all()
+        }
+        for name in ("pre_close", "is_suspended", "source", "source_licence_id"):
+            assert name in cols
+            assert cols[name][1] == "YES"
+        conn.execute(
+            text(
+                "INSERT INTO market.daily_bars(code, trade_date, adj_type) "
+                "VALUES ('600001.SH', '2026-11-10', 'none')"
+            )
+        )
+        conn.commit()
+        with pytest.raises(Exception):  # noqa: BLE001  # CHECK 拒绝非法 source
+            with temp_db.engine.begin() as c2:
+                c2.execute(
+                    text(
+                        "INSERT INTO market.daily_bars(code, trade_date, adj_type, source) "
+                        "VALUES ('301002.SZ', '2026-11-10', 'none', 'legacy')"
+                    )
+                )
+
+
+def test_upsert_requires_source(temp_db: SimpleNamespace) -> None:
+    """§7 ④ :246。"""
+    m = _impl()
+    bar = m.DailyBar(
+        code=CODE_A,
+        trade_date=OPEN_10,
+        open=10,
+        high=11,
+        low=9,
+        close=10,
+        pre_close=10,
+        volume=10000,
+        amount=100000,
+        adj_type="none",
+        is_suspended=False,
+    )
+    result = m.DailyBarsResult(bars=[bar], gaps=[], halted=None)
+    with pytest.raises(ValueError):
+        with temp_db.engine.begin() as conn:
+            m.upsert_daily_bars(
+                conn, result, source=None, licence_id=None, fetched_at=dt.datetime.now(dt.UTC)
+            )
+    assert _daily_bar_count(temp_db.engine) == 0
+
+
+def test_downgrade_refuses_when_sourced_rows_exist(temp_db: SimpleNamespace) -> None:
+    """§7 ④ :247。"""
+    m = _impl()
+    source = m.FakeDailyBarsSource()
+    with temp_db.engine.begin() as conn:
+        m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u2, window_trading_days=None
+        )
+    assert _daily_bar_count(temp_db.engine) >= 1
+    url_str = temp_db.url.render_as_string(hide_password=False)
+    cfg = _alembic_config(url_str)
+    script = ScriptDirectory.from_config(cfg)
+    head = script.get_current_head()
+    down = script.get_revision(head).down_revision
+    with pytest.raises(Exception):  # noqa: BLE001
+        command.downgrade(cfg, down)
+    with temp_db.engine.connect() as conn:
+        assert _daily_bar_count(temp_db.engine) >= 1
+        cols = conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema='market' AND table_name='daily_bars' "
+                "AND column_name IN ('pre_close','is_suspended','source','source_licence_id')"
+            )
+        ).scalars().all()
+        assert set(cols) == {"pre_close", "is_suspended", "source", "source_licence_id"}
+    # 无来源行时 downgrade 成功
+    with temp_db.engine.begin() as conn:
+        conn.execute(text("DELETE FROM market.daily_bars"))
+    command.downgrade(cfg, down)
+    with temp_db.engine.connect() as conn:
+        cols = conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema='market' AND table_name='daily_bars' "
+                "AND column_name IN ('pre_close','is_suspended','source','source_licence_id')"
+            )
+        ).scalars().all()
+        assert cols == []
+
+
+def test_normal_row_is_suspended_false(temp_db: SimpleNamespace) -> None:
+    """§7 ④ :248。"""
+    m = _impl()
+    source = m.FakeDailyBarsSource()
+    with temp_db.engine.begin() as conn:
+        m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u2, window_trading_days=None
+        )
+    with temp_db.engine.connect() as conn:
+        from app.db.tables.market import daily_bars
+
+        row = conn.execute(select(daily_bars).where(daily_bars.c.code == CODE_C)).one()
+    assert row.is_suspended is False
+
+
+def test_upsert_stats_fields_and_equal_after_quantize(temp_db: SimpleNamespace) -> None:
+    """§7 ⑤ :267。"""
+    m = _impl()
+    t0 = dt.datetime(2026, 11, 10, 8, 0, tzinfo=dt.UTC)
+    kw = dict(
+        code=CODE_A,
+        trade_date=OPEN_10,
+        open=10,
+        high=11,
+        low=9,
+        close=10.1234,
+        pre_close=10,
+        volume=10000,
+        amount=101234,
+        adj_type="none",
+        is_suspended=False,
+    )
+    first = m.DailyBarsResult(bars=[m.DailyBar(**kw)], gaps=[], halted=None)
+    second = m.DailyBarsResult(bars=[m.DailyBar(**dict(kw, close=10.12340))], gaps=[], halted=None)
+    with temp_db.engine.begin() as conn:
+        m.upsert_daily_bars(conn, first, source="fake", licence_id=None, fetched_at=t0)
+    with temp_db.engine.begin() as conn:
+        stats = m.upsert_daily_bars(conn, second, source="fake", licence_id=None, fetched_at=t0)
+    assert stats.inserted == 0 and stats.unchanged == 1 and stats.conflicts == 0
+
+
+def test_same_values_different_source_is_unchanged(temp_db: SimpleNamespace) -> None:
+    """§7 ⑤ :268。"""
+    m = _impl()
+    t0 = dt.datetime(2026, 11, 10, 8, 0, tzinfo=dt.UTC)
+    kw = dict(
+        code=CODE_A,
+        trade_date=OPEN_10,
+        open=10,
+        high=11,
+        low=9,
+        close=10,
+        pre_close=10,
+        volume=10000,
+        amount=100000,
+        adj_type="none",
+        is_suspended=False,
+    )
+    first = m.DailyBarsResult(bars=[m.DailyBar(**kw)], gaps=[], halted=None)
+    with temp_db.engine.begin() as conn:
+        m.upsert_daily_bars(conn, first, source="fake", licence_id=None, fetched_at=t0)
+    with temp_db.engine.begin() as conn:
+        stats = m.upsert_daily_bars(
+            conn, first, source="mairui", licence_id=uuid.uuid4(), fetched_at=t0
+        )
+    assert stats.unchanged == 1
+    with temp_db.engine.connect() as conn:
+        from app.db.tables.market import daily_bars
+
+        row = conn.execute(select(daily_bars).where(daily_bars.c.code == CODE_A)).one()
+    assert row.source == "fake"
+
+
+def test_run_row_stats_shape(temp_db: SimpleNamespace) -> None:
+    """§7 ⑤ :269。"""
+    m = _impl()
+    source = m.FakeDailyBarsSource(missing=frozenset({CODE_B}))
+    before = len(_pipeline_rows(temp_db.engine))
+    with temp_db.engine.begin() as conn:
+        m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u1, window_trading_days=None
+        )
+    assert len(_pipeline_rows(temp_db.engine)) == before + 1
+    run = _latest_run(temp_db.engine)
+    assert run.step == "daily_bars.fetch"
+    assert run.status == "partial"
+    assert set((run.stats or {}).keys()) == STATS_KEYS
+    assert f"daily_bars_missing:{CODE_B}" in ((run.stats or {}).get("issues") or [])
+
+
+def test_off_recorded_even_on_closed_day(temp_db: SimpleNamespace) -> None:
+    """§7 ⑧ :316。"""
+    settings = _settings(app_env="test", daily_bars_source="off", database_url=temp_db.url)
+    fn = _task_from_jobs()
+    n = fn(settings, trade_date=CLOSED_08.isoformat())
+    assert n == 0
+    run = _latest_run(temp_db.engine)
+    assert run.status == "skipped"
+    assert "daily_bars_source_off" in ((run.stats or {}).get("issues") or [])
+
+
+def test_licence_id_none_written_as_null(temp_db: SimpleNamespace) -> None:
+    """§7 ⑨ :323。"""
+    m = _impl()
+    source = m.FakeDailyBarsSource()
+    with temp_db.engine.begin() as conn:
+        m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=temp_db.u2, window_trading_days=None
+        )
+    with temp_db.engine.connect() as conn:
+        from app.db.tables.market import daily_bars
+
+        row = conn.execute(select(daily_bars).where(daily_bars.c.code == CODE_C)).one()
+    assert row.source_licence_id is None
+
+
+def test_licence_id_empty_string_rejected(temp_db: SimpleNamespace) -> None:
+    """§7 ⑨ :324。空串 TypeError，不规范化。"""
+    m = _impl()
+    bar = m.DailyBar(
+        code=CODE_A,
+        trade_date=OPEN_10,
+        open=10,
+        high=11,
+        low=9,
+        close=10,
+        pre_close=10,
+        volume=10000,
+        amount=100000,
+        adj_type="none",
+        is_suspended=False,
+    )
+    result = m.DailyBarsResult(bars=[bar], gaps=[], halted=None)
+    with pytest.raises(TypeError):
+        with temp_db.engine.begin() as conn:
             m.upsert_daily_bars(
                 conn, result, source="fake", licence_id="", fetched_at=dt.datetime.now(dt.UTC)
             )
-        with engine.connect() as conn:
-            from app.db.tables.market import daily_bars
-
-            row = conn.execute(
-                select(daily_bars).where(daily_bars.c.code == "600001.SH", daily_bars.c.trade_date == day)
-            ).one()
-        assert row.is_suspended is True
-        assert row.open is None and row.high is None and row.low is None and row.close is None
-        # 快照入口未在 A 立约，导入失败或缺失即红并列入歧义。
-        from app.marketdata.daily_snapshot import build_owned_snapshot
-
-        # TODO: build_owned_snapshot(conn, owner, date) 的 owner 如何取得未在本例给出。
-        _ = build_owned_snapshot
-    finally:
-        engines.close()
-
-
-def test_universe_holdings_only_until_clarified() -> None:
-    """A-10 / 契约 :138。
-
-    依赖：daily_universe(conn, owner, trade_date)；持仓口径沿用
-    api/v1/portfolio._account(...).positions；表（种子未立约）可能涉及
-    app.holdings / opening_positions / trades、app.watchlist_items、
-    app.strategy_instances。
-    """
-    m = _impl()
-    engines = _temp_engine()
-    engine = next(engines)
-    try:
-        # TODO(T-T70 歧义): 如何写入「持仓 2 / 自选 1 / scope=security 实例 1」使
-        # portfolio._account.positions 得到两只，契约未给出建行步骤。
-        owner = uuid.uuid4()
-        day = dt.date(2026, 11, 9)
-        with engine.begin() as conn:
-            got = m.daily_universe(conn, owner, day)
-        assert isinstance(got, list)
-        # 澄清前只返回持仓 2 只（Q4）。在种子未立约前，仅锁定「不得悄悄纳入自选/实例」的长度断言
-        # 会误伤空库；因此要求实现后的结果恰好为那两只持仓代码——种子步骤待补。
-        assert len(got) == 2
-    finally:
-        engines.close()
+    assert _daily_bar_count(temp_db.engine) == 0

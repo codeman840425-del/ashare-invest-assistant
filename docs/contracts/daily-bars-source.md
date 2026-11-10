@@ -1,6 +1,6 @@
 # 正式日 K 数据契约（T-A128，主线补缺第 1 项）
 
-状态：draft，架构契约，不代表已实现。基线 main `965598b`。适用范围是 Phase 2 最小闭环，也就是盘后求值和日报所需的日 K，不含分钟线、快照、财报和公告。引用只写文件名和函数名/配置项名/用例名。
+状态：draft，架构契约，不代表已实现。基线 main `965598b`。适用范围是 Phase 2 最小闭环，也就是盘后求值和日报所需的日 K，不含分钟线、快照、财报和公告。引用只写文件名和函数名/配置项名/用例名。**用户本人已裁定 Q1、Q3、Q4、Q5（含 QB1），落地见 §8（T-A135）；本文其余各节与 §8 冲突处以 §8 为准。**
 
 ## 0. 现状（核对结论）
 
@@ -21,7 +21,7 @@
   - 单位固定为 CNY/股、股、CNY，与 `replay/baseline.payload` 和 `features/pipeline.prepare` 的检查一致；指数行按 `tracking/service` 的现有口径。
 - 范围：由 `daily_universe(conn, owner, trade_date) -> list[str]` 计算，取下面几类的并集：
   - 持仓：沿用 `api/v1/portfolio._account(...).positions`，与 `analyze` 一致；
-  - 自选：是否纳入见 Q4。澄清前只取持仓，不读 `watchlist_items`。（目前也没有自选写入 API。）
+  - 自选：~~是否纳入见 Q4。澄清前只取持仓，不读 `watchlist_items`。~~ **已由 T-A135 取代**：纳入本人有效自选，见 §8.2。
   - active 的 `strategy_instances` 中 scope=security 的 `security_code`。scope=account 已被持仓∪自选覆盖；watch_group 本单不展开。是否纳入见 Q4，澄清前不纳入；
   - 基准 `000300.SH`：`tracking/models.benchmark_code` 和 H-01/W-01 的 F50 需要它。它的可得性见 Q6，澄清前只在 fake 源里给出。
   - 只取证券主数据中 type 为 stock 且 listed 的标的，与 `analyze` 的 `security_not_eligible` 判定相同；基准是例外。
@@ -71,14 +71,14 @@
   - 最新：`/hsstock/latest/{code}.{mkt}/d/{fq}?lt=`。
   - 文档里没有批量日 K 接口，ingest.yaml 的 `eod_scope` 写有“批量日 K”，但没有对应接口实测，状态是【待 T003】。
   - 因此按**每标的每复权口径 1 次**估算。
-- 持仓数量级：脱敏文档里没有找到。下面按 N≈10–50 只做量级示意，**不是假设**，见 Q1。自选目前为 0，基准 +1。
-- 首次回填：窗口长度见 Q3。两张卡有 `lookback_trading_days: 120`，预热 62–64 根，这只是参考值。一次 history 调用能否覆盖整个窗口要等 T003 确认。
+- 持仓数量级：脱敏文档里没有找到。下面按 N≈10–50 只做量级示意，**不是假设**，见 Q1。自选目前为 0，基准 +1。（**已由 T-A135 取代**：范围含自选，调用量与回填量的公式见 §8.3。）
+- 首次回填（**已由 T-A135 取代**：近 3 年，见 §8.3）：窗口长度见 Q3。两张卡有 `lookback_trading_days: 120`，预热 62–64 根，这只是参考值。一次 history 调用能否覆盖整个窗口要等 T003 确认。
   - 只要 none：N+1 次，约 11–51 次；
   - 若按 Q2 另取 hfq：约 22–102 次。
 - 日常增量：每个交易日 latest 调用 N+1 次，约 11–51 次；若取 hfq 则约 22–102 次。持仓变化时只为新标的补回填。
 - 限流（不放宽）：
   - `master/daily_delivery.DAILY_HTTP_LIMIT=1` 和 `live_budget_issue()` 原样保留，它们管的是 18:00 名单，与本单无关、不借用。
-  - 新增独立常量 `DAILY_BARS_HTTP_LIMIT = 0`，以 0 作为默认关闭的保险。超出时记 `daily_bars_http_budget_unset` 或 `daily_bars_quota_deferred`，不发请求。改数值必须有用户原话加评审提交，不能通过回执、环境变量或客户端参数放宽。
+  - 新增独立常量 `DAILY_BARS_HTTP_LIMIT`，默认值 0，以 0 作为默认关闭的保险（Q1 裁定后的取值空间与判定见 §8.1，默认值仍为 0）。超出时记 `daily_bars_http_budget_unset` 或 `daily_bars_quota_deferred`，不发请求。改数值必须有用户原话加评审提交，不能通过回执、环境变量或客户端参数放宽。
   - `ingest.yaml` 的 budget/shares/licences 现值不动，日 K 归 other 份额、p1_daily 优先级，并发为 1。
 - 停止规则：
   - 只经 `ingest/egress.mairui_get` 出网，它会先检查 STOP/HALT，再按 `ingest/daily_lists.limited` 和 `ingest/upstream.classify` 判 103/429，并 `_write_halt`。
@@ -92,7 +92,7 @@
 - 用户授权开关（默认关）：需要同时满足下面三条才会出网，否则不建 outbox、不取证书、不开 socket。
   - `daily_bars_source=mairui`；
   - 运维安装的只读回执 `/run/aia/receipts/mairui-daily-bars.json`，校验沿用 `daily_delivery.read_grant` 的 root-owned 0444 规则；
-  - `DAILY_BARS_HTTP_LIMIT > 0`。
+  - `DAILY_BARS_HTTP_LIMIT` 不是 0（**已由 T-A135 细化**：合法的开放取值只有「不限」哨兵，见 §8.1）。
 - 必测用例（建议名）：
   - `test_daily_bars_default_off_no_writes`
   - `test_fake_source_refused_outside_test_env`
@@ -117,7 +117,7 @@
 
 ### A｜写入口 + 假源 + 调度｜中
 - 澄清：签名、排程、迁移列、假源注入、停牌用例、测试落点以 §7（T-A130）为准，本小节与 §7 冲突处作废。
-- 目标：§1 的协议、`daily_universe`（澄清前只含持仓，Q4）、`upsert_daily_bars`、`FakeDailyBarsSource`、迁移、`daily_bars_source` 配置。另在 `workers/jobs` 注册 `daily_bars_fetch`：`slot_jobs` 设钟点（时刻见 Q5，澄清前不排程，只能手动入队），加入 `LOCKED_TASKS`。
+- 目标：§1 的协议、`daily_universe`（澄清前只含持仓，Q4）、`upsert_daily_bars`、`FakeDailyBarsSource`、迁移、`daily_bars_source` 配置。另在 `workers/jobs` 注册 `daily_bars_fetch`：~~`slot_jobs` 设钟点（时刻见 Q5，澄清前不排程，只能手动入队）~~（**已由 T-A135 取代**：北京时间 17:15 进 `slot_jobs`，见 §8.4），加入 `LOCKED_TASKS`。
 - 文件：
   - 新增 `app/marketdata/daily_bars.py`；
   - `app/db/tables/market.py`；
@@ -136,9 +136,10 @@
   - `test_only_writer_inserts_daily_bars`：Given 扫描 src/backend/app / When 静态检查 / Then 只有 `upsert_daily_bars` 含对 daily_bars 的写语句。
   - `test_non_trading_day_noop_and_calendar_not_covered`：Given 休市日；另一组为日历未覆盖的日期 / When fetch / Then 休市日零写入、无 issue；未覆盖日期零写入并记 `calendar_not_covered`；出网=否。
   - `test_suspended_placeholder_becomes_gap_not_bar`：Given fake 源报告某标的当日停牌 / When fetch 后构建快照 / Then 写一行 is_suspended=true、OHLC 为空，快照里该日进 gaps（suspended），不进 bars。
-  - `test_universe_holdings_only_until_clarified`：Given 持仓 2 只、自选 1 只、scope=security 实例 1 个 / When 计算 daily_universe / Then 只返回持仓 2 只（Q4 澄清前）。
+  - ~~`test_universe_holdings_only_until_clarified`~~（**已由 T-A135 取代**，改为 `test_universe_holdings_and_active_watchlist`，见 §8.2）：Given 持仓 2 只、自选 1 只、scope=security 实例 1 个 / When 计算 daily_universe / Then 只返回持仓 2 只（Q4 澄清前）。
 
 ### B｜owned 快照 + 解除 analyze 闸｜中｜依赖 A 的接口，可与 C 并发
+- 实施契约见 `docs/contracts/daily-snapshot-from-bars.md`（T-A133）。本小节和 §2 与它冲突时，以新文件为准。
 - 目标：§2 的 `build_owned_snapshot`、analyze 的三条放行条件、`reports/dimensions.load_inputs` 接受新 schema，以及日报 gap 文案。
 - 文件：
   - 新增 `app/marketdata/daily_snapshot.py`；
@@ -172,17 +173,17 @@
   - `test_daily_http_limit_unchanged`：Given 导入模块 / Then `daily_delivery.DAILY_HTTP_LIMIT` 为 1，`live_budget_issue()` 结果不变，`DAILY_BARS_HTTP_LIMIT` 为 0；test_tb90_* 和 test_tb116b 的现有断言原样通过。
   - `test_mairui_rerun_idempotent_no_extra_calls`：Given 当日已成功取过 / When 再跑一次 / Then transport 0 次（已就绪的标的跳过），daily_bars 不变。
 
-**留给用户**：安装回执、给出 DAILY_BARS_HTTP_LIMIT 的数值、首次实调。这些都需要用户本人批准麦蕊实调或出网。
+**留给用户**：安装回执、~~给出 DAILY_BARS_HTTP_LIMIT 的数值~~（**已由 T-A135 取代**：用户定为不设上限，见 §8.1）、首次实调。这些都需要用户本人批准麦蕊实调或出网。
 
 ## 6. 待澄清（澄清前实现单一律按最保守做法）
 
 | # | 问题 | 为何拿不准 | 可选答案 | 澄清前做法 |
 |---|---|---|---|---|
-| Q1 | 持仓数量级 N 与每日调用上限 | 脱敏文档里没有；原始文件含敏感信息，不读 | 用户给 N 和上限；或按实际持仓数自动计算并设上限 | `DAILY_BARS_HTTP_LIMIT=0`，不出网；估算只作示意 |
+| Q1 | 持仓数量级 N 与每日调用上限 | 脱敏文档里没有；原始文件含敏感信息，不读 | 用户给 N 和上限；或按实际持仓数自动计算并设上限 | `DAILY_BARS_HTTP_LIMIT=0`，不出网；估算只作示意。**已裁定（T-A135）**：不设每日上限，以「不限」哨兵表达，默认仍为 0，见 §8.1 |
 | Q2 | 复权因子来源/口径 | `prepare` 必须有显式 A(d)；hfq/none 比值有舍入误差；除权接口未实测 | 另取 hfq 推因子（调用翻倍）；用专门的除权接口；只用不复权、qfq 特征暂缺 | 只存 adjust=none，不推因子；求值保持 `adjust_factor_missing` |
-| Q3 | 首次回填窗口长度 | 卡的 lookback 是 120，预热 62–64；一次调用能否覆盖整个窗口未实测 | 120 个交易日；按卡的最大预热取；更长 | 实现单 A 把窗口做成参数，不设默认值；没有值就不回填 |
-| Q4 | 自选与 scope=security 实例是否纳入取数范围 | 契约 eod_scope 写的是“自选与持仓”，但自选没有写入口；实例标的会增加调用量 | 只持仓；持仓+自选；再加实例标的 | 只取持仓 |
-| Q5 | 取数钟点与就绪截止 | plan 写 15:30–16:30；麦蕊日 K 发布时间未实测 | 16:30；17:00；失败后重试一次 | 不进 slot 排程，只能手动或测试入队 |
+| Q3 | 首次回填窗口长度 | 卡的 lookback 是 120，预热 62–64；一次调用能否覆盖整个窗口未实测 | 120 个交易日；按卡的最大预热取；更长 | 实现单 A 把窗口做成参数，不设默认值；没有值就不回填。**已裁定（T-A135）**：首次回填近 3 年；仍是参数、无默认，由 CLI 手动触发，前置为 upsert 分批，见 §8.3 |
+| Q4 | 自选与 scope=security 实例是否纳入取数范围 | 契约 eod_scope 写的是“自选与持仓”，但自选没有写入口；实例标的会增加调用量 | 只持仓；持仓+自选；再加实例标的 | 只取持仓。**已裁定（T-A135）**：持仓 + 本人有效自选，不含实例标的，见 §8.2 |
+| Q5 | 取数钟点与就绪截止 | plan 写 15:30–16:30；麦蕊日 K 发布时间未实测 | 16:30；17:00；失败后重试一次 | 不进 slot 排程，只能手动或测试入队。**已裁定（T-A135）**：交易日北京时间 17:15 进 `slot_jobs`，不重试，见 §8.4 |
 | Q6 | 基准 000300.SH 的接口与主数据 | plan 标注【待 T003】，指数可能不在主数据中 | 用指数接口；不取，F50 记缺口 | 不取，F50 和基准相关的跟踪保持缺口 |
 | Q7 | `source_licence_id` 是否进主键 | plan 的 per_licence 规则要求进；当前读方都不过滤 | 现在就升主键并让读方过滤；单用户期只加列 | 只加可空列，记录来源，不用于共享 |
 | Q8 | 同键不同值（上游修正）怎么处理 | 覆盖会破坏 PIT；不覆盖可能保留错误值 | 不覆盖并告警；新建版本；人工确认后覆盖 | 不覆盖，记 `daily_bar_conflict` |
@@ -224,10 +225,10 @@
 
 ### ③ slot_jobs 与排程
 
-- 结论：采用预读方案 A。**只登记 `TASKS` 和 `LOCKED_TASKS`，不加入 `slot_jobs`，也不加入 `schedule()`**，不写恒假开关或注释掉的钟点。§5.A 中「slot_jobs 设钟点」一句作废，Q5 澄清后另开单。
+- **本条已由 T-A135 取代**（Q5 已裁定，见 §8.4；「不加入 `schedule()`」仍成立）。原结论：采用预读方案 A。只登记 `TASKS` 和 `LOCKED_TASKS`，不加入 `slot_jobs`，也不加入 `schedule()`，不写恒假开关或注释掉的钟点。§5.A 中「slot_jobs 设钟点」一句作废，Q5 澄清后另开单。
 - 理由：`slot_jobs` 一旦列入就会在开市日的钟点窗口入队，`beat_tick` 按间隔入队，两者都违背 Q5「只能手动或测试入队」。
 - G/W/T：
-  - `test_daily_bars_fetch_never_scheduled`：Given 一个已覆盖的开市日，北京时间 00:00–23:59 每 5 分钟取一个 now（`covered` 打桩为 True）/ When 调 `slot_jobs(settings, now)` / Then 结果里从不出现 daily_bars_fetch；同时 `schedule(settings)` 的键不含它。
+  - ~~`test_daily_bars_fetch_never_scheduled`~~（**已由 T-A135 取代**，改为 `test_daily_bars_fetch_slot_1715_open_day_only`，见 §8.4）：Given 一个已覆盖的开市日，北京时间 00:00–23:59 每 5 分钟取一个 now（`covered` 打桩为 True）/ When 调 `slot_jobs(settings, now)` / Then 结果里从不出现 daily_bars_fetch；同时 `schedule(settings)` 的键不含它。
 
 ### ④ 迁移与列缺省
 
@@ -349,7 +350,7 @@
 
 ### 留给用户（不自行假设）
 
-本节没有新增需要用户定的产品问题。Q3（窗口长度 N）、Q5（钟点）、Q1、Q2、Q4、Q6、Q7、Q8 仍按 §6 的保守做法执行，等用户答复。
+本节没有新增需要用户定的产品问题。~~Q3（窗口长度 N）、Q5（钟点）、Q1、Q2、Q4、Q6、Q7、Q8 仍按 §6 的保守做法执行，等用户答复。~~ **已由 T-A135 取代**：Q1、Q3、Q4、Q5 已裁定（§8）；Q2、Q6、Q7、Q8 仍按 §6 保守做法。
 
 ### T-T70 补充裁定（T-A131）
 
@@ -369,7 +370,7 @@
 
 #### 补3　种子里的 listing_status 必须写
 
-- 结论：**必须写**。A、B、C、D 都写 `listing_status=listed`。§7 种子段「列只填非空列 code、type、name、exchange」改读为「填这 4 个非空列，再加 listing_status」。`daily_universe` 的资格过滤与 `workers/daily.analyze` 的 `security_not_eligible` 判定相同：type 为 stock 且 listing_status 为 listed 才纳入。**listing_status 为空也视为不合格**，不按 listed 推断。
+- 结论：**必须写**。A、B、C、D 都写 `listing_status=listed`（T-A135 起，§8.2 新增的自选种子 E、E2 同样必须写）。§7 种子段「列只填非空列 code、type、name、exchange」改读为「填这 4 个非空列，再加 listing_status」。`daily_universe` 的资格过滤与 `workers/daily.analyze` 的 `security_not_eligible` 判定相同：type 为 stock 且 listing_status 为 listed 才纳入。**listing_status 为空也视为不合格**，不按 listed 推断。
 - 理由：`market.securities.listing_status` 是可空列；`workers/daily.analyze` 对空值判为不合格。不写这一列，A、B 会被过滤掉，用例会误红。
 - G/W/T：同一个用例 `test_universe_holdings_only_until_clarified`：Given 附加种子里再加一只证券 G（type=stock，listing_status 为空），并把 G 挂进 u1 的持仓快照 / Then 返回值里没有 G，也没有 D（etf）、E（自选）、F（实例）。
 
@@ -407,4 +408,154 @@
 
 #### 留给用户（不变）
 
-Q3（窗口长度 N）和 Q5（取数钟点）仍等用户答复。在答复之前，窗口没有默认值、不自动回填；不进 `slot_jobs`/`schedule()`，只能手动或由测试入队。本小节不新增需要用户决定的问题。
+~~Q3（窗口长度 N）和 Q5（取数钟点）仍等用户答复。在答复之前，窗口没有默认值、不自动回填；不进 `slot_jobs`/`schedule()`，只能手动或由测试入队。~~ **已由 T-A135 取代**：见 §8.3（窗口仍无默认、不自动回填）与 §8.4（17:15 进 `slot_jobs`，仍不进 `schedule()`）。本小节不新增需要用户决定的问题。
+
+## 8. 用户裁定落地（T-A135）
+
+依据：`/workspace/team/rules/daily-bars-user-decisions-2026-11-10.md`（编排者记录的用户本人裁定，2026-11-10）。源码按 be/T-B128 `af77bb5` 核对。**本节与 §1–§7、§6 的保守默认冲突处以本节为准**；被推翻的原文已在原处标「已由 T-A135 取代」。Q2（复权因子）本单不改：缺因子仍走 `adjust_factor_missing`，不补 1。Q6、Q7、Q8 不变。
+
+总原则（不因本节放宽）：
+
+- 默认仍不出网。`daily_bars_source` 默认 off；没有运维安装的只读回执就不建 outbox、不开 socket。
+- 遇 STOP、HALT、103、429，或 `DailyHaltError`/`EgressDenied`，仍整批立即停、不重试、剩余标的记 `daily_bars_upstream_halted`；HALT 不由代码清除（§3 原文不变）。
+- 契约落地并经用户确认的实现合入之前，生产不自动调麦蕊。**真实首次调用仍须用户本人批准**；代理或其他角色转述的「用户同意」不算批准。
+
+### 8.1 Q1：不设每日上限
+
+- 用户原话：不设置上限。表达方式：**一个显式的「不限」取值，而不是把默认值改成不限**。
+- 配置名与位置（沿用 `master/daily_delivery.DAILY_HTTP_LIMIT` 的模块常量写法，不进 Settings，不读环境变量或回执）：放在单 C 的 `app/ingest/daily_bars.py`。
+  - `DAILY_BARS_HTTP_UNLIMITED`：哨兵常量，值为字符串 unlimited。
+  - `DAILY_BARS_HTTP_LIMIT`：默认值仍为整数 0。
+- 判定（单 C 新增纯函数 `daily_bars_http_budget(value) -> DailyBarsBudget`，三种结果）：
+  - 值为整数 0：**unset**。不建 outbox，transport 0 次，记 `daily_bars_http_budget_unset`，运行状态 skipped。
+  - 值等于 `DAILY_BARS_HTTP_UNLIMITED`：**unlimited**。不做每日计数截断；每个标的每复权口径仍只按计划请求，不重试（见下文结构上界）。
+  - 值为正整数 n（只允许测试 monkeypatch，生产代码不得出现）：**capped(n)**。第 n 次之后的标的记 `daily_bars_quota_deferred`，当日不重试，沿用 `test_budget_cap_reached_defers_rest`。
+  - 其他任何值（负数、布尔、None、其他字符串、浮点）：按 unset 处理，同上，不抛错、不出网。
+- 什么时候改成「不限」：单 C 合入时 `DAILY_BARS_HTTP_LIMIT` 仍为 0。另开一张「开放单」（建议单 D），在用户本人批准首次实调之后，以一次经评审的代码提交把它改为 `DAILY_BARS_HTTP_UNLIMITED`，提交说明引用本节与用户 Q1 原话。环境变量、回执字段、客户端参数都不能改变它（§3 原则不变）。
+- 「开放真实麦蕊」须同时满足，缺一不出网：
+  1. 环境变量 `DAILY_BARS_SOURCE` 为 mairui（运维配置）；
+  2. 运维安装的只读回执 `/run/aia/receipts/mairui-daily-bars.json`，按 `daily_delivery.read_grant` 的规则校验（root 属主、0444、目录不可写、在 start–end 有效期内）；
+  3. `daily_bars_http_budget(DAILY_BARS_HTTP_LIMIT)` 的结果不是 unset（即开放单已合入）；
+  4. 单 C 与开放单都已合入。
+- 不动：`daily_delivery.DAILY_HTTP_LIMIT` 仍为 1，`live_budget_issue()` 不变；`ingest.yaml` 的 budget/shares/licences 不动；并发仍为 1。
+- 结构上界（不是额度，是正确性不变量，单 C 必须满足）：一次运行的 transport 调用次数恰为「计划调用数」，即标的数 × 每标的请求段数（§8.3 的 ceil(W/k)）；提前停止时更少，永不更多。是否在此之外再加一道数值型「每批防失控上限」，见 §8.6 U3；用户答复前不加。
+- G/W/T（单 C 测试）：
+  - `test_daily_http_limit_unchanged`（改）：Given 导入模块 / Then `DAILY_HTTP_LIMIT` 为 1，`live_budget_issue()` 不变，`DAILY_BARS_HTTP_LIMIT` 为 0，`DAILY_BARS_HTTP_UNLIMITED` 存在且值为 unlimited。开放单合入时，在同一提交里把本例对 `DAILY_BARS_HTTP_LIMIT` 的期望改为哨兵，其余断言不动。
+  - `test_http_budget_resolution_table`（新，不连库）：Given 0、哨兵、3、-1、True、None、字符串 0、2.0 / When `daily_bars_http_budget` / Then 依次为 unset、unlimited、capped(3)，其余全部 unset。
+  - `test_unlimited_no_cap_calls_equal_planned`（新）：Given monkeypatch 为哨兵、回执与源齐备、假 transport、5 个标的、单日 / When fetch / Then transport 恰 5 次，无 `daily_bars_quota_deferred`，写 5 行。
+  - `test_unlimited_still_halts_on_stop_103_429`（新）：Given 哨兵；假 transport 第 2 次返回 103（另两组为 429、运行前已有 STOP）/ Then 103/429 组恰 2 次、STOP 组 0 次，写 HALT，剩余记 `daily_bars_upstream_halted`，不重试；下一次 tick 在 HALT 存在时 0 次。
+  - `test_limit_not_widened_by_env_or_receipt`（新）：Given 限额常量为 0，同时设置名为 DAILY_BARS_HTTP_LIMIT 的环境变量为大数、回执 JSON 里多放一个 limit 字段 / Then 仍 transport 0 次，记 `daily_bars_http_budget_unset`。
+  - `test_mairui_requires_receipt_and_budget`（不变）。
+
+### 8.2 Q4：范围 = 持仓 + 本人有效自选
+
+- `daily_universe(conn, owner, trade_date) -> list[str]`（签名不变）取并集：
+  - 持仓：`api/v1/portfolio._account(...).positions`（不变）；
+  - 自选：`watchlist_items` 中 user_id 为 owner、`removed_at IS NULL` 的 security_code（与 `reports/service.build`、`intraday/engine` 读自选的条件相同）。自选代码由 `/watchlist` 写入时已规范化，原样使用，不再变换大小写。
+  - **不含**：scope=security 的实例标的（`workers/daily.analyze` 只在代码属于持仓或自选时才求值，实例标的已被覆盖）、watch_group、基准（Q6 不变）、他人的自选。
+- 资格过滤对并集整体执行，不变：type 为 stock 且 listing_status 为 listed；listing_status 为空视为不合格。
+- 去重升序（`sorted`）。多用户时 `fetch_and_record` 取各用户结果的并集再去重升序（§7 补2 不变）。不按 added_at 做 PIT 过滤：取运行时刻的有效自选。
+- 快照范围随之扩大：`daily-snapshot-from-bars.md` 的 `build_owned_snapshot` 直接用 `daily_universe`，自选代码会进本人快照（见该文 §11）。这正好让 `analyze` 对 account 范围实例里的自选代码求值，而不是记 `owned_source_security_missing`。
+- 调用量：N 为全体 approved 用户「合格持仓 ∪ 合格有效自选」去重后的个数，N ≤ Σ（持仓数 + 自选条数上限）。自选上限来自权益或 `config/realtime.yaml` 的 `watchlist.per_user_cap`（默认 100）。
+- 不需要迁移（`watchlist_items` 已由 0031 提供）。
+- G/W/T：
+  - `test_universe_holdings_and_active_watchlist`（取代 `test_universe_holdings_only_until_clarified`；§7 种子段与补2、补3 中对旧名的引用都改读为新名）：Given §7 种子与补3 的 G；u1 另有自选 E（stock、listed，有效）、E2（stock、listed，removed_at 有值）、A（与持仓重复）、D（etf）；u2 自选 C2（stock、listed）；实例 F / When `daily_universe(conn, u1, 11-10)` / Then 列表相等于 sorted([A, B, E])：无 E2、D、F、G、C、C2，A 只出现一次。
+  - `test_universe_watchlist_only_owner`（新）：Given u1 无持仓、只有有效自选 E / Then 返回 [E]；u2 的结果不含 E。
+  - `test_task_user_scope_union_and_single`（Given 加 u2 有效自选 E）：Then 不给 user_id 时写 A、B、C、E；user_id=u1 时不写 E。
+
+### 8.3 Q3：首次回填近 3 年；前置为 upsert 分批
+
+**前置（必须先合入，否则不得触发任何多日窗口的真实回填）：`upsert_daily_bars` 分批。**
+
+- 原因：每行 14 个绑定参数，一条多 VALUES 语句超过 4,681 行（65535 ÷ 14 取整）就会撞 PG 参数上限。3 年窗口下 N 只即约 N × 730 行。
+- 做法：
+  - 常量 `UPSERT_BATCH_ROWS`，值 1000（`app/marketdata/daily_bars.py`），并在模块导入时断言它乘以每行参数数不超过 65535。
+  - 写入前按 (code, trade_date, adj_type) 升序排序，再按 1000 行切块；每块一条 `INSERT … ON CONFLICT DO NOTHING RETURNING`。
+  - 每块的读回比较只查本块未插入的键，用 (code, trade_date, adj_type) 元组 IN（顺带完成 T-A132 非阻塞项⑶），不再用三个独立 IN 做笛卡尔范围查询。
+  - `UpsertStats` 跨块累加；issues 全局排序去重。签名、返回类型、不 UPDATE 的规则都不变。
+- 事务边界：全部块都在调用方的同一个事务里（`fetch_and_record` 仍不 begin/commit；`daily_bars_fetch_task` 用一个 `engine.begin()`），本次运行只写一行 pipeline_runs。任一块出错整体回滚，任务另开事务写 failed（§7 补6 不变）。不做逐块提交：那会让失败的运行留下半截数据，也与「一次运行一行运行记录」冲突。
+- 不需要迁移。
+
+**「3 年」的口径**
+
+- 仍走 `window_trading_days` 参数，不进 Settings，没有默认值（§7 ②、补1 不变：Settings 字段名仍不得含 window、backfill、lookback）。
+- 新增纯函数 `backfill_window_days(conn, trade_date: date, years: int) -> int | None`（`app/marketdata/daily_bars.py`）：
+  - 起点 start 为 trade_date 往前 years 个公历年的同月同日（2 月 29 日回落到 2 月 28 日）。
+  - 返回 trading_calendar 中 start < date ≤ trade_date 且 is_open 的天数，即按日历实际开市日计，不用每年 250 天之类的估算。
+  - 日历覆盖检查：[start, trade_date] 内每个公历日都必须有日历行（行数等于天数），不满足时返回 None。
+  - years 不是正整数时抛 ValueError。
+- 日历覆盖不足：`backfill_window_days` 返回 None，触发方不入队，报 `calendar_not_covered`，**不缩短窗口**。§7 ② 原有的「窗口超出日历时零写入、记 `calendar_not_covered`」仍兜底。
+- 量级：每年约 242 个开市日，3 年约 720–735 天，以日历为准。
+
+**怎样触发（用户原文没有要求自动回填，所以不自动）**
+
+- 新增命令 `python -m app.cli daily-bars-backfill --years 3 [--trade-date YYYY-MM-DD] [--apply]`（`app/cli/daily_bars_backfill.py`，注册进 `app/cli/__main__.COMMANDS`）：
+  - trade-date 缺省为「数据已是完成版」的最近开市日：今天是开市日且北京时间已过 17:45 时取今天，否则取今天之前最近的开市日。显式给出今天而当前早于 17:45 时拒绝（退出码非零、不入队）。理由：upsert 不覆盖，17:10 之前取到的当日行会一直是非完成版，当日快照只能把它记为 `daily_bars_not_final`。
+  - 默认只读演练：输出 window_trading_days、标的数 N、预计行数、预计 SQL 语句数、预计调用数，**不输出证券代码**，不入队、不写库。
+  - 加 `--apply` 时只往 `jobs:worker` 推一条 daily_bars_fetch 任务，args 为 trade_date 和 window_trading_days，不带 user_id，然后返回。它不自己取数，所以锁、不重试、出网条件全部沿用任务本身的规则。
+  - `--apply` 是运维动作：须在 §8.1 的开放条件都满足、并经用户本人批准后执行。交易日北京时间 17:00–17:45 之间不得运行，以免与 17:15 的钟点任务争 `LOCKED_TASKS` 锁，因为被锁跳过的那次钟点任务不会重排。
+- 新进入范围的标的（新买入、新加自选）不自动补历史：从进入范围那天起每天取当日，历史缺日由 `prepare` 如实记 `daily_bar_missing:<date>`。要补就再手动跑一次本命令：已有行是 unchanged，幂等；代价是全体标的重新请求一遍。是否自动补，见 §8.6 U2。
+
+**调用量粗估（不编造持仓数）**
+
+- 记 N 为 §8.2 的标的数，W 为 `backfill_window_days` 的结果（约 730），k 为一次 history 调用最多能返回的交易日数（【待 T003】，未实测）。只取 adjust=none（Q2 不变）。
+  - 首次回填调用数 = N × ceil(W / k)；若一次调用就能覆盖整个窗口，即为 N。
+  - 回填行数约 N × W（停牌占位行也计在内）；SQL 语句数 = ceil(行数 / 1000)。
+  - 每日增量调用数 = N，行数 = N。
+  - 示意（不是假设）：N 为 10 时约 7,300 行、8 条语句；N 为 150 时约 110,000 行、110 条语句。
+- 单 C 的 history 分段：k 小于 W 时按 k 切段，段与段之间不重试；任何一段触发停止规则就整批停（§3）。
+
+**G/W/T**
+
+- `test_upsert_batches_under_param_limit`：Given 5,000 根 fake bar（例如 10 只 × 500 天，直接构造 `DailyBarsResult`）/ When `upsert_daily_bars` / Then inserted 为 5000；用 SQLAlchemy 的 `before_cursor_execute` 计数，对 daily_bars 的 INSERT 恰为 5 条，每条绑定参数数不超过 65535。
+- `test_upsert_batch_constant_bound`（不连库）：Then `UPSERT_BATCH_ROWS` 为 1000，乘以每行参数数后不超过 65535。
+- `test_upsert_batched_stats_aggregate`：Given 已有 1,500 行（其中 1 行将以不同 close 再写），再写 2,500 行（含这 1,500 个键）/ Then inserted 为 1000、unchanged 为 1499、conflicts 为 1，issues 恰为那一条冲突。
+- `test_upsert_batched_atomic_on_error`：Given 第 2 块执行时注入异常 / When 在 `engine.begin()` 内调用 / Then 回滚后 daily_bars 零新增（第 1 块也不留）。
+- `test_backfill_window_days_three_years`：Given 合成日历覆盖 2023-11-10 至 2026-11-10 / When `backfill_window_days(conn, 2026-11-10, 3)` / Then 等于 2023-11-10（不含）到 2026-11-10（含）之间的 is_open 行数；另一组以 2024-02-29 为 trade_date 时，起点为 2021-02-28。
+- `test_backfill_window_days_calendar_short`：Given 日历最早只到 2025-01-01 / Then 返回 None；日历中间缺一天时也返回 None。
+- `test_backfill_cli_dry_run_default_no_enqueue`：Given 假 Redis / When 不带 `--apply` 运行 / Then 队列长度不变，输出不含任何证券代码，库零写入。
+- `test_backfill_cli_apply_enqueues_once`：Given 假 Redis / When 带 `--apply` / Then 队列恰多一条，task 为 daily_bars_fetch，args 恰为 trade_date 与 window_trading_days；日历不足时不入队、退出码非零、输出含 calendar_not_covered。
+- `test_backfill_cli_refuses_today_before_1745`：Given 今天为开市日、北京时间 16:00 / When 显式 `--trade-date` 为今天并带 `--apply` / Then 不入队、退出码非零；不给 trade-date 时取上一开市日。
+- `test_no_settings_field_for_window`（不变）。
+
+### 8.4 Q5 / QB1：交易日北京时间 17:15 自动取数；analyze 仍 17:30
+
+- 推翻 §7 ③「不进 `slot_jobs`」。仍然**不进 `schedule()`**（间隔排程），仍然**不进 `RETRY_TASKS`**，仍在 `LOCKED_TASKS`。
+- 接入（`app/workers/jobs.py`，照现有 18:00、17:30 分支的写法）：
+  - 新常量 `DAILY_BARS_FETCH_TIME`，值为 17:15（与 `CODE_MAP_TIME` 同风格；不进 Settings，补1 不变）。
+  - `slot_jobs` 新增一支：北京时间落在 [17:15, 17:15 + `SLOT_WINDOW_S`)，即 [17:15, 17:30) 时，用 `_engine(settings).connect()` 调 `reports/service.covered(conn, 北京日期)`；为 True 才排 (DAILY_BARS_FETCH, 17:15, {trade_date: 北京日期 ISO})。不带 user_id（全体 approved 用户），不带 window_trading_days（只取当日）。
+  - 交易日判定就是 `covered`：休市不排；日历未覆盖时与现有 17:30 分支一样由 `covered` 抛错，本单不改这一既有行为。
+  - `beat_slots` 对它不调用 `record_intent`、不调用 `read_grant`（beat 容器不挂回执卷；出网条件在 worker/ingest 里判，见 §8.1）。去重键沿用 `beat:slot:<task>:<YYYYMMDD>:1715`，同一窗口只推一次。
+  - 源为 off 时照样排；任务自己记 skipped 和 `daily_bars_source_off`（§7 ⑧ 不变），「没开源」在运行记录里可见。
+- 与 17:10–17:30 完成版窗口的关系：
+  - 钟点窗口 [17:15, 17:30) 落在完成版窗口内。正常情况下取到的行 fetched_at 不早于 17:10，`is_final` 为真，且早于 17:30 截止。
+  - fetched_at 口径（单 C 必须遵守）：真实源写入的 fetched_at **不得早于该行数据实际收到的时刻**；一次运行只用一个 fetched_at 时，取最后一个响应收到之后的时刻。fake 源可沿用 `fetch_and_record` 的开始时刻或注入值。
+  - 取数拖过 17:30：这些行的 fetched_at 晚于 17:30，当日快照把对应标的放进 omitted 并记 `daily_bars_after_asof:<code>`，当日不求值；不改 as_of，不等待，不补跑。这些行仍是完成版，次日起作为历史 bar 进入快照（`daily-snapshot-from-bars.md` §10 J14）。
+  - 若 17:30 时取数事务还没提交，analyze 看不到运行记录，记 `daily_bars_not_ready`。compose 里 worker 未设 replicas（默认 1），按 FIFO 执行；单副本时 analyze 会排在取数之后，此时走上一条。
+- 重试与锁：失败不重试（不进 `RETRY_TASKS`，`_after_failure` 对它无动作）；运行中又到达同名任务时 worker 返回 locked 并丢弃，不重排。当日错过即为如实缺口，次日钟点照常。
+- 快照仍由 analyze 惰性生成：`daily_bars_ready`、`build_owned_snapshot` 不注册任务、不进 `slot_jobs`/`schedule()`（`daily-snapshot-from-bars.md` §1 不变）。
+- 「此前卡上的 18:30 作废」指此前卡里「每天 18:30 取数」那个选项。它**不改变** `slot_jobs` 里 `REPORT` 的 18:30 钟点，也不改变 `CODE_MAP_TIME`。日报实际几点生成，见 §8.6 U1。
+- 17:15 时麦蕊当日数据是否已经完整，没有实测（【待 T003】）。首次实调时由运维记录，结果不符再报编排者。
+- G/W/T：
+  - `test_daily_bars_fetch_slot_1715_open_day_only`（取代 `test_daily_bars_fetch_never_scheduled`；后端 `selfchecks/test_tb127_daily_bars.py` 里的同名副本一并改）：Given `covered` 打桩为 True、`_engine` 打桩，北京时间 00:00–23:59 每 5 分钟一个 now / When `slot_jobs(settings, now)` / Then daily_bars_fetch 恰在 17:15、17:20、17:25 三个 now 出现，slot 为「当日 YYYYMMDD:1715」，args 恰为 {trade_date}；`covered` 为 False 时一次也不出现；`schedule(settings)` 的键不含它。
+  - `test_task_registered_locked_not_retried`（不变）。
+  - `test_beat_slots_fetch_once_no_intent_no_grant`（新）：Given 假 Redis，now 为开市日 17:16 / When 连续两次 `beat_slots` / Then 只推一次；`record_intent` 与 `read_grant` 的计数桩都为 0 次。
+  - `test_fetch_locked_skip_not_retried`（新）：Given 锁已被占 / When `worker_tick` / Then 结果为 locked，`jobs:delayed` 为空。
+  - `test_mairui_fetched_at_not_before_last_response`（单 C，新）：Given 假 transport 的最后一个响应在 t / Then 写入行的 fetched_at 不早于 t。
+  - 快照侧用例见 `daily-snapshot-from-bars.md` §11。
+
+### 8.5 改动清单与迁移
+
+- 无新迁移（分批、范围、排程、常量都只改代码）。
+- 建议拆单（都可离线完成，不出网）：
+  - A 补丁单：`upsert_daily_bars` 分批；`daily_universe` 加自选；`slot_jobs` 17:15 接入；`backfill_window_days` 与 `daily-bars-backfill` 命令；`fetch_and_record` 改用源对象的 name 写 source，不再写死 fake（T-A132 非阻塞项⑴，单 C 前必须完成）。
+  - 单 C：`DAILY_BARS_HTTP_LIMIT` 为 0 与 `DAILY_BARS_HTTP_UNLIMITED` 哨兵、`daily_bars_http_budget`、fetched_at 口径、结构上界。
+  - 开放单 D（用户本人批准首次实调后才开）：常量改为哨兵；运维装回执、设 `DAILY_BARS_SOURCE`。
+
+### 8.6 只有用户能定的（本单新增）
+
+| # | 问题 | 答复前做法 |
+|---|---|---|
+| U1 | 用户原文是「analyze / 日报仍在 17:30 出」。但现网 `slot_jobs` 里 analyze 在 17:30，`REPORT`（daily_report 生成）在 18:30。日报保持 18:30 生成，还是要求提前？ | 不改 `REPORT` 的 18:30 |
+| U2 | 新进入范围的标的（新买入、新加自选）要不要自动补近 3 年历史？ | 不自动；手动 `daily-bars-backfill` |
+| U3 | 在「不设每日上限」之外，要不要再加一道数值型「每批防失控上限」（一次运行超过若干次调用就停）？架构建议加，作为兜底，数值由用户定 | 不加；只靠结构上界和 STOP/103/429 停止规则 |

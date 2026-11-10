@@ -216,4 +216,3 @@ def mairui_get(
 
     transitions = core.complete(dispatched, signal, clock())
     return EgressResult(status=status_code, body=body, signal=signal, transitions=transitions)
-

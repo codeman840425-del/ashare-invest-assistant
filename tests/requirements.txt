@@ -7,3 +7,6 @@ testcontainers[postgres,redis]==4.15.0
 psycopg[binary]==3.3.6
 redis==8.1.0
 schemathesis==4.33.0
+# A1r 运行时用例需要 requests / urllib3（T-T62）。版本与本机复现所用钉死值一致。
+requests==2.34.2
+urllib3==2.8.0

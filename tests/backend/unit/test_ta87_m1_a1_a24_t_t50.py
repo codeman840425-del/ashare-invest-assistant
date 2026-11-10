@@ -32,6 +32,12 @@ from unittest import mock
 
 import pytest
 import yaml
+# tests/ 为 pytest rootdir，用 tests/backend 入径加载护栏
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+from pg_o61 import PgOwnershipError, require_o61_pg, template_db_name, validate_temp_db_name  # noqa: E402
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
@@ -74,6 +80,10 @@ def _require_pg() -> dict[str, str]:
     user = os.environ.get("PGUSER")
     if not host or not port or not user:
         pytest.skip("PGHOST/PGPORT/PGUSER 未齐：T-T50 需 o61-pg 临时库")
+    try:
+        require_o61_pg(host, port)
+    except PgOwnershipError as exc:
+        pytest.fail(str(exc))
     return {"PGHOST": host, "PGPORT": port, "PGUSER": user}
 
 
@@ -99,11 +109,13 @@ def _drop_db(env: dict[str, str], db: str) -> None:
 
 
 def _ensure_tpl(env: dict[str, str], tpl: str = "tt51_tpl") -> str:
-    """Private template cloned from o61_tmp_0030; datallowconn=false.
+    """Private template cloned from TT_O61_TEMPLATE_DB (default o61_tmp_0030).
 
     Timescale background workers can reattach to the source DB; terminate,
     clone, then immediately disallow connections on the private tpl.
     """
+    src = template_db_name(env)
+    tpl = validate_temp_db_name(tpl)
     exists = _psql(
         env,
         "postgres",
@@ -124,9 +136,9 @@ def _ensure_tpl(env: dict[str, str], tpl: str = "tt51_tpl") -> str:
             env,
             "postgres",
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname='o61_tmp_0030' AND pid<>pg_backend_pid();",
+            f"WHERE datname='{src}' AND pid<>pg_backend_pid();",
         )
-        c = _psql(env, "postgres", f"CREATE DATABASE {tpl} TEMPLATE o61_tmp_0030;")
+        c = _psql(env, "postgres", f"CREATE DATABASE {tpl} TEMPLATE {src};")
         if c.returncode == 0:
             break
         import time as _t

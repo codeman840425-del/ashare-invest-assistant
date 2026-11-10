@@ -27,6 +27,7 @@ from app.db.tables.strategy import (
 from app.engine_policies import load as load_policy
 from app.engine_policies import seed
 from app.replay.baseline import manifest_hash, payload
+from app.tracking.worker import TASK as TRACKING
 from app.workers.daily import ANALYZE, REPORT
 from selfchecks.test_tb70_replay import integration, no_network  # noqa: F401
 from selfchecks.test_tb74_candidates import ROOT, setup  # noqa: F401
@@ -167,7 +168,7 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: An
     expected = load_policy(ROOT / "config")
     alternate_version = expected.version_no + 1
     instance = prepare(setup)
-    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok")]
+    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (TRACKING, "ok")]
     with engine.connect() as conn:
         candidate = conn.execute(
             select(candidate_signals).where(candidate_signals.c.instance_id == instance)
@@ -195,7 +196,7 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: An
     assert Decimal(str(confidence["value"])) == value
     assert body["strategies"][0]["candidate_signal_id"] == cid
     assert stranger.get("/api/v1/suggestions/" + sid).status_code == 404
-    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok")]
+    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (TRACKING, "ok")]
     with engine.connect() as conn:
         assert (
             len(conn.execute(select(suggestions).where(suggestions.c.user_id == owner)).all()) == 1

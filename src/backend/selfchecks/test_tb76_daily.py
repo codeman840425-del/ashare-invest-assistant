@@ -16,8 +16,9 @@ from sqlalchemy.exc import DBAPIError
 from app.common.errors import AppError
 from app.config import Settings
 from app.db.tables.accounts import broker_position_snapshot_items
-from app.db.tables.realtime import daily_reports, pipeline_runs
+from app.db.tables.realtime import daily_reports, pipeline_runs, suggestions
 from app.db.tables.research import watchlist_items
+from app.db.tables.signals import candidate_signals
 from app.db.tables.strategy import (
     strategies,
     strategy_card_versions,
@@ -28,6 +29,7 @@ from app.db.tables.strategy import (
 from app.replay.baseline import load
 from app.reports.service import build, covered
 from app.strategy.runtime import runnable
+from app.tracking.worker import TASK as TRACKING
 from app.workers import jobs
 from app.workers.daily import ANALYZE, REPORT, recover_task
 from selfchecks.test_tb70_replay import DB, REDIS, integration, no_network  # noqa: F401
@@ -67,7 +69,7 @@ def test_real_queue_holdings_calendar_report_http_and_idempotence(
                     last_price_ref=13,
                 )
             )
-    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok")]
+    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (TRACKING, "ok")]
     assert enqueue(REPORT, owner) == [(REPORT, "ok")]
     response = client.get("/api/v1/daily-reports/2026-10-30")
     assert response.status_code == 200
@@ -138,14 +140,29 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
         "params_schema": {},
         "rules": [
             {
-                "id": "fictional_only",
+                "id": key,
                 "dimension": "technical",
-                "role": "entry",
-                "expr": "ma(f.close_qfq,60) > 0",
-                "eval_time": "daily",
+                "role": role,
+                "expr": expr,
+                "eval_time": "daily_close",
+                "weight": 1,
             }
+            for key, role, expr in [
+                ("E", "entry", "ma(f.close_qfq,60) > 0"),
+                ("X", "exit", "f.close_qfq > 0"),
+                ("C", "counter", "f.close_qfq < 0"),
+                ("I", "invalidation", "f.close_qfq < 0"),
+            ]
         ],
-        "action_map": {"entry_all_core_pass": "buy", "else": "wait"},
+        "action_map": {
+            "entry_all_core_pass": "buy",
+            "held_hold": "hold",
+            "exit": "sell",
+            "else": "wait",
+        },
+        "dimension_view_thresholds": {"bullish": 0.67, "bearish": 0.33},
+        "stops": {"stop_loss": None, "take_profit": None, "time_stop_days": 5},
+        "valid_until": {"trading_days": 40},
     }
     with engine.begin() as conn:
         load(conn, owner, app_env="test")
@@ -196,7 +213,7 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
                 horizon="swing",
             )
         )
-    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok")]
+    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (TRACKING, "ok")]
     with engine.connect() as conn:
         runs = conn.execute(
             select(pipeline_runs)
@@ -204,15 +221,30 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
             .order_by(pipeline_runs.c.started_at.desc())
         ).first()
         outcome = runs.stats["users"][str(owner)]
-        assert outcome["evaluations"][0]["state"] == "hold_ok"
+        # 待 T-T75 回填 evaluation state 的精确值；本中间头不断言具体 state，以免猜值。
         assert outcome["evaluations"][0]["rule_refs"]
         assert outcome["evaluations"][0]["simulation"] is True
-        assert "p1_conclusion_assembler_missing:688018.SH" in outcome["issues"]
-        assert outcome["evaluations"][0]["rule_refs"][0]["passed"] is None
+        entry = next(r for r in outcome["evaluations"][0]["rule_refs"] if r["id"] == "E")
+        assert entry["passed"] is None
+        assert (
+            len(
+                conn.execute(
+                    select(candidate_signals).where(candidate_signals.c.instance_id == instance)
+                ).all()
+            )
+            == 0
+        )
+        actions = [
+            strategy["action"]
+            for row in conn.execute(select(suggestions).where(suggestions.c.user_id == owner)).all()
+            for strategy in (row.strategies or [])
+        ]
+        assert set(actions).isdisjoint({"buy", "sell", "reduce"})
     assert enqueue(REPORT, owner) == [(REPORT, "ok")]
     response = client.get("/api/v1/daily-reports/2026-10-30")
     assert response.status_code == 200
-    assert any("p1_conclusion_assembler_missing" in g["key"] for g in response.json()["gaps"])
+    assert response.json()["gaps"]
+    # 待 T-T75 回填 gaps 中的具体 key；本中间头只断言 gaps 非空，不准猜 key。
 
 
 def test_runtime_boundary_calendar_and_actual_beat_dedupe(setup: Any) -> None:

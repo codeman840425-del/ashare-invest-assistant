@@ -19,6 +19,7 @@ from app.db.tables.accounts import accounts, reconciliation_items, reconciliatio
 from app.db.tables.realtime import suggestions
 from app.db.tables.research import watchlist_items
 from app.db.tables.signals import candidate_signals, non_executable_reasons, plan_drafts
+from app.tracking.worker import TASK as TRACKING
 from app.workers.daily import ANALYZE, REPORT
 from selfchecks.test_tb70_replay import integration, no_network  # noqa: F401
 from selfchecks.test_tb74_candidates import RULES, setup  # noqa: F401
@@ -56,7 +57,7 @@ def seed_differences(engine: Any, account: uuid.UUID, at: dt.datetime) -> uuid.U
 def assembled(setup: Any) -> Any:
     _engine, _client, _stranger, owner, _other, _account, *_ = setup
     instance = prepare(setup)
-    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok")]
+    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (TRACKING, "ok")]
     return setup, instance
 
 

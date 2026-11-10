@@ -81,7 +81,7 @@ def create(
         with engine.begin() as conn:
             return 201, s.create(conn, auth.user_id, body)
 
-    return idempotency.run(
+    result: dict[str, Any] = idempotency.run(
         rds,
         user_id=auth.user_id,
         scope="plans:create",
@@ -89,6 +89,7 @@ def create(
         payload=body.model_dump(mode="json"),
         fn=perform,
     )[1]
+    return result
 
 
 @router.get("/plans", response_model=Page[PlanSummary])
@@ -143,7 +144,7 @@ def revise(
         with engine.begin() as conn:
             return 201, s.revise(conn, auth.user_id, identifier, body)
 
-    return idempotency.run(
+    result: dict[str, Any] = idempotency.run(
         rds,
         user_id=auth.user_id,
         scope=f"plans:{identifier}:versions",
@@ -151,6 +152,7 @@ def revise(
         payload=body.model_dump(mode="json"),
         fn=perform,
     )[1]
+    return result
 
 
 @router.get("/plans/{identifier}/versions", response_model=Page[PlanVersion])

@@ -123,6 +123,32 @@ def is_bj_session(dt: datetime, need_s: float = 0.0) -> bool:
     return False
 
 
+def same_auction_session(snap, recv) -> bool:
+    """快照 t 与本机收到时刻是否同属一个北京时间连续竞价时段（同一自然日的 9:30–11:30 或 13:00–15:00）。
+    用于计算 stale_threshold 时丢掉停牌/隔夜/午休冻结等不能代表本段行情延迟的样本。
+    时区按 Asia/Shanghai；naive 视为北京时间。"""
+    if snap is None or recv is None:
+        return False
+    if snap.tzinfo is None:
+        snap = snap.replace(tzinfo=BJ)
+    else:
+        snap = snap.astimezone(BJ)
+    if recv.tzinfo is None:
+        recv = recv.replace(tzinfo=BJ)
+    else:
+        recv = recv.astimezone(BJ)
+    if snap.date() != recv.date():
+        return False
+    if not (is_bj_session(snap) and is_bj_session(recv)):
+        return False
+    return (snap.hour < 12) == (recv.hour < 12)
+
+
+def session_lags(samples: list) -> list:
+    """samples 中 in_session 且有 lag_s 的延迟秒数。"""
+    return [s["lag_s"] for s in samples if s.get("lag_s") is not None and s.get("in_session")]
+
+
 def norm_date(v) -> str | None:
     """'2026-09-30' / '20260930' / '2026-09-30 00:00:00' / 20260930 → '2026-09-30'。"""
     if v in (None, ""):
@@ -647,6 +673,24 @@ def selftest_pure() -> list:
                 and lq["ntp_corrected"]["min"] == 5.5 and st_["ref_p95_s"] == 10.25
                 and st_["basis"] == "ntp_corrected_p95" and st_["suggested_s"] == 21
                 and st_u["basis"].startswith("uncorrected") and st_u["ref_p95_s"] == 11.75, f"{lq} / {st_}"))
+    # T-B117：同段连续竞价过滤；勿把午休冻结/隔夜旧票计入 stale_threshold
+    recv = datetime(2026, 11, 10, 13, 5, 49, tzinfo=BJ)
+    t_live = datetime(2026, 11, 10, 13, 5, 36, tzinfo=BJ)
+    t_lunch = datetime(2026, 11, 10, 11, 30, 57, tzinfo=BJ)
+    t_old = datetime(2026, 7, 16, 9, 23, 33, tzinfo=BJ)
+    out.append(("同段连续竞价：下午收到只与下午盘中 t 同段；11:30:57 午休冻结与 7 月旧票排除",
+                same_auction_session(t_live, recv) and not same_auction_session(t_lunch, recv)
+                and not same_auction_session(t_old, recv)
+                and not same_auction_session(t_live, recv.replace(hour=10)), ""))
+    # T-B117：w32tm 负值 = 本机慢；探针 local_ahead_s 与 RFC 5905 offset 符号相反，修正公式 lag − local_ahead
+    w32 = parse_w32tm("22:05:36, -00.4414716s\n22:05:38, -00.4405399s\n22:05:40, -00.4387174s\n")
+    ahead_s = round(sum(w32) / len(w32), 4)
+    rfc = round(-ahead_s, 4)
+    lag_raw, lag_corr = 10.182, round(10.182 - ahead_s, 3)
+    out.append(("NTP 符号：w32tm 负值=本机慢；local_ahead_s=本机−NTP；RFC 5905 offset=server−local=−local_ahead_s；"
+                "本机慢时真实延迟 = lag − local_ahead_s（比未修正更大）",
+                ahead_s < 0 and rfc > 0 and abs(ahead_s + 0.4402) < 1e-3 and lag_corr == round(10.182 + 0.4402, 3)
+                and lag_corr > lag_raw, f"ahead={ahead_s} rfc={rfc} corr={lag_corr}"))
     base = [("2026-01-29", 1.4714182949831487), ("2026-01-30", 2.0), ("2026-02-02", 3.0)]
     h_ok = compare_history(base, [("2026-01-29", 1.471418), ("2026-01-30", 2.0), ("2026-02-02", 3.0),
                                   ("2026-11-09", 4.0)])
@@ -717,12 +761,16 @@ def item1_latency(res, shared):
         in_sess = bool(FORCE_SESSION)
     ahead = _local_ahead()
     ntp = {"local_ahead_s": ahead, "values_s": list(LOCAL_AHEAD_S), "sources": list(NTP_SOURCES),
-           "convention": "本机 − NTP（秒），正值=本机快；w32tm /dataonly 数值按正值=本机比目标快读入"} \
+           "convention": "本机 − NTP（秒），正值=本机快；与 RFC 5905 offset（server − local）符号相反。"
+                         "w32tm /dataonly 数值按正值=本机比目标快读入；字段含义未翻转",
+           "rfc5905_offset_s": None if ahead is None else round(-ahead, 4)} \
         if LOCAL_AHEAD_S else "unknown"
     limits = ["延迟 = 本机收到响应时刻 − 快照 t，含本机时钟误差；提供 NTP 偏差（--local-ahead-s/--ntp-file）时另给"
               "修正后的一套分位数。另用服务端 HTTP Date 头（秒级）估计本机与服务端的钟差供参考，服务端时钟本身的准确性同样未知",
               "t 字段只到秒，单次延迟分辨率约 ±1s",
-              "每个 源×股票 只有 6 个样本，p95 实际接近最大值"]
+              "每个 源×股票 只有 6 个样本，p95 实际接近最大值",
+              "stale_threshold 只用快照 t 与收到时刻同属本段连续竞价的样本；"
+              "隔夜/午休冻结/长期未更新的 t 仍记在 evidence 与 per_source_stock 全量分位数里"]
     if not in_sess:
         return _item(res, name, item, "skipped",
                      {"summary": "盘后无法测", "bj_now": now.isoformat(timespec="seconds"), "codes": codes,
@@ -759,28 +807,40 @@ def item1_latency(res, shared):
                     srv = parsedate_to_datetime(r.headers.get("Date") or r.headers.get("date")).timestamp()
                 except Exception:
                     srv = None
+                recv_dt = datetime.fromtimestamp(t_recv, BJ)
                 samples[k][code].append({
                     "i": i + 1, "t": rec.get("t") if rec else None,
-                    "recv_bj": datetime.fromtimestamp(t_recv, BJ).isoformat(timespec="milliseconds"),
+                    "recv_bj": recv_dt.isoformat(timespec="milliseconds"),
                     "lag_s": round(t_recv - ts.timestamp(), 3) if ts else None,
+                    "in_session": same_auction_session(ts, recv_dt),
                     "rtt_ms": r.ms,
                     "local_minus_server_date_s": round((t_send + t_recv) / 2 - srv, 3) if srv else None})
         if i + 1 < LAT_SAMPLES:
             time.sleep(interval)
     per_stock, per_source, offs_all = {}, {}, []
+    n_excl = 0
     for k, by_code in samples.items():
         pooled = []
         for code, ss in by_code.items():
             lags = [s["lag_s"] for s in ss if s["lag_s"] is not None]
+            sess = session_lags(ss)
+            n_excl += len(lags) - len(sess)
             offs = [s["local_minus_server_date_s"] for s in ss if s["local_minus_server_date_s"] is not None]
             offs_all += offs
-            pooled += lags
+            pooled += sess
             per_stock[f"{k}/{code}"] = {"n": len(ss), "n_with_t": len(lags),
+                                         "n_in_session": len(sess),
                                          "t_distinct": len({s["t"] for s in ss if s["t"]}),
                                          "clock_offset_vs_server_date_s_p50": statistics.median(offs) if offs else None,
-                                         **lag_quantiles(lags, ahead)}
+                                         **lag_quantiles(lags, ahead),
+                                         "in_session": lag_quantiles(sess, ahead)}
         per_source[k] = lag_quantiles(pooled, ahead)
     thr = stale_threshold(per_source)
+    if n_excl:
+        thr["basis"] = (thr["basis"] or "") + (
+            f"；已排除 {n_excl} 个快照 t 不在本段连续竞价时段的样本（停牌/隔夜/午休冻结等，不代表本段延迟）")
+        thr["excluded_n"] = n_excl
+        thr["session_filter"] = "same_auction_session"
     http_off = statistics.median(offs_all) if offs_all else None
     sign_check = None
     if ahead is not None and http_off is not None and abs(ahead) >= 0.5 and abs(http_off) >= 0.5:

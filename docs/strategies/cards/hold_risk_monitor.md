@@ -1,4 +1,4 @@
-# H-01 持仓风险体检 `hold_risk_monitor` — 正式卡 v2（T-R20；v1 为 T-R15，纯离场系统组件）
+# H-01 持仓风险体检 `hold_risk_monitor` — 正式卡 v3（T-R49；v2 为 T-R20，v1 为 T-R15，纯离场系统组件）
 
 > 正式卡。导入格式：plan 2.5.14 A 节三个带标签块。`mount_policy: system_only` 纯离场组件（G1 豁免依据，plan 2.5.14 T-R15 裁定②；用户 POST /strategy-instances → 422 `STRATEGY_SYSTEM_ONLY`）：规则只含 exit/weakening/counter/invalidation，`action_map` 不含 buy/add，**不产生任何新开仓**；只对持有中证券求值，未持有不出现在结论中；不能被用户实例化为普通模板。
 > 夹具全部数值**虚构**；`688018.SH`、`688073.SH`、`300364.SZ`、`301218.SZ` 仅为板块场景标签（`desc`），不代表真实行情。期望值由 `golden/gen_T-R15.py` 确定性求值生成。
@@ -20,7 +20,7 @@
 卖出：印花税 0.05%、佣金按用户费率（最低 5 元）、过户费 0.001%、基础滑点 10bp、冲击成本按参与率 5 档（plan 2.13，estimate）。离场类规则**不因成本放弃卖出**；成本只进入计划草案的价格区间与预估金额。
 
 ## 反证 / 失效（研究侧）
-H-01 不预测收益，只提示风险；证伪：模拟跟踪中 `exit_signal` 后 20 日收益显著高于持有（n ≥ 30，扣费），说明阈值过敏。
+H-01 不预测收益。可检验的部分只有两条：跌破成本缓冲（X2）与跌破长期均线（W1）是持仓风险上升提示，证伪见 `hypothesis.falsified_by` 与下文「证伪口径（v3）」；单只与行业仓位上限（W2/W3）是组合风险限额的执行，不是对收益或亏损的预测，本卡不对其作可检验主张。
 
 ## v2 变更（T-R20，按 plan「T-R19 裁定」③④，78de694）
 - v1 原文冻结在 `cards/history/hold_risk_monitor.v1.md`。
@@ -29,7 +29,7 @@ H-01 不预测收益，只提示风险；证伪：模拟跟踪中 `exit_signal` 
 
 ```yaml strategy-card
 key: hold_risk_monitor
-version_no: 2
+version_no: 3
 name: 持仓风险体检
 category: risk
 horizons: [intraday_t, short, swing, long]
@@ -37,10 +37,10 @@ card_id: H-01
 mount_policy: system_only
 risk_level: normal
 hypothesis:
-  why_it_works: 跌破成本缓冲、跌破长期均线与集中度超限是持仓风险上升的确定性提示；只给出风险方向，不预测收益
+  why_it_works: 跌破成本缓冲、跌破长期均线是可检验的持仓风险上升提示；单只与行业仓位上限是组合风险限额（阈值属 estimate），不是可检验的收益或亏损预测机制
   falsified_by:
-    - 模拟跟踪：exit_signal 后 20 个交易日扣费收益中位数显著高于继续持有（n ≥ 30）
-    - 研究侧：MA60 连续 3 日跌破后 20 日超额中位数 ≥ 0（转弱规则无区分度）
+    - F1 模拟跟踪：X2 离场首日后，按 RC5 口径 B 周期 h∈{1,5,20}（缺 horizon 记 gap 不计入），继续持有收益 D 的中位数 ≥ 往返成本中位数，且单侧精确符号检验经 BH 校正 q ≤ 0.10（不重叠事件 n ≥ 30；口径见正文「证伪口径（v3）」F1）
+    - F2 模拟跟踪：W1 转弱首日后，相对当日其他持仓等权池（非沪深300）的超额 AR 中位数 ≥ 0，且单侧符号检验不能显示 P(AR<0) > 0.5（α=0.05；不重叠事件 n ≥ 30；h 同 F1；口径见正文「证伪口径（v3）」F2）
 dimensions:
   - {dimension: technical, role: core}
   - {dimension: sector_market, role: auxiliary}
@@ -92,7 +92,7 @@ validation_summary: {type: rule, window: 未执行, benchmark: 继续持有, cos
 
 ```yaml strategy-spec
 key: hold_risk_monitor
-version_no: 2
+version_no: 3
 kind: rule_template
 horizons: [intraday_t, short, swing, long]
 params_schema:
@@ -119,6 +119,43 @@ screen: null
 ```
 
 > 夹具：每例带 `security{code,board,list_date}`；H01-FX10 停牌（`f.is_suspended`）；H01-FX11 成本跨除权（10 送 5，A(d)=前 74 根 1.0、后 6 根 1.5，cost_qfq=cost×1.0/1.5）；H01-FX7 一字跌停卖出、H01-FX10 停牌减仓：`expect.reason_details` 写 `direction: sell`，state 仍按规则为 exit_signal/weakening，但不可执行（plan 2.5.14 T-R15 ⑧⑩）。
+
+## v3 变更（T-R49，按架构师 T-A112，ebdab40）
+- v2 原文冻结在 `cards/history/hold_risk_monitor.v2.md`（v1 见上节）。
+- 只改 `hypothesis.why_it_works`、`hypothesis.falsified_by`、正文「反证 / 失效」一句、标题与 `version_no: 3`；规则、参数、`data_needs`、`epistemic`、`universe`、成本、夹具与期望值均不变。
+- 前后差异：集中度从可检验的预测机制中移出，改为组合风险限额（T-A112 §1.8 方案 B）。W2/W3 仍按原规则触发 weakening/reduce，含义是限额的执行，不是「超限会导致亏损或更差收益」的预测；state 与 action 不受影响。证伪口径由「显著」「超额」无定义改为下节确定性规格。
+
+## 证伪口径（v3，确定性规格；只在 A 线模拟跟踪上判定）
+只用 `verified_doc` 键：`f.close_qfq`、`f.high_qfq`、`f.low_qfq`、`f.amount`、`f.is_suspended`、`f.limit_locked_down`、`f.market_regime_idx`（仅分组展示）；另用本卡规则已用的持仓上下文与卡面成本参数，不新增数据需求。不做历史回测（qfq 历史回写值不作时点依据）。结论用语为「候选信号 / 计划条件」。
+
+**公共口径（F1、F2 共用）**
+1. 事件：系统实例对持有证券在 T 日盘后求值，规则组由「非真」（False 或 null）变为 True 的首日；F1 取 X2，F2 取 W1。单位（账户, 证券, 规则组, T）。X1 计划止损不进证伪，只在 F1 报告中把 X1 子集单列 median(D) 与 n 供复看。
+2. 周期 h：按 RC5 口径 B，intraday_t→1、short→5、swing/long→20；取该观测所属建议的 horizon，缺失再取明确版本周期；本卡四周期、无唯一版本周期，仍不清楚 → 跳过并记 gap `sim_fail_horizon_unknown`，不进 n、不默认 5。h=1、5、20 分开判定。
+3. 收益：`R_i(T,h) = C^{(T+h)}_i(T+h) / C^{(T+h)}_i(T) − 1`，`C^{(a)}(d)` 为 as_of=a 当次快照中 d 日的 `f.close_qfq`（同一快照取比值，除权抵消）；窗口在 T+h 收盘后关闭才计入，T+h 之前不读任何 T 之后的数据。过渡参考价：T 收盘 → T+h 收盘（见 gaps G2）。
+4. 剔除：T+1 `f.is_suspended = true` 或 `f.limit_locked_down = true`（卖出不可成交）→ 不进 n，单独计数；T+h 停牌 → 用 (T, T+h] 内最后一个有效 K 收盘；伪停牌行按缺失；任一所需值为 null → 不进 n，记 gap。现金收益记 0。
+5. 去重：不重叠抽样——同（证券, 规则组, h）内，上一计入事件窗口 (T, T+h] 未结束前的新事件不计入；同证券多账户同日触发按（证券, T）只计一次。
+6. 样本量：每个（条件, h）n ≥ 30 才判定；5 ≤ n < 30 只报 small_sample，n < 5 不显示。
+7. 处置：任一条件满足 → 通知管理员复审，不自动退役；simulating 期间可出新版本重走 G1–G7，或由管理员按契约退役（任意→retired）。
+
+**F1（X2 离场后继续持有是否显著更好）**
+- 统计量 `D_i = R_i(T,h)`（继续持有对比离场转现金；窗末两边都须卖出，卖出成本一阶抵消，故 D 不扣费，成本用效应门槛体现）。
+- 检验：H0 `median(D) ≤ 0`，H1 `median(D) > 0`，单侧精确符号检验（`D_i = 0` 的样本剔除后计 n）；h=1/5/20 三个检验为一族，按 Benjamini–Hochberg 校正，q = 0.10。
+- 效应门槛 δ：每个事件按示例名义金额 M = 50,000 元计往返成本率 `c_i = [买佣 + 卖佣 + 印花税 0.0005·M + 过户费 2×0.00001·M + 滑点 2×10bp·M + 冲击 2×bp(r)·M] / M`；佣金 = max(5 元, M×用户费率)，用户费率未设置时只计最低 5 元并记 gap `commission_rate_unset`；参与率 r = M / ma(f.amount, 20)，按卡面 `impact_tiers` 取 bp，有效 K < 5 或均额为 0 取最高档。δ = 该批事件 c_i 的中位数（k = 1）。
+- 证伪：n ≥ 30，BH 校正后 q ≤ 0.10，且 `median(D) ≥ δ`。
+- 只报告、不作判据：Holm（FWER 0.05）结果；k = 2 结果；按信号日聚合的 Newey-West t 值（滞后 h−1）。
+
+**F2（W1 转弱无区分度）**
+- 基准：相对当日其他持仓的等权池（非市场基准）。`P_T` = T 日系统已取数并可求值的全部持有证券（各账户持仓去重），剔除事件证券自身与 T 日停牌者；池在 T 日定成员，不因 T 后退市或停牌剔除。`R_pool(T,h) = mean_{j∈P_T} R_j(T,h)`，`AR_i = R_i(T,h) − R_pool(T,h)`；`|P_T| < 5` → `AR_i = null`，记 gap `bench_pool_insufficient`，不进 n。
+- 主张：W1 后 `π = P(AR < 0) > 0.5`。
+- 证伪：n ≥ 30，`median(AR) ≥ 0`，且单侧符号检验 H1 `π > 0.5` 的 p > 0.05（不做多重校正：此类条件校正会让证伪更易触发）。
+- 只报告、不作判据：α = 0.10 结果；ma_long ±5、ma_break_days ±1 邻域内 median(AR) 符号是否翻转（翻转标「不稳健」）。
+
+## 已知缺口（gaps，v3）
+- G1 基准：沪深300（模拟跟踪默认基准）收盘未登记为特征键，本版不用；F2 的「超额」是相对当日其他持仓，不是相对市场。持仓高度同向时 AR 被压小，F2 更容易判「无区分度」。登记该键后另出版本改用。
+- G2 参考价：没有开盘价键，过渡用 T 收盘 → T+h 收盘。离场实际在 T+1 开盘成交，以 T 收盘为起点时隔夜跳空全部计入「继续持有」一侧，**不是**持有与离场的共同项；登记开盘价键后必须改为 T+1 开盘 → T+h 收盘。
+- G3 集中度：W2/W3 是风险限额，不设证伪条件；行业归属来源（`f.sw_l1`）仍为 declared、无历史成分。如要恢复集中度的可检验主张，须另走版本并先裁定行业归属来源。
+- G4 佣金费率未在卡上钉死；未设置时 δ 只含最低佣金，偏低。
+- G5 样本：H-01 只对持仓求值，simulating 期间仅管理员测试账户，不重叠事件凑满 n ≥ 30 可能需要较长时间；未满前不判证伪。
 
 ```yaml validation
 methods: [fixture, trigger_stats, tracking_sim]

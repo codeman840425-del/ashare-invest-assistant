@@ -352,6 +352,11 @@
       "scope_role": "enumerated_identity_source"
     },
     {
+      "path": "docs/strategies/cards/history/hold_risk_monitor.v2.md",
+      "scope_role": "enumerated_identity_source",
+      "note": "T-R49 H-01 v2 frozen (T-A112); historical identity"
+    },
+    {
       "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v1.md",
       "scope_role": "enumerated_identity_source"
     },
@@ -578,6 +583,44 @@
       "release_condition": "结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则"
     },
     {
+      "record_id": "hold_risk_monitor@2:historical_frozen",
+      "path": "docs/strategies/cards/history/hold_risk_monitor.v2.md",
+      "key": "hold_risk_monitor",
+      "version_no": 2,
+      "document_version": "v2",
+      "scope": "historical_frozen",
+      "horizons": [
+        "intraday_t",
+        "short",
+        "swing",
+        "long"
+      ],
+      "horizon": null,
+      "classification": "explicit_multi_no_unique_fallback",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级",
+      "rc5_consume": "frozen_snapshot_not_default_template",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/history/hold_risk_monitor.v2.md",
+          "line": 32,
+          "quote": "version_no: 2"
+        },
+        {
+          "path": "docs/strategies/cards/history/hold_risk_monitor.v2.md",
+          "line": 35,
+          "quote": "horizons: [intraday_t, short, swing, long]"
+        },
+        {
+          "path": "docs/strategies/cards/hold_risk_monitor.md",
+          "line": 124,
+          "quote": "v2 原文冻结在 `cards/history/hold_risk_monitor.v2.md`"
+        }
+      ],
+      "gap_reason": "四周期通用持仓风控，无唯一版本周期；具体建议的该版本结论horizon缺失时不得猜",
+      "release_condition": "结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则"
+    },
+    {
       "record_id": "sw_ma_trend_pullback@1:historical_frozen",
       "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v1.md",
       "key": "sw_ma_trend_pullback",
@@ -613,11 +656,11 @@
       "release_condition": null
     },
     {
-      "record_id": "hold_risk_monitor@2:current_formal_L1_with_L2_spec",
+      "record_id": "hold_risk_monitor@3:current_formal_L1_with_L2_spec",
       "path": "docs/strategies/cards/hold_risk_monitor.md",
       "key": "hold_risk_monitor",
-      "version_no": 2,
-      "document_version": "v2",
+      "version_no": 3,
+      "document_version": "v3",
       "scope": "current_formal_L1_with_L2_spec",
       "horizons": [
         "intraday_t",
@@ -634,7 +677,7 @@
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
           "line": 32,
-          "quote": "version_no: 2"
+          "quote": "version_no: 3"
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
@@ -1987,7 +2030,7 @@
     {
       "path": "docs/strategies/golden/hold_risk_monitor.card.tmpl",
       "key": "hold_risk_monitor",
-      "version_no": 2,
+      "version_no": 3,
       "horizons": [
         "intraday_t",
         "short",
@@ -2041,10 +2084,10 @@
     }
   ],
   "stats": {
-    "identity_records": 43,
-    "source_identity_files": 21,
+    "identity_records": 44,
+    "source_identity_files": 22,
     "scope_counts": {
-      "historical_frozen": 2,
+      "historical_frozen": 3,
       "current_formal_L1_with_L2_spec": 3,
       "research_blocked_not_importable": 15,
       "catalog_research_not_formal_card": 23
@@ -2055,7 +2098,7 @@
       "short": 9,
       "intraday_t": 7
     },
-    "multi_records": 8,
+    "multi_records": 9,
     "source_field_repairs": 0,
     "missing_horizons": 0
   },
@@ -2106,5 +2149,9 @@
       "docs/strategies/p2n09_golden_draft.md"
     ],
     "notes": "==43 unchanged; S-01 research→formal; pycache removed from census; ignore table in checker"
+  },
+  "t_r49_refresh": {
+    "ruling": "T-A112 §3 ③④",
+    "change": "H-01 v3 落卡：cards/hold_risk_monitor.md 由 v2 改为 v3；v2 冻结为 cards/history/hold_risk_monitor.v2.md（新增历史身份）；身份 43→44、源文件 21→22、historical_frozen 2→3、multi 8→9；tmpl 镜像 version_no 2→3"
   }
 }

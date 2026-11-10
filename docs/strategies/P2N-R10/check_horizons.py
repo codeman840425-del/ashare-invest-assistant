@@ -90,8 +90,9 @@ def validate(data):
             scope='historical_frozen' if '/history/' in path else 'current_formal_L1_with_L2_spec'
             actual[(path,key,ver)]=(scope,hs)
             if scope=='historical_frozen':
-                current=BASE/'cards'/p.name.replace('.v1','')
-                require(f'cards/history/{p.name}' in current.read_text() and 'v1 原文冻结' in current.read_text())
+                vm=re.search(r'\.v(\d+)\.md$',p.name);require(vm is not None, 'history file must be <key>.vN.md')  # T-R49: v2 frozen
+                current=BASE/'cards'/(p.name[:vm.start()]+'.md')
+                require(f'cards/history/{p.name}' in current.read_text() and f'v{vm.group(1)} 原文冻结' in current.read_text())
         elif re.match(r'# [A-Z]-\d\d .*知识卡 v\d+',text.splitlines()[0] if text else ''):
             require('当前状态：不可导入' in text)
             title=text.splitlines()[0];ver=int(re.search(r'知识卡 v(\d+)',title).group(1))
@@ -107,7 +108,7 @@ def validate(data):
         cols=[c.strip() for c in l.split('|')[1:-1]]
         if len(cols)==7:actual[(path,cols[1],None)]=('catalog_research_not_formal_card',translation[cols[3]])
     rows=data['records'];require(len({r['record_id'] for r in rows})==len(rows))
-    require(len(rows)==len(actual)==43)
+    require(len(rows)==len(actual)==44)  # T-R49: +hold_risk_monitor v2 frozen
     for r in rows:
         key=(r['path'],r['key'],r['version_no']);require(key in actual)
         scope,hs=actual[key];require((r['scope'],r['horizons'])==(scope,hs))

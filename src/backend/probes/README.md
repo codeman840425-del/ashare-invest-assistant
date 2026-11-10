@@ -144,7 +144,7 @@ p12 新增 **2 次**（`/bj/list/all`、`/kc/list/all`，api 主机）；`/hslt/
 
 | 项 | 做法 | 调用 |
 |---|---|---|
-| GAP1 快照延迟 | 仅在北京时间工作日 9:30–11:30 / 13:00–15:00 内执行（先查交易日历排除节假日）；对 000001 交替取 `real/time`（券商源）与 `hsrl/ssjy`（网络源）各 6 次、间隔 5 秒，延迟 = 本机收到时刻 − 快照 `t`；同时用响应头 `Date` 估算本机与服务端钟差。盘外记“盘后无法测”并跳过。每个 源×股票 和每个源合并后都给 p50/p95/max 两套：未修正、按 NTP 偏差修正（`--local-ahead-s`/`--ntp-file` 提供时；否则 `ntp_offset="unknown"`）；`stale_threshold.ref_p95_s` = 各源修正后 p95 的最大值（无 NTP 时退回未修正 p95 并在 `basis` 注明），建议值 = max(2×参考, 10s) 向上取整（后端经验值，待确认） | 13（盘外 0；`--gap1-codes` N 只时 1+12N） |
+| GAP1 快照延迟 | 仅在北京时间工作日 9:30–11:30 / 13:00–15:00 内执行（先查交易日历排除节假日）；对 000001 交替取 `real/time`（券商源）与 `hsrl/ssjy`（网络源）各 6 次、间隔 5 秒，延迟 = 本机收到时刻 − 快照 `t`；同时用响应头 `Date` 估算本机与服务端钟差。盘外记“盘后无法测”并跳过。每个 源×股票 和每个源合并后都给 p50/p95/max 两套：未修正、按 NTP 偏差修正（`--local-ahead-s`/`--ntp-file` 提供时；否则 `ntp_offset="unknown"`）；**p95 只计与收到时刻同属一个连续竞价时段的样本**；`stale_threshold.ref_p95_s` = 各源修正后 p95 的最大值（无 NTP 时退回未修正 p95 并在 `basis` 注明），`suggested_s` = max(2×参考, 10s) 向上取整（仅作建议值输出，**不写进配置**；`config/realtime.yaml` 的 `stale_threshold_s` 维持 `null`，默认 30s，编排者裁定） | 13（盘外 0；`--gap1-codes` N 只时 1+12N） |
 | GAP2 cje/v 单位 | 对 000001、600519 的快照（复用 GAP1 样本）与最新日线，用 成交额 ÷(成交量 × 价格) 反推单位，要求 VWAP 落在当日最高/最低价之间；与文档对照 | 4（盘外 6） |
 | GAP3 plrq | 600519 / 000001 / 600000 利润表全量 + 600519 资产负债表、现金流量表：最早报告期是否有 plrq、空值率（含 2007 年前）、同报告期多行、疑似更正/版本字段、披露滞后 > 400 天的行 | 5 |
 | GAP4 退市股 | 股票列表 1 次 + 4 只已退市股（600087 长航油运、600432 吉恩镍业、000979 中弘股份、002450 康得新；文档无退市列表接口，代码凭公开报道列举，见源码注释）各取基础信息 / 日线 / 利润表，判断幸存者偏差 | 13 |
@@ -161,7 +161,7 @@ p12 新增 **2 次**（`/bj/list/all`、`/kc/list/all`，api 主机）；`/hslt/
 |---|---|---|
 | `--gap1-codes 000001,600519,300750,688981,920000` | GAP1 采样股票（6 位代码，去重，≤10 只）；每轮依次对每只取两个快照源，轮间停 5 秒 | 盘中 1（交易日历）+ N×2×6；5 只 = **61**/时段；盘外 0 |
 | `--p11-only gap1` | p11 只跑 GAP1（不跑 GAP2–7） | 同上；三个时段共 183 |
-| `--local-ahead-s X`（可重复）/ `--ntp-file F`（可重复） | 本机比 NTP 快多少秒（本机 − NTP，正 = 本机快），多次取均值，用于修正延迟；`--ntp-file` 读 `w32tm /stripchart /computer:ntp.aliyun.com /samples:3 /dataonly` 的输出（按“正值 = 本机比目标快”读入；结论里另和 HTTP `Date` 钟差比对符号，`ntp_sign_check`），原文存进 GAP1 evidence | 0（只读本地文件） |
+| `--local-ahead-s X`（可重复）/ `--ntp-file F`（可重复） | 本机比 NTP 快多少秒（`local_ahead_s` = 本机 − NTP，正值 = 本机快），多次取均值，用于修正延迟；结论另给出 `rfc5905_offset_s` = −`local_ahead_s`（RFC 5905 约定 offset = server − local，正值 = 本机慢）；`--ntp-file` 读 `w32tm /stripchart /computer:ntp.aliyun.com /samples:3 /dataonly` 的输出（按“正值 = 本机比目标快”读入；结论里另和 HTTP `Date` 钟差比对符号，`ntp_sign_check`），原文存进 GAP1 evidence | 0（只读本地文件） |
 | `--p11-only gap6-history [--history-baseline <run_id 或样例目录>]` | 只取 600519 的 profit_yoy、roe_ttm 两条 `factor/history`（完整序列存 `samples/<run_id>/p11_pit_history_*.json`）；给基线时离线逐日比对：已有日期的值变了、插入或删除了日期 → `rewritten`，只有精度差和末尾新增 → `no_rewrite` | **2**（比对 0） |
 | `--p11-only gap6-nulls [--zt-codes a,b]` | 先取当日涨停池 `/hslt/ztgc/<日期>` 并记下取样时刻，只从**当时已在池中**（首次封板时间 `fbt` ≤ 取样时刻）的股票里按封板先后选 2 只（排除原样本），再加 600519、300750、000001、688981、920000 共 7 只各取 `factor/all`，看封板类因子（limit_up_streak/seal_ratio/seal_to_float）在涨停股上是否有值。收盘后复跑用 `--zt-codes` 沿用盘中选出的代码（仍取 1 次涨停池核对是否仍在池中） | **8**（盘中 + 收盘后共 16） |
 | `--p12-only hslt` | p12 只取 `/hslt/list` | 单独 **1**；与完整 p11 同次运行时复用 GAP4 的响应，**0** |

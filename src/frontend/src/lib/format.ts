@@ -1,7 +1,23 @@
 import type { DimensionCell, Evidence } from '../api/types';
 import { PROVIDER } from '../i18n/labels';
-/** 契约时间均为 +08:00；界面统一按北京时间显示 */
-export const fmtTime = (t: string) => t.replace('T', ' ').replace(/\+08:00$/, '').replace(/:00$/, '');
+/** 契约时间均为 +08:00；界面统一按北京时间显示。Z 或其他偏移换算到 Asia/Shanghai；+08:00 输出与旧实现逐字节不变。 */
+export const fmtTime = (t: string) => {
+  if (t.endsWith('+08:00') || !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(t)) {
+    return t.replace('T', ' ').replace(/\+08:00$/, '').replace(/:00$/, '');
+  }
+  const date = new Date(t);
+  if (Number.isNaN(date.getTime())) return t;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const g = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  if (!g('year') || !g('month') || !g('day') || !g('hour') || !g('minute') || !g('second')) return t;
+  const base = `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}`;
+  return g('second') === '00' ? base : `${base}:${g('second')}`;
+};
 export const fmtNum = (v: string | number | null | undefined, digits = 2) =>
   v === null || v === undefined || v === '' || Number.isNaN(Number(v))
     ? '—'

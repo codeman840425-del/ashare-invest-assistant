@@ -72,13 +72,20 @@ export const fmtShanghaiHm = (iso: string | null) => fmtShanghai(iso)?.slice(11)
 
 /**
  * 今日可用底仓（§3.7 ④）：原样取后端 sellable_qty，不自行截断。
- * 违反契约（大于 base_qty 或为负）时返回 'violation'，界面显示「—」并附「数据核对中」。
+ * 违反契约（sellable_qty 大于 base_qty，或 base_qty / sellable_qty 为负）时返回 'violation'，界面显示「—」并附「数据核对中」。比较用有符号十进制，不用绝对值。
  */
 export function availableBase(v: Pick<TView, 'base_qty' | 'sellable_qty'>): string | null | 'violation' {
   if (!isDec(v.sellable_qty)) return null;
   const s = v.sellable_qty.trim();
   if (s.startsWith('-') && !/^-0*(\.0*)?$/.test(s)) return 'violation';
-  if (isDec(v.base_qty) && !absAtLeast(v.base_qty, s.replace(/^[+-]/, ''))) return 'violation';
+  if (isDec(v.base_qty)) {
+    const base = v.base_qty.trim().match(DEC_RE)!;
+    const sellable = s.match(DEC_RE)!;
+    const scale = Math.max((base[3] ?? '').length, (sellable[3] ?? '').length);
+    const signed = (m: RegExpMatchArray) => BigInt(`${m[1] === '-' ? '-' : ''}${m[2]}${(m[3] ?? '').padEnd(scale, '0')}`);
+    const baseQty = signed(base);
+    if (baseQty < 0n || signed(sellable) > baseQty) return 'violation';
+  }
   return s;
 }
 

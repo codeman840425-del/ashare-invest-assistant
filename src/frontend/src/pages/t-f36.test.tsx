@@ -98,6 +98,7 @@ describe('T-F36 做 T 视图（契约 §5.2 四条）', () => {
     expect(availableBase({ base_qty: '1000', sellable_qty: '1000' })).toBe('1000');
     expect(availableBase({ base_qty: '1000', sellable_qty: '1500' })).toBe('violation');
     expect(availableBase({ base_qty: '1000', sellable_qty: '-5' })).toBe('violation');
+    expect(availableBase({ base_qty: '-100', sellable_qty: '50' })).toBe('violation');
     expect(availableBase({ base_qty: null, sellable_qty: '300' })).toBe('300');
     expect(availableBase({ base_qty: '1000', sellable_qty: null })).toBeNull();
     await setup([row({ ...TV, base_qty: '1000', sellable_qty: '1500' })]);

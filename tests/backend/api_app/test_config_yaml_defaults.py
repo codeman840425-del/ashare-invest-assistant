@@ -56,7 +56,6 @@ CONFIG_DIR = Path(os.environ.get("AIA_CONFIG_DIR") or REPO_ROOT / "config").reso
 
 #: T-A02 改动的文件 → 负责同步仓库文件与后端模型的任务
 OWNER = {
-    "market_rules": "后端 T-B36（交易规则模块：modeled_from / adv_basis / risk_warning，第二段 2023-04-10；v0.2.3 applies_to_boards 加 chinext、新增 limit_order_only_exchanges）",
     "horizon_classifier": "后端 T-B30（周期分类：f.* 特征、recompute 加 position_open_close、rules 全文；v0.2.5 version_no 3 / classifier_version 1.2.0 / 画像类 requires 为 mode: hint，T-A06 §3）",
     "llm": "后端 T-B25（LLM 网关：config/llm.yaml 与其模型）",
     "imports": "后端 T-B02a 跟进（T-A05：新建 config/imports.yaml 与模型，键路径 imports.*，删除 ingest.imports.*）",
@@ -484,6 +483,8 @@ def _repo_file(name: str) -> Path:
         p = CONFIG_DIR / f"{name}{ext}"
         if p.is_file():
             return p
+    if name == "market_rules":
+        pytest.fail(f"{CONFIG_DIR.name}/market_rules.yaml 缺失：已同步的仓库默认值必须存在")
     if name in OWNER and any((CONFIG_DIR / f"{n}.yaml").is_file() for n in NAMES):
         pytest.xfail(f"{CONFIG_DIR.name}/{name}.yaml 未创建（plan §6.1）：{OWNER[name]}")
     pytest.skip(f"{CONFIG_DIR}/{name}.yaml 尚未创建（依赖 T-B01 后续 / T-B02：plan §6.1 文件由后端创建）")
@@ -497,7 +498,7 @@ def test_repo_yaml_equals_plan_defaults(name):
         pytest.xfail(V029_BACKEND_PENDING_BY.get(name, V029_BACKEND_PENDING))
     if diffs and name in OWNER:
         pytest.xfail(f"仓库 config/{name}.yaml 与 plan §6.1 快照不一致 {diffs[:8]}：{OWNER[name]}")
-    assert diffs == []
+    assert diffs == [], f"仓库 config/{name}.yaml 与 plan §6.1 快照不一致：{diffs[:8]}"
 
 
 def test_repo_yaml_loads_in_settings(backend, cfgtools, clean_env, monkeypatch):

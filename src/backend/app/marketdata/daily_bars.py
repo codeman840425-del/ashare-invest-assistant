@@ -8,9 +8,9 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
-from typing import Protocol
+from typing import Final, Protocol
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Connection
 
@@ -20,11 +20,16 @@ from app.common.errors import AppError
 from app.config import Settings
 from app.db.tables.market import daily_bars, securities, trading_calendar
 from app.db.tables.realtime import pipeline_runs
+from app.db.tables.research import watchlist_items
 from app.db.tables.users import users
 from app.reports.service import covered
 from app.schemas.enums import GapReason
 
 DAILY_BARS_FETCH: str = "daily_bars_fetch"
+UPSERT_BATCH_ROWS: Final[int] = 1000
+UPSERT_PARAMS_PER_ROW: Final[int] = 14
+if UPSERT_BATCH_ROWS * UPSERT_PARAMS_PER_ROW > 65535:
+    raise RuntimeError("UPSERT_BATCH_ROWS exceeds PostgreSQL bind parameter limit")
 _STEP: str = "daily_bars.fetch"
 _KIND: str = "daily_batch"
 _MONEY_Q = Decimal("0.0001")
@@ -75,6 +80,8 @@ class UpsertStats:
 
 
 class DailyBarsSource(Protocol):
+    name: str
+
     def fetch(
         self, codes: Sequence[str], start: dt.date, end: dt.date, adjust: str
     ) -> DailyBarsResult:
@@ -124,6 +131,8 @@ def _days(start: dt.date, end: dt.date) -> list[dt.date]:
 
 class FakeDailyBarsSource:
     """仅测试使用的确定日 K 假源。missing 优先于 suspended。"""
+
+    name: str = "fake"
 
     def __init__(
         self, *, missing: Sequence[str] = (), suspended: Sequence[str] = ()
@@ -251,72 +260,88 @@ def upsert_daily_bars(
     if not result.bars:
         return UpsertStats(inserted=0, unchanged=0, conflicts=0, issues=())
 
-    values = [
-        {
-            "code": bar.code,
-            "trade_date": bar.trade_date,
-            "adj_type": bar.adj_type,
-            "open": bar.open,
-            "high": bar.high,
-            "low": bar.low,
-            "close": bar.close,
-            "pre_close": bar.pre_close,
-            "volume": bar.volume,
-            "amount": bar.amount,
-            "is_suspended": bar.is_suspended,
-            "source": source,
-            "source_licence_id": licence_id,
-            "fetched_at": fetched_at,
-        }
-        for bar in result.bars
-    ]
-    ret = conn.execute(
-        pg_insert(daily_bars)
-        .values(values)
-        .on_conflict_do_nothing(index_elements=["code", "trade_date", "adj_type"])
-        .returning(daily_bars.c.code, daily_bars.c.trade_date, daily_bars.c.adj_type)
-    ).all()
-    inserted_keys = {(r.code, r.trade_date, r.adj_type) for r in ret}
-    inserted = len(inserted_keys)
-    leftovers = [
-        bar for bar in result.bars if (bar.code, bar.trade_date, bar.adj_type) not in inserted_keys
-    ]
-    if leftovers:
-        existing = conn.execute(
-            select(daily_bars).where(
-                daily_bars.c.code.in_({b.code for b in leftovers}),
-                daily_bars.c.trade_date.in_({b.trade_date for b in leftovers}),
-                daily_bars.c.adj_type.in_({b.adj_type for b in leftovers}),
-            )
-        ).mappings()
-        by_pk = {(r["code"], r["trade_date"], r["adj_type"]): r for r in existing}
-        for bar in leftovers:
-            row = by_pk.get((bar.code, bar.trade_date, bar.adj_type))
-            if row is None:
-                continue
-            if _bar_key(bar) == _value_key(row):
-                unchanged += 1
-            else:
-                conflicts += 1
-                issues.append(f"daily_bar_conflict:{bar.code}:{bar.trade_date.isoformat()}")
-    issues.sort()
+    ordered = sorted(result.bars, key=lambda bar: (bar.code, bar.trade_date, bar.adj_type))
+    for offset in range(0, len(ordered), UPSERT_BATCH_ROWS):
+        chunk = ordered[offset : offset + UPSERT_BATCH_ROWS]
+        values = [
+            {
+                "code": bar.code,
+                "trade_date": bar.trade_date,
+                "adj_type": bar.adj_type,
+                "open": bar.open,
+                "high": bar.high,
+                "low": bar.low,
+                "close": bar.close,
+                "pre_close": bar.pre_close,
+                "volume": bar.volume,
+                "amount": bar.amount,
+                "is_suspended": bar.is_suspended,
+                "source": source,
+                "source_licence_id": licence_id,
+                "fetched_at": fetched_at,
+            }
+            for bar in chunk
+        ]
+        ret = conn.execute(
+            pg_insert(daily_bars)
+            .values(values)
+            .on_conflict_do_nothing(index_elements=["code", "trade_date", "adj_type"])
+            .returning(daily_bars.c.code, daily_bars.c.trade_date, daily_bars.c.adj_type)
+        ).all()
+        inserted_keys = {(r.code, r.trade_date, r.adj_type) for r in ret}
+        inserted += len(inserted_keys)
+        leftovers = [
+            bar for bar in chunk if (bar.code, bar.trade_date, bar.adj_type) not in inserted_keys
+        ]
+        if leftovers:
+            keys = [(bar.code, bar.trade_date, bar.adj_type) for bar in leftovers]
+            existing = conn.execute(
+                select(daily_bars).where(
+                    tuple_(
+                        daily_bars.c.code, daily_bars.c.trade_date, daily_bars.c.adj_type
+                    ).in_(keys)
+                )
+            ).mappings()
+            by_pk = {(r["code"], r["trade_date"], r["adj_type"]): r for r in existing}
+            for bar in leftovers:
+                row = by_pk.get((bar.code, bar.trade_date, bar.adj_type))
+                if row is None:
+                    continue
+                if _bar_key(bar) == _value_key(row):
+                    unchanged += 1
+                else:
+                    conflicts += 1
+                    issues.append(f"daily_bar_conflict:{bar.code}:{bar.trade_date.isoformat()}")
     return UpsertStats(
-        inserted=inserted, unchanged=unchanged, conflicts=conflicts, issues=tuple(issues)
+        inserted=inserted,
+        unchanged=unchanged,
+        conflicts=conflicts,
+        issues=tuple(sorted(set(issues))),
     )
 
 
 def daily_universe(
     conn: Connection, owner: uuid.UUID, trade_date: dt.date
 ) -> list[str]:
-    """单用户宇宙：持仓中 type=stock 且 listing_status=listed 的代码，去重后升序。
+    """单用户宇宙：合格持仓 ∪ 本人有效自选，去重后升序。
 
-    listing_status 为空视为不合格，不按 listed 推断。
+    listing_status 为空视为不合格，不按 listed 推断。不含实例标的。
     """
     raw: set[str] = set()
     account_id = select_account(conn, owner, None)
     if account_id is not None:
         for code in _account(conn, account_id, trade_date).positions:
             raw.add(code)
+    raw.update(
+        conn.execute(
+            select(watchlist_items.c.security_code).where(
+                watchlist_items.c.user_id == owner,
+                watchlist_items.c.removed_at.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
     if not raw:
         return []
     listed = (
@@ -406,6 +431,31 @@ def _as_user(user_id: uuid.UUID | str | None) -> uuid.UUID | None:
     if user_id is None:
         return None
     return user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(str(user_id))
+
+
+
+def backfill_window_days(conn: Connection, trade_date: dt.date, years: int) -> int | None:
+    """[start, trade_date] 日历齐全时，返回 (start, trade_date] 的开市日数；否则 None。"""
+    if type(years) is not int or years <= 0:
+        raise ValueError("years must be a positive integer")
+    try:
+        start = trade_date.replace(year=trade_date.year - years)
+    except ValueError:
+        start = trade_date.replace(year=trade_date.year - years, day=28)
+    span = (trade_date - start).days + 1
+    rows = conn.execute(
+        select(trading_calendar.c.date, trading_calendar.c.is_open).where(
+            trading_calendar.c.date >= start,
+            trading_calendar.c.date <= trade_date,
+        )
+    ).all()
+    if len(rows) != span:
+        return None
+    present = {row.date for row in rows}
+    expected = {start + dt.timedelta(days=offset) for offset in range(span)}
+    if present != expected:
+        return None
+    return sum(1 for row in rows if row.is_open and start < row.date <= trade_date)
 
 
 def fetch_and_record(
@@ -503,7 +553,7 @@ def _run_fetch(
     upsert = upsert_daily_bars(
         conn,
         DailyBarsResult(bars=kept, gaps=raw.gaps, halted=raw.halted),
-        source="fake",
+        source=source.name,
         licence_id=None,
         fetched_at=fetched_at,
     )

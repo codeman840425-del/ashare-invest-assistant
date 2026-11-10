@@ -60,6 +60,9 @@ CODE_C = "300364.SZ"
 CODE_D = "510300.SH"
 CODE_E = "600000.SH"
 CODE_F = "600001.SH"
+CODE_E2 = "600002.SH"
+CODE_C2 = "600003.SH"
+CODE_G = "600004.SH"
 
 DAY_0606 = dt.date(2026, 11, 6)
 DAY_0707 = dt.date(2026, 11, 7)
@@ -240,8 +243,11 @@ def _seed_holdings(
     return account
 
 
-def _seed_watch_and_instance(conn: Any, user_id: uuid.UUID, account_id: uuid.UUID) -> None:
-    conn.execute(insert(watchlist_items).values(user_id=user_id, security_code=CODE_E))
+def _seed_watch_and_instance(
+    conn: Any, user_id: uuid.UUID, account_id: uuid.UUID, *, watch: bool = True
+) -> None:
+    if watch:
+        conn.execute(insert(watchlist_items).values(user_id=user_id, security_code=CODE_E))
     template, version, instance = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     conn.execute(
         insert(strategies).values(
@@ -336,9 +342,8 @@ def world() -> Iterator[dict[str, Any]]:
             _seed_securities(conn)
             _seed_user(conn, u1, "tb127_u1")
             _seed_user(conn, u2, "tb127_u2")
-            acc1 = _seed_holdings(conn, u1, (CODE_A, CODE_B, CODE_D), tag="u1")
+            _seed_holdings(conn, u1, (CODE_A, CODE_B, CODE_D), tag="u1")
             _seed_holdings(conn, u2, (CODE_C,), tag="u2")
-            _seed_watch_and_instance(conn, u1, acc1)
         yield {"engine": engine, "url": url, "name": name, "u1": u1, "u2": u2}
     finally:
         raw = url.render_as_string(hide_password=False)
@@ -355,6 +360,7 @@ def db(world: dict[str, Any]) -> Iterator[dict[str, Any]]:
     engine: Engine = world["engine"]
     with engine.begin() as conn:
         conn.execute(text("TRUNCATE market.daily_bars, app.pipeline_runs"))
+        conn.execute(text("TRUNCATE app.watchlist_items"))
     yield world
 
 
@@ -376,10 +382,12 @@ def test_task_registered_locked_not_retried() -> None:
 
 
 def test_task_user_scope_union_and_single(db: dict[str, Any]) -> None:
+    """§8.2：不给 user_id 时并集含 u2 有效自选 E；user_id=u1 时不写 E。"""
     mod = _import_impl()
     engine, url, u1, u2 = db["engine"], db["url"], db["u1"], db["u2"]
     trade = DAY_1010.isoformat()
     with engine.begin() as conn:
+        conn.execute(insert(watchlist_items).values(user_id=u2, security_code=CODE_E))
         inserted = mod.fetch_and_record(
             conn,
             mod.FakeDailyBarsSource(),
@@ -387,10 +395,10 @@ def test_task_user_scope_union_and_single(db: dict[str, Any]) -> None:
             user_id=None,
             window_trading_days=None,
         )
-        assert inserted == 3
-        assert _codes_on(conn, DAY_1010) == [CODE_C, CODE_A, CODE_B]
+        assert inserted == 4
+        assert _codes_on(conn, DAY_1010) == sorted([CODE_C, CODE_A, CODE_B, CODE_E])
         assert _run_count(conn) == 1
-        assert _runs(conn)[0]["stats"]["codes"] == 3
+        assert _runs(conn)[0]["stats"]["codes"] == 4
 
     with engine.begin() as conn:
         conn.execute(text("TRUNCATE market.daily_bars, app.pipeline_runs"))
@@ -403,6 +411,7 @@ def test_task_user_scope_union_and_single(db: dict[str, Any]) -> None:
         )
         assert inserted == 2
         assert _codes_on(conn, DAY_1010) == [CODE_A, CODE_B]
+        assert CODE_E not in _codes_on(conn, DAY_1010)
 
     with engine.begin() as conn:
         conn.execute(text("TRUNCATE market.daily_bars, app.pipeline_runs"))
@@ -413,15 +422,15 @@ def test_task_user_scope_union_and_single(db: dict[str, Any]) -> None:
             user_id=u2,
             window_trading_days=None,
         )
-        assert inserted == 1
-        assert _codes_on(conn, DAY_1010) == [CODE_C]
+        assert inserted == 2
+        assert _codes_on(conn, DAY_1010) == [CODE_C, CODE_E]
 
     settings = _settings(url, source="fake")
     with engine.begin() as conn:
         conn.execute(text("TRUNCATE market.daily_bars, app.pipeline_runs"))
-    assert jobs_mod.TASKS[mod.DAILY_BARS_FETCH](settings, trade) == 3
+    assert jobs_mod.TASKS[mod.DAILY_BARS_FETCH](settings, trade) == 4
     with engine.begin() as conn:
-        assert _codes_on(conn, DAY_1010) == [CODE_C, CODE_A, CODE_B]
+        assert _codes_on(conn, DAY_1010) == sorted([CODE_C, CODE_A, CODE_B, CODE_E])
 
 
 def test_mairui_before_c_is_inert(db: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -525,10 +534,12 @@ def test_no_settings_field_for_window() -> None:
     assert not hasattr(Settings(), "window_trading_days")
 
 
-def test_daily_bars_fetch_never_scheduled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_daily_bars_fetch_slot_1715_open_day_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """§8.4：covered 为真时仅 17:15/17:20/17:25 出现；不进 schedule。"""
     mod = _import_impl()
     name = mod.DAILY_BARS_FETCH
-    assert name not in jobs_mod.schedule(Settings(_env_file=None, app_env="test", session_cookie_secure=False))
+    settings = Settings(_env_file=None, app_env="test", session_cookie_secure=False)
+    assert name not in jobs_mod.schedule(settings)
 
     class _Conn:
         def __enter__(self) -> _Conn:
@@ -541,22 +552,28 @@ def test_daily_bars_fetch_never_scheduled(monkeypatch: pytest.MonkeyPatch) -> No
         def connect(self) -> _Conn:
             return _Conn()
 
-    monkeypatch.setattr(jobs_mod, "_engine", lambda settings: _Eng())
-    monkeypatch.setattr("app.reports.service.covered", lambda conn, day: True)
-    settings = Settings(_env_file=None, app_env="test", session_cookie_secure=False)
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(jobs_mod, "_engine", lambda _settings: _Eng())
+    monkeypatch.setattr("app.reports.service.covered", lambda _conn, _day: True)
     beijing = dt.timezone(dt.timedelta(hours=8))
     day = DAY_1010
-    seen: set[str] = set()
+    hits: list[tuple[int, int, str, dict[str, Any]]] = []
     for minute in range(0, 24 * 60, 5):
         now = dt.datetime(day.year, day.month, day.day, minute // 60, minute % 60, tzinfo=beijing)
-        for task_name, _hhmm, _args in jobs_mod.slot_jobs(settings, now):
-            seen.add(task_name)
-            assert task_name != name
-    # 显式撞上已知钟点，避免网格漏窗
-    for hhmm in ("03:30", "17:30", "18:00", "18:30"):
-        h, m = (int(p) for p in hhmm.split(":"))
-        now = dt.datetime(day.year, day.month, day.day, h, m, tzinfo=beijing)
-        for task_name, _hhmm, _args in jobs_mod.slot_jobs(settings, now):
+        for task_name, slot, args in jobs_mod.slot_jobs(settings, now):
+            if task_name == name:
+                hits.append((now.hour, now.minute, slot, args))
+    assert [(h, m) for h, m, _s, _a in hits] == [(17, 15), (17, 20), (17, 25)]
+    expect_slot = f"{day:%Y%m%d}:1715"
+    expect_args = {"trade_date": day.isoformat()}
+    assert all(slot == expect_slot and args == expect_args for _h, _m, slot, args in hits)
+
+    monkeypatch.setattr("app.reports.service.covered", lambda _conn, _day: False)
+    for minute in range(0, 24 * 60, 5):
+        now = dt.datetime(day.year, day.month, day.day, minute // 60, minute % 60, tzinfo=beijing)
+        for task_name, _slot, _args in jobs_mod.slot_jobs(settings, now):
             assert task_name != name
 
 
@@ -1201,20 +1218,54 @@ def test_only_writer_inserts_daily_bars() -> None:
     assert writers == [], writers
 
 
-def test_universe_holdings_only_until_clarified(db: dict[str, Any]) -> None:
-    mod = _import_impl()
-    engine = db["engine"]
-    with engine.begin() as conn:
-        mod.fetch_and_record(
-            conn,
-            mod.FakeDailyBarsSource(),
-            trade_date=DAY_1010,
-            user_id=db["u1"],
-            window_trading_days=None,
+def _seed_universe_extras(conn: Any, u1: uuid.UUID, u2: uuid.UUID) -> None:
+    for code, typ, name, status, _removed in (
+        (CODE_E2, "stock", "合成E2", "listed", AT),
+        (CODE_C2, "stock", "合成C2", "listed", None),
+        (CODE_G, "stock", "合成G", None, None),
+    ):
+        conn.execute(
+            insert(securities).values(
+                code=code, type=typ, name=name, exchange="SH", board="main", listing_status=status
+            )
         )
-        assert _codes_on(conn, DAY_1010) == [CODE_A, CODE_B]
-        for excluded in (CODE_C, CODE_D, CODE_E, CODE_F):
-            n = conn.execute(
-                select(func.count()).select_from(daily_bars).where(daily_bars.c.code == excluded)
-            ).scalar_one()
-            assert n == 0, excluded
+    # E 已在公共种子的证券表中；有效自选 E、重复自选 A、ETF 自选 D、已移除 E2
+    conn.execute(insert(watchlist_items).values(user_id=u1, security_code=CODE_E))
+    conn.execute(insert(watchlist_items).values(user_id=u1, security_code=CODE_A))
+    conn.execute(insert(watchlist_items).values(user_id=u1, security_code=CODE_D))
+    conn.execute(
+        insert(watchlist_items).values(user_id=u1, security_code=CODE_E2, removed_at=AT)
+    )
+    conn.execute(insert(watchlist_items).values(user_id=u2, security_code=CODE_C2))
+    # listing_status 为空的持仓 G + 实例 F
+    acc = conn.execute(select(accounts.c.id).where(accounts.c.user_id == u1)).scalar_one()
+    _seed_watch_and_instance(conn, u1, acc, watch=False)
+    snap = conn.execute(
+        select(broker_position_snapshots.c.id)
+        .where(broker_position_snapshots.c.account_id == acc)
+        .limit(1)
+    ).scalar_one()
+    conn.execute(
+        insert(broker_position_snapshot_items).values(
+            id=uuid.uuid4(),
+            snapshot_id=snap,
+            security_code=CODE_G,
+            quantity=Decimal("100"),
+            sellable_quantity=Decimal("100"),
+            broker_cost_price=Decimal("10"),
+            last_price_ref=Decimal("10"),
+        )
+    )
+
+
+def test_universe_holdings_and_active_watchlist(db: dict[str, Any]) -> None:
+    """§8.2：u1 为 sorted([A, B, E])；排除 E2/D/F/G/C/C2，A 只出现一次。"""
+    mod = _import_impl()
+    engine, u1, u2 = db["engine"], db["u1"], db["u2"]
+    with engine.begin() as conn:
+        _seed_universe_extras(conn, u1, u2)
+        got = mod.daily_universe(conn, u1, DAY_1010)
+    assert got == sorted([CODE_A, CODE_B, CODE_E])
+    for excluded in (CODE_E2, CODE_D, CODE_F, CODE_G, CODE_C, CODE_C2):
+        assert excluded not in got
+    assert got.count(CODE_A) == 1

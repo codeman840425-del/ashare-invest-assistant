@@ -114,6 +114,7 @@ RECONCILE_VENDOR: Final = "master.reconcile_vendor"
 RECONCILE_VENDOR_APPLY: Final = "master.reconcile_vendor_apply"
 VENDOR_SWEEP: Final = "master.vendor_batches_sweep"
 CODE_MAP_TIME: Final = "18:30"
+DAILY_BARS_FETCH_TIME: Final = "17:15"
 PURGE_SNAPSHOTS_TIME: Final = "03:30"
 
 
@@ -491,6 +492,15 @@ def slot_jobs(settings: Settings, now: dt.datetime) -> list[tuple[str, str, dict
     plan: list[tuple[str, str, dict[str, Any], bool]] = [
         (PURGE_SNAPSHOTS, PURGE_SNAPSHOTS_TIME, {}, True),
     ]
+    start1715 = dt.datetime.combine(bj.date(), _hhmm(DAILY_BARS_FETCH_TIME), BEIJING)
+    if start1715 <= bj < start1715 + dt.timedelta(seconds=SLOT_WINDOW_S):
+        from app.reports.service import covered
+
+        with _engine(settings).connect() as conn:
+            is_open = covered(conn, bj.date())
+        plan.append(
+            (DAILY_BARS_FETCH, DAILY_BARS_FETCH_TIME, {"trade_date": str(bj.date())}, is_open)
+        )
     start1800 = dt.datetime.combine(bj.date(), dt.time(18), BEIJING)
     if start1800 <= bj < start1800 + dt.timedelta(seconds=SLOT_WINDOW_S):
         from app.reports.service import covered

@@ -78,6 +78,7 @@ CODE_A = "688018.SH"
 CODE_B = "688073.SH"
 CODE_C = "300364.SZ"
 CODE_E = "600001.SH"
+CODE_E2 = "600002.SH"
 CODE_H = "600000.SH"
 
 DAY_0606 = dt.date(2026, 11, 6)
@@ -365,8 +366,26 @@ def _seed_holdings(conn: Any, user_id: uuid.UUID, codes: tuple[str, ...], *, tag
     return account
 
 
-def _seed_watchlist(conn: Any, user_id: uuid.UUID, code: str = CODE_E) -> None:
-    conn.execute(insert(watchlist_items).values(user_id=user_id, security_code=code))
+def _seed_watchlist(
+    conn: Any,
+    user_id: uuid.UUID,
+    code: str = CODE_E,
+    *,
+    removed_at: dt.datetime | None = None,
+) -> None:
+    conn.execute(
+        insert(watchlist_items).values(
+            user_id=user_id, security_code=code, removed_at=removed_at
+        )
+    )
+
+
+def _seed_extra_security(conn: Any, code: str, name: str) -> None:
+    conn.execute(
+        insert(securities).values(
+            code=code, type="stock", name=name, exchange="SH", board="main", listing_status="listed"
+        )
+    )
 
 
 def _seed_core(conn: Any) -> uuid.UUID:
@@ -376,7 +395,6 @@ def _seed_core(conn: Any) -> uuid.UUID:
     _seed_user(conn, U2, "tb128_u2")
     account = _seed_holdings(conn, U1, (CODE_A, CODE_B, CODE_H), tag="u1")
     _seed_holdings(conn, U2, (CODE_C,), tag="u2")
-    _seed_watchlist(conn, U1)
     return account
 
 
@@ -588,6 +606,19 @@ def test_ready_carries_only_owner_issues(temp_db: Engine) -> None:
         ready, issues = snap.daily_bars_ready(conn, U1, DAY_1010)
         assert ready is True
         assert issues == (f"daily_bars_missing:{CODE_A}",)
+        # §11.1 加一组：u1 有效自选 C 时，应带出 daily_bars_missing:C
+        conn.execute(delete(pipeline_runs))
+        _seed_watchlist(conn, U1, CODE_C)
+        _insert_run(
+            conn,
+            status="partial",
+            started_at=t0,
+            finished_at=t0,
+            issues=[f"daily_bars_missing:{CODE_A}", f"daily_bars_missing:{CODE_C}"],
+        )
+        ready, issues = snap.daily_bars_ready(conn, U1, DAY_1010)
+        assert ready is True
+        assert f"daily_bars_missing:{CODE_C}" in issues
 
 
 def test_snapshot_shape_fields_from_daily_bars(temp_db: Engine) -> None:
@@ -794,17 +825,24 @@ def test_snapshot_calendar_hole_not_built(temp_db: Engine) -> None:
 
 
 def test_snapshot_only_owner_universe(temp_db: Engine) -> None:
+    """§11.1：u1 快照 instruments 恰为 A、B、E（另加 omitted 中的 H），不含 C、E2。"""
     snap = _import_impl()
     with temp_db.begin() as conn:
         _seed_core(conn)
+        _seed_extra_security(conn, CODE_E2, "合成E2")
+        _seed_watchlist(conn, U1, CODE_E)
+        _seed_watchlist(conn, U1, CODE_E2, removed_at=AT)
         _fetch_bars(conn)
-        ident, _ = snap.build_owned_snapshot(conn, U1, DAY_1010)
+        ident, issues = snap.build_owned_snapshot(conn, U1, DAY_1010)
+        assert ident is not None
         items = _owned_row(conn, ident).items
-        codes = {i["security_code"] for i in items["instruments"]} | {
-            row["security_code"] for row in items["omitted"]
-        }
-        assert CODE_C not in codes
-        assert CODE_E not in codes
+        inst = {i["security_code"] for i in items["instruments"]}
+        omitted = {row["security_code"] for row in items["omitted"]}
+        assert inst == {CODE_A, CODE_B, CODE_E}
+        assert CODE_H in omitted
+        assert f"security_board_missing:{CODE_H}" in issues
+        assert CODE_C not in inst and CODE_C not in omitted
+        assert CODE_E2 not in inst and CODE_E2 not in omitted
 
 
 def test_owned_snapshot_idempotent_rerun(temp_db: Engine) -> None:
@@ -1222,3 +1260,128 @@ def test_placeholder_rows_ignored_by_price_readers(temp_db: Engine) -> None:
                 price = row.get("price") or row.get("last_price") or row.get("market_price")
                 if price is not None:
                     assert Decimal(str(price)) != 0
+
+
+def test_analyze_watchlist_code_evaluated(
+    temp_db: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§11.1：u1 有效自选 E 当日有行时，analyze 对 E 求值且无 owned_source_security_missing:E。"""
+    settings = _settings(temp_db.url, source="fake")
+    monkeypatch.setattr("app.workers.daily.require_isolated", lambda *_a, **_k: None)
+    snap = _import_impl()
+    with temp_db.begin() as conn:
+        account = _seed_core(conn)
+        policy = _seed_policy(conn)
+        _seed_instance(conn, U1, account)
+        _seed_watchlist(conn, U1, CODE_E)
+        _fetch_bars(conn)
+        outcome = analyze(conn, settings, U1, DAY_1010, "user", policy)
+        ev = {row["security_code"]: row for row in outcome["evaluations"]}
+        assert CODE_E in ev
+        ident, _ = snap.build_owned_snapshot(conn, U1, DAY_1010)
+        digest = _owned_row(conn, ident).hash
+        assert ev[CODE_E]["source_hash"] == digest
+        assert f"owned_source_security_missing:{CODE_E}" not in outcome["issues"]
+
+
+def test_snapshot_watchlist_change_new_id(temp_db: Engine) -> None:
+    """§11.1：同日加有效自选后再 build，id 不同，旧行保留，load_inputs 取后者。"""
+    import time
+
+    snap = _import_impl()
+    with temp_db.begin() as conn:
+        _seed_core(conn)
+        _fetch_bars(conn)
+        first, _ = snap.build_owned_snapshot(conn, U1, DAY_1010)
+        assert first is not None
+    time.sleep(0.05)
+    with temp_db.begin() as conn:
+        _seed_watchlist(conn, U1, CODE_E)
+        _fetch_bars(conn)
+        second, _ = snap.build_owned_snapshot(conn, U1, DAY_1010)
+        assert second is not None and second != first
+        rows = conn.execute(
+            select(data_snapshots.c.id).where(
+                data_snapshots.c.user_id == U1,
+                data_snapshots.c["items"]["schema_version"].astext == snap.OWNED_VERSION,
+            )
+        ).scalars().all()
+        assert first in rows and second in rows
+        now = dt.datetime(2026, 11, 10, 23, 0, tzinfo=BEIJING)
+        loaded = dimensions.load_inputs(conn, U1, CODE_A, DAY_1010, now)
+        assert loaded["sources"]
+        assert loaded["sources"][0]["id"] == str(second)
+
+
+def test_snapshot_includes_backfilled_history(temp_db: Engine) -> None:
+    """§11.2：回填的 11-06、11-09 与当日 11-10 均入选且 is_final 为真；omitted 不含 A、B。"""
+    from app.marketdata.daily_bars import FakeDailyBarsSource, fetch_and_record
+
+    snap = _import_impl()
+    with temp_db.begin() as conn:
+        _seed_core(conn)
+        fetch_and_record(
+            conn,
+            FakeDailyBarsSource(),
+            trade_date=DAY_0909,
+            user_id=U1,
+            window_trading_days=2,
+            fetched_at=dt.datetime(2026, 11, 9, 20, 0, tzinfo=BEIJING),
+        )
+        fetch_and_record(
+            conn,
+            FakeDailyBarsSource(),
+            trade_date=DAY_1010,
+            user_id=U1,
+            window_trading_days=None,
+            fetched_at=dt.datetime(2026, 11, 10, 17, 15, tzinfo=BEIJING),
+        )
+        ident, _issues = snap.build_owned_snapshot(conn, U1, DAY_1010)
+        assert ident is not None
+        items = _owned_row(conn, ident).items
+        omitted = {row["security_code"] for row in items["omitted"]}
+        assert CODE_A not in omitted and CODE_B not in omitted
+        for code in (CODE_A, CODE_B):
+            inst = next(i for i in items["instruments"] if i["security_code"] == code)
+            days = {b["trade_date"]: b for b in inst["bars"]}
+            for day in (DAY_0606, DAY_0909, DAY_1010):
+                assert day.isoformat() in days
+                assert days[day.isoformat()]["is_final"] is True
+
+
+def test_late_fetch_row_used_as_history_next_day(temp_db: Engine) -> None:
+    """§11.3：11-09 17:35 取到的 A 当日 omitted 为 after_asof；次日作为历史 bar 且 is_final。"""
+    from app.marketdata.daily_bars import FakeDailyBarsSource, fetch_and_record
+
+    snap = _import_impl()
+    with temp_db.begin() as conn:
+        _seed_core(conn)
+        fetch_and_record(
+            conn,
+            FakeDailyBarsSource(),
+            trade_date=DAY_0909,
+            user_id=U1,
+            window_trading_days=None,
+            fetched_at=dt.datetime(2026, 11, 9, 17, 35, tzinfo=BEIJING),
+        )
+        ident_09, issues_09 = snap.build_owned_snapshot(conn, U1, DAY_0909)
+        assert ident_09 is not None
+        items_09 = _owned_row(conn, ident_09).items
+        omitted_09 = {row["security_code"] for row in items_09["omitted"]}
+        assert CODE_A in omitted_09
+        assert f"daily_bars_after_asof:{CODE_A}" in issues_09
+        fetch_and_record(
+            conn,
+            FakeDailyBarsSource(),
+            trade_date=DAY_1010,
+            user_id=U1,
+            window_trading_days=None,
+            fetched_at=dt.datetime(2026, 11, 10, 17, 15, tzinfo=BEIJING),
+        )
+        ident_10, _ = snap.build_owned_snapshot(conn, U1, DAY_1010)
+        assert ident_10 is not None
+        items_10 = _owned_row(conn, ident_10).items
+        inst = next(i for i in items_10["instruments"] if i["security_code"] == CODE_A)
+        bars = {b["trade_date"]: b for b in inst["bars"]}
+        assert DAY_0909.isoformat() in bars
+        assert bars[DAY_0909.isoformat()]["is_final"] is True

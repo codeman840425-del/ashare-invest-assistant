@@ -417,11 +417,20 @@ def latest_manifest(audit_dir: Path, kind: Kind) -> tuple[str, Manifest | None] 
     return name, parse_manifest((audit_dir / name).read_text(encoding="utf-8"))
 
 
-def _write_new(path: Path, text: str) -> None:
+def _write_new(path: Path, text: str, *, run_id: str) -> None:
     tmp = path.with_name(path.name + ".part")
-    with tmp.open("x", encoding="utf-8") as fh:
-        fh.write(text)
-    os.replace(tmp, path)
+    fh = tmp.open("x", encoding="utf-8")
+    try:
+        with fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        # 清单 .part：open("x") 成功后出错则删本次文件并记 warning，原样抛出。
+        # open("x") 失败不进这里，不会删事先已存在的 .part。
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        logger.warning("tdx 导入中途出错，已清理清单临时文件 %s（run_id=%s）", tmp.name, run_id)
+        raise
 
 
 # ---------------------------------------------------------------- 重叠对账（只读）
@@ -588,7 +597,7 @@ def run_import(
     stamp = now.astimezone(BEIJING).strftime("%Y%m%dT%H%M%S")
     report.manifest_name = f"tdx-{kind}-manifest-{stamp}-{run_id}.txt"
     report.manifest_sha256 = manifest.sha256
-    _write_new(audit / report.manifest_name, manifest.text)
+    _write_new(audit / report.manifest_name, manifest.text, run_id=run_id)
     if previous is not None:
         report.previous_manifest = previous[0]
         if previous[1] is None:

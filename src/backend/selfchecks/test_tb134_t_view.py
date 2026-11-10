@@ -321,8 +321,7 @@ def test_t_view_base_qty_from_snapshot_without_trades() -> None:
     assert v.data_status is DataStatus.PARTIAL
     # 快照时点为空同样加 gap
     assert any(
-        g.key == "t_view.base_qty"
-        for g in build(base_source="snapshot", snapshot_as_of=None).gaps
+        g.key == "t_view.base_qty" for g in build(base_source="snapshot", snapshot_as_of=None).gaps
     )
 
 

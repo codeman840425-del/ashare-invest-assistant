@@ -415,6 +415,7 @@ def fetch_and_record(
     trade_date: dt.date | str,
     user_id: uuid.UUID | str | None,
     window_trading_days: int | None,
+    fetched_at: dt.datetime | None = None,
 ) -> int:
     day = _as_day(trade_date)
     uid = _as_user(user_id)
@@ -422,8 +423,11 @@ def fetch_and_record(
         type(window_trading_days) is not int or window_trading_days <= 0
     ):
         raise ValueError("window_trading_days must be a positive integer")
+    if fetched_at is not None and fetched_at.tzinfo is None:
+        raise ValueError("fetched_at must be timezone-aware")
+    stamp = fetched_at if fetched_at is not None else dt.datetime.now(dt.UTC)
     # 事务由调用方负责，这里不 begin / commit。
-    return _run_fetch(conn, source, day, uid, window_trading_days)
+    return _run_fetch(conn, source, day, uid, window_trading_days, stamp)
 
 
 def _run_fetch(
@@ -432,6 +436,7 @@ def _run_fetch(
     day: dt.date,
     uid: uuid.UUID | None,
     window_trading_days: int | None,
+    fetched_at: dt.datetime,
 ) -> int:
     try:
         is_open = covered(conn, day)
@@ -500,7 +505,7 @@ def _run_fetch(
         DailyBarsResult(bars=kept, gaps=raw.gaps, halted=raw.halted),
         source="fake",
         licence_id=None,
-        fetched_at=dt.datetime.now(dt.UTC),
+        fetched_at=fetched_at,
     )
     missing_issues = [f"daily_bars_missing:{code}" for code in missing_codes]
     issues = sorted(set(missing_issues) | set(upsert.issues))

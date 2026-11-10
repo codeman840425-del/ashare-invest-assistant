@@ -218,6 +218,8 @@ def read(conn: Connection, user_id: uuid.UUID, snapshot_id: uuid.UUID) -> dict[s
             data_snapshots.c.purpose == "report",
         )
     ).first()
-    if row is None or row[0].get("schema_version") != VERSION:
+    from app.marketdata.daily_snapshot import OWNED_VERSION
+
+    if row is None or row[0].get("schema_version") not in {VERSION, OWNED_VERSION}:
         raise AppError(ErrorCode.NOT_FOUND)
     return dict(row[0])

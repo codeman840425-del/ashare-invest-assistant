@@ -26,6 +26,11 @@ from app.db.tables.strategy import (
 from app.db.tables.users import users
 from app.engine_policies import latest as latest_policy
 from app.features.evaluation import evaluate_snapshot
+from app.marketdata.daily_snapshot import (
+    ANALYZE_AS_OF,
+    build_owned_snapshot,
+    daily_bars_ready,
+)
 from app.replay.baseline import VERSION, require_isolated
 from app.reports.service import build, canonical, covered
 from app.strategy.runtime import runnable
@@ -62,6 +67,7 @@ def analyze(
     issues: list[str] = []
     evaluations: list[dict[str, Any]] = []
     bindings: list[dict[str, Any]] = []
+    owned_state: tuple[str, uuid.UUID | None] | None = None
     instances = conn.execute(
         select(strategy_instances)
         .where(strategy_instances.c.user_id == owner, strategy_instances.c.status == "active")
@@ -98,22 +104,43 @@ def analyze(
             continue
         # No real certificate reader/production price source exists here yet. Synthetic
         # offline replay is accepted ONLY inside the pre-existing isolated boundary.
-        if settings.app_env != "test":
-            issues.append("owned_market_cache_adapter_missing")
-            continue
-        require_isolated(conn, app_env=settings.app_env)
-        sources = conn.execute(
-            select(data_snapshots)
-            .where(
-                data_snapshots.c.user_id == owner,
-                data_snapshots.c.purpose == "report",
-                data_snapshots.c.licence_id.is_(None),
+        if settings.daily_bars_source == "off":
+            if settings.app_env != "test":
+                issues.append("owned_market_cache_adapter_missing")
+                continue
+            require_isolated(conn, app_env=settings.app_env)
+            sources = conn.execute(
+                select(data_snapshots)
+                .where(
+                    data_snapshots.c.user_id == owner,
+                    data_snapshots.c.purpose == "report",
+                    data_snapshots.c.licence_id.is_(None),
+                )
+                .order_by(data_snapshots.c.created_at.desc(), data_snapshots.c.id.desc())
+            ).all()
+            source = next(
+                (s for s in sources if (s.items or {}).get("schema_version") == VERSION), None
             )
-            .order_by(data_snapshots.c.created_at.desc(), data_snapshots.c.id.desc())
-        ).all()
-        source = next(
-            (s for s in sources if (s.items or {}).get("schema_version") == VERSION), None
-        )
+        else:
+            if owned_state is None:
+                ready, ready_issues = daily_bars_ready(conn, owner, date)
+                if not ready:
+                    owned_state = ("not_ready", None)
+                else:
+                    snap_id, build_issues = build_owned_snapshot(conn, owner, date)
+                    issues.extend(ready_issues)
+                    issues.extend(build_issues)
+                    owned_state = ("ready", snap_id)
+            if owned_state[0] == "not_ready":
+                issues.append("daily_bars_not_ready")
+                continue
+            snap_id = owned_state[1]
+            if snap_id is None:
+                issues.append("owned_source_or_card_missing")
+                continue
+            source = conn.execute(
+                select(data_snapshots).where(data_snapshots.c.id == snap_id)
+            ).one()
         card = conn.execute(
             select(strategy_card_versions.c.fields).where(
                 strategy_card_versions.c.id == version.card_version_id
@@ -179,7 +206,7 @@ def analyze(
                 user_id=owner,
                 snapshot_id=source.id,
                 security_code=code,
-                as_of=dt.datetime.combine(date, dt.time(17, 30), BEIJING),
+                as_of=dt.datetime.combine(date, ANALYZE_AS_OF, BEIJING),
                 card=card,
                 spec=spec,
                 registry=registry,

@@ -168,7 +168,13 @@ def relabel_1300(table: pa.Table) -> tuple[pa.Table, dict[str, int]]:
     return result, {"relabelled_1300": repaired, "dropped_unconfirmed_1300": dropped}
 
 
-def decode_lc1(path: Path, exchange: str, symbol: str) -> tuple[pa.Table, Summary]:
+def decode_lc1(
+    path: Path,
+    exchange: str,
+    symbol: str,
+    *,
+    inventory_end: date | None = None,
+) -> tuple[pa.Table, Summary]:
     """Decode <HHfffffII, float32 yuan, uint32 shares; never modify the source."""
     exchange = exchange.upper()
     if not selected_symbol(exchange, symbol):
@@ -218,6 +224,34 @@ def decode_lc1(path: Path, exchange: str, symbol: str) -> tuple[pa.Table, Summar
     table = canonical_table(table, exchange, symbol)
     _, normalized_days = _clock(table)
     _, counts = np.unique(normalized_days, return_counts=True)
+    inventory = {}
+    if inventory_end is not None:
+        epoch = date(1970, 1, 1)
+        first_day = int(normalized_days[0]) if normalized_days.size else None
+        for name, start, end in (
+            ("single", SINGLE_DAY, SINGLE_DAY),
+            ("main", MAIN_START, inventory_end),
+        ):
+            lo, hi = (start - epoch).days, (end - epoch).days
+            mask = (days >= lo) & (days <= hi)
+            used = normalized_days[(normalized_days >= lo) & (normalized_days <= hi)]
+            if not mask.any():
+                continue
+            selected, day_counts = np.unique(used, return_counts=True)
+            inventory[name] = {
+                "raw_slice_sha256": hashlib.sha256(records[mask].tobytes()).hexdigest(),
+                "source_rows": int(mask.sum()),
+                "normalized_rows": len(used),
+                "stock_days": len(selected),
+                "full_days": int((day_counts == 240).sum()),
+                "single_bar_days": [
+                    {
+                        "date": date.fromordinal(epoch.toordinal() + int(day)).isoformat(),
+                        "first_observed_day": int(day) == first_day,
+                    }
+                    for day in selected[day_counts == 1]
+                ],
+            }
     return table, {
         **checks,
         "source_sha256": hashlib.sha256(content).hexdigest(),
@@ -226,6 +260,7 @@ def decode_lc1(path: Path, exchange: str, symbol: str) -> tuple[pa.Table, Summar
         "stock_days": len(counts),
         "non_240_stock_days": int((counts != 240).sum()),
         "single_bar_days": int((counts == 1).sum()),
+        **({"date_inventory": inventory} if inventory_end is not None else {}),
     }
 
 
@@ -319,11 +354,12 @@ def check_splice(
     events: Sequence[Event] = (),
     price_limit: float | None = None,
     require_overlap: bool | None = None,
+    shared_vipdoc: bool = False,
 ) -> Summary:
-    """Validate one stock, returning {"splice": counts}; any checkable failure stops.
+    """Validate one stock; any checkable failure stops.
 
-    The caller supplies two independently pinned vipdoc packages. It must never
-    supply a view of one file twice to simulate the dual-package assertion.
+    A shared snapshot supplies two date uses, so independent equality is not
+    applicable. HF overlap and daily anchors still use independent sources.
     """
     hf, single, main = [canonical_table(t, exchange, symbol) for t in (hf, single, main)]
     failures: list[str] = []
@@ -365,7 +401,9 @@ def check_splice(
             result["incomplete_volume_days"] += check.get("volume_state") == "incomplete_day"
     repeated = _day(main, SINGLE_DAY)
     result["dual_package"] = {"state": "no_main_0807"}
-    if repeated.num_rows:
+    if shared_vipdoc:
+        result["dual_package"] = {"state": "not_applicable_shared_snapshot"}
+    elif repeated.num_rows:
         same = _same_package_day(right, repeated)
         result["dual_package"] = {"state": "checked", "ok": same}
         if not same:

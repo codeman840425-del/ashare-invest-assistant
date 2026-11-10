@@ -8,7 +8,7 @@ import json
 import struct
 import zipfile
 from collections import Counter, defaultdict
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from itertools import pairwise
 from pathlib import Path
@@ -91,12 +91,27 @@ def check_manifest(
     expect: Summary,
     verify_sha: bool = True,
     workers: int = 8,
+    *,
+    verify_bj: bool = True,
 ) -> Summary:
     # §2.1：核对文件清单、汇总和实际目录；SHA 流式读取，不加载整份行情。
     root = Path(hf_dir)
     with open(root / "manifest.json", encoding="utf-8") as f:
         manifest = json.load(f)
     rows = _rows(root / "manifest_files.csv")
+    resolved_root = root.resolve()
+    for row in rows:
+        exchange, symbol = row["exchange"], row["symbol"]
+        if (
+            exchange not in {"SH", "SZ", "BJ"}
+            or len(symbol) != 6
+            or not symbol.isascii()
+            or not symbol.isdigit()
+        ):
+            raise DataFormatError("unsafe HF manifest identity")
+        candidate = root / exchange / f"{symbol}.parquet"
+        if candidate.is_symlink() or not candidate.resolve().is_relative_to(resolved_root):
+            raise DataFormatError("HF manifest path leaves verified snapshot")
     actual = {
         "files": len(rows),
         "stocks_by_exchange": dict(Counter(r["exchange"] for r in rows)),
@@ -133,8 +148,12 @@ def check_manifest(
             }
         )
     if verify_sha:
-        tasks = [(root / r["exchange"] / (r["symbol"] + ".parquet"), r["sha256"]) for r in rows]
-        with ProcessPoolExecutor(max_workers=workers) as executor:
+        tasks = [
+            (root / r["exchange"] / (r["symbol"] + ".parquet"), r["sha256"])
+            for r in rows
+            if verify_bj or r["exchange"] != "BJ"
+        ]
+        with ThreadPoolExecutor(max_workers=workers) as executor:
             mismatches.extend(x for x in executor.map(_verify_file, tasks) if x is not None)
     return {
         "ok": not mismatches,
@@ -142,6 +161,7 @@ def check_manifest(
         "actual": actual,
         "manifest": manifest,
         "sha_verified": verify_sha,
+        "sha_scope": ("all" if verify_bj else "SH/SZ") if verify_sha else None,
         "manifest_sha256": sha256(root / "manifest.json"),
         "manifest_files_sha256": sha256(root / "manifest_files.csv"),
     }
@@ -175,28 +195,21 @@ def grid_from_table(table: pa.Table, dates: list[date]) -> tuple[Grid, Summary]:
             raise DataFormatError("timestamp must use Asia/Shanghai")
     grid = {k: np.full((len(dates), len(features.SLOT_END)), np.nan) for k in "ohlcva"}
     present = np.zeros((len(dates), len(features.SLOT_END)), dtype=bool)
-    day_index = {d: i for i, d in enumerate(dates)}
-    slot_index = {s: i for i, s in enumerate(features.SLOT_END)}
-    di, ti, ri = [], [], []
-    outside = 0
-    for row, stamp in enumerate(table["timestamp"].to_pylist()):
-        if (
-            stamp is None
-            or stamp.strftime("%H:%M") not in slot_index
-            or stamp.second
-            or stamp.microsecond
-        ):
-            raise DataFormatError(f"非法时刻 {stamp}")
-        if stamp.date() not in day_index:
-            outside += 1
-            continue
-        d, t = day_index[stamp.date()], slot_index[stamp.strftime("%H:%M")]
-        if present[d, t]:
-            raise DataFormatError(f"重复 timestamp {stamp}")
-        present[d, t] = True
-        di.append(d)
-        ti.append(t)
-        ri.append(row)
+    # Use Asia/Shanghai minute ordinals. Materializing Python datetime objects
+    # per bar would dominate the full 1.39-billion-row preparation pass.
+    if any(a >= b for a, b in pairwise(dates)):
+        raise DataFormatError("grid trading dates must be strictly increasing")
+    calendar_ord = np.array([(d - date(1970, 1, 1)).days for d in dates], dtype=np.int64)
+    stamps, source_days = splice._clock(table)
+    day_positions = np.searchsorted(calendar_ord, source_days)
+    in_calendar = day_positions < len(dates)
+    in_calendar[in_calendar] = calendar_ord[day_positions[in_calendar]] == source_days[in_calendar]
+    di = day_positions[in_calendar]
+    local_minutes = (stamps[in_calendar] + splice.CST_US) % splice.DAY_US // splice.MINUTE_US
+    ti = np.searchsorted(splice.VALID_MINUTES, local_minutes)
+    ri = np.flatnonzero(in_calendar)
+    outside = table.num_rows - len(ri)
+    present[di, ti] = True
     for key, col in zip(
         "ohlcva", ("open", "high", "low", "close", "volume", "turnover"), strict=True
     ):
@@ -225,6 +238,7 @@ def grid_from_table(table: pa.Table, dates: list[date]) -> tuple[Grid, Summary]:
             },
         }
     grid["present"] = present
+    grid["valid"] = present & ~bad
     return grid, checks
 
 
@@ -240,6 +254,7 @@ def load_spliced_stock(
     events: list[sim.Event] | None = None,
     price_limit: float | None = None,
     require_overlap: bool | None = None,
+    shared_vipdoc: bool = False,
 ) -> tuple[Grid, Summary]:
     """Validate first, merge one source per stock-day, then use the shared grid loader."""
     checked = splice.check_splice(
@@ -252,6 +267,7 @@ def load_spliced_stock(
         events=events or (),
         price_limit=price_limit,
         require_overlap=require_overlap,
+        shared_vipdoc=shared_vipdoc,
     )
     table, source_checks = splice.merge_sources(hf, single, main, exchange=exchange, symbol=symbol)
     grid, checks = grid_from_table(table, dates)
@@ -344,6 +360,7 @@ def day_kinds(
         new_days = set()
     kinds, st = np.full(len(dates), sim.OK, dtype=np.int8), np.zeros(len(dates), dtype=bool)
     reasons = {"first": {}, "all": {}, "stock_days": {}, "ok_by_year": {}}
+    present_grid = grid["present"] if "present" in grid else ~np.isnan(grid["o"])
     for i, d in enumerate(dates):
         year = str(d.year)
         for name in reasons:
@@ -355,15 +372,10 @@ def day_kinds(
         hits = []
         if d < start:
             hits.append("warmup")
-        present = grid.get("present", ~np.isnan(grid["o"]))[i]
-        if (
-            not present.any()
-            or not np.any(grid["v"][i] > 0)
-            or (stock[1], stock[0], d) in meta["confirmed_suspension"]
-        ):
-            hits.append("suspended")
         if d in new_days:
             hits.append("new_listing")
+        if stock[2] == "vipdoc_only" and listing is None:
+            hits.append("listing_date_unknown")
         if listing_status == "delisting_period":
             hits.append("delisting_period")
         if listing_status is None and not smoke:
@@ -372,6 +384,14 @@ def day_kinds(
             hits.append("st")
         if st_status is None and not smoke:
             hits.append("st_unknown")
+        # Whole-day absence is diagnostic. It must not mask an already-known
+        # exclusion and change the disposition of a deferred leg at the open.
+        if (
+            not present_grid[i].any()
+            or not np.any(grid["v"][i] > 0)
+            or (stock[1], stock[0], d) in meta["confirmed_suspension"]
+        ):
+            hits.append("suspended")
         for reason in hits:
             reasons["all"][year][reason] = reasons["all"][year].get(reason, 0) + 1
         if hits:
@@ -447,38 +467,52 @@ def load_gbbq(
     return {key: sorted(events, key=lambda e: e.ex_date) for key, events in result.items()}
 
 
+class DailyArchive:
+    """One read-only ZIP index for a sequential full-pool splice pass."""
+
+    def __init__(self, archive: zipfile.ZipFile) -> None:
+        self.archive = archive
+        self.names: dict[str, str] = {}
+        for name in archive.namelist():
+            key = "/".join(part for part in name.replace("\\", "/").split("/") if part)
+            if key.endswith(".day"):
+                if key in self.names:
+                    raise DataFormatError(f"duplicate .day archive member: {key}")
+                self.names[key] = name
+
+    def records(
+        self, exchange: str, symbol: str, *, required: bool = False
+    ) -> dict[date, splice.DailyBar]:
+        target = f"{exchange.lower()}/lday/{exchange.lower()}{symbol}.day"
+        name = self.names.get(target)
+        if name is None:
+            if required:
+                raise DataFormatError(f"§2.6 D5 缺失 {target}")
+            return {}
+        content = self.archive.read(name)
+        if len(content) % 32:
+            raise DataFormatError(f"{target}: .day 记录截断")
+        result = {}
+        for raw_day, opening, _, _, close, _, volume, _ in struct.iter_unpack("<IIIIIfII", content):
+            try:
+                day = date(raw_day // 10000, raw_day // 100 % 100, raw_day % 100)
+            except ValueError as exc:
+                raise DataFormatError(f"{target}: invalid .day date") from exc
+            if day in result:
+                raise DataFormatError(f"{target}: duplicate .day date")
+            result[day] = splice.DailyBar(opening / 100, close / 100, volume)
+        return result
+
+
 def _day_records(
     tdx_zip: str | Path,
     exchange: str,
     symbol: str,
     required: bool = False,
 ) -> dict[date, tuple[float, int]]:
-    # §2.1、§2.6 D5：包内使用反斜线，兼容重复的路径分隔符。
-    target = f"{exchange.lower()}/lday/{exchange.lower()}{symbol}.day"
-    with zipfile.ZipFile(tdx_zip) as z:
-        name = next(
-            (n for n in z.namelist() if "/".join(n.replace("\\", "/").split()) == target), None
-        )
-        if name is None:
-            name = next(
-                (
-                    n
-                    for n in z.namelist()
-                    if "/".join(p for p in n.replace("\\", "/").split("/") if p) == target
-                ),
-                None,
-            )
-        if name is None:
-            if required:
-                raise DataFormatError(f"§2.6 D5 缺失 {target}")
-            return {}
-        content = z.read(name)
-    if len(content) % 32:
-        raise DataFormatError(f"{target}: .day 记录截断")
-    return {
-        datetime.strptime(str(r[0]), "%Y%m%d").date(): (r[4] / 100, r[6])
-        for r in struct.iter_unpack("<IIIIIfII", content)
-    }
+    with zipfile.ZipFile(tdx_zip) as archive:
+        records = DailyArchive(archive).records(exchange, symbol, required=required)
+    return {day: (bar.close, bar.volume) for day, bar in records.items()}
 
 
 def load_index_close(

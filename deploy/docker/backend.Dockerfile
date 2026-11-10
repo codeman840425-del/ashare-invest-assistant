@@ -43,7 +43,12 @@ RUN groupadd --gid ${APP_UID} aia \
  && useradd --uid ${APP_UID} --gid aia --home-dir /app --no-create-home --shell /usr/sbin/nologin aia \
  && mkdir -p /app/config /var/lib/aia-dev/imports /var/lib/aia-dev/master \
  && chown aia:aia /var/lib/aia-dev/imports /var/lib/aia-dev/master \
- && chmod 700 /var/lib/aia-dev/imports /var/lib/aia-dev/master
+ && chmod 700 /var/lib/aia-dev/imports /var/lib/aia-dev/master \
+ && mkdir -p /run/aia/state/halt /run/aia/tmp /run/aia/receipts \
+ && chown -R aia:aia /run/aia/state /run/aia/tmp \
+ && chmod 700 /run/aia/state /run/aia/state/halt /run/aia/tmp \
+ && chown root:root /run/aia/receipts \
+ && chmod 755 /run/aia/receipts
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /app/src/backend /app/src/backend
 ENV PATH=/opt/venv/bin:$PATH \

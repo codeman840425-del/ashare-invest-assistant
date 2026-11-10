@@ -51,6 +51,15 @@
   - 成交量单位为股。
   - 分钟量合计与日量相差在 100 股以内、不完全相等，原因是「推断，未验证」，生产代码不做「合计等于日量」的强校验。
   - 全市场仍靠逐文件单位自检（`unit_suspect`）兜底。
+- 记录级拒绝原因（T-A148 追加，按 be/T-B135 = 4e0ae7b 同步；`parse_lc_bytes`、`_quantize`）：
+  - 口径与 `daily-bars-tdx.md` §3.3 的「记录级拒绝原因」相同：只拒绝这一条记录，计入 `rejected_records`，运行状态不因此变为 partial。
+  - 判断顺序：`invalid_date`、`invalid_minute` → `non_finite` → `out_of_range` → 高低价校验。
+  - `non_finite`：open、high、low、close、成交额中任一项为 NaN 或 ±Inf。
+  - `out_of_range`：五项都是有限值，但出现以下任一情况：
+    - 四个价按 2 位小数量化、或成交额按 4 位小数量化时，Decimal 报错；
+    - 任一项量化后的整数位数超过 `MONEY` 的 precision − scale，即 16 位。
+    不另设阈值。
+  - 用例：`test_m2_lc_nan_and_inf_rejected_per_record`（`test_tb135_tdx_m1_m3`）、`test_r2_lc_huge_finite_rejected_per_record`（`test_tb135_tdx_r2r3`）。
 - **分钟线金额不比对**：分钟金额容差没有出处，属未验证，默认关闭。`_execute` 只对日线开启金额比对；分钟线对账只比 OHLC 和量，对账报告的汇总行 `amount_compared` 为 false。待有出处后另行评审，再决定是否开启。
 - 落盘文件的名称与格式同 `daily-bars-tdx.md` §3.3 的「导入时的落盘文件」，kind 为 lc1 或 lc5；对账明细的 ts 为 bar 结束时刻。
 

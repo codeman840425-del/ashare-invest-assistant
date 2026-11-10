@@ -68,6 +68,21 @@
   4. **防读到半截文件**：解析完一个文件后再算一次 sha256，与第 2 步不同即视为导入中被改写，该文件拒绝并计数，整次运行为 partial；不影响其他文件。
   5. 校验 D；解析与单位自检；按 `UPSERT_BATCH_ROWS` 分批写入 trade_date 在 [from, D] 内的行。
 - 解析：每条 32 字节，小端 `<IIIIIfII`；日期非法、高低价矛盾、价格为 0 的记录拒绝并计数。
+- 记录级拒绝原因（T-A148 追加，按 be/T-B135 = 4e0ae7b 同步；`parse_day_bytes`、`_quantize`）：
+  - 口径：
+    - 只拒绝这一条记录，同一文件的其余记录照常处理；
+    - 按原因计入 stats 的 `rejected_records`；
+    - 运行状态不因此变为 partial，退出码也不变，与日期非法等原因同口径。只有文件级拒绝（`changed_during_import`、`unit_suspect`）才把运行置为 partial。
+  - 判断顺序：日期非法（`invalid_date`）→ `non_finite` → `out_of_range` → 高低价与价格校验。
+  - `non_finite`（常量 `REJECT_NON_FINITE`）：成交额 float32 为 NaN 或 ±Inf（T-A147 M2）。
+  - `out_of_range`（常量 `REJECT_OUT_OF_RANGE`，编排者已采纳）：成交额是有限值，但出现以下任一情况：
+    - 按 4 位小数量化时，Decimal 默认上下文报错；
+    - 量化后的整数位数超过写库列类型 `MONEY`（Numeric(20,4)）的 precision − scale，即 16 位。
+    这个界限由列类型推出，不另设数值阈值。不拒绝的话，dry-run 能过，`--apply` 写库时会整次失败。
+  - .day 的价格是 uint32 ÷ 100，上限约 4.29e7，不会超出列宽，不做 out_of_range 判断。
+  - 用例：
+    - `test_m2_day_nan_amount_rejected_per_record`、`test_m2_cli_run_survives_nan_record`（`test_tb135_tdx_m1_m3`）；
+    - `test_r2_day_huge_amount_rejected_per_record`、`test_r2_cli_run_survives_huge_record`、`test_r2_boundary_values_are_what_the_test_claims`（`test_tb135_tdx_r2r3`）。
 - 单位自检（逐文件）：成交额 ÷ 成交量须落在当日 [low, high] 内（容差 1%）；不满足的比例超过 5% 时整文件拒绝，记 `tdx_unit_suspect:<code>`。
 - 幂等：写入只经 `upsert_daily_bars`，DO NOTHING；同样参数重复运行，第二次 inserted 为 0、行数不变。一次性动作，可重复运行。
 - 记录：每次运行写一条 pipeline_runs，stats 含清单 sha256、文件数、导入行数、跳过数（按原因）、冲突数、拒绝数、复跑比对计数；不写宿主路径。

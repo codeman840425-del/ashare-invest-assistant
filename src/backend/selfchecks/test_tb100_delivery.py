@@ -35,17 +35,38 @@ from app.db.tables.market import (
 )
 from app.db.tables.users import users
 from app.main import create_app
+from app.strategy.cards.importing import prepare_document
 from selfchecks.test_tb89_full_migrations import deploy_grants
 
 ROOT = Path(__file__).resolve().parents[3]
 DSN = "postgresql+psycopg://postgres@127.0.0.1:55498/tb100_test"
 AT = dt.datetime(2031, 1, 2, 10, tzinfo=dt.UTC)
+OFFICIAL_CARD_KEYS = ("hold_risk_monitor", "sw_ma_trend_pullback", "st_pullback_ma")
+
+
+def official_card_paths() -> list[Path]:
+    return [ROOT / "docs/strategies/cards" / (key + ".md") for key in OFFICIAL_CARD_KEYS]
+
+
+def official_golden_count(card_paths: list[Path]) -> int:
+    """Sum validation.fixtures on each official card via prepare_document (T-A125③).
+
+    34 was hardcoded in f640b55 as H-01 11 + W-01 15 + S-01 8; 4c00ae7 added
+    S-01 FX9/FX10, so the live total is 11+15+10. Do not freeze that constant.
+    """
+    total = 0
+    for path in card_paths:
+        item = prepare_document(path.read_text(encoding="utf-8"))
+        assert item is not None
+        total += len(item.blocks["validation"]["fixtures"])
+    return total
 
 
 def test_importer_module_executes_three_card_golden_preflight() -> None:
+    cards = official_card_paths()
     args = [sys.executable, "-m", "app.cli.cards_import"]
-    for key in ("hold_risk_monitor", "sw_ma_trend_pullback", "st_pullback_ma"):
-        args.extend(["--card", str(ROOT / "docs/strategies/cards" / (key + ".md"))])
+    for path in cards:
+        args.extend(["--card", str(path)])
     args.extend(
         [
             "--catalog",
@@ -65,7 +86,8 @@ def test_importer_module_executes_three_card_golden_preflight() -> None:
         env={**os.environ, "PYTHONUTF8": "1"},
     )
     assert result.returncode == 0, result.stderr
-    assert "formal cards validated: 3; golden passed: 34" in result.stdout
+    assert "formal cards validated: 3" in result.stdout
+    assert f"golden passed: {official_golden_count(cards)}" in result.stdout
     assert "lifecycle remains draft; no gates granted" in result.stdout
 
 

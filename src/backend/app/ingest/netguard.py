@@ -167,8 +167,8 @@ def _bind() -> tuple[
         lease: object, validate: Callable[[], bool] | None = None
     ) -> Iterator[None]:
         # Contract (T-A92): validate is required; missing or false → EgressBlocked.
-        # No default lambda: True.
-        if validate is None or not validate():
+        # No default lambda: True. A None lease is also refused (A1r ⑬).
+        if lease is None or validate is None or not validate():
             raise EgressBlocked("lease")
         tid = threading.get_ident()
         windows[tid] = set()

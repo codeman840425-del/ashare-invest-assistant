@@ -424,6 +424,12 @@ try:
         raise SystemExit(3)
 except ng.EgressBlocked:
     pass
+# None lease is refused even if validate returns True (T-A92 ⑬)
+try:
+    with ng.egress_window(None, lambda: True):
+        raise SystemExit(5)
+except ng.EgressBlocked:
+    pass
 # validate that returns False is also blocked
 try:
     with ng.egress_window(object(), lambda: False):

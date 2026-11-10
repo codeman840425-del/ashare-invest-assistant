@@ -483,4 +483,3 @@ def test_guard_temp_pg_refuses_forbidden_instances_without_connecting(
     )
     with pytest.raises(PgOwnershipError):
         guard_temp_pg("127.0.0.1", 55460)
-

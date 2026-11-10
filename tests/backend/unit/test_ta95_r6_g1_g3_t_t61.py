@@ -251,4 +251,3 @@ def test_tt69_ta95_refuses_forbidden_without_connecting(monkeypatch: pytest.Monk
     with pytest.raises(PgOwnershipError) as ei:
         guard_temp_pg("127.0.0.1", 55494)
     assert "o55" in str(ei.value)
-

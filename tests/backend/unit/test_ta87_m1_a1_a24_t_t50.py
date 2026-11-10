@@ -169,10 +169,13 @@ def _temp_db(suffix: str):
         )
         c = _psql(env, "postgres", f"CREATE DATABASE {name} TEMPLATE {tpl};")
         assert c.returncode == 0, c.stderr[-400:]
-        url = libpq_sqlalchemy_url(name)
-        eng = create_engine(url, pool_pre_ping=True)
+        sa_url = libpq_sqlalchemy_url(name)
+        # 第三项须为字符串 DSN：子进程 env 不能收 SQLAlchemy URL（A30 TypeError）。
+        # hide_password=False 才能带上口令；调用方不得打印该字符串。
+        dsn = sa_url.render_as_string(hide_password=False)
+        eng = create_engine(sa_url, pool_pre_ping=True)
         try:
-            yield eng, name, url
+            yield eng, name, dsn
         finally:
             eng.dispose()
     finally:
@@ -1400,4 +1403,3 @@ def test_tt69_require_pg_refuses_forbidden_without_connecting(monkeypatch: pytes
     with pytest.raises(pytest.fail.Exception) as ei:
         _require_pg()
     assert "o55" in str(ei.value)
-

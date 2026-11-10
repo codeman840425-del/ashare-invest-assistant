@@ -59,7 +59,12 @@ export function ReportGaps({ view }: { view: ReportGapView }) {
       {view.securities.map((s) => (
         <li key={s.code} data-testid={`report-gap-sec-${s.code}`}>
           <Link to={`/stocks/${encodeURIComponent(s.code)}`}><span className="mono">{s.code}</span>{s.name ? ` ${s.name}` : ''}</Link>
-          {s.lines.map((l) => <span key={l.text} className="today-gap-line">{l.text}</span>)}
+          {s.lines.map((l) => (
+            <span key={l.text} className="today-gap-line">
+              {l.text}
+              {l.route ? <> <Link className="small" to={l.route} data-testid="report-gap-route">去处理 ›</Link></> : null}
+            </span>
+          ))}
         </li>
       ))}
       {view.hiddenCount ? <li className="muted small" data-testid="report-gap-more">等 {view.hiddenCount} 只</li> : null}

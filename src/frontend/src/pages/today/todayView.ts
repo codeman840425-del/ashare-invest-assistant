@@ -164,6 +164,9 @@ export function buildReportGaps(
     if (price && SEC_RE.test(price[1])) { toSec(price[1], { text: '缺现价，按成本估算。' }); continue; }
     const stock = g.key.match(/^stocks\.(.+)$/);
     if (stock && SEC_RE.test(stock[1])) { toSec(stock[1], { text: '该股无候选信号。' }); continue; }
+    // §8 c：stocks.<证券>.<维度>.<键> 且 reason 为 user_input_missing → 该证券行「有信息待补录。」去 /portfolio/import；其他 reason 不显示
+    const dim = g.key.match(/^stocks\.(\d{6}\.(?:SH|SZ|BJ))\..+$/);
+    if (dim) { if (g.reason === 'user_input_missing') toSec(dim[1], { text: USER_INPUT_GAP_TEXT, route: '/portfolio/import' }); continue; }
     // §2.3 已列出但 today 页不展示的：account、account.pnl_day（由 A1/A2 表达）、stocks.* 其余键、market
     if (g.key === 'account' || g.key === 'account.pnl_day' || g.key === 'market' || g.key.startsWith('market.') || g.key.startsWith('stocks.')) continue;
     // 其余未列出的：只有 user_input_missing 显示（用户能自己处理，不藏）

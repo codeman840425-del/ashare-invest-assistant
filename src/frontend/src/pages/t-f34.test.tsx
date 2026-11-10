@@ -501,3 +501,30 @@ describe('T-F34b 契约 §7 补充裁定（12 条）', () => {
     expect(screen.queryByTestId('today-report-gaps')).toBeNull();
   });
 });
+
+describe('T-F34c 契约 §8 c', () => {
+  it('§8c：stocks.<证券>.<维度>.<键> + user_input_missing → 该股行「有信息待补录。」去 /portfolio/import；no_source 与 account/account.pnl_day/market.*/stocks.change_from_previous 不显示', async () => {
+    const r = todayViewReport(DATE, [], null);
+    const gap = (key: string, reason: 'user_input_missing' | 'no_source') => ({ key, reason, message: '示例数据' });
+    const page = await setup(today({ focus: { items: [held, { ...held, security_code: '000002.SZ', name: '示例乙' }], more: false } }), {
+      ...r,
+      gaps: [
+        gap('stocks.000001.SZ.technical.cost', 'user_input_missing'),
+        gap('stocks.000001.SZ.money_flow.main_net', 'user_input_missing'),
+        gap('stocks.000002.SZ.technical.cost', 'no_source'),
+        gap('account', 'user_input_missing'), gap('account.pnl_day', 'user_input_missing'),
+        gap('market', 'user_input_missing'), gap('market.breadth', 'user_input_missing'),
+        gap('stocks.change_from_previous', 'user_input_missing'),
+      ],
+    });
+    await settled(true);
+    const area = screen.getByTestId('today-report-gaps');
+    const row = within(area).getByTestId('report-gap-sec-000001.SZ');
+    expect(row).toHaveTextContent(`000001.SZ 示例甲${USER_INPUT_GAP_TEXT}`);
+    expect(within(row).getAllByTestId('report-gap-route').map((a) => a.getAttribute('href'))).toEqual(['/portfolio/import']);
+    expect(within(area).queryByTestId('report-gap-sec-000002.SZ')).toBeNull();
+    expect(within(area).queryAllByTestId('report-gap-general')).toHaveLength(0);
+    expect((page.textContent ?? '').split(USER_INPUT_GAP_TEXT).length - 1).toBe(1);
+    expect(screen.getByTestId('today-account')).toHaveAttribute('data-state', 'A1');
+  });
+});

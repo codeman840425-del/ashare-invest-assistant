@@ -28,7 +28,7 @@
 ## 4. 前端遗留
 
 - T-F34 已交付（tb-T-F34=47ede97，合入 team-b=33dc4c9）。
-- **T-F34b 未提交 WIP**（F:\wt-frontend-T-F34 工作树，非任何提交）：errorPolicy.ts/StockPage.tsx 子资源判定收窄为显式清单、superseded 真实资源 404 优先、新增 t-f34b.test.tsx。定点 57 项中 55 过，2 条失败为财务页签用例前提与实现不符（tab-financials 在 404 态变开发中空态），非实现回归。续修方向：改正用例前提后提交。
+- **T-F34b 未提交 WIP——已随旧 worktree 清理丢失（2026-11-10 批量清理），无 zip 备份，按本条文字记录重建**。原改动内容：errorPolicy.ts/StockPage.tsx 子资源判定收窄为显式清单、superseded 真实资源 404 优先、新增 t-f34b.test.tsx。曾验证定点 57 项中 55 过，2 条失败为财务页签用例前提与实现不符（tab-financials 在 404 态变开发中空态），非实现回归。重建路径：按上述改动清单在 tb-T-F34（47ede97）之上重写，并先改正 2 条用例前提。
 - 后端五个子资源路由（financials/fund-flows/factors/announcements/bars）与 /quotes、/market/sector-flows 未实现——实现后前端需再回改（T-F33 注释有约定）。
 
 ## 5. 测试遗留

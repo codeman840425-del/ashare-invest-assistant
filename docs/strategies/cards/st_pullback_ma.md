@@ -1,5 +1,5 @@
-# S-01 短线·强势股回踩 `st_pullback_ma` — 正式卡 v1（T-R25，首次正式化）
-
+# S-01 短线·强势股回踩 `st_pullback_ma` — 正式卡 v2（T-R55；v1 为 T-R25 首次正式化）
+> **v2 变更（T-R55，按编排者裁定 S-01 升 v2）**：v1 原文冻结在 `cards/history/st_pullback_ma.v1.md`（v1 原文冻结＝提交 055105a 的卡，即 T-B100 导入库内的 v1 内容；库内 v1 审核作废，须按 v2 重新导入并重跑 G1–G6）。相对 055105a，v1 版本号下曾有两次未升号的改动，现随 v2 一并生效：① fe2afa5（T-R40）：S01-FX1–FX8 八个夹具的 desc 前缀改为「【虚构】」（原为【入场】【不满足】等场景标签），夹具数值与期望不变；② 4c00ae7（T-R43）：卡头「与草稿的差异」增 ③「v1 选股只扫持仓 ∪ 自选」说明（screen:null、全市场 DSL 暂缓，T-A83 ④）；validation 末尾新增 S01-FX9（反证 C1 正例）与 S01-FX10（反证 C2 正例）两个【虚构】夹具。规则、参数、阈值、data_needs、universe、screen、costs 均未改；本次只把 version_no 1→2（:29、:92），并改本标题与本行。
 > 正式卡（由 T-R16/S-01_st_pullback_ma.md 草稿正式化；草稿保留过程记录）。导入格式：plan 2.5.14 A 节三个带标签块，导入器只读这三块，正文存为 `narrative`。
 > 夹具全部数值**虚构**；`600000.SH` 为 plan 2.5.14 A 允许的虚构示例代码，不代表任何真实行情。期望值由规则确定性推得（与 T-R15 卡同法）；导入时若 T-B71 fixture 执行器 diff，以实跑为准回修。
 > 结论只由规则决定；AI 只做中文解释。与其他卡结论相反时并列展示，不合并（P4）。
@@ -26,7 +26,7 @@
 
 ```yaml strategy-card
 key: st_pullback_ma
-version_no: 1
+version_no: 2
 name: 短线·强势股回踩
 category: momentum
 horizons: [short]
@@ -89,7 +89,7 @@ validation_summary: {type: rule, window: 未执行, benchmark: 所属申万一�
 
 ```yaml strategy-spec
 key: st_pullback_ma
-version_no: 1
+version_no: 2
 kind: rule_template
 horizons: [short]
 params_schema:

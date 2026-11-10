@@ -3,6 +3,8 @@
 ## 枚举范围与结论
 
 > **T-R49 刷新（T-A112）**：H-01 落 v3，`cards/hold_risk_monitor.md` 由 v2 改为 v3，v2 冻结为 `cards/history/hold_risk_monitor.v2.md`（新增历史身份）。现计 **44 个身份记录、22 个源文件**（historical_frozen 3、current_formal 3、多值 9），scope 124；`check_horizons.py` 身份常量 43→44，历史文件匹配由仅 `.v1` 改为任意 `.vN`。下文「43」「H-01 v2」等为 P2N-R10 当时记录。
+>
+> **T-R55 刷新（编排者裁定 S-01 升 v2）**：`cards/st_pullback_ma.md` 由 v1 改为 v2，v1（055105a 内容，即 T-B100 导入库内者）冻结为 `cards/history/st_pullback_ma.v1.md`（新增历史身份）。现计 **45 个身份记录、23 个源文件**（historical_frozen 4、current_formal 3、多值 9、explicit_single short 10）；`check_horizons.py` 身份常量 44→45。上文/下文「44」「43」为当时快照。
 
 枚举docs/strategies下全部90个既有文件路径；不执行这些文件。按plan §2.5.14的正式strategy-card/spec围栏、知识卡标题/身份行、catalog §2目录表分别定位。**43个独立文档身份记录，21个源文件**，不等于43个生产策略：当前正式卡含L2规格2、冻结历史版本2、T-R16不可导入研究知识卡16、目录研究条目23。相同key的不同版本/不同文档分别保留；目录文档版本0.3.8不是策略version_no，策略版本未知写null。
 
@@ -19,6 +21,8 @@
 | cards/history/hold_risk_monitor.v2.md | hold_risk_monitor | v2 | intraday_t,short,swing,long | null：不强选 | 冻结历史（T-R49） |
 | cards/hold_risk_monitor.md | hold_risk_monitor | v3（T-R49；原 v2） | intraday_t,short,swing,long | null：不强选 | 当前正式卡+L2规格（上线未核实） |
 | cards/sw_ma_trend_pullback.md | sw_ma_trend_pullback | v2 | swing | swing | 当前正式卡+L2规格（上线未核实） |
+| cards/history/st_pullback_ma.v1.md | st_pullback_ma | v1（055105a） | short | short | 冻结历史（T-R55） |
+| cards/st_pullback_ma.md | st_pullback_ma | v2（T-R55；原 v1） | short | short | 当前正式卡+L2规格（上线未核实） |
 | T-R16/L-01_lt_value.md | lt_value | v1 | long | long | 研究知识卡/不可导入 |
 | T-R16/L-02_lt_quality_growth.md | lt_quality_growth | v1 | long | long | 研究知识卡/不可导入 |
 | T-R16/L-03_lt_dividend.md | lt_dividend | v1 | long | long | 研究知识卡/不可导入 |

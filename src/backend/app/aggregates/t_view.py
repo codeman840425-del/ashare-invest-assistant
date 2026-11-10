@@ -11,13 +11,19 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from sqlalchemy import Connection, func, select
 
 from app.aggregates import models
-from app.db.tables.accounts import trades
+from app.api.v1.portfolio import _has_ledger
+from app.db.tables.accounts import (
+    broker_position_snapshot_items,
+    broker_position_snapshots,
+    trades,
+)
 from app.db.tables.market import minute_bars
+from app.importing.pipeline import live_snapshots
 from app.schemas.enums import DataStatus, GapReason, SecurityType
 
 logger = logging.getLogger(__name__)
@@ -109,6 +115,9 @@ def build(
     scheduled: bool,
     interval_s: int,
     thresholds: Thresholds | None,
+    base_source: Literal["ledger", "snapshot"] = "ledger",
+    snapshot_as_of: dt.datetime | None = None,
+    sellable_known: bool = True,
 ) -> models.TView:
     local_time = now.astimezone(BEIJING).time()
     if security_type is not SecurityType.STOCK:
@@ -133,8 +142,31 @@ def build(
             gaps=[models.Gap(key=key, reason=GapReason.NOT_APPLICABLE, message=message)],
         )
 
-    sellable, clamped = clamp_sellable(base_qty, sold_today, holding_sellable)
     gaps: list[models.Gap] = []
+    if base_source == "snapshot" and (
+        snapshot_as_of is None
+        or snapshot_as_of >= dt.datetime.combine(now.astimezone(BEIJING).date(), OPEN, BEIJING)
+    ):
+        gaps.append(
+            models.Gap(
+                key="t_view.base_qty",
+                reason=GapReason.USER_INPUT_MISSING,
+                message="未导入今日成交流水，底仓按持仓快照计，可能含今日买入",
+            )
+        )
+    sellable_qty = None
+    clamped = False
+    if sellable_known:
+        sellable, clamped = clamp_sellable(base_qty, sold_today, holding_sellable)
+        sellable_qty = format(sellable.normalize(), "f")
+    else:
+        gaps.append(
+            models.Gap(
+                key="t_view.sellable_qty",
+                reason=GapReason.USER_INPUT_MISSING,
+                message="持仓快照无可卖数量，暂不提供可卖数",
+            )
+        )
     if clamped:
         gaps.append(
             models.Gap(
@@ -158,7 +190,7 @@ def build(
             dev_pct=None,
             volume_ratio=None,
             base_qty=format(base_qty.normalize(), "f"),
-            sellable_qty=format(sellable.normalize(), "f"),
+            sellable_qty=sellable_qty,
             as_of=None,
             data_status=DataStatus.PENDING if scheduled else DataStatus.UNAVAILABLE,
             gaps=gaps,
@@ -194,7 +226,7 @@ def build(
         dev_pct=dev,
         volume_ratio=ratio,
         base_qty=format(base_qty.normalize(), "f"),
-        sellable_qty=format(sellable.normalize(), "f"),
+        sellable_qty=sellable_qty,
         as_of=as_of,
         data_status=data_status,
         gaps=gaps,
@@ -258,8 +290,30 @@ def history_volumes(conn: Connection, code: str, day: dt.date) -> list[Decimal]:
         .limit(HISTORY_DAYS)
     ).scalars()
     result = [Decimal(volume) if volume is not None else Decimal(0) for volume in volumes]
+    if len(result) < HISTORY_DAYS or sum(result, Decimal(0)) == 0:
+        return result
     _HISTORY[code, day] = result
     return result
+
+
+def snapshot_basis(
+    conn: Connection, account_id: uuid.UUID
+) -> tuple[dt.datetime | None, dict[str, bool]] | None:
+    """T-A149 §3.8 ④：无流水时返回最新有效快照 as_of 与各代码可卖数是否已知；有流水返回 None。"""
+    if _has_ledger(conn, account_id):
+        return None
+    snap = conn.execute(
+        live_snapshots(account_id).order_by(broker_position_snapshots.c.version_no.desc()).limit(1)
+    ).first()
+    if snap is None:
+        return None, {}
+    items = conn.execute(
+        select(
+            broker_position_snapshot_items.c.security_code,
+            broker_position_snapshot_items.c.sellable_quantity,
+        ).where(broker_position_snapshot_items.c.snapshot_id == snap.id)
+    )
+    return snap.as_of, {item.security_code: item.sellable_quantity is not None for item in items}
 
 
 def today_trades(

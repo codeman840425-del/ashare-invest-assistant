@@ -306,6 +306,7 @@ def today(
         else "not_yet"
     )
     trades = t_view.today_trades(conn, account_id, clock.trade_date) if account_id else {}
+    basis = t_view.snapshot_basis(conn, account_id) if account_id else None
     focus = []
     for row in base.rows:
         view = None
@@ -328,6 +329,9 @@ def today(
                 scheduled=False,
                 interval_s=interval_s,
                 thresholds=t_view.THRESHOLDS,
+                base_source="snapshot" if basis is not None else "ledger",
+                snapshot_as_of=basis[0] if basis is not None else None,
+                sellable_known=basis[1].get(code, False) if basis is not None else True,
             )
         focus.append(
             m.TodayRow(**{k: getattr(row, k) for k in m.TerminalRow.model_fields}, t_view=view)

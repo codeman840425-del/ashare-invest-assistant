@@ -901,6 +901,19 @@ def test_a16_deny_logs_omit_secret_and_url(tmp_path: Path, capsys: pytest.Captur
 # ---------------------------------------------------------------------------
 
 
+
+def _ingest_main_child_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if k != "MAIRUI_LICENCE"}
+    env["MAIRUI_LICENCE"] = ""
+    env["MAIRUI_MODE"] = "replay"
+    env["SERVICE_NAME"] = "ingest"
+    env["APP_ENV"] = "local"
+    env.pop("APP_MASTER_KEY", None)
+    env["PYTHONPATH"] = str(ROOT / "src/backend") + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
 @contextmanager
 def _blackhole_tcp():
     """Listen but never accept → connect() blocks until OS/client timeout."""
@@ -916,57 +929,61 @@ def _blackhole_tcp():
 
 
 def test_a17_bootstrap_and_tick_bounded_on_blackhole(monkeypatch: pytest.MonkeyPatch) -> None:
-    """假 TCP 只 listen 不应答：bootstrap ≤8s 且 rc=78；tick 同样有上界。
-
-    基线无 connect_timeout 时 connect 会挂起；用守护线程 + 8s 探针证明未按时返回（红）。
-    """
-    from pydantic import SecretStr
-
+    """假 TCP 只 listen 不应答：bootstrap ≤8s 且 rc=78。main() 在子进程运行（钩子不可卸载）。"""
     with _blackhole_tcp() as port:
         bad_url = f"postgresql+psycopg://u:x@127.0.0.1:{port}/db"
-
-        monkeypatch.setenv("SERVICE_NAME", "ingest")
-        monkeypatch.setenv("APP_ENV", "local")
-        monkeypatch.delenv("MAIRUI_LICENCE", raising=False)
-        monkeypatch.delenv("APP_MASTER_KEY", raising=False)
-
-        from app.workers import ingest as ingest_worker
-        from app.ingest import runtime
-
-        runtime.set_ingest_core(None)
-        monkeypatch.setattr(ingest_worker, "legacy_licence_present", lambda environ=None: False)
-        monkeypatch.setattr(ingest_worker, "master_key_present", lambda environ=None: False)
-
-        class _Settings:
-            database_url = SecretStr(bad_url)
-            business = SimpleNamespace(
-                ingest=SimpleNamespace(heartbeat=SimpleNamespace(interval_s=15), licences=_cfg())
-            )
-
-        import app.config as config_mod
-
-        monkeypatch.setattr(config_mod, "get_settings", lambda: _Settings())
-        monkeypatch.setattr(ingest_worker, "run", lambda *a, **k: 0)
-
-        box: dict[str, Any] = {}
-
-        def _run_main() -> None:
-            try:
-                box["rc"] = ingest_worker.main()
-            except BaseException as exc:  # noqa: BLE001
-                box["exc"] = exc
-
+        env = _ingest_main_child_env()
+        env["TT56_DATABASE_URL"] = bad_url
+        code = r"""
+import os, sys
+from types import SimpleNamespace
+from pydantic import SecretStr
+os.environ.pop("MAIRUI_LICENCE", None)
+os.environ.pop("APP_MASTER_KEY", None)
+url = os.environ["TT56_DATABASE_URL"]
+class _Settings:
+    database_url = SecretStr(url)
+    business = SimpleNamespace(
+        ingest=SimpleNamespace(heartbeat=SimpleNamespace(interval_s=15), licences=None)
+    )
+import app.config as config_mod
+config_mod.get_settings = lambda: _Settings()
+from app.workers import ingest as iw
+iw.legacy_licence_present = lambda environ=None: False
+iw.master_key_present = lambda environ=None: False
+iw.run = lambda *a, **k: 0
+try:
+    rc = iw.main()
+except SystemExit as exc:
+    rc = exc.code if isinstance(exc.code, int) else 1
+except Exception as exc:
+    print("EXC", type(exc).__name__, file=sys.stderr)
+    raise SystemExit(1)
+print("RC", rc)
+raise SystemExit(int(rc) if isinstance(rc, int) else 1)
+"""
         t0 = time.monotonic()
-        th = threading.Thread(target=_run_main, daemon=True)
-        th.start()
-        th.join(timeout=8.0)
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=str(ROOT),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=8.5,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            elapsed = time.monotonic() - t0
+            raise AssertionError(
+                f"A17: bootstrap 在 8s 内未返回（≥{elapsed:.1f}s；"
+                "基线无 connect_timeout 时挂起 >20s → 红）"
+            ) from None
         elapsed = time.monotonic() - t0
-        assert not th.is_alive(), (
-            f"A17: bootstrap 在 8s 内未返回（≥{elapsed:.1f}s；"
-            "基线无 connect_timeout 时挂起 >20s → 红）"
+        assert proc.returncode == 78, (
+            f"A17: bootstrap 应 rc=78，实际 {proc.returncode}（{elapsed:.1f}s）\n"
+            f"stdout={proc.stdout[-400:]}\nstderr={proc.stderr[-400:]}"
         )
-        assert "exc" not in box, f"A17: 未预期异常 {box.get('exc')!r}"
-        assert box.get("rc") == 78, f"A17: bootstrap 应 rc=78，实际 {box.get('rc')}"
         assert elapsed <= 8.0
 
 
@@ -1009,95 +1026,114 @@ def test_a18_ingest_profile_nullpool_connect_args() -> None:
 
 
 def test_a19_bad_url_with_fake_password_rc78_no_leak(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    from pydantic import SecretStr
-
-    monkeypatch.setenv("SERVICE_NAME", "ingest")
-    monkeypatch.setenv("APP_ENV", "local")
-    monkeypatch.delenv("MAIRUI_LICENCE", raising=False)
-    monkeypatch.delenv("APP_MASTER_KEY", raising=False)
-
-    from app.workers import ingest as ingest_worker
-    from app.ingest import runtime
-
-    runtime.set_ingest_core(None)
-    monkeypatch.setattr(ingest_worker, "legacy_licence_present", lambda environ=None: False)
-    monkeypatch.setattr(ingest_worker, "master_key_present", lambda environ=None: False)
-    # 不可解析 URL（含假口令片段）→ ArgumentError；基线 main 只 catch RuntimeError → 红
-    bad = f"not-a-url-with-{FAKE_PW_FRAG}"
-
-    class _Settings:
-        database_url = SecretStr(bad)
-        business = SimpleNamespace(
-            ingest=SimpleNamespace(heartbeat=SimpleNamespace(interval_s=15), licences=_cfg())
-        )
-
-    import app.config as config_mod
-
-    monkeypatch.setattr(config_mod, "get_settings", lambda: _Settings())
-    monkeypatch.setattr(ingest_worker, "run", lambda *a, **k: 0)
-
-    # Also wrap get_settings+bootstrap in the way L-2 requires: any Exception → 78
-    # Baseline may print str(exc) containing password → assertion catches it.
-    err = io.StringIO()
-    with mock.patch("sys.stderr", err):
-        try:
-            rc = ingest_worker.main()
-        except Exception as exc:  # noqa: BLE001
-            pytest.fail(
-                f"A19 RED: main 未捕获 {type(exc).__name__}（基线只 catch RuntimeError）；"
-                f"应 rc=78 且不泄露口令/Traceback"
-            )
-    err_text = err.getvalue()
-    assert rc == 78, f"A19: 期望 rc=78，实际 {rc}"
+    """A19：不可解析 URL（含假口令）→ rc=78 且不泄露。main() 在子进程运行。"""
+    env = _ingest_main_child_env()
+    env["TT56_BAD_URL"] = f"not-a-url-with-{FAKE_PW_FRAG}"
+    env["TT56_PW_FRAG"] = FAKE_PW_FRAG
+    code = r"""
+import os, sys
+from types import SimpleNamespace
+from pydantic import SecretStr
+os.environ.pop("MAIRUI_LICENCE", None)
+os.environ.pop("APP_MASTER_KEY", None)
+bad = os.environ["TT56_BAD_URL"]
+class _Settings:
+    database_url = SecretStr(bad)
+    business = SimpleNamespace(
+        ingest=SimpleNamespace(heartbeat=SimpleNamespace(interval_s=15), licences=None)
+    )
+import app.config as config_mod
+config_mod.get_settings = lambda: _Settings()
+from app.workers import ingest as iw
+iw.legacy_licence_present = lambda environ=None: False
+iw.master_key_present = lambda environ=None: False
+iw.run = lambda *a, **k: 0
+try:
+    rc = iw.main()
+except SystemExit as exc:
+    rc = exc.code if isinstance(exc.code, int) else 1
+except Exception as exc:
+    print("UNCAUGHT", type(exc).__name__, file=sys.stderr)
+    raise SystemExit(1)
+print("RC", rc)
+raise SystemExit(int(rc) if isinstance(rc, int) else 1)
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=str(ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=15,
+        env=env,
+    )
+    err_text = (proc.stderr or "") + (proc.stdout or "")
+    assert proc.returncode == 78, (
+        f"A19: 期望 rc=78，实际 {proc.returncode}（未捕获则红）\n"
+        f"stdout={proc.stdout[-400:]}\nstderr={proc.stderr[-400:]}"
+    )
     assert "Traceback" not in err_text, "A19: stderr 不得含 Traceback"
+    assert "UNCAUGHT" not in err_text
     assert FAKE_PW_FRAG not in err_text, "A19: stderr 不得含口令"
 
 
 def test_a20_settings_validation_rc78_no_leak(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SERVICE_NAME", "ingest")
-    monkeypatch.setenv("APP_ENV", "local")
-    monkeypatch.delenv("MAIRUI_LICENCE", raising=False)
-    monkeypatch.delenv("APP_MASTER_KEY", raising=False)
-
-    from app.workers import ingest as ingest_worker
-    from app.ingest import runtime
-    from pydantic import ValidationError
-
-    runtime.set_ingest_core(None)
-    monkeypatch.setattr(ingest_worker, "legacy_licence_present", lambda environ=None: False)
-    monkeypatch.setattr(ingest_worker, "master_key_present", lambda environ=None: False)
-
-    import app.config as config_mod
-
-    def _boom() -> None:
-        # Simulate Settings validation failure that would include input_value
-        raise ValidationError.from_exception_data(
-            "Settings",
-            [
-                {
-                    "type": "value_error",
-                    "loc": ("database_url",),
-                    "input": f"postgresql://u:{FAKE_PW_FRAG}@h/db",
-                    "ctx": {"error": ValueError("bad")},
-                }
-            ],
-        )
-
-    monkeypatch.setattr(config_mod, "get_settings", _boom)
-    monkeypatch.setattr(ingest_worker, "run", lambda *a, **k: 0)
-
-    err = io.StringIO()
-    with mock.patch("sys.stderr", err):
-        try:
-            rc = ingest_worker.main()
-        except ValidationError:
-            pytest.fail(
-                "A20 RED: main 未捕获 ValidationError（基线只 catch RuntimeError）；"
-                "应 rc=78 且不泄露"
-            )
-    err_text = err.getvalue()
-    assert rc == 78
+    """A20：Settings ValidationError 含假口令 → rc=78 且不泄露。main() 在子进程运行。"""
+    env = _ingest_main_child_env()
+    env["TT56_PW_FRAG"] = FAKE_PW_FRAG
+    code = r"""
+import os, sys
+from pydantic import ValidationError
+os.environ.pop("MAIRUI_LICENCE", None)
+os.environ.pop("APP_MASTER_KEY", None)
+frag = os.environ["TT56_PW_FRAG"]
+def _boom():
+    raise ValidationError.from_exception_data(
+        "Settings",
+        [
+            {
+                "type": "value_error",
+                "loc": ("database_url",),
+                "input": f"postgresql://u:{frag}@h/db",
+                "ctx": {"error": ValueError("bad")},
+            }
+        ],
+    )
+import app.config as config_mod
+config_mod.get_settings = _boom
+from app.workers import ingest as iw
+iw.legacy_licence_present = lambda environ=None: False
+iw.master_key_present = lambda environ=None: False
+iw.run = lambda *a, **k: 0
+try:
+    rc = iw.main()
+except SystemExit as exc:
+    rc = exc.code if isinstance(exc.code, int) else 1
+except ValidationError:
+    print("UNCAUGHT_VALIDATION", file=sys.stderr)
+    raise SystemExit(1)
+except Exception as exc:
+    print("UNCAUGHT", type(exc).__name__, file=sys.stderr)
+    raise SystemExit(1)
+print("RC", rc)
+raise SystemExit(int(rc) if isinstance(rc, int) else 1)
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=str(ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=15,
+        env=env,
+    )
+    err_text = (proc.stderr or "") + (proc.stdout or "")
+    assert proc.returncode == 78, (
+        f"A20: 期望 rc=78，实际 {proc.returncode}\n"
+        f"stdout={proc.stdout[-400:]}\nstderr={proc.stderr[-400:]}"
+    )
     assert "Traceback" not in err_text
+    assert "UNCAUGHT" not in err_text
     assert FAKE_PW_FRAG not in err_text
 
 

@@ -179,27 +179,34 @@ def _a29_contention_rounds(tmp_path: Path, *, optimized: bool) -> None:
                     connects["n"] += 1
                     return orig(*a, **k)
 
-                eng.connect = _counting_connect  # type: ignore[method-assign]
                 tr = FakeTransport()
-                t0 = time.monotonic()
+                # T-A92：连接数从进入 mairui_get 起算 ==1；single_egress 锁会话不计。
                 try:
-                    with pytest.raises(eg.EgressDenied) as ei:
-                        _call_mairui(
-                            eg,
-                            engine=eng,
-                            core=core,
-                            lid=lid,
-                            uid=uid,
-                            transport=tr,
-                            tmp_path=tmp_path,
+                    with eg.single_egress(eng) as lease:
+                        eng.connect = _counting_connect  # type: ignore[method-assign]
+                        t0 = time.monotonic()
+                        with pytest.raises(eg.EgressDenied) as ei:
+                            _call_mairui(
+                                eg,
+                                engine=eng,
+                                core=core,
+                                lid=lid,
+                                uid=uid,
+                                transport=tr,
+                                lease=lease,
+                                tmp_path=tmp_path,
+                            )
+                        elapsed = time.monotonic() - t0
+                        times.append(elapsed)
+                        assert ei.value.code == "core_denied"
+                        assert tr.calls == []
+                        assert connects["n"] == 1, (
+                            f"从进入 mairui_get 起须恰好 1 条连接（不计 single_egress），实际 {connects['n']}"
                         )
-                    elapsed = time.monotonic() - t0
-                    times.append(elapsed)
-                    assert ei.value.code == "core_denied"
-                    assert tr.calls == []
-                    assert connects["n"] <= 1, f"准入应只开 1 条连接，实际 {connects['n']}"
-                    # xact_lock count may include single-egress try_advisory (non-xact). We count xact only.
-                    assert xact_locks["n"] <= 1, f"应只发 1 次 pg_advisory_xact_lock，实际 {xact_locks['n']}"
+                        # xact_lock 不计 single_egress 的 session 锁（非 xact）。
+                        assert xact_locks["n"] == 1, (
+                            f"从进入 mairui_get 起应只发 1 次 pg_advisory_xact_lock，实际 {xact_locks['n']}"
+                        )
                 finally:
                     eng.connect = orig  # type: ignore[method-assign]
                     try:
@@ -443,45 +450,47 @@ def test_a30_halt_dir_unwritable_exit_74(tmp_path: Path) -> None:
     code = r"""
 import os, sys, uuid
 from pathlib import Path
+from sqlalchemy import create_engine
 from tests.backend.unit.test_ta87_m1_a1_a24_t_t50 import (
-    FakeTransport, _call_mairui, _import_egress, _make_core, _seed_licence, _temp_db,
+    FakeTransport, _call_mairui, _import_egress, _make_core, _seed_licence,
 )
 from tests.backend.unit.test_ta91_a28_a32_t_t55 import _install_reject_invalid
 eg = _import_egress()
 tmp = Path(os.environ["A30_TMP"])
-# Make halt path unwritable: use a file-as-dir or chmod 500 after creating a file in the way
 halt_dir = tmp / "nohalt"
 halt_dir.mkdir()
 os.chmod(halt_dir, 0o500)
 halt = halt_dir / "HALT"
 tr = FakeTransport(responses=[(102, None)])
+eng = create_engine(os.environ["TT56_DATABASE_URL"], pool_pre_ping=True)
 try:
-    with _temp_db("a30b") as (eng, _n, _u):
-        uid, lid = uuid.uuid4(), uuid.uuid4()
-        _seed_licence(eng, uid, lid)
-        core = _make_core(eng)
-        _install_reject_invalid(eng)
-        try:
-            _call_mairui(eg, engine=eng, core=core, lid=lid, uid=uid, transport=tr, tmp_path=tmp, halt=halt)
-        except SystemExit as exc:
-            raise
-        except Exception:
-            # product should have os._exit(74) already
-            pass
+    uid, lid = uuid.uuid4(), uuid.uuid4()
+    _seed_licence(eng, uid, lid)
+    core = _make_core(eng)
+    _install_reject_invalid(eng)
+    try:
+        _call_mairui(eg, engine=eng, core=core, lid=lid, uid=uid, transport=tr, tmp_path=tmp, halt=halt)
+    except SystemExit:
+        raise
+    except Exception:
+        pass
 finally:
+    eng.dispose()
     os.chmod(halt_dir, 0o700)
 print("NO_EXIT_74", file=sys.stderr)
 raise SystemExit(0)
 """
-    proc = subprocess.run(
-        [PY, "-c", code],
-        cwd=str(ROOT),
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=60,
-        env=env,
-    )
+    with _temp_db("a30b") as (_eng, _n, url):
+        env["TT56_DATABASE_URL"] = url
+        proc = subprocess.run(
+            [PY, "-c", code],
+            cwd=str(ROOT),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=60,
+            env=env,
+        )
     assert proc.returncode == 74, (
         f"A30② 应 os._exit(74)，实际 rc={proc.returncode}\n"
         f"stdout={proc.stdout[-400:]}\nstderr={proc.stderr[-400:]}"
@@ -494,28 +503,41 @@ raise SystemExit(0)
 
 
 def test_a30_bootstrap_halt_dir_unwritable_rc78_keeps_existing_halt(tmp_path: Path) -> None:
-    """A30③：停机目录不可写时 bootstrap 退出码 78，且未触碰任何已有 HALT 文件。"""
+    """A30③：patch daily_lists.HALT 到不可写目录，并提供一次性库使 engine 探测通过；
+    bootstrap 退出码 78，文案指向停机目录不可写，已有 HALT 不变。不加 A30_HALT_DIR 产品钩。"""
     env = _child_env()
     halt_dir = tmp_path / "hd"
     halt_dir.mkdir()
-    existing = halt_dir / "HALT"
+    existing = halt_dir / "mairui-daily.HALTED"
     existing.write_bytes(b"limit_103_or_429")
     os.chmod(existing, 0o600)
     before = existing.read_bytes()
     mtime = existing.stat().st_mtime_ns
-    os.chmod(halt_dir, 0o500)
-    env["A30_HALT_DIR"] = str(halt_dir)
+    env["A30_HALT_PATH"] = str(existing)
+    env["SERVICE_NAME"] = "ingest"
+    env["APP_ENV"] = "local"
     code = r"""
 import os, sys
 from pathlib import Path
-# Product should refuse bootstrap with rc=78 when halt dir is not writable.
-# If the API is env/path based, honor A30_HALT_DIR.
+from types import SimpleNamespace
+from pydantic import SecretStr
 os.environ.setdefault("SERVICE_NAME", "ingest")
 os.environ.setdefault("APP_ENV", "local")
 os.environ.pop("MAIRUI_LICENCE", None)
 os.environ.pop("APP_MASTER_KEY", None)
+import app.ingest.daily_lists as dl
+dl.HALT = Path(os.environ["A30_HALT_PATH"])
+url = os.environ["TT56_DATABASE_URL"]
+class _Settings:
+    database_url = SecretStr(url)
+    business = SimpleNamespace(
+        ingest=SimpleNamespace(heartbeat=SimpleNamespace(interval_s=15), licences=None)
+    )
+import app.config as config_mod
+config_mod.get_settings = lambda: _Settings()  # type: ignore[assignment]
 from app.workers import ingest as iw
-# If no hook for halt dir yet, main/bootstrap ignores this → we still invoke and expect 78.
+iw.legacy_licence_present = lambda environ=None: False
+iw.master_key_present = lambda environ=None: False
 try:
     rc = iw.main()
 except SystemExit as exc:
@@ -523,16 +545,19 @@ except SystemExit as exc:
 print("RC", rc)
 raise SystemExit(int(rc) if isinstance(rc, int) else 1)
 """
+    os.chmod(halt_dir, 0o500)
     try:
-        proc = subprocess.run(
-            [PY, "-c", code],
-            cwd=str(ROOT),
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=20,
-            env=env,
-        )
+        with _temp_db("a30c") as (_eng, _n, url):
+            env["TT56_DATABASE_URL"] = url
+            proc = subprocess.run(
+                [PY, "-c", code],
+                cwd=str(ROOT),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=20,
+                env=env,
+            )
     finally:
         os.chmod(halt_dir, 0o700)
     err = (proc.stderr or "") + (proc.stdout or "")
@@ -540,7 +565,6 @@ raise SystemExit(int(rc) if isinstance(rc, int) else 1)
         f"A30③ bootstrap 应 rc=78，实际 {proc.returncode}\n"
         f"stdout={proc.stdout[-400:]}\nstderr={proc.stderr[-400:]}"
     )
-    # 须明确因停机目录不可写而拒绝，不能仅因缺 DATABASE_URL 等其它 78 碰巧通过。
     needle = err.lower()
     assert any(s in needle for s in ("halt", "停机", "unwritable", "不可写")), (
         f"A30③ 用例过弱风险：rc=78 但文案未指向停机目录不可写。stderr={err[-400:]}"
@@ -635,6 +659,62 @@ def test_a31_l9_flush_success_clears_pending_after_outer_commit() -> None:
             ipl.flush_pending_escalation = orig  # type: ignore[assignment]
         assert seen["pending_inside"] is True, "flush 进行时 pending 仍应在"
         assert mem.pending_escalation is None, "外层提交后才清除 pending"
+
+
+def test_a31_flush_ok_outer_commit_fails_keeps_pending() -> None:
+    """A31：flush 已成功但外层提交失败 → pending 必须保留（不得在提交前清 pending）。"""
+    from app.ingest.core import IngestCore
+    from app.schemas.enums import DataLicenceStatus, DataLicenceTier
+    from test_ta87_m1_a1_a24_t_t50 import _cfg
+
+    with _temp_db("a31cf") as (eng, _n, _u):
+        uid, lid = uuid.uuid4(), uuid.uuid4()
+        _seed_licence(eng, uid, lid)
+        core = IngestCore(_cfg(), engine=eng)
+        core.upsert(
+            lid,
+            user_id=uid,
+            tier=DataLicenceTier.ANNUAL,
+            status=DataLicenceStatus.ACTIVE,
+            now=NOW0,
+        )
+        _plant_pending(core, uid, lid)
+        mem = core._user_mem(uid)  # type: ignore[attr-defined]
+        assert mem.pending_escalation is not None
+        orig_locked = core.rehydrate_locked
+
+        def _locked(conn: Any, user_id: uuid.UUID, now: Any) -> bool:
+            ok = orig_locked(conn, user_id, now)
+            if ok:
+                root = conn.get_transaction()
+                while root is not None and getattr(root, "parent", None) is not None:
+                    root = root.parent
+                if root is None:
+                    raise AssertionError("A31：找不到外层事务，无法注入提交失败")
+
+                def _fail(*_a: Any, **_k: Any) -> None:
+                    raise RuntimeError("a31_outer_commit_injected")
+
+                root.commit = _fail  # type: ignore[method-assign]
+            return ok
+
+        core.rehydrate_locked = _locked  # type: ignore[method-assign]
+        try:
+            core.rehydrate(uid, NOW0 + dt.timedelta(seconds=5))
+        finally:
+            core.rehydrate_locked = orig_locked  # type: ignore[method-assign]
+        assert mem.pending_escalation is not None, (
+            "A31：flush 成功但外层提交失败时不得清 pending（提交前清 pending 即红）"
+        )
+        with eng.connect() as conn:
+            n = conn.execute(
+                text(
+                    "SELECT count(*) FROM ops.data_licence_events "
+                    "WHERE user_id=:u AND actor='ingest' AND event IN ('paused','ip_limited')"
+                ),
+                {"u": uid},
+            ).scalar_one()
+        assert n == 0, f"外层回滚后库内不应有升级行，实际 {n}"
 
 
 # ---------------------------------------------------------------------------
@@ -751,6 +831,16 @@ def test_a32_existing_temp_second_batch_new_trade_day(monkeypatch: pytest.Monkey
     with pytest.raises(DailyHaltError) as ei:
         temporary(fifo, "x")
     assert ei.value.args[0] == "temp_path_not_regular" or getattr(ei.value, "args", [""])[0] == "temp_path_not_regular" or "temp_path_not_regular" in str(ei.value)
+
+    # T-A92 补例：残留普通文件被替换后须为 0600
+    leftover = tmp_path / "cred.tmp"
+    leftover.write_text("stale-mode")
+    leftover.chmod(0o644)
+    temporary(leftover, "x")
+    mode = leftover.stat().st_mode
+    assert stat.S_ISREG(mode)
+    assert (mode & 0o777) == 0o600, f"A32：temporary 替换后须 0600，实际 {oct(mode & 0o777)}"
+    leftover.unlink()
 
     with _tb90_containers() as (pg_id, rd_id):
         # Build env via the selfcheck fixture guts by invoking request on a new day

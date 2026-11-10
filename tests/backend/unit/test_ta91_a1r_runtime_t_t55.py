@@ -1,15 +1,18 @@
 # ruff: noqa: S101
-"""T-T55 / T-A91 A1r：运行时拦截（netguard / 放行窗口）。
+"""T-T56 / T-A92 A1r：运行时拦截（netguard / 放行窗口）。
 
-每例在子进程中先安装测试防护再 `netguard.install()`，然后执行绕过写法。
+每例在子进程中先 `netguard.install()`，再追加测试审计钩子，然后执行绕过写法。
 保证不产生真实外网/麦蕊请求：
 - 子进程 `env -u MAIRUI_LICENCE` 且 `MAIRUI_LICENCE=`、`MAIRUI_MODE=replay`
-- 优先 `unshare -n`（无网命名空间）；若内核拒绝（本机已测 Operation not permitted），
-  子进程仍安装：麦蕊域名 DNS 直接失败；`connect`/`connect_ex` 只放行 AF_UNIX / 回环 /
-  RFC1918 / ULA / 文档网段 203.0.113.0/24（超短超时），其它立即 OSError
-- 绕过目标只用 203.0.113.x 或本机不可达地址，curl --max-time 1 指向 203.0.113.10
-- 不用真 transport、不读证书
-被拦 ⇒ 子进程看到 EgressBlocked；被放行 ⇒ gaierror/OSError（或防护层 OSError）即判红。
+- 优先 `unshare -n`（无网命名空间）；若内核拒绝（Operation not permitted），
+  在 `netguard.install()` **之后** `sys.addaudithook` 追加测试钩子：对非
+  AF_UNIX / 回环 / RFC1918 / ULA 的 connect/sendto/sendmsg 抛 OSError，
+  并对麦蕊域名的 getaddrinfo 抛 OSError。
+- **不得**在 Python 层替换 `socket.getaddrinfo` / `socket.socket.connect`
+  （会遮蔽 C 层审计事件，测到的是测试自己的拦截）。
+- 绕过目标只用 203.0.113.x 或主机名直连；不用真 transport、不读证书。
+被拦 ⇒ 子进程看到 EgressBlocked；被放行 ⇒ 测试钩子 OSError / gaierror 即判红。
+正向窗口须先 `register_resolved_ip` 并传入 `validate`。
 """
 
 from __future__ import annotations
@@ -23,58 +26,12 @@ ROOT = Path(__file__).resolve().parents[3]
 PY = sys.executable
 SRC = str(ROOT / "src/backend")
 
-# Child preamble: never talk to Mairui; optional unshare added by parent.
+# Env only — do not replace socket.getaddrinfo / connect in the preamble.
 _PREAMBLE = r"""
-import os, socket, sys, ipaddress
+import os, sys
 os.environ.pop("MAIRUI_LICENCE", None)
 os.environ["MAIRUI_LICENCE"] = ""
 os.environ["MAIRUI_MODE"] = "replay"
-_BLOCK = ("mairuiapi.com", "mairui.com")
-_real_gai = socket.getaddrinfo
-def _gai(host, *a, **k):
-    h = host.decode("ascii","ignore") if isinstance(host, bytes) else host
-    h = (h or "").lower().rstrip(".")
-    if any(h == s or h.endswith("."+s) for s in _BLOCK):
-        raise OSError("test-dns-block-mairui")
-    return _real_gai(host, *a, **k)
-socket.getaddrinfo = _gai
-def _ok_ip(addr):
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        return False
-    return bool(ip.is_loopback or ip.is_private or ip.is_link_local
-                or ip in ipaddress.ip_network("203.0.113.0/24"))
-_real_connect = socket.socket.connect
-_real_connect_ex = socket.socket.connect_ex
-def _safe_addr(address):
-    if not isinstance(address, tuple) or not address:
-        return True  # AF_UNIX str / path
-    host = address[0]
-    if isinstance(host, bytes):
-        host = host.decode("ascii", "ignore")
-    if host in {"127.0.0.1", "::1", "localhost"}:
-        return True
-    try:
-        return _ok_ip(host)
-    except Exception:
-        return False
-def _connect(self, address):
-    if self.family == socket.AF_UNIX:
-        return _real_connect(self, address)
-    if not _safe_addr(address):
-        raise OSError("test-connect-blocked-non-local")
-    self.settimeout(0.2)
-    return _real_connect(self, address)
-def _connect_ex(self, address):
-    if self.family == socket.AF_UNIX:
-        return _real_connect_ex(self, address)
-    if not _safe_addr(address):
-        return 111
-    self.settimeout(0.2)
-    return _real_connect_ex(self, address)
-socket.socket.connect = _connect
-socket.socket.connect_ex = _connect_ex
 """
 
 
@@ -90,7 +47,6 @@ def _child_env() -> dict[str, str]:
 def _run_child(body: str, timeout: int = 20) -> subprocess.CompletedProcess[str]:
     script = _PREAMBLE + "\n" + body + "\n"
     cmd_py = [PY, "-c", script]
-    # Prefer unshare -n; fall back if not permitted.
     unshare = ["unshare", "-n", "--"] + cmd_py
     try:
         proc = subprocess.run(
@@ -137,6 +93,7 @@ def _assert_blocked(proc: subprocess.CompletedProcess[str], label: str) -> None:
     )
 
 
+# install first (product hook), then append the test safety-net audithook.
 _INSTALL = r"""
 try:
     from app.ingest import netguard
@@ -145,6 +102,74 @@ except ImportError as exc:
     sys.exit(2)
 netguard.install()
 Blocked = netguard.EgressBlocked
+
+import ipaddress, socket, sys as _sys
+
+# Python 3.12+ treats documentation ranges (203.0.113.0/24 etc.) as is_private;
+# the safety hook must still refuse them so UDP/TFO cannot leak packets.
+_TT56_DOC = (
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+    ipaddress.ip_network("2001:db8::/32"),
+)
+def _tt56_ok_ip(addr):
+    try:
+        ip = ipaddress.ip_address(addr)
+    except (ValueError, TypeError):
+        return False
+    if any(ip in net for net in _TT56_DOC):
+        return False
+    return bool(
+        ip.is_loopback or ip.is_private or ip.is_link_local
+        or ip.is_unspecified
+    )
+
+def _tt56_addr_host(address):
+    if isinstance(address, (str, bytes)):
+        return None  # AF_UNIX path
+    if isinstance(address, tuple) and address:
+        host = address[0]
+        if isinstance(host, bytes):
+            host = host.decode("ascii", "ignore")
+        return host
+    return None
+
+def _tt56_test_hook(event, args):
+    if event == "socket.getaddrinfo":
+        host = args[0] if args else None
+        if isinstance(host, bytes):
+            host = host.decode("ascii", "ignore")
+        h = (host or "").lower().rstrip(".")
+        if h.endswith("mairuiapi.com") or h.endswith("mairui.com") or h in {
+            "mairuiapi.com", "mairui.com"
+        }:
+            raise OSError("tt56-test-dns-block-mairui")
+        return
+    if event not in {"socket.connect", "socket.connect_ex", "socket.sendto", "socket.sendmsg"}:
+        return
+    # CPython 对各事件传入的 address 位置不同（sendto 可能是末参），逐项查找 (host, port)。
+    host = None
+    for item in args[1:]:
+        got = _tt56_addr_host(item)
+        if got is not None:
+            host = got
+            break
+        # sendmsg ancdata / flags 之外，有时地址在嵌套元组
+        if isinstance(item, tuple) and item and isinstance(item[0], tuple):
+            got = _tt56_addr_host(item[0])
+            if got is not None:
+                host = got
+                break
+    if host is None:
+        return
+    if host in {"127.0.0.1", "::1", "localhost"} or _tt56_ok_ip(host):
+        return
+    # Public / TEST-NET / hostname: product hook should already have raised.
+    # If we get here, the product allowed it — fail closed for the test process.
+    raise OSError("tt56-test-net-safety")
+
+_sys.addaudithook(_tt56_test_hook)
 """
 
 
@@ -251,7 +276,6 @@ def test_a1r_lease_held_but_outside_window() -> None:
     """⑥ 持有 lease 但窗口外连接须 EgressBlocked。"""
     body = _INSTALL + r"""
 import socket
-# lease object if any is irrelevant: connect must be blocked outside window
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(0.2)
 try:
@@ -271,11 +295,19 @@ raise SystemExit(4)
 
 
 def test_a1r_lease_thread_a_window_thread_b() -> None:
-    """⑦ lease 在 A 线程签发、B 线程进入窗口或连接须 EgressBlocked。"""
+    """⑦ 须在 A 线程真开窗（validate + register_resolved_ip），B 线程连接已登记 IP → EgressBlocked。"""
     body = _INSTALL + r"""
 import threading, socket
 err = {}
+ready = threading.Event()
+win = getattr(netguard, "egress_window", None) or getattr(netguard, "_egress_window", None)
+reg = getattr(netguard, "register_resolved_ip", None)
+if win is None or reg is None:
+    print("NO_WINDOW_API")
+    raise SystemExit(4)
+
 def other():
+    ready.wait(3)
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(0.2)
     try:
@@ -287,16 +319,29 @@ def other():
         err["other"] = type(exc).__name__
     finally:
         s.close()
-# Best-effort: if _egress_window exists, open it only in this thread.
-try:
-    from app.ingest import egress as eg
-    from app.ingest import netguard
-    win = getattr(netguard, "_egress_window", None) or getattr(eg, "_egress_window", None)
-except Exception:
-    win = None
+
 t = threading.Thread(target=other)
 t.start()
-t.join(3)
+opened = False
+try:
+    with win(object(), validate=lambda: True):
+        reg("203.0.113.21")
+        opened = True
+        ready.set()
+        t.join(3)
+except Blocked:
+    ready.set()
+    t.join(3)
+    print("WINDOW_NOT_OPENED")
+    raise SystemExit(4)
+except TypeError as exc:
+    ready.set()
+    t.join(3)
+    print("WINDOW_TYPE_ERROR", type(exc).__name__, file=sys.stderr)
+    raise SystemExit(4)
+if not opened:
+    print("WINDOW_NOT_OPENED")
+    raise SystemExit(4)
 if err.get("blocked"):
     print("EGRESS_BLOCKED")
     raise SystemExit(0)
@@ -355,28 +400,143 @@ raise SystemExit(4)
     _assert_blocked(_run_child(body), "ctypes")
 
 
-def test_a1r_positive_window_fake_ip_is_oserror_not_blocked() -> None:
-    """正向：窗口内假解析 203.0.113.10 登记后连接被放行，无网下为 OSError 而非 EgressBlocked。"""
+def test_a1r_hostname_connect_blocked() -> None:
+    """⑩ 非麦蕊主机名直连（不经 Python getaddrinfo）须 EgressBlocked。"""
     body = _INSTALL + r"""
 import socket
-# If no window API yet, this is red (cannot allow in-window connect).
-win_cm = getattr(netguard, "_egress_window", None)
-if win_cm is None:
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(0.2)
+try:
+    # Hostname form: CPython 在审计事件之后走 C 层解析，不触发 socket.getaddrinfo。
+    s.connect(("tt56-public.example", 443))
+except Blocked:
+    print("EGRESS_BLOCKED")
+    raise SystemExit(0)
+except Exception as exc:
+    print("OTHER", type(exc).__name__, file=sys.stderr)
+    raise SystemExit(3)
+finally:
+    s.close()
+print("ALLOWED")
+raise SystemExit(4)
+"""
+    _assert_blocked(_run_child(body), "hostname-connect")
+
+
+def test_a1r_cdll_none_and_pythonapi_connect() -> None:
+    """⑪ ctypes.CDLL(None) 与 pythonapi.connect 须 EgressBlocked（不调用所得函数）。"""
+    body = _INSTALL + r"""
+import ctypes
+bad = []
+try:
+    ctypes.CDLL(None)
+    bad.append("CDLL_NONE_ALLOWED")
+except Blocked:
+    pass
+except Exception as exc:
+    bad.append("CDLL_NONE_OTHER:"+type(exc).__name__)
+try:
+    _ = ctypes.pythonapi.connect
+    bad.append("PYTHONAPI_CONNECT_ALLOWED")
+except Blocked:
+    pass
+except Exception as exc:
+    bad.append("PYTHONAPI_CONNECT_OTHER:"+type(exc).__name__)
+if not bad:
+    print("EGRESS_BLOCKED")
+    raise SystemExit(0)
+print("NOT_BLOCKED", bad)
+raise SystemExit(4)
+"""
+    _assert_blocked(_run_child(body), "cdll-none-pythonapi")
+
+
+def test_a1r_sendto_and_tfo_blocked() -> None:
+    """⑫ sendto UDP 与 TCP Fast Open 到公网须 EgressBlocked。"""
+    body = _INSTALL + r"""
+import socket
+bad = []
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(0.2)
+try:
+    s.sendto(b"x", ("203.0.113.10", 53))
+    bad.append("SENDTO_UDP_ALLOWED")
+except Blocked:
+    pass
+except Exception as exc:
+    bad.append("SENDTO_UDP_OTHER:"+type(exc).__name__)
+finally:
+    s.close()
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(0.2)
+try:
+    flags = getattr(socket, "MSG_FASTOPEN", 0x20000000)
+    try:
+        s.sendto(b"x", flags, ("203.0.113.11", 443))
+    except TypeError:
+        s.sendmsg([b"x"], [], flags, ("203.0.113.11", 443))
+    bad.append("TFO_ALLOWED")
+except Blocked:
+    pass
+except Exception as exc:
+    bad.append("TFO_OTHER:"+type(exc).__name__)
+finally:
+    s.close()
+if not bad:
+    print("EGRESS_BLOCKED")
+    raise SystemExit(0)
+print("NOT_BLOCKED", bad)
+raise SystemExit(4)
+"""
+    _assert_blocked(_run_child(body), "sendto-tfo")
+
+
+def test_a1r_window_requires_validate_and_lease() -> None:
+    """⑬ egress_window 不传 validate、或 lease 为 None，须 EgressBlocked。"""
+    body = _INSTALL + r"""
+win = getattr(netguard, "egress_window", None) or getattr(netguard, "_egress_window", None)
+if win is None:
     print("NO_WINDOW_API")
     raise SystemExit(4)
-# fake lease if required
-lease = None
+bad = []
 try:
-    import app.ingest.egress as eg
-    lease = getattr(eg, "EgressLease", lambda **k: None)
-except Exception:
+    with win(object()):
+        bad.append("OPENED_NO_VALIDATE")
+except Blocked:
     pass
-# monkeypatch getaddrinfo used inside window
-def fake_gai(host, *a, **k):
-    return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("203.0.113.10", 0))]
-socket.getaddrinfo = fake_gai
+except TypeError:
+    # 若签名把 validate 做成必填位置参数，TypeError 也视为拒开窗
+    pass
+except Exception as exc:
+    bad.append("NO_VALIDATE_OTHER:"+type(exc).__name__)
 try:
-    with win_cm(lease) if lease is not None else win_cm():
+    with win(None, validate=lambda: True):
+        bad.append("OPENED_NONE_LEASE")
+except Blocked:
+    pass
+except Exception as exc:
+    bad.append("NONE_LEASE_OTHER:"+type(exc).__name__)
+if not bad:
+    print("EGRESS_BLOCKED")
+    raise SystemExit(0)
+print("NOT_BLOCKED", bad)
+raise SystemExit(4)
+"""
+    _assert_blocked(_run_child(body), "window-validate-lease")
+
+
+def test_a1r_positive_window_fake_ip_is_oserror_not_blocked() -> None:
+    """正向：窗口内先 register_resolved_ip(203.0.113.10) 并传 validate，连接被放行，无网下为 OSError 而非 EgressBlocked。"""
+    body = _INSTALL + r"""
+import socket
+win = getattr(netguard, "egress_window", None) or getattr(netguard, "_egress_window", None)
+reg = getattr(netguard, "register_resolved_ip", None)
+if win is None or reg is None:
+    print("NO_WINDOW_API")
+    raise SystemExit(4)
+try:
+    with win(object(), validate=lambda: True):
+        reg("203.0.113.10")
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(0.2)
         try:
@@ -394,6 +554,9 @@ try:
 except Blocked:
     print("BLOCKED_OPENING_WINDOW")
     raise SystemExit(4)
+except TypeError as exc:
+    print("WINDOW_TYPE_ERROR", type(exc).__name__)
+    raise SystemExit(4)
 """
     proc = _run_child(body)
     if proc.returncode != 0 or "OSERROR_IN_WINDOW" not in (proc.stdout or ""):
@@ -406,11 +569,10 @@ except Blocked:
 def test_a1r_private_and_unix_unaffected() -> None:
     """正向：postgres/redis 私网地址与 AF_UNIX 不受 netguard 拒绝。"""
     body = _INSTALL + r"""
-import socket, tempfile, os
-# AF_UNIX connect to a missing path → OSError, not EgressBlocked
+import socket
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 try:
-    s.connect("/tmp/tt55-no-such-unix.sock")
+    s.connect("/tmp/tt56-no-such-unix.sock")
 except Blocked:
     print("BLOCKED_UNIX")
     raise SystemExit(4)
@@ -418,7 +580,6 @@ except OSError:
     pass
 finally:
     s.close()
-# RFC1918 connect (short timeout) → OSError/timeout, not EgressBlocked
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(0.2)
 try:
@@ -444,13 +605,11 @@ raise SystemExit(0)
 def test_a1r_main_installs_first_line_and_reinstall_noop() -> None:
     """正向：main() 第一行已安装（AST + sys.audit 探测）；重复 install() 为 no-op。"""
     body = r"""
-import ast, inspect, sys
+import ast, sys
 from pathlib import Path
-# AST: main body first meaningful stmt is netguard.install()
 src_path = Path("src/backend/app/workers/ingest.py")
 tree = ast.parse(src_path.read_text(encoding="utf-8"))
 main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
-# skip docstrings
 stmts = list(main.body)
 if stmts and isinstance(stmts[0], ast.Expr) and isinstance(getattr(stmts[0], "value", None), ast.Constant):
     stmts = stmts[1:]

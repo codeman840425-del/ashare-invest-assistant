@@ -187,9 +187,10 @@ def test_a25_upstream_102_then_always_licence_unavailable(tmp_path: Path) -> Non
 
 
 def test_a26_status_write_fail_fail_closed(tmp_path: Path) -> None:
-    """A26：INVALID 落库失败 → 本调用后后续拒绝，transport 不增加。"""
+    """A26：INVALID 落库失败 → 本调用 core_denied 且写 HALT=licence_status_persist_failed；
+    后续调用 halt_present；transport 不增加。"""
     eg = _import_egress()
-
+    halt = tmp_path / "HALT"
     tr = FakeTransport(responses=[(102, None)])
     with _temp_db("a26") as (eng, _n, _u):
         uid, lid = uuid.uuid4(), uuid.uuid4()
@@ -211,15 +212,24 @@ def test_a26_status_write_fail_fail_closed(tmp_path: Path) -> None:
                 )
             )
         before = len(tr.calls)
-        try:
-            _call_mairui(
-                eg, engine=eng, core=core, lid=lid, uid=uid, transport=tr, tmp_path=tmp_path
-            )
-        except Exception:
-            pass
-        mid = len(tr.calls)
-        tr_next = FakeTransport(responses=[(200, {"x": 1})])
         with pytest.raises(eg.EgressDenied) as ei:
+            _call_mairui(
+                eg,
+                engine=eng,
+                core=core,
+                lid=lid,
+                uid=uid,
+                transport=tr,
+                tmp_path=tmp_path,
+                halt=halt,
+            )
+        assert ei.value.code == "core_denied"
+        assert halt.is_file(), "A26：写库失败须同时写 HALT"
+        assert halt.read_text(encoding="utf-8") == "licence_status_persist_failed"
+        mid = len(tr.calls)
+        assert mid - before == 1
+        tr_next = FakeTransport(responses=[(200, {"x": 1})])
+        with pytest.raises(eg.EgressDenied) as ei2:
             _call_mairui(
                 eg,
                 engine=eng,
@@ -228,11 +238,11 @@ def test_a26_status_write_fail_fail_closed(tmp_path: Path) -> None:
                 uid=uid,
                 transport=tr_next,
                 tmp_path=tmp_path,
+                halt=halt,
             )
-        assert ei.value.code in {"licence_unavailable", "core_denied"}
+        assert ei2.value.code == "halt_present"
         assert tr_next.calls == []
         assert len(tr.calls) == mid
-        assert mid - before <= 1
 
 
 # ---------------------------------------------------------------------------

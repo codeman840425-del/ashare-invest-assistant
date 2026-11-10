@@ -352,6 +352,170 @@ def test_a1s_s2_positive_forms_flagged() -> None:
         assert hits, f"S2 positive {name} should be flagged, src={src!r}"
 
 
+
+
+# ---------------------------------------------------------------------------
+# S2b netguard 窗口 API（T-A92）
+# ---------------------------------------------------------------------------
+
+S2B_WINDOW_NAMES = frozenset(
+    {
+        "egress_window",
+        "_egress_window",
+        "register_resolved_ip",
+    }
+)
+
+
+def _netguard_private_names() -> set[str]:
+    names = set(S2B_WINDOW_NAMES)
+    path = APP / "ingest/netguard.py"
+    if not path.is_file():
+        return names
+    tree = _parse(path)
+    if tree is None:
+        return names
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name.startswith("_") and not (
+                node.name.startswith("__") and node.name.endswith("__")
+            ):
+                names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id.startswith("_") and not (
+                    t.id.startswith("__") and t.id.endswith("__")
+                ):
+                    names.add(t.id)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if node.target.id.startswith("_") and not (
+                node.target.id.startswith("__") and node.target.id.endswith("__")
+            ):
+                names.add(node.target.id)
+    return names
+
+
+def _s2b_hits(path: Path, tree: ast.AST, priv: set[str]) -> list[str]:
+    rel = str(path.relative_to(APP))
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and "netguard" in node.module:
+            for alias in node.names:
+                if alias.name == "*" or alias.name in priv or alias.name in S2B_WINDOW_NAMES:
+                    hits.append(f"{rel}:{node.lineno}: from {node.module} import {alias.name}")
+        if isinstance(node, ast.Attribute) and (
+            node.attr in priv or node.attr in S2B_WINDOW_NAMES
+        ):
+            # only count when the value chain mentions netguard, or attr is a window name
+            hits.append(f"{rel}:{node.lineno}: .{node.attr}")
+        if isinstance(node, ast.Name) and node.id in priv:
+            hits.append(f"{rel}:{getattr(node, 'lineno', 0)}: name {node.id}")
+    return hits
+
+
+def _netguard_aliases(tree: ast.AST) -> set[str]:
+    aliases: set[str] = {"netguard"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if "netguard" in str(node.module):
+                for alias in node.names:
+                    aliases.add(alias.asname or alias.name)
+            for alias in node.names:
+                if alias.name == "netguard" or "netguard" in (alias.asname or ""):
+                    aliases.add(alias.asname or alias.name)
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if "netguard" in alias.name:
+                    aliases.add(alias.asname or alias.name.split(".")[-1])
+        if isinstance(node, ast.Assign):
+            if isinstance(node.value, ast.Name) and "netguard" in node.value.id.lower():
+                for t in node.targets:
+                    if isinstance(t, ast.Name):
+                        aliases.add(t.id)
+    return aliases
+
+
+def _attr_root_name(node: ast.AST) -> str | None:
+    cur = node
+    while isinstance(cur, ast.Attribute):
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        return cur.id
+    return None
+
+
+def test_a1s_s2b_tree_allowed_refs() -> None:
+    """负例：workers/ingest 只许 install；egress 只许窗口 API 与 EgressBlocked；其它 app 引用即红。"""
+    priv = _netguard_private_names() | set(S2B_WINDOW_NAMES)
+    ingest_allow = {"install"}
+    egress_allow = set(S2B_WINDOW_NAMES) | {"EgressBlocked", "install"}
+    offenders: list[str] = []
+    for path in APP.rglob("*.py"):
+        rel = str(path.relative_to(APP))
+        tree = _parse(path)
+        if tree is None:
+            continue
+        aliases = _netguard_aliases(tree)
+        hits = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                mentions = "netguard" in str(node.module)
+                imported_ng = any(a.name == "netguard" for a in node.names)
+                if mentions or imported_ng:
+                    for alias in node.names:
+                        name = alias.name
+                        if rel == "workers/ingest.py":
+                            # 只许 import 模块后用 install，不得直接 from netguard import 窗口 API
+                            if mentions and name not in ingest_allow and name != "netguard":
+                                hits.append(f"import {name}")
+                            if name == "*":
+                                hits.append("import *")
+                        elif rel == "ingest/egress.py":
+                            if mentions and name not in egress_allow and name != "netguard":
+                                hits.append(f"import {name}")
+                            if name == "*":
+                                hits.append("import *")
+                        else:
+                            hits.append(f"import {name}")
+            if isinstance(node, ast.Attribute):
+                root = _attr_root_name(node.value) if not isinstance(node.value, ast.Name) else node.value.id
+                if root is None or (root not in aliases and "netguard" not in root.lower()):
+                    continue
+                if rel == "workers/ingest.py" and node.attr in ingest_allow:
+                    continue
+                if rel == "ingest/egress.py" and node.attr in egress_allow:
+                    continue
+                if node.attr in priv or node.attr in S2B_WINDOW_NAMES or node.attr == "install":
+                    hits.append(f".{node.attr}")
+        if hits:
+            offenders.append(f"{rel}: {hits}")
+    assert not offenders, "A1s S2b tree:\n" + "\n".join(offenders)
+
+
+def test_a1s_s2b_positive_forms_flagged() -> None:
+    """正例：egress 外以任何静态形式引用 egress_window / _egress_window / register_resolved_ip / netguard 下划线名即红。"""
+    priv = _netguard_private_names() | set(S2B_WINDOW_NAMES)
+    samples = {
+        "abs_win": "from app.ingest.netguard import egress_window\n",
+        "abs_priv": "from app.ingest.netguard import _egress_window\n",
+        "reg": "from app.ingest.netguard import register_resolved_ip\n",
+        "attr": "import app.ingest.netguard as ng\nng.egress_window(lease)\n",
+        "star": "from app.ingest.netguard import *\n",
+    }
+    for name, src in samples.items():
+        tree = ast.parse(src)
+        hits: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module and "netguard" in node.module:
+                for alias in node.names:
+                    if alias.name == "*" or alias.name in priv or alias.name in S2B_WINDOW_NAMES:
+                        hits.append(alias.name)
+            if isinstance(node, ast.Attribute) and (
+                node.attr in priv or node.attr in S2B_WINDOW_NAMES
+            ):
+                hits.append(node.attr)
+        assert hits, f"S2b positive {name} should be flagged, src={src!r}"
+
 # ---------------------------------------------------------------------------
 # S3
 # ---------------------------------------------------------------------------
@@ -464,17 +628,50 @@ def test_a1s_s4_positive_literal_flagged() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _dict_has_transport_key(node: ast.AST) -> bool:
+    if isinstance(node, ast.Dict):
+        for k in node.keys:
+            if isinstance(k, ast.Constant) and k.value == "transport":
+                return True
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "dict":
+        for kw in node.keywords:
+            if kw.arg == "transport":
+                return True
+    return False
+
+
+def _s5_starstar_names(tree: ast.AST) -> set[str]:
+    """Names bound to a dict literal/dict() that contains a \"transport\" key."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and _dict_has_transport_key(node.value):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    names.add(t.id)
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value is not None
+            and _dict_has_transport_key(node.value)
+        ):
+            names.add(node.target.id)
+    return names
+
+
 def _s5_transport_inject(tree: ast.AST) -> list[str]:
     hits: list[str] = []
+    star_names = _s5_starstar_names(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            # mairui_get(..., transport=...)
+            # mairui_get(..., transport=...) / **{"transport": ...} / **var
             for kw in node.keywords:
                 if kw.arg == "transport":
                     hits.append(f"kw:transport:{node.lineno}")
-                if kw.arg is None and isinstance(kw.value, ast.Name):
-                    # **kwargs — static name not enough; look for dict "transport" nearby
-                    pass
+                if kw.arg is None:
+                    if _dict_has_transport_key(kw.value):
+                        hits.append(f"kw-star-dict:transport:{node.lineno}")
+                    elif isinstance(kw.value, ast.Name) and kw.value.id in star_names:
+                        hits.append(f"kw-star-name:transport:{node.lineno}")
             # process(..., upstream=...)
             func = node.func
             name = ""
@@ -520,11 +717,14 @@ def test_a1s_s5_tree_daily_lists_seam_only() -> None:
 
 
 def test_a1s_s5_positive_inject_and_process_upstream_flagged() -> None:
-    """正例：app 内 transport= / 字典键 transport / process(upstream=) 即红。"""
+    """正例：app 内 transport= / 字典键 transport / process(upstream=) / **{\"transport\":…} / **变量 即红。"""
     samples = {
         "kw": "mairui_get(path, transport=fn)\n",
         "dict": 'get_kwargs["transport"] = fn\n',
         "proc": "process(engine, bid, grant, upstream=fn)\n",
+        # T-A92 / T-T56：两种 ** 写法（T-T55 均漏报）
+        "star_dict": 'mairui_get(**{"transport": fn})\n',
+        "star_var": 'params = {"transport": fn}\nmairui_get(path, **params)\n',
     }
     for name, src in samples.items():
         hits = _s5_transport_inject(ast.parse(src))

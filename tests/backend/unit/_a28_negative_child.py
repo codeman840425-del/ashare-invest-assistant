@@ -37,9 +37,14 @@ def main() -> int:
         if case == "inject_registry":
             # A28-negative: copy nonce, stuff fake into _ISSUED_LEASES / _LEASE_LOCK_CONN
             with eg.single_egress(eng) as real:
-                nonce = getattr(real, "_nonce", "") or "copied"
+                # T-A92：字段名是 nonce，不加 _nonce 别名。
+                fields = getattr(real, "__dataclass_fields__", {})
+                nonce = getattr(real, "nonce", None)
+                if not nonce or "nonce" not in fields:
+                    print("MISSING_NONCE_FIELD", list(fields))
+                    return 4
                 fake_conn = SimpleNamespace(closed=False)
-                forged = eg.EgressLease(held=True, _nonce=nonce)  # type: ignore[call-arg]
+                forged = eg.EgressLease(held=True, nonce=nonce)  # type: ignore[call-arg]
                 # T-A90 M-a：覆盖同一 nonce 槽位（不是另开无关键）
                 eg._ISSUED_LEASES[nonce] = forged  # A28-negative
                 eg._LEASE_LOCK_CONN[nonce] = fake_conn  # A28-negative
@@ -124,14 +129,20 @@ def main() -> int:
             from sqlalchemy import text
 
             with eg.single_egress(eng) as real:
-                nonce = getattr(real, "_nonce", "")
+                nonce = getattr(real, "nonce", None)
+                if not nonce:
+                    print("MISSING_NONCE_FIELD", list(getattr(real, "__dataclass_fields__", {})))
+                    return 4
                 conn = eg._LEASE_LOCK_CONN.get(nonce)  # A28-negative
-                if conn is not None and hasattr(conn, "execute"):
-                    conn.execute(text("SELECT pg_advisory_unlock(hashtext('ingest:single-egress'))"))
-                    try:
-                        conn.commit()
-                    except Exception:
-                        pass
+                # T-A92：④ 取不到锁会话必须报错，不得继续（否则可能误放行/误绿）。
+                if conn is None or not hasattr(conn, "execute"):
+                    print("NO_LOCK_SESSION")
+                    return 4
+                conn.execute(text("SELECT pg_advisory_unlock(hashtext('ingest:single-egress'))"))
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
                 try:
                     h._call_mairui(
                         eg,

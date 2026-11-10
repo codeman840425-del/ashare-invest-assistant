@@ -1,8 +1,9 @@
 # ruff: noqa: S101
-"""T-T71 / T-T71c：daily-snapshot-from-bars.md 实现单 B 验收。
+"""T-T71 / T-T71c / T-T71d 第 1 步：daily-snapshot-from-bars.md 实现单 B 验收。
 
-T-T71 28 例名与契约 §8 一一对应；T-T71c 按 7234aa7 §12 / T-A137 新增 6 例（名与 :432–:457 一一对应）。
-自选 E 只在专用用例播种（§11.1），不进 _seed_b。
+T-T71 28 例名与契约 §8 一一对应；T-T71c 按 7234aa7 §12 新增 6 例。
+T-T71d 第 1 步按 §11.1 补自选纳入范围的新例（af77bb5 上应为功能缺失红，消息「缺实现：…」）。
+自选只在专用 helper 播种，不进 _seed_b。用例 14 的 Then 与 drafts 本步不动。
 契约新符号一律在用例内部探测：缺失时以 ``assert ..., "缺实现：…"`` 报红，保证本文件可被收集。
 
 临时库与探针复用 tests/backend/daily_bars_t70_support.py（自 T-T70 复制，T-T70 文件不改）：
@@ -240,6 +241,15 @@ def _seed_u1_watchlist_e(conn: Any, ctx: SimpleNamespace) -> None:
         board=Board.MAIN.value))
     conn.execute(insert(watchlist_items).values(
         id=uuid.uuid4(), user_id=ctx.u1, security_code=CODE_E))
+
+
+
+def _seed_u1_watchlist(conn: Any, ctx: SimpleNamespace, code: str) -> None:
+    """§11.1：只写 u1 有效自选行（证券已在公共或专用种子中）。"""
+    from app.db.tables.research import watchlist_items
+
+    conn.execute(insert(watchlist_items).values(
+        id=uuid.uuid4(), user_id=ctx.u1, security_code=code, removed_at=None))
 
 
 @pytest.fixture
@@ -1073,3 +1083,79 @@ def test_report_build_now_before_ledger_nulls_account(b_db: SimpleNamespace) -> 
     codes = {s.get("security_code") for s in stocks}
     assert CODE_A not in codes and CODE_B not in codes
     assert stocks == []
+
+
+# ---------------------------------------------------------------------------
+# T-T71d 第 1 步 / §11.1 自选纳入范围（新例；用例 14 Then 本步不动）
+# af77bb5 上应为功能缺失红；T-B129 落地后转绿。
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_watchlist_code_evaluated(
+    b_db: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§11.1 :386；:379–:380。"""
+    mod = _snapshot_mod()
+    with b_db.engine.begin() as conn:
+        _seed_u1_watchlist_e(conn, b_db)
+        _insert_fake_bars(conn, (CODE_E,))
+        out, _ = _full_analyze(conn, b_db, monkeypatch)
+        rows = _owned_rows(conn, b_db.u1, mod.OWNED_VERSION)
+    ev = next((e for e in out["evaluations"] if e.get("security_code") == CODE_E), None)
+    assert ev is not None, (
+        f"缺实现：自选 {CODE_E} 未进入 analyze 求值（契约 §11.1 :380、:386）"
+    )
+    assert rows, "缺实现：analyze 未写入 owned 快照（契约 §11.1 :386）"
+    assert ev["source_hash"] == rows[0].hash, (
+        "缺实现：自选 E 的 evaluation.source_hash 应等于快照 hash（契约 §11.1 :386）"
+    )
+    assert f"owned_source_security_missing:{CODE_E}" not in out["issues"], (
+        f"缺实现：自选 {CODE_E} 仍记 owned_source_security_missing（契约 §11.1 :380、:386）"
+    )
+
+
+def test_ready_carries_watchlist_owner_issues(b_db: SimpleNamespace) -> None:
+    """§11.1 :387（既有 test_ready_carries_only_owner_issues 的加一组）。
+
+    不能把这组断言写进既有用例 4：本步须保持既有 34 例在 af77bb5 上全绿。
+    """
+    mod = _snapshot_mod()
+    with b_db.engine.begin() as conn:
+        _seed_u1_watchlist(conn, b_db, CODE_C)
+        _run_row(conn, OPEN_10, "partial",
+                 issues=[f"daily_bars_missing:{CODE_A}", f"daily_bars_missing:{CODE_C}"])
+        got = mod.daily_bars_ready(conn, b_db.u1, OPEN_10)
+        assert f"daily_bars_missing:{CODE_C}" in got[1], (
+            f"缺实现：daily_bars_ready 的 owner 当日 universe 未包含自选 {CODE_C}"
+            "（契约 §11.1 :381、:387）"
+        )
+        assert got[0] is True
+        assert f"daily_bars_missing:{CODE_C}" in got[1]
+        conn.rollback()
+
+
+def test_snapshot_watchlist_change_new_id(b_db: SimpleNamespace) -> None:
+    """§11.1 :388；:382。"""
+    mod = _snapshot_mod()
+    from app.reports.dimensions import load_inputs
+
+    with b_db.engine.begin() as conn:
+        _fetch_three(conn)
+        _insert_fake_bars(conn, (CODE_E,))
+        sid1, _i1, _row1 = _build(conn, b_db)
+        _seed_u1_watchlist_e(conn, b_db)
+        sid2, _i2, _row2 = _build(conn, b_db)
+        assert sid1 is not None and sid2 is not None
+        assert sid1 != sid2, (
+            "缺实现：同日自选变化未得到新的 hash 与 id（契约 §11.1 :382、:388）"
+        )
+        rows = _owned_rows(conn, b_db.u1, mod.OWNED_VERSION)
+        assert any(r.id == sid1 for r in rows), (
+            "缺实现：自选变化后旧快照未被保留（契约 §11.1 :382、:388）"
+        )
+        now = dt.datetime.now(dt.UTC) + dt.timedelta(minutes=1)
+        got = load_inputs(conn, b_db.u1, CODE_A, OPEN_10, now)
+        src_ids = [s.get("id") for s in got.get("sources") or []]
+        assert src_ids and src_ids[0] == str(sid2), (
+            "缺实现：load_inputs(u1, A, 当日) 未取自选变化后的快照（契约 §11.1 :388）"
+        )

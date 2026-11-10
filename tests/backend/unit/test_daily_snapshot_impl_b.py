@@ -25,6 +25,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import insert, select, text, update
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -35,6 +36,7 @@ from daily_bars_t70_support import (  # noqa: E402
     CODE_A,
     CODE_B,
     CODE_C,
+    CODE_D,
     CODE_E,
     CODE_H,
     OPEN_06,
@@ -184,11 +186,34 @@ def _seed_b(conn: Any, ctx: SimpleNamespace) -> None:
     conn.execute(insert(feature_catalog).values(
         feature_key="f.close_qfq", unit="CNY/share", status="declared", source={"synthetic": True}))
     card, cardversion, strategy, version, instance = (uuid.uuid4() for _ in range(5))
+    # 10.2：形状同 test_tb76_assembly 虚构接线卡（E/X/C/I），不是 tb76_daily 的单条 entry。
     spec = {
         "params_schema": {},
-        "rules": [{"id": "fictional_only", "dimension": "technical", "role": "entry",
-                   "expr": "ma(f.close_qfq,60) > 0", "eval_time": "daily"}],
-        "action_map": {"entry_all_core_pass": "buy", "else": "wait"},
+        "rules": [
+            {
+                "id": key,
+                "dimension": "technical",
+                "role": role,
+                "expr": expr,
+                "eval_time": "daily_close",
+                "weight": 1,
+            }
+            for key, role, expr in (
+                ("E", "entry", "f.close_qfq > 0"),
+                ("X", "exit", "f.close_qfq > 0"),
+                ("C", "counter", "f.close_qfq < 0"),
+                ("I", "invalidation", "f.close_qfq < 0"),
+            )
+        ],
+        "action_map": {
+            "entry_all_core_pass": "buy",
+            "held_hold": "hold",
+            "exit": "sell",
+            "else": "wait",
+        },
+        "dimension_view_thresholds": {"bullish": 0.67, "bearish": 0.33},
+        "stops": {"stop_loss": None, "take_profit": None, "time_stop_days": 5},
+        "valid_until": {"trading_days": 40},
     }
     conn.execute(insert(strategy_cards).values(
         id=card, key="tt71_fiction_" + card.hex, title="明确虚构非正式卡", source_kind="user",
@@ -230,6 +255,10 @@ def _omitted_issues(items: dict[str, Any]) -> set[str]:
     return {o["issue"] for o in items["omitted"]}
 
 
+def _owned_id(version: str, owner: uuid.UUID, day: dt.date, digest: str) -> uuid.UUID:
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"{version}:{owner}:{day.isoformat()}:{digest}")
+
+
 def _build(conn: Any, ctx: SimpleNamespace, day: dt.date = OPEN_10) -> tuple[Any, Any, dict[str, Any]]:
     from app.db.tables.reviews import data_snapshots
 
@@ -250,7 +279,13 @@ def test_ready_requires_ok_or_partial_run(b_db: SimpleNamespace) -> None:
     mod = _snapshot_mod()
     with b_db.engine.begin() as conn:
         assert mod.daily_bars_ready(conn, b_db.u1, OPEN_10) == (False, ())
-        for status, expected in (("skipped", False), ("failed", False), ("ok", True), ("partial", True)):  # Then :153 只写 ok；按用例名与 §1 :24 将 partial 视为 True，见报告 J13
+        for status, expected in (
+            ("skipped", False),
+            ("failed", False),
+            ("running", False),
+            ("ok", True),
+            ("partial", True),
+        ):
             conn.execute(text("DELETE FROM app.pipeline_runs"))
             _run_row(conn, OPEN_10, status)
             assert mod.daily_bars_ready(conn, b_db.u1, OPEN_10)[0] is expected, status
@@ -314,8 +349,9 @@ def test_snapshot_hash_matches_dimensions_digest(b_db: SimpleNamespace) -> None:
 
     with b_db.engine.begin() as conn:
         _fetch_three(conn)
-        _sid, _issues, row = _build(conn, b_db)
+        sid, _issues, row = _build(conn, b_db)
         assert row.hash == digest(row.items) == manifest_hash(row.items)
+        assert sid == row.id == _owned_id(row.items["schema_version"], b_db.u1, OPEN_10, row.hash)
 
 
 def test_suspended_placeholder_becomes_gap_not_bar(b_db: SimpleNamespace) -> None:
@@ -336,9 +372,9 @@ def test_suspended_placeholder_becomes_gap_not_bar(b_db: SimpleNamespace) -> Non
             else mod.ANALYZE_AS_OF
         if as_of.tzinfo is None:
             as_of = as_of.replace(tzinfo=BEIJING)
-        out = prepare(inst, row.items["sessions"], as_of=as_of, factors=[], registry={})
-        # TODO(歧义 J3)：prepare 输出里 f.is_suspended 的确切路径契约未写明，按字符串查找。
-        assert "is_suspended" in repr(out)
+        out = prepare(inst, row.items["sessions"], as_of=as_of, factors=inst.get("factors") or [], registry={})
+        assert out["features"]["f.is_suspended"] is True
+        assert out["raw_close"] is None
 
 
 def test_snapshot_omits_code_without_today_bar(b_db: SimpleNamespace) -> None:
@@ -456,28 +492,66 @@ def test_owned_snapshot_idempotent_rerun(b_db: SimpleNamespace) -> None:
         assert len(_owned_rows(conn, b_db.u1, mod.OWNED_VERSION)) == 1
 
 
+class _CloseOverrideSource:
+    """包装 FakeDailyBarsSource：只改 A 在 11-10 的 close，仍落在该行 [low, high] 内。"""
+
+    def __init__(self, inner: Any, *, code: str, day: dt.date, close: Any) -> None:
+        self._inner = inner
+        self._code = code
+        self._day = day
+        self._close = close
+
+    def fetch(self, codes: Any, start: Any, end: Any, adjust: Any) -> Any:
+        import dataclasses
+
+        raw = self._inner.fetch(codes, start, end, adjust)
+        bars = []
+        for bar in raw.bars:
+            if bar.code == self._code and bar.trade_date == self._day:
+                bar = dataclasses.replace(bar, close=self._close)
+            bars.append(bar)
+        return dataclasses.replace(raw, bars=tuple(bars))
+
+
 def test_snapshot_conflict_keeps_first_row(b_db: SimpleNamespace) -> None:
-    """§8 :168；§3 :101；§5 :123。"""
-    _snapshot_mod()
-    m = _impl()
+    """§8 :168；§3 :101；§5 :123；§10.1 J5。"""
+    mod = _snapshot_mod()
+    m = _require_fetched_at()
     with b_db.engine.begin() as conn:
         _fetch_three(conn)
-        _sid, _i, row1 = _build(conn, b_db)
+        sid1, _i, row1 = _build(conn, b_db)
         old = conn.execute(text(
-            "SELECT * FROM market.daily_bars WHERE code=:c AND trade_date=:d"
+            "SELECT close, low, high FROM market.daily_bars WHERE code=:c AND trade_date=:d"
         ), {"c": CODE_A, "d": OPEN_10}).mappings().one()
-        bar = m.DailyBar(
-            code=CODE_A, trade_date=OPEN_10, adj_type="none", open=old["open"], high=old["high"],
-            low=old["low"], close=old["close"] + 1, pre_close=old["pre_close"],
-            volume=old["volume"], amount=old["amount"], is_suspended=False)
-        m.upsert_daily_bars(conn, m.DailyBarsResult(bars=(bar,), gaps=(), halted=()),
-                            source="fake", licence_id=None, fetched_at=_at(OPEN_10, 17, 20))
-        # TODO(歧义 J5)：冲突 issue 须经运行记录带出（§3 :101）；此处补一条 partial 运行承载。
-        _run_row(conn, OPEN_10, "partial", issues=[f"daily_bar_conflict:{CODE_A}:{OPEN_10}"])
-        _sid2, _i2, row2 = _build(conn, b_db)
-        assert row2.hash == row1.hash
+        close, low, high = old["close"], old["low"], old["high"]
+        if high is not None and high != close:
+            new_close = high
+        elif low is not None and low != close:
+            new_close = low
+        else:
+            raise AssertionError("无法在 [low, high] 内构造不同于原 close 的值")
+        source = _CloseOverrideSource(
+            m.FakeDailyBarsSource(), code=CODE_A, day=OPEN_10, close=new_close)
+        m.fetch_and_record(
+            conn, source, trade_date=OPEN_10, user_id=None, window_trading_days=None,
+            fetched_at=_at(OPEN_10, 17, 20),
+        )
+        latest = conn.execute(text(
+            "SELECT status, stats FROM app.pipeline_runs "
+            "WHERE kind='daily_batch' AND step='daily_bars.fetch' AND run_date=:d "
+            "ORDER BY finished_at DESC, started_at DESC LIMIT 1"
+        ), {"d": OPEN_10}).mappings().one()
+        issue = f"daily_bar_conflict:{CODE_A}:{OPEN_10.isoformat()}"
+        assert latest["status"] == "partial"
+        assert issue in (latest["stats"] or {}).get("issues", [])
+        kept = conn.execute(text(
+            "SELECT close FROM market.daily_bars WHERE code=:c AND trade_date=:d"
+        ), {"c": CODE_A, "d": OPEN_10}).scalar_one()
+        assert kept == close
+        sid2, _i2, row2 = _build(conn, b_db)
+        assert sid2 == sid1 and row2.hash == row1.hash
         out = _analyze(conn, b_db)
-        assert f"daily_bar_conflict:{CODE_A}:{OPEN_10}" in out["issues"]
+        assert issue in out["issues"]
 
 
 # ---------------------------------------------------------------------------
@@ -494,6 +568,8 @@ def test_analyze_off_keeps_legacy_issue_and_report(b_db: SimpleNamespace) -> Non
     with b_db.engine.connect() as conn:
         before = _snap_count(conn)
     assert phase(settings, ANALYZE, OPEN_10.isoformat()) >= 1
+    with b_db.engine.connect() as conn:
+        assert _snap_count(conn) == before
     assert phase(settings, REPORT, OPEN_10.isoformat()) >= 1
     with b_db.engine.connect() as conn:
         run = conn.execute(select(pipeline_runs).where(pipeline_runs.c.step == "tb76." + ANALYZE)
@@ -505,8 +581,6 @@ def test_analyze_off_keeps_legacy_issue_and_report(b_db: SimpleNamespace) -> Non
             daily_reports.c.user_id == b_db.u1, daily_reports.c.trade_date == OPEN_10)).first()
         assert report is not None
         assert any("owned_market_cache_adapter_missing" in g["key"] for g in report.gaps)
-        # TODO(歧义 J6)：report 自身是否写 data_snapshots 契约未写；此处只断言 analyze 后零新增 owned 行。
-        assert _snap_count(conn) >= before
         assert conn.execute(text(
             "SELECT count(*) FROM app.data_snapshots WHERE items->>'schema_version'='owned-daily-v1'"
         )).scalar_one() == 0
@@ -516,7 +590,7 @@ def test_analyze_test_env_off_keeps_tb70_path(b_db: SimpleNamespace, monkeypatch
     """§8 :170；§1 :33。模块尚未落地时不强制导入，按现状行为验收（可本就绿）。"""
     import app.workers.daily as daily
 
-    calls = {"iso": 0, "build": 0}
+    calls = {"iso": 0, "build": 0, "ready": 0}
 
     def iso(*_a: Any, **_k: Any) -> None:
         calls["iso"] += 1
@@ -524,6 +598,10 @@ def test_analyze_test_env_off_keeps_tb70_path(b_db: SimpleNamespace, monkeypatch
     def build(*_a: Any, **_k: Any) -> Any:
         calls["build"] += 1
         return None, ()
+
+    def ready(*_a: Any, **_k: Any) -> Any:
+        calls["ready"] += 1
+        return False, ()
 
     monkeypatch.setattr(daily, "require_isolated", iso)
     spec = importlib.util.find_spec(B_MOD)
@@ -533,9 +611,13 @@ def test_analyze_test_env_off_keeps_tb70_path(b_db: SimpleNamespace, monkeypatch
             monkeypatch.setattr(mod, "build_owned_snapshot", build)
         if hasattr(daily, "build_owned_snapshot"):
             monkeypatch.setattr(daily, "build_owned_snapshot", build)
+        if hasattr(mod, "daily_bars_ready"):
+            monkeypatch.setattr(mod, "daily_bars_ready", ready)
+        if hasattr(daily, "daily_bars_ready"):
+            monkeypatch.setattr(daily, "daily_bars_ready", ready)
     with b_db.engine.begin() as conn:
         out = _analyze(conn, b_db, source="off")
-    assert calls == {"iso": 1, "build": 0}
+    assert calls == {"iso": 1, "build": 0, "ready": 0}
     # 改动前：tt71_ 库无 VERSION 快照 → owned_source_or_card_missing（现状 daily.py tb70 分支）。
     assert "owned_source_or_card_missing" in out["issues"]
     assert "daily_bars_not_ready" not in out["issues"]
@@ -576,24 +658,40 @@ def test_analyze_fake_bars_produces_evaluations(b_db: SimpleNamespace, monkeypat
     with b_db.engine.begin() as conn:
         out, calls = _full_analyze(conn, b_db, monkeypatch)
         row = _owned_rows(conn, b_db.u1, mod.OWNED_VERSION)[0]
-    codes = {e.get("security_code") for e in out["evaluations"]}
+    codes = {e["security_code"] for e in out["evaluations"]}
     assert {CODE_A, CODE_B} <= codes
     assert all(e["simulation"] is True for e in out["evaluations"])
-    # TODO(歧义 J7)：evaluation 内 source_hash 的确切键名契约未写，按 source_hash 取。
-    assert all(e.get("source_hash") == row.hash for e in out["evaluations"])
+    assert all(e["source_hash"] == row.hash for e in out["evaluations"])
     assert calls["iso"] == 0
 
 
 def test_missing_factor_stays_gap_not_one(b_db: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
-    """§8 :173；§2 :72；§3 :96。"""
-    _snapshot_mod()
+    """§8 :173；§2 :72；§3 :96；§10.1 J7。"""
+    from app.features.pipeline import prepare
+
+    mod = _snapshot_mod()
     with b_db.engine.begin() as conn:
         out, _ = _full_analyze(conn, b_db, monkeypatch)
-    ev = next(e for e in out["evaluations"] if e.get("security_code") == CODE_A)
-    text_ev = repr(ev)
-    assert "adjust_factor_missing:" in text_ev
-    # TODO(歧义 J7)：f.close_qfq 在 evaluation 中的路径未写明；断言不出现 1 补值的因子痕迹。
-    assert "'value': '1'" not in text_ev and "'factor': '1'" not in text_ev
+        row = _owned_rows(conn, b_db.u1, mod.OWNED_VERSION)[0]
+    ev = next(e for e in out["evaluations"] if e["security_code"] == CODE_A)
+    sessions = row.items["sessions"]
+    for d in sessions:
+        assert f"adjust_factor_missing:{d}" in ev["gaps"]
+    inst = _instr(row.items, CODE_A)
+    assert inst is not None
+    as_of = dt.datetime.combine(OPEN_10, mod.ANALYZE_AS_OF) if isinstance(mod.ANALYZE_AS_OF, dt.time) else mod.ANALYZE_AS_OF
+    if as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=BEIJING)
+    prepared = prepare(inst, sessions, as_of=as_of, factors=inst.get("factors") or [], registry={})
+    assert prepared["features"]["f.close_qfq"] is None
+    assert all(v is None for v in prepared["series"]["f.close_qfq"])
+    for item in ev["evidence"]:
+        if item["key"] == "f.close_qfq":
+            val = item["value"]
+            if isinstance(val, (list, tuple)):
+                assert all(v is None for v in val)
+            else:
+                assert val is None
 
 
 def test_analyze_partial_bars_gaps_no_fabricated_suggestion(
@@ -624,19 +722,21 @@ def test_load_inputs_accepts_owned_schema_same_day(b_db: SimpleNamespace) -> Non
 
     with b_db.engine.begin() as conn:
         _fetch_three(conn)
-        _build(conn, b_db)
+        sid, _i, row = _build(conn, b_db)
         now = dt.datetime.now(dt.UTC) + dt.timedelta(minutes=1)
         got = load_inputs(conn, b_db.u1, CODE_A, OPEN_10, now)
-        # TODO(歧义 J8)：sources 元素的 kind 键形状未写明，按 repr 查 OWNED_VERSION。
-        assert mod.OWNED_VERSION in repr(got.get("sources"))
+        assert got["sources"] == [
+            {"kind": mod.OWNED_VERSION, "id": str(sid), "hash": row.hash}
+        ]
         got9 = load_inputs(conn, b_db.u1, CODE_A, OPEN_09, now)
-        assert mod.OWNED_VERSION not in repr(got9.get("sources"))
+        assert got9["sources"] == []
 
 
 def test_baseline_read_accepts_owned_keeps_filters(b_db: SimpleNamespace) -> None:
     """§8 :176；§1 :38。"""
     _snapshot_mod()
-    from app.common.errors import AppError
+    from app.common.errors import AppError, ErrorCode
+    from app.db.tables.licences import ROW_STATUSES, user_data_licences
     from app.db.tables.reviews import data_snapshots
     from app.replay.baseline import read
 
@@ -644,17 +744,28 @@ def test_baseline_read_accepts_owned_keeps_filters(b_db: SimpleNamespace) -> Non
         _fetch_three(conn)
         sid, _i, row = _build(conn, b_db)
         assert read(conn, b_db.u1, sid)
-        with pytest.raises(AppError):
+        with pytest.raises(AppError) as ei_other:
             read(conn, b_db.u2, sid)
-        lic = conn.execute(text("SELECT id FROM app.user_data_licences LIMIT 1")).scalar()
-        # TODO(歧义 J9)：licence_id 非空行需一条 user_data_licences；临时库无则此半句无法构造。
-        if lic is not None:
-            other = uuid.uuid4()
-            conn.execute(insert(data_snapshots).values(
-                id=other, user_id=b_db.u1, purpose="report", items=row.items, hash=row.hash,
-                licence_id=lic))
-            with pytest.raises(AppError):
-                read(conn, b_db.u1, other)
+        assert ei_other.value.code == ErrorCode.NOT_FOUND
+        lic_id = uuid.uuid4()
+        conn.execute(insert(user_data_licences).values(
+            id=lic_id,
+            user_id=b_db.u1,
+            provider="mairui",
+            seal_key_version=1,
+            tier="free",
+            status=ROW_STATUSES[0],
+            deleted_at=dt.datetime.now(dt.UTC),
+            ciphertext=None,
+            licence_hmac=None,
+        ))
+        other = uuid.uuid4()
+        conn.execute(insert(data_snapshots).values(
+            id=other, user_id=b_db.u1, purpose="report", items=row.items, hash=row.hash,
+            licence_id=lic_id))
+        with pytest.raises(AppError) as ei_lic:
+            read(conn, b_db.u1, other)
+        assert ei_lic.value.code == ErrorCode.NOT_FOUND
 
 
 def test_fetch_and_record_fetched_at_injection(b_db: SimpleNamespace) -> None:
@@ -693,11 +804,18 @@ def test_daily_snapshot_not_a_task() -> None:
     assert not any(from_b(fn) for fn in jobs.TASKS.values())
     assert not any("daily_snapshot" in str(t) for t in jobs.LOCKED_TASKS)
     assert not any(from_b(fn) for fn in jobs.RETRY_TASKS.values())
-    # TODO(歧义 J10)：slot_jobs/schedule 需 redis/时钟，按源码静态检查而非调用。
-    for fn in (jobs.slot_jobs, jobs.schedule):
-        src = inspect.getsource(fn)
-        for name in ("daily_snapshot", "build_owned_snapshot", "daily_bars_ready"):
-            assert name not in src
+    scheduled = jobs.schedule(_settings())
+    assert not any(from_b(jobs.TASKS[name]) for name in scheduled if name in jobs.TASKS)
+    assert not any(
+        name in {"build_owned_snapshot", "daily_bars_ready"} or "daily_snapshot" in name
+        for name in scheduled
+    )
+    slot_src = inspect.getsource(jobs.slot_jobs)
+    for name in ("daily_snapshot", "build_owned_snapshot", "daily_bars_ready"):
+        assert name not in slot_src
+    jobs_text = (APP_ROOT / "workers/jobs.py").read_text(encoding="utf-8")
+    for name in ("build_owned_snapshot", "daily_bars_ready", "daily_snapshot"):
+        assert name not in jobs_text
 
 
 def _imports(path: Path) -> set[str]:
@@ -733,13 +851,32 @@ def test_impl_b_has_no_network_imports() -> None:
 
 
 def test_placeholder_rows_ignored_by_price_readers(b_db: SimpleNamespace) -> None:
-    """§8 :180；§0 :14；§7 :135。不依赖 fetched_at 参数（A 现状即可）。"""
+    """§8 :180；§0 :14；§7 :135；§10.1 J11。不依赖 fetched_at 参数（A 现状即可）。"""
     m = _impl()
-    from app.api.v1.portfolio import latest_daily_close
+    from app.aggregates.service import select_account
+    from app.api.v1.portfolio import _account, latest_daily_close
+    from app.db.tables.accounts import (
+        broker_position_snapshot_items,
+        broker_position_snapshots,
+        import_batches,
+    )
+    from app.db.tables.realtime import daily_reports
     from app.reports.service import build
     from app.tracking.service import instrument
 
     with b_db.engine.begin() as conn:
+        # 持仓行只追加、禁止 DELETE。本例另写 version_no=2 快照（不含 H），使估值可计算。
+        batch_id, snap2 = uuid.uuid4(), uuid.uuid4()
+        conn.execute(insert(import_batches).values(
+            id=batch_id, user_id=b_db.u1, account_id=b_db.acc1, status="committed", kind="positions"))
+        conn.execute(insert(broker_position_snapshots).values(
+            id=snap2, account_id=b_db.acc1, import_batch_id=batch_id,
+            as_of=dt.datetime(2026, 11, 10, 15, 0, tzinfo=BEIJING), version_no=2))
+        conn.execute(insert(broker_position_snapshot_items), [
+            {"id": uuid.uuid4(), "snapshot_id": snap2, "security_code": code,
+             "quantity": 100, "sellable_quantity": 100}
+            for code in (CODE_A, CODE_B)
+        ])
         for day, sus in ((OPEN_06, ()), (OPEN_09, ()), (OPEN_10, (CODE_B,))):
             m.fetch_and_record(conn, m.FakeDailyBarsSource(suspended=sus), trade_date=day,
                                user_id=None, window_trading_days=None)
@@ -748,5 +885,25 @@ def test_placeholder_rows_ignored_by_price_readers(b_db: SimpleNamespace) -> Non
         assert OPEN_10.isoformat() not in {b["trade_date"] for b in bars}
         close = latest_daily_close(conn, {CODE_B}, OPEN_10)
         assert close[CODE_B][1].date() == OPEN_09
-        # TODO(歧义 J11)：日报估值取价的观测面契约未写；断言 build 不因占位行出错。
-        assert build(conn, b_db.u1, OPEN_10, far) is not None
+        rid = build(conn, b_db.u1, OPEN_10, far)
+        report = conn.execute(select(daily_reports).where(daily_reports.c.id == rid)).one()
+        assert report.body["account"] is not None
+        prices = {
+            (r.code, r.trade_date): r.close
+            for r in conn.execute(text(
+                "SELECT code, trade_date, close FROM market.daily_bars "
+                "WHERE adj_type='none' AND close IS NOT NULL AND close > 0"
+            ))
+        }
+        acc = _account(conn, select_account(conn, b_db.u1, None), OPEN_10)
+        cash = acc.cash if acc.cash is not None else Decimal("0.00")
+        # 本例最新快照只保留 A、B：H 按 J11 去掉；ETF D 不在 daily_universe、无日 K，
+        # 留下会使估值不可计算。与 :245 的 A+B+现金口径一致。
+        qty = Decimal("100")
+        total = (
+            Decimal(str(prices[(CODE_A, OPEN_10)])) * qty
+            + Decimal(str(prices[(CODE_B, OPEN_09)])) * qty
+            + cash
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        assert report.body["account"]["total_assets"] == format(total, "f")
+        assert all(g.get("key") != "account." + CODE_B + ".price" for g in (report.gaps or []))

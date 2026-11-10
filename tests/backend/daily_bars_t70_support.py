@@ -224,7 +224,7 @@ def _seed_core(conn: Any, ctx: SimpleNamespace) -> None:
 
 
 def _open_temp_db() -> Iterator[SimpleNamespace]:
-    """o61 临时库：模板 0030 → upgrade head → 播种；失败 skip；finally DROP。不打印 DSN。"""
+    """o61 临时库：模板 0030 → upgrade head → 播种；建库失败则 fail；finally DROP。不打印 DSN。"""
     import sys
 
     sys.path.insert(0, str(BACKEND_TESTS))
@@ -253,7 +253,7 @@ def _open_temp_db() -> Iterator[SimpleNamespace]:
             with admin.connect() as conn:
                 conn.execute(text(f"CREATE DATABASE {name} TEMPLATE {tpl}"))
         except Exception as exc:  # noqa: BLE001
-            pytest.skip(f"无法在目标实例上创建临时库：{type(exc).__name__}")
+            pytest.fail(f"无法在目标实例上创建临时库：{type(exc).__name__}")
         engine = create_engine(db_url, hide_parameters=True)
         with engine.connect() as conn:
             ver = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()

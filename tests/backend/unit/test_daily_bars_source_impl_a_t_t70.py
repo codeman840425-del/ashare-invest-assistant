@@ -1,22 +1,25 @@
 # ruff: noqa: S101
-"""T-T70：docs/contracts/daily-bars-source.md 实现单 A 验收（以 §7 / T-A130 为准）。
+"""T-T70 / T-T70b：docs/contracts/daily-bars-source.md 实现单 A 验收（以 §7 及 T-A131 补充裁定为准）。
 
-基线 docs/T-A128=4a81876。实现尚不存在。按契约接口名导入，导入失败或符号缺失即红；
-不用 xfail。理由：左移后一旦实现落地，断言立刻执行，不必再摘 xfail，也不会把半成品
-藏在 xfailed 里。导入放在各例内部，收集本文件与其他测试互不影响。
+基线 be/T-B127=832faa2，合入 test/T-T70=efc8cb8 后按 04178d0 补充裁定调整。
+按契约接口名导入。导入放在各例内部，收集本文件与其他测试互不影响。
 
 假源用 FakeDailyBarsSource(missing=, suspended=)，经 fetch_and_record 注入。
 任务经 jobs.TASKS 取 daily_bars_fetch_task(settings, trade_date, user_id=None,
 window_trading_days=None)。licence_id 传 None；空串应 TypeError。
-停牌用例为 test_suspended_placeholder_row_written，不导入 daily_snapshot。
+停牌用例为 test_suspended_placeholder_row_written，不导入实现单 B 的快照模块。
 
 临时库：guard_temp_pg → TEMPLATE o61_tmp_0030 → 断言版本 0030 → 仅对该库
 alembic upgrade head → 播种 → finally DROP。建库失败 skip。麦蕊 0。
+出网=否：拦 socket connect（只放行 AF_UNIX/回环）+ egress.mairui_get 计数桩=0；
+不调用 netguard.install()，也不再用 netguard_blocks。
 """
 
 from __future__ import annotations
 
 import ast
+import ipaddress
+import socket
 import datetime as dt
 import inspect
 import uuid
@@ -48,6 +51,7 @@ CODE_C = "002001.SZ"
 CODE_D = "510981.SH"  # etf
 CODE_E = "600981.SH"  # 仅 universe 用例自选
 CODE_F = "600991.SH"  # 仅 universe 用例实例
+CODE_G = "600000.SH"  # 仅 universe 用例：listing_status 为空的持仓股（夹具曾用）
 OPEN_06 = dt.date(2026, 11, 6)
 CLOSED_07 = dt.date(2026, 11, 7)
 CLOSED_08 = dt.date(2026, 11, 8)
@@ -98,12 +102,79 @@ def _task_from_jobs() -> Any:
     return fn
 
 
-def _assert_no_egress(before: int = 0) -> None:
-    from app.ingest.netguard import netguard_blocks
+def _host_of(address: Any) -> str | None:
+    if isinstance(address, tuple) and address:
+        return str(address[0])
+    if isinstance(address, str):
+        return address
+    return None
 
-    # TODO(T-T70 剩余): netguard_blocks 现网恒返回 0（netguard.py 约 :200–202），
-    # 与契约「transport 和 netguard 计数」只有名义对齐（§5 文首、§7 未改探针）。
-    assert netguard_blocks() == before == 0
+
+def _is_loopback_host(host: str) -> bool:
+    h = host.split("%", 1)[0]
+    if h in {"localhost", "127.0.0.1", "::1"}:
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_allowed_socket(sock: socket.socket, address: Any) -> bool:
+    if sock.family == socket.AF_UNIX:
+        return True
+    if sock.family in (socket.AF_INET, socket.AF_INET6):
+        host = _host_of(address)
+        return bool(host) and _is_loopback_host(host)
+    return False
+
+
+@pytest.fixture
+def no_egress(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """出网=否：只放行 AF_UNIX 与回环；mairui_get 计数须为 0。不调用 netguard.install()。"""
+    blocked: list[Any] = []
+    counts = {"mairui_get": 0}
+    orig_connect = socket.socket.connect
+    orig_ex = socket.socket.connect_ex
+
+    def guarded_connect(self: socket.socket, address: Any, *args: Any, **kwargs: Any) -> Any:
+        if _is_allowed_socket(self, address):
+            return orig_connect(self, address, *args, **kwargs)
+        blocked.append(address)
+        raise OSError("blocked non-loopback / non-unix connect")
+
+    def guarded_ex(self: socket.socket, address: Any, *args: Any, **kwargs: Any) -> Any:
+        if _is_allowed_socket(self, address):
+            return orig_ex(self, address, *args, **kwargs)
+        blocked.append(address)
+        raise OSError("blocked non-loopback / non-unix connect_ex")
+
+    def fake_mairui_get(*_a: Any, **_k: Any) -> Any:
+        counts["mairui_get"] += 1
+        raise RuntimeError("mairui_get must not be called")
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", guarded_ex)
+    monkeypatch.setattr("app.ingest.egress.mairui_get", fake_mairui_get)
+    yield
+    assert blocked == []
+    assert counts["mairui_get"] == 0
+
+
+def _imported_modules(path: Path, *, top_level: bool = False) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    nodes: list[ast.AST] = list(tree.body) if top_level else list(ast.walk(tree))
+    names: set[str] = set()
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            names.add(mod)
+            for alias in node.names:
+                names.add(f"{mod}.{alias.name}" if mod else alias.name)
+    return names
 
 
 def _count(engine: Engine, table: Any) -> int:
@@ -241,7 +312,23 @@ def _seed_universe_extras(conn: Any, ctx: SimpleNamespace) -> None:
         )
     )
     conn.execute(
+        insert(securities).values(
+            code=CODE_G, type="stock", name="合成G", exchange="SH", listing_status=None
+        )
+    )
+    conn.execute(
         insert(watchlist_items).values(id=uuid.uuid4(), user_id=ctx.u1, security_code=CODE_E)
+    )
+    from app.db.tables.accounts import broker_position_snapshot_items
+
+    conn.execute(
+        insert(broker_position_snapshot_items).values(
+            id=uuid.uuid4(),
+            snapshot_id=ctx.snap1,
+            security_code=CODE_G,
+            quantity=100,
+            sellable_quantity=100,
+        )
     )
     # 链路形状同 test_tb74_candidates.setup（§7 :348）
     tmpl, ver, inst = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
@@ -358,15 +445,36 @@ def temp_db() -> Iterator[SimpleNamespace]:
     yield from _open_temp_db()
 
 
-def _settings(*, app_env: str = "test", daily_bars_source: str | None = None, database_url: Any = None):
+_MISSING = object()
+
+
+def _database_url_text(url: Any) -> str:
+    """URL.render_as_string(hide_password=False)；不打印返回值。"""
+    if hasattr(url, "render_as_string"):
+        return url.render_as_string(hide_password=False)
+    if isinstance(url, str):
+        return url
+    raise TypeError("database_url 须为 str 或 SQLAlchemy URL")
+
+
+def _settings(
+    *,
+    app_env: str = "test",
+    daily_bars_source: str | None = None,
+    database_url: Any = _MISSING,
+):
     from app.config import Settings
 
     assert "daily_bars_source" in Settings.model_fields
     payload: dict[str, Any] = {"app_env": app_env}
     if daily_bars_source is not None:
         payload["daily_bars_source"] = daily_bars_source
-    if database_url is not None:
-        payload["database_url"] = database_url
+    if database_url is _MISSING:
+        pass
+    elif database_url is None:
+        payload["database_url"] = None
+    else:
+        payload["database_url"] = _database_url_text(database_url)
     return Settings(**payload)
 
 
@@ -419,7 +527,7 @@ def test_tt70_temp_db_fixture_lifecycle() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_fake_source_refused_outside_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fake_source_refused_outside_test_env(monkeypatch: pytest.MonkeyPatch, no_egress: None) -> None:
     """A-2 / §5.A :131；§7 ① 配置校验。"""
     from pydantic import ValidationError
 
@@ -430,7 +538,6 @@ def test_fake_source_refused_outside_test_env(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("DAILY_BARS_SOURCE", "fake")
     with pytest.raises(ValidationError):
         Settings()
-    _assert_no_egress()
 
 
 def test_only_writer_inserts_daily_bars() -> None:
@@ -480,12 +587,16 @@ def test_task_registered_locked_not_retried() -> None:
 
 
 def test_no_settings_field_for_window() -> None:
-    """§7 ② :223。窗口不进 Settings。本断言在实现前已成立（负向）。"""
+    """§7 补1 / T-A131：字段名不得含 window/backfill/lookback；daily_bars_ 前缀只允许 daily_bars_source。"""
     from app.config import Settings
 
-    names = set(Settings.model_fields)
-    assert "window_trading_days" not in names
-    # TODO(T-T70 剩余): §7 :223 写「不含任何回填窗口字段」，未列字段名单。
+    names = list(Settings.model_fields)
+    for name in names:
+        lowered = name.lower()
+        assert "window" not in lowered
+        assert "backfill" not in lowered
+        assert "lookback" not in lowered
+    assert {n for n in names if n.lower().startswith("daily_bars_")} == {"daily_bars_source"}
 
 
 def test_daily_bars_fetch_never_scheduled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -570,15 +681,38 @@ def test_fake_deterministic_and_bounded() -> None:
 
 
 def test_impl_a_imports_no_b_module() -> None:
-    """§7 ⑦ :304。"""
+    """§7 ⑦ :304。按 import 口径禁止实现单 B 的模块，不把文档字符串里的说明当成引用。"""
+    banned = (
+        "app.marketdata.daily_snapshot",
+        "app.workers.daily",
+    )
     path = APP_ROOT / "marketdata/daily_bars.py"
     assert path.is_file()
-    src = path.read_text(encoding="utf-8")
-    assert "daily_snapshot" not in src
-    assert "workers.daily" not in src and "workers/daily" not in src
-    here = Path(__file__).read_text(encoding="utf-8")
-    assert "daily_snapshot" not in here
-    assert "workers.daily" not in here and "from app.workers import daily" not in here
+    imported = _imported_modules(path)
+    imported |= _imported_modules(Path(__file__))
+    for name in banned:
+        assert name not in imported
+        assert not any(item == name or item.startswith(name + ".") for item in imported)
+
+
+def test_impl_a_has_no_network_imports() -> None:
+    """T-A131 补4：顶层不得导入 egress、netguard、socket 或 HTTP 库。"""
+    forbidden = {
+        "app.ingest.egress",
+        "app.ingest.netguard",
+        "socket",
+        "httpx",
+        "requests",
+        "urllib.request",
+    }
+    path = APP_ROOT / "marketdata/daily_bars.py"
+    imported = _imported_modules(path, top_level=True)
+    hits = set()
+    for name in imported:
+        for bad in forbidden:
+            if name == bad or name.startswith(bad + "."):
+                hits.add(name)
+    assert not hits
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +720,7 @@ def test_impl_a_imports_no_b_module() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_daily_bars_default_off_no_writes(temp_db: SimpleNamespace) -> None:
+def test_daily_bars_default_off_no_writes(temp_db: SimpleNamespace, no_egress: None) -> None:
     """A-1 / §5.A :130；「返回 0」只断言 int 0（§7 :335）。"""
     settings = _settings(app_env="test", daily_bars_source="off", database_url=temp_db.url)
     fn = _task_from_jobs()
@@ -600,10 +734,9 @@ def test_daily_bars_default_off_no_writes(temp_db: SimpleNamespace) -> None:
     issues = (run.stats or {}).get("issues") or []
     assert "daily_bars_source_off" in issues
     assert len(_pipeline_rows(temp_db.engine)) == before + 1
-    _assert_no_egress()
 
 
-def test_fake_no_bars_for_day(temp_db: SimpleNamespace) -> None:
+def test_fake_no_bars_for_day(temp_db: SimpleNamespace, no_egress: None) -> None:
     """A-3 / §5.A :132。missing 等于全部标的（§7 :277）。"""
     m = _impl()
     source = m.FakeDailyBarsSource(missing=frozenset({CODE_A, CODE_B, CODE_C, CODE_D}))
@@ -618,10 +751,9 @@ def test_fake_no_bars_for_day(temp_db: SimpleNamespace) -> None:
     issues = (run.stats or {}).get("issues") or []
     for code in (CODE_A, CODE_B):
         assert f"daily_bars_missing:{code}" in issues
-    _assert_no_egress()
 
 
-def test_fake_partial_codes_missing(temp_db: SimpleNamespace) -> None:
+def test_fake_partial_codes_missing(temp_db: SimpleNamespace, no_egress: None) -> None:
     """A-4 / §5.A :133。"""
     m = _impl()
     source = m.FakeDailyBarsSource(missing=frozenset({CODE_B}))
@@ -641,7 +773,6 @@ def test_fake_partial_codes_missing(temp_db: SimpleNamespace) -> None:
     assert run.status == "partial"
     issues = (run.stats or {}).get("issues") or []
     assert f"daily_bars_missing:{CODE_B}" in issues
-    _assert_no_egress()
 
 
 def test_fake_source_deterministic_and_idempotent(temp_db: SimpleNamespace) -> None:
@@ -723,7 +854,7 @@ def test_upsert_conflict_never_overwrites(temp_db: SimpleNamespace) -> None:
     assert issue in tuple(stats.issues)
 
 
-def test_non_trading_day_noop_and_calendar_not_covered(temp_db: SimpleNamespace) -> None:
+def test_non_trading_day_noop_and_calendar_not_covered(temp_db: SimpleNamespace, no_egress: None) -> None:
     """A-8 / §5.A :137；§7 ⑧ :315。"""
     settings = _settings(app_env="test", daily_bars_source="fake", database_url=temp_db.url)
     fn = _task_from_jobs()
@@ -738,7 +869,6 @@ def test_non_trading_day_noop_and_calendar_not_covered(temp_db: SimpleNamespace)
     run = _latest_run(temp_db.engine)
     assert run.status == "skipped"
     assert (run.stats or {}).get("issues") == ["calendar_not_covered"]
-    _assert_no_egress()
 
 
 def test_suspended_placeholder_row_written(temp_db: SimpleNamespace) -> None:
@@ -767,13 +897,16 @@ def test_suspended_placeholder_row_written(temp_db: SimpleNamespace) -> None:
 
 
 def test_universe_holdings_only_until_clarified(temp_db: SimpleNamespace) -> None:
-    """A-10 / §5.A :139；§7 :348 断言只返回 A、B。"""
+    """A-10 / §7 :348 与 T-A131 补2/补3：列表相等 sorted([A, B])；排除 D/E/F 与 listing_status 为空的 G。"""
     m = _impl()
     with temp_db.engine.begin() as conn:
         _seed_universe_extras(conn, temp_db)
         got = m.daily_universe(conn, temp_db.u1, OPEN_10)
-    # TODO(T-T70 剩余): 返回顺序未立约，本例只比集合。
-    assert set(got) == {CODE_A, CODE_B}
+    assert got == sorted([CODE_A, CODE_B])
+    assert CODE_D not in got
+    assert CODE_E not in got
+    assert CODE_F not in got
+    assert CODE_G not in got
 
 
 def test_task_user_scope_union_and_single(temp_db: SimpleNamespace) -> None:
@@ -796,7 +929,7 @@ def test_task_user_scope_union_and_single(temp_db: SimpleNamespace) -> None:
     assert codes == {CODE_A, CODE_B}
 
 
-def test_mairui_before_c_is_inert(temp_db: SimpleNamespace) -> None:
+def test_mairui_before_c_is_inert(temp_db: SimpleNamespace, no_egress: None) -> None:
     """§7 ① :207。"""
     settings = _settings(app_env="test", daily_bars_source="mairui", database_url=temp_db.url)
     fn = _task_from_jobs()
@@ -806,7 +939,14 @@ def test_mairui_before_c_is_inert(temp_db: SimpleNamespace) -> None:
     run = _latest_run(temp_db.engine)
     assert run.status == "skipped"
     assert "daily_bars_http_budget_unset" in ((run.stats or {}).get("issues") or [])
-    _assert_no_egress()
+
+
+def test_task_without_database_url_raises_no_write() -> None:
+    """T-A131 补6：显式 database_url=None 时任务抛 RuntimeError；本例不连库。"""
+    settings = _settings(app_env="test", daily_bars_source="fake", database_url=None)
+    fn = _task_from_jobs()
+    with pytest.raises(RuntimeError):
+        fn(settings, trade_date=OPEN_10.isoformat())
 
 
 def test_single_day_when_no_window(temp_db: SimpleNamespace) -> None:

@@ -4,7 +4,8 @@
 #   master-bootstrap.sh --check                                # 只读：判断是否需要执行（不联网、不改库）
 #   master-bootstrap.sh --run --confirm-network-fetch          # 需要时执行一次；已完成则跳过（幂等）
 # --check 退出码：0 = 不需要（已有 status='ok' 的 master_runs）；10 = 需要；3 = 未就绪（表不存在 / CLI 未交付）；其余 = 出错。
-# --run：先做 --check；不需要就直接成功退出；需要才在一次性 worker 容器里跑 CLI（--no-deps，不启动 ingest），
+# --run：先做 --check；不需要就直接成功退出；需要才用 opt-in profile 跑 master-bootstrap 服务
+#        （compose.sh --profile master-bootstrap run --rm --no-deps -T，不启动 ingest、不走 worker），
 #        跑完再查一次，必须出现 status='ok' 的记录才算成功。同一主机同一项目用 flock 防并发。
 # 不调用麦蕊：容器只拉交易所公开列表；worker 不持有麦蕊证书（只有 ingest 能解密，CI 规则守着）；按证书对账（麦蕊）只由 beat 日常任务经 ingest 做，
 #   不属于首次导入（T-B52 须保证 bootstrap 不链式触发 master.reconcile_vendor）。
@@ -85,7 +86,7 @@ case "$rc" in
   *) exit "$rc" ;;
 esac
 
-log "开始首次导入（一次性 worker 容器，--no-deps）"
-cmp run --rm --no-deps -T worker python -m "$CLI_MODULE" || die "$CLI_MODULE 失败；查看上面的输出后重试（幂等）" 1
+log "开始首次导入（profile master-bootstrap，--rm --no-deps，不走 worker）"
+cmp --profile master-bootstrap run --rm --no-deps -T master-bootstrap || die "$CLI_MODULE 失败；查看上面的输出后重试（幂等）" 1
 [ "$(db_state)" = done ] || die "CLI 退出 0 但没有 status='ok' 的 master_runs 记录，视为失败" 1
 log "完成：已有 status='ok' 的主数据同步记录，可以开放服务"

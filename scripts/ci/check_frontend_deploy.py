@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -16,12 +17,48 @@ PLACEHOLDER = "frontend not built yet"
 FORBIDDEN_BUILD = ("MAIRUI_", "APP_MASTER_KEY", "PASSWORD", "SECRET")
 
 
+MASTER_VOL = "master:${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}"
+
+
 def _block(conf: str, start: str, until: str | None = None) -> str:
     i = conf.find(start)
     if i < 0:
         return ""
     j = conf.find(until, i + len(start)) if until else -1
     return conf[i:] if j < 0 else conf[i:j]
+
+
+def _service_block(yml: str, name: str) -> str:
+    """顶层服务块（两个空格缩进的键），不含下一个同级键。"""
+    start = f"\n  {name}:\n"
+    i = yml.find(start)
+    if i < 0:
+        return ""
+    rest = yml[i + len(start):]
+    nxt = re.search(r"\n  [A-Za-z0-9._-]+:", rest)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def _service_volumes(block: str) -> list[str]:
+    """从服务块里取出 volumes 列表项（短语法），忽略注释。不在整份文件里搜字符串。"""
+    items: list[str] = []
+    lines = block.splitlines()
+    i = 0
+    while i < len(lines):
+        if re.match(r"^    volumes:\s*$", lines[i]):
+            i += 1
+            while i < len(lines):
+                ln = lines[i]
+                if ln.startswith("      - "):
+                    items.append(ln[len("      - "):].strip())
+                elif ln.startswith("      #") or not ln.strip():
+                    pass
+                else:
+                    break
+                i += 1
+            break
+        i += 1
+    return items
 
 
 def check(repo: Path) -> list[str]:
@@ -103,10 +140,22 @@ def check(repo: Path) -> list[str]:
         errs.append("nginx 仍须只读挂载 nginx.conf 与 limits.conf")
     if "dns:\n      - 127.0.0.1" not in ngx or "/health/live" not in ngx:
         errs.append("nginx 的 dns 127.0.0.1 或 /health/live 健康检查丢了")
-    if "master:${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}" not in yml:
-        errs.append("worker 的 master 快照卷丢了（T-O18）")
-    if "MASTER_SNAPSHOT_PATH:" not in yml:
-        errs.append("worker 的 MASTER_SNAPSHOT_PATH 丢了（T-O18）")
+    # 按服务 volumes 列表检查，不能在整份 yml 里搜字符串。
+    # T-O67/L-5 起 master-bootstrap 也挂同一 master 卷，须单独核对。
+    worker = _service_block(yml, "worker")
+    if not worker:
+        errs.append("compose 没有 worker 服务")
+    else:
+        if MASTER_VOL not in _service_volumes(worker):
+            errs.append("worker 的 master 快照卷丢了（T-O18）")
+        if "MASTER_SNAPSHOT_PATH:" not in worker:
+            errs.append("worker 的 MASTER_SNAPSHOT_PATH 丢了（T-O18）")
+    boot = _service_block(yml, "master-bootstrap")
+    if boot:
+        if MASTER_VOL not in _service_volumes(boot):
+            errs.append("master-bootstrap 的 master 快照卷丢了")
+        if "MASTER_SNAPSHOT_PATH:" not in boot:
+            errs.append("master-bootstrap 的 MASTER_SNAPSHOT_PATH 丢了")
 
     if f"FROM {NGINX_PIN}" not in df:
         errs.append("frontend.Dockerfile 最终阶段必须 FROM 原来的 nginx digest")

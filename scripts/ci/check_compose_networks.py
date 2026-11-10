@@ -7,7 +7,7 @@
 
 基础文件必须声明四张网：
   default / aia_internal ：internal: true（漏写 networks 的新服务也出不了网）
-  aia_egress             ：可出网，仅 EGRESS_ALLOWLIST（本轮只有 ingest）
+  aia_egress             ：可出网，仅 EGRESS_ALLOWLIST（ingest + opt-in 的 master-bootstrap）
   aia_edge               ：非 internal，关闭 IP masquerade，只给要向宿主发布端口的服务
 
 每个服务必须用映射式 networks 挂上 aia_internal（compose 合并时才能与覆盖层做键并集，
@@ -17,7 +17,11 @@
 覆盖文件不得削弱顶层网络属性，也不得把未登记服务挂到 aia_egress / aia_edge。
 覆盖层顶层 networks 与各服务 networks 都只许使用与基础层相同的四个登记名
 （default / aia_internal / aia_egress / aia_edge），禁止另开可出网桥给 worker 等服务。
+覆盖层不得对已登记网络设置 name / external / driver（T-A97 N4–N6）；
+internal 与 edge 的 IP masquerade 开关仍按下面的削弱检查处理。driver_opts: {} 与基础合并，不拦。
 发布了 ports 的服务必须绑定 127.0.0.1，不得 0.0.0.0 或省略宿主地址。
+master-bootstrap 必须带 profiles、restart 为 "no"、不得发布端口；
+其它服务不得 depends_on 它；覆盖层不得替换它的 command（T-A98 B1）。
 """
 
 from __future__ import annotations
@@ -40,8 +44,9 @@ NET_DEFAULT = "default"
 REGISTERED_NETWORKS: frozenset[str] = frozenset({NET_DEFAULT, NET_INTERNAL, NET_EGRESS, NET_EDGE})
 MASQ_OPT = "com.docker.network.bridge.enable_ip_masquerade"
 
-# 本轮只让 ingest 出网。扩表白名单须经编排者裁定后再改这里。
-EGRESS_ALLOWLIST: frozenset[str] = frozenset({"ingest"})
+# 默认可出网的只有 ingest。master-bootstrap 是编排者裁定④ 的 opt-in profile（主数据首导），
+# 默认 up 不启动；扩表白名单须再经编排者裁定。
+EGRESS_ALLOWLIST: frozenset[str] = frozenset({"ingest", "master-bootstrap"})
 # 允许挂 aia_edge 的服务（发布 127.0.0.1 端口，无出网伪装）
 EDGE_ALLOWLIST: frozenset[str] = frozenset({"nginx", "postgres", "redis"})
 REQUIRED_ON_EDGE: frozenset[str] = frozenset({"nginx"})
@@ -132,13 +137,29 @@ def _check_base_networks(rel: str, nets: dict[str, Any], errs: list[str]) -> Non
 
 
 def _check_overlay_networks(rel: str, nets: dict[str, Any], errs: list[str]) -> None:
-    """覆盖层若重定义网络，不得削弱基础约束；不得新声明未登记的网络。"""
+    """覆盖层若重定义网络，不得削弱基础约束；不得新声明未登记的网络。
+
+    T-A97 N4–N6：叠加层不得对已登记网络设置 name / external / driver。
+    （N4：external: true + name: bridge 会把服务送进有伪装的默认桥；
+     N5：改 driver，如 macvlan；N6/M5：把 edge/internal 的 name 改成 egress 的网络名。）
+    internal 与 enable_ip_masquerade 已在本函数后续检查，不在这三项里重复定义。
+    """
     extra = set(nets) - REGISTERED_NETWORKS
     if extra:
         errs.append(
             f"{rel}: 顶层 networks 有未登记的网络 {sorted(extra)}"
             f"（只许 {sorted(REGISTERED_NETWORKS)}）"
         )
+    for key in REGISTERED_NETWORKS:
+        net = nets.get(key)
+        if not isinstance(net, dict):
+            continue
+        set_keys = [k for k in ("name", "external", "driver") if k in net]
+        if set_keys:
+            errs.append(
+                f"{rel}: 不得对已登记网络 {key} 设置 {'/'.join(set_keys)}"
+                f"（叠加层不得改 name、external、driver；T-A97 N4–N6）"
+            )
     for key in (NET_DEFAULT, NET_INTERNAL):
         net = nets.get(key)
         if net is None:
@@ -193,6 +214,64 @@ def _check_service(
         )
 
 
+
+MASTER_BOOTSTRAP = "master-bootstrap"
+
+
+def _depends_on_names(svc: object) -> set[str]:
+    if not isinstance(svc, dict):
+        return set()
+    deps = svc.get("depends_on")
+    if isinstance(deps, dict):
+        return {str(k) for k in deps}
+    if isinstance(deps, list):
+        return {str(x) for x in deps}
+    return set()
+
+
+def _check_master_bootstrap_shape(
+    rel: str, name: str, svc: object, *, is_base: bool, errs: list[str]
+) -> None:
+    """T-A98 B1 / ①：opt-in 首导服务的结构约束。
+
+    「没有 depends_on」指其它服务不得把它列为依赖（被默认栈拉起），
+    不是禁止本服务自己写 depends_on（run --no-deps 会忽略）。
+    """
+    if name != MASTER_BOOTSTRAP or not isinstance(svc, dict):
+        return
+    profiles = svc.get("profiles")
+    if is_base or profiles is not None:
+        raw = profiles if isinstance(profiles, list) else ([profiles] if profiles else [])
+        plist = [str(p) for p in raw]
+        if MASTER_BOOTSTRAP not in plist:
+            errs.append(
+                f"{rel}: 服务 {MASTER_BOOTSTRAP} 必须声明 profiles: "
+                f'["{MASTER_BOOTSTRAP}"]（默认 up 不得启动）'
+            )
+    restart = svc.get("restart")
+    if is_base or restart is not None:
+        if str(restart or "") != "no":
+            errs.append(
+                f"{rel}: 服务 {MASTER_BOOTSTRAP} 的 restart 必须是 \"no\""
+                f"（不得 always / unless-stopped）"
+            )
+    if svc.get("ports"):
+        errs.append(f"{rel}: 服务 {MASTER_BOOTSTRAP} 不得发布 ports")
+    if not is_base and "command" in svc:
+        errs.append(f"{rel}: 覆盖层不得替换服务 {MASTER_BOOTSTRAP} 的 command")
+
+
+def _check_not_depended_on(rel: str, services: dict[str, Any], errs: list[str]) -> None:
+    for name, svc in services.items():
+        if name == MASTER_BOOTSTRAP:
+            continue
+        if MASTER_BOOTSTRAP in _depends_on_names(svc):
+            errs.append(
+                f"{rel}: 服务 {name} 不得 depends_on {MASTER_BOOTSTRAP}"
+                f"（不得被默认栈或其他服务拉起）"
+            )
+
+
 def check(repo: Path) -> list[str]:
     errs: list[str] = []
     files = sorted((repo / COMPOSE_DIR).glob("*.y*ml"))
@@ -229,8 +308,10 @@ def check(repo: Path) -> list[str]:
         if not isinstance(services, dict):
             errs.append(f"{rel}: services 必须是映射")
             continue
+        _check_not_depended_on(rel, services, errs)
         for name, svc in services.items():
             where = f"{rel}: 服务 {name}"
+            _check_master_bootstrap_shape(rel, name, svc, is_base=is_base, errs=errs)
             nets = _nets(svc)
             if nets is None:
                 errs.append(f"{where}: networks 必须是映射（不能用列表，覆盖层列表会整段替换、冲掉 {NET_INTERNAL}）")

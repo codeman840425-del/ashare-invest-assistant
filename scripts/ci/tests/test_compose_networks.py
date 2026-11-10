@@ -180,3 +180,137 @@ def test_nginx_ports_must_bind_localhost(repo: Path) -> None:
     )
     errs = ccn.check(repo)
     assert any("nginx" in e and "127.0.0.1" in e for e in errs), errs
+
+
+def test_master_bootstrap_must_join_egress(repo: Path) -> None:
+    """opt-in 首导服务在白名单内，但漏挂 aia_egress 应被拦。"""
+    _sub(
+        repo,
+        BASE,
+        "  master-bootstrap:\n    logging: *default-logging\n    networks:\n      aia_internal:\n      aia_egress:\n",
+        "  master-bootstrap:\n    logging: *default-logging\n    networks:\n      aia_internal:\n",
+    )
+    errs = ccn.check(repo)
+    assert any("master-bootstrap" in e and "必须挂 aia_egress" in e for e in errs), errs
+
+
+def test_overlay_cannot_set_edge_external_and_name_n4(repo: Path) -> None:
+    """T-A97 N4：叠加层把 aia_edge 改成 external: true, name: bridge，会进有伪装的默认桥。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "networks:\n"
+        "  aia_edge:\n"
+        "    external: true\n"
+        "    name: bridge\n",
+        encoding="utf-8",
+    )
+    errs = ccn.check(repo)
+    assert any(
+        "aia_edge" in e and "name" in e and "external" in e and "不得对已登记网络" in e
+        for e in errs
+    ), errs
+
+
+def test_overlay_cannot_change_edge_driver_n5(repo: Path) -> None:
+    """T-A97 N5：叠加层改 edge 的 driver（如 macvlan）。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "networks:\n"
+        "  aia_edge:\n"
+        "    driver: macvlan\n",
+        encoding="utf-8",
+    )
+    errs = ccn.check(repo)
+    assert any(
+        "aia_edge" in e and "driver" in e and "不得对已登记网络" in e for e in errs
+    ), errs
+
+
+def test_overlay_cannot_rename_registered_network_to_egress_n6(repo: Path) -> None:
+    """T-A97 N6/M5：叠加层把 edge 或 internal 的 name 改成 egress 的网络名。"""
+    egress_name = "${AIA_VOLUME_PREFIX:?请用 deploy/scripts/compose.sh 调用}_egress"
+    for key in ("aia_edge", "aia_internal"):
+        (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+            "networks:\n"
+            f"  {key}:\n"
+            f"    name: {egress_name}\n",
+            encoding="utf-8",
+        )
+        errs = ccn.check(repo)
+        assert any(
+            key in e and "name" in e and "不得对已登记网络" in e for e in errs
+        ), (key, errs)
+
+
+def test_overlay_may_restate_internal_and_empty_driver_opts(repo: Path) -> None:
+    """T-A97：driver_opts: {} 与基础合并、保留原值；重申 internal: true 不应误拦。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "networks:\n"
+        "  aia_internal:\n"
+        "    internal: true\n"
+        "  aia_edge:\n"
+        "    driver_opts: {}\n",
+        encoding="utf-8",
+    )
+    assert ccn.check(repo) == []
+
+
+def test_overlay_cannot_drop_master_bootstrap_profile(repo: Path) -> None:
+    """T-A98 B1：去掉 profiles 后会被默认 up 拉起，必须报错。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "services:\n"
+        "  master-bootstrap:\n"
+        "    profiles: []\n",
+        encoding="utf-8",
+    )
+    errs = ccn.check(repo)
+    assert any("master-bootstrap" in e and "profiles" in e for e in errs), errs
+
+
+def test_overlay_cannot_set_master_bootstrap_restart_always(repo: Path) -> None:
+    """T-A98 B1：restart always 会常驻，必须报错。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "services:\n"
+        "  master-bootstrap:\n"
+        "    restart: always\n",
+        encoding="utf-8",
+    )
+    errs = ccn.check(repo)
+    assert any("master-bootstrap" in e and "restart" in e for e in errs), errs
+
+
+def test_service_cannot_depend_on_master_bootstrap(repo: Path) -> None:
+    """T-A98 B1：其它服务不得 depends_on 首导服务（会被默认栈拉起）。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "services:\n"
+        "  api:\n"
+        "    depends_on:\n"
+        "      master-bootstrap:\n"
+        "        condition: service_started\n",
+        encoding="utf-8",
+    )
+    errs = ccn.check(repo)
+    assert any("api" in e and "depends_on" in e and "master-bootstrap" in e for e in errs), errs
+
+
+def test_master_bootstrap_cannot_publish_ports(repo: Path) -> None:
+    """T-A98 B1：首导服务不得发布端口。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "services:\n"
+        "  master-bootstrap:\n"
+        '    ports:\n'
+        '      - "127.0.0.1:18080:8000"\n',
+        encoding="utf-8",
+    )
+    errs = ccn.check(repo)
+    assert any("master-bootstrap" in e and "ports" in e for e in errs), errs
+
+
+def test_overlay_cannot_replace_master_bootstrap_command(repo: Path) -> None:
+    """T-A98 B1：覆盖层不得替换 command。"""
+    (repo / "deploy/compose/docker-compose.extra.yml").write_text(
+        "services:\n"
+        "  master-bootstrap:\n"
+        "    command: [python, -m, app.cli, unexpected]\n",
+        encoding="utf-8",
+    )
+    errs = ccn.check(repo)
+    assert any("master-bootstrap" in e and "command" in e for e in errs), errs

@@ -573,13 +573,36 @@ def test_gitleaksignore_malformed_is_error(tmp_repo: Path, bad: str) -> None:
     assert r.returncode == 1 and "gitleaksignore" in r.stdout
 
 
-def test_repo_gitleaksignore_is_narrow() -> None:
-    """仓库的 .gitleaksignore：只有 4 段完整指纹，规则 ID 都在 .gitleaks.toml 里；toml 里不再有重复的 S1 规则级豁免。"""
-    cfg = tomllib.loads((REPO / ".gitleaks.toml").read_text(encoding="utf-8"))
+# useDefault=true 时，只放行这里显式登记过的默认规则 ID（精确到提交/文件/规则/行号的指纹仍须完整 4 段）。
+# 不得改成「任意默认规则名都行」。新增须评审后写进本集合。
+# generic-api-key：T-O23 / T-O24 / T-O33 已登记的历史误报指纹。
+REGISTERED_DEFAULT_RULE_IDS = frozenset({"generic-api-key"})
+
+
+def _gitleaksignore_allowed_rule_ids(cfg: dict) -> set[str]:
     ids = {r["id"] for r in cfg["rules"]}
+    if cfg.get("extend", {}).get("useDefault"):
+        ids |= set(REGISTERED_DEFAULT_RULE_IDS)
+    return ids
+
+
+def test_repo_gitleaksignore_is_narrow() -> None:
+    """仓库的 .gitleaksignore：只有 4 段完整指纹，无通配；规则 ID 须是 toml 自定义规则，或（仅当 useDefault 启用时）显式登记过的默认规则 ID。toml 里不再有重复的 S1 规则级豁免。"""
+    cfg = tomllib.loads((REPO / ".gitleaks.toml").read_text(encoding="utf-8"))
+    ids = _gitleaksignore_allowed_rule_ids(cfg)
     fps, errors = ss.load_ignore(REPO / ".gitleaksignore")
     assert errors == [] and fps
     for commit, path, rule, line in fps:
         assert re.fullmatch(r"[0-9a-f]{40}", commit) and rule in ids and line >= 1 and "*" not in path
     s1 = next(r for r in cfg["rules"] if r["id"] == S1_GL)
     assert "allowlists" not in s1
+
+
+def test_gitleaksignore_does_not_allow_unregistered_default_rule() -> None:
+    """即便 useDefault 启用，未在 REGISTERED_DEFAULT_RULE_IDS 里的默认规则 ID 也不能用于指纹。"""
+    cfg = tomllib.loads((REPO / ".gitleaks.toml").read_text(encoding="utf-8"))
+    assert cfg.get("extend", {}).get("useDefault") is True
+    ids = _gitleaksignore_allowed_rule_ids(cfg)
+    assert "generic-api-key" in ids
+    assert "aws-access-key" not in ids
+    assert "*" not in REGISTERED_DEFAULT_RULE_IDS

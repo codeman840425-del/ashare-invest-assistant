@@ -26,7 +26,11 @@ case "$1" in
     exit "${FAKE_SQL_RC:-0}" ;;
   run)
     if [[ "$*" == *"--entrypoint python worker -c"* ]]; then exit "${FAKE_CLI_RC:-0}"; fi
-    if [[ "$*" == *"worker python -m app.cli.master_bootstrap"* ]]; then touch "$FAKE_DIR/ran"; exit "${FAKE_RUN_RC:-0}"; fi
+    exit 99 ;;
+  --profile)
+    if [ "${3:-}" = run ] && [[ "$*" == *"--no-deps"* ]] && [[ "$*" == *"master-bootstrap"* ]]; then
+      touch "$FAKE_DIR/ran"; exit "${FAKE_RUN_RC:-0}"
+    fi
     exit 99 ;;
 esac
 exit 98
@@ -91,8 +95,12 @@ def test_run_executes_once_when_needed(fake: Path) -> None:
     r = _run(fake, "--run", "--confirm-network-fetch")
     assert r.returncode == 0, r.stderr
     calls = _calls(fake)
-    assert calls.count("python -m app.cli.master_bootstrap") == 1
-    assert "--no-deps" in calls
+    assert calls.count("--profile master-bootstrap") == 1
+    assert "run --rm --no-deps -T master-bootstrap" in calls or (
+        "run" in calls and "--rm" in calls and "--no-deps" in calls and "-T" in calls
+        and "master-bootstrap" in calls
+    )
+    assert "worker python" not in calls
     assert "fake-not-a-real-licence" not in r.stdout + r.stderr
 
 
@@ -143,10 +151,32 @@ def test_usage_errors(fake: Path) -> None:
 
 
 def test_no_automatic_trigger() -> None:
-    """自动 up、compose 服务、CI 工作流都不得调用首次导入。"""
-    paths = [REPO / "deploy/scripts/up.sh", REPO / "deploy/scripts/compose.sh"]
-    paths += sorted((REPO / "deploy/compose").glob("*.y*ml"))
-    paths += sorted((REPO / ".github/workflows").glob("*.y*ml"))
-    for p in paths:
-        text = p.read_text(encoding="utf-8")
-        assert "master-bootstrap" not in text and "master_bootstrap" not in text, p
+    """自动 up、CI 不得调用首次导入；compose 里只允许 opt-in 结构（T-A98 B1）。"""
+    import yaml
+
+    import check_compose_networks as ccn
+
+    forbidden = [REPO / "deploy/scripts/up.sh", REPO / "deploy/scripts/compose.sh"]
+    forbidden += sorted((REPO / ".github/workflows").glob("*.y*ml"))
+    for path in forbidden:
+        text = path.read_text(encoding="utf-8")
+        assert "master-bootstrap" not in text and "master_bootstrap" not in text, path
+
+    assert ccn.check(REPO) == []
+
+    base = yaml.safe_load((REPO / "deploy/compose/docker-compose.yml").read_text(encoding="utf-8"))
+    svc = base["services"]["master-bootstrap"]
+    assert "master-bootstrap" in (svc.get("profiles") or [])
+    assert svc.get("restart") == "no"
+    assert not svc.get("ports")
+    assert svc.get("command")
+    for name, other in base["services"].items():
+        if name == "master-bootstrap":
+            continue
+        deps = other.get("depends_on") or {}
+        keys = deps if isinstance(deps, dict) else list(deps)
+        assert "master-bootstrap" not in keys, name
+    for path in (REPO / "deploy/compose").glob("docker-compose.*.y*ml"):
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        ov = (doc.get("services") or {}).get("master-bootstrap") or {}
+        assert "command" not in ov, path

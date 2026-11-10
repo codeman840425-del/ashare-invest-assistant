@@ -27,6 +27,9 @@ env:
   PIP_AUDIT_VERSION: "2.10.1"
   SCHEMATHESIS_VERSION: "4.33.0"
   PYYAML_VERSION: "6.0.3"
+  # A1r ③/⑤ 要 import requests / urllib3 才能断言 hook 拦截（后端运行时依赖没有这两库）
+  REQUESTS_VERSION: "2.34.2"
+  URLLIB3_VERSION: "2.8.0"
   TIMESCALE_IMAGE: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
   REDIS_IMAGE: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
 
@@ -36,7 +39,7 @@ jobs:
     name: backend (ruff, mypy, pytest+coverage)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # T-O66：t_t41 / t_t45 读 TT41_DATABASE_URL，需要与 contract/migrations 同源的内建 PG。
+    # T-O66：t_t41 / t_t45 读 TT41_DATABASE_URL；T-O67：A2–A31 读 PGHOST 等，均指向本 job 内建 PG（ci-only）。
     services:
       db:
         image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
@@ -51,6 +54,13 @@ jobs:
       # CI 专用口令（与 contract/migrations 一致），不是真实密钥；驱动用 psycopg 与用例注释一致。
       TT41_DATABASE_URL: postgresql+psycopg://aia:ci-only@127.0.0.1:5432/aia
       DATABASE_URL: postgresql://aia:ci-only@127.0.0.1:5432/aia
+      # T-O67：正式 A2–A31 读 PGHOST/PGPORT/PGUSER（缺则 skip）；口令走 PGPASSWORD / libpq，不进测试源码 URL。
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: aia
+      PGPASSWORD: ci-only
+      # 后端自检 A28–A31（独立库，由 prepare_tt50_template.py 创建）
+      TB116D_DATABASE_URL: postgresql+psycopg://aia:ci-only@127.0.0.1:5432/o67_selfcheck
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,6 +82,15 @@ jobs:
       - name: 迁移到 head（供 TT41_DATABASE_URL / t_t41·t_t45）
         working-directory: src/backend
         run: uv run --frozen alembic upgrade head
+      - name: 准备 A2–A31 模板库（o61_tmp_0030 仅存在于本一次性服务）
+        run: bash scripts/ci/prepare_tt50_template.sh
+      - name: 预拉 A32 用例所需镜像（--pull never）
+        run: |
+          set -euo pipefail
+          docker pull "${TIMESCALE_IMAGE}"
+          docker tag "${TIMESCALE_IMAGE}" timescale/timescaledb:2.31.0-pg16
+          docker pull "${REDIS_IMAGE}"
+          docker tag "${REDIS_IMAGE}" redis:7.4.12-alpine
       - name: pytest + 覆盖率
         shell: bash
         run: |
@@ -82,6 +101,8 @@ jobs:
           else
             uv pip install --python "$py" "pytest-cov==${PYTEST_COV_VERSION}"
           fi
+          # A1r 正式例 ③/⑤（__import__('requests')、urllib3.PoolManager）需要这两库在测试环境里
+          uv pip install --python "$py" "requests==${REQUESTS_VERSION}" "urllib3==${URLLIB3_VERSION}"
           dirs=()
           for d in src/backend/tests tests/backend tests/replay; do
             [ -d "$d" ] && dirs+=("$d")
@@ -94,7 +115,22 @@ jobs:
           [ -f tests/pytest.ini ] && ini=(-c tests/pytest.ini)
           PYTHONPATH=src/backend "$py" -m pytest "${ini[@]}" "${dirs[@]}" \
             --cov=src/backend/app --cov-report=term-missing:skip-covered \
-            --cov-report="json:${RUNNER_TEMP}/coverage.json" --cov-fail-under=80
+            --cov-report="json:${RUNNER_TEMP}/coverage.json" --cov-fail-under=80 \
+            --junitxml="${RUNNER_TEMP}/backend-pytest.xml"
+      - name: 确认 A1s–A32 与 t_t41 已执行（未因缺库 skip）
+        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
+        run: python3 scripts/ci/assert_a1s_a32_ran.py "${RUNNER_TEMP}/backend-pytest.xml"
+      - name: 后端自检 A1s/A1r/A28–A31（A32 在 tb90，正式例已覆盖）
+        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          py=src/backend/.venv/bin/python
+          PYTHONPATH=src/backend "$py" -m pytest -c tests/pytest.ini \
+            src/backend/selfchecks/test_tb116d_a1s_static.py \
+            src/backend/selfchecks/test_tb116d_a1r_runtime.py \
+            src/backend/selfchecks/test_tb116d_a28_a32.py \
+            --junitxml="${RUNNER_TEMP}/selfcheck-a1s-a32.xml"
       - name: 领域包覆盖率 ≥ 90%（domain/ importing/ signals/ advice/ llm/）
         if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
         run: |

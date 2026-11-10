@@ -87,8 +87,8 @@
 
 - VWAP：当日 09:30 起累计成交额 ÷ 累计成交量。
 - 偏离 dev_pct：(最新收盘 − VWAP) ÷ VWAP × 100，单位是**百分数**（T-A145 修订，见 §3.7 ②）。
-- 量比：当日截至当前分钟的累计量，除以过去 5 个交易日同一时刻累计量的均值。历史不足 5 日时为空，并记 gap。
-- 信号：复用既有 signal_kind 里的 vwap_deviation 与 volume_spike（`SignalEvent`，经 `/signals`，不含动作建议）。阈值数值不由本契约定，等研究员 T-R58；阈值未经验证前不下发，也不产生这两类信号（T-A145 修订，见 §3.7 ③）。
+- 量比：口径与公式只在 §3.8 定义（T-A146）。历史不足 5 日时为空，并记 gap。
+- 信号：复用既有 signal_kind 里的 vwap_deviation 与 volume_spike（`SignalEvent`，经 `/signals`，不含动作建议）。阈值未验证，复测前只显示指标、不出信号。阈值数值不由本契约定，等研究员 T-R58 复测；未经验证前也不下发阈值字段（T-A145 修订，见 §3.7 ③）。
 - 数据不足时：本股不出信号，`data_status` 为 partial 或 unavailable，gap 标出原因（no_source、quota_deferred 等既有 reason）。
 
 ### 3.4 复测输入
@@ -113,7 +113,7 @@
 | --- | --- | --- | --- |
 | vwap | string(decimal) | 是 | 当日 09:30 起累计成交额 ÷ 累计成交量（与 `Bar.avg_price` 的分时均价同义），精度见 ⑧ |
 | dev_pct | string(decimal) | 是 | 百分数，见 ② |
-| volume_ratio | string(decimal) | 是 | 倍数（比值，不是百分数），2 位小数，ROUND_HALF_UP；为空的显示见 ⑦ |
+| volume_ratio | string(decimal) | 是 | 倍数（比值，不是百分数），口径见 §3.8，2 位小数，ROUND_HALF_UP；为空的显示见 ⑦ |
 | base_qty | string(decimal)，整数值 | 是 | 上一交易日收盘持有数量，单位股 |
 | sellable_qty | string(decimal)，整数值 | 是 | 今日可用于卖出一侧的底仓，见 ④ |
 | dev_pct_threshold | string(decimal) | 是，可缺省 | 偏离阈值，百分数，见 ③ |
@@ -156,7 +156,7 @@
 
 **⑤ 「不适用」与「不可用」**
 
-- 不适用：这只股票本来就没有做 T 视图。沿用既有约定（ETF 的财务等接口：data_status 为 unavailable，gaps 的 reason 为 not_applicable）。这时所有指标字段为 null，gaps 恰有一项 reason 为 not_applicable 的条目，key 取下列之一：
+- 不适用：这只股票本来就没有做 T 视图。沿用既有约定（ETF 的财务等接口：data_status 为 unavailable，gaps 的 reason 为 not_applicable）。这时所有指标字段为 null，gaps **只有这一项**（reason 为 not_applicable，T-A146 明确：不与其他原因混排），key 取下列之一：
 
 | key | 含义 | 前端文案 |
 | --- | --- | --- |
@@ -167,7 +167,7 @@
 - 不可用：本该有数据，但缺失或过期。gaps 里没有 not_applicable；data_status 为 unavailable、stale、pending、partial 之一，gaps 的 reason 取既有枚举：no_source、not_yet_published、upstream_error、quota_deferred、data_licence_unavailable。data_status 为 unavailable 时显示「分时数据暂不可用。」，并附原因。
 - 判定顺序：先看有没有 not_applicable，有则为不适用；否则按 data_status 判。
 - 收盘后（15:00 起）仍为适用，显示当日最终值，不判过期。午间休市（11:30–13:00）也不判过期。
-- 前端复用既有的 `isNotApplicable`、`DataStatusTag` 与 `GapNote`，不新写一套判定。
+- 前端复用既有的 `DataStatusTag` 与 `GapNote`。t_view 的「任一 gap 为 not_applicable 即不适用」只在 t_view 内判定（T-F36b 的 `notApplicableText`）；全站的 `isNotApplicable` 保持「全部 gap 为 not_applicable」不变（T-A146 裁定 ①，理由：其他接口可能把 not_applicable 与真实缺数混排，改成「任一」会把缺数误标为不适用）。由于后端保证不适用时 gaps 只有一项，两种判定在 t_view 上结果相同。
 - 依据：`api-contract.md` 变更记录中 ETF 不适用的写法；`gap_reason` 枚举（`GapReason`）；前端 `components/common` 中的 `DataStatusTag`、`GapNote`。
 
 **⑥ stale、pending、partial**
@@ -181,16 +181,18 @@
 | unavailable | 不适用（⑤），或本该有数据而完全没有、上游不可用、证书不可用 | 按 ⑤ 显示 |
 
 - 依据：`api-contract.md` §1.1：stale 为超过刷新间隔 ×2 未更新，pending 为已投递拉取，partial 为部分维度缺数据；`config/realtime.yaml` 的 stale_threshold_s 为空时取 2 倍间隔；today 页现有的 `DataStatusTag` 文案（已过期、拉取中、部分缺失）。
-- T-F36 现行实现对 stale、pending 不做标注，与本条冲突，列为前端返工。
+- T-F36 现行实现对 stale、pending 不做标注，与本条冲突，列为前端返工（T-F36b 已完成）。
+- fresh 时后端输出的 gaps 应为空（缺任何字段即为 partial）。前端如果仍收到 fresh 且 gaps 非空，照常显示 `GapNote`（标题「数据提示」），不隐藏原因（T-A146 裁定 ③；依据：`api-contract.md` §1.1 的示例本身就是 fresh 带 gaps，`GapNote` 已为此准备「数据提示」标题）。
 
 **⑦ 量比为空**
 
 - 后端：volume_ratio 为 null 时，必须在 gaps 给出原因，key 为 t_view.volume_ratio：
-  - 过去 5 个交易日的同时刻分钟数据不足，reason 为 no_source，message 为「历史分时不足 5 个交易日」；
+  - 过去 5 个有成交的交易日分钟数据不足（§3.8），reason 为 no_source，message 为「历史分时不足 5 个交易日」；
+  - 过去 5 日总量为 0，reason 为 no_source，message 为「历史 5 日无成交」；
   - 当日成交量为 0（如开盘即停牌），reason 为 no_source，message 为「今日无成交」。
   - 有其他字段时，data_status 为 partial。
 - 前端：量比显示「—」，原因经 `GapNote` 或 `DataStatusTag` 的说明显示，不另写文案。
-- 依据：§3.3「历史不足 5 日时为空，并记 gap」；T-F36 第 7 条「t_view 里没有 gaps 字段」由 ① 补上。
+- 依据：§3.3、§3.8「历史不足 5 日时为空，并记 gap」；T-F36 第 7 条「t_view 里没有 gaps 字段」由 ① 补上。
 
 **⑧ 均价的精度**
 
@@ -201,8 +203,62 @@
 - 依据：`api-contract.md` 的数字约定（P2N-R09-065：展示值须等于证据值 ROUND_HALF_UP 取 d 位）；T-A27 的百分数存 4 位、展示 2 位。
 
 **本节验收用例名**
-- 后端（M4）：`test_t_view_field_types_and_nullability`、`test_t_view_dev_pct_is_percent_4dp`、`test_t_view_thresholds_absent_until_validated`、`test_signals_not_emitted_without_validated_thresholds`、`test_t_view_sellable_clamped_with_gap`、`test_t_view_not_applicable_keys`、`test_t_view_stale_after_twice_interval_in_session`、`test_t_view_not_stale_lunch_and_after_close`、`test_t_view_pending_before_first_bar`、`test_t_view_volume_ratio_null_has_gap`、`test_t_view_vwap_2dp_half_up`。
+- 后端（M4）：`test_t_view_field_types_and_nullability`、`test_t_view_dev_pct_is_percent_4dp`、`test_t_view_thresholds_absent_until_validated`、`test_signals_not_emitted_without_validated_thresholds`、`test_t_view_sellable_clamped_with_gap`、`test_t_view_not_applicable_keys`、`test_t_view_stale_after_twice_interval_in_session`、`test_t_view_not_stale_lunch_and_after_close`、`test_t_view_pending_before_first_bar`、`test_t_view_volume_ratio_null_has_gap`、`test_t_view_vwap_2dp_half_up`；量比口径用例见 §3.8。其中 `test_t_view_not_applicable_keys` 需断言不适用时 gaps 只有一项（T-A146）。
 - 前端（F36b）：`t-f36b dev_pct 按百分数显示`、`t-f36b 阈值字段缺省不提示`、`t-f36b stale 不提示且标已过期`、`t-f36b pending 显示拉取中`、`t-f36b 可卖超底仓显示核对中`、`t-f36b 不适用三种 key`、`t-f36b 量比为空显示原因`、`t-f36b 均价原样显示不再舍入`。
+
+### 3.8 量比口径（T-A146，唯一口径）
+
+**公式**
+
+  volume_ratio = (V今 ÷ N) ÷ (V5 ÷ (5 × 240))
+
+- V今：当日分钟线（只取 mairui，§3.3）中，bar 结束时间不晚于 as_of 的成交量之和，单位为股（§1.1）。
+- N：已开盘分钟数，算法见下。
+- V5：过去 5 个有成交的交易日的全日分钟线成交量之和（不含当日）。每日按 240 分钟计，即过去 5 日每分钟平均量 = V5 ÷ 1200。
+- 用 Decimal 计算，ROUND_HALF_UP 保留 2 位（§3.7 ⑧）。
+- T-A143 的原口径已删除，全文只用本式。
+
+**出处**
+- T-R58 reference_survey（docs/T-R58@66451f2，`docs/strategies/T-R58/reference_survey.md`）§3.1「量比」表：
+  - 聚宽 jqdatasdk `LB`：开市后平均每分钟成交量 ÷ 过去 N 日平均每分钟成交量，N=5；
+  - 同花顺 SuperMind：过去 5 日、每日 240 分钟；
+  - 天软 FAQ：5 日、240 分钟，集合竞价算在第一分钟；
+  - tick-stock-panel `vol_ratio_5d`：×240 ÷ 已交易分钟。
+- 架构师已核对：该文件要点第 3、4 条把惯例口径写作「今日每分钟均量 ÷ 过去 5 日每分钟均量」、每日 240 分钟，与上式一致。
+- T-R58 同时写明：5 日与 240 分钟属于**惯例，未经检验**；阈值没有出处（见 §3.7 ③）。
+
+**已开盘分钟数 N**（按 as_of 计，不按当前时钟，使分子与参与计算的分钟线一致）
+
+| as_of（北京时间） | N |
+| --- | --- |
+| 09:31–11:30 | as_of − 09:30 的分钟数（09:31 为 1，11:30 为 120） |
+| 11:30–13:00 午休 | 固定 120，不增长。依据：240 分钟不含午休（T-R58 SuperMind 的 60×4） |
+| 13:01–15:00 | 120 + (as_of − 13:00) 的分钟数（15:00 为 240） |
+| 15:00 以后 | 240 |
+
+- 开盘集合竞价（09:15–09:25）：
+  - 依据：天软 FAQ「集合竞价算在第一分钟」，不单独计分钟。
+  - 麦蕊没有盘中竞价数据（T-R58 P9 引 plan）。**保守默认**：第一根分钟线（09:31）的成交量原样计入，不另补竞价量，也不另加分钟。第一根分钟线是否已含 09:25 竞价量未实测，单 D 首次实调时核对一次，结果写入 §1.1。
+- 收盘集合竞价（14:57–15:00）：包含在 240 分钟之内，按普通分钟计。**保守默认**：T-R58 未单独提到收盘竞价，以 240 分钟总数为准。
+- 09:30 之前（含 09:25–09:30）：t_view 为不适用，key 为 t_view.session（§3.7 ⑤），不计算量比。
+- 5 分钟档：N 仍按 as_of 算，as_of 09:35 时 N 为 5。
+- 停牌日：不算作「有成交的交易日」，向前顺延取满 5 日。**保守默认**：T-R58 引的各口径都没写停牌处理；不顺延的话，复牌后几天量比会虚高。
+- 分母只用分钟线、不用日线：麦蕊日线的量是手，分钟线的量单位未实测（§1.1），两者混用有单位风险（**保守默认**）。改用日线需要在单 D 核对单位后另行评审。
+
+**对后端 M4 的影响**（请编排者通知后端）
+- `volume_ratio` 改按本节公式实现，T-A143 的原口径作废。
+- 分母只需要过去 5 个有成交交易日的全日总量，可在每个交易日 09:30 前对每只股票算一次并缓存。不再需要逐分钟对齐历史。
+- 新增已开盘分钟数函数（建议名 `minutes_elapsed`），按上表实现午休与 15:00 封顶。
+- `test_t_view_volume_ratio_needs_5_days` 保留，语义改为「有成交的交易日不足 5 日」。
+- 新增用例：
+  - `test_t_view_volume_ratio_per_minute_avg_240`：Given 过去 5 日每日 240 分钟、每分钟 100 股，当日 10:00 时累计 6,000 股 / Then N 为 30，volume_ratio 为 2.00；
+  - `test_t_view_volume_ratio_minutes_frozen_at_lunch`：Given as_of 分别为 11:30、12:15（仍为 11:30 的 bar）、13:01、15:00 / Then N 分别为 120、120、121、240；
+  - `test_t_view_volume_ratio_first_bar_as_is`：Given 第一根 09:31 的 bar / Then N 为 1，竞价量不另加；
+  - `test_t_view_volume_ratio_5min_tier_minutes`：Given 5 分钟档 as_of 09:35 / Then N 为 5；
+  - `test_t_view_volume_ratio_skips_suspended_days`：Given 过去 6 个交易日里有 1 日停牌 / Then 取另外 5 日；
+  - `test_t_view_volume_ratio_zero_history_gap`：Given 过去 5 日总量为 0 / Then volume_ratio 为空，gaps 写「历史 5 日无成交」。
+- 删除用例：无（原口径没有专门用例）。
+- 前端不受影响：量比仍是原样显示的 2 位字符串。
 
 ### 3.6 压后
 
@@ -281,7 +337,7 @@
 - `test_t_view_sellable_is_base_minus_sold_today`：Given 昨日底仓 1,000 股、今日买入 500 股、卖出 300 股 / Then sellable_qty 为 700，今日买入的不计入。
 - `test_t_view_only_holdings_with_base`（T-A145 改）：Given 今日新买、昨日无底仓的股 / Then t_view 为不适用（§3.7 ⑤），gaps 含 key 为 t_view.base_qty、reason 为 not_applicable 的项；非持仓行 t_view 为 null。
 - `test_t_view_ignores_tdx_local`：Given 当日只有 tdx_local 分钟行 / Then data_status 为 unavailable。
-- `test_signals_vwap_deviation_volume_spike_threshold`：Given 偏离 2.1%、量比 2.2 / Then `/signals` 各有一条，且不含动作建议。
+- `test_signals_vwap_deviation_volume_spike_threshold`（T-A146 改）：Given 测试里注入已标 validated 的夹具阈值（只用于测试，不是真实阈值），偏离与量比都达到夹具阈值 / Then `/signals` 各有一条，且不含动作建议。未注入时按 `test_signals_not_emitted_without_validated_thresholds`，不出信号。
 
 **M5 日报分时摘要（现在）**
 - `test_report_intraday_summary_key`：Given 持仓有当日 mairui 分钟行 / Then 日报 body 有 stocks.<代码>.intraday 摘要；没有分钟行时 gaps 有该键，reason 为 no_source。
@@ -320,5 +376,5 @@
 | Q2 | 盘中频率 | 持仓最多 20 只每 1 分钟，自选不采集，盘后补齐全部 | 获批前不采集；获批后先用 C 档（每 5 分钟） |
 | Q3 | 是否同意把通达信分钟线目录只读挂进容器并导入 | 同意，只导 A 股 | 不挂载，不导入 |
 | Q4 | 是否批准分钟线首次实调（单 D 分钟线部分） | 批准约 10 次小实调，核对时延、成交量单位、lt 覆盖 | 不调 |
-| Q5 | 信号阈值（偏离、量比） | ~~2% 与 2 倍作为初值~~ T-A145：数值等研究员 T-R58 复测，不由架构自定 | 只显示指标，不发信号，不下发阈值字段 |
+| Q5 | 信号阈值（偏离、量比） | 阈值未验证，复测前只显示指标、不出信号；数值等研究员 T-R58 复测，不由架构自定（T-A145、T-A146） | 只显示指标，不发信号，不下发阈值字段 |
 | Q6 | 分钟线保留期 | 1 分钟 3 年，5 分钟历史全部保留 | 不自动删除 |

@@ -265,3 +265,8 @@ G/W/T（前端单，用例落在 `pages/t-f34.test.tsx`；测试单同步 `today
 
 - 持仓行的 t_view 字段与状态以 `intraday-bars.md` §3.7 为准。它与本契约的 S1–S9 状态条互不影响：状态条仍只由 `/today` 与日报判定；t_view 的 stale、pending、partial、不适用只作用在该行的做 T 视图里。
 - 显示复用既有的 `DataStatusTag` 与 `GapNote`，文案与本页其他数据状态一致（已过期、拉取中、部分缺失、不适用）。
+- T-A146 补充：
+  - 量比口径改为每分钟均量之比，见 `intraday-bars.md` §3.8。前端显示不变。
+  - 不适用的判定只在 t_view 内用「任一 not_applicable」；全站 `isNotApplicable` 不变。
+  - fresh 且 gaps 非空时照常显示 `GapNote`。
+  - 时间显示：t_view 的数据时间与「截至 hh:mm」一律按北京时间换算，与机器时区无关。全站 `fmtTime` 的 Z 结尾问题另开前端单，见 `docs/reviews/T-F36b-review.md`。

@@ -1,6 +1,6 @@
 # 日 K 生成本人快照 + 解除 analyze 闸（实现单 B 实施契约，T-A133）
 
-状态：draft，架构契约，不代表已实现。基点 docs/T-A128 `04178d0`（契约 `daily-bars-source.md` §5.B、§7），源码按 be/T-B127 `832faa2` 核对（其后 `fc798cc` 只改 selfchecks，不影响本文）。**本文件与 `daily-bars-source.md` §2、§5.B 不一致处以本文件为准。** 引用只写文件路径、函数名、用例名。原则：最小可用；不编造、不推断数据；Q2/Q3/Q4/Q5 保守默认不变。**用户本人已裁定 Q1、Q3、Q4、Q5 与 QB1，落地见 §11（T-A135）；本文其余各节与 §11 冲突处以 §11 为准。Q2 仍保守。**
+状态：draft，架构契约，不代表已实现。基点 docs/T-A128 `04178d0`（契约 `daily-bars-source.md` §5.B、§7），源码按 be/T-B127 `832faa2` 核对（其后 `fc798cc` 只改 selfchecks，不影响本文）。**本文件与 `daily-bars-source.md` §2、§5.B 不一致处以本文件为准。** 引用只写文件路径、函数名、用例名。原则：最小可用；不编造、不推断数据；Q2/Q3/Q4/Q5 保守默认不变。**无行情标的的去留与两条测试前置条件见 §12（T-A137）。**用户本人已裁定 Q1、Q3、Q4、Q5 与 QB1，落地见 §11（T-A135）；本文其余各节与 §11 冲突处以 §11 为准。Q2 仍保守。**
 
 ## 0. 核对结论（决定本单形状的事实）
 
@@ -238,7 +238,7 @@ instrument（每个 `daily_universe` 标的一个，除非被 omitted）：
   - `slot_jobs` 在 17:30、18:00、18:30 窗口内会连库，保留源码静态检查。
   - 补一条：对 `workers/jobs.py` 全文静态扫描，不出现 build_owned_snapshot、daily_bars_ready、daily_snapshot。理由：只比 `__module__` 会漏掉在 jobs 里包一层的任务。
 - **J11 日报「估值不取该日」的观测面：** 观测 `reports/service.build` 写出的 daily_reports 行。
-  - Given：仅本例内去掉 u1 的 H 持仓行，使账户估值可计算。
+  - Given：仅本例内去掉 u1 的 H 持仓行，使账户估值可计算。（**已由 T-A137 细化**：持仓明细只追加，改为本例内追加一份 version_no=2 的持仓快照，只含 A、B，同时去掉 H 和无行情的 ETF D；`build` 的 now 须满足 §12.3。）
   - Then：
     - body.account 非空；
     - body.account.total_assets 等于「A 取 11-10 收盘 × 数量 + B 取 11-09 收盘 × 数量 + 现金」，两位小数，ROUND_HALF_UP，现金取 `api/v1/portfolio._account` 的 cash，为空按 0.00；
@@ -268,7 +268,7 @@ instrument（每个 `daily_universe` 标的一个，除非被 omitted）：
   - action_map：entry_all_core_pass 为 buy，held_hold 为 hold，exit 为 sell，else 为 wait。
   - dimension_view_thresholds：bullish 0.67，bearish 0.33。`conclusion` 按维度出 view 时必读这一项，缺了会 KeyError。
   - stops：stop_loss、take_profit 为空，time_stop_days 为 5；valid_until 的 trading_days 为 40。种子日历只有 5 行，所以 valid_until 会如实成为缺口，不会抛错。
-  - feature_catalog 已有 f.close_qfq（declared）。`strategy/cards/dsl` 的 Interpreter 在值为 None 时也会记录输入，所以 qfq 全为 null 时 evidence 仍非空，`conclusion` 能走完。
+  - feature_catalog 已有 f.close_qfq（declared）。这是前置条件，不由迁移提供，见 §12.2。`strategy/cards/dsl` 的 Interpreter 在值为 None 时也会记录输入，所以 qfq 全为 null 时 evidence 仍非空，`conclusion` 能走完。
 - 不允许的做法：
   - 让这 5 例只断言快照或评估、不跑 conclusion，因为用例 15 的「建议不重复归档」和用例 22 的「没有 B 的建议」都依赖 conclusion 与归档；
   - 让 analyze 把该 ValueError 吞成 issue，这是行为变更，不在本单范围。
@@ -329,7 +329,7 @@ instrument（每个 `daily_universe` 标的一个，除非被 omitted）：
   - 拟用名：容器 tt71b-regress-pg、tt71b-regress-redis，卷 tt71b-regress-sock、tt71b-regress-redissock；
   - 实例全部 `--network none`，不发布端口，不写宿主 /tmp 的 tb70-* 目录（socket 只在卷里），所以不占任何端口。
 - **PG**：本机已有镜像 timescale/timescaledb:2.31.0-pg16，参数 listen_addresses 为空，socket 目录为卷挂载点。
-  - 只建 tb70_replay 一个库，以 alembic 迁到当时的单一 head；其余库由 p2n 夹具自建自删。
+  - 只建 tb70_replay 一个库，以 alembic 迁到当时的单一 head；其余库由 p2n 夹具自建自删。迁到 head 后 feature_catalog 为空，须先按 §12.2 播种，再跑回归（T-A137 补）。
   - 不复制任何真实数据，不放股东代码。
 - **Redis**：本机已有镜像 redis:7.4.12-alpine，unixsocket 放在 Redis 卷里。
 - **runner**：沿用 T-T21 写法：本机镜像 aia-backend:aia-t01，`--network none`，代码只读挂载。
@@ -412,3 +412,54 @@ instrument（每个 `daily_universe` 标的一个，除非被 omitted）：
 ### 11.5 只有用户能定的
 
 - 新增的 U1（日报生成时刻）、U2（新标的自动补历史）、U3（每批防失控上限）列在 `daily-bars-source.md` §8.6。Q2 仍待定，维持保守。
+
+## 12. 无行情标的与测试前置条件（T-A137）
+
+依据：测试 T-T71b `e41967a`（`/workspace/team/reports/T-T71b.md` 歧义 1、2、4）。行为按 be/T-B128 `af77bb5` 的实际代码核对；本节只把现行代码行为写成契约，**不要求后端改代码**。
+
+### 12.1 owned-daily-v1 里的无行情标的
+
+T-T71b 歧义 1 里的「v2」是用例 28 追加的 **version_no=2 持仓快照**（`broker_position_snapshots`），不是 owned 快照的新 schema。owned-daily-v1 本来就不含 ETF D。无行情标的分两类，判定和去向不同：
+
+| 类别 | 判定条件 | 在 owned 快照里 | `build_owned_snapshot` 的 issue | `workers/daily.analyze` 的行为 |
+|---|---|---|---|---|
+| 不合格标的（如 ETF D、listing_status 为空的 G） | 不满足「type 为 stock 且 listing_status 为 listed」，由 `marketdata/daily_bars.daily_universe` 的资格过滤剔除 | 不建 instrument，**也不进 omitted** | 无 | account 范围实例遍历「持仓 ∪ 有效自选」时，在读 instrument 之前就记 `security_not_eligible:<code>` 并跳过：不求值、不生成建议；不记 `owned_source_security_missing` |
+| 合格但当日没有可用行 | 在 `daily_universe` 里，但当日无入选行、只有 source 为空的旧式行、board 为空，或 fetched_at 不在 17:10–17:30 | 不建 instrument，进 omitted | 按 §2：`daily_bars_missing:<code>`、`security_board_missing:<code>`、`daily_bars_not_final:<code>`、`daily_bars_after_asof:<code>` | 并入该 issue，另记 `owned_source_security_missing:<code>`，不求值 |
+
+- 不合格标的不进 omitted 的理由：omitted 只记「本该进快照而进不了」的标的；不合格标的本来就不在范围内，不取数（单 A 也不为它请求），记缺口会误导。
+- 对日报的影响（`reports/service.build`，现行行为，不改）：持仓里的无行情标的既没有日 K 收盘、也没有券商参考价和已知成本时，账户估值整体不可算，`body.account` 为 null，gaps 含 `account`。有已知成本时按成本估值，并记 `account.<code>.price`。用例 28 的口径是 A 取 11-10 收盘、B 取 11-09 收盘，再加现金；要得到这个口径，本例的持仓快照必须同时去掉 H 和 D（§10.1 J11 已按此细化）。
+- G/W/T：
+  - `test_snapshot_excludes_ineligible_codes_silently`（新）：Given u1 持有 A、B、D（etf）、G（stock，listing_status 为空），都有当日 fake 行 / When `build_owned_snapshot(u1, 11-10)` / Then instruments 里没有 D、G；omitted 里也没有 D、G；返回的 issue 元组里没有含 D、G 的项。
+  - `test_analyze_ineligible_holding_not_evaluated`（新）：Given 同上、account 范围实例 / When 跑 analyze / Then issues 含 `security_not_eligible:D` 和 `security_not_eligible:G`，不含 `owned_source_security_missing:D`；evaluations 里没有 D、G。
+  - `test_report_account_null_when_holding_unpriced_uncosted`（新，守护现状）：Given u1 持有 D，D 无日 K、无券商参考价、成本未知，now 满足 §12.3 / When `reports/service.build` / Then daily_reports 行的 body.account 为 null，gaps 含 key 为 account 的项，不抛错。
+  - 用例 28 `test_placeholder_rows_ignored_by_price_readers`：接受 T-T71b 的做法（追加只含 A、B 的 version_no=2 持仓快照，不 DELETE 持仓行），断言不变。
+
+### 12.2 前置条件：feature_catalog 先播种
+
+- 条件：跑 analyze 之前，`strategy.feature_catalog` 里必须已有卡规则引用的每个特征键。迁移**不**播种这张表（迁到 head 后为 0 行）。
+  - 单元套件（`tests/backend/unit/test_daily_snapshot_impl_b.py`）：由 `_seed_b` 插入 f.close_qfq（declared），已满足。
+  - 隔离回归（§10.3 的专用实例）：迁到 head 之后、跑 tb76/p2n04 之前，用官方的 feature_registry 加 load_metadata、import_metadata 写入目录；不导入正式卡，不 `--apply`。
+- 违反时的行为（按 af77bb5 核对，分两种，都**不是**宁缺勿造的 issue 化）：
+  - 卡版本 config **没有** source_hash（T-T71 的虚构卡就是这样）：`analyze` 用空 registry 调 `evaluate_snapshot`，`strategy/cards/dsl` 编译规则时抛 `ValueError("dsl_unknown_symbol")`。`analyze` 不捕获，**整次 ANALYZE 拒绝运行**：失败 owner 的事务回滚（含刚建的 owned 快照）；`workers/daily.phase` 把 tb76.analysis 运行记为 failed，error 只写 ValueError，然后原样抛出；worker 按 `RETRY_TASKS` 10 分钟后重试，共 3 次，用尽后调 `final_failure`。在它之前已经提交的 owner 结果保留。
+  - 卡版本 config **有** source_hash：先过 `source_issues`，缺目录行的特征记 `runtime_source_gate:<特征键>:feature_not_verified_doc_or_live`，跳过该实例，**不抛错**，日报照出。declared 状态同样走这条，所以 T-T71 的种子卡**不得**带 source_hash，否则会在 source gate 处停下、不到 conclusion。
+- G/W/T：
+  - `test_analyze_empty_catalog_rejects_run`（新）：Given 临时库里 feature_catalog 为空、虚构卡没有 source_hash、fake 源已就绪 / When 经 `workers/daily.analysis_task` 跑 11-10 / Then 抛 ValueError；最新 tb76.analysis 运行 status 为 failed、error 为 ValueError；u1 的 owned-daily-v1 行数为 0；suggestions 零写入。
+  - `test_analyze_missing_catalog_with_source_hash_is_gate_issue`（新）：Given feature_catalog 为空，卡 config 带 source_hash / When 跑 analyze / Then 不抛错；issues 含 `runtime_source_gate:f.close_qfq:feature_not_verified_doc_or_live`；没有该实例的 evaluation。
+
+### 12.3 前置条件：`build` 的 now 不早于 ledger_at
+
+- 条件：调用 `reports/service.build(conn, user_id, date, now)` 时，now 不得早于本人账户的 ledger_at（`api/v1/portfolio._ledger_as_of`：holdings.rebuilt_at、trades 的 created_at 或 voided_at、broker_position_snapshots.created_at 中的最大值），也不得早于账户的 price_at。生产路径自动满足：`workers/daily.phase` 的 REPORT 传入墙钟时间。测试里种子行的时间戳是建库时的真实墙钟，所以写死成 11-10 17:30 往往早于 ledger_at，必须传一个确定晚于种子时刻的 now（T-T71b 用 2030-01-01 UTC）。
+- 违反时的行为（按 af77bb5 核对）：**不拒绝、不抛错**，按「未来账本不可回看」把账户整体置空：
+  - body.account 为 null，gaps 含 key 为 account 的项；
+  - 账户置空后持仓字典为空，日报的标的列表只剩有效自选，持仓标的不出现；
+  - 报告照常写入 daily_reports。
+- G/W/T：
+  - `test_report_build_now_before_ledger_nulls_account`（新）：Given u1 的持仓快照已在墙钟时刻 t 写入 / When `build(conn, u1, 11-10, now=t 减 1 小时)` / Then 不抛错；body.account 为 null；gaps 含 account；body 的标的列表不含 A、B（u1 无自选时为空）。
+  - `test_report_build_now_after_ledger_computes`：由用例 28 覆盖（now 为 2030-01-01 UTC，body.account 非空）。
+
+### 12.4 与代码、测试的不一致（截至 af77bb5 / e41967a）
+
+- 代码：12.1–12.3 都是 af77bb5 的现行行为，无不一致，后端无需改动。
+- 测试（非阻断）：e41967a 的 `_seed_b` 在公共种子里给 u1 加了有效自选 E。af77bb5 的 `daily_universe` 只取持仓，所以当前 28/28 绿；但 §11.1 规定公共种子不加自选行，A 补丁单让 `daily_universe` 纳入自选后，用例 4、20、22 等会因多出 E 而变红。须在 A 补丁单落地之前，把 E 的自选行移到用例 14 和 §11.1 列出的新用例里。
+- 测试（非阻断）：§10.3 原先没有写播种 feature_catalog 这一步，T-T71b 自行补做，现已写入 12.2。
+- 不归本契约（非阻断，既有）：`selfchecks/test_tb76_assembly`、`test_tb76_daily` 里三例在 50835e3 与 af77bb5 上同样失败（worker 在 ANALYZE 成功后同一 tick 执行 TRACKING；只有 entry 规则的卡被 conclusion 的反证/失效校验打断）。须另开允许改 selfchecks 的后端单处理。

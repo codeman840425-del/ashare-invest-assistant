@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 from app.config import _DEV_ENVS
 from app.config_files import IngestLicences
@@ -123,43 +124,70 @@ class IngestCore:
         # L-6: transaction committed successfully.
         mem.pending_escalation = None
 
-    def rehydrate(self, user_id: uuid.UUID, now: dt.datetime) -> None:
-        """Fill user IP-limit memory from the store; fail-closed → escalated.
+    def rehydrate_locked(self, conn: Connection, user_id: uuid.UUID, now: dt.datetime) -> bool:
+        """Read events and SAVEPOINT-flush on an already-locked connection.
 
-        T-A89 B-1(a)/L-a: take ``ingest:ip_limit:{user}`` (lock_timeout 3s) before reading
-        events. Lock busy / timeout / store error → escalate and deny (wall ≤3s).
-        B-1: merge ``escalated_until`` with ``later`` so an in-memory fail-closed
-        pause is never shortened by an empty DB snapshot after recovery.
-        L-2/L9: after a successful read commit, one-shot ``_try_flush_pending`` in a
-        *separate* transaction (clear pending only after that commit succeeds). Merging
-        flush into the read txn would clear pending on a single BudgetEngine(ok=1) connect.
+        Caller holds ``ingest:ip_limit:{user}``. Returns True iff a flush write
+        was issued and its SAVEPOINT succeeded. Does not clear pending (L-6).
         """
         esc = self.cfg.ip_limited_escalate
         mem = self._user_mem(user_id)
+        loaded = ipl.rehydrate(
+            conn,
+            user_id,
+            window_s=esc.window_s,
+            pause_s=esc.pause_s,
+            now=now,
+        )
+        flush_ok = False
+        if mem.pending_escalation is not None:
+            try:
+                with conn.begin_nested():
+                    ipl.flush_pending_escalation(conn, mem)
+                flush_ok = True
+            except Exception:  # noqa: BLE001 — keep pending (L9 / A31)
+                flush_ok = False
+        ipl.merge_rehydrated(mem, loaded)
+        return flush_ok
+
+    def rehydrate(
+        self, user_id: uuid.UUID, now: dt.datetime, *, deadline: float | None = None
+    ) -> None:
+        """Fill user IP-limit memory from the store; fail-closed → escalated.
+
+        T-A89 B-1(a)/L-a and T-A91 M-b: one advisory lock, then read + optional
+        SAVEPOINT flush in the same transaction. ``SET LOCAL`` timeouts are driven
+        by a 2.8s deadline (not a fixed 5s statement_timeout). Admission in
+        ``mairui_get`` uses this helper on its already-open connection instead of
+        opening a second one. Tick still uses ``_try_flush_pending`` independently.
+        """
+        mem = self._user_mem(user_id)
         if self.engine is None:
             return
+        flush_ok = False
+        t0 = time.monotonic()
+        cut = deadline if deadline is not None else t0 + 2.8
         try:
             with self.engine.connect() as conn, conn.begin():
-                # T-A89: wall-clock bound ≤3s for the admit-path lock wait.
-                conn.execute(text("SET LOCAL lock_timeout = '2000'"))
-                conn.execute(text("SET LOCAL statement_timeout = '5000'"))
+                remain = cut - time.monotonic()
+                if remain < 0.2:
+                    raise TimeoutError("rehydrate_deadline")
+                remain_ms = max(1, int(remain * 1000))
+                lock_ms = min(1000, remain_ms)
+                conn.execute(text(f"SET LOCAL lock_timeout = '{lock_ms}ms'"))
+                conn.execute(text(f"SET LOCAL statement_timeout = '{remain_ms}ms'"))
                 ipl.acquire_ip_limit_lock(conn, user_id)
-                loaded = ipl.rehydrate(
-                    conn,
-                    user_id,
-                    window_s=esc.window_s,
-                    pause_s=esc.pause_s,
-                    now=now,
-                )
-            ipl.merge_rehydrated(mem, loaded)
+                flush_ok = self.rehydrate_locked(conn, user_id, now)
         except Exception:  # noqa: BLE001 — fail-closed (lock timeout / store error)
             mem.hits.clear()
             mem.escalated_until = ipl.later(
-                mem.escalated_until, ipl.fail_closed_until(now, esc.pause_s)
+                mem.escalated_until,
+                ipl.fail_closed_until(now, self.cfg.ip_limited_escalate.pause_s),
+
             )
             return
-        # L-2: separate txn so a flush failure keeps pending (T-A81 L9 / T-B112 L-6).
-        self._try_flush_pending(user_id)
+        if flush_ok:
+            mem.pending_escalation = None
 
     def upsert(
         self,

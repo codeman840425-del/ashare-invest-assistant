@@ -51,6 +51,7 @@ from app.signals.execution import assess, condition
 from app.signals.models import MarketFacts, SignalInput
 from app.signals.screen import screen_membership
 from app.strategy.instances.service import owned
+from app.strategy.universe_norm import board_in_universe, normalize_universe
 
 BJT = dt.timezone(dt.timedelta(hours=8))
 TERMINAL = {"confirmed", "dismissed", "expired", "invalidated", "superseded"}
@@ -321,7 +322,10 @@ def write_candidate(
         if version.card_version_id
         else None
     )
-    universe = (fields or {}).get("universe", version.config.get("universe"))
+    universe = normalize_universe(
+        (fields or {}).get("universe", version.config.get("universe")),
+        screen=(version.config or {}).get("screen", (fields or {}).get("screen")),
+    )
     mount_policy = (fields or {}).get("mount_policy", version.config.get("mount_policy", "user"))
     diag = screen_membership(
         universe=universe,
@@ -348,9 +352,10 @@ def write_candidate(
         master = locked.execute(
             select(securities).where(securities.c.code == content.security_code)
         ).one()
-        if master.type not in universe.get("security_types", []) or not universe.get(
-            "boards", {}
-        ).get(master.board, False):
+        if master.type not in (universe or {}).get("security_types", []) or not board_in_universe(
+            (universe or {}).get("boards"),
+            master.board,
+        ):
             return {"id": None, "diagnostic": "outside_universe"}
         if (fields or {}).get(
             "mount_policy", version.config.get("mount_policy")

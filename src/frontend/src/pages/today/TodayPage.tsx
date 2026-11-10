@@ -12,6 +12,8 @@ import {
   RISK_CONTROL, RISK_LEVEL, SESSION, SEVERITY, SEVERITY_TEXT,
 } from '../../i18n/labels';
 import { fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
+import { WatchlistToggle } from '../../features/watchlist/WatchlistToggle';
+import { WatchlistSection } from '../../features/watchlist/WatchlistSection';
 import { MORE_ROUTE, safeInternalRoute, type TodayListKey as ListKey } from './todayRoutes';
 
 /**
@@ -58,6 +60,8 @@ const focusColumns: ColumnsType<TerminalRow> = [
   { title: '不可执行原因', key: 'rs', width: 96, align: 'right', render: (_, r) => (r.active_reason_count ? <span className="num">{r.active_reason_count}</span> : <span className="muted">0</span>) },
   { title: '风险', key: 'risk', width: 70, render: (_, r) => (r.max_risk_level ? <Tag color={RISK_LEVEL[r.max_risk_level].color}>{RISK_LEVEL[r.max_risk_level].text}</Tag> : <span className="muted">—</span>) },
   { title: '数据', key: 'ds', width: 120, render: (_, r) => <DataStatusTag status={r.data_status} asOf={r.data_as_of} /> },
+  // T-F33：自选入口（以 GET /watchlist 为准，不用行上的 in_watchlist，写入后无需等 /today 轮询）
+  { title: '自选', key: 'wl', width: 150, render: (_, r) => <WatchlistToggle code={r.security_code} testId={`watchlist-focus-${r.security_code}`} /> },
 ];
 
 export function TodayPage() {
@@ -128,6 +132,8 @@ export function TodayPage() {
           aria-label="重点关注列表"
         />
       </Section>
+
+      <WatchlistSection />
 
       <div className="today-grid">
         <Section title="待确认的计划草案" k="pending_plan_drafts" data={t} testId="today-drafts">

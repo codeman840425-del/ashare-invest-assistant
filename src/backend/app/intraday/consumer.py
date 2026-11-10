@@ -16,7 +16,8 @@ class Consumer:
     def __init__(self, settings: Settings, client: redis.Redis) -> None:
         self.settings = settings
         self.client = client
-        self.pubsub = client.pubsub(ignore_subscribe_messages=True)
+        # redis.Redis.pubsub 工厂方法在 redis 类型存根中未标注返回类型（no-untyped-call）。
+        self.pubsub = client.pubsub(ignore_subscribe_messages=True)  # type: ignore[no-untyped-call]
         self.pubsub.subscribe("market.updated")
         self.last_fallback: dt.datetime | None = None
 

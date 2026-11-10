@@ -5,6 +5,8 @@
   = Numeric(20,4) 的整数位）与 M2 一致，按记录拒绝并计数，其余记录照常处理，整次运行不退出。
   「极大」只以量化/写库类型实际会不会出错为准，不引入新阈值。
 - ③：运行中途出错时删除审计目录里对账报告的 ``.part`` 临时文件，并记一条日志。
+  清单 ``.part`` 同样：独占创建成功后只要后面出错就删除，记一条只含文件名和
+  run_id 的 warning，再把原错误抛出；事先已存在、非本次创建的不删。
 
 合成样本均为虚构数据；不连库、不出网、不调用麦蕊。
 """
@@ -14,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import os
 import struct
 from collections.abc import Sequence
 from pathlib import Path
@@ -156,6 +159,54 @@ def test_r3_existing_part_not_owned_is_not_deleted(tmp_path: Path) -> None:
     audit.mkdir()
     stamp = NOW.astimezone(tdx_local.BEIJING).strftime("%Y%m%dT%H%M%S")
     foreign = audit / f"tdx-day-reconcile-{stamp}-r3.jsonl.part"
+    foreign.write_text("foreign", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        _run(root, audit, lambda bars: len(bars))
+    assert foreign.read_text(encoding="utf-8") == "foreign"
+
+
+# ---------------------------------------------------------------- 清单 .part
+
+
+def test_r3_manifest_part_removed_and_logged_on_replace_error(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 独占创建清单 .part 成功后，os.replace 失败：应删除本次 .part、记 warning、原样抛出。
+    root = _three_files(tmp_path)
+    audit = tmp_path / "audit"
+    audit.mkdir()
+    real_replace = tdx_local.os.replace
+
+    def boom(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+        dest = Path(dst)
+        if "manifest" in dest.name:
+            assert Path(src).is_file()
+            raise RuntimeError("manifest-replace-boom")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(tdx_local.os, "replace", boom)
+    caplog.set_level(logging.WARNING, logger="app.ingest.tdx_local")
+    with pytest.raises(RuntimeError, match="manifest-replace-boom"):
+        _run(root, audit, lambda bars: len(bars))
+    assert not list(audit.glob("*.part"))
+    assert not list(audit.glob("tdx-day-manifest-*.txt"))
+    hits = [
+        r for r in caplog.records if r.name == "app.ingest.tdx_local" and ".part" in r.getMessage()
+    ]
+    assert len(hits) == 1
+    msg = hits[0].getMessage()
+    assert "r3" in msg
+    assert "tdx-day-manifest-" in msg and ".part" in msg
+    assert str(tmp_path) not in msg
+
+
+def test_r3_existing_manifest_part_not_owned_is_not_deleted(tmp_path: Path) -> None:
+    # 防护：清单 .part 若已存在（不是本次创建的），open("x") 失败时不得把它删掉。
+    root = _three_files(tmp_path)
+    audit = tmp_path / "audit"
+    audit.mkdir()
+    stamp = NOW.astimezone(tdx_local.BEIJING).strftime("%Y%m%dT%H%M%S")
+    foreign = audit / f"tdx-day-manifest-{stamp}-r3.txt.part"
     foreign.write_text("foreign", encoding="utf-8")
     with pytest.raises(FileExistsError):
         _run(root, audit, lambda bars: len(bars))

@@ -23,12 +23,14 @@ import socket
 import sys
 import time
 from collections.abc import Mapping
+from contextlib import suppress
 
 import redis
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.config import Settings
+from app.ingest import netguard as _netguard
 from app.version import APP_VERSION
 from app.workers.runner import run
 
@@ -107,8 +109,10 @@ def bootstrap_ingest_core(settings: Settings) -> Engine:
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-    except Exception as exc:  # noqa: BLE001  surface as start refusal, not crash traceback path
+    except Exception as exc:
         raise RuntimeError(f"{ENGINE_UNAVAILABLE_MESSAGE}: {type(exc).__name__}") from exc
+
+    _probe_halt_directory()
 
     core = IngestCore(cfg=settings.business.ingest.licences, engine=engine)
     set_ingest_core(core)
@@ -160,7 +164,28 @@ def write_heartbeat(settings: Settings) -> None:
         client.close()
 
 
+def _probe_halt_directory() -> None:
+    """T-A91 M-c: halt dir must be writable; never touch existing HALT files."""
+    from app.ingest.daily_lists import HALT
+
+    directory = HALT.parent
+    probe = directory / f".probe-{os.getpid()}"
+    fd = None
+    try:
+        fd = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.write(fd, b"probe")
+        os.fsync(fd)
+    except Exception as exc:
+        raise RuntimeError("ingest 拒绝启动：停机标志目录不可写") from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
+        with suppress(FileNotFoundError):
+            os.unlink(probe)
+
+
 def main() -> int:
+    _netguard.install()
     if legacy_licence_present():
         # 在读取配置、建立任何连接之前退出；消息不含变量值
         print(LEGACY_LICENCE_MESSAGE, file=sys.stderr)
@@ -177,7 +202,12 @@ def main() -> int:
         settings = get_settings()
         bootstrap_ingest_core(settings)
     except Exception as exc:  # noqa: BLE001
-        print(f"ingest 拒绝启动：{type(exc).__name__}", file=sys.stderr)
+        # M-c: halt-dir refusal uses a fixed sentence (no path/secret). Other
+        # bootstrap failures stay type-name only (L-2).
+        if isinstance(exc, RuntimeError) and "停机标志目录不可写" in str(exc):
+            print(str(exc), file=sys.stderr)
+        else:
+            print(f"ingest 拒绝启动：{type(exc).__name__}", file=sys.stderr)
         return EXIT_LEGACY_LICENCE
 
     interval = settings.business.ingest.heartbeat.interval_s

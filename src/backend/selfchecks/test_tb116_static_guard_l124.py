@@ -233,7 +233,7 @@ def test_tb116_l1_ingest_profile_nullpool_and_timeouts() -> None:
     assert eng.pool.__class__ is NullPool
     src = (ROOT / "src/backend/app/db/engine.py").read_text(encoding="utf-8")
     assert 'profile == "ingest"' in src
-    assert "connect_timeout" in src and "3" in src
+    assert '"connect_timeout": 2' in src
     assert "NullPool" in src
     assert "statement_timeout=5000" in src
     assert "lock_timeout=2000" in src
@@ -285,8 +285,10 @@ def test_tb116_l2_main_exit_78_no_traceback_no_secret(
     monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.delenv("MAIRUI_LICENCE", raising=False)
     monkeypatch.delenv("APP_MASTER_KEY", raising=False)
+    from app.ingest import netguard as ng
     from app.workers import ingest as iw
 
+    monkeypatch.setattr(ng, "install", lambda: None)
     monkeypatch.setattr(iw, "legacy_licence_present", lambda environ=None: False)
     monkeypatch.setattr(iw, "master_key_present", lambda environ=None: False)
 

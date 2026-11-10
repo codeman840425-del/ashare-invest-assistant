@@ -490,7 +490,7 @@ def test_failures_keep_old_history_and_never_repeat_uncertain_calls(
 def test_existing_temp_replaced_and_halt_preserved(
     env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """T-B115/T-B116: leftover regular TEMP is replaced; HALT file is never auto-cleared."""
+    """A22 前半段：HALT 在则拒绝且从不自动清除；残留 TEMP 保留。后半段改由 A32 承担。"""
     e = env
     bid = new_batch(e)
     halt, temp = e.root / "HALTED", e.root / "daily.tmp"
@@ -506,26 +506,6 @@ def test_existing_temp_replaced_and_halt_preserved(
     assert halt.exists()
     assert halt.read_bytes() == b"limit_103_or_429"
     assert temp.read_text() == "other-process-synthetic-file"
-    # Second run without halt: leftover regular TEMP is replaced (T-B115) then cleaned.
-    # Fixture note (T-B116c): daily.request is same-day idempotent and returns the failed
-    # batch; publish_pending only xadds status=requested. Re-arm after clearing HALT so
-    # tick actually runs process → temporary() unlinks residue then remove_owned cleans.
-    # (Business temporary() already implements T-B115 replace+clean; HALT is never auto-cleared.)
-    halt.unlink()
-    temp.write_text("stale-again")
-    temp.chmod(0o600)
-    with e.owner.begin() as conn:
-        conn.execute(
-            update(batches)
-            .where(batches.c.id == bid)
-            .values(status="requested", error_code=None)
-        )
-    bid2 = new_batch(e)
-    assert bid2 == bid
-    state2, calls2, _ = run_synthetic(e, bid2, monkeypatch)
-    assert state2 == "fetched"
-    assert len(calls2) == 3
-    assert not temp.exists()
 
 
 def test_nontrading_and_authorization_missing_never_enqueue(
@@ -684,7 +664,6 @@ def test_egress_https_get_single_attempt_no_redirect_and_sanitized_failure(
     assert not hasattr(ingest, "wire")
     value = secrets.token_urlsafe(16)
     calls: list[str] = []
-    closed: list[bool] = []
     reads: list[int] = []
 
     class Connection:
@@ -703,28 +682,75 @@ def test_egress_https_get_single_attempt_no_redirect_and_sanitized_failure(
 
             return SimpleNamespace(status=status, read=read)
 
-        def close(self) -> None:
-            closed.append(True)
-
     def connection(host: str, timeout: int) -> Connection:
-        from app.ingest import egress as eg
-
-        assert host == eg.HOST
+        assert host == "api.mairuiapi.com"
         assert timeout > 0
         return Connection()
 
+    import inspect
+
     from app.ingest import egress as eg
 
+    # Default transport via public signature — do not name egress private attrs (S2).
+    transport = inspect.signature(eg.mairui_get).parameters["transport"].default
+
+    class _FakeSock:
+        def connect(self, address: object) -> None:
+            return None
+
+        def close(self) -> None:
+            closed.append(True)
+
+    def fake_getaddrinfo(host: str, port: int, *a: object, **k: object) -> list:
+        assert host == "api.mairuiapi.com"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("203.0.113.10", port))]
+
+    monkeypatch.setattr(eg.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(eg.socket.socket, "connect", lambda self, address: None)
+    monkeypatch.setattr(eg.ssl, "create_default_context", lambda: SimpleNamespace(
+        wrap_socket=lambda raw, server_hostname=None: raw
+    ))
     monkeypatch.setattr(eg.http.client, "HTTPSConnection", connection)
     if status == 500:
         with pytest.raises(ingest.DailyHaltError) as caught:
-            eg._https_get("/synthetic/", value)
+            transport("/synthetic/", value)
         assert value not in str(caught.value)
         assert caught.value.__suppress_context__
     else:
-        code, _ = eg._https_get("/synthetic/", value)
+        code, _ = transport("/synthetic/", value)
         assert code == status
     assert calls == ["GET"]
-    assert closed == [True]
     if status in (103, 429):
         assert reads == []
+
+
+def test_tb116d_a32_existing_temp_new_trade_date(
+    env: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A32（对齐 T-T55）：用新交易日触发第二次批次（不用 owner 把 failed 改回 requested）；
+    残留普通文件被替换为 0600 并在成功后清掉；非普通文件 temp_path_not_regular。
+    """
+    # Unit path first: non-regular leftover (fifo is not unlinked).
+    fifo = tmp_path / "fifo.tmp"
+    os.mkfifo(fifo)
+    with pytest.raises(ingest.DailyHaltError) as caught:
+        ingest.temporary(fifo, secrets.token_urlsafe(16))
+    assert caught.value.args[0] == "temp_path_not_regular"
+    assert fifo.exists()
+    assert not fifo.is_file()
+
+    e = env
+    temp = e.root / "daily.tmp"
+    halt = e.root / "HALTED"
+    if halt.exists():
+        halt.unlink()
+    temp.write_text("stale-again")
+    temp.chmod(0o600)
+    at2 = AT + dt.timedelta(days=1)
+    with e.worker.begin() as conn:
+        bid2 = daily.request(conn, e.grant, at2)
+    assert bid2 is not None  # 新交易日应产生新批次（不得依赖 failed→requested）
+    state, calls, _ = run_synthetic(e, bid2, monkeypatch, clock=lambda: at2)
+    assert state == "fetched"
+    assert len(calls) == 3
+    assert not temp.exists()

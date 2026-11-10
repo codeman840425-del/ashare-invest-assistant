@@ -15,6 +15,7 @@ from __future__ import annotations
 import ast
 import datetime as dt
 import hashlib
+import json
 import os
 import struct
 from collections import Counter, defaultdict
@@ -540,10 +541,7 @@ def test_tdx_import_do_nothing_on_existing(tmp_path: Path) -> None:
         str(len(days) - 2),
     )
     assert {b.trade_date for b in deps.written}.isdisjoint({days[0], days[1]})
-    rows = [
-        __import__("json").loads(x)
-        for x in (audit / out["reconcile_report"]).read_text().splitlines()
-    ]
+    rows = [json.loads(x) for x in (audit / out["reconcile_report"]).read_text().splitlines()]
     assert [(r["field"], r["kind"]) for r in rows[:-1]] == [
         ("close", "mismatch"),
         ("amount", "mismatch"),

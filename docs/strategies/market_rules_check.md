@@ -2,7 +2,7 @@
 
 > 作者：量化策略研究员 · 2026-11-01。只读核实，**未修改** `config/market_rules.yaml`。
 > 核实对象：plan.md §6.1 的 `config/market_rules.yaml` 块（plan 第 2164–2209 行）中"`effective_from: "2026-07-06"` … 沪深主板 ST/*ST 涨跌幅改为 10%（此前段为 5%）【待 T003 补测核实】"，以及 plan 第 1026、1107、2646 行的同一表述。
-> 说明：仓库里**没有独立的 market_rules.yaml 文件**（`rg --files /workspace/ashare-invest-assistant | rg market_rules` 只返回 `src/backend/app/market_rules/.gitkeep`），该 yaml 目前只以代码块形式存在于 plan.md §6.1。
+> 说明：仓库里**没有独立的 market_rules.yaml 文件**（`rg --files | rg market_rules` 当时只返回 `src/backend/app/market_rules/.gitkeep`），该 yaml 目前只以代码块形式存在于 plan.md §6.1。
 
 ---
 
@@ -58,7 +58,7 @@
 > 作者：量化策略研究员 · 2026-11-01（MST，America/Denver）。只读核实，**未修改** plan.md / api-contract.md / market_rules。
 > 依据只采用 sse.com.cn、szse.cn、csrc.gov.cn 上的正式文件（含其下属静态文件域 docs.static.szse.cn、star.sse.com.cn、investor.szse.cn、edu.sse.com.cn）。
 > 引文均为短引，条号与原文已对照下载的 PDF/DOCX 全文逐字核对。查不到的写"未找到"。新增出处编号接续 O8，为 O9 起（见 §8）。
-> 详细过程见 `/workspace/team/reports/T006b-strategy.md`。
+> 详细过程见团队报告 T006b-strategy（不入库）。
 
 ## 5. 问题 1：`modeled_from: "2023-04-10"` 的官方出处，以及前后各板涨跌幅规则变化
 

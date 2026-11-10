@@ -1,7 +1,7 @@
 # 证券主数据（Security Master）：来源对比与合并规则（T007 · v0.2 草案）
 
 > v0.2（2026-11-01）：新增 §8「代码级缺口统计（run-20261101-190106）」。§0 第 1 条"无法算到代码级"已被 §8 取代；§0–§7 的其他内容未改。
-> 作者：量化策略研究员 · 2026-11-01（America/Denver，UTC-7）。详细证据与原始统计见 `/workspace/team/reports/T007.md`。
+> 作者：量化策略研究员 · 2026-11-01（America/Denver，UTC-7）。详细证据与原始统计见团队报告 T007（不入库）。
 > 本文是**研究建议**，表结构与落库由架构/后端决定；文中阈值凡标"建议值"的都是规则参数，不是实测结论。条款原文只摘引，是否满足合规由用户/法务确认。
 
 ## 0. 结论速览
@@ -101,7 +101,7 @@
 
 ## 7. 需要后端补探的内容（只读，不改代码）
 
-1. 真实调用 `/hslt/list`、`/bj/list/all`、`/kc/list/all`，**完整保存** `dm`、`mc` 等全部字段，同时保存 `/hsrl/ssjy/all`、`/hsrl/real/all` 的完整 `dm` 集合。然后用 `/tmp/t7/compare_mairui_codes.py`（或拷进仓库）按板块做集合差。
+1. 真实调用 `/hslt/list`、`/bj/list/all`、`/kc/list/all`，**完整保存** `dm`、`mc` 等全部字段，同时保存 `/hsrl/ssjy/all`、`/hsrl/real/all` 的完整 `dm` 集合。然后用比对脚本（私有，不入库；或拷进仓库）按板块做集合差。
 2. 运行 p11 第 4 项（退市股：列表是否含退市股，日线/财务能否取到）。
 3. 用旧北交所代码（如 832000，对应 920000）调用 instrument/history，确认麦蕊是否支持旧码，以及新码历史是否覆盖换码前的行情。
 4. `/hslt/cxgc` 次新股池 1 次，看样本覆盖。
@@ -110,7 +110,7 @@
 
 ## 8. 代码级缺口统计（run-20261101-190106）
 
-**依据**：`src/backend/probes/results/run-20261101-190106/diff_{lists,hslt_list,hsrl_ssjy_all,hsrl_real_all,union_all}.json`（位于 run 根目录，不在 `code_lists/` 下），`p12_code_lists.json`，`code_lists/raw_*.json`，以及 `T003-mairui-capability.md` §16。官方基准是 `/tmp/t7/official_codes.json`（§1 的同一批快照，2026-11-01 13:41–13:46 MST 下载，对应交易日 2026-10-30），终止上市名单用 `/tmp/t7/sse_delist.json` 和 `sz_delist.xlsx`。麦蕊数据的取数时间是北京时间 2026-11-02 10:01–10:09（周一盘中），两个全市场接口复用的是 p01 在 10:01 的返回，比三个列表接口早约 7 分钟，所以**两边不是同一时刻**。下文数字全部由 json 离线重算，与 `diff_*.json` 逐项一致；没有调用麦蕊。
+**依据**：`src/backend/probes/results/run-20261101-190106/diff_{lists,hslt_list,hsrl_ssjy_all,hsrl_real_all,union_all}.json`（位于 run 根目录，不在 `code_lists/` 下），`p12_code_lists.json`，`code_lists/raw_*.json`，以及 `T003-mairui-capability.md` §16。官方基准是私有快照（不入库；§1 的同一批，2026-11-01 13:41–13:46 MST 下载，对应交易日 2026-10-30），终止上市名单亦为私有（不入库）。麦蕊数据的取数时间是北京时间 2026-11-02 10:01–10:09（周一盘中），两个全市场接口复用的是 p01 在 10:01 的返回，比三个列表接口早约 7 分钟，所以**两边不是同一时刻**。下文数字全部由 json 离线重算，与 `diff_*.json` 逐项一致；没有调用麦蕊。
 
 ### 8.1 各源与官方的对照（官方 A 股含 CDR 共 5577 只：沪 2318、深 2905、京 354）
 

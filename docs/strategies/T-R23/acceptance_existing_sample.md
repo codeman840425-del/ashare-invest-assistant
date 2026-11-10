@@ -24,8 +24,8 @@
 
 ## 精确产物
 - 本文及README引用；规则文件不变。
-- `/workspace/team/reports/T-R23/`：`closeout_existing.py`、`closeout_summary.json`、`existing_window_sample.jsonl`、`excluded_rows.jsonl`、`frozen_match_results.jsonl`、`deepseek_existing_checks.jsonl`、`deepseek_unfinished_ids.jsonl`、`regression_v2_1.txt`、`regression_v2.txt`；运行依赖`deps/`（PyYAML6.0.3）。
-- `/workspace/team/reports/deepseek/T-R23/closeout_verification.json`；既有call_log/raw_batch/提示词不改。
-- `/workspace/team/reports/T-R23.md`、`/workspace/team/reports/T-R23/public_pages/source_record.md`、`/workspace/team/status/策略研究员.md`。
+- 团队报告 T-R23 目录（不入库）：closeout 脚本与汇总、既有窗口样本、排除行、冻结匹配、DeepSeek 检查与未完成 ID、回归文本；运行依赖 deps/（PyYAML6.0.3）。
+- 团队报告 deepseek/T-R23 的 closeout_verification（不入库）；既有 call_log/raw_batch/提示词不改。
+- 团队报告 T-R23.md、T-R23/public_pages/source_record.md、status/策略研究员.md（均不入库）。
 
 任务到此收口：停止项如实保留，待父级交付编排者；不再扩展、不额外核验、不发送、不提交。

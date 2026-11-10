@@ -1,7 +1,7 @@
 # 策略知识卡模板（T006a · v0.3 草案）
 
 > 作者：量化策略研究员 · 2026-11-01（v0.2 按 plan §2.5.14 契约与 T003 报告修订；**v0.3（T006a）按 `docs/api-contract.md` v0.2 与 plan §2.5.14 H 节①–⑫、§9 C(1)–C(8) 编排者默认决策对齐**，ST 涨跌幅已核实，见 `market_rules_check.md`）
-> 依据：`/workspace/team/vision.md`《策略卡字段定稿》（用户 11:52 表 + 编排者补充 + 不可执行原因 + 11:56 硬性原则）；`docs/plan.md` §2.5.14（导入契约，**字段名、结构、枚举以它为准**，H 节为对本模板 v0.2 的裁决）、`docs/api-contract.md` v0.2（API 字段名、枚举）、§0B、§2.5、§2.8、§2.12、§2.13；`docs/strategy-references.md` §3；`/workspace/team/reports/T003-mairui-capability.md`（2026-11-01，大部分接口未实测）。
+> 依据：团队文件 vision.md《策略卡字段定稿》（不入库；用户 11:52 表 + 编排者补充 + 不可执行原因 + 11:56 硬性原则）；`docs/plan.md` §2.5.14（导入契约，**字段名、结构、枚举以它为准**，H 节为对本模板 v0.2 的裁决）、`docs/api-contract.md` v0.2（API 字段名、枚举）、§0B、§2.5、§2.8、§2.12、§2.13；`docs/strategy-references.md` §3；团队报告 T003-mairui-capability（不入库；2026-11-01，大部分接口未实测）。
 > **字段覆盖以 vision.md 定稿为准，字段名与格式以 plan §2.5.14 为准**。两者的关系：§2.5.14 B 节是导入的最低要求，本模板多出来的字段由导入器存进 `extra` 并在详情页展示（§2.5.14 G）。差异与裁决状态见文末附录 B。
 > 数据：本模板里的 `f.xxx` 是**本项目的特征键**（要在 `feature_catalog` 登记，未登记的写进 `validation.feature_requests`），**不是麦蕊字段名**。T003 报告里列出的麦蕊接口与因子 ID 只来自官方文档，绝大多数未实测；引用时一律写"文档已列·待T003验证"。
 

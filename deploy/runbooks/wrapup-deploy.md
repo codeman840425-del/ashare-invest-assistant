@@ -81,17 +81,24 @@ deploy/scripts/wrapup/update-repo.sh --apply --target <批准的完整哈希> --
 deploy/scripts/wrapup/start-stack.sh --apply --backup-dir /data/aia-wrapup-backup/<backup.sh 本轮打印的时间戳>
 ```
 
-顺序（与 `up.sh` / compose `depends_on` 一致）：
+顺序（与 `up.sh` / compose `depends_on` 一致，但 **seed 插在 migrate 之后、worker 启动之前**）：
 
 1. postgres、redis（等到 healthy）
 2. **migrate**（`alembic upgrade head`）
 3. timescale-apply
 4. **db-roles**（`apply-roles.sh`）
-5. api / worker / beat / ingest / signal-rt / nginx
+5. 按「engine_policy seed」节只读列出现有行并显式跑 seed（`start-stack.sh` 不会代跑）
+6. 再启 api / worker / beat / ingest / signal-rt / nginx
 
 不要加 `--profile master-bootstrap`。默认 dev/live 不会启动该服务。
 
-migrate 完成后、worker 下一轮作业产出建议之前，按「engine_policy seed」节显式跑 seed（本脚本不会代跑）。正式卡 v3 `--apply` 导入目前仍是「待补」，见该节。
+`start-stack.sh --apply` 目前会在最后一步把 worker 一并拉起。本轮收口不要一次跑完到 worker：在 postgres / migrate / timescale-apply / db-roles 完成之后先 seed，再：
+
+```bash
+deploy/scripts/compose.sh up -d --build --wait --no-deps api worker beat ingest signal-rt nginx
+```
+
+正式卡 v3 `--apply` 导入目前仍是「待补」，见「engine_policy seed」节。
 
 ## 4. HALT 目录可写检查
 
@@ -130,7 +137,7 @@ deploy/scripts/wrapup/verify.sh --apply
 - `alembic heads` 只有一个 head，且 `current` 指向它
 - `http://127.0.0.1:${NGINX_HTTP_PORT:-8080}/health/live` 为 200；抽查 `/`、`/login`
 - 收据卷 `<前缀>_aia_receipts`：目录 `root:root 755`，文件 `root:root 644`，ingest/worker `:ro`。只删收据文件不能恢复出口（`receipts.md`）
-- engine_policy / H-01 的只读 SQL 见「部署后只读 SQL 验证清单」：`app.engine_policies` 最新 `version_no=3`；H-01（库内 `app.strategy_cards.key='hold_risk_monitor'`）最新版=3；持仓实例的 `strategy_version_id` 指向 v3 行
+- engine_policy / H-01 的只读 SQL 见「部署后只读 SQL 验证清单」：`app.engine_policies` 最新 `version_no=3`；H-01（库内 `app.strategy_cards.key='hold_risk_monitor'`）最新版=3；持仓实例按 `COALESCE(derived_strategy_version_id, strategy_version_id)` 指向 v3 行；`app.strategy_promotion_reviews` 中有 `decision='approved'` 且 `target_strategy_version_id` 指向 H-01 v3 的行
 
 ## 主数据首次导入与词表（只走指定入口）
 
@@ -199,9 +206,9 @@ ROLLBACK;
 SQL
 ```
 
-## engine_policy seed（migrate 后、worker 产出建议前）
+## engine_policy seed（migrate 之后、worker 启动之前）
 
-时机：第 3 节启栈已完成（含 migrate）、worker 下一轮作业写出建议之前。seed **不会**在启动或 migrate 时自动执行（`migration_check` 只做同号守卫、缺行放行；`cards-import` 也不调 seed）。要写入的是镜像内现行 `config/engine_policy.yaml` 的 `version_no`（升 3 之后须显式重跑，插入 v3 新行；v1/v2 旧行保留不动，不可删除）。
+时机：第 3 节已完成 postgres、migrate、timescale-apply、db-roles 之后，**尚未启动 worker**（以及其他应用服务）之前。seed **不会**在启动或 migrate 时自动执行（`migration_check` 只做同号守卫、缺行放行；`cards-import` 也不调 seed）。要写入的是镜像内现行 `config/engine_policy.yaml` 的 `version_no`（升 3 之后须显式重跑，插入 v3 新行；v1/v2 旧行保留不动，不可删除）。`compose run --no-deps` 只起一次性 worker 容器来跑 seed，不会把常驻 worker 拉起来。
 
 入口（只读核对 `src/backend/app/engine_policies.py`）：`python -m app.engine_policies --database-url`（`--database-url` 为必填；模块不在 `python -m app.cli` 子命令表里）。CLI 从 `Settings.config_dir` 读取现行 yaml（容器内默认 `/app/config`，worker 已只读挂载）。成功时只打印一行 `engine_policy_seed_inserted=`，值为 `1`（本号不存在，已 INSERT）或 `0`（同号且 `config` 含相同 `content_sha256`，幂等、不写新行）。同号但内容/摘要不同会抛 `ValueError("engine_policy_version_hash_conflict")` 并以非 0 退出，**没有**名为 `hash_conflict` 的输出字段。
 
@@ -230,10 +237,12 @@ SQL
 
 ### 2. 在 worker 容器内跑 seed
 
-DSN 只在容器内从环境变量 `DATABASE_URL` 展开（worker 的 compose 环境已提供），**不要**在宿主机命令行写明文 DSN，不要 `echo` / 打印该变量或连接串。
+DSN 只在容器内从环境变量 `DATABASE_URL` 展开（worker 的 compose 环境已提供），**不要**在宿主机命令行写明文 DSN，不要 `echo` / 打印该变量或连接串，不要 `set -x`（默认入口 `deploy/docker/secret-env.sh` 开头也会关掉继承来的 xtrace，避免把密钥或 DSN 打到 stderr）。
+
+保留 worker 默认 entrypoint（compose 为 `sh /aia/secret-env.sh`）。该脚本注入 `APP_MASTER_KEY` 后执行 `exec "$@"`，会把后面的参数作为命令原样执行。不要加 `--entrypoint sh`（会绕过 secret-env.sh；用户机若 `APP_ENV` 为 staging/production，Settings 会因缺 `APP_MASTER_KEY` 拒绝）。
 
 ```bash
-deploy/scripts/compose.sh run --rm --no-deps -T --entrypoint sh worker -c \
+deploy/scripts/compose.sh run --rm --no-deps -T worker sh -c \
   'python -m app.engine_policies --database-url "$DATABASE_URL"'
 ```
 
@@ -241,7 +250,7 @@ deploy/scripts/compose.sh run --rm --no-deps -T --entrypoint sh worker -c \
 
 - 首跑（库中还没有现行 yaml 的 `version_no`）：标准输出为 `engine_policy_seed_inserted=1`，退出码 0。
 - 重跑（同号同摘要）：`engine_policy_seed_inserted=0`，退出码 0。
-- 出现 `engine_policy_version_hash_conflict`（同号异摘要）：**立即停止**，不要重试、不要改旧行、不要手工 INSERT，问编排者。
+- 出现 `engine_policy_version_hash_conflict`（同号异摘要）：**立即停止**，不要重试、不要改旧行、**不要删除旧行**、不要手工 INSERT，问编排者。
 - 其它非 0 退出：同样停止。
 
 ### 4. 确认最新号与首条建议
@@ -256,7 +265,7 @@ seed 成功后再只读复查：`app.engine_policies` 按 `version_no` 降序的
 
 ### 部署后只读 SQL 验证清单
 
-在已启动的 postgres 上跑（只读事务）。表名和列名以 `src/backend/app/db/tables/strategy.py`、`realtime.py` 与迁移 0001 为准。正式卡对外编号是 **H-01**，库里头表键是 `app.strategy_cards.key` / `app.strategies.key` = `'hold_risk_monitor'`（文档字段 `card_id: H-01` 在版本 `fields` 里，**不是** `strategy_card_versions.card_id` 列——该列是指向头表的 UUID）。
+在已启动的 postgres 上跑（只读事务）。表名、列名和 `decision` 状态值以 `src/backend/app/db/tables/strategy.py`、`realtime.py` 与迁移 0001 为准。正式卡对外编号是 **H-01**，库里头表键是 `app.strategy_cards.key` / `app.strategies.key` = `'hold_risk_monitor'`（文档字段 `card_id: H-01` 在版本 `fields` 里，**不是** `strategy_card_versions.card_id` 列——该列是指向头表的 UUID）。
 
 ```bash
 deploy/scripts/compose.sh exec -T postgres \
@@ -273,16 +282,38 @@ LEFT JOIN app.strategy_versions sv ON sv.card_version_id = cv.id
 WHERE c.key = 'hold_risk_monitor'
 GROUP BY c.key;
 
--- 持仓实例（该策略下的 app.strategy_instances）须指向 v3 行
+-- 持仓实例：运行时取 COALESCE(derived_strategy_version_id, strategy_version_id)
+-- （与 src/backend/app/workers/daily.py:80、intraday/engine.py:293 一致）
 SELECT i.id,
        i.status,
        i.strategy_version_id,
-       sv.version_no
+       i.derived_strategy_version_id,
+       COALESCE(i.derived_strategy_version_id, i.strategy_version_id) AS effective_strategy_version_id,
+       sv.version_no AS effective_version_no
 FROM app.strategy_instances i
-JOIN app.strategy_versions sv ON sv.id = i.strategy_version_id
-JOIN app.strategies s ON s.id = sv.strategy_id
+JOIN app.strategy_versions base ON base.id = i.strategy_version_id
+JOIN app.strategies s ON s.id = base.strategy_id
+JOIN app.strategy_versions sv
+  ON sv.id = COALESCE(i.derived_strategy_version_id, i.strategy_version_id)
 WHERE s.key = 'hold_risk_monitor'
 ORDER BY sv.version_no, i.created_at;
+
+-- G7：已批准且 target_strategy_version_id 指向 H-01 v3 的行
+-- decision 取值以迁移 0001 CHECK / strategy.py:416 为准：pending、approved、rejected、changes_requested
+SELECT r.id,
+       r.decision,
+       r.target_strategy_version_id,
+       r.card_version_id,
+       r.reviewed_at,
+       sv.version_no,
+       s.key
+FROM app.strategy_promotion_reviews r
+JOIN app.strategy_versions sv ON sv.id = r.target_strategy_version_id
+JOIN app.strategies s ON s.id = sv.strategy_id
+WHERE r.decision = 'approved'
+  AND s.key = 'hold_risk_monitor'
+  AND sv.version_no = 3
+ORDER BY r.reviewed_at NULLS LAST, r.created_at;
 
 -- engine_policies 最新=3
 SELECT version_no,
@@ -308,20 +339,23 @@ SQL
 判定：
 
 - H-01：`latest_card_version_no` 与 `latest_strategy_version_no` 均为 **3**。若该 key 还没有行，说明正式卡尚未导入（见上文「待补」），不要把空结果当成已通过。
-- 持仓实例：`strategy_version_id` 应指向 `version_no=3` 的行。若仍有实例指向 v2，按 T-A119 会继续跑 v2；记下这些行，不要改 `strategy_version_id`，问编排者是否接受。
+- 持仓实例：有效版本 `COALESCE(derived_strategy_version_id, strategy_version_id)` 应指向 `version_no=3` 的行。若仍有实例的有效版本为 v2，按 T-A119 会继续跑 v2；记下这些行，不要改 `strategy_version_id` / `derived_strategy_version_id`，问编排者是否接受。
+- G7 审批：`app.strategy_promotion_reviews` 中至少有一行 `decision='approved'`，且 `target_strategy_version_id` 等于 H-01（`key='hold_risk_monitor'`）`version_no=3` 的 `app.strategy_versions.id`。没有这样的行则不要当成已通过（正式卡导入或审批可能尚未完成）。
 - `app.engine_policies` 最大 `version_no` 须为 **3**。
 - 首条**新**建议的 `engine_policy_version_no` 须为 **3**（在下一轮作业之后再核）。
 
 ## 授权口径与必须停下来问编排者的情况
 
-依据 `standing-auth-2026-11-08.md`：用户已长期授权收口时部署到其电脑（先备份，失败回滚，绝不 `down -v`），主数据首次导入（三所官网公开 HTTPS）也在 11-08 授权过。因此备份、迁 0029、更新代码、启停服务、halt 目录可写修复（不删已有 HALT）、网络探测、verify-roles、按手册执行的回滚，以及 `master-bootstrap.sh --check` / `--run --confirm-network-fetch`，还有按「engine_policy seed」节在 worker 容器内显式跑 `python -m app.engine_policies --database-url`（DSN 仅容器内展开），都由编排者在收口时下令 `--apply`，不必逐步再问用户。解除停机标志或恢复出口不在此列：必须由用户本人确认（与 `ingest-halt.md`、`receipts.md`、契约 1406/1411 一致），编排者不能代为确认。正式卡 v3 的 `--apply` 导入**不在**该授权范围内，须用户本人另行授权；步骤仍为「待补」。
+依据：该文件（`standing-auth-2026-11-08.md`）原话与编排者 2026-11-10 裁定。该文件记载用户本人原话「给你们最高授权，以后类似操作都无需问询」，范围包括「部署到用户本地电脑（先备份数据库，失败回滚，绝不 down -v）」。engine_policy seed 是只插入、幂等的版本配置行，属于上述「部署到用户本地电脑」步骤，因此在该授权范围内，由编排者在收口时下令即可，不必逐步再问用户。出现 `engine_policy_version_hash_conflict` 立即停止，**不删除旧行**，问编排者。正式卡 v3 的 `--apply` 导入**不在**该范围内，仍须用户本人授权；步骤仍为「待补」，编排者不得在未获用户本人授权时下令 `--apply`。
+
+主数据首次导入（三所官网公开 HTTPS）也在 11-08 授权过。因此备份、迁 0029、更新代码、启停服务、halt 目录可写修复（不删已有 HALT）、网络探测、verify-roles、按手册执行的回滚，以及 `master-bootstrap.sh --check` / `--run --confirm-network-fetch`，同样由编排者在收口时下令 `--apply`。解除停机标志或恢复出口不在此列：必须由用户本人确认（与 `ingest-halt.md`、`receipts.md`、契约 1406/1411 一致），编排者不能代为确认。
 
 下列情况**仍然必须停下来问编排者**后再继续：
 
 - 0029 分叉（库已在 0029 且 ingest_private / 触发器 / 函数与入链文件不一致，T-A70）
 - 任何删除数据或卷的操作（包括把回滚产生的新库/新卷切成现网之前若涉及删除现网数据或卷；删除旧 `<前缀>_aia_run` 卷）
 - 回滚失败
-- `engine_policy_version_hash_conflict` 或 seed / 只读核验未看到最新 `version_no=3`
+- `engine_policy_version_hash_conflict`（立即停止，不删旧行）或 seed / 只读核验未看到最新 `version_no=3` / 缺少已批准且指向 H-01 v3 的 `strategy_promotion_reviews` 行
 
 ## 本机自检
 

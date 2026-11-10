@@ -29,7 +29,7 @@ from alembic import command
 from alembic.config import Config
 from psycopg import sql
 from pydantic import SecretStr
-from sqlalchemy import create_engine, delete, func, insert, select, update
+from sqlalchemy import create_engine, delete, event, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine, URL
 
@@ -90,6 +90,41 @@ OPEN_DAYS = (DAY_0606, DAY_0909, DAY_1010)
 BEIJING = dt.timezone(dt.timedelta(hours=8))
 AT = dt.datetime(2026, 11, 10, 15, 0, tzinfo=BEIJING)
 FETCHED = dt.datetime(2026, 11, 10, 17, 15, tzinfo=BEIJING)
+# load_inputs 用 created_at <= now。快照表只追加、不能 UPDATE，须在 INSERT 时
+# 钉死 created_at，不能依赖墙钟。取值与 now 同一固定北京时间（或更早）。
+# 只改绑定参数，不改写 Insert 语句，以免丢掉 ON CONFLICT。
+LOAD_NOW = dt.datetime(2026, 11, 10, 23, 0, tzinfo=BEIJING)
+_PINNED_SNAPSHOT_AT = {"value": LOAD_NOW}
+
+
+def _pin_snapshot_created_at_params(
+    conn: Any,
+    cursor: Any,
+    statement: Any,
+    parameters: Any,
+    context: Any,
+    executemany: Any,
+) -> tuple[Any, Any]:
+    text = statement if isinstance(statement, str) else str(statement)
+    if "data_snapshots" not in text or "created_at" not in text:
+        return statement, parameters
+    if not isinstance(parameters, dict) or "created_at" not in parameters:
+        return statement, parameters
+    pinned = dict(parameters)
+    pinned["created_at"] = _PINNED_SNAPSHOT_AT["value"]
+    return statement, pinned
+
+
+@pytest.fixture
+def pin_snapshot_created_at() -> Any:
+    """Stamp data_snapshots.created_at at INSERT so load_inputs 不依赖墙钟。"""
+    _PINNED_SNAPSHOT_AT["value"] = LOAD_NOW
+    event.listen(Engine, "before_cursor_execute", _pin_snapshot_created_at_params, retval=True)
+    try:
+        yield _PINNED_SNAPSHOT_AT
+    finally:
+        event.remove(Engine, "before_cursor_execute", _pin_snapshot_created_at_params)
+
 TOP_KEYS = {
     "schema_version",
     "trade_date",
@@ -1093,13 +1128,13 @@ def test_analyze_partial_bars_gaps_no_fabricated_suggestion(temp_db: Engine) -> 
             assert all(r.security_code != CODE_B for r in rows)
 
 
-def test_load_inputs_accepts_owned_schema_same_day(temp_db: Engine) -> None:
+def test_load_inputs_accepts_owned_schema_same_day(temp_db: Engine, pin_snapshot_created_at: dict[str, dt.datetime]) -> None:
     snap = _import_impl()
     with temp_db.begin() as conn:
         _seed_core(conn)
         _fetch_bars(conn)
         snap.build_owned_snapshot(conn, U1, DAY_1010)
-        now = dt.datetime(2026, 11, 10, 23, 0, tzinfo=BEIJING)
+        now = LOAD_NOW
         same = dimensions.load_inputs(conn, U1, CODE_A, DAY_1010, now)
         assert same["sources"]
         assert same["sources"][0]["kind"] == snap.OWNED_VERSION
@@ -1284,17 +1319,18 @@ def test_analyze_watchlist_code_evaluated(
         assert f"owned_source_security_missing:{CODE_E}" not in outcome["issues"]
 
 
-def test_snapshot_watchlist_change_new_id(temp_db: Engine) -> None:
+def test_snapshot_watchlist_change_new_id(
+    temp_db: Engine, pin_snapshot_created_at: dict[str, dt.datetime]
+) -> None:
     """§11.1：同日加有效自选后再 build，id 不同，旧行保留，load_inputs 取后者。"""
-    import time
-
     snap = _import_impl()
+    pin_snapshot_created_at["value"] = LOAD_NOW - dt.timedelta(seconds=1)
     with temp_db.begin() as conn:
         _seed_core(conn)
         _fetch_bars(conn)
         first, _ = snap.build_owned_snapshot(conn, U1, DAY_1010)
         assert first is not None
-    time.sleep(0.05)
+    pin_snapshot_created_at["value"] = LOAD_NOW
     with temp_db.begin() as conn:
         _seed_watchlist(conn, U1, CODE_E)
         _fetch_bars(conn)
@@ -1307,7 +1343,7 @@ def test_snapshot_watchlist_change_new_id(temp_db: Engine) -> None:
             )
         ).scalars().all()
         assert first in rows and second in rows
-        now = dt.datetime(2026, 11, 10, 23, 0, tzinfo=BEIJING)
+        now = LOAD_NOW
         loaded = dimensions.load_inputs(conn, U1, CODE_A, DAY_1010, now)
         assert loaded["sources"]
         assert loaded["sources"][0]["id"] == str(second)

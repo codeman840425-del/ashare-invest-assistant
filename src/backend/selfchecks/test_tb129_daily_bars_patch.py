@@ -821,3 +821,61 @@ def test_backfill_cli_refuses_today_before_1745(temp_db: Engine) -> None:
     )
     assert code2 == 0
     assert str(prev) in out2 or f"trade_date={prev.isoformat()}" in out2
+
+
+
+def _cli_trade_date(temp_db: Engine, now: dt.datetime, value: str) -> tuple[int, str, _MemRedis]:
+    settings = _settings(temp_db.url)
+    client = _MemRedis()
+    with temp_db.begin() as conn:
+        _seed_cli_world(conn)
+    code, out = _run_cli(
+        ["--years", "3", "--trade-date", value],
+        settings=settings,
+        now=now,
+        redis_client=client,
+    )
+    return code, out, client
+
+
+def test_backfill_cli_rejects_future_trade_date(temp_db: Engine) -> None:
+    now = dt.datetime(2026, 11, 10, 20, 0, tzinfo=BEIJING)
+    code, out, client = _cli_trade_date(temp_db, now, "2026-11-11")
+    assert code != 0
+    assert "refused" in out
+    assert client.llen(jobs_mod.QUEUE_KEY) == 0
+
+
+def test_backfill_cli_rejects_closed_trade_date(temp_db: Engine) -> None:
+    """2026-11-08 为周日休市日。"""
+    now = dt.datetime(2026, 11, 10, 20, 0, tzinfo=BEIJING)
+    code, out, client = _cli_trade_date(temp_db, now, "2026-11-08")
+    assert code != 0
+    assert "refused" in out
+    assert client.llen(jobs_mod.QUEUE_KEY) == 0
+
+
+def test_backfill_cli_rejects_invalid_trade_date(temp_db: Engine) -> None:
+    now = dt.datetime(2026, 11, 10, 20, 0, tzinfo=BEIJING)
+    code, out, client = _cli_trade_date(temp_db, now, "not-a-date")
+    assert code != 0
+    assert "refused" in out
+    assert client.llen(jobs_mod.QUEUE_KEY) == 0
+
+
+def test_backfill_cli_rejects_today_at_174459(temp_db: Engine) -> None:
+    """契约 §8.3：显式今天而当前早于 17:45 时拒绝。边界 17:44:59。"""
+    now = dt.datetime(2026, 11, 10, 17, 44, 59, tzinfo=BEIJING)
+    code, out, client = _cli_trade_date(temp_db, now, "2026-11-10")
+    assert code != 0
+    assert "refused" in out
+    assert client.llen(jobs_mod.QUEUE_KEY) == 0
+
+
+def test_backfill_cli_allows_today_at_174500_when_open(temp_db: Engine) -> None:
+    """契约 §8.3：早于 17:45 才拒，17:45:00 起放行（开市日）。用 dry-run，避开 --apply 的 17:00–17:45 锁窗。"""
+    now = dt.datetime(2026, 11, 10, 17, 45, 0, tzinfo=BEIJING)
+    code, out, client = _cli_trade_date(temp_db, now, "2026-11-10")
+    assert code == 0
+    assert "trade_date=2026-11-10" in out
+    assert client.llen(jobs_mod.QUEUE_KEY) == 0

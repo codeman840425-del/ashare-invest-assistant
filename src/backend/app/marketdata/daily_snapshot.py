@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Connection, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.common.errors import AppError
 from app.db.tables.market import daily_bars, securities, trading_calendar
 from app.db.tables.realtime import pipeline_runs
 from app.db.tables.reviews import data_snapshots
@@ -233,10 +232,7 @@ def _snapshot_id(owner: uuid.UUID, trade_date: dt.date, digest: str) -> uuid.UUI
 def build_owned_snapshot(
     conn: Connection, owner: uuid.UUID, trade_date: dt.date
 ) -> tuple[uuid.UUID | None, tuple[str, ...]]:
-    try:
-        is_open = covered(conn, trade_date)
-    except AppError:
-        raise
+    is_open = covered(conn, trade_date)
     if not is_open:
         return None, ()
     codes = daily_universe(conn, owner, trade_date)

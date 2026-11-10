@@ -1,8 +1,12 @@
-note: T-R62 F23 词表 v3 冻结记录（T-A152 定向修订：controller 否定短语 + insolvency 他方重整排除）。上一冻结记录见 docs/strategies/T-R23/rules_freeze_v2_1.yaml。
+note: T-R62 F23 词表 v3 冻结记录（T-A152 定向修订：controller 否定短语 + insolvency 他方重整排除）。上一冻结记录见 docs/strategies/T-R23/rules_freeze_v2_1.yaml。集成规范见 docs/strategies/f23_lexicon_spec.md（v3 口径）。
 version: f23_lexicon_v3
 supersedes: {version: f23_lexicon_v2_1, record: docs/strategies/T-R23/rules_freeze_v2_1.yaml}
 frozen_at: '2026-11-10 (Asia/Shanghai)'
 basis: T-A152；实测依据 T-R61 B 轮（1,490 条样本、18 命中、FP-1/FP-2 两处误报）
+ruling_refs:
+  - {id: T-A151, doc: docs/reviews/T-A151-f23-dual-metric-ruling.md, commit: bf4b0ab, scope: '验收误报指标分列：semantic ≤5% 保留为门 + policy 命中差异如实报告不设上限、不作门'}
+  - {id: T-A152, scope: 'v3 定向修订授权（只 3 处，其余逐字继承 v2.1）'}
+  - {id: T-A153, scope: 'F23 升 verified_doc（ceiling simulating）；FP-3 与 Q-5 扩表并入 v4；两日非连续样本接受，v4 起优先连续日'}
 scope_of_change: 仅 3 处——controller_selldown.negations_before、controller_equity.negations_before、insolvency.exclude_all_of；其余逐字继承 v2.1（check_f23_v3.py 断言）
 sha256:
   f23_lexicon_v3.yaml: 8a545da8eef56a30804a998f238d6a18c54469d3544840773d251d15922da05a
@@ -15,4 +19,4 @@ rerun_acceptance:
   protocol: docs/strategies/T-R60/sampling_plan.md（沿用；B 轮口径：如实报告点估计+区间，不设 FP 上限宣称）
   sample: 2026-11-06 全市场公开公告（不与 A 轮 11-03/04/05、B 轮 11-09/11-10 重叠）
   baseline: T-R61 B 轮 v2.1 结果归档（1,490 条 / 18 命中 / FP 2 / FN 0），本单以同口径对照
-  criteria: ['抽样完成（≥1,000 条、不按关键词筛）', '漏报 0（100 条盲抽）', '如实报告 FP 点估计与 95% 区间']
+  criteria: ['抽样完成（≥1,000 条、不按关键词筛）', '漏报 0（100 条盲抽）', '如实报告 FP 点估计与 95% 区间', '误报指标按 T-A151 分列：semantic 误报率 ≤5% 为验收门（本轮 1/29=3.45%）；policy 命中差异单列报告（本轮政策命中 3 条均 semantic_truth=true，差异 0）；不宣称总体 FP≤5%（CI 上界 17.18%）']

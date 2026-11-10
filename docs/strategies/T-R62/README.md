@@ -22,6 +22,7 @@
 - 匹配器 `match_f23_v3.py` 由 v2.1 复制 + 两处技术改动：词表文件名、`exclude_all_of` 支持；另把词表读取改为显式 UTF-8（Windows 默认 GBK 会崩，语义不变）。
 - 冻结：`rules_freeze_v3.yaml`（lexicon `8a545da8…`、matcher `d3e930a8…`）。
 - **4 条边界观察与 300689 维持排除**（T-A152 明确）：`f23_v3_cases.yaml` V3-N7–N10 断言仍不命中。
+- **集成规范（v3 口径）**：`docs/strategies/f23_lexicon_spec.md`——原 T-R23 规范并入并按 v3 收口（权威文件与哈希、匹配算法按序、计数/PIT、升级路径、缺口 F23-G1..G8、裁定状态 A1–A5/Q-5–Q-8）。
 
 ## 3. 修复效果验证（B 轮归档 1,490 条，同题对照）
 
@@ -84,7 +85,7 @@ uv run --no-project --with pyyaml==6.0.3 python docs/strategies/T-R62/compare_v2
     --sample <T-R61 的 sample_titles.jsonl>                                                   # 对照效果
 ```
 
-产物：`f23_lexicon_v3.yaml`、`match_f23_v3.py`、`rules_freeze_v3.yaml`、`f23_v3_cases.yaml`（20 例）、`make_lexicon_v3.py`、`check_f23_v3.py`（PASS）、`compare_v21_v3.py`、`sample_titles_v3.jsonl`（1,367）、`sample_v3_stats.json`、`fetch_manifest.json`、`hit_review_v3.yaml`（29）、`nonhit_review_v3.jsonl`（100）。
+产物：`f23_lexicon_v3.yaml`、`match_f23_v3.py`、`rules_freeze_v3.yaml`、`f23_v3_cases.yaml`（20 例）、`make_lexicon_v3.py`、`check_f23_v3.py`（PASS）、`compare_v21_v3.py`、`sample_titles_v3.jsonl`（1,367）、`sample_v3_stats.json`、`fetch_manifest.json`、`hit_review_v3.yaml`（29）、`nonhit_review_v3.jsonl`（100）；集成规范 `docs/strategies/f23_lexicon_spec.md`（v3 口径）。
 
 ## 7. 裁定结果（T-A153，2026-11-11 北京时间）
 

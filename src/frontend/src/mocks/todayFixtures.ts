@@ -3,8 +3,8 @@
  * 全部为示例：标题与条件文字只陈述“发生了什么”，不含动作建议；只读，不下单。
  */
 import type { DataGapScope, GapReason, Severity } from '../api/enums';
-import type { Evidence, RiskFlag, TodayAlert, TodayDataGap, TodayPlanTrigger } from '../api/types';
-import { NOW, SUGGESTIONS, TERMINAL_ROWS, TRADE_DATE, uid } from './fixtures';
+import type { DailyReport, Evidence, Gap, RiskFlag, TodayAlert, TodayDataGap, TodayPlanTrigger } from '../api/types';
+import { DAILY_REPORTS, NOW, SUGGESTIONS, TERMINAL_ROWS, TRADE_DATE, uid } from './fixtures';
 
 const nameOf = (code: string) => TERMINAL_ROWS.find((r) => r.security_code === code)?.name ?? code;
 const ev = (id: string, key: string, value: Evidence['value'], unit: string | null, at: string, provider: Evidence['provider'] = 'mairui'): Evidence => ({
@@ -114,4 +114,14 @@ export function todaySamples() {
       text: '价格跌破 20 日均线，该条规则信号失效（示例）', at: `${TRADE_DATE}T10:20:00+08:00`,
     }] : [],
   };
+}
+
+/**
+ * T-F34（契约 today-view.md §4 mock 形状）：示例日报详情，只替换日期、gaps 与 account（示例数据）。
+ * gaps 的 key 形如 pipeline.<code>[:参数]；证券代码均为示例。
+ */
+export function todayViewReport(date: string, keys: string[], account: DailyReport['account'] = null): DailyReport {
+  const base = DAILY_REPORTS[0]!;
+  const gaps: Gap[] = keys.map((key) => ({ key, reason: 'not_yet_published', message: '示例数据' }));
+  return { ...base, date, account, gaps };
 }

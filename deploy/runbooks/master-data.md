@@ -40,7 +40,7 @@ deploy/scripts/master-bootstrap.sh --check; echo "rc=$?"
 
   `terms.rebuild` 只在调用方事务内写词表，幂等、不出网。升级本身不强制重建；本步骤用于补写默认首导未写的词表。
 
-- **其它 rc**（例如 3 未就绪、1 查询失败）：停止，不要继续 `--run` 或离线 `--apply`。
+- **其它 rc**（例如 2 用法错、3 未就绪、1 查询失败）：停止，不要继续 `--run` 或离线 `--apply`。
 
 `--run` 不带 `--confirm-network-fetch` 一律拒绝；`CI` / `GITHUB_ACTIONS` 非空时拒绝。`--run` 用 opt-in profile 跑 compose 服务 `master-bootstrap`（由脚本执行 `compose.sh --profile master-bootstrap run --rm --no-deps -T`，需要时在服务名后附加 `--rebuild-search-terms`；不走 worker、不启动 ingest），结束后再查一次：必须出现 `status='ok'` 的记录才算成功；失败可直接重跑。不要绕过本脚本直接对该 profile `compose run`。
 
@@ -50,6 +50,7 @@ deploy/scripts/master-bootstrap.sh --check; echo "rc=$?"
 |---|---|---|
 | 0 | 已有成功导入（仅 `--check`） | 按第 2 节在不出网 worker 上跑离线 CLI（先 dry-run 再 `--apply`）；不要再 `--run` |
 | 10 | 需要首次导入（仅 `--check`） | 按第 2 节执行 `--run --confirm-network-fetch --rebuild-search-terms` |
+| 2 | 用法错 | **停止**，更正参数后再从 `--check` 开始。`master-bootstrap.sh` 的 `die` 默认退出 2：未给 `--check`/`--run`（且不是单独的 `--rebuild-search-terms` dry-run）、同时给 `--check` 与 `--run`、或未知参数（见 `test_master_bootstrap.py::test_usage_errors`） |
 | 3 | 未就绪：表不存在（迁移没到 T-B52）或镜像里没有 CLI | **停止**，等 T-B52 交付并重建镜像 |
 | 4 | 缺 `--confirm-network-fetch`，或在 CI 中 | **停止**；手动在部署主机上带确认执行，不要在 CI 里跑 |
 | 5 | 另一个实例在运行 | **停止**，等它结束 |

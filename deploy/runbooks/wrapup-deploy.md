@@ -8,7 +8,7 @@
 
 ## 红线
 
-不要 `down -v`，不要 `prune`，不要 `git reset` / `--force` / rebase，不要删别人的卷，不要动受保护实例（o53 / o55 / o57 / o60 / o61）或收口用的空匿名卷。不要调麦蕊。不要 stamp / downgrade 来「对齐」0029 分叉（T-A70）。主数据首次导入**只许**走 `deploy/scripts/master-bootstrap.sh`（保留 `--check`、flock、`--confirm-network-fetch`、CI 拒绝），不要直接 `compose.sh run`。
+不要 `down -v`，不要 `prune`，不要 `git reset` / `--force` / rebase，不要删别人的卷，不要动受保护实例（o53 / o55 / o57 / o60 / o61）或收口用的空匿名卷。不要调麦蕊。不要 stamp / downgrade 来「对齐」0029 分叉（T-A70）。主数据首次导入**只许**走 `deploy/scripts/master-bootstrap.sh`（保留 `--check`、flock、`--confirm-network-fetch`、CI 拒绝），不要 `compose.sh --profile master-bootstrap run …`（会绕过上述入口，T-A98 B2）。rc=0 时的离线词表只许用本文「主数据首次导入与词表」里的 worker 命令，不要用 maint-cli。
 
 ## 已知环境与出处
 
@@ -156,7 +156,7 @@ deploy/scripts/master-bootstrap.sh --check; echo "rc=$?"
 
   `terms.rebuild` 只在调用方事务内写词表，幂等、不出网。升级本身不强制重建；本步骤用于补写默认首导未写的词表。
 
-- **其它 rc**（例如 3 未就绪、1 查询失败）：停止，不要继续 `--run` 或离线 `--apply`。
+- **其它 rc**（例如 2 用法错、3 未就绪、1 查询失败）：停止，不要继续 `--run` 或离线 `--apply`。
 
 ### 只读验证词表
 

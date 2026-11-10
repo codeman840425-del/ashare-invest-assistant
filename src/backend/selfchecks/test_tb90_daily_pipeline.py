@@ -48,6 +48,8 @@ from app.master.mairui_snapshot import latest_visible_flags, read_flags
 from app.master.vendor import sweep_batches
 from app.workers import ingest as ingest_worker
 from app.workers import jobs
+
+ROOT = Path(__file__).resolve().parents[2]
 from selfchecks.test_tb89_full_migrations import AT, CODES, DAY, NAMES, ROOT, deploy_grants, seed
 
 SOCKET = "/tmp/tb90-pg-socket"
@@ -237,6 +239,18 @@ def run_synthetic(
         )
 
     monkeypatch.setattr(ingest, "process", injected)
+    # T-B116: collection seam uses egress+IngestCore; open budget only inside this helper.
+    # Production DAILY_HTTP_LIMIT / live_budget_issue unchanged (see test_tb90_http_budget).
+    import yaml
+    from app.config_files import IngestConfig
+    from app.ingest.core import IngestCore
+    from app.ingest import runtime
+
+    cfg = IngestConfig.model_validate(
+        yaml.safe_load((ROOT / "config/ingest.yaml").read_text(encoding="utf-8"))
+    ).licences
+    monkeypatch.setattr(ingest, "live_budget_issue", lambda: None)
+    runtime.set_ingest_core(IngestCore(cfg, engine=e.collector))
     daily.publish_pending(e.worker, e.rds)
     if deployed_entry:
         original_tick = ingest.tick
@@ -263,6 +277,7 @@ def run_synthetic(
         assert temp.read_text() == "other-process-synthetic-file"
     else:
         assert not temp.exists()
+    runtime.set_ingest_core(None)
     return status, calls, waits
 
 
@@ -402,7 +417,6 @@ def test_http_and_business_limits_halt_without_retry(
         "malformed",
         "uncertain",
         "unauthorized",
-        "existing_temp",
     ],
 )
 def test_failures_keep_old_history_and_never_repeat_uncertain_calls(
@@ -412,8 +426,6 @@ def test_failures_keep_old_history_and_never_repeat_uncertain_calls(
     bid = new_batch(e)
     if mode == "stop_before":
         (e.root / "STOP").touch()
-    if mode == "existing_temp":
-        (e.root / "daily.tmp").write_text("other-process-synthetic-file")
     if mode == "uncertain":
         with e.owner.begin() as conn:
             p = conn.execute(
@@ -439,7 +451,6 @@ def test_failures_keep_old_history_and_never_repeat_uncertain_calls(
         monkeypatch,
         response=response,
         stop_after=mode == "stop_after",
-        preserve_existing=mode == "existing_temp",
     )
     assert state == "failed"
     assert len(calls) == (1 if mode in {"stop_after", "empty", "malformed"} else 0)
@@ -465,6 +476,34 @@ def test_failures_keep_old_history_and_never_repeat_uncertain_calls(
             ).scalar_one()
             == 4
         )
+
+
+def test_existing_temp_replaced_and_halt_preserved(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-B115/T-B116: leftover regular TEMP is replaced; HALT file is never auto-cleared."""
+    e = env
+    bid = new_batch(e)
+    halt, temp = e.root / "HALTED", e.root / "daily.tmp"
+    temp.write_text("other-process-synthetic-file")
+    temp.chmod(0o600)
+    halt.write_bytes(b"limit_103_or_429")
+    halt.chmod(0o600)
+    state, calls, _ = run_synthetic(e, bid, monkeypatch)
+    # HALT present → refuse before HTTP; halt file must remain (never auto-cleared).
+    assert state == "failed"
+    assert calls == []
+    assert halt.exists()
+    assert halt.read_bytes() == b"limit_103_or_429"
+    # Second run without halt: leftover regular TEMP is replaced (T-B115) then cleaned.
+    halt.unlink()
+    temp.write_text("stale-again")
+    temp.chmod(0o600)
+    bid2 = new_batch(e)
+    state2, calls2, _ = run_synthetic(e, bid2, monkeypatch)
+    assert state2 == "fetched"
+    assert len(calls2) == 3
+    assert not temp.exists()
 
 
 def test_nontrading_and_authorization_missing_never_enqueue(
@@ -644,11 +683,16 @@ def test_wire_single_attempt_no_redirect_and_sanitized_failure(
             closed.append(True)
 
     def connection(host: str, timeout: int) -> Connection:
-        assert host == ingest.HOST
+        from app.ingest import egress as eg
+
+        assert host == eg.HOST
         assert timeout > 0
         return Connection()
 
-    monkeypatch.setattr(ingest.http.client, "HTTPSConnection", connection)
+    from app.ingest import egress as eg
+
+    monkeypatch.setattr(ingest, "live_budget_issue", lambda: None)
+    monkeypatch.setattr(eg.http.client, "HTTPSConnection", connection)
     if status == 500:
         with pytest.raises(ingest.DailyHaltError) as caught:
             ingest.wire("/synthetic/", value)

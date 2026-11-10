@@ -103,7 +103,7 @@ def bootstrap_ingest_core(settings: Settings) -> Engine:
     if settings.database_url is None:
         raise RuntimeError(NO_DATABASE_URL_MESSAGE)
 
-    engine = engine_for(settings.database_url.get_secret_value())
+    engine = engine_for(settings.database_url.get_secret_value(), profile="ingest")
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
@@ -149,7 +149,7 @@ def write_heartbeat(settings: Settings) -> None:
             if shared_engine is not None:
                 tick(shared_engine, client, pause=heartbeat_wait)
             elif settings.database_url is not None:
-                engine = engine_for(settings.database_url.get_secret_value())
+                engine = engine_for(settings.database_url.get_secret_value(), profile="ingest")
                 try:
                     tick(engine, client, pause=heartbeat_wait)
                 finally:
@@ -169,15 +169,15 @@ def main() -> int:
         print(MASTER_KEY_MESSAGE, file=sys.stderr)
         return EXIT_LEGACY_LICENCE
 
-    from app.config import get_settings
-
-    # 主密钥若来自其他配置来源（secret 文件等），Settings 校验同样拒绝（SERVICE_NAME=ingest）
-    settings = get_settings()
-    # T-B114: wire IngestCore with real engine before the heartbeat loop.
+    # T-A87 L-2: any Settings/bootstrap failure → exit 78; fixed text + type name only
+    # (never str(exc) — ValidationError may embed input_value / secrets).
     try:
+        from app.config import get_settings
+
+        settings = get_settings()
         bootstrap_ingest_core(settings)
-    except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ingest 拒绝启动：{type(exc).__name__}", file=sys.stderr)
         return EXIT_LEGACY_LICENCE
 
     interval = settings.business.ingest.heartbeat.interval_s

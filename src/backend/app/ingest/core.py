@@ -100,10 +100,10 @@ class IngestCore:
         return mem
 
     def _try_flush_pending(self, user_id: uuid.UUID) -> None:
-        """One-shot pending rewrite; try-lock + timeouts (L-6/L-7/L-10).
+        """One-shot pending rewrite; bounded wait (lock_timeout 2s), not try-lock (L-6/L-7/L-10).
 
         Tick must not block forever on a held advisory lock or hung DB. On
-        lock miss / timeout / error: keep pending and stay fail-closed.
+        lock timeout / statement timeout / error: keep pending and stay fail-closed.
         """
         if self.engine is None:
             return

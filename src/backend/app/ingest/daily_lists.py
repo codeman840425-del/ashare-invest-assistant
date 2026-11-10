@@ -8,7 +8,6 @@ never persisted batches/history or their results. No retries or redirects.
 from __future__ import annotations
 
 import datetime as dt
-import http.client
 import json
 import os
 import re
@@ -38,7 +37,6 @@ from app.master.daily_delivery import (
     read_grant,
 )
 
-HOST = "api.mairuiapi.com"
 PATHS = dict(zip(LISTS, ("/hslt/list/", "/bj/list/all/", "/kc/list/all/"), strict=True))
 TEMP = Path("/run/aia/tmp/mairui-daily.tmp")
 STOP = Path(__file__).resolve().parents[2] / "probes/results/STOP"
@@ -51,27 +49,12 @@ class DailyHaltError(RuntimeError):
 
 
 def wire(path: str, secret: str) -> tuple[int, object]:
+    """Compatibility shim: real sockets live only in ``app.ingest.egress._https_get``."""
     if live_budget_issue():
         raise DailyHaltError("daily_http_budget_unresolved")
-    conn = http.client.HTTPSConnection(HOST, timeout=20)
-    conn.set_debuglevel(0)
-    try:
-        conn.request("GET", path + quote(secret, safe=""))
-        response = conn.getresponse()
-        if response.status in (103, 429):
-            return response.status, None
-        payload = response.read(16 * 1024 * 1024 + 1)
-        if len(payload) > 16 * 1024 * 1024:
-            raise DailyHaltError("response_too_large")
-        try:
-            body = json.loads(payload)
-        except (ValueError, UnicodeError):
-            body = "103:" if re.search(rb"(?<!\d)(103|429)(?!\d)", payload) else None
-        return response.status, body
-    except Exception:  # noqa: BLE001 - sanitize upstream/credential exceptions, never log them
-        raise DailyHaltError("transport_or_response_failed_no_retry") from None
-    finally:
-        conn.close()
+    from app.ingest.egress import _https_get
+
+    return _https_get(path, secret)
 
 
 def limited(status: int, body: object) -> bool:
@@ -196,13 +179,25 @@ def process(
         return "budget_contract_unresolved"
     identity = None
     secret = None
+    # T-A87: STOP/HALT before taking single-egress (outermost lock).
+    if stop.exists() or halt.exists():
+        with engine.begin() as conn:
+            b = conn.execute(select(batches).where(batches.c.id == bid).with_for_update()).first()
+            if b is not None and b.status == "requested":
+                conn.execute(
+                    update(batches)
+                    .where(batches.c.id == bid)
+                    .values(status="failed", error_code="STOP_or_halt_present")
+                )
+        return "failed"
+    from app.ingest.egress import EgressDenied, mairui_get, single_egress
+    from app.ingest.runtime import get_ingest_core
+    from app.ingest.state import Priority
+    from app.ingest.upstream import Signal
+
     # Session lock spans reservation commits and every HTTP request. No retry.
-    with engine.connect() as lock:
-        locked = lock.execute(
-            text("SELECT pg_try_advisory_lock(hashtext('ingest:single-egress'))")
-        ).scalar_one()
-        lock.commit()
-        if not locked:
+    with single_egress(engine) as lease:
+        if lease is None:
             return "busy"
         try:
             with engine.begin() as conn:
@@ -282,15 +277,26 @@ def process(
                     )
                 if stop.exists() or halt.exists():
                     raise DailyHaltError("STOP_or_halt_present")
-                status, body = upstream(PATHS[dataset], secret)
-                if limited(status, body):
-                    try:
-                        fd = os.open(halt, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                        os.write(fd, b"limit_103_or_429")
-                        os.fsync(fd)
-                        os.close(fd)
-                    except FileExistsError:
-                        pass
+                # HTTP only via egress; must not hold an open transaction here.
+                try:
+                    result = mairui_get(
+                        lease=lease,
+                        core=get_ingest_core(),
+                        engine=engine,
+                        licence_id=lid,
+                        user_id=grant.user_id,
+                        path=PATHS[dataset],
+                        secret=secret,
+                        priority=Priority.P1,
+                        clock=clock,
+                        stop=stop,
+                        halt=halt,
+                        transport=upstream,
+                    )
+                except EgressDenied as denied:
+                    raise DailyHaltError(denied.code) from None
+                status, body = result.status, result.body
+                if result.signal == Signal.IP_LIMITED or limited(status, body):
                     with engine.begin() as conn:
                         parent = conn.execute(
                             select(master_runs)
@@ -347,12 +353,8 @@ def process(
             return "failed"
         finally:
             secret = None
-            try:
-                if identity is not None:
-                    remove_owned(temp, identity)
-            finally:
-                lock.execute(text("SELECT pg_advisory_unlock(hashtext('ingest:single-egress'))"))
-                lock.commit()
+            if identity is not None:
+                remove_owned(temp, identity)
 
 
 def tick(

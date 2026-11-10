@@ -161,15 +161,6 @@ def acquire_ip_limit_lock(conn: Connection, user_id: uuid.UUID) -> None:
     )
 
 
-def try_acquire_ip_limit_lock(conn: Connection, user_id: uuid.UUID) -> bool:
-    """Non-blocking §4.1 lock for tick/rehydrate flush (T-A84 L-10)."""
-    got = conn.execute(
-        text("SELECT pg_try_advisory_xact_lock(hashtext(:k))"),
-        {"k": ip_limit_lock_key(user_id)},
-    ).scalar()
-    return bool(got)
-
-
 def flush_pending_escalation(conn: Connection, mem: UserIpLimitMemory) -> bool:
     """Write pending pause mark (L-2). Does **not** clear pending (L-6).
 

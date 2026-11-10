@@ -43,7 +43,20 @@ wrapup_log "bash -n 已跑完 ${#scripts[@]} 个脚本"
 "$WRAPUP_DIR/wrapup.sh" preflight --target "$WRAPUP_TARGET" || fail=1
 "$WRAPUP_DIR/backup.sh" --volume-prefix o69 || fail=1
 "$WRAPUP_DIR/update-repo.sh" --target "$(git -C "$AIA_ROOT" rev-parse HEAD)" || fail=1
-"$WRAPUP_DIR/start-stack.sh" || fail=1
+start_out="$(mktemp)"
+if ! "$WRAPUP_DIR/start-stack.sh" >"$start_out" 2>&1; then
+  fail=1
+fi
+wrapup_redact <"$start_out" >&2 || cat "$start_out" >&2
+if ! grep -q 'engine_policy seed' "$start_out"     || ! grep -q 'python -m app.engine_policies --database-url' "$start_out"; then
+  wrapup_log "ERROR: start-stack dry-run 未覆盖 engine_policy seed 步"
+  fail=1
+fi
+if grep -q '已写入本轮收据' "$start_out"; then
+  wrapup_log "ERROR: start-stack dry-run 不应执行 seed 或写收据"
+  fail=1
+fi
+rm -f "$start_out"
 "$WRAPUP_DIR/halt-check.sh" --volume o69_ingest_state || fail=1
 "$WRAPUP_DIR/net-verify.sh" || fail=1
 "$WRAPUP_DIR/verify.sh" --volume-prefix o69 || fail=1

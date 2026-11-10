@@ -1,5 +1,5 @@
 key: sw_ma_trend_pullback
-narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式卡 v1（T-R15）
+narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式卡 v2（T-R20；v1 为 T-R15）
 
 
   > 正式卡（非 catalog 草案、非 `_template.md` 示例）。导入格式：plan 2.5.14 A 节三个带标签块（`strategy-card`
@@ -18,8 +18,9 @@ narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式�
   上市交易日数 ≥ `min_list_days`；F3 **成本过滤**：ATR14/收盘（bp）≥ `min_edge_cost_mult`×(2×`slippage_bp`+`fixed_cost_bp`)，一倍
   ATR 的波动覆盖不了往返成本的若干倍则不出买入。
 
-  - **否决**：V1 大盘 `downtrend`；V2 最近一期净利同比 < `np_yoy_floor`；V4 RSI14 > `rsi_overheat`。否决数据缺失（`veto_unknown`）→
-  状态照常求值，买入方向计划草案由 `KEY_DATA_MISSING` 阻断，解除 = 字段在新快照中非空。
+  - **否决**：V1 大盘（沪深300指数口径 `f.market_regime_idx`）`downtrend`；V2 最近一期净利同比 < `np_yoy_floor`；V4
+  RSI14 > `rsi_overheat`。否决数据缺失（`veto_unknown`）→ 状态照常求值，买入方向计划草案由 `KEY_DATA_MISSING`
+  阻断，解除 = 字段在新快照中非空。
 
   - **退出（任一为真 → `exit_signal`/sell）**：X1 收盘连续 `exit_confirm_days` 日低于 MA20；X2 盘中价
   ≤ 计划止损；X3 持有 ≥ `time_stop` 日且未达 1R；X4 收盘跌破前 20 日最低价；X5 达 `trail_trigger_r`R 后收盘（qfq）跌破
@@ -58,8 +59,22 @@ narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式�
 
   ## 反证 / 失效
 
-  反证（并列展示，不抵消）：行业 20 日弱于大盘、主力 20 日净流出、当日成交额 < 20 日均额一半。失效：MA20 跌破 MA60；大盘转 `downtrend`。研究侧证伪见
+  反证（并列展示，不抵消）：主力 20 日净流出、当日成交额 < 20 日均额一半。失效：MA20 跌破 MA60；大盘转 `downtrend`。研究侧证伪见
   `hypothesis.falsified_by`。
+
+
+  ## v2 变更（T-R20，按 plan「T-R19 裁定」③④，78de694）
+
+  - v1 原文冻结在 `cards/history/sw_ma_trend_pullback.v1.md`，v1 夹具冻结在 `golden/history/T-R15_golden.v1.json`。
+
+  - V1 和 I2 的 `f.market_regime` 改为 `f.market_regime_idx`（只用沪深300指数，去掉 F24 宽度）。`applicability.market_regime`
+  字段名是卡片 schema 字段，没有改；其取值改由 `f.market_regime_idx` 求得（这一点待架构师确认）。
+
+  - 删除 C1（`f.ind_rs20 < 0`，weight 0 的反证）和 data_needs 中的 `f.ind_rs20`；C2、C3 不重新编号。入场
+  E1–E3/A1、过滤 F1–F3、否决 V1/V2/V4、失效 I1/I2、退出 X1–X6、参数、成本、风控都不变。
+
+  - 前后差异：v1 中行业弱势时会多出一条 C1 反证展示；v2 不再展示这一条，state 和 action 不受影响（C1 原本 weight 0、不参与状态）。失效条件：行业轮动剧烈时，反证不完整。大盘口径不看宽度后，“指数强、宽度弱”的日子可能由
+  range 变为 uptrend，从而放宽准入；虚构夹具直接给出 regime 值，不覆盖这种情况。
 
 
 
@@ -71,7 +86,7 @@ narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式�
   series 已按 qfq@as_of 折算；W01-FX14 锁定 Wilder（SMA 口径会得出相反结论）；W01-FX15 跟踪止盈跨除权（A(d)=前
   74 根 1.0、后 6 根 1.5）。含 `LIMIT_LOCKED`/`SUSPENDED` 的夹具写 `expect.reason_details:{码:{direction}}`；`expect.lot_rule={min_buy,
   step, odd_lot_sell_all, sell_qty?}`（plan 2.5.14 T-R15 ⑧⑨）。'
-source_hash: 1e9b0517df5f728ea2eaee392c0120a971fa7a901c4c678988e58f5ab3eb8677
+source_hash: 6caead93321aa62f83039baa2a7000a69ba5ffe8fb5249951f803628018e6124
 strategy-card:
   a_share_constraints: 涨跌停按 config/market_rules.yaml 生效段（创业板/科创板现行 20%，注册制新股前 5 日无涨跌幅为
     null）；科创板买入 ≥200 股、1 股递增，其余 100 股整数倍；零股卖出一次性申报；T+1；ST/退市整理/停牌/新股由 G-01 处理
@@ -101,9 +116,6 @@ strategy-card:
     stamp_duty_sell: 0.0005
     transfer_fee: 1.0e-05
   counter_evidence:
-  - ref: C1
-    status: quantified
-    text: 所属行业近 20 日弱于大盘
   - ref: C2
     status: quantified
     text: 近 20 日主力资金净流出
@@ -160,12 +172,8 @@ strategy-card:
     feature_key: f.np_yoy_latest
     frequency: quarterly
   - adjust: none
-    available_at: T 日盘后（G-02）
-    feature_key: f.market_regime
-    frequency: daily
-  - adjust: none
-    available_at: T 日盘后
-    feature_key: f.ind_rs20
+    available_at: T 日盘后（沪深300 日线落库后，F50）
+    feature_key: f.market_regime_idx
     frequency: daily
   dimensions:
   - dimension: technical
@@ -261,6 +269,7 @@ strategy-card:
       bse: false
       chinext: true
       main: true
+      main_board: true
       star: true
     pool: 持仓 ∪ 自选
     security_types:
@@ -272,7 +281,7 @@ strategy-card:
     trade_log_ref: null
     type: rule
     window: 未执行
-  version_no: 1
+  version_no: 2
 strategy-spec:
   action_map:
     else: wait
@@ -488,11 +497,11 @@ strategy-spec:
     weight: 0
   - dimension: sector_market
     eval_time: daily_close
-    expr: f.market_regime == 'downtrend'
+    expr: f.market_regime_idx == 'downtrend'
     id: V1
     missing_policy: veto_unknown
     required_features:
-    - f.market_regime
+    - f.market_regime_idx
     role: veto
     weight: 0
   - dimension: fundamental
@@ -512,14 +521,6 @@ strategy-spec:
     required_features:
     - f.rsi14
     role: veto
-    weight: 0
-  - dimension: sector_market
-    eval_time: daily_close
-    expr: f.ind_rs20 < 0
-    id: C1
-    required_features:
-    - f.ind_rs20
-    role: counter
     weight: 0
   - dimension: capital
     eval_time: daily_close
@@ -547,10 +548,10 @@ strategy-spec:
     weight: 0
   - dimension: sector_market
     eval_time: daily_close
-    expr: f.market_regime == 'downtrend'
+    expr: f.market_regime_idx == 'downtrend'
     id: I2
     required_features:
-    - f.market_regime
+    - f.market_regime_idx
     role: invalidation
     weight: 0
   - dimension: technical
@@ -614,7 +615,7 @@ strategy-spec:
     time_stop_days: 40
   valid_until:
     trading_days: 5
-  version_no: 1
+  version_no: 2
 validation:
   feature_requests: []
   fixtures:
@@ -636,7 +637,6 @@ validation:
       - F3
       state: entry_ok
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 21.2
       f.limit_locked_down: false
@@ -644,7 +644,7 @@ validation:
       f.limit_up_price: 31.8
       f.list_days: 600
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     id: W01-FX1
@@ -990,7 +990,6 @@ validation:
       - F3
       state: not_triggered
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 21.2
       f.limit_locked_down: false
@@ -998,7 +997,7 @@ validation:
       f.limit_up_price: 31.8
       f.list_days: 600
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     id: W01-FX2
@@ -1351,7 +1350,6 @@ validation:
       - F3
       state: entry_ok
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 21.2
       f.limit_locked_down: false
@@ -1359,7 +1357,7 @@ validation:
       f.limit_up_price: 31.8
       f.list_days: 900
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: null
       f.rsi14: 56.0
     id: W01-FX3
@@ -1693,7 +1691,7 @@ validation:
       - 26.1
       - 26.2
   - as_of: '2026-10-30'
-    desc: 【虚构】维度分歧：技术满足，行业弱于大盘、主力净流出（并列，不合并）
+    desc: 【虚构】维度分歧：技术满足，主力净流出（并列，不合并；v2 删除 C1 行业反证）
     expect:
       action: buy
       lot_rule:
@@ -1707,11 +1705,9 @@ validation:
       - F1
       - F2
       - F3
-      - C1
       - C2
       state: entry_ok
     features:
-      f.ind_rs20: -1.8
       f.is_suspended: false
       f.limit_down_price: 21.2
       f.limit_locked_down: false
@@ -1719,7 +1715,7 @@ validation:
       f.limit_up_price: 31.8
       f.list_days: 900
       f.main_net_20d: -20000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     id: W01-FX4
@@ -2075,7 +2071,6 @@ validation:
       - F3
       state: entry_ok
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 21.2
       f.limit_locked_down: false
@@ -2083,7 +2078,7 @@ validation:
       f.limit_up_price: 31.8
       f.list_days: 900
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 70.0
     id: W01-FX5
@@ -2445,7 +2440,6 @@ validation:
       - X6
       state: exit_signal
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 20.46
       f.limit_locked_down: false
@@ -2453,7 +2447,7 @@ validation:
       f.limit_up_price: 30.68
       f.list_days: 600
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     holding:
@@ -2807,7 +2801,6 @@ validation:
       - A1
       state: insufficient_data
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: null
       f.limit_locked_down: false
@@ -2815,7 +2808,7 @@ validation:
       f.limit_up_price: null
       f.list_days: 3
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     id: W01-FX7
@@ -2853,7 +2846,6 @@ validation:
       - F2
       state: not_triggered
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 18.38
       f.limit_locked_down: false
@@ -2861,7 +2853,7 @@ validation:
       f.limit_up_price: 27.56
       f.list_days: 600
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     id: W01-FX8
@@ -3210,7 +3202,6 @@ validation:
       - I2
       state: vetoed
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 21.2
       f.limit_locked_down: false
@@ -3218,7 +3209,7 @@ validation:
       f.limit_up_price: 31.8
       f.list_days: 900
       f.main_net_20d: 30000000.0
-      f.market_regime: downtrend
+      f.market_regime_idx: downtrend
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     id: W01-FX9
@@ -3578,7 +3569,6 @@ validation:
       - X6
       state: exit_signal
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 20.06
       f.limit_locked_down: false
@@ -3586,7 +3576,7 @@ validation:
       f.limit_up_price: 30.08
       f.list_days: 900
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     holding:
@@ -3949,7 +3939,6 @@ validation:
       - F3
       state: entry_ok
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: true
       f.limit_down_price: 21.2
       f.limit_locked_down: false
@@ -3957,7 +3946,7 @@ validation:
       f.limit_up_price: 31.8
       f.list_days: 600
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     id: W01-FX11
@@ -4311,7 +4300,6 @@ validation:
       - F3
       state: hold_ok
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 10.7
       f.limit_locked_down: false
@@ -4319,7 +4307,7 @@ validation:
       f.limit_up_price: 16.06
       f.list_days: 900
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     holding:
@@ -4679,7 +4667,6 @@ validation:
       - F2
       state: hold_ok
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 20.79
       f.limit_locked_down: false
@@ -4687,7 +4674,7 @@ validation:
       f.limit_up_price: 31.19
       f.list_days: 600
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     holding:
@@ -5048,7 +5035,6 @@ validation:
       - F3
       state: hold_ok
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 10.7
       f.limit_locked_down: false
@@ -5056,7 +5042,7 @@ validation:
       f.limit_up_price: 16.06
       f.list_days: 900
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     holding:
@@ -5415,7 +5401,6 @@ validation:
       - F3
       state: entry_ok
     features:
-      f.ind_rs20: 1.5
       f.is_suspended: false
       f.limit_down_price: 21.2
       f.limit_locked_down: false
@@ -5423,7 +5408,7 @@ validation:
       f.limit_up_price: 31.8
       f.list_days: 900
       f.main_net_20d: 30000000.0
-      f.market_regime: range
+      f.market_regime_idx: range
       f.np_yoy_latest: 12.0
       f.rsi14: 56.0
     id: W01-FX14
@@ -5780,4 +5765,4 @@ validation:
   window:
     lookback_trading_days: 120
     universe: 全A（不含北交所）
-version_no: 1
+version_no: 2

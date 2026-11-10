@@ -21,7 +21,13 @@
 - 接线方式（照 T-T81 docstring）：占位 `SpliceChecker` → `from app.retest.splice import SpliceChecker`（模块名以后端落地为准），**断言本体不改**；接线后 24 collected / 0 error、15+9 全 passed。
 - 接线复测命令：`python -m pytest tests/backend/retest/test_splice_validation.py -q --tb=short -p no:cacheprovider`（在 T-B136 分支或合并后基线）。
 - 通过判据：§2.7 第 1/4/5/6/7/8 条断言全绿——北交所=0 与 920 前缀不进池、不可配对股计数不 fail、抽査股不进复测区、重叠一致 ≥98% 仅限抽查股、双包原始+gbbq 自算、`check4` 任一失败即停且带代码清单、失败语义落 `summary.json` 的 `splice` 节点。
-- 分级：接线后任何断言红 = **阻断**（后端返修，不记「业务已通过」）；skip 未消除 = 后端模块未落地，如实报阻塞。
+- **接线清理项（与 9 条 pending 同批，架构师 T-A150 预审指出）**：T-T81 常绿层有 5 处恒真/占位断言，接线时必须换成真实现断言，不得原样保留冒充已验证——
+  1. `test_overlap_ohlc_and_volume_agree_at_least_98pct`：`agree = 99.0; assert agree >= 98.0`（§2.7 第 6 条）→ 换为 checker 对重叠段实算的 OHLC/量一致率；
+  2. `test_check_1_hf_last_close_matches_hsjday`：`abs(10.0-10.0) <= 0.005`（④①）→ 换为 checker 实算 HF 末收 vs hsjday 收盘；
+  3. `test_check_2_vipdoc_first_open_last_close_match_hsjday`：`max(abs(10.0-10.0),…) <= 0.005`（④②）→ 同上换实算；
+  4. `test_check_3_daily_volume_relative_diff_within_0_1pct`：字面量 2_400_000/2_400_000（④③）→ 换为 checker 实算量相对差；
+  5. `test_labels_are_bar_end_beijing_time`：`… and "13:00" not in VALID_LABELS or True` 尾巴 `or True` 使半边恒真（第 2 条）→ 删 `or True`，改为仅断言 13:00 只允许出现在已知异常形态（13:00 改记 11:30 的 240 根日）。
+- 分级：恒真断言未清理即判「接线完成」= **阻断**（不把占位断言写成业务已通过）；清理后任何断言红 = 后端返修，不记「业务已通过」；skip 未消除 = 后端模块未落地，如实报阻塞。
 
 ## 三、复测执行监控点（开跑后逐项核对，照 issue #3 验收节）
 

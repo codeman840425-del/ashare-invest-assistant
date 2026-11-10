@@ -139,7 +139,7 @@ def _bind_lease_auth() -> tuple[
         if deadline is not None and (deadline - time.monotonic()) < 0.2:
             return False
         conn = issued[nonce]
-        return _conn_holds_single_egress(conn)
+        return _conn_holds_single_egress(conn, deadline)
 
     def release(nonce: str) -> None:
         issued.pop(nonce, None)
@@ -152,12 +152,26 @@ def _bind_lease_auth() -> tuple[
 _issue_lease, _lease_is_valid, _release_lease = _bind_lease_auth()
 
 
-def _conn_holds_single_egress(conn: object) -> bool:
-    """Session still holds ``ingest:single-egress`` (T-A91 M-a / pg_locks)."""
+def _conn_holds_single_egress(conn: object, deadline: float | None = None) -> bool:
+    """Session still holds ``ingest:single-egress`` (T-A91 M-a / T-A92 M-1).
+
+    Short transaction: ``SET LOCAL statement_timeout`` from the remaining admit
+    budget, query ``pg_locks``, then commit/rollback immediately so the lock
+    session is not idle in transaction during HTTP.
+    """
     execute = getattr(conn, "execute", None)
     if not callable(execute):
         return False
+    commit = getattr(conn, "commit", None)
+    rollback = getattr(conn, "rollback", None)
+    # Admit path (②): remaining admit budget. Window re-check (⑦ entry, after
+    # admit): no admit budget left to share, so bound by ADMIT_BUDGET_S.
+    remain = ADMIT_BUDGET_S if deadline is None else deadline - time.monotonic()
+    if remain < 0.2:
+        return False
+    remain_ms = max(1, int(remain * 1000))
     try:
+        execute(text(f"SET LOCAL statement_timeout = '{remain_ms}ms'"))
         held = execute(
             text(
                 "SELECT EXISTS ("
@@ -171,8 +185,13 @@ def _conn_holds_single_egress(conn: object) -> bool:
                 ")"
             )
         ).scalar()
+        if callable(commit):
+            commit()
         return bool(held)
-    except Exception:  # noqa: BLE001 — unreadable conn is not a held lease
+    except Exception:  # noqa: BLE001 — unreadable/timeout conn is not a held lease
+        if callable(rollback):
+            with suppress(Exception):
+                rollback()
         return False
 
 
@@ -482,7 +501,7 @@ def mairui_get(
         raise EgressDenied("halt_present")
 
     try:
-        with ng.egress_window(lease, lambda: _lease_is_valid(lease, None)):
+        with ng.egress_window(lease, lambda: _lease_is_valid(lease, deadline)):
             status_code, body = transport(path, secret)
     except ng.EgressBlocked:
         core.complete(dispatched, Signal.NETWORK, clock())

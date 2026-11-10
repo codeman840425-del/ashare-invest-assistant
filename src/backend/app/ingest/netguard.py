@@ -107,8 +107,10 @@ def _bind() -> tuple[
                 _audit_log(event, "mairui_dns", in_window=held)
                 raise EgressBlocked("mairui_dns")
             return
-        if event in {"socket.connect", "socket.connect_ex"}:
+        if event in {"socket.connect", "socket.connect_ex", "socket.sendto", "socket.sendmsg"}:
             address = args[1] if len(args) > 1 else None
+            if event in {"socket.sendto", "socket.sendmsg"} and address is None:
+                return  # connected socket: connect() already judged
             if isinstance(address, str) or (
                 isinstance(address, bytes) and address[:1] in {b"/", b"@"}
             ):
@@ -116,13 +118,11 @@ def _bind() -> tuple[
             host = address[0] if isinstance(address, tuple) and address else address
             ip = _as_ip(host)
             if ip is None:
-                # hostname in connect: treat mairui as DNS rule, else allow
-                # (getaddrinfo usually happens first). Public hostname still
-                # rejected at connect if it is already an IP.
-                if _is_mairui_host(host) and not held:
-                    _audit_log(event, "mairui_dns", in_window=held)
-                    raise EgressBlocked("mairui_dns")
-                return
+                # Non-IP literal (hostname). C-layer resolve does not fire
+                # socket.getaddrinfo, so deny even inside the window; egress
+                # connects by IP after its own getaddrinfo (T-A92 / §7.11.5 ①b).
+                _audit_log(event, "hostname", in_window=held)
+                raise EgressBlocked("hostname")
             if _is_private_or_loopback(ip):
                 return
             approved = windows.get(tid, set())
@@ -142,10 +142,14 @@ def _bind() -> tuple[
             _audit_log(event, "subprocess", in_window=held)
             raise EgressBlocked("subprocess")
         if event == "ctypes.dlopen":
-            # CPython's `import ctypes` does PyDLL(None) for pythonapi; allow that
-            # only. Named libraries (libc, etc.) stay denied (①b / R19).
-            path = args[0] if args else None
-            if path is None:
+            # After install, every dlopen — including dlopen(None) / CDLL(None) —
+            # is denied (T-A92). pythonapi's dlopen(None) is done in install()
+            # before the hook is registered.
+            _audit_log(event, "ctypes", in_window=held)
+            raise EgressBlocked("ctypes")
+        if event == "ctypes.dlsym":
+            name = args[1] if len(args) > 1 else None
+            if isinstance(name, str) and (name.startswith("Py") or name.startswith("_Py")):
                 return
             _audit_log(event, "ctypes", in_window=held)
             raise EgressBlocked("ctypes")
@@ -154,6 +158,7 @@ def _bind() -> tuple[
         nonlocal installed
         if installed:
             return
+        import ctypes  # noqa: F401 — pythonapi dlopen(None) before the hook
         sys.addaudithook(hook)
         installed = True
 
@@ -161,10 +166,9 @@ def _bind() -> tuple[
     def egress_window(
         lease: object, validate: Callable[[], bool] | None = None
     ) -> Iterator[None]:
-        # Contract form: `with _egress_window(lease):`. Optional validate re-checks
-        # the lease when the caller supplies one (mairui_get).
-        check = validate if validate is not None else (lambda: True)
-        if not check():
+        # Contract (T-A92): validate is required; missing or false → EgressBlocked.
+        # No default lambda: True.
+        if validate is None or not validate():
             raise EgressBlocked("lease")
         tid = threading.get_ident()
         windows[tid] = set()

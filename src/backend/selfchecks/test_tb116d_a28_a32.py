@@ -363,6 +363,18 @@ finally:
         )
     finally:
         locked.chmod(0o755)
+        # os._exit(74) skips the child's finally: drop its trigger/function here
+        # so later cases on the same temp DB are not poisoned (T-B116e).
+        with eng.begin() as conn:
+            leftovers = conn.execute(
+                text(
+                    "SELECT t.tgname FROM pg_trigger t JOIN pg_class c ON t.tgrelid = c.oid "
+                    "WHERE c.relname = 'user_data_licences' AND t.tgname LIKE 'tb116d_a30_%'"
+                )
+            ).scalars().all()
+            for name in leftovers:
+                conn.execute(text(f"DROP TRIGGER IF EXISTS {name} ON app.user_data_licences"))
+                conn.execute(text(f"DROP FUNCTION IF EXISTS {name}()"))
     assert result.returncode == 74, result.stdout + result.stderr
     err = result.stderr.strip()
     assert err == "ingest 致命：证书状态与停机标志均无法持久化"

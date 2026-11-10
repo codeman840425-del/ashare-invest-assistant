@@ -328,3 +328,107 @@ else:
     sys.exit(2)
 """
     )
+
+
+def test_tb116e_a1r_hostname_connect_denied() -> None:
+    # ⑩ non-IP literal (hostname) is always denied, even if C would resolve it.
+    _ok(
+        r"""
+s = socket.socket(); s.settimeout(0.2)
+try:
+    s.connect(("example.com", 443))
+except ng.EgressBlocked:
+    check_log(); print("OK")
+else:
+    sys.exit(2)
+"""
+    )
+
+
+def test_tb116e_a1r_cdll_none_and_pythonapi_connect_denied() -> None:
+    # ⑪ CDLL(None) and pythonapi.connect (dlsym of a non-Py symbol) denied.
+    _ok(
+        r"""
+caught = []
+try:
+    ctypes.CDLL(None)
+except ng.EgressBlocked:
+    caught.append("dlopen_none")
+else:
+    sys.exit(2)
+try:
+    ctypes.pythonapi.connect
+except ng.EgressBlocked:
+    caught.append("dlsym_connect")
+else:
+    sys.exit(2)
+assert caught == ["dlopen_none", "dlsym_connect"]
+check_log(); print("OK")
+"""
+    )
+
+
+def test_tb116e_a1r_sendto_sendmsg_follow_connect_rules() -> None:
+    # ⑫ sendto / sendmsg with a destination follow the same rules as connect.
+    _ok(
+        r"""
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.setblocking(False)
+try:
+    s.sendto(b"x", ("203.0.113.10", 9))
+except ng.EgressBlocked:
+    pass
+else:
+    sys.exit(2)
+s2 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s2.setblocking(False)
+try:
+    s2.sendmsg([b"x"], [], 0, ("203.0.113.10", 9))
+except ng.EgressBlocked:
+    pass
+else:
+    sys.exit(3)
+s3 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s3.setblocking(False)
+try:
+    s3.sendto(b"x", ("example.com", 9))
+except ng.EgressBlocked:
+    pass
+else:
+    sys.exit(4)
+# loopback sendto is allowed (OSError/success, not EgressBlocked)
+s4 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s4.setblocking(False)
+try:
+    s4.sendto(b"x", ("127.0.0.1", 9))
+except ng.EgressBlocked:
+    sys.exit(5)
+except OSError:
+    pass
+check_log(); print("OK")
+"""
+    )
+
+
+def test_tb116e_a1r_window_requires_validate() -> None:
+    # ⑬ egress_window without validate, or validate=None, is EgressBlocked.
+    _ok(
+        r"""
+try:
+    with ng.egress_window(None):
+        raise SystemExit(2)
+except ng.EgressBlocked:
+    pass
+try:
+    with ng.egress_window(object(), None):
+        raise SystemExit(3)
+except ng.EgressBlocked:
+    pass
+# validate that returns False is also blocked
+try:
+    with ng.egress_window(object(), lambda: False):
+        raise SystemExit(4)
+except ng.EgressBlocked:
+    check_log(); print("OK")
+"""
+    )

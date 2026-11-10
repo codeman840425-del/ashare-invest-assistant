@@ -91,7 +91,7 @@
 | `docs/strategies/cards/hold_risk_monitor.md:137` | 样本量门槛 | n≥30；5≤n<30 小样本；n<5 不显示 | 未验证 | 统计惯例 | 经验法则，无出处 |
 | `docs/strategies/cards/hold_risk_monitor.md:142` | BH 校正 q | 0.10 | 未验证 | 统计惯例 | 方法有出处（BH 1995），q 取值为惯例 |
 | `docs/strategies/cards/hold_risk_monitor.md:143` | 示例名义金额 M | 50,000 元 | 未验证 | 示例 |  |
-| `docs/strategies/cards/hold_risk_monitor.md:143` | 最低佣金 | 5 元 | 制度参数，有出处 | 制度 | 证监发〔2002〕21 号（现行有效性未复核） |
+| `docs/strategies/cards/hold_risk_monitor.md:143` | 最低佣金 | 5 元 | 制度参数，有出处 | 制度 | 证监发〔2002〕21 号（T-R58b 已复核：证监会法规库标「现行有效」；实收以券商为准，用户可配置，见 §5） |
 | `docs/strategies/cards/hold_risk_monitor.md:151` | 只报告的 α 与邻域 | 0.10；ma_long ±5、ma_break_days ±1 | 未验证 | 统计惯例 |  |
 | `docs/strategies/cards/hold_risk_monitor.md:163` | 历史回看 | 120 交易日 | 未验证 | 统计 |  |
 | `docs/strategies/cards/hold_risk_monitor.md:167` | min_n | 30 | 未验证 | 统计惯例 |  |
@@ -105,7 +105,7 @@
 | `docs/strategies/cards/sw_ma_trend_pullback.md:42` | 证伪：超额观察期 | 20 交易日 | 未验证 | 统计 |  |
 | `docs/strategies/cards/sw_ma_trend_pullback.md:43` | 证伪：参数邻域 | ma_fast ±5、pullback_pct ±0.01 | 未验证 | 统计 |  |
 | `docs/strategies/cards/sw_ma_trend_pullback.md:44` | 证伪：胜率门槛 | n≥30 时 5 日胜率 <45% | 未验证 | 统计 |  |
-| `docs/strategies/cards/sw_ma_trend_pullback.md:113` | 最低佣金 | 5 元 | 制度参数，有出处 | 制度 | 证监发〔2002〕21 号 |
+| `docs/strategies/cards/sw_ma_trend_pullback.md:113` | 最低佣金 | 5 元 | 制度参数，有出处 | 制度 | 证监发〔2002〕21 号（T-R58b 已复核，用户可配置，见 §5） |
 | `docs/strategies/cards/sw_ma_trend_pullback.md:114` | 卖出印花税 | 0.0005 | 制度参数，有出处 | 制度 | 财政部 税务总局公告 2023 年第 39 号 |
 | `docs/strategies/cards/sw_ma_trend_pullback.md:115` | 过户费 | 0.00001 | 制度参数，有出处 | 制度 | 中国结算 |
 | `docs/strategies/cards/sw_ma_trend_pullback.md:116` | 滑点 | 10 bp | 未验证 | 估计 |  |
@@ -220,4 +220,26 @@
 - 涨跌幅 20%、注册制新股上市前 5 日无涨跌幅、科创板 200 股：`docs/strategies/market_rules_check.md:26-33` 列出的官方规则原文（O1–O8）。
 - 卖出印花税 0.05%：财政部 税务总局公告 2023 年第 39 号，自 2023-08-28 起减半征收，https://www.mof.gov.cn/jrttts/202308/t20230828_3904235.htm （减半前 1‰ 的原始文件本次未核对）。
 - 过户费 0.001%（双向）：中国结算 2022-04-29 起下调，新华社报道 http://www.news.cn/2022-04/28/c_1128605983.htm 。
-- 单笔最低佣金 5 元：证监发〔2002〕21 号，https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html （现行有效性本次未核对）。
+- 单笔最低佣金 5 元：证监发〔2002〕21 号，https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html （现行有效性已在 T-R58b 复核，见 §5）。
+
+## 5 制度参数复核（T-R58b）
+
+> 范围按编排者裁定 ④：只复核做T与 P2N 主线用到的 T+1、涨跌幅（主板 / 创业板 / 科创板 / ST）、最低佣金 5 元、印花税、过户费。其余制度参数（整手、单笔上限、新股无涨跌幅等）本次不复核，沿用 `market_rules_check.md` 与 `config/market_rules.yaml` 的既有核对。核对日 2026-11-11（北京时间）。
+
+| # | 参数 | 我方取值（出现处） | 现行文件与条款 | 核对结论 | 状态 |
+|---|---|---|---|---|---|
+| R1 | T+1：当日买入的股票当日不得卖出 | `t_plus: 1`（`config/market_rules.yaml`）；T-01 卡 §17 | 《上海证券交易所交易规则（2026年修订）》（上证发〔2026〕41号，2026-07-06 起施行）第 3.1.4 条「投资者买入的证券，在交收前不得卖出，但实行回转交易的除外」，第 3.1.5 条列出的当日回转品种不含 A 股；《深圳证券交易所交易规则（2026年修订）》第 3.1.4、3.1.5 条同文。https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/exchange/c/c_20260424_10816482.shtml ；https://docs.static.szse.cn/www/lawrules/rule/stock/W020260424690713155663.pdf | 一致（研究员读了两份规则正文原文） | 制度参数，有出处 |
+| R2 | 主板涨跌幅 10% | `main_board: 10` | 沪 2026 规则第 3.3.13 条「涨跌幅限制比例为10%」；深 2026 规则第 3.3.13 条「主板股票的价格涨跌幅限制比例为 10%」（链接同 R1） | 一致 | 制度参数，有出处 |
+| R3 | 创业板涨跌幅 20% | `chinext: 20`；H-01/W-01/S-01 卡 | 深 2026 规则第 3.3.13 条「创业板股票的价格涨跌幅限制比例为 20%」 | 一致 | 制度参数，有出处 |
+| R4 | 科创板涨跌幅 20% | `star: 20`；H-01/W-01/S-01 卡 | 沪 2026 规则第 6.6 条「本所对科创板股票交易实行价格涨跌幅限制，涨跌幅限制比例为20%」 | 一致 | 制度参数，有出处 |
+| R5 | 主板 ST/*ST 涨跌幅 | 2026-07-06 起 10%、此前 5%（`config/market_rules.yaml` 两段）；**T-R16 下 12 张前期卡（含 T-02:51、T-03:51、T-04:52）仍写「ST 5%」** | 沪 2026 规则起草说明（三）「将主板风险警示股票价格涨跌幅限制比例由5%调整为10%」；深交所 2026 规则发布通知（2026-07-06 施行）与修订说明同；https://www.szse.cn/www/lawrules/rule/stock/t20260424_620190.html | config 一致。前期卡的「ST 5%」**已过时**（只对 2026-07-05 及以前的数据成立）。创业板、科创板 ST 本就 20%，未变 | 制度参数，有出处（前期卡措辞待改，见下） |
+| R6 | 卖出印花税 0.05%（仅出让方） | `stamp_duty_sell_pct: 0.05` | 《中华人民共和国印花税法》税目税率表：证券交易 成交金额的千分之一，对出让方征收 http://www.npc.gov.cn/npc/c2/c30834/202106/t20210610_311898.html ；财政部 税务总局公告 2023 年第 39 号，自 2023-08-28 起减半 https://www.gov.cn/zhengce/zhengceku/202308/content_6900443.htm 。未查到之后的调整文件 | 一致：1‰ × 1/2 = 0.5‰ = 0.05% | 制度参数，有出处 |
+| R7 | 过户费 0.001%（双向） | `transfer_fee_pct: 0.001` | 中国结算《关于降低股票交易过户费收费标准的通知》（2022-04-28）：自 2022-04-29 起沪深 A 股按成交金额 0.01‰ 双向收取。官网原页本次未打开成功，用新华社 http://www.news.cn/2022-04/28/c_1128605983.htm 与香港交易所通告 CT/037/22 https://www.hkex.com.hk/-/media/HKEX-Market/Services/Circulars-and-Notices/Participant-and-Members-Circulars/SEHK/2022/CT03722B.pdf 两个独立转载交叉核对。未查到之后的调整公告 | 一致：0.01‰ = 0.001% | 制度参数，有出处（原发布页待补链） |
+| R8 | 单笔最低佣金 5 元 | `commission_min_yuan: 5`（注释写「券商常见做法」）；卡片「最低 5 元」 | 证监发〔2002〕21 号第一条「A股、证券投资基金每笔交易佣金不足5元的，按5元收取」，同条规定佣金上限 3‰；证监会法规库标注「现行有效」https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=3&secFutrsLawId=b25a17fb262742f2aea99515380cf3bb ；正文 https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html | 文件现行有效。但第六条规定**各券商自定佣金收取标准**，实际费率由券商定；市场上有宣传「免五」的券商（财联社 2025-09-30 报道，未见监管新文件）。所以「5 元」是有出处的默认值，用户实际收费可能不同 | 制度参数，有出处；**费率与最低额作为用户可配置参数**（默认费率无统一文件，`commission_rate_default_pct: null` 合理） |
+
+要点：
+
+1. 8 条全部找到现行原文或现行有效的文件，数值与 `config/market_rules.yaml` 一致，没有需要改的值。
+2. 复测须按成交日期取 `market_rules` 的对应段：通达信导出样本很可能跨过 2026-07-06，跨过时主板 ST 的涨跌停价前后不同（5% → 10%）。
+3. 佣金：复测与产品都按用户填写的费率与最低额计算；用户未填时，研究侧用最低额 5 元（证监发〔2002〕21 号）和两档费率做敏感性（见 `retest_plan.md` §6），不把某一档费率写成默认。
+4. 需要别人改的地方（研究员不改）：① `config/market_rules.yaml` 中 `commission_min_yuan` 的注释「券商常见做法」可改为「证监发〔2002〕21 号，现行有效；实收以券商为准」——归架构师；② `docs/strategies/T-R16/` 下 12 张前期卡的「ST 5%」应改为「主板 ST 按 market_rules 分段（2026-07-06 起 10%）」——这批是仅知识卡，是否修订由编排者定。

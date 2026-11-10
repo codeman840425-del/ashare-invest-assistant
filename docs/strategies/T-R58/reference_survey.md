@@ -1,16 +1,16 @@
 # T-R58 做T提醒阈值：前期调研回顾与外部项目对照表
 
-> 范围：只回答「VWAP 偏离 2%、量比 2 倍」这类日内阈值有没有出处，以及别的项目怎么设。本文件不含复测方案（复测方案另行提交）。
+> 范围：只回答「VWAP 偏离 2%、量比 2 倍」这类日内阈值有没有出处，以及别的项目怎么设。复测方案见同目录 `retest_plan.md`（T-R58b）。
 > 用语：本文中的阈值只作「候选信号 / 计划条件」的讨论，不构成选股或收益承诺。
 > 标签：**实证** = 出处给出了样本检验结果；**惯例** = 出处只给默认值或公式，没有检验；**未查到** = 出处里没有这一项；**仅见摘要** = 只读到二手转述或摘要页。
-> 核对列：**DeepSeek 初筛→已核对** = 该行先由 DeepSeek 从公开摘录中抽取（未核实草稿，存于 `team/reports/deepseek/T-R58/`），再由研究员回到原始出处 WebFetch 逐项核对；**人工直查** = 研究员直接读原始出处，未经 DeepSeek。
+> 核对列：**Codex 初筛→已核对** = 该行先由 Codex L2 从公开仓库源码抽取，再由研究员按提交逐行核对（§3.5）；**DeepSeek 初筛→已核对** = 该行先由 DeepSeek 从公开摘录中抽取（未核实草稿，存于 `team/reports/deepseek/T-R58/`），再由研究员回到原始出处 WebFetch 逐项核对；**人工直查** = 研究员直接读原始出处，未经 DeepSeek。
 
 ## 1 结论先行
 
 1. 「|dev_pct| ≥ 2%」「量比 ≥ 2」两个数，在本次检索到的公开资料里**都没有实证出处**。见到的同类数值只有：Q-Code「较日内 VWAP 回落 1.5%」（页面自标「待验证」）、海通「集合竞价量比阈值 4」（另一个量，样本内 2015.1–2019.5）。两者都不能支撑 2% / 2 倍。
 2. 我们自己的前期调研**早就提出过按波动归一化的阈值**：`catalog.md:105` 写的是 `|dev_t| ≥ k×σ_t` 且 `|dev_t| ≥ 1.2%`（示例），`T-R16/T-01_t_vwap_revert.md:62` 的 k 默认 2.0（1.0–4.0）。T-A143 契约（362ad41）定 2% / 2 倍时没有引用这些内容，也没有说明为什么不用。
 3. 量比**窗口 N=5 有出处**（聚宽 jqdatasdk `LB` 的 N=5、天软 FAQ、同花顺 SuperMind 文章都是过去 5 个交易日、每日 240 分钟），属于**惯例**；但**阈值 2 没有出处**。
-4. T-A143 的量比口径（`362ad41:docs/contracts/intraday-bars.md:90`：除以过去 5 日**同一时刻累计量**的均值）与上述惯例口径（今日每分钟均量 ÷ 过去 5 日每分钟均量）**不同**。同一时刻口径能避开日内 U 形量能分布，但不是行业常用的「量比」，两种口径下的同一个阈值不可互换。需要编排者/架构师裁定口径与命名。
+4. T-A143 的量比口径（`362ad41:docs/contracts/intraday-bars.md:90`：除以过去 5 日**同一时刻累计量**的均值）与上述惯例口径（今日每分钟均量 ÷ 过去 5 日每分钟均量）**不同**。同一时刻口径能避开日内 U 形量能分布，但不是行业常用的「量比」，两种口径下的同一个阈值不可互换。**编排者已裁定（T-R58b）：只用惯例口径，同一时刻口径废弃**（见 §5）。
 5. 外部开源项目（vnpy、qlib、backtrader、TSP、bondTrader）**都没有给 VWAP 偏离或量比的默认交易阈值**；它们只提供指标定义或无阈值的穿越信号。
 6. 按波动归一化有学术先例：Zarattini 等（SPY，14 日噪声边界 + VWAP 跟踪止损，**样本内**）；A 股有日内动量/反转的文献（Chu 等 2019；Gao 等 2018 为美股市场层面）。这些只说明「归一化」方向有依据，**不提供 A 股做T的具体阈值**。
 7. 本仓「有回测」的参数为 0（见 `param_audit.md`）。在复测完成前，维持「只显示指标、不发信号」的保守默认（契约 Q5 的保守选项，`362ad41:docs/contracts/intraday-bars.md:222`）。
@@ -62,6 +62,9 @@
 | 海通量化「海量」专题 131（新浪转载） | 集合竞价量比 = 240 × 竞价成交额 ÷ 过去 5 日日均成交额；T+0 阈值 | 4 | 原文为「不低于一定阈值（4）」；参数敏感性：T+0 量比阈值 3–5、开盘涨幅阈值 −1%–1% 时「整体表现较好」；T+1 量比 2–5 | https://finance.sina.cn/2019-07-17/detail-ihytcitm2536959.d.html | 实证（样本内 2015.1–2019.5；因子 rank IC 均值 0.01）。**另一个量**（开盘前竞价，非盘中），且我方无盘中竞价数据（`docs/plan.md:95`） | DeepSeek 初筛→已核对（DeepSeek 把三个区间的理由填成「未查到」，已按原文敏感性结论更正） |
 | vnpy `ArrayManager` | 量比 | 未查到 | — | https://raw.githubusercontent.com/vnpy/vnpy/master/vnpy/trader/utility.py | 未查到 | DeepSeek 初筛→已核对 |
 | backtrader indicators | 量比 | 未查到 | — | https://api.github.com/repos/mementum/backtrader/contents/backtrader/indicators | 未查到 | DeepSeek 初筛→已核对 |
+| backtrader 示例 `RelativeVolume`（samples，非库内指标） | period / volisnan | 20 / True | 未查到；计算式为 `volume(-period) / volume`，即 20 根前的量 ÷ 当前量（方向与量比相反） | https://github.com/mementum/backtrader/blob/b853d7c90b6721476eb5a5ea3135224e33db1f14/samples/data-filler/relativevolume.py#L34-L35 | 惯例（示例代码） | Codex 初筛→已核对 |
+| backtrader 示例 `RelativeVolumeByBar` | prestart / start / end | 08:00 / 09:10 / 17:15 | 未查到；当前 bar 量 ÷ **上一交易日同一时刻 bar 量**（单 bar、只回看 1 日，不是累计量） | https://github.com/mementum/backtrader/blob/b853d7c90b6721476eb5a5ea3135224e33db1f14/samples/relative-volume/relvolbybar.py#L37-L39 | 惯例（示例代码） | Codex 初筛→已核对 |
+| qlib `RandomOrderStrategy` | volume_ratio | 0.01 | 随机订单量占成交量的比例，**不是量比** | https://github.com/microsoft/qlib/blob/54355232463878d2eebb91fe0ee5fa7fa1f5976c/qlib/contrib/strategy/rule_strategy.py#L544 | 惯例（与本题无关，列出以免误读） | Codex 初筛→已核对（Codex 归为「成交量比率」，已更正） |
 | 米筐 RQData | 量比 | 未查到 | — | https://www.ricequant.com/doc/rqdata/python/generic-api | 未查到 | DeepSeek 初筛→已核对 |
 | **我方 T-A143** | 量比阈值 | 2 | 未写理由，标「待复测」 | `362ad41:docs/contracts/intraday-bars.md:91`、`:222` | 未查到出处 | 人工直查 |
 
@@ -93,6 +96,27 @@
 | **我方 T-A143** | \|dev_pct\| 阈值 | 2% | 未写理由，标「待复测」 | `362ad41:docs/contracts/intraday-bars.md:91`、`:222` | 未查到出处 | 人工直查 |
 | **我方 catalog / T-01** | k×σ 与绝对下限 | k=2.0；1.2%（示例） | hypothesis；「无外部来源」 | `docs/strategies/catalog.md:105`、`docs/strategies/T-R16/T-01_t_vwap_revert.md:62` | 未查到出处 | 人工直查 |
 
+### 3.5 Codex L2 源码默认值核对（T-R58b）
+
+- 模型与档位：L2 `gpt-6.1-sol`，`model_reasoning_effort=medium`，`codex exec -s read-only`，不联网；输入为公开仓库浅克隆（vnpy `c6e231c`、vnpy_ctastrategy `7a8768d`、vnpy_algotrading `bee959d`、qlib `5435523`、backtrader `b853d7c`），不含本仓契约、样本或私有数据。约 77k tokens。原始输出：`team/reports/codex/T-R58/l2_output.md`（未经核对的草稿）。
+- 核对方法：脚本逐行打开 Codex 给出的「仓库/路径/行号」，检查该行是否含所列默认值；再人工读上下文核语义。
+- 结果：Codex 共给 **106 行**。行号与默认值对不上、属编造：**0 行**。需更正语义：**1 行**（qlib `RandomOrderStrategy.volume_ratio=0.01` 是随机订单量比例，不是量比）。需加注：**2 行**（backtrader `RelativeVolume` 是「过去量 ÷ 当前量」，方向与量比相反；`StandardDeviation.safepow` 文档字符串写 default False、代码 :51 实为 True，源码自身不一致，Codex 两处都照实列出）。漏抽：**1 处**（vnpy_algotrading `TwapAlgo` time 600 / interval 60，Codex 写「未找到」，第一部分已人工列入 §3.2）。
+- Codex 未发现任何 VWAP 偏离或量比的**交易阈值**默认值，与 §1 第 5 条一致。
+- 与本题相关、已核对的波动倍数默认值（只说明各项目倍数各不相同、均无检验，**不用于定 k**）：
+
+| 项目 | 参数 | 默认值 | 位置 | 标签 | 核对 |
+|---|---|---|---|---|---|
+| vnpy `ArrayManager.std` | nbdev | 1 | https://github.com/vnpy/vnpy/blob/c6e231caf32b7fc97e6459817fff66458cf7e7c4/vnpy/trader/utility.py#L809 | 惯例 | Codex 初筛→已核对 |
+| vnpy `ArrayManager.boll` / `keltner` | dev | 无默认（必填） | https://github.com/vnpy/vnpy/blob/c6e231caf32b7fc97e6459817fff66458cf7e7c4/vnpy/trader/utility.py#L1050-L1053 | 惯例 | Codex 初筛→已核对 |
+| backtrader `BollingerBands` | period / devfactor | 20 / 2.0 | https://github.com/mementum/backtrader/blob/b853d7c90b6721476eb5a5ea3135224e33db1f14/backtrader/indicators/bollinger.py#L43 | 惯例 | Codex 初筛→已核对 |
+| backtrader `AverageTrueRange` | period | 14 | https://github.com/mementum/backtrader/blob/b853d7c90b6721476eb5a5ea3135224e33db1f14/backtrader/indicators/atr.py#L113 | 惯例 | Codex 初筛→已核对 |
+| backtrader `StandardDeviation` | period / safepow | 20 / True | https://github.com/mementum/backtrader/blob/b853d7c90b6721476eb5a5ea3135224e33db1f14/backtrader/indicators/deviation.py#L51 | 惯例 | Codex 初筛→已核对 |
+| vnpy_ctastrategy 示例 `BollChannelStrategy` | boll_window / boll_dev / atr_window / sl_multiplier | 18 / 3.4 / 30 / 5.2 | https://github.com/vnpy/vnpy_ctastrategy/blob/7a8768de9784dda35a7b261a7ade1dbfbff50919/vnpy_ctastrategy/strategies/boll_channel_strategy.py#L20-L24 | 惯例（期货示例策略） | Codex 初筛→已核对 |
+| vnpy_ctastrategy 示例 `KingKeltnerStrategy` | kk_length / kk_dev | 11 / 1.6 | https://github.com/vnpy/vnpy_ctastrategy/blob/7a8768de9784dda35a7b261a7ade1dbfbff50919/vnpy_ctastrategy/strategies/king_keltner_strategy.py#L20-L21 | 惯例（期货示例策略） | Codex 初筛→已核对 |
+| vnpy `BarGenerator` | window / interval | 0 / `Interval.MINUTE` | https://github.com/vnpy/vnpy/blob/c6e231caf32b7fc97e6459817fff66458cf7e7c4/vnpy/trader/utility.py#L186-L188 | 惯例（分钟合成） | Codex 初筛→已核对 |
+| qlib `HighFreqGeneralHandler` | day_length | 240 | https://github.com/microsoft/qlib/blob/54355232463878d2eebb91fe0ee5fa7fa1f5976c/qlib/contrib/data/highfreq_handler.py#L114 | 惯例（与量比 240 分钟/日一致） | Codex 初筛→已核对 |
+| qlib 高频示例 `simpson_vwap` | 近似式 | (open+2high+2low+close)/6 | https://github.com/microsoft/qlib/blob/54355232463878d2eebb91fe0ee5fa7fa1f5976c/examples/highfreq/highfreq_handler.py#L46 | 惯例（无成交额时的近似；我方有成交额，不用） | Codex 初筛→已核对 |
+
 ### 3.3 学术与券商研报（只用于「方向」，不提供 A 股做T阈值）
 
 | 出处 | 要点 | 标签 | 核对 |
@@ -109,7 +133,7 @@
 - vnpy `ArrayManager`：无 VWAP、无量比方法。
 - vnpy_algotrading：algos 目录无 VWAP 算法文件。
 - qlib Alpha158 loader：无交易阈值，无量比定义。
-- backtrader indicators：无 VWAP、无量比文件。
+- backtrader indicators：无 VWAP、无量比文件（`samples/` 下有两个相对成交量示例，见 §3.1 Codex 行）。
 - jqdatasdk：无 VWAP 函数；`LB`、`DBLB` 未给信号阈值。
 - 米筐 RQData：未查到量比函数，未查到 VWAP 偏离阈值。
 
@@ -123,9 +147,11 @@
   - 漏抽：**3 处**——Zarattini 的 HH:00/HH:30 检查时点、海通 T+1 开盘涨幅区间 −1%–1%、Q-Code「或回归 VWAP」；另有聚宽 `SG_LB`（不在输入摘录中）由人工补入。
 - 结论：DeepSeek 抽取的数值全部能在原文找到，错误集中在「理由」与「语义」两列；表中所有 DeepSeek 行均以研究员核对后的内容为准。
 
-## 5 需要裁定的问题
+## 5 裁定结果（编排者，T-R58b）
 
-1. 契约 362ad41 的 `:91`、`:222` 仍写「初值 2% 与 2 倍」。若 2% / 2 倍已撤回，契约需要改为「复测前只显示指标、不发信号」（Q5 保守项），并删去「初值」措辞；`:183` 的测试用 2.1% / 2.2 只是夹具，不代表阈值。
-2. 量比口径：保留「同一时刻累计量」口径（需改名，例如「同时刻量比」，避免与行业「量比」混淆），还是改为惯例口径（每分钟均量之比，240 分钟/日）？复测须两种都算。
-3. VWAP 偏离阈值形式：沿用前期调研的 `k×σ_t` + 绝对下限（`catalog.md:105`、T-01 卡），还是固定百分比？本次检索的外部资料倾向前者，但都不是 A 股做T的实证。
-4. 制度参数（印花税、过户费、最低佣金、涨跌幅、科创板 200 股）的出处是否要按现行文件逐条复核（最低 5 元佣金出处为 2002 年文件，现行有效性本次未核对）。
+1. 契约 362ad41 残留的 2% / 2 倍：由架构师在 T-A146 删除，本文件不改契约。
+2. 量比口径：只用行业惯例口径（回看 5 日、每天 240 分钟）。T-A143 的「同一时刻累计量」口径**已裁定废弃**，复测不再作对照。量比阈值仍为「待复测」。
+3. 偏离阈值形式：候选为 `k×σ_t` 加绝对下限（`catalog.md:105`、T-01 卡）；固定百分比只作对照组。k 与下限由复测定，复测前不生效。
+4. 制度参数：只复核做T与 P2N 主线用到的几条，结果见 `param_audit.md` §5。
+
+复测方案见 `retest_plan.md`。

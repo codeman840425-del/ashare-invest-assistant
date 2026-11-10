@@ -8,13 +8,20 @@ import type { DailyReport, Gap, TodayResponse } from '../../api/types';
 export const REPORT_EXPECTED_AT = '18:30';
 /** 收盘后开始显示「盘后数据准备中」的时刻 */
 export const POST_CLOSE_AT = '15:00';
-/** 日报逾时阈值（契约 U2 默认 18:45） */
-export const REPORT_OVERDUE_AT = '18:45';
+/** 日报逾时 = 「日报约 HH:MM 生成」时刻 + 15 分钟（编排者裁定 ⑧；默认 18:30 → 18:45） */
+export const REPORT_OVERDUE_GRACE_MIN = 15;
 /** 「数据缺口」区最多列出的证券数 */
 export const GAP_SECURITY_LIMIT = 10;
 
 const SH_TZ = 'Asia/Shanghai';
 const hhmm = (s: string) => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
+const fmtHhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+/** 由「日报约 HH:MM 生成」时刻推导逾时阈值（HH:MM） */
+export const overdueAt = (expectedAt: string = REPORT_EXPECTED_AT) => fmtHhmm(hhmm(expectedAt) + REPORT_OVERDUE_GRACE_MIN);
+/** 日报逾时阈值（默认由 REPORT_EXPECTED_AT 推导，即 18:45） */
+export const REPORT_OVERDUE_AT = overdueAt();
+/** S4 文案随「日报约 HH:MM 生成」时刻变化 */
+export const s4Text = (expectedAt: string = REPORT_EXPECTED_AT) => `盘后数据准备中，日报约 ${expectedAt} 生成。`;
 
 /** server_time 换算到北京时间的「当日分钟数」；只用 Intl 并显式指定 timeZone，与浏览器/机器时区无关。无法解析时返回 null */
 export function shanghaiMinutes(iso: string): number | null {
@@ -32,7 +39,7 @@ export const STATE_TEXT: Record<Exclude<GlobalState, 'S9'>, string> = {
   S1: '还没有导入持仓，导入后才能生成你的日报。',
   S2: '当前没有持仓，日报只覆盖你的自选。',
   S3: '今天休市，没有新的日报。',
-  S4: `盘后数据准备中，日报约 ${REPORT_EXPECTED_AT} 生成。`,
+  S4: s4Text(),
   S5: '今日日报还没有生成，请稍后再看。',
   S6: '今日行情数据未就绪，本日报未做策略分析。',
   S7: '行情数据源尚未开通，本日报未做策略分析。',
@@ -47,7 +54,7 @@ const hasHolding = (t: TodayResponse) => t.focus.items.some((r) => r.holding !==
 export const hasSuggestion = (t: TodayResponse) => t.focus.items.some((r) => r.suggestion !== null);
 
 /** 不依赖日报的前置状态（S1–S5）；都不命中返回 null */
-export function preReportState(t: TodayResponse): GlobalState | null {
+export function preReportState(t: TodayResponse, expectedAt: string = REPORT_EXPECTED_AT): GlobalState | null {
   if (!hasHolding(t)) return t.reconciliation.status === 'not_imported' ? 'S1' : 'S2';
   if (t.session === 'non_trading_day') return 'S3';
   const st = t.daily_report.status;
@@ -55,7 +62,7 @@ export function preReportState(t: TodayResponse): GlobalState | null {
   const now = shanghaiMinutes(t.server_time);
   if (now === null) return null; // 时间无法判定：不猜，不显示时段状态
   // S5：交易日、已到逾时阈值、仍为 not_yet
-  if (st === 'not_yet' && now >= hhmm(REPORT_OVERDUE_AT)) return 'S5';
+  if (st === 'not_yet' && now >= hhmm(overdueAt(expectedAt))) return 'S5';
   // S4：交易日、收盘后、日报未就绪（契约 15:00–18:30；18:30 到逾时阈值之间以及逾时后仍 generating 也保守按 S4，见待裁定）
   if (now >= hhmm(POST_CLOSE_AT)) return 'S4';
   return null;

@@ -13,7 +13,7 @@ import { server } from '../mocks/server';
 import { TERMINAL_ROWS } from '../mocks/fixtures';
 import { todayViewReport } from '../mocks/todayFixtures';
 import {
-  A1_TEXT, GAP_CODES, R2_TEXT, REPORT_EXPECTED_AT, STATE_TEXT, UNKNOWN_GAP_TEXT, buildReportGaps, parsePipelineKey, preReportState, shanghaiMinutes,
+  A1_TEXT, GAP_CODES, R2_TEXT, REPORT_EXPECTED_AT, REPORT_OVERDUE_AT, STATE_TEXT, UNKNOWN_GAP_TEXT, buildReportGaps, overdueAt, parsePipelineKey, preReportState, s4Text, shanghaiMinutes,
 } from './today/todayView';
 
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -102,7 +102,20 @@ describe('T-F34 时间换算（纯函数）', () => {
     expect(st('18:50', 'ready')).toBeNull();
   });
   it('「日报约 HH:MM 生成」取自单一常量', () => {
+    expect(REPORT_EXPECTED_AT).toBe('18:30');
     expect(STATE_TEXT.S4).toBe(`盘后数据准备中，日报约 ${REPORT_EXPECTED_AT} 生成。`);
+  });
+  it('⑧ 逾时阈值 = 常量 + 15 分钟：默认 18:45；常量换 17:30 → 17:45，文案随之变化', () => {
+    expect(REPORT_OVERDUE_AT).toBe('18:45');
+    expect(overdueAt('17:30')).toBe('17:45');
+    expect(s4Text('17:30')).toBe('盘后数据准备中，日报约 17:30 生成。');
+    expect(s4Text()).toBe(STATE_TEXT.S4);
+    const st = (t: string, expectedAt?: string) => preReportState(today({ server_time: bj(t), daily_report: { date: DATE, status: 'not_yet' } }), expectedAt);
+    expect(st('18:44')).toBe('S4');
+    expect(st('18:45')).toBe('S5');
+    expect(st('17:44', '17:30')).toBe('S4');
+    expect(st('17:45', '17:30')).toBe('S5');
+    expect(st('17:20', '17:30')).toBe('S4');
   });
 });
 

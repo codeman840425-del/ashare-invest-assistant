@@ -243,6 +243,10 @@ def _make_core(engine: Engine):
     return IngestCore(cfg=_cfg(), engine=engine)
 
 
+# Sentinel: omit lease= → acquire unforgeable lease via single_egress (T-B116b / T-A89).
+_LEASE_ISSUED = object()
+
+
 def _call_mairui(
     eg: Any,
     *,
@@ -251,7 +255,7 @@ def _call_mairui(
     lid: uuid.UUID,
     uid: uuid.UUID,
     transport: FakeTransport,
-    lease: FakeLease | None = None,
+    lease: Any = _LEASE_ISSUED,
     halt: Path | None = None,
     stop: Path | None = None,
     priority: Any = None,
@@ -264,8 +268,7 @@ def _call_mairui(
     base = tmp_path or Path("/tmp")
     stop = stop or (base / "STOP")
     halt = halt or (base / "HALT")
-    return eg.mairui_get(
-        lease=lease if lease is not None else FakeLease(True),
+    kwargs = dict(
         core=core,
         engine=engine,
         licence_id=lid,
@@ -278,6 +281,11 @@ def _call_mairui(
         halt=halt,
         transport=transport,
     )
+    if lease is _LEASE_ISSUED:
+        with eg.single_egress(engine) as issued:
+            assert issued is not None, "single_egress must yield a lease in tests"
+            return eg.mairui_get(lease=issued, **kwargs)
+    return eg.mairui_get(lease=lease, **kwargs)
 
 
 def _expect_denied(eg: Any, code: str, **kwargs: Any) -> None:
@@ -810,6 +818,7 @@ def test_a11_halt_present_no_lock_no_db(tmp_path: Path) -> None:
                 lid=lid,
                 uid=uid,
                 transport=tr,
+                lease=FakeLease(True),  # halt 先于 lease；避免 single_egress 连库
                 halt=halt,
                 stop=tmp_path / "STOP",
             )
@@ -1345,24 +1354,48 @@ def test_a24_transport_counts_and_https_get_unused(tmp_path: Path, monkeypatch: 
         uid, lid = uuid.uuid4(), uuid.uuid4()
         _seed_licence(eng, uid, lid)
         # deny paths → 0 calls
-        for lease, core, code in [
-            (FakeLease(False), _make_core(eng), "single_egress_not_held"),
-            (FakeLease(True), None, "core_unavailable"),
-        ]:
-            tr_i = FakeTransport()
-            with pytest.raises(eg.EgressDenied) as ei:
-                _call_mairui(
-                    eg,
-                    engine=eng,
-                    core=core,
-                    lid=lid,
-                    uid=uid,
-                    transport=tr_i,
-                    lease=lease,
-                    tmp_path=tmp_path,
-                )
-            assert ei.value.code == code
-            assert tr_i.calls == []
+        tr_i = FakeTransport()
+        with pytest.raises(eg.EgressDenied) as ei:
+            _call_mairui(
+                eg,
+                engine=eng,
+                core=_make_core(eng),
+                lid=lid,
+                uid=uid,
+                transport=tr_i,
+                lease=FakeLease(False),
+                tmp_path=tmp_path,
+            )
+        assert ei.value.code == "single_egress_not_held"
+        assert tr_i.calls == []
+        # forged held=True is also not_held (T-A89); core_unavailable needs issued lease
+        tr_f = FakeTransport()
+        with pytest.raises(eg.EgressDenied) as ei_f:
+            _call_mairui(
+                eg,
+                engine=eng,
+                core=None,
+                lid=lid,
+                uid=uid,
+                transport=tr_f,
+                lease=FakeLease(True),
+                tmp_path=tmp_path,
+            )
+        assert ei_f.value.code == "single_egress_not_held"
+        assert tr_f.calls == []
+        tr_c = FakeTransport()
+        with pytest.raises(eg.EgressDenied) as ei_c:
+            _call_mairui(
+                eg,
+                engine=eng,
+                core=None,
+                lid=lid,
+                uid=uid,
+                transport=tr_c,
+                tmp_path=tmp_path,
+            )
+        assert ei_c.value.code == "core_unavailable"
+        assert tr_c.calls == []
         # success path → exactly 1
         tr_ok = FakeTransport(responses=[(200, {"n": 1})])
         core = _make_core(eng)

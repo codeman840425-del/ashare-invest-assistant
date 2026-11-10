@@ -13,7 +13,7 @@ from sqlalchemy import Connection, func, select
 from app.aggregates import models as m
 from app.aggregates import products, t_view
 from app.aggregates.reconciliation import read as read_reconciliation
-from app.api.v1.portfolio import _account
+from app.api.v1.portfolio import _account, previous_open_day
 from app.common.errors import AppError, ErrorCode
 from app.db.tables.accounts import (
     accounts,
@@ -307,6 +307,9 @@ def today(
     )
     trades = t_view.today_trades(conn, account_id, clock.trade_date) if account_id else {}
     basis = t_view.snapshot_basis(conn, account_id) if account_id else None
+    previous_open = (
+        previous_open_day(conn, now.astimezone(t_view.BEIJING).date()) if basis else None
+    )
     focus = []
     for row in base.rows:
         view = None
@@ -332,6 +335,8 @@ def today(
                 base_source="snapshot" if basis is not None else "ledger",
                 snapshot_as_of=basis[0] if basis is not None else None,
                 sellable_known=basis[1].get(code, False) if basis is not None else True,
+                snapshot_at=basis.snapshot_at if basis is not None else None,
+                previous_open=previous_open,
             )
         focus.append(
             m.TodayRow(**{k: getattr(row, k) for k in m.TerminalRow.model_fields}, t_view=view)

@@ -58,6 +58,10 @@ PRICE_DP: Final = Decimal("0.0001")
 ZERO: Final = Decimal(0)
 #: 日线收盘价的时点（北京时间收盘）
 CLOSE_TIME: Final = dt.time(15, 0)
+# intraday-bars §3.8 T-B134c: call-auction start, independent of minute-bar opening.
+SNAPSHOT_TPLUS_CUTOFF: Final = dt.time(9, 15)
+INFERRED_SELLABLE: Final = "可卖数按开盘前持仓快照推算（T+1），未扣今日卖出和冻结、限售股份"
+UNKNOWN_SELLABLE: Final = "当日持仓快照没有可卖数量，无法核实今日可卖，可卖暂按 0 计"
 
 
 class Gap(BaseModel):
@@ -114,6 +118,7 @@ class _Acc:
     cash: Decimal | None = None
     positions: dict[str, _Pos] = field(default_factory=dict)
     price_at: dt.datetime | None = None
+    gaps: list[dict[str, str]] = field(default_factory=list)
 
 
 def _s(v: Decimal | None, q: Decimal = MONEY_DP) -> str | None:
@@ -195,6 +200,35 @@ def _has_ledger(conn: Connection, account_id: uuid.UUID) -> bool:
     return bool(t or o)
 
 
+def previous_open_day(conn: Connection, today: dt.date) -> dt.date | None:
+    """Strictly previous opening day; missing calendar coverage has no weekday fallback."""
+    previous: dt.date | None = conn.execute(
+        select(func.max(trading_calendar.c.date)).where(
+            trading_calendar.c.date < today, trading_calendar.c.is_open.is_(True)
+        )
+    ).scalar_one()
+    if previous is None:
+        return None
+    covered = conn.execute(
+        select(func.count())
+        .select_from(trading_calendar)
+        .where(trading_calendar.c.date >= previous, trading_calendar.c.date < today)
+    ).scalar_one()
+    return previous if covered == (today - previous).days else None
+
+
+def snapshot_stale_message(
+    snapshot_at: dt.datetime | None,
+    previous_open: dt.date | None,
+) -> str | None:
+    if snapshot_at is None or snapshot_at.tzinfo is None:
+        return None
+    day = snapshot_at.astimezone(BEIJING).date()
+    if previous_open is not None and day >= previous_open:
+        return None
+    return f"持仓快照停在 {day.isoformat()}，早于上一交易日，之后的买卖未反映，持仓与可卖可能已变"
+
+
 def _account(conn: Connection, account_id: uuid.UUID, today: dt.date) -> _Acc:
     acc = _Acc()
     snap = conn.execute(
@@ -202,6 +236,7 @@ def _account(conn: Connection, account_id: uuid.UUID, today: dt.date) -> _Acc:
     ).first()
     items: dict[str, Any] = {}
     snap_day: dt.date | None = None
+    snap_at: dt.datetime | None = None
     if snap is not None:
         items = {
             i.security_code: i
@@ -258,6 +293,16 @@ def _account(conn: Connection, account_id: uuid.UUID, today: dt.date) -> _Acc:
         else:
             acc.cash = last_cash_balance(conn, account_id)
     elif snap is not None:
+        missing_sellable: set[str] = set()
+        stale_message = snapshot_stale_message(snap_at, previous_open_day(conn, today))
+        if stale_message:
+            acc.gaps.append(
+                {
+                    "key": "positions.snapshot",
+                    "reason": "user_input_missing",
+                    "message": stale_message,
+                }
+            )
         for code, i in items.items():
             if i.quantity is None or Decimal(i.quantity) <= 0:
                 continue
@@ -267,11 +312,21 @@ def _account(conn: Connection, account_id: uuid.UUID, today: dt.date) -> _Acc:
                 p.cost_known = False
             else:
                 p.cost_total = Decimal(i.broker_cost_price) * qty
-            if snap_day == today and i.sellable_quantity is not None:
+            if i.sellable_quantity is None:
+                preopen = snap_at is not None and snap_at.astimezone(BEIJING) < (
+                    dt.datetime.combine(today, SNAPSHOT_TPLUS_CUTOFF, BEIJING)
+                )
+                p.sellable = qty if preopen else ZERO
+                missing_sellable.add(INFERRED_SELLABLE if preopen else UNKNOWN_SELLABLE)
+            elif snap_day == today:
                 p.sellable = min(qty, Decimal(i.sellable_quantity))
             else:
                 p.sellable = qty
             acc.positions[code] = p
+        acc.gaps.extend(
+            {"key": "positions.sellable_qty", "reason": "user_input_missing", "message": message}
+            for message in sorted(missing_sellable)
+        )
         acc.cash = None if snap.cash_balance is None else Decimal(snap.cash_balance)
     for code, p in acc.positions.items():
         item = items.get(code)
@@ -308,11 +363,15 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
     now = dt.datetime.now(BEIJING)
     today = now.date()
     merged: dict[str, _Pos] = {}
+    gaps: list[dict[str, str]] = []
     cash = ZERO
     # R6 ③：没有现金记录（无账户，或任一账户既无快照现金也无流水现金）→ 按 0 计并列缺口
     cash_missing = not account_ids
     for aid in account_ids:
         acc = _account(conn, aid, today)
+        for item in acc.gaps:
+            if item not in gaps:
+                gaps.append(item)
         if acc.cash is None:
             cash_missing = True
         else:
@@ -345,7 +404,6 @@ def build_portfolio(conn: Connection, account_ids: list[uuid.UUID]) -> dict[str,
     for code, (close, at) in latest_daily_close(conn, set(types) & codes, today).items():
         merged[code].price, merged[code].price_at = close, at
 
-    gaps: list[dict[str, str]] = []
     rows: list[dict[str, Any]] = []
     total_value = ZERO
     no_price = cb = unknown = no_cost = False

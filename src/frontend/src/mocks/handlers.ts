@@ -288,8 +288,9 @@ const routeHandlers = [
   http.get(`${API}/securities/:code/factors`, async ({ params }) => {
     await lag();
     if (isEtf(String(params.code))) {
+      // F-10 / T-A158：ETF 同形空态，gap=not_applicable；两个字段为 null，不下发合成版本
       return HttpResponse.json({
-        ...etfNotApplicable(String(params.code), 'factors'), trade_date: '2026-10-30', factor_set_version: 'mr-factors-85（示例）', counts: { total: 0, by_category: {} },
+        ...etfNotApplicable(String(params.code), 'factors'), trade_date: null, factor_set_version: null, counts: { total: 0, by_category: {} },
       });
     }
     const f = factors(String(params.code));

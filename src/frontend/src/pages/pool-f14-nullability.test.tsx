@@ -151,7 +151,24 @@ describe('③ 两处 slice 崩溃回归（真实组件路径，全部显式合�
     security_code: '600000.SH', name: '示例银行', price: '10.24', change_pct: '2.20', volume: '41230000', amount: '420000000.00',
     t: '2026-11-02T10:31:00+08:00', data_status: 'fresh', data_as_of: '2026-11-02T10:31:00+08:00', gaps: [],
   };
-  const armQuote = () => server.use(http.get(`${API}/quotes`, () => HttpResponse.json({ items: [quote] })));
+  /** quoteDelayMs>0 时延迟返回：用于证明「quote 晚于 minute 到达」时断言同样成立（顺序不影响） */
+  const armQuote = (quoteDelayMs = 0) =>
+    server.use(
+      http.get(`${API}/quotes`, async () => {
+        if (quoteDelayMs > 0) await new Promise((r) => setTimeout(r, quoteDelayMs));
+        return HttpResponse.json({ items: [quote] });
+      }),
+    );
+  /**
+   * 头部「昨收」取值：昨收行在场时返回该值，行不在场返回 null（未渲染 / 显示占位都不算采纳）。
+   * 只读头部统计区，不扫全页文本——否则价格或其它字段里的同数字会造成假命中。
+   */
+  const shouCloseOf = (head: HTMLElement): string | null => {
+    const row = Array.from(head.querySelectorAll('*')).find((el) => /^昨收$/.test(el.textContent?.trim() ?? ''));
+    const box = row?.parentElement ?? null;
+    const m = box?.textContent?.match(/昨收\s*([0-9.]+)/);
+    return m ? m[1] : null;
+  };
 
   /** 日 K 固定给「不含今日」的 bar：todayBar() 找不到当日 bar → 不会提前给出 pre_close（不短路旧行） */
   const dailyBars = (): BarsResponse => ({
@@ -172,15 +189,37 @@ describe('③ 两处 slice 崩溃回归（真实组件路径，全部显式合�
     next_before: null, adjust_as_of: null, gaps: [],
   };
 
-  it('无时点空态：1m items=[] 且 data_as_of=null → 图表显示空态文本（旧版在此处 .slice(null) 抛错）', async () => {
-    armQuote();
+  /** 无时点空态用例：同一份合成 minute（items=[] + data_as_of=null + pre_close 非空） */
+  const armEmptyMinute = () =>
     server.use(barsRoute({ ...minuteBase, pre_close: '10.02', items: [], data_status: 'unavailable', data_as_of: null,
       gaps: [{ key: 'bars', reason: 'no_source', message: '分时从未取得（示例）' }] }));
-    renderAt('/stocks/600000.SH');
-    // 等空态文本本身：它只在 minute 响应被消费、且走过 tradeDate 计算后才渲染
+
+  /** 两条真实 slice 行都被走到、且结果符合契约：minute 空态 + quote 已被头部消费 + 昨收未采纳 10.02 */
+  async function expectBothSlicePathsReached() {
+    // ① minute 响应被消费并走过 PriceChartPanel.tradeDate（null 时点不取交易日）
     const empty = await screen.findByTestId('chart-empty', {}, { timeout: 15_000 });
     expect(empty.textContent).toMatch(/无分时数据/);
-    expect(document.body.textContent).not.toMatch(/Cannot read properties|TypeError/);
+    // ② quote 已被 StockHeader 消费：头部显示该 quote 价格；否则 StockPage.intradayPreClose 会因 !q 提前 return，旧 slice 行根本走不到
+    const head = await screen.findByTestId('stock-head', {}, { timeout: 15_000 });
+    await waitFor(() => expect(head.textContent).toContain('10.24'), { timeout: 12_000 });
+    // ③ 无时点就不认交易日：昨收不采纳 10.02（缺省为未渲染/占位），头部无失败痕迹
+    expect(shouCloseOf(head)).not.toBe('10.02');
+    expect(head.textContent).not.toMatch(/Cannot read properties|TypeError|undefined|NaN/);
+    return { head, empty };
+  }
+
+  it('无时点空态（minute 先到）：1m items=[] 且 data_as_of=null → 两处 slice 路径都走到且不崩', async () => {
+    armQuote();
+    armEmptyMinute();
+    renderAt('/stocks/600000.SH');
+    await expectBothSlicePathsReached();
+  });
+
+  it('无时点空态（quote 延后 400ms）：到达顺序不影响断言，仍两处路径都走到且不崩', async () => {
+    armQuote(400);
+    armEmptyMinute();
+    renderAt('/stocks/600000.SH');
+    await expectBothSlicePathsReached();
   });
 
   it('item.t 优先：items[0].t 与 quote 同日 → 采纳 pre_close，不崩', async () => {

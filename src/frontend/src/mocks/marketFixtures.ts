@@ -359,10 +359,11 @@ const FACTOR_UNIVERSE = 5300;
 export function factors(code: string): FactorsResponse | null {
   const idx = INDEX_SPECS.find((x) => x.code === code);
   if (idx) {
-    // F-10 / T-A158：无因子批次 → trade_date、factor_set_version 均为 null，且**不**下发合成版本名
+    // F-10 / T-A158：无因子批次 → trade_date、factor_set_version 均为 null，且**不**下发合成版本名；
+    // F-14 / A-12：全空响应没有「截至」时点，data_as_of 同样为 null（不造日期）。有真实批次的股票见下方返回，仍带旧时点。
     return {
       security_code: idx.code, name: idx.name, trade_date: null, factor_set_version: null, counts: { total: 0, by_category: {} },
-      items: [], sources: [], data_status: 'unavailable', data_as_of: '2026-10-30T18:30:00+08:00', gaps: [{ key: 'factors', reason: 'no_source', message: '指数没有因子数据（示例）' }],
+      items: [], sources: [], data_status: 'unavailable', data_as_of: null, gaps: [{ key: 'factors', reason: 'no_source', message: '指数没有因子数据（示例）' }],
     };
   }
   const s = specBrief(code);

@@ -295,8 +295,10 @@ const routeHandlers = [
     }
     if (isEtf(String(params.code))) {
       // F-10 / T-A158：ETF 同形空态，gap=not_applicable；两个字段为 null，不下发合成版本
+      // F-14 / A-12：ETF 没有因子数据 → 不存在「截至」时点，data_as_of 也置 null（不沿用 etfNotApplicable 的 NOW 占位）
       return HttpResponse.json({
-        ...etfNotApplicable(String(params.code), 'factors'), trade_date: requestedDate, factor_set_version: null, counts: { total: 0, by_category: {} },
+        ...etfNotApplicable(String(params.code), 'factors'), trade_date: requestedDate, factor_set_version: null,
+        counts: { total: 0, by_category: {} }, data_as_of: null,
       });
     }
     const f = factors(String(params.code));

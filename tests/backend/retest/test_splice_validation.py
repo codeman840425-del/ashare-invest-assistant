@@ -23,7 +23,8 @@ import pytest
 from retest.t_r58 import splice
 from retest.t_r58.errors import DataFormatError
 
-# Historical pending markers removed; production runner persistence remains unverified.
+# Historical pending markers removed; this module verifies the library boundary.
+# Formal writer persistence is covered by the independent runner/writer tests.
 
 CST = zoneinfo.ZoneInfo("Asia/Shanghai")
 MINUTE_BYTES = 32
@@ -540,7 +541,7 @@ class TestFailureSemantics:
         assert not grid["present"][1, 0] and grid["present"][1, 1:].all()
 
     def test_splice_payload_json_roundtrip_library_boundary(self, synthetic_tree: dict[str, Any]) -> None:
-        """成功/失败 payload 在隔离文件读回；正式 runner 的 summary.json 落盘尚未实现，仍属阻塞。"""
+        """本例仅核库边界成功/失败 payload 的 JSON 往返；正式 writer 由独立落盘测试验收。"""
         tree = synthetic_tree
         hf = TestSplicePointChecks._hf_600000()
         table, _ = splice.decode_lc1(Path(tree["vip_root"]) / "single" / "sh" / "minline" / "600000.lc1", "SH", "600000")
@@ -549,7 +550,7 @@ class TestFailureSemantics:
         from retest.t_r58 import data
         grid, checks = data.load_spliced_stock(hf, table, splice.empty_table(), [HF_END, VIP_SINGLE_DAY], hf_anchor(), exchange="SH", symbol="600000", require_overlap=False)
         assert "splice" in checks and checks["splice"]["ok"]
-        # Library serialization boundary only: no production summary writer exists in this SHA.
+        # Library serialization only; independent runner/writer tests cover formal output.
         # Writing here verifies the payload is JSON-safe; it does not certify runner output.
         import json
         path = Path(tree["vip_root"]) / "summary.json"

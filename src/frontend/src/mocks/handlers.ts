@@ -257,8 +257,9 @@ const routeHandlers = [
     const from = url.searchParams.get('from');
     const to = url.searchParams.get('to');
     let pool = before ? res.items.filter((b) => b.t < before) : res.items;
-    if (from) pool = pool.filter((b) => b.t >= from);
-    if (to) pool = pool.filter((b) => b.t <= to);
+    // from/to 为包含端点的交易日期；1m 的 t 是 +08:00 datetime，不能直接与 to 日期比较。
+    if (from) pool = pool.filter((b) => b.t.slice(0, 10) >= from);
+    if (to) pool = pool.filter((b) => b.t.slice(0, 10) <= to);
     // 日期窗内没有任何数据：对齐后端 empty_bars()（200 + unavailable + no_source + data_as_of=null）
     if (pool.length === 0) {
       return HttpResponse.json({

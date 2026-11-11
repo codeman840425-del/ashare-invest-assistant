@@ -9,7 +9,9 @@
  * 因此本单只对齐 mock 与响应形状；调用这些判定的用例等 #19 合入后由后续单接管。
  * 行号对照：`t-f08.test.tsx` 保持 main 原样（今日关注 13 例），本文件是 F-08 增量唯一入口。
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { TRADE_DATE } from '../mocks/fixtures';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
@@ -21,7 +23,10 @@ import { mockLoginAs } from '../mocks/session';
 import { preloadRoutes } from '../test/preloadRoutes';
 
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
-vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
+vi.mock('../components/charts/IntradayChart', () => ({
+  IntradayChart: ({ bars, empty }: { bars: unknown[]; empty: ReactNode }) =>
+    bars.length ? <div data-testid="intraday" /> : <div data-testid="chart-empty">{empty}</div>,
+}));
 vi.mock('../components/charts/FundFlowChart', () => ({ FundFlowChart: () => <div data-testid="fund-flow-chart" /> }));
 
 beforeAll(() => preloadRoutes(routes), 60_000);
@@ -103,6 +108,31 @@ describe('③ 旧代码 → 404 带 superseded_by（对齐后端）', () => {
   });
 });
 
+describe('日期窗：to 是包含末日的 date，不是午夜时间戳', () => {
+  it.each([
+    `from=${TRADE_DATE}&to=${TRADE_DATE}`,
+    `to=${TRADE_DATE}`,
+  ])('%s 保留当日全部分钟行情及数据时点', async (window) => {
+    const endpoint = '/securities/600000.SH/bars?freq=1m&adjust=none';
+    const baseline = await getBars(endpoint);
+    const bounded = await getBars(`${endpoint}&${window}`);
+    expect(baseline.status).toBe(200);
+    expect((baseline.body.items as unknown[]).length).toBeGreaterThan(0);
+    expect(bounded.status).toBe(200);
+    expect(bounded.body.items).toEqual(baseline.body.items);
+    expect(bounded.body.data_as_of).toBe(baseline.body.data_as_of);
+    expect(bounded.body.data_status).toBe(baseline.body.data_status);
+  });
+
+  it('from 在分钟行情日之后仍应返回真实空态，不能忽略日期窗', async () => {
+    const bounded = await getBars('/securities/600000.SH/bars?freq=1m&adjust=none&from=2030-01-01&to=2030-01-02');
+    expect(bounded.status).toBe(200);
+    expect(bounded.body.items).toEqual([]);
+    expect(bounded.body.data_as_of).toBeNull();
+    expect(bounded.body.data_status).toBe('unavailable');
+  });
+});
+
 describe('④ 页面层：空态不编造时间', () => {
   it('窗外无数据时不出现编造的具体「更新于 某个日期」', async () => {
     server.use(
@@ -116,8 +146,15 @@ describe('④ 页面层：空态不编造时间', () => {
       ),
     );
     renderAt('/stocks/600000.SH');
-    await screen.findByTestId('stock-page');
-    await waitFor(() => expect(screen.queryByText(/加载中/)).toBeNull());
-    expect(screen.queryByText(/更新于 20\d\d-/)).toBeNull();
+    const page = await screen.findByTestId('stock-page');
+    const head = await within(page).findByTestId('stock-head');
+    // 不能把ErrorBoundary替换掉原页面当作「没有更新时间」；同时要求头部与本响应空图正向在场。
+    await waitFor(() => expect(head).toHaveTextContent('10.24'));
+    const chart = within(page).getByTestId('price-chart');
+    expect(await within(chart).findByTestId('chart-empty')).toHaveTextContent('无分时数据');
+    expect(within(chart).getByTestId('chart-gap-note')).toHaveTextContent('行情读取源尚未接入（示例数据）');
+    expect(page).toContainElement(head);
+    expect(chart).not.toHaveTextContent(/更新于 20\d\d-/);
+    expect(document.body).not.toHaveTextContent(/Unexpected Application Error|Cannot read properties|TypeError/);
   });
 });

@@ -16,7 +16,15 @@
 
 `pages/pool-f08-bars-mock-alignment.test.tsx`：迁移 F-08 新增 8 例；`pages/t-f08.test.tsx` 按 origin/main 原 blob 恢复，全部历史用例保留。
 
-## 验证
+## 当前复核返修（优先于下方历史门禁）
+- RV独立重跑确认e7b0c40的8绿包含PriceChartPanel null.slice错误边界，原作者未检查运行期错误而误报页面通过。
+- 修复from/to为包含端点的日期比较：以bar.t前10位交易日期筛选，分钟末日不再被全过滤。新增同日from/to、仅to、未来空窗3例。
+- 原页面例改为正向等待stock-head消费10.24、图表chart-empty及响应特有gap；canvas桩透传空态，不允许ErrorBoundary替代页面仍通过。
+- 只含#57本头：日期边界修复后pool为10过1败/exit1，剩页面null.slice依赖#82@dff3c8c，明确阻断；不复制其guard、不改冻结#82。
+- 加强用例但未修过滤前：pool为8过3败/exit1，两日期边界及页面例真实红。
+- 临时隔离组合#57返修+#82的准确SHA、最终绿证、完整范围扫描见本次#57评论及F:\workspace\team\reports\F-08d-evidence\；下方旧8绿不作为当前放行依据。
+
+## 历史验证
 - 2026-11-11 11:14 MST：`vitest run src/pages/t-f08.test.tsx --reporter=verbose` exit 0，实际 **16/16**（原派单称13例，另有3条契约相关测试，未跳过）；`pool-f08-bars-mock-alignment.test.tsx` **8/8**，exit 0。
 - `tsc --noEmit -p tsconfig.test.json` exit 0；`pnpm run build` exit 0。原始日志：`F:\workspace\team\reports\F-08c-evidence\`。
 - `t-f08` 对 main blob 一致，历史测试删除/改写 **0**；#86 的 handlers blob 原样承接（仅相对原#57去重一块注释），8条新测试迁入 pool 文件；#86原报告归档到上述证据目录，旧报告关于向 t-f08 追加的说法作废。

@@ -31,7 +31,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 WINDOW_START = "2022-01-01"
-SZ_A_PREFIX = ("000", "001", "002", "003", "300", "301")
+SZ_A_PREFIX = ("000", "001", "002", "003", "300", "301", "302")
 SOURCE = {
     "name": "szse_ssgsgmxx_name_change_xlsx",
     "url": "https://www.szse.cn/api/report/ShowReport?SHOWTYPE=xlsx&CATALOGID=SSGSGMXX&TABKEY=tab2",
@@ -215,7 +215,7 @@ def main() -> int:
         "output": {"file": csv_path.name, "bytes": csv_path.stat().st_size, "sha256": sha256(csv_path)},
     }
     manifest_path = out / "st_history_sz_manifest.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
     print(json.dumps({"rows": rows, "stocks": len(intervals), "stocks_with_st": stocks_with_st,
                       "st_true_intervals": st_true, "csv_sha256": manifest["output"]["sha256"]},
                      ensure_ascii=False))

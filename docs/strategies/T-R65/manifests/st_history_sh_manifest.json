@@ -1,0 +1,137 @@
+{
+  "product": "st_history_sh",
+  "generated_at": "2026-11-11T10:13:02+08:00",
+  "window": {
+    "start": "2022-01-01",
+    "end": null
+  },
+  "format": "csv exchange,symbol,valid_from,valid_to,is_st (runner data.load_status_history)",
+  "rule": {
+    "events": "巨潮公告标题：撤销/实施（含「实行」）风险警示判切换；继续实施、叠加、进展、申请撤销中判「仍处于风险警示」断言；「可能被实施」先剔除",
+    "effective_date": "公告日后第一个交易日",
+    "padding": "置 true 提前 1 个交易日；置 false 延后 1 个交易日（保守多剔除）",
+    "baseline": "窗口起点状态取窗口前最后一条事件：切换按其值、断言按 true；无事件 → false（披露）",
+    "assertion_recovery": "窗口内状态为 false 却出现「仍处于风险警示」断言 → 保守补为 ST（公告日前一个交易日起），逐条入 manifest",
+    "coverage": "每只股票从窗口起点连续覆盖到开区间",
+    "not_mixed_with": [
+      "security_risk_flag_history"
+    ]
+  },
+  "pool": {
+    "stocks": 2396,
+    "source": "HF manifest 沪市 A 股前缀 + vipdoc sh/minline 补 VIPDOC-only"
+  },
+  "events": {
+    "files": [
+      {
+        "path": "cninfo_v2/events.jsonl",
+        "sha256": "d486668248df8abe000888b23330266743d7b1cc1b23a1ea55ad026d72881d65"
+      },
+      {
+        "path": "cninfo_2021/events.jsonl",
+        "sha256": "fcc0b5292ec08334685d2cac3684c607d48d1cb6407507bfc6fe670745d5f857"
+      }
+    ],
+    "per_stock_gapfix": [
+      {
+        "path": "cninfo_gapfix/per_stock.jsonl",
+        "sha256": "48fadc258044e7c046375b8024d1fccb99274c15ebb294ad886e449a60b5c5d4"
+      }
+    ]
+  },
+  "coverage": {
+    "stocks_covered": 2396,
+    "stocks_with_st": 225,
+    "st_true_intervals": 242,
+    "baseline_true_stocks": 73,
+    "assertion_recovered": 2,
+    "assertion_recovered_sample": [
+      [
+        "600593",
+        "2022-04-23",
+        "2022-04-25"
+      ],
+      [
+        "603729",
+        "2022-04-27",
+        "2022-04-27"
+      ]
+    ],
+    "events_after_calendar": 86,
+    "events_after_calendar_sample": [
+      [
+        "600080",
+        "2026-08-29"
+      ],
+      [
+        "600080",
+        "2026-09-30"
+      ],
+      [
+        "600080",
+        "2026-10-31"
+      ],
+      [
+        "600165",
+        "2026-08-15"
+      ],
+      [
+        "600165",
+        "2026-08-25"
+      ],
+      [
+        "600180",
+        "2026-08-25"
+      ],
+      [
+        "600180",
+        "2026-09-24"
+      ],
+      [
+        "600180",
+        "2026-10-24"
+      ],
+      [
+        "600187",
+        "2026-09-01"
+      ],
+      [
+        "600187",
+        "2026-10-08"
+      ]
+    ],
+    "rows": 2654
+  },
+  "outputs": {
+    "st_history_sh": {
+      "file": "st_history_sh.csv",
+      "sha256": "e6b220410456d430ce32afd4fcc669c6f9ddb693c91851a568094eea0dc653a3",
+      "rows": 2654
+    },
+    "st_history_merged": {
+      "file": "st_history.csv",
+      "sha256": "9500e791e176d22086d086486d67bccbeebe6cbb9d61a94755dbc80c6a5c2154",
+      "rows": 6208,
+      "sz_sha256": "1b91cf2f503f4b7f04d7d2c559329c9e5618eb0aba7a270b89901f980c4c371b"
+    }
+  },
+  "calibration_sz": {
+    "over_days": 2888,
+    "under_days": 790,
+    "missed_st_start_days": 2,
+    "missed_starts": [
+      [
+        "000610",
+        "2026-04-27"
+      ],
+      [
+        "002102",
+        "2026-04-30"
+      ]
+    ],
+    "sz_stocks": 3021,
+    "sz_stocks_with_events": 408,
+    "sz_baseline_true": 101,
+    "sz_assertion_recovered": 9
+  }
+}

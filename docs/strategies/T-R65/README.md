@@ -8,48 +8,91 @@
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| ① | 深市 ST 历史（深交所简称变更 → runner 输入） | **完成（本 PR）** |
-| ② | 已知子集三件套：沪市 ST（东财逐股倒排）、上市状态历史、沪深终止名单 | 进行中 |
-| ③ | runner 接线：三项输入 + coverage 非 null 预检 + 覆盖比例入 summary 首页 | 待做 |
+| ① | 深市 ST 历史（深交所简称变更 → runner 输入） | **完成**（补 302 号段，见下） |
+| ② | 已知子集三件套：沪市 ST、上市状态历史、沪深终止名单 | **完成**（P9 口径缺口待裁定） |
+| ③ | runner 接线：三项输入 + coverage 非 null 预检 + 覆盖比例入 summary 首页 | **完成** |
+
+## 产物清单（数据在 `data/retest-inputs/`，gitignored）
+
+| 产物 | 行数 | sha256 | 说明 |
+|---|---|---|---|
+| `st_history_sz.csv` | 3,554 | `1b91cf2f…c371b` | 深市，3,021 只 |
+| `st_history_sh.csv` | 2,654 | `e6b22041…653a3` | 沪市，2,396 只 |
+| `st_history.csv` | 6,208 | `9500e791…c2154` | 合并，5,417 只（runner `--st-history`） |
+| `listing_history.csv` | 5,627 | `6ea03f73…2b383` | 沪深上市状态（runner `--listing-history`） |
+| `termination_list.csv` | 337 | `48c6e743…186f` | 沪深终止名单（runner `--delisting-list`） |
+| `delisting_period.csv` | 106 | `cc838335…6bcd8` | 退市整理期起点（listing 构建输入 + 证据） |
+
+完整 sha256 与统计：`manifests/*_manifest.json`。
 
 ## ① 深市 ST 历史 → runner 输入
 
-**产物**（数据本体在仓库外，按 runner `--st-history` 路径传入）：
+- 来源：深交所「上市公司简称变更」xlsx（SSGSGMXX，全历史 1994-01-03 至 2026-11-10；sha256 `9291117a…`）。
+- 口径：`is_st` 仅当简称以 `*ST` / `ST` 开头（NFKC、去空白）；「退」不计 is_st；不与 `security_risk_flag_history` 混写。
+- 本轮修正：补 **302 号段**（中航成飞 302132，HF 池内），股票数 3,020 → 3,021、区间 3,553 → 3,554；sha 由 `869b9542…` 变为 `1b91cf2f…`。
 
-| 项 | 值 |
-|---|---|
-| 数据文件 | `data/retest-inputs/st_history_sz.csv`（gitignored，不入库） |
-| CSV sha256 | `869b9542af8571c614da8373fb01fba608a374e344855801c3aae42cda5bb9a1` |
-| 生成脚本 | `docs/strategies/T-R65/build_st_history_sz.py` |
-| manifest（入库） | `docs/strategies/T-R65/manifests/st_history_sz_manifest.json` |
-| 覆盖 | 3,020 只深市 A 股 × 3,553 个区间；372 只有 ST/*ST 段（399 段）；每只从 2022-01-01 连续覆盖到开区间 |
-| 来源 | 深交所「上市公司简称变更」xlsx（SSGSGMXX，全历史 1994-01-03 至 2026-11-10；sha256 `9291117a…`） |
+## ② 沪市 ST / 上市状态 / 终止名单
 
-**口径（对齐 `data.load_status_history`）**：
+### 沪市 ST 历史 `st_history_sh.csv`
 
-- CSV 列 `exchange,symbol,valid_from,valid_to,is_st`；`is_st ∈ {true,false}`；`valid_to` 空 = 开区间。
-- 窗口起点之前的状态取「最后一条 ≤ 2022-01-01 的变更」；之后每条变更开新段；无变更记录 → 全程 `false`（简称从未变化）。
-- `is_st=true` 仅当简称以 `*ST` / `ST` 开头（NFKC、去空白）；**「退」不计 is_st**（退市整理期由 listing-status 输入处理）。
-- **不与 `security_risk_flag_history` 混写**：本产物只来自深交所公开简称变更，独立 sha256 + manifest，不写库。
+- 来源：巨潮公告标题检索（9 类短语：撤销/实施/推行「退市」「其他」风险警示、被实施两类、进入退市整理期；窗口 2021-01-01~2026-11-10，两次抓取共 6,842 条，manifest 记每个响应 sha256）＋ 4 只已知缺口的逐股公告补漏（`--per-stock-jsonl`）。限流：单线程 1.0–1.2s/请求，0 失败。
+- 判读：按 `暨/及/并/、/，/。` 分句；只撤销 → false；撤销其一但继续/新实施另一类 → true；只实施 → true；「继续实施/叠加/进展/申请撤销中」判「仍处于风险警示」断言；「可能被实施」先剔除。
+- 日期：公告日后第一个交易日生效；保守外扩 1 个交易日（置 true 提前、置 false 延后）。窗口起点状态取窗口前最后一条事件（切换按其值、断言按 true）；窗口内出现「仍处于风险警示」断言而状态为 false → 保守补 ST 并逐条入 manifest。
+- 覆盖：2,396 只（HF 池 2,383 + vipdoc-only 13），2,654 区间，225 只有 ST/*ST（242 段）。
+- **校准（深市简称变更为真值，同日、同判读规则）**：over 2,888 股票日（0.09%）、under 790（0.025%）、窗口内启动段漏 2 只（000610、002102，均为 2026 年新增且公告未入索引）。
+- **收盘状态核对（交易所 2026-11-06 快照）**：剔除 33 只「窗口结束后另有事件」的股票后，2,361 只中 0 不一致。
+- 东财 F10 曾用名链：只做旁证。实测链不含当前简称、退市股返回 `--`，不能当权威；用它定位到 600198/600239/600807/688053 四只缺口，逐股公告补漏后修正。
 
-**复现**：
+### 上市状态历史 `listing_history.csv`
+
+- 覆盖 5,417 只（= T-B136 正式跑股票池），5,627 区间；状态 `listed` / `delisting_period`(106) / `delisted`(106)。
+- 起点 = max(2022-01-01, 上市日)；上市日后于窗口起点的 813 只，窗口前日期不覆盖（runner 记 `listing_status_unknown` 剔除并计数）。
+- 退市整理期起点：深市简称「退」段 62 只（与巨潮首公告核对，日差 0 或 +1~2 天）+ 巨潮首次「进入退市整理期」公告 44 只；来源混合时以简称段为先。
+- 86 只无整理期起点（多为交易类强制退市/主动退市）：`listed` 段截至终止日前 30 自然日，尾部不覆盖（`listing_status_unknown` 剔除并计数），逐只入 manifest `fallback_stocks`。
+
+### 终止名单 `termination_list.csv` 与整理期 `delisting_period.csv`
+
+- 337 行（SH 148 / SZ 189）。SZ 来自深交所终止上市导出（212 行，B 股 23 行不计、A 股 189 行）；SH 来自库内 `exchange_delist_list` 来源的 `delisted`+`delist_date`（148 行，含 2022 年前）。
+- 窗口内（2022-01-04~2026-08-06）188 行，**全部带巨潮「终止上市」公告 URL**（188/188）。
+- 交叉核对：深市 xlsx vs 库内日期 0 差异；窗口内名单与股票池 0 缺失（P9 `missing`=0）；整理期起点晚于最后一根 bar 的 0 只（P9 `truncated`=0）。
+- 整理期起点 = 首次「进入退市整理期」公告日（早于实际首日，保守），106 只；公告日到终止日中位数 31 自然日。
+
+### P9 口径缺口（**需要架构师/编排者裁定**）
+
+- 窗口内 188 只终止名单里，**83 只没有退市整理期公告**：43 只有面值/市值类关键词、7 只明示交易类强制退市、21 只主动退市/吸收合并、12 只无标题证据（逐股明细 `manifests/p9_no_delisting_period_evidence.json`）。这批股票的最后一根 bar 距终止日 1–3 自然日（与有整理期组一致），无尾段缺失。
+- 按当前 `judgement._delisting` 实现，找不到 `delisting_period` 区间即记 unknown → **P9=unknown → 重跑结论会是 `data_insufficient`**，与数据质量无关，是口径问题。
+- 建议（供裁定）：把「终止上市公告未披露整理期且最后一根 bar 距终止日 ≤5 自然日」记为 P9 通过证据（`reason=no_delisting_period_disclosed`），或在 P9 分母中剔除并披露。数据侧已备好证据清单，代码改动需架构师定。
+
+## ③ runner 接线
+
+- `runner_data.require_status_inputs`：`st_history` / `listing_history` / `delisting_list` 任一缺失 → `DataFormatError` 拒绝执行。
+- `preflight`：`st_coverage` / `listing_coverage` / `termination_list` 任一为空 → 拒绝（T-A154，防「输入给了没吃」）。
+- `StockCache.prepare` 累计按交易所按年计数，`summary.json` 首页新增 `coverage`：`by_exchange_year` / `by_exchange` 的 `st_known_share`、`listing_known_share`、`st_true_share`、`delisting_period_share`。
+- 测试：`tests/backend/retest/test_status_inputs.py` 8 例（预检拒绝、load_status_history 契约、覆盖比例算术、空分母）；`tests/backend/retest` 全套 32 例通过。
+
+## 自检
 
 ```bash
-uv run --no-project --with openpyxl==3.1.5 python docs/strategies/T-R65/build_st_history_sz.py \
-  --xlsx <szse_name_change.xlsx> \
+# 三件套结构 + P9 就绪度（只读 data/，不联网）
+uv run --no-project python docs/strategies/T-R65/check_status_inputs.py \
+  --st data/retest-inputs/st_history.csv --listing data/retest-inputs/listing_history.csv \
+  --delisting data/retest-inputs/termination_list.csv \
   --hf-manifest data/hf-1min/2022plus/manifest_files.csv \
-  --vipdoc-dir <vipdoc/sz/minline> \
-  --out-dir data/retest-inputs
+  --coverage-csv data/hf-1min/raw/metadata/coverage_by_instrument.csv \
+  --securities-csv <securities 导出> \
+  --calendar data/hf-1min/raw/metadata/market_calendar.csv
 ```
 
-## ② 已知子集三件套（进行中，待补）
+## 复现（抓取脚本，全部只读公开源）
 
-- 沪市 ST：东财逐股礼貌拉取，按「ST 不明股票-日」清单倒排子集（限流纪律照旧）→ `st_history_sh.csv`；与 ① 合并为 runner 的 `st_history.csv`。
-- 上市状态历史：库内表（IPO/退市日期等）+ 区间外 unknown 剔除计数（沪深都做）。
-- 终止名单：沪深交易所公告页一次做全，人工核对带 URL（177+99 只）。
-
-## ③ runner 接线（待做）
-
-- 接入 `--st-history` / `--listing-history` / `--delisting-list` 三项输入；
-- **coverage 三项非 null 预检**（`st_coverage` / `listing_coverage` / `termination_list_sha256` 任一为 null → 拒绝执行，防「输入给了没吃」静默空转）；
-- 覆盖比例按交易所按年强制写入 summary 首页。
+```bash
+# 关键词事件（2021 与 2022-2026 两段；沪市 ST 主来源）
+uv run --no-project python docs/strategies/T-R65/fetch_cninfo_st_events.py --out <dir> --sdate 2022-01-01 --edate 2026-11-10
+uv run --no-project python docs/strategies/T-R65/fetch_cninfo_st_events.py --out <dir> --sdate 2021-01-01 --edate 2021-12-31
+# 逐股公告（终止名单 URL + 整理期起点；orgId 自动解析）
+uv run --no-project python docs/strategies/T-R65/fetch_cninfo_per_stock.py --codes-file <终止名单窗口 CSV> --out <dir>
+# 构建
+uv run --no-project python docs/strategies/T-R65/build_termination_list.py --szse-xlsx <szse_delist.xlsx> --securities-csv <sec.csv> --per-stock-jsonl <per_stock.jsonl> --out-dir data/retest-inputs
+uv run --no-project python docs/strategies/T-R65/build_listing_history.py --hf-manifest … --securities-csv … --name-history-csv … --coverage-csv … --delisting-period-csv … --vipdoc-sh … --vipdoc-sz … --out-dir data/retest-inputs
+uv run --no-project python docs/strategies/T-R65/build_st_history_sh.py --events … --per-stock-jsonl … --hf-manifest … --vipdoc-dir … --calendar … --sz-csv … --securities-csv … --out-dir data/retest-inputs
+```

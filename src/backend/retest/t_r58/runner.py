@@ -39,6 +39,7 @@ class StockCache:
             "listing": [],
             "last_bars": {},
             "exrights": [],
+            "coverage_counters": {},
         }
 
     def prepare(self) -> None:
@@ -59,6 +60,11 @@ class StockCache:
             stock_days.update(reasons["stock_days"])
             for year, counts in reasons["all"].items():
                 exclusions.setdefault(year, Counter()).update(counts)
+            for year, day_count in reasons["stock_days"].items():
+                counter = self.quality["coverage_counters"].setdefault((stock.exchange, int(year)), Counter())
+                counter["stock_days"] += day_count
+                for name in ("st", "st_unknown", "listing_status_unknown", "delisting_period"):
+                    counter[name] += reasons["all"].get(year, {}).get(name, 0)
             bar_quality.update(
                 {
                     name: evidence[name]
@@ -82,6 +88,7 @@ class StockCache:
         self.quality["exclusions"] = exclusions
         self.quality["stock_days"] = stock_days
         self.quality["bar_quality"] = bar_quality
+        self.quality["status_coverage"] = runner_data.coverage_ratios(self.quality["coverage_counters"])
 
     def stocks(self, segments: list[sim.Segment]) -> Iterator[sim.StockInput]:
         dates = self.prepared.dates
@@ -391,6 +398,7 @@ def run(paths: runner_data.ResearchPaths, destination: Path, *, workers: int = 8
                 summary={
                     "plan": config["plan"],
                     "data": prepared.evidence,
+                    "coverage": cache.quality["status_coverage"],
                     "segments": prepared.evidence["segments"],
                     "seed": config["stats"]["seed"],
                     "splice": cache.quality["splice"],

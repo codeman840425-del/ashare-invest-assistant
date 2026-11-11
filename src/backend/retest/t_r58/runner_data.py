@@ -21,6 +21,45 @@ from .errors import DataFormatError
 CALENDAR_SHA = "af18d0298024c4e38f44aaf1ac35347d6e044a513f9cba9c26b23fdd64aa330b"
 DAILY_ANCHOR_POLICY = "minute_stock_days_intersect_hsjday_coverage"
 _EPOCH = date(1970, 1, 1)
+STATUS_INPUTS = ("st_history", "listing_history", "delisting_list")
+
+
+def require_status_inputs(paths: ResearchPaths) -> None:
+    """T-A154：三项状态输入缺一不可，缺任一项直接拒绝执行（防「输入给了没吃」静默空转）。"""
+    missing = [name for name in STATUS_INPUTS if getattr(paths, name) is None]
+    if missing:
+        raise DataFormatError(f"T-A154: 状态输入缺失 {missing}，拒绝执行")
+
+
+def coverage_ratios(counters: dict[tuple[str, int], dict[str, int]]) -> dict:
+    """把 (exchange, year) 股票日计数折算成覆盖比例；比例 = 1 - unknown / stock_days。"""
+    def ratio(counter: dict[str, int], name: str) -> float | None:
+        total = counter.get("stock_days", 0)
+        return round(1 - counter.get(name, 0) / total, 6) if total else None
+
+    def row(key_exchange: str, year: int | None, counter: dict[str, int]) -> dict:
+        return {
+            "exchange": key_exchange,
+            "year": year,
+            "stock_days": counter.get("stock_days", 0),
+            "st_known_share": ratio(counter, "st_unknown"),
+            "listing_known_share": ratio(counter, "listing_status_unknown"),
+            "st_true_share": round(counter.get("st", 0) / counter["stock_days"], 6) if counter.get("stock_days") else None,
+            "delisting_period_share": round(counter.get("delisting_period", 0) / counter["stock_days"], 6) if counter.get("stock_days") else None,
+        }
+
+    by_year = [row(exchange, year, counter) for (exchange, year), counter in sorted(counters.items())]
+    totals: dict[str, dict[str, int]] = {}
+    for (exchange, _year), counter in counters.items():
+        target = totals.setdefault(exchange, {})
+        for name, value in counter.items():
+            target[name] = target.get(name, 0) + value
+    return {
+        "method": "比例 = 1 - unknown/stock_days；stock_days = 该交易所该年全部股票日",
+        "by_exchange_year": by_year,
+        "by_exchange": [row(exchange, None, counter) for exchange, counter in sorted(totals.items())],
+    }
+
 
 
 @dataclass(frozen=True)
@@ -130,6 +169,7 @@ def _stock_pool(
 
 
 def preflight(paths: ResearchPaths, config: data.Summary, *, workers: int = 8) -> Prepared:
+    require_status_inputs(paths)
     single: inputs.VipdocInput | None
     main: inputs.VipdocInput | inputs.LocalVipdoc
     if paths.live_vipdoc is not None:
@@ -218,6 +258,18 @@ def preflight(paths: ResearchPaths, config: data.Summary, *, workers: int = 8) -
         else None,
         "gbbq_revision_bias": "unable_to_verify",
     }
+    # T-A154：coverage 三项必须非 null，否则说明输入没被吃到，拒绝静默空转。
+    empty = [
+        name
+        for name, value in (
+            ("st_coverage", st_coverage),
+            ("listing_coverage", listing_coverage),
+            ("termination_list", meta["termination_list"]),
+        )
+        if not value
+    ]
+    if empty:
+        raise DataFormatError(f"T-A154: coverage 预检失败 {empty}（输入缺失或为空）")
     return Prepared(
         dates,
         segments,

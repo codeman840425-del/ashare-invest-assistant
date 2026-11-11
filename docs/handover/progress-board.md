@@ -11,6 +11,10 @@ T-T23 在用户电脑 8080 上做了 86 项 HTTP/API 核查：通过 16、失败
 7. 界面层 44 项需要用户机上可操作的浏览器才能测。
 明细：team/reports/T-T23.md、T-T23-check-results.md、T-T24.md；清单 team/tasks/T-T23-checklist.md。
 
+## 0.8 测试池T-07隔离路径参数化（2026-11-11）
+- ds/T07冻结代码34ec476：T-B63隔离身份三参数完整覆盖、socket与调用方一致、Windows只跳过真PG用例；none网络/精确卷与共享挂载拒绝保留。
+- Windows60过/1平台skip，Linux合成身份31过；真实PG/Redis及旧closeout未执行，不能据此宣称第二梯设施已恢复。方案/责任与报告见runbook/POOL-T07-integration-resource-plan.md和team/reports/POOL-T07.md，仅本地未推送。
+
 ## 1. 阶段完成度：按能力与门槛，不填无依据百分比
 | 阶段 | 已有能力/证据 | 未完成的阶段门槛 |
 |---|---|---|

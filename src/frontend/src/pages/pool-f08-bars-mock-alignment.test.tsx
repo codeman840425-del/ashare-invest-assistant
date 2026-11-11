@@ -146,8 +146,9 @@ describe('④ 页面层：空态不编造时间', () => {
       ),
     );
     renderAt('/stocks/600000.SH');
-    const page = await screen.findByTestId('stock-page');
-    const head = await within(page).findByTestId('stock-head');
+    const head = await screen.findByTestId('stock-head');
+    // 加载分支与成功分支的stock-page节点会替换；成功内容出现后再获取当前容器。
+    const page = screen.getByTestId('stock-page');
     // 不能把ErrorBoundary替换掉原页面当作「没有更新时间」；同时要求头部与本响应空图正向在场。
     await waitFor(() => expect(head).toHaveTextContent('10.24'));
     const chart = within(page).getByTestId('price-chart');

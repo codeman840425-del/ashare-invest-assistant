@@ -9,7 +9,7 @@
 - 定点9 passed/6 deselected：含hypothesis真实属性测试、会话边界与坏响应契约负例；未跑live契约请求、PG/Redis fixture或全量测试体/coverage。
 - 收集命令：python tests/tools/check_collection.py --output <证据路径>；两环境以PYTHONPATH是否包含上述外部目录区分；仅collect-only。
 - 基线对照：T-02为1596项/4错；T-03缺包时增加2条milestone用例至1598，四个原错误全部清零。
-- lint：四个文件基线与修复后各42条继承诊断，按文件/规则/消息多重集比较无新增；未宣称全量ruff绿，未夹带格式清理。
+- lint：四文件基线42条、最终41条继承诊断（去除schemathesis直接import后少一条布局诊断），按文件/规则/消息多重集比较无新增；未宣称全量ruff绿，未夹带格式清理。
 - 原始日志/JSON：F:/workspace/team/status/T03-{missing-collection,present-collection}.{json,log}、T03-present-tests.log、T03-ruff-{before,after}.json。
 - secret_scan改动代码与文档0阻断/0告警、git diff --check通过；无业务代码修改、无真实数据读取/麦蕊调用/共享库连接/栈变更。
 - 遗留：缺依赖环境的三个模块业务测试未执行；完整测试依赖已在场环境只做收集+9项离线定点，不代替完整业务验收；专用数据库设施仍另单。

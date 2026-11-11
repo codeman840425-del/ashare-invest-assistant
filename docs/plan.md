@@ -1182,7 +1182,7 @@ class NotificationChannel(Protocol):
     def render(self, n: Notification, detail_level: Literal["full","summary","ping"]) -> RenderedMessage
 ```
   `notifications`（每用户一条通知）→ 按 `notification_preferences` 选择渠道 → `notification_deliveries`（每渠道一次投递：`queued/sent/failed/retrying/dropped`，`attempts`、`next_retry_at`、`error`）。重试：指数退避 3 次；permanent 错误（如绑定失效）自动停用绑定并站内提醒。
-- **频控与免打扰**：每用户每渠道每分钟 / 每小时上限（配置，默认外部渠道 5/分钟、30/小时）；同一股票同一类事件 10 分钟内合并（站内语义见契约 §7.11.4「通知合并与推送节奏」，T-A28）；免打扰时段内外部渠道只累积，结束后发摘要（站内照常）；严重级别 `important`（如失效条件触发）可设置"免打扰期间仍发送"。
+- **频控与免打扰**：每用户每渠道每分钟 / 每小时上限（配置，默认外部渠道 5/分钟、30/小时）；同一股票同一类事件 10 分钟内合并（站内语义见契约 §7.11.4「通知合并与推送节奏」，T-A28；完整 `Notification` 投影以契约 §5.1 同步既有 T-A28/T-A31 四字段 `merged_count`、`updated_at`、`refs`、`version`，旧记录按其既定默认值投影；契约 §3 同步登记 T-A31 既有 `notification_ref_type=signal|plan_condition`，本轮仅补全结构/枚举登记，不新增合并或版本行为）；免打扰时段内外部渠道只累积，结束后发摘要（站内照常）；严重级别 `important`（如失效条件触发）可设置"免打扰期间仍发送"。
 - **外部渠道内容最小化**：默认 `detail_level = summary`（"您关注的 1 只股票触发失效条件，请登录查看"），不在第三方渠道发送持仓数量、成本、金额。
 
 **微信类渠道评估（2026-11-01 网页核实；未实测）**

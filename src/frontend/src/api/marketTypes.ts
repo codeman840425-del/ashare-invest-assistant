@@ -108,8 +108,13 @@ export interface FactorValue {
 export interface FactorsResponse extends Sourced {
   security_code: string;
   name: string;
-  trade_date: DateStr;
-  factor_set_version: string;
+  /**
+   * T-A158（F-10）：无因子批次时 `trade_date` 为 null（请求带合法 `trade_date` 时原样透传）；
+   * `factor_set_version` 在没有真实因子集版本时也为 null——**合成本不得进入生产响应**，
+   * 因此前端不得用任何常量兜底，只能如实显示「未知」。
+   */
+  trade_date: DateStr | null;
+  factor_set_version: string | null;
   counts: { total: number; by_category: Record<FactorCategory, number> };
   items: FactorValue[];
 }

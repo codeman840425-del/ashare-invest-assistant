@@ -285,15 +285,25 @@ const routeHandlers = [
     const f = fundFlows(code, days);
     return f ? HttpResponse.json(degrade(f, 'fund_flows')) : notFound('证券');
   }),
-  http.get(`${API}/securities/:code/factors`, async ({ params }) => {
+  http.get(`${API}/securities/:code/factors`, async ({ params, request }) => {
     await lag();
+    // F-12 / #71：后端强制 `value.trade_date === query.trade_date`——请求带合法 trade_date 时原样透传，
+    // 不带则为 null。mock 必须同口径，否则联调时看不出「透传」这条契约。
+    const requestedDate = new URL(request.url).searchParams.get('trade_date');
+    if (requestedDate !== null && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+      return validation('trade_date', 'trade_date 须为 YYYY-MM-DD');
+    }
     if (isEtf(String(params.code))) {
+      // F-10 / T-A158：ETF 同形空态，gap=not_applicable；两个字段为 null，不下发合成版本
       return HttpResponse.json({
-        ...etfNotApplicable(String(params.code), 'factors'), trade_date: '2026-10-30', factor_set_version: 'mr-factors-85（示例）', counts: { total: 0, by_category: {} },
+        ...etfNotApplicable(String(params.code), 'factors'), trade_date: requestedDate, factor_set_version: null, counts: { total: 0, by_category: {} },
       });
     }
     const f = factors(String(params.code));
-    return f ? HttpResponse.json(f.items.length ? degrade(f, 'factors') : f) : notFound('证券');
+    if (!f) return notFound('证券');
+    // 空态（无因子批次）：透传请求日期；有数据时同样以请求日期为准（后端如此）
+    if (!f.items.length) return HttpResponse.json({ ...f, trade_date: requestedDate });
+    return HttpResponse.json(degrade({ ...f, trade_date: requestedDate ?? f.trade_date }, 'factors'));
   }),
   http.get(`${API}/securities/:code/announcements`, async ({ params, request }) => {
     await lag();

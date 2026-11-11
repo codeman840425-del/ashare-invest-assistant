@@ -16,11 +16,13 @@ from pathlib import Path
 def main() -> int:
     out = Path(sys.argv[1])
     sys.path.insert(0, str(Path.cwd()))
+    from app.config import Settings
+    from app.main import create_app
     from fastapi.testclient import TestClient
 
-    from app.main import create_app
-
-    with TestClient(create_app()) as client:
+    # Export static route data before CI migrations; never inherit database/Redis access.
+    settings = Settings(app_env="test", database_url=None, redis_url=None, _env_file=None)
+    with TestClient(create_app(settings)) as client:
         prefix = client.app.openapi_url.rsplit("/", 1)[0]  # type: ignore[attr-defined]
         resp = client.get(f"{prefix}/meta/enums")
     if resp.status_code != 200:

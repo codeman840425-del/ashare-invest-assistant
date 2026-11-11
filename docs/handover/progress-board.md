@@ -11,6 +11,10 @@ T-T23 在用户电脑 8080 上做了 86 项 HTTP/API 核查：通过 16、失败
 7. 界面层 44 项需要用户机上可操作的浏览器才能测。
 明细：team/reports/T-T23.md、T-T23-check-results.md、T-T24.md；清单 team/tasks/T-T23-checklist.md。
 
+## 0.1 测试基础设施池单 T-01（2026-11-11）
+- ds/T01 代码冻结 0ac8553：两个 POSIX 探针 selfcheck 在 Windows 导入前显式跳过；T-B70 按迁移图唯一 head 核版本（基线 465e020 实际为 0034），零头/多头均拒绝。
+- 定点：Windows 6 通过/2 模块平台跳过，Linux 47 通过/0 跳过；未跑专用 PG/Redis 集成。仅本地未推送/未合入；剩余设施依赖见 team/reports/POOL-T01.md。
+
 ## 1. 阶段完成度：按能力与门槛，不填无依据百分比
 | 阶段 | 已有能力/证据 | 未完成的阶段门槛 |
 |---|---|---|

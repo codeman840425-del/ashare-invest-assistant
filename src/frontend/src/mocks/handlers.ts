@@ -101,10 +101,7 @@ function degrade<T extends Block>(body: T, key: string, mode: 'stale' | 'unavail
   return mode === 'unavailable' && 'items' in out ? { ...out, items: [] } : out;
 }
 
-/**
- * F-08：旧代码 → 新代码。对齐后端 B-04（bars_read.PlaceholderBarsReader 查 security_code_history）。
- * 从示例证券档案的 code_history 推导，不手写编造。
- */
+
 /**
  * F-08：旧代码 → 新代码。对齐后端 B-04（bars_read.PlaceholderBarsReader 查 security_code_history）。
  * 从示例证券档案的 code_history 推导，不手写编造。

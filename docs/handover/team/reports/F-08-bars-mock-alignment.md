@@ -14,11 +14,13 @@
 3. **日期窗内无数据 → 对齐后端 `empty_bars()`**：`200 + unavailable + no_source + data_as_of=null`，不是 404、不编造时间。
 4. **停牌 ≠ 无源**：停牌证券保留历史 K 线与 `data_as_of`，测试专门守住这条，避免误清空。
 
-`pages/t-f08.test.tsx`（新）：8 例。
+`pages/pool-f08-bars-mock-alignment.test.tsx`：迁移 F-08 新增 8 例；`pages/t-f08.test.tsx` 按 origin/main 原 blob 恢复，全部历史用例保留。
 
 ## 验证
-- `t-f08` **8/8**；`t-f03`（含个股/市场）**14/14**
-- `secret_scan` 2 文件 0 命中；`git diff --check` 干净
+- 2026-11-11 11:14 MST：`vitest run src/pages/t-f08.test.tsx --reporter=verbose` exit 0，实际 **16/16**（原派单称13例，另有3条契约相关测试，未跳过）；`pool-f08-bars-mock-alignment.test.tsx` **8/8**，exit 0。
+- `tsc --noEmit -p tsconfig.test.json` exit 0；`pnpm run build` exit 0。原始日志：`F:\workspace\team\reports\F-08c-evidence\`。
+- `t-f08` 对 main blob 一致，历史测试删除/改写 **0**；#86 的 handlers blob 原样承接（仅相对原#57去重一块注释），8条新测试迁入 pool 文件；#86原报告归档到上述证据目录，旧报告关于向 t-f08 追加的说法作废。
+- 最终完整PR范围扫描与diff检查结果以#57修复提交评论为准，不复用旧扫描计数。
 - **既有失败已隔离**：`src/mocks/contract.test.ts` 的 `Notification` 用例在**干净基线**上同样失败（stash 前后对照），与本单无关，未修（越界），移交记录
 
 ## 移交项

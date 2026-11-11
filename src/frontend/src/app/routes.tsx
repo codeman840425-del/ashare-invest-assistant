@@ -13,7 +13,6 @@ const lazyPage = <M,>(load: () => Promise<M>, pick: (m: M) => React.ComponentTyp
 
 /** 契约 §4 / plan 规划的页面；未实现的先给占位 */
 export const PLACEHOLDERS: [string, string][] = [
-  ['strategies/:id', '策略详情'],
   ['strategy-cards', '策略知识卡'],
   ['strategy-instances', '我的策略实例'],
   ['restrictions', '禁投 / 冷静期 / 屏蔽'],
@@ -51,6 +50,8 @@ export const routes: RouteObject[] = [
       { path: 'settings/profile', lazy: lazyPage(() => import('../pages/settings/ProfilePage'), (m) => m.ProfilePage) },
       { path: 'settings/data-licence', lazy: lazyPage(() => import('../pages/settings/DataLicencePage'), (m) => m.DataLicencePage) },
       { path: 'strategies', lazy: lazyPage(() => import('../pages/strategies/StrategiesPage'), (m) => m.StrategiesPage) },
+      // F-05：策略详情按不可变版本展示（契约 §7.4 /strategies/{id}/versions/{vid}；通知路由带 ?version=）
+      { path: 'strategies/:id', lazy: lazyPage(() => import('../pages/strategies/StrategyDetailPage'), (m) => m.StrategyDetailPage) },
       { path: 'candidate-signals', lazy: lazyPage(() => import('../pages/signals/CandidateSignalsPage'), (m) => m.CandidateSignalsPage) },
       { path: 'candidate-signals/:id', lazy: lazyPage(() => import('../pages/signals/CandidateSignalDetailPage'), (m) => m.CandidateSignalDetailPage) },
       { path: 'candidates', lazy: lazyPage(() => import('../pages/research/CandidatesPage'), (m) => m.CandidatesPage) },

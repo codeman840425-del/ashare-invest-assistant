@@ -2,7 +2,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from './client';
 import type { Paged } from './types';
-import type { StrategyInstance, StrategyInstanceCreate, StrategyInstanceCreated, StrategyTemplate } from './strategyTypes';
+import type { StrategyInstance, StrategyInstanceCreate, StrategyInstanceCreated, StrategyTemplate, StrategyTracking, StrategyVersionDetail } from './strategyTypes';
 
 export const sk = { templates: ['strategies'] as const, instances: ['strategy-instances'] as const };
 
@@ -30,6 +30,36 @@ export const useStrategyTemplates = () =>
   useQuery({ queryKey: sk.templates, queryFn: ({ signal }) => fetchAllPages<StrategyTemplate>('/strategies', signal) });
 export const useStrategyInstances = () =>
   useQuery({ queryKey: sk.instances, queryFn: ({ signal }) => fetchAllPages<StrategyInstance>('/strategy-instances', signal) });
+
+/**
+ * F-05：契约 §7.4 `GET /strategies/{id}/versions/{vid}`（不可变配置）。
+ * 注意：后端**没有** `GET /strategies/{id}` 单端点，详情必须带版本 id（通知里的
+ * `/strategies/{strategy_id}?version={vid}` 就是这个口径）。
+ */
+export const useStrategyVersionDetail = (strategyId: string | undefined, versionId: string | undefined) =>
+  useQuery({
+    queryKey: ['strategy-version', strategyId ?? '', versionId ?? ''],
+    queryFn: ({ signal }) =>
+      apiGet<StrategyVersionDetail>(
+        `/strategies/${encodeURIComponent(strategyId!)}/versions/${encodeURIComponent(versionId!)}`,
+        undefined,
+        signal,
+      ),
+    enabled: Boolean(strategyId && versionId),
+  });
+
+/** 契约 §7.4 tracking：策略页展示全站汇总（scope=site，只含策略级聚合，不含他人数据） */
+export const useSiteStrategyTracking = (strategyId: string | undefined, versionId: string | undefined) =>
+  useQuery({
+    queryKey: ['strategy-tracking', 'site', strategyId ?? '', versionId ?? ''],
+    queryFn: ({ signal }) =>
+      apiGet<StrategyTracking>(
+        `/strategies/${encodeURIComponent(strategyId!)}/versions/${encodeURIComponent(versionId!)}/tracking`,
+        { scope: 'site' },
+        signal,
+      ),
+    enabled: Boolean(strategyId && versionId),
+  });
 
 export function useCreateStrategyInstance() {
   const qc = useQueryClient();

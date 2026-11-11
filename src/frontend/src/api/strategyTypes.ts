@@ -86,3 +86,58 @@ export interface StrategyTracking extends DataStatusBlock {
   scope: 'mine' | 'site';
   by_horizon: StrategyTrackingRow[];
 }
+
+/**
+ * F-05：契约 §7.4 `GET /strategies/{id}/versions/{vid}`（不可变配置，plan §2.5.14 C 节）
+ * 后端 app/api/v1/strategy_cards.py version_detail：`{**config, lifecycle, card_version_id, risk_level,
+ * param_hash, parent_version_id, internal_check}`。
+ *
+ * `config` 各块按 plan C 节定义；未列出的块用 `unknown` 承接，避免为展示捏造字段。
+ */
+export interface StrategyParamsSchemaField {
+  type: string;
+  default?: unknown;
+  min?: number | null;
+  max?: number | null;
+  step?: number | null;
+  desc?: string | null;
+}
+
+/** plan C 节 `rules[]` 元素（role ∈ entry/hold/weakening/exit/filter/veto/counter/invalidation） */
+export interface StrategyRule {
+  id: string;
+  dimension: string;
+  role: string;
+  expr: string;
+  weight: number;
+  required_features: string[];
+}
+
+/** 方案 A：用户只看到是否做过内部检验、方法类型和日期，**不含任何数值或通过与否** */
+export interface InternalCheck {
+  done: boolean;
+  method_types: ('factor_ic' | 'event_study' | 'param_robustness')[];
+  checked_on: string | null;
+}
+
+export interface StrategyVersionDetail {
+  key: string;
+  version_no: number;
+  kind: string;
+  horizons: Horizon[];
+  params_schema: Record<string, StrategyParamsSchemaField>;
+  rules: StrategyRule[];
+  action_map?: Record<string, string> | null;
+  stops?: { stop_loss: string | null; take_profit: string | null; time_stop_days: number | null } | null;
+  dimension_view_thresholds?: Record<string, number> | null;
+  applicability?: Record<string, unknown> | null;
+  valid_until?: Record<string, unknown> | null;
+  screen?: unknown;
+  /** 展示附加字段（后端 version_detail 补出） */
+  lifecycle: Lifecycle;
+  card_version_id: string | null;
+  risk_level: CardRiskLevel;
+  param_hash: string;
+  parent_version_id: string | null;
+  internal_check: InternalCheck;
+}

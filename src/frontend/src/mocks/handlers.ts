@@ -12,6 +12,7 @@ import type { SectorKind } from '../api/marketTypes';
 import { accountHandlers } from './accountHandlers';
 import { openQuoteMissingFor, quarantinedCodes, reconHandlers } from './reconMock';
 import { resetStrategies, strategyHandlers } from './strategyHandlers';
+import { strategyVersionHandlers } from './strategyVersionHandlers';
 import { reasonsNow, resetSignals, signalHandlers, signalsNow } from './signalHandlers';
 import { draftsNow, planHandlers, resetPlanDrafts } from './planHandlers';
 import { candidateHandlers, resetCandidates } from './candidateHandlers';
@@ -152,6 +153,8 @@ const routeHandlers = [
   // 策略库最小模拟（T-F22，见 strategyHandlers.ts）
   ...promotionHandlers,
   ...strategyHandlers,
+  // 策略版本详情（F-05）。必须排在 strategyHandlers 之后：更具体的 /versions/:vid/tracking 先注册
+  ...strategyVersionHandlers,
   http.get(`${API}/health/ready`, () => HttpResponse.json(HEALTH_READY)),
 
   http.get(`${API}/terminal`, async ({ request }) => {

@@ -15,6 +15,10 @@ T-T23 在用户电脑 8080 上做了 86 项 HTTP/API 核查：通过 16、失败
 - ds/T01 代码冻结 0ac8553：两个 POSIX 探针 selfcheck 在 Windows 导入前显式跳过；T-B70 按迁移图唯一 head 核版本（基线 465e020 实际为 0034），零头/多头均拒绝。
 - 定点：Windows 6 通过/2 模块平台跳过，Linux 47 通过/0 跳过；未跑专用 PG/Redis 集成。仅本地未推送/未合入；剩余设施依赖见 team/reports/POOL-T01.md。
 
+## 0.4 测试池 T-04 Windows迁移预研（2026-11-11）
+- 事实冻结59d88a9/代码0ac8553：56实例盘点，replay6项当前可Win直跑；B86四项纯逻辑候选须先拆无POSIX入口，不能删除module skip即宣称覆盖。
+- 不改selfcheck/probes、不执行测试/真库；replay另外3项为写入型专库集成，设施/身份/清理责任另派。迁移清单见team/reports/POOL-T04.md及runbook/POOL-T04-windows-selfcheck-migration.md，文档仅本地未推送。
+
 ## 1. 阶段完成度：按能力与门槛，不填无依据百分比
 | 阶段 | 已有能力/证据 | 未完成的阶段门槛 |
 |---|---|---|

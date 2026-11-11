@@ -44,11 +44,20 @@ def coverage_ratios(counters: dict[tuple[str, int], dict[str, int]]) -> dict:
             "stock_days": counter.get("stock_days", 0),
             "st_known_share": ratio(counter, "st_unknown"),
             "listing_known_share": ratio(counter, "listing_status_unknown"),
-            "st_true_share": round(counter.get("st", 0) / counter["stock_days"], 6) if counter.get("stock_days") else None,
-            "delisting_period_share": round(counter.get("delisting_period", 0) / counter["stock_days"], 6) if counter.get("stock_days") else None,
+            "st_true_share": (
+                round(counter.get("st", 0) / counter["stock_days"], 6)
+                if counter.get("stock_days") else None
+            ),
+            "delisting_period_share": (
+                round(counter.get("delisting_period", 0) / counter["stock_days"], 6)
+                if counter.get("stock_days") else None
+            ),
         }
 
-    by_year = [row(exchange, year, counter) for (exchange, year), counter in sorted(counters.items())]
+    by_year = [
+        row(exchange, year, counter)
+        for (exchange, year), counter in sorted(counters.items())
+    ]
     totals: dict[str, dict[str, int]] = {}
     for (exchange, _year), counter in counters.items():
         target = totals.setdefault(exchange, {})
@@ -57,7 +66,9 @@ def coverage_ratios(counters: dict[tuple[str, int], dict[str, int]]) -> dict:
     return {
         "method": "比例 = 1 - unknown/stock_days；stock_days = 该交易所该年全部股票日",
         "by_exchange_year": by_year,
-        "by_exchange": [row(exchange, None, counter) for exchange, counter in sorted(totals.items())],
+        "by_exchange": [
+            row(exchange, None, counter) for exchange, counter in sorted(totals.items())
+        ],
     }
 
 

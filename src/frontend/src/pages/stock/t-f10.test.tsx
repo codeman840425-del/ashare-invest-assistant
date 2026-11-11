@@ -98,3 +98,36 @@ describe('③ 页面层：null 时显示「未知」，不拿常量兜底', () =
     expect(screen.getByTestId('tab-factors').textContent).not.toMatch(/截面日 未知/);
   });
 });
+
+describe('④ trade_date 原样透传（F-12 / #71）', () => {
+  it('请求带合法 trade_date → 响应原样返回该日期（指数空态）', async () => {
+    const body = await getFactors('/securities/000300.SH/factors?trade_date=2026-09-15');
+    expect(body.trade_date).toBe('2026-09-15');
+    // 透传不影响其它空态语义：因子集仍为 null、items 仍为空
+    expect(body.factor_set_version).toBeNull();
+    expect(body.items).toEqual([]);
+  });
+
+  it('不带 trade_date → 为 null（不透传、不编造）', async () => {
+    const body = await getFactors('/securities/000300.SH/factors');
+    expect(body.trade_date).toBeNull();
+  });
+
+  it('ETF 空态同样透传请求日期', async () => {
+    const body = await getFactors('/securities/510300.SH/factors?trade_date=2026-09-15');
+    expect(body.trade_date).toBe('2026-09-15');
+    expect(body.factor_set_version).toBeNull();
+  });
+
+  it('非法 trade_date 格式 → 400 校验错误（不静默吞掉）', async () => {
+    const res = await fetch(`${window.location.origin}${API}/securities/000300.SH/factors?trade_date=2026/09/15`);
+    expect(res.status).toBe(400);
+  });
+
+  it('重复请求同一日期结果稳定（幂等，无隐藏状态）', async () => {
+    const a = await getFactors('/securities/000300.SH/factors?trade_date=2026-09-15');
+    const b = await getFactors('/securities/000300.SH/factors?trade_date=2026-09-15');
+    expect(a.trade_date).toBe(b.trade_date);
+    expect(a.factor_set_version).toBe(b.factor_set_version);
+  });
+});

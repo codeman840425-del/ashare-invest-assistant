@@ -15,6 +15,7 @@ export type Exchange = 'SH' | 'SZ' | 'BJ';
 export interface ProviderRef { provider: DataProvider; endpoint: string | null; fetched_at: DateTime | null }
 interface Sourced extends DataStatusBlock { sources: ProviderRef[] }
 
+
 /** §5.1 SecurityHit（GET /securities/search） */
 export interface SecurityHit {
   security_code: string;

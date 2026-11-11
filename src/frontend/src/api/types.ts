@@ -22,9 +22,9 @@ export type Uuid = string;
 // ---------- §1 ----------
 export interface Gap { key: string; reason: GapReason; message: string }
 /**
- * F-07 / 契约 T-A53：空数据场景 `data_as_of` 为 `null`（没有取到任何数据就没有"截至"时间）。
- * 之前这里写成 `DateTime`（string），把后端的合法 null 拒掉，B-03 空数据 dry 链因此 13 项 TS2322。
- * 消费点显示时统一走 `fmtAsOf()`，不直接拼字符串。
+ * F-07 / 契约 T-A53 + A-12：空数据场景 `data_as_of` 为 `null`（没有取到任何数据就没有"截至"时间）。
+ * A-12 终裁（#78 756b7b7）：DataStatusBlock 统一为「实际使用数据时点的最早非空值，全空 null」，键必须出现、值可空；
+ * 不取生成/评估/当前时刻补值。Evidence 与独立事件时间戳仍按各自非空定义，**不由本块推导**。
  */
 export interface DataStatusBlock { data_status: DataStatus; data_as_of: DateTime | null; gaps: Gap[] }
 export interface Paged<T> { items: T[]; next_cursor: string | null }

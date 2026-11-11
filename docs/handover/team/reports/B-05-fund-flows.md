@@ -14,4 +14,6 @@
 - 与其余B-05 PR共用subresource_read.py/b05_harness.py/b03_shapes.py相同blob；各路由注册增量须保留。
 - 限制：真HTTP路径+fixture打样，生产资金流源未接入；不宣称真实资金流可用，不造缺失字段。
 - DeepSeek：复用B-03已复核夹具（reports/deepseek/B-03/）；权限、安全、日历边界与最终验收本地完成。
-申请新任务：继续已授权factors→announcements；factors无源时非空日期/版本字段需Chief协调契约裁定。
+- RV-03 P2返修：503 details补date=请求区间第一个实际缺失日、coverage_start/end=日历全局真实边界；空日历边界null，不猜交易日。
+- P2定点：原日历边界1项+新增6项（默认/fixture两源×头尾越界/空日历）7 passed，精确断言三字段；Ruff两模块/mypy本模块通过；证据F:/workspace/team/status/B-05-fund-flows-P2-pytest.xml。
+申请新任务：请复核做#59 P2增量；其后继续已授权factors（T-A158已裁），announcements已交PR #63。

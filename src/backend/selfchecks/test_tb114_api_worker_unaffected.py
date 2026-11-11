@@ -16,7 +16,7 @@ def test_tb114_worker_module_import_does_not_bootstrap(monkeypatch: pytest.Monke
     from app.ingest import runtime
 
     runtime.set_ingest_core(None)
-    import app.workers.worker  # noqa: F401
+    import app.workers.worker
 
     assert runtime.get_ingest_core() is None
     assert not hasattr(app.workers.worker, "bootstrap_ingest_core")

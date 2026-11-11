@@ -24,6 +24,7 @@ from app.api.v1 import (
     promotions,
     risk_controls,
     securities,
+    security_fund_flows,
     signal_events,
     strategy_cards,
     suggestions,
@@ -56,6 +57,7 @@ router.include_router(instances.router)
 
 router.include_router(aggregates.router)
 router.include_router(securities.router)
+router.include_router(security_fund_flows.router)
 
 router.include_router(strategy_cards.router)
 

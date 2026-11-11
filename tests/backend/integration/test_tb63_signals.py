@@ -9,7 +9,6 @@ from __future__ import annotations
 import datetime as dt
 import sys
 import os
-import tempfile
 from pathlib import Path
 from typing import cast
 
@@ -22,7 +21,7 @@ from app.schemas.enums import Action, ReasonCode
 from app.signals.admission import MasterAdmission, assess_master
 from selfchecks import tb60
 
-from .tb28_isolation import verify_isolated_pg
+from .tb28_isolation import isolation_target, verify_isolated_pg
 
 DAY = dt.date(2026, 11, 6)
 
@@ -95,16 +94,20 @@ def test_invalid_action_is_rejected() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="requires isolated Linux PostgreSQL Unix socket"
+)
 def test_isolated_pg_guard_writes_and_savepoint(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # 先核查固定容器身份/none网络/无映射/独立卷，再运行原45项真实PG断言。
+    # Identity and tb60 must use the same socket; partial overrides fail before Docker/PG.
+    target = isolation_target()
     verify_isolated_pg()
     # 复用真实写入/外键/分区夹具，不以 mock 连接或空回调替代；失败不跳过。
     monkeypatch.setattr(
         sys,
         "argv",
-        ["tb60.py", "--socket-dir", str(Path(tempfile.gettempdir()) / "tb58-pg3-socket")],
+        ["tb60.py", "--socket-dir", target.socket],
     )
     try:
         result = tb60.main()

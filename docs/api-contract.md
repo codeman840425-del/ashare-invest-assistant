@@ -329,6 +329,7 @@
 - `data_status: "fresh" | "stale" | "pending" | "partial" | "unavailable"`：`stale`=超过刷新间隔 ×2 未更新（0A.3）；`pending`=已投递按需拉取任务；`partial`=部分维度缺数据；`unavailable`=上游不可用，或本人数据证书不可用且从未取到数据（v0.2.6）。本人证书不可用时行情接口不报错，只把 `data_status` 置为 `stale`/`unavailable` 并在 `gaps` 中给出 `data_licence_unavailable`；**不会用他人证书的数据补齐**。
 - `gaps[]: {key: string, reason: "no_source"|"not_yet_published"|"upstream_error"|"quota_deferred"|"user_input_missing"|"data_licence_unavailable"|"not_applicable", message: string}`（`not_applicable`：该证券类型没有此类数据，如 ETF 的财务、资金流、因子、公告；v0.2.8）。
 - **混合来源响应（v0.2.7）**：一个响应同时含“证券公开主数据”（全站一份，范围见 v0.2.7 #19：代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示）和“本人证书取到的麦蕊数据”时，`data_status` 只按证书部分判定。证书部分从未取到时为 `partial`（主数据仍返回），`gaps` 给出 `data_licence_unavailable` 或 `not_yet_published`，被影响的字段为 `null`；证书部分全部可用时按 0A.3 规则判定。**个股与板块类读接口**（§7.3 中 v0.2.7 新增的端点、`/securities/{code}/bars`、`/quotes`）**不返回** `409 DATA_LICENCE_UNAVAILABLE`；该错误码仍只用于需要触发拉取的写操作。
+- **A-12 终裁：T-A53 时点口径的全站外延（收敛 T-A160/#72）**：T-A53「最早非空值、全空 null」适用于所有响应级 DataStatusBlock；键必须出现，值为 `string(datetime) | null`，包括快照对象中的该块。只计算实际参与返回内容的数据时点；有旧缓存就保留旧时点，不以当前时刻刷新，不因部分缺失清空仍可用的时点。SecurityProfile 的公开/本人证书时点取并集见 §5.1；Evidence.data_as_of 与 §8 SSE quote 不属于本块，按各自非空规则。此处为语义外延，不将 HTTP /quotes 逐项结构机械套到 SSE 顶层。
 - **缓存未命中（v0.2.7）**：本人证书下没有缓存时返回 `200`，`data_status:"pending"`，按本人证书入队（P1）；当日该证书配额不足时 `gaps` 加 `{reason:"quota_deferred"}`，不报 429。
 - **证书范围（v0.2.7）**：除证券公开主数据外，所有字段都只来自本人证书取到的数据；**不会用他人证书的数据补齐**（与 v0.2.6 #1 一致）。公开主数据的确切来源（交易所公开列表，或用管理员本人证书拉取）【待 Q2 / T-A04 补测】；确认前只用交易所公开列表，不得用他人（含管理员）的证书为其他用户取数。
 
@@ -606,7 +607,7 @@
 | `Stat` | `{value: string(decimal) \| null, n: int, window: string, small_sample: boolean}`。n < 30 时 `small_sample=true`；n < 5 时 `value=null`（plan 2.12.3；这是展示阈值，与降权门槛 n ≥ 20 无关）。**所有胜率、收益、IC、CAR 都用这个结构** |
 | `ReleaseCondition` | `{kind: "expr" \| "time" \| "event" \| "user_action", expr: string \| null, at: string(datetime) \| null, event: string \| null, action: string \| null, check_on: check_on[], human_text: string, machine_checkable: boolean}` |
 | `RiskFlag` | `{control: risk_control, level: risk_level, message: string, gated_actions: action[], quantity_cap: string(decimal) \| null, evidence_ids: string[]}`；T-A15：`total_exposure`(RC3) 与 `sector_concentration`(RC4) 超出上限时 `gated_actions=["buy","add"]`，否则为 `[]`（只做提示），`sell`/`reduce`/`hold`/`wait` 永远不会被这两项门控（plan 2.5.6 T-A15） |
-| `DataStatusBlock` | 1.1 节的 `{data_status, data_as_of, gaps[]}` |
+| `DataStatusBlock` | 1.1 节的 `{data_status, data_as_of: string(datetime) \| null, gaps[]}`。**A-12 终裁（收敛 T-A160/#72）**：取本响应实际使用数据时点中最早的非空值；全空为 `null`，不得取生成/评估/当前时刻替代。该语义全站适用于 DataStatusBlock，Evidence 及 §8 SSE `quote` 为独立结构，维持非空 |
 | `Stops` | `{stop_loss: string(decimal) \| null, take_profit: string(decimal) \| null, time_stop_days: int \| null}`。所有止损、止盈、时间止损一律嵌套在 `stops` 中（`CandidateSignal`、`StrategyConclusion`、`PlanDraft`），不平铺 |
 | `ImportFinding` | `{id: string, code: string(IMPORT_*，§4.1), severity: import_severity, scope: import_scope, row_no: int \| null, field: string \| null, message: string, params: object, needs_action: boolean, resolution_choices: string[]（按 §4.1“处理选项”表，v0.2.4）, default_resolution: string \| null（= `resolution_choices[0]`，为空时 null）, resolution: {choice: string, reason: string \| null, by: string(uuid), at: string(datetime)} \| null}`。`row_no` 为文件物理行号（从 1 起），文件级为 `null`；`params`/`message` 中的股东代码、资金账号先掩码 |
 | `Bar` | `{t: string(date) \| string(datetime), open, high, low, close: string(decimal), pre_close: string(decimal) \| null, volume: string(decimal), amount: string(decimal), avg_price: string(decimal) \| null}`。`t`：日/周线为交易日（周线取该周最后一个**有成交**的交易日，口径见 §6.2，v0.2.7）；`1m` 为该分钟 bar 的**结束**时刻【口径待 T003/T-B05 实测上游后确认】。`volume` 单位为**股**、`amount` 单位为**元**（上游若以“手”返回，由 ingest 换算；上游单位【待 T003 核实】）。`avg_price` 只在 `1m` 给出（分时均价 = 当日累计成交额 / 累计成交量），日/周线为 `null`。v0.2.7 加 `is_final: boolean`：日 K 当日收盘并入库后为 `true`，盘中返回的当日 bar 为 `false`；周 K 见 §6.2；`1m` 正在形成的那一分钟若返回则为 `false`【待 T003 补测：麦蕊分钟线是否返回未完成的那一分钟】 |
@@ -640,7 +641,7 @@
  suspended: boolean | null,
  sources: ProviderRef[], data_status, data_as_of, gaps}
 ```
-- **`data_as_of` 可空（A-12，2026-11-11）**：本人证书部分从未取到时为 `null`（与 `data_status=unavailable` 同源）；`master_as_of` 维持必填。
+- **`data_as_of: string(datetime) | null`（A-12 终裁，2026-11-11）**：取实际参与本响应的公开主数据时点与本人证书各字段时点之并集中的最早非空值；仅整个并集为空时为 `null`。公开部分仍有可信时点时，不能仅因本人证书部分为空而返回 `null`；`master_as_of: string(date)` 仍必填。公开侧使用该快照日对应的原始带时区时间戳（现存 `securities.master_as_of`），证书侧使用各参与字段有据可查的数据时点（仅有采集时点时用对应 `fetched_at`）；只有 date 而缺原始时间戳时不拼造零点/当前时刻，保留日期并通过 gaps 披露时点缺口。`data_status` 继续只按证书部分判定，证书部分从未取得仍为 `partial`，两字段独立表达状态与时点。
 - 第一行到 `attribution` 是**证券公开主数据**（全站一份，范围见 v0.2.7 #19：代码、简称、拼音、曾用名、交易所、板块、上市日、状态、风险警示；`type`、`code_history` 属“代码”，`list_date_basis` 属“上市日”，`delist_date` 属“状态”；拼音只用于搜索，不在本对象中返回）。来源（v0.2.9 内，T-A04 定）：交易所公开列表（`provider=exchange`，plan 4.6.1）；巨潮只在交易所列表缺字段时补缺、不覆盖交易所值，AKShare 只作交叉核对；不得用任何人的证书；能否展示与再分发仍待 plan 第 9 节问题 52（合规）。`list_date_basis="neeq_select"` 表示北交所平移股取的是精选层挂牌日；`attribution` 是固定的来源说明文字（如“证券列表来自上交所、深交所、北交所公开信息”），前端原样展示。**不提供公司全称**（不在公开主数据范围内）。
 - `industry` 之后的字段来自本人证书（`provider=mairui`）；从未取到时为 `null` 或 `[]`，规则见 §1.1 混合来源响应。
 - 指数：`board`、`list_date_basis`、股本、`industry` 为 `null`，`concepts` 为 `[]`。
@@ -1419,7 +1420,7 @@ evidence: Evidence[]
 | event | data | 说明 |
 |---|---|---|
 | `heartbeat` | `{at}` | |
-| `quote` | `{items: [{security_code, name, price, change_pct, amount, t}], data_as_of}` | 只推送用户自选或持仓的证券，来自缓存 |
+| `quote` | `{items: [{security_code, name, price, change_pct, amount, t}], data_as_of: string(datetime)}` | 只推送用户自选或持仓的证券，来自缓存。**A-12 终裁规定**：无 quote 变化不发布新的 quote 事件；发布时 `items` 必须含至少一条有可信行情时点的变化项，`data_as_of` 必须出现且非空，取本块实际行情时点最早值；不得用发布/心跳时刻填充。生产发布方须落实此前提，通用 transport 当前不代做 quote 校验；合法历史事件仍按原续传规则重放 |
 | `signal` | `SignalEvent`（§5.1，`kind: signal_kind`） | 盘中规则事件 |
 | `candidate_signal` | `{id, security_code, name, state, proposed_action, strategy_key, strategy_name}` | ⚖ 候选信号新建或状态变化 |
 | `reason_released` | `{reason_id, signal_id, code, released_at}` | ⚖ 原因已解除，系统正在重新检查 |

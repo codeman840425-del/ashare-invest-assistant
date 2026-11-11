@@ -1637,6 +1637,7 @@ class LLMGateway:
    另有 `source_kind ∈ {market_data, disclosure, user_input, system_calc}` 与 `confidence`（仅对 estimate/hypothesis，用户自填 low/medium/high）。
 2. **只追加 + 版本**：`research_candidates`、`action_plans`、`reviews` 采用"头表（当前指针、状态）+ 版本表（不可变）"；版本表行禁止 UPDATE/DELETE（数据库触发器强制）。
 3. **数据快照**：每个版本创建时生成 `data_snapshots`，记录当时引用的数据项的值、数据源、`data_as_of`（数据本身对应的时点）、`fetched_at`（我们拿到的时间）。回看时只读快照，不读最新行情。
+   - **A-12 终裁（2026-11-11，收敛 #72/#78）**：响应级 DataStatusBlock 的 `data_as_of` 必须出现、允许 `null`，取实际使用数据时点的最早非空值；全空 `null`，不以生成/评估/当前时刻代替。SecurityProfile 取公开主数据与本人证书参与字段的时点并集，公开时点仍可用时不能因证书部分为空而清空；`master_as_of` 日期本身不拼造 datetime。Evidence 的单条数据时点与独立事件时间戳仍按各自非空定义；快照对象仅其 DataStatusBlock 服从可空总则，不变更存储约束。SSE quote 为独立推送结构：无 quote 变化不发布新事件，发布块必须有非空 `data_as_of`，取实际行情时点最早值。此前提由后续生产发布方落实，基线通用 transport 无该校验；既有续传仍重放合法历史事件。详见契约 §1.1、§5.1、§8 与 `docs/reviews/A-12-data-as-of-nullability-ruling.md`。
 4. **成交只追加**：`trades` 不允许修改；更正用 `void`（作废标记 + 原因）+ 新记录；持仓由成交推导。
 5. **个人数据与行情数据分 schema**：`app`（用户数据，含 `user_id`，所有查询强制按用户过滤）与 `market`（~~全站共享~~ v0.2.6 起麦蕊来源的行带 `source_licence_id` 按证书隔离，2.1B；只有证券公开主数据全站一份，第 9 节问题 51）。
 6. 时间：数据库统一 `timestamptz`（UTC）；交易日用 `date`（Asia/Shanghai 口径）；金额用 `numeric(20,4)`，API 中以字符串传输。

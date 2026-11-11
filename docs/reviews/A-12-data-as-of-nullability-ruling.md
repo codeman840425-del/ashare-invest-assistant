@@ -1,37 +1,44 @@
-# A-12 裁定：data_as_of 可空性外延（F-11 带出的 4 项待裁）（架构师，2026-11-11）
+# A-12 终裁：DataStatusBlock 全站可空与 SSE quote 推送前提
 
-> 范围：F-11（PR #70）「待架构师裁定」节列出的 4 项 data_as_of 可空性。裁定基准：契约 §1.1 DataStatusBlock 语义（`unavailable` = 从未取到）、§1 混合来源响应规则、T-A53 §7.3 第 4 条（四端点 data_as_of 全空 null）、`bars.pending` 的 `adjust_as_of=null` 先例、日报顶层「非 null 最早值、全空 null」先例。
-> 原则一句话：**凡是「DataStatusBlock 的 data_as_of」（语义=本响应实际用到数据的时点），可空性与 data_status=unavailable 同源——从未取到即 null，没有「编一个时刻」的合法路径。凡是「事件/证据的时间戳」（Evidence.data_as_of、SSE 事件的 at），它记录的是事实发生时刻，必有值，不可空。**
+日期：2026-11-11（北京时间）。依据：编排者在 PR #78 评论 6797263288 的终裁、RV-06 事实备忘录、PR #72 非 SSE 增量；取代本文件初版的证书为空即清空 profile 时点、快照块一律非空及「无数据不推是既有实现事实」三处表述。#72 已关闭，由 #78 唯一承载相关契约增量。
 
-## 逐项裁定
+## 1. 取证与适用范围
 
-### 1. SecurityProfile.data_as_of → **可空（`string(datetime) | null`）**
+共同基线 main=465e020。直接核读 `app/master/profile.py:34–42,71–101`：公开字段带原始 master_as_of，profile 当前仍固定 data_as_of=null；本终裁是待实现的规则，不能声称基线已符合。直接核读 `app/notify/transport.py:35–83`、`app/api/v1/notifications.py:162–231`：transport 序列化/重放原 payload，未校验 quote.items/data_as_of；/stream 做会话校验和心跳、不构造行情块。自检 `test_tb92_repairs.py:554–608` 的 quote 仅 synthetic_index，用于会话撤销，不能证明生产 quote 非空保证。前端 streamTypes 的 quote.data_as_of 和 Evidence 当前均非空。
 
-- 依据：SecurityProfile 是混合来源响应（公开主数据 + 本人证书部分），§1.1 明写「证书部分从未取到时 data_status 只按证书部分判定为 unavailable/partial」。证书部分从未取到时，`data_as_of` 无可取值——公开主数据侧只有 `master_as_of`（date 型快照日），不是「实际用到的行情时点」，拿它顶替等于伪造 datetime。与 T-A53 四端点「全空 null」同一裁法。
-- 注意分工不变：`master_as_of: string(date)` 维持必填（主数据快照日，公开侧恒有）；可空的只是尾部 DataStatusBlock 的 `data_as_of`。
+## 2. DataStatusBlock：键必有，值可空，全站统一
 
-### 2. SectorFlowsResponse.data_as_of → **可空（`string(datetime) | null`）**
+`data_as_of: string(datetime) | null` = 本响应实际使用数据时点中最早的非空值；并集全空才 null，不用生成、评估、当前或心跳时刻代替。只在实际返回内容的时间集合上求值；旧数据仍保留旧时点，部分缺失不抹掉已有时点。T-A53、日报与风控评价的最早非空规则在此全站外延，不能据外延改变已有接口路由、错误码或存储约束。
 
-- 盘后数据端点，本人证书从未取到资金流 → `data_status=unavailable`、`items=[]`、`data_as_of=null`。与 financials/fund-flows 空态同构，无独立不可空理由。
+- SecurityProfile：并集为公开主数据与本人证书参与字段各自的可信时点。公开侧使用 master_as_of 快照日对应的原始带时区时间戳（现存 securities.master_as_of），证书侧使用实际数据时点，只有采集时点可得时用对应 fetched_at。date 型 master_as_of 本身不凭空变成零点/当前 datetime；若原始时点确缺，保留日期、以 gaps 披露缺口，只在可证明的非空时点上取最早值。公开时点存在时，即便行业/股本等证书字段全空也不能返回 null；data_status 按 §1.1 仍为 partial。主数据首导前置与 master_as_of 必填不变。
+- SectorFlowsResponse：无任何可用板块流量时 data_as_of=null；有数据取实际参与行的数据时点最早值。本次只裁 data_as_of，不连带修改 trade_date 的日期契约。
+- MarketOverview：参与输入时点全空则 null；有任一可用时点则取最早。顶层 trade_date 保持既有定义，不能用日历日期填充行情 data_as_of。
+- CandidateSignal 等对象如有 DataStatusBlock，仅该块服从总则；独立 at/created_at、snapshot_id 和 Evidence 的值域不受外延影响。SignalEvent 的契约结构未声明顶层 data_as_of，不新增该字段。
+- Evidence：data_as_of/fetched_at 按既有单条证据定义非空；value=null 不意味着可删时间锚点，也不能拿当前时刻伪造其历史时点。缺少可信锚点的证据不能靠本裁定放行。
 
-### 3. MarketOverview.data_as_of → **可空（`string(datetime) | null`）**
+## 3. SSE quote：契约规定推送前提，data_as_of 维持非空
 
-- 契约 §7.3 /market/overview 行原文已是 `indices[].t: string(datetime) | null` + `DataStatusBlock`；T-A53 裁定第 2/3 条进一步把 breadth/regime/turnover_total 置 null 的场景写死（「不用本人小样本冒充全市场」）。最小切片下 indices 各 `t` 可全 null，顶层 data_as_of「取实际使用行情时点最早值」在全空时按 T-A53 第 4 条就是 null。**本条其实是 T-A53 已定语义的直接推论**，此处置确认并落契约字面。
+终裁规定：无 quote 变化不发布新的 quote 事件；发布块 items 至少一条有可信行情时点的变化项，顶层 data_as_of 必须出现且为非空 datetime，取该块实际行情时点最早值。无可发布项时不得制造空 quote，也不得以 publish/heartbeat 时刻补值。HTTP /quotes 的逐项 DataStatusBlock 与 SSE quote 顶层是不同结构。
 
-### 4. Evidence.data_as_of 与快照类、SSE quote 推送块 → **维持必填（不可空）**
+这是补入契约 §8 的明确规范，**不是基线已实现的行为事实**。当前通用 transport 不代做该校验；后端后续生产发布接线必须在业务发布入口落实。续传仍重放合法历史事件，不因当前行情未变化抑制既有合规历史块；心跳/reset 机制不受影响。
 
-- **Evidence.data_as_of**：结构定义 `{..., data_as_of: string(datetime), fetched_at: string(datetime), ...}`——它是**单条证据的数据时点**，一条 Evidence 存在即意味着它引用的数据曾被取到（否则不产生这条证据、走 gaps）。「无数据」的表达位置在响应级 DataStatusBlock/gaps，不在 Evidence 内部。维持必填。
-- **CandidateSignal/SignalEvent 等快照类**：同逻辑——对象存在 = 生成时快照存在（`snapshot_id` 必填），其 data_as_of 是快照事实属性，必有值。维持。
-- **SSE quote 推送块**：quote 事件推送的前提是「有 quote 变化」，无数据不推（不推是缺数据的表达，不是推 null）。维持必填；若未来出现「推送占位事件」需求另裁，本单不预开。
+## 4. 权限、兼容性、迁移与受影响任务
 
-## F-11 的类型面收敛
+本人证书数据隔离、仅本人自选/持仓 SSE 范围、401/403/404、会话撤销、CSRF、ETag、审计与幂等规则均按原契约，本单没有新增写接口/审计事件/迁移。禁止以他人证书或其他用户缓存补时点，禁止靠 owner 变体扩权。
 
-PR #70 已按「T-A53 点名的四端点先行、其余不动」实施——正确。本裁定生效后：
-- F-11 后续补改（或 F-12）：`SecurityProfile`/`SectorFlowsResponse`/`MarketOverviewResponse` 三处前端类型从 `Sourced` 改 `SliceSourced` 同款（data_as_of 可空）；`FactorsResponse` 随 T-A158（#60）落地时一并（factors 不在本 4 项内，其可空已在 #60 裁定）。
-- 快照类与 Evidence **不改**——前端保持非空声明是契约正确的，不是待办。
+兼容性：必填 datetime 放宽为 datetime|null 对旧的非空消费代码可能不兼容，须同步前端类型和空态展示；不能宣称旧客户端无影响。返回键仍不可省略，历史非空值不回填、不重写快照。SSE/Evidence 维持非空，对未来生产发布端增加明确验收前提。
 
-## 契约同步（本 PR 内完成）
+- 前端 F-14：SecurityProfile/SectorFlowsResponse/MarketOverview 三处落型；全局 DataStatusBlock 外延按总则核对继承消费，不把 Evidence/StreamEventMap.quote 放宽。与 #70、T-A158/#60 组合时保留各自增量。
+- 后端：profile 不再仅因本人证书为空而固定 null；其他响应块核对最早非空算法。quote 生产接线专项落实 §8 前提，不能以 transport 自检替代；实现另派，不在本单修改。
+- 测试：按下列定点集覆盖；不使用真实数据或共享库。plan §3.1、契约 §1.1/§5.1/§8 与本文同步。
 
-§5.1 三处字面更新：SecurityProfile 代码块 `data_as_of` 行注 `| null`；SectorFlowsResponse、MarketOverview 响应说明各加一句「从未取到时 data_as_of=null（A-12）」。Evidence 与 SSE 块不加注（维持现状即必填，本裁定文档为据）。
+## 5. 可执行验收与负例
 
-不兼容性：三处全是「必填→可空」的单向放宽，旧客户端不受影响；后端实现侧（公开主数据未挂证书的 ETF/指数 profile、sector-flows 首次未取）按 null 返回，无状态机变更。
+1. 全空/一非空/多非空/旧缓存分别得到 null/该时点/最早值/原旧时点；禁止缺键、生成时刻补值及一处 gap 清空全部时点。
+2. profile 仅公开时点非空→该时点，证书更早→证书时点，公开更早→公开时点；仅 date 缺原始 timestamp→不构造 datetime、披露缺口。ETF/指数与普通证券同算法。
+3. SSE 新事件：无变化、空变化集、无可信行情时点→不发布 quote；合法变化→非空 data_as_of；部分行情缺失不得伪造补齐；合法历史块可按续传重放。
+4. 权限负例：未登录/未批准仍为既有401/403；跨用户本人资源仍404；公开资料可读不授予他人证书字段，SSE 会话撤销后不再发帧。此次仅静态核对路由与 live() 检查，动态权限负例待实现方用隔离合成环境执行，未冒称通过。
+5. Evidence 的 null value 不放宽其时点；前端三处 null 正常展示，Evidence/SSE 仍拒绝 null；不重写历史快照。
+
+DeepSeek：未用，原因：裁定不外包。
+申请新任务：A-11 合入潮收口继续；F-14 与后端接线由编排者派单。

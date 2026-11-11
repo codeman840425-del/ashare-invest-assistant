@@ -61,7 +61,9 @@ class StockCache:
             for year, counts in reasons["all"].items():
                 exclusions.setdefault(year, Counter()).update(counts)
             for year, day_count in reasons["stock_days"].items():
-                counter = self.quality["coverage_counters"].setdefault((stock.exchange, int(year)), Counter())
+                counter = self.quality["coverage_counters"].setdefault(
+                    (stock.exchange, int(year)), Counter()
+                )
                 counter["stock_days"] += day_count
                 for name in ("st", "st_unknown", "listing_status_unknown", "delisting_period"):
                     counter[name] += reasons["all"].get(year, {}).get(name, 0)
@@ -88,7 +90,9 @@ class StockCache:
         self.quality["exclusions"] = exclusions
         self.quality["stock_days"] = stock_days
         self.quality["bar_quality"] = bar_quality
-        self.quality["status_coverage"] = runner_data.coverage_ratios(self.quality["coverage_counters"])
+        self.quality["status_coverage"] = runner_data.coverage_ratios(
+            self.quality["coverage_counters"]
+        )
 
     def stocks(self, segments: list[sim.Segment]) -> Iterator[sim.StockInput]:
         dates = self.prepared.dates
@@ -267,6 +271,11 @@ def _leg_rows(phases: list[exp.Phase], dates: list[date]) -> Iterator[dict[str, 
         for trial in phase.trials:
             for row in trial.rows:
                 leg = row.leg
+                control = row.control
+                if control is not None and (
+                    control.entry_day != leg.entry_day or control.direction != leg.direction
+                ):
+                    raise DataFormatError("R control does not match its leg")
                 record = asdict(leg)
                 exit_day = record.pop("exit_day")
                 exit_trigger_day = record.pop("exit_trigger_day")
@@ -282,6 +291,9 @@ def _leg_rows(phases: list[exp.Phase], dates: list[date]) -> Iterator[dict[str, 
                     "exit_date": dates[exit_day] if exit_day is not None else None,
                     "exit_trigger_date": dates[exit_trigger_day],
                     "data_source": entry_source if entry_source == exit_source else "cross_splice",
+                    # Keep per-leg R evidence; absent controls differ from zero successful draws.
+                    "control_mean_bp": control.mean_bp if control is not None else None,
+                    "control_n_ok": control.n_ok if control is not None else None,
                 }
 
 

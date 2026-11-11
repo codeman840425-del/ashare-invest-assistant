@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 from retest.t_r58 import data, experiments, outputs, runner, runner_data, sim, splice
 from selfchecks import tb136_retest as synthetic
 
@@ -32,7 +33,8 @@ def test_tb136_runner_output_cannot_leave_offline_root(tmp_path: Path) -> None:
 
 def test_tb136_runner_missing_input_publishes_only_failure(tmp_path: Path) -> None:
     target = tmp_path / "missing"
-    with pytest.raises(data.DataFormatError, match="missing or unsafe"):
+    # T-A154 checks the mandatory status inputs before opening source archives.
+    with pytest.raises(data.DataFormatError, match=r"T-A154.*st_history"):
         runner.run(paths(tmp_path), target)
     assert not target.exists()
     failure = outputs.failure_path(target)

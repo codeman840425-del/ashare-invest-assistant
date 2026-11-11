@@ -79,6 +79,8 @@ LEG_FIELDS = (
     "exec_anomaly",
     "hold_bars",
     "mae_bp",
+    "control_mean_bp",
+    "control_n_ok",
 )
 SUMMARY_FIELDS = {
     "plan",

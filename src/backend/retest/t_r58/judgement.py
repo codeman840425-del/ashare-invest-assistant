@@ -298,6 +298,7 @@ def evaluate(
         if len(paired) == len(held) and r["low"] is not None
         else None
     )
+    paired_controls = [row.control for row in paired if row.control is not None]
     final = result.training[-1]
     chosen = result.final_choice.a
     grid = {t.candidate.point: t for t in final.trials if t.candidate.base == "A"}
@@ -345,7 +346,16 @@ def evaluate(
             bad_share <= config["stats"]["max_bad_exit_share"] if bad_share is not None else None,
             share=bad_share,
         ),
-        "P5": _check(p5, paired=r),
+        "P5": _check(
+            p5,
+            paired=r,
+            control_mean_bp=(
+                mean(control.mean_bp for control in paired_controls) if paired_controls else None
+            ),
+            # Same unit as legs.csv: successful random draws, not the paired-leg count in r["n"].
+            control_n_ok=sum(control.n_ok for control in paired_controls),
+            control_n_ok_unit="successful_random_draws",
+        ),
         "P6": _check(p6, neighbors=values),
         "P7": _environment(environment, prepared, config),
         "P8": _check(

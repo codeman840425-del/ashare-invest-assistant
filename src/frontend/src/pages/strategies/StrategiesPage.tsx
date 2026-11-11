@@ -83,7 +83,9 @@ export function StrategiesPage() {
               title: '模板', key: 'name',
               render: (_, t) => (
                 <span>
-                  {t.name} <span className="mono muted">{t.key}</span>
+                  {/* F-06：点模板名进详情（详情按不可变版本展示，链接必须带 version，契约 §7.4 通知同格式） */}
+                  <Link to={`/strategies/${t.id}?version=${t.current_version.id}`} data-testid={`strategy-link-${t.key}`}>{t.name}</Link>{' '}
+                  <span className="mono muted">{t.key}</span>
                   {isHighRisk(t.risk_level) ? <Tag color="red" style={{ marginLeft: 6 }}>高风险</Tag> : null}
                 </span>
               ),

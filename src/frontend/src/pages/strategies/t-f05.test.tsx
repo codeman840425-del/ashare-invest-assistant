@@ -113,3 +113,20 @@ describe('⑤ 错误处理', () => {
     await waitFor(() => expect(screen.queryByText('策略详情')).toBeNull());
   });
 });
+
+describe('⑥ F-06 策略库 → 详情入口', () => {
+  it('策略库列表的模板名可点，跳转带正确的 strategy id 与 version', async () => {
+    const router = renderAt('/strategies');
+    const link = await screen.findByTestId('strategy-link-demo_trend');
+    // 链接 href 必须带 version（详情按不可变版本展示，缺 version 会退化为指引页）
+    expect(link).toHaveAttribute('href', `/strategies/${SID}?version=${VID}`);
+
+    link.click();
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/strategies/${SID}`));
+    expect(new URLSearchParams(router.state.location.search).get('version')).toBe(VID);
+
+    // 落到的正是详情页，不是「请选择版本」的指引
+    expect(await screen.findByTestId('version-meta')).toBeInTheDocument();
+    expect(screen.queryByTestId('need-version')).toBeNull();
+  });
+});

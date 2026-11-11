@@ -2570,6 +2570,7 @@ MVP 明确写入产品：**"本产品不提供新闻资讯；公告信息为盘�
 - **分页与错误**
   - 游标分页：`?limit=&cursor=`，响应 `{items, next_cursor}`。
   - 统一错误格式：`{"error":{"code","message","details","request_id"}}`，错误码表见契约第 4 节。
+  - **CI ST205 路由澄清（v0.2.9 内）**：完整静态路径先确定资源，再判断方法；实际分派与 `405` 的 `Allow`/`details.allowed` 必须同源，合并同一静态路径的分注册方法，不并入模板路径对保留文字的误匹配。`/suggestions/refresh` 当前只允许 `POST`，其他方法 `405` 且仅列 `POST`；合法 UUID 详情、非保留文字的参数校验、同路径 `GET`/`PUT` 并集、显式 `HEAD` 与原认证/CSRF/全局上限、管理端隐藏 `404` 均沿契约 §1.3。不改 OpenAPI 扩充虚假方法、不削 schemathesis 检查；后端与测试分别承接路由修复及定点负例，历史测试保持。
 - **数据状态**：所有带数据的响应都有 `data_status`（`fresh/stale/pending/partial/unavailable`）和 `gaps`。
 - **主线接口**
   - 建议：`/suggestions`，包括详情、建议链、用户动作和跟踪。

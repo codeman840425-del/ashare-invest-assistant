@@ -1,0 +1,140 @@
+{
+  "etf": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/510300.SH/factors"
+    },
+    "response": {
+      "counts": {
+        "by_category": {},
+        "total": 0
+      },
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "factor_set_version": "synthetic-2-factors",
+      "gaps": [
+        {
+          "key": "factors",
+          "message": "合成 ETF 不适用",
+          "reason": "not_applicable"
+        }
+      ],
+      "items": [],
+      "name": "合成 ETF 示例",
+      "security_code": "510300.SH",
+      "sources": [],
+      "trade_date": "2026-11-03"
+    }
+  },
+  "index": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/000001.SH/factors"
+    },
+    "response": {
+      "counts": {
+        "by_category": {},
+        "total": 0
+      },
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "factor_set_version": "synthetic-2-factors",
+      "gaps": [
+        {
+          "key": "factors",
+          "message": "合成指数无该数据源",
+          "reason": "no_source"
+        }
+      ],
+      "items": [],
+      "name": "合成指数示例",
+      "security_code": "000001.SH",
+      "sources": [],
+      "trade_date": "2026-11-03"
+    }
+  },
+  "licence_unavailable": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/999999.SH/factors"
+    },
+    "response": {
+      "counts": {
+        "by_category": {},
+        "total": 0
+      },
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "factor_set_version": "synthetic-2-factors",
+      "gaps": [
+        {
+          "key": "factors",
+          "message": "合成证书不可用，无缓存",
+          "reason": "data_licence_unavailable"
+        }
+      ],
+      "items": [],
+      "name": "合成示例股份",
+      "security_code": "999999.SH",
+      "sources": [],
+      "trade_date": "2026-11-03"
+    }
+  },
+  "stock": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/999999.SH/factors"
+    },
+    "response": {
+      "counts": {
+        "by_category": {
+          "liquidity": 1,
+          "momentum": 1
+        },
+        "total": 2
+      },
+      "data_as_of": "2026-11-03T18:30:00+08:00",
+      "data_status": "partial",
+      "factor_set_version": "synthetic-2-factors",
+      "gaps": [
+        {
+          "key": "factor.F-LIQ-TURN",
+          "message": "合成示例：该因子本日无值",
+          "reason": "no_source"
+        }
+      ],
+      "items": [
+        {
+          "category": "momentum",
+          "factor_id": "F-MOM-20D",
+          "feature_key": null,
+          "market_rank": 812,
+          "market_rank_pct": "24.10",
+          "name": "20日动量（合成）",
+          "unit": "ratio",
+          "value": "0.0350"
+        },
+        {
+          "category": "liquidity",
+          "factor_id": "F-LIQ-TURN",
+          "feature_key": null,
+          "market_rank": null,
+          "market_rank_pct": null,
+          "name": "5日换手率（合成）",
+          "unit": "pct",
+          "value": null
+        }
+      ],
+      "name": "合成示例股份",
+      "security_code": "999999.SH",
+      "sources": [
+        {
+          "endpoint": null,
+          "fetched_at": "2026-11-03T18:30:00+08:00",
+          "provider": "mairui"
+        }
+      ],
+      "trade_date": "2026-11-03"
+    }
+  }
+}

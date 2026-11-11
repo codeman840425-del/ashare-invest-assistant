@@ -11,6 +11,10 @@ T-T23 在用户电脑 8080 上做了 86 项 HTTP/API 核查：通过 16、失败
 7. 界面层 44 项需要用户机上可操作的浏览器才能测。
 明细：team/reports/T-T23.md、T-T23-check-results.md、T-T24.md；清单 team/tasks/T-T23-checklist.md。
 
+## 0.6 PR #11 严格门禁接续（2026-11-11）
+- ds/T05以PR #11原头7787441为基线，复用cfea45a补丁为e0d11eb：market_rules移出宽泛xfail，坏配置和缺文件均真FAIL/exit1，正常3项通过。
+- 仅本地未推送/未合入，不能把新头结果回套旧PR；原白名单失败仍另单，PR验收说明由原作者更正。报告team/reports/PR11-strict-gate-closeout.md。
+
 ## 1. 阶段完成度：按能力与门槛，不填无依据百分比
 | 阶段 | 已有能力/证据 | 未完成的阶段门槛 |
 |---|---|---|

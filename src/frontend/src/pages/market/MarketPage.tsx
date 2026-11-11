@@ -26,7 +26,8 @@ export function MarketPage() {
         <span className="mono">{m.trade_date}</span>
         <Tag variant="outlined">{SESSION[m.session]}</Tag>
         <DataStatusTag status={m.data_status} asOf={m.data_as_of} gaps={m.gaps} />
-        <span className="muted small mono">更新于 {fmtTime(m.data_as_of)}</span>
+        {/* F-07：空数据时 data_as_of 为 null（契约 T-A53），不能直接 fmtTime，也不编造时间 */}
+        <span className="muted small mono">{m.data_as_of ? `更新于 ${fmtTime(m.data_as_of)}` : '数据不可用（无数据时点）'}</span>
       </div>
       <GapNote status={m.data_status} gaps={m.gaps} asOf={m.data_as_of} testId="market-gap-note" />
       <div className="index-strip" role="list" aria-label="主要指数">

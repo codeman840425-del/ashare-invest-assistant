@@ -21,7 +21,12 @@ export type Uuid = string;
 
 // ---------- §1 ----------
 export interface Gap { key: string; reason: GapReason; message: string }
-export interface DataStatusBlock { data_status: DataStatus; data_as_of: DateTime; gaps: Gap[] }
+/**
+ * F-07 / 契约 T-A53：空数据场景 `data_as_of` 为 `null`（没有取到任何数据就没有"截至"时间）。
+ * 之前这里写成 `DateTime`（string），把后端的合法 null 拒掉，B-03 空数据 dry 链因此 13 项 TS2322。
+ * 消费点显示时统一走 `fmtAsOf()`，不直接拼字符串。
+ */
+export interface DataStatusBlock { data_status: DataStatus; data_as_of: DateTime | null; gaps: Gap[] }
 export interface Paged<T> { items: T[]; next_cursor: string | null }
 export interface ApiErrorBody {
   error: { code: string; message: string; details: Record<string, unknown> | null; request_id: string };

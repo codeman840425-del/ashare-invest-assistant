@@ -26,7 +26,8 @@ export function MarketPage() {
         <span className="mono">{m.trade_date}</span>
         <Tag variant="outlined">{SESSION[m.session]}</Tag>
         <DataStatusTag status={m.data_status} asOf={m.data_as_of} gaps={m.gaps} />
-        <span className="muted small mono">更新于 {fmtTime(m.data_as_of)}</span>
+        {/* F-13：data_as_of 为 null 时不显示「更新于 」（空串会变成悬空的标签），也不编造时间 */}
+        {m.data_as_of ? <span className="muted small mono">更新于 {fmtTime(m.data_as_of)}</span> : null}
       </div>
       <GapNote status={m.data_status} gaps={m.gaps} asOf={m.data_as_of} testId="market-gap-note" />
       <div className="index-strip" role="list" aria-label="主要指数">

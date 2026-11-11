@@ -24,6 +24,9 @@ export const ENUMS = {
   risk_control: ['stop_take', 'position_cap', 'total_exposure', 'sector_concentration', 'loss_streak_drawdown', 'plan_violation'],
   risk_level: ['info', 'warning', 'critical'],
   card_risk_level: ['normal', 'high'],
+  // F-04：接口 STRATEGY_CARDS 列表项与详情（契约 §7.4 GET /strategy-cards）
+  card_completeness: ['draft', 'documented', 'runnable_candidate', 'promoted', 'retired'],
+  card_source_kind: ['builtin', 'admin', 'user', 'llm_draft', 'reference'],
   market_regime: ['uptrend', 'range', 'downtrend'],
   signal_kind: [
     'rule_flip', 'breakout', 'breakdown', 'vwap_deviation', 'volume_spike', 'limit_up_touch', 'limit_down_touch',
@@ -154,6 +157,8 @@ export type TradeSide = E<'trade_side'>;
 export type PlanDraftStatus = E<'plan_draft_status'>;
 export type Lifecycle = E<'lifecycle'>;
 export type CardRiskLevel = E<'card_risk_level'>;
+export type CardCompleteness = E<'card_completeness'>;
+export type CardSourceKind = E<'card_source_kind'>;
 export type InstanceStatus = E<'instance_status'>;
 export type CandidateSignalState = E<'candidate_signal_state'>;
 export type CandidateSignalEventCause = E<'candidate_signal_event_cause'>;

@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
@@ -126,6 +128,30 @@ def test_positions_preview(encoding: str) -> None:
     assert "SYNTHETIC" not in str([row.raw_masked for row in result.rows])
 
 
+def _migration_head() -> str:
+    """Read this checkout's migration graph without a DB or locale-dependent ini."""
+    config = Config()
+    config.set_main_option(
+        "script_location", str(Path(__file__).resolve().parents[1] / "migrations")
+    )
+    heads = ScriptDirectory.from_config(config).get_heads()
+    assert len(heads) == 1, f"T-B70 requires a unique migration head; found {heads}"
+    return heads[0]
+
+
+def test_migration_head_matches_checkout() -> None:
+    assert _migration_head()  # Resolves the checked-out graph without connecting to PostgreSQL.
+
+
+@pytest.mark.parametrize("heads", [[], ["synthetic-head-a", "synthetic-head-b"]])
+def test_migration_head_rejects_non_unique_graph(
+    monkeypatch: pytest.MonkeyPatch, heads: list[str],
+) -> None:
+    monkeypatch.setattr(ScriptDirectory, "get_heads", lambda _self: heads)
+    with pytest.raises(AssertionError, match="unique migration head"):
+        _migration_head()
+
+
 @pytest.fixture
 def integration(
     tmp_path: Path,
@@ -137,7 +163,7 @@ def integration(
         require_isolated(conn, app_env="test")
         assert (
             conn.execute(text("select version_num from public.alembic_version")).scalar_one()
-            == "0020"
+            == _migration_head()
         )
     settings = Settings(
         _env_file=None,

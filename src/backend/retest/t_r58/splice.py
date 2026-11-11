@@ -103,12 +103,18 @@ def empty_table() -> pa.Table:
     return pa.Table.from_pylist([], schema=SCHEMA)
 
 
-def _clock(table: pa.Table, *, allow_1300: bool = False) -> tuple[np.ndarray, np.ndarray]:
+def _timestamps(table: pa.Table) -> np.ndarray:
+    if "timestamp" not in table.column_names:
+        raise DataFormatError("missing required timestamp column")
     timestamp = table["timestamp"]
     dtype = timestamp.type
     if not pa.types.is_timestamp(dtype) or dtype.tz != "Asia/Shanghai" or timestamp.null_count:
         raise DataFormatError("timestamp must be non-null and use Asia/Shanghai")
-    stamps = timestamp.cast(SCHEMA.field("timestamp").type).cast(pa.int64()).to_numpy()
+    return timestamp.cast(SCHEMA.field("timestamp").type).cast(pa.int64()).to_numpy()
+
+
+def _clock(table: pa.Table, *, allow_1300: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    stamps = _timestamps(table)
     local = stamps + CST_US
     minutes = local % DAY_US // MINUTE_US
     allowed = np.r_[VALID_MINUTES, 780] if allow_1300 else VALID_MINUTES
@@ -355,6 +361,7 @@ def check_splice(
     price_limit: float | None = None,
     require_overlap: bool | None = None,
     shared_vipdoc: bool = False,
+    single_day_suspended: bool = False,
 ) -> Summary:
     """Validate one stock; any checkable failure stops.
 
@@ -414,7 +421,7 @@ def check_splice(
         result["overlap"] = _overlap(hf, main)
         if not result["overlap"]["ok"]:
             failures.append("overlap_below_98pct")
-        if not repeated.num_rows:
+        if not repeated.num_rows and not single_day_suspended:
             failures.append("sample_main_missing_0807")
     result["ok"] = not failures
     if failures:

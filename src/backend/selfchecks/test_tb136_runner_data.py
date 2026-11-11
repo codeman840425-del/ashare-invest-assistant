@@ -10,6 +10,7 @@ from datetime import date
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
 import pytest
 
 from retest.t_r58 import data, inputs, outputs, runner_data, sim, splice
@@ -144,6 +145,7 @@ def _suspension_fixture(
     symbol: str,
     *,
     archive_days: tuple[int, ...] = (20260731, 20260810),
+    main_days: tuple[date, ...] = (splice.MAIN_START,),
     shared: bool = True,
 ) -> runner_data.Prepared:
     listed = date(2010, 1, 1)
@@ -152,7 +154,7 @@ def _suspension_fixture(
     root = tmp_path / "vipdoc"
     root.mkdir()
     lc1 = root / f"sz{symbol}.lc1"
-    lc1.write_bytes(_lc1_bytes(splice.SINGLE_DAY, 10.5) + _lc1_bytes(splice.MAIN_START))
+    lc1.write_bytes(_lc1_bytes(splice.SINGLE_DAY, 10.5) + b"".join(map(_lc1_bytes, main_days)))
     source = inputs.Lc1Input(lc1, data.sha256(lc1))
     with zipfile.ZipFile(original.archive, "w") as z:
         z.writestr(
@@ -164,6 +166,7 @@ def _suspension_fixture(
         )
     return replace(
         original,
+        dates=[splice.HF_END, splice.SINGLE_DAY, *main_days],
         pool=[(*key, "L")],
         single=None if shared else inputs.VipdocInput(root, {key: source}, "", "", ""),
         main=inputs.LocalVipdoc(root, {key: source}, source.sha256)
@@ -194,6 +197,7 @@ def test_tb136_runner_confirmed_suspension_removes_one_day_and_keeps_source_evid
             "reason": "suspension_residual_minutes",
             "label": "停牌期分钟残留",
             "rows": 1,
+            "rows_by_source": {"vipdoc": 1},
             "prior_daily_date": "2026-07-31",
             "next_daily_date": "2026-08-10",
         }
@@ -203,26 +207,64 @@ def test_tb136_runner_confirmed_suspension_removes_one_day_and_keeps_source_evid
     assert evidence["lc1"]["main"]["date_inventory"]["single"]["normalized_rows"] == 1
 
 
+@pytest.mark.parametrize("shared", [True, False])
+def test_tb136_runner_suspension_gap_uses_anchors_across_source_boundary(
+    tmp_path: Path, shared: bool
+) -> None:
+    main_days = tuple(date(2026, 8, day) for day in (10, 11, 13))
+    prepared = _suspension_fixture(
+        tmp_path, "300247", archive_days=(20260729, 20260813), main_days=main_days, shared=shared
+    )
+    stock, evidence = next(runner_data.iter_stocks(replace(prepared, st_history={})))
+    assert np.isnan(stock.o[1:4]).all()
+    assert stock.day_kind[1:4].tolist() == [sim.SUSPENDED] * 3
+    assert stock.o[4, 0] == 10
+    checks = evidence["splice"]
+    assert checks["resume_day"]["date"] == "2026-08-13"
+    assert [row["date"] for row in checks["pre_splice_exclusions"]] == [
+        "2026-08-07",
+        "2026-08-10",
+        "2026-08-11",
+    ]
+    assert all(row["next_daily_date"] == "2026-08-13" for row in checks["pre_splice_exclusions"])
+
+
 @pytest.mark.parametrize(
-    ("symbol", "archive_days", "shared", "reason"),
+    ("archive_days", "reason"),
     [
-        ("300247", (20260731, 20260810), True, "single_day.missing_daily_anchor"),
-        ("300246", (20260810,), True, "single_day.missing_daily_anchor"),
-        ("300246", (20260731, 20260810), False, "single_day.missing_daily_anchor"),
-        ("300246", (20260731, 20260807, 20260810), True, "single_day.daily_open"),
-        ("300333", (20260729, 20260813), True, "resume_day.missing_daily_anchor"),
+        ((20260810,), "single_day.missing_daily_anchor"),
+        ((20260731,), "single_day.missing_daily_anchor"),
+        ((20260731, 20260807, 20260810), "single_day.daily_open"),
     ],
 )
-def test_tb136_runner_suspension_exception_preserves_other_splice_failures(
-    tmp_path: Path, symbol: str, archive_days: tuple[int, ...], shared: bool, reason: str
+def test_tb136_runner_suspension_gap_preserves_unbracketed_and_price_failures(
+    tmp_path: Path, archive_days: tuple[int, ...], reason: str
 ) -> None:
-    prepared = _suspension_fixture(tmp_path, symbol, archive_days=archive_days, shared=shared)
+    prepared = _suspension_fixture(tmp_path, "300246", archive_days=archive_days)
     with pytest.raises(splice.SpliceError) as error:
         next(runner_data.iter_stocks(prepared))
     checks = error.value.summary["splice"]
     assert reason in checks["failures"]
-    if symbol == "300333":
-        assert checks["pre_splice_exclusions"][0]["date"] == "2026-08-07"
-        assert checks["resume_day"]["date"] == "2026-08-10"
-    else:
-        assert "pre_splice_exclusions" not in checks
+    assert "pre_splice_exclusions" not in checks
+
+
+def test_tb136_runner_suspension_gap_counts_hf_and_vipdoc_and_rejects_duplicate(
+    tmp_path: Path,
+) -> None:
+    key = ("SZ", "300247")
+    prepared = _suspension_fixture(tmp_path, key[1])
+    table, _ = splice.decode_lc1(prepared.main.files[key].path, *key)
+    day = splice.SINGLE_DAY
+    residual = splice._day(table, day)
+    left, right = date(2026, 7, 31), splice.MAIN_START
+    anchors = dict.fromkeys((left, right), splice.DailyBar(10, 10, 100))
+    bad = {"HF": pa.concat_tables([residual, residual])}
+    with pytest.raises(data.DataFormatError, match="duplicate timestamp"):
+        runner_data._exclude_suspension_residuals(key, bad, anchors, {day})
+    sources = {"HF": residual, "vipdoc": table}
+    suspended, evidence = runner_data._exclude_suspension_residuals(key, sources, anchors, {day})
+    assert suspended == {day}
+    assert sources["HF"].num_rows == 0
+    assert sources["vipdoc"].num_rows == 1
+    assert evidence[0]["rows_by_source"] == {"HF": 1, "vipdoc": 1}
+    assert evidence[0]["rows"] == 2

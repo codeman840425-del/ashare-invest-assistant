@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import zipfile
+from bisect import bisect_left
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date
@@ -18,10 +19,8 @@ from . import data, inputs, rules, sessions, sim, splice
 from .errors import DataFormatError
 
 CALENDAR_SHA = "af18d0298024c4e38f44aaf1ac35347d6e044a513f9cba9c26b23fdd64aa330b"
-# Chief's §2.3 ruling is for these four 2026-08-07 stock-days in the local snapshot.
-_SINGLE_DAY_SUSPENSIONS = frozenset(
-    {("SZ", "000838"), ("SZ", "300246"), ("SZ", "300333"), ("SZ", "300862")}
-)
+SUSPENSION_POLICY = "absent_between_adjacent_hsjday_records_on_open_session"
+_EPOCH = date(1970, 1, 1)
 
 
 @dataclass(frozen=True)
@@ -268,7 +267,7 @@ def _minute_stock(
 
 
 def _listing_check(
-    stock: data.Stock, prepared: Prepared, single: pa.Table, main: pa.Table
+    stock: data.Stock, prepared: Prepared, single: pa.Table, main: pa.Table, *, gap_exclusions: bool
 ) -> data.Summary:
     key = stock[:2]
     securities = prepared.meta["securities"].get(key)
@@ -282,6 +281,11 @@ def _listing_check(
         return {"state": "unknown" if securities is None else "checked", "mismatches": mismatches}
     first_days = [(t["timestamp"][0].as_py().date(), t) for t in (single, main) if t.num_rows]
     if not first_days:
+        if gap_exclusions:
+            return {
+                "state": "no_retained_minute_records",
+                "listing_date": securities["listing_date"] if securities else None,
+            }
         raise DataFormatError(f"vipdoc-only code has no normalized records: {key}")
     first, source = min(first_days, key=lambda item: item[0])
     listed = securities["listing_date"] if securities else None
@@ -335,32 +339,56 @@ def _exrights_audit(
     return result
 
 
-def _exclude_single_day_suspension(
-    key: inputs.StockKey, single: pa.Table, daily: dict[date, splice.DailyBar]
-) -> tuple[pa.Table, list[data.Summary]]:
-    """Only the adjudicated local-snapshot days qualify; missing anchors alone do not."""
-    if key not in _SINGLE_DAY_SUSPENSIONS or not single.num_rows or splice.SINGLE_DAY in daily:
-        return single, []
-    prior = max((day for day in daily if day < splice.SINGLE_DAY), default=None)
-    following = min((day for day in daily if day > splice.SINGLE_DAY), default=None)
-    if prior is None or prior >= splice.HF_END or following is None:
-        return single, []
-    return splice.empty_table(), [
-        {
-            "date": splice.SINGLE_DAY.isoformat(),
-            "reason": "suspension_residual_minutes",
-            "label": "停牌期分钟残留",
-            "rows": single.num_rows,
-            "prior_daily_date": prior.isoformat(),
-            "next_daily_date": following.isoformat(),
-        }
-    ]
+def _exclude_suspension_residuals(
+    key: inputs.StockKey,
+    sources: dict[str, pa.Table],
+    daily: dict[date, splice.DailyBar],
+    market_days: set[date],
+) -> tuple[set[date], list[data.Summary]]:
+    """Remove rows only for exchange sessions bracketed by dated daily records."""
+    dated = sorted(daily)
+    if len(dated) < 2:
+        return set(), []
+    suspended = {day for day in market_days.difference(daily) if dated[0] < day < dated[-1]}
+    if not suspended:
+        return set(), []
+    gap_days = {(day - _EPOCH).days: day for day in sorted(suspended)}
+    removed: dict[date, dict[str, int]] = {}
+    for name, table in sources.items():
+        if not table.num_rows:
+            continue
+        days = (splice._timestamps(table) + splice.CST_US) // splice.DAY_US
+        mask = np.isin(days, list(gap_days))
+        if not mask.any():
+            continue
+        # A malformed row cannot evade checks by falling on a removed date.
+        splice.canonical_table(table, *key)
+        sources[name] = table.filter(pa.array(~mask))
+        offsets, counts = np.unique(days[mask], return_counts=True)
+        for offset, count in zip(offsets, counts, strict=True):
+            removed.setdefault(gap_days[int(offset)], {})[name] = int(count)
+    evidence = []
+    for day, counts in sorted(removed.items()):
+        following = bisect_left(dated, day)
+        evidence.append(
+            {
+                "date": day.isoformat(),
+                "reason": "suspension_residual_minutes",
+                "label": "停牌期分钟残留",
+                "rows": sum(counts.values()),
+                "rows_by_source": counts,
+                "prior_daily_date": dated[following - 1].isoformat(),
+                "next_daily_date": dated[following].isoformat(),
+            }
+        )
+    return suspended, evidence
 
 
 def iter_stocks(prepared: Prepared) -> Iterator[tuple[sim.StockInput, data.Summary]]:
     """Decode each verified stock, check the splice before handing off its grid."""
     if data.sha256(prepared.archive) != prepared.archive_sha256:
         raise DataFormatError("hsjday archive changed after preflight")
+    market_days = set(prepared.dates)
     with zipfile.ZipFile(prepared.archive) as archive:
         daily = data.DailyArchive(archive)
         for stock in prepared.pool:
@@ -372,14 +400,24 @@ def iter_stocks(prepared: Prepared) -> Iterator[tuple[sim.StockInput, data.Summa
                 prepared.main, key, inventory_end=prepared.dates[-1] if shared_vipdoc else None
             )
             anchors = daily.records(*key)
-            exclusions = []
             if shared_vipdoc:
                 single = splice._day(main, splice.SINGLE_DAY)
                 sc = {"mode": "derived_date_use", "rows": single.num_rows}
-                single, exclusions = _exclude_single_day_suspension(key, single, anchors)
+                sources = {"HF": hf, "vipdoc": main}
             else:
                 single, sc = _minute_stock(prepared.single, key)
-            listing = _listing_check(stock, prepared, single, main)
+                sources = {"HF": hf, "vipdoc_single": single, "vipdoc_main": main}
+            suspended, exclusions = _exclude_suspension_residuals(
+                key, sources, anchors, market_days
+            )
+            hf = sources["HF"]
+            if shared_vipdoc:
+                main = sources["vipdoc"]
+                if splice.SINGLE_DAY in suspended:
+                    single = single.slice(0, 0)
+            else:
+                single, main = sources["vipdoc_single"], sources["vipdoc_main"]
+            listing = _listing_check(stock, prepared, single, main, gap_exclusions=bool(exclusions))
             events = prepared.events.get(key, [])
             try:
                 grid, checks = data.load_spliced_stock(
@@ -392,11 +430,14 @@ def iter_stocks(prepared: Prepared) -> Iterator[tuple[sim.StockInput, data.Summa
                     symbol=symbol,
                     events=events,
                     shared_vipdoc=shared_vipdoc,
+                    single_day_suspended=splice.SINGLE_DAY in suspended,
                 )
             except splice.SpliceError as exc:
+                exc.summary["splice"]["suspension_policy"] = SUSPENSION_POLICY
                 if exclusions:
                     exc.summary["splice"]["pre_splice_exclusions"] = exclusions
                 raise
+            checks["splice"]["suspension_policy"] = SUSPENSION_POLICY
             if exclusions:
                 checks["splice"]["pre_splice_exclusions"] = exclusions
             checks["lc1"] = {"single": sc, "main": mc}
@@ -411,6 +452,7 @@ def iter_stocks(prepared: Prepared) -> Iterator[tuple[sim.StockInput, data.Summa
                 prepared.st_history,
                 prepared.listing_history,
                 grid,
+                daily_suspensions=suspended,
             )
             checks["exclusions"] = reasons
             checks["exrights"] = _exrights_audit(stock, grid, prepared.dates, st, events)

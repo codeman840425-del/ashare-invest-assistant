@@ -1,0 +1,510 @@
+{
+  "frozen_commit": "24e4ba6c665db939e3d10cd9f591fdb43a2d94ee",
+  "diagnostic_head": "24e4ba6c665db939e3d10cd9f591fdb43a2d94ee",
+  "frontend_tree": "8e9d7e5788da696674db976ca3ed51d7e58d7c97",
+  "logical_cpus": 8,
+  "node_version": "v24.21.0",
+  "lock_sha256": "b18a99dbafd1d9b926cd6c1b427be405387f6bd9912157481dae5de5138aa991",
+  "note": "Bounded observations; cache is not cleared; repeated runs are warm, not independent cold samples. Host CPU cannot establish causality.",
+  "schema_note": "Vitest 5 JSON has no unhandled-error count. Banner presence is checked in logs; absence is not a numeric runtime-error count. Raw matrix initially used a default zero; do not interpret that field.",
+  "runs": [
+    {
+      "label": "four-w4-1",
+      "workers": 4,
+      "pool": "forks (Vitest default)",
+      "files": [
+        "src/pages/stock/t-f10.test.tsx",
+        "src/pages/t-f03.test.tsx",
+        "src/pages/t-a09.test.tsx",
+        "src/pages/t-f22a.test.tsx"
+      ],
+      "exit_code": 1,
+      "success": false,
+      "elapsed_seconds": 27.277,
+      "passed": 57,
+      "failed": 1,
+      "pending": 0,
+      "host_cpu_percent_max": 100.0,
+      "host_cpu_percent_mean": 99.99,
+      "host_available_bytes_min": 893247488,
+      "unhandled_error_banner_seen": false,
+      "chart_value_is_null_seen": false,
+      "failed_assertions": [
+        {
+          "file": "t-f22a.test.tsx",
+          "name": "M1 证书状态横幅自动刷新 提交后验证失败：不刷新页面，全站横幅即变为“无效”",
+          "status": "failed",
+          "duration_ms": 1871.7314000000006
+        }
+      ],
+      "log_sha256": "ab3161f8c2ea86c45a9ee97f1bb4c08f1a7097368514481de8ad5294879f14c5"
+    },
+    {
+      "label": "four-w4-2",
+      "workers": 4,
+      "pool": "forks (Vitest default)",
+      "files": [
+        "src/pages/stock/t-f10.test.tsx",
+        "src/pages/t-f03.test.tsx",
+        "src/pages/t-a09.test.tsx",
+        "src/pages/t-f22a.test.tsx"
+      ],
+      "exit_code": 1,
+      "success": false,
+      "elapsed_seconds": 25.118,
+      "passed": 56,
+      "failed": 2,
+      "pending": 0,
+      "host_cpu_percent_max": 100.0,
+      "host_cpu_percent_mean": 99.98,
+      "host_available_bytes_min": 807297024,
+      "unhandled_error_banner_seen": false,
+      "chart_value_is_null_seen": false,
+      "failed_assertions": [
+        {
+          "file": "t-f03.test.tsx",
+          "name": "个股档案 /stocks/:code 行情头、基本信息、周期分类、默认分时图",
+          "status": "failed",
+          "duration_ms": 1572.2808999999997
+        },
+        {
+          "file": "t-f10.test.tsx",
+          "name": "③ 页面层：null 时显示「未知」，不拿常量兜底 指数因子页签显示「未知」而不是编造的截面日/因子集",
+          "status": "failed",
+          "duration_ms": 1559.3973000000005
+        }
+      ],
+      "log_sha256": "a75ce7851f33648182f4f83b72dc28121599e7d0efe71872defd92533c48ca3d"
+    },
+    {
+      "label": "four-w1",
+      "workers": 1,
+      "pool": "forks (Vitest default)",
+      "files": [
+        "src/pages/stock/t-f10.test.tsx",
+        "src/pages/t-f03.test.tsx",
+        "src/pages/t-a09.test.tsx",
+        "src/pages/t-f22a.test.tsx"
+      ],
+      "exit_code": 0,
+      "success": true,
+      "elapsed_seconds": 69.483,
+      "passed": 58,
+      "failed": 0,
+      "pending": 0,
+      "host_cpu_percent_max": 100.0,
+      "host_cpu_percent_mean": 99.94,
+      "host_available_bytes_min": 847855616,
+      "unhandled_error_banner_seen": false,
+      "chart_value_is_null_seen": false,
+      "failed_assertions": [],
+      "log_sha256": "10f4e95c508434f79de2a097aeeacbf09fc7fa757c9f18c706a1affaf9851ed4"
+    },
+    {
+      "label": "pair-w2",
+      "workers": 2,
+      "pool": "forks (Vitest default)",
+      "files": [
+        "src/pages/t-f03.test.tsx",
+        "src/pages/t-f22a.test.tsx"
+      ],
+      "exit_code": 0,
+      "success": true,
+      "elapsed_seconds": 25.219,
+      "passed": 41,
+      "failed": 0,
+      "pending": 0,
+      "host_cpu_percent_max": 100.0,
+      "host_cpu_percent_mean": 99.94,
+      "host_available_bytes_min": 920178688,
+      "unhandled_error_banner_seen": false,
+      "chart_value_is_null_seen": false,
+      "failed_assertions": [],
+      "log_sha256": "905901ee214a4daa3a5567f6a10892e68081b5af5d6302d6de116c1237c3582b"
+    },
+    {
+      "label": "solo-t-f10.test",
+      "workers": 1,
+      "pool": "forks (Vitest default)",
+      "files": [
+        "src/pages/stock/t-f10.test.tsx"
+      ],
+      "exit_code": 0,
+      "success": true,
+      "elapsed_seconds": 15.934,
+      "passed": 4,
+      "failed": 0,
+      "pending": 0,
+      "host_cpu_percent_max": 100.0,
+      "host_cpu_percent_mean": 99.99,
+      "host_available_bytes_min": 1383735296,
+      "unhandled_error_banner_seen": false,
+      "chart_value_is_null_seen": false,
+      "failed_assertions": [],
+      "log_sha256": "c6485bdcb86ec74dd8ac6da935e2538fee13845951cb8eb46fa895e0d38dec16"
+    },
+    {
+      "label": "solo-t-f03.test",
+      "workers": 1,
+      "pool": "forks (Vitest default)",
+      "files": [
+        "src/pages/t-f03.test.tsx"
+      ],
+      "exit_code": 0,
+      "success": true,
+      "elapsed_seconds": 13.226,
+      "passed": 14,
+      "failed": 0,
+      "pending": 0,
+      "host_cpu_percent_max": 100.0,
+      "host_cpu_percent_mean": 100.0,
+      "host_available_bytes_min": 1490137088,
+      "unhandled_error_banner_seen": false,
+      "chart_value_is_null_seen": false,
+      "failed_assertions": [],
+      "log_sha256": "04a369825d0b48f41df62e4769f89cad47caadad78dfe802f1a5fb679479f782"
+    },
+    {
+      "label": "solo-t-a09.test",
+      "workers": 1,
+      "pool": "forks (Vitest default)",
+      "files": [
+        "src/pages/t-a09.test.tsx"
+      ],
+      "exit_code": 0,
+      "success": true,
+      "elapsed_seconds": 10.124,
+      "passed": 13,
+      "failed": 0,
+      "pending": 0,
+      "host_cpu_percent_max": 100.0,
+      "host_cpu_percent_mean": 99.98,
+      "host_available_bytes_min": 1602433024,
+      "unhandled_error_banner_seen": false,
+      "chart_value_is_null_seen": false,
+      "failed_assertions": [],
+      "log_sha256": "076b13d467889ed3e3d3186d2ce39b5781db18e874138b1d3d93db31e94c732e"
+    },
+    {
+      "label": "solo-t-f22a.test",
+      "workers": 1,
+      "pool": "forks (Vitest default)",
+      "files": [
+        "src/pages/t-f22a.test.tsx"
+      ],
+      "exit_code": 0,
+      "success": true,
+      "elapsed_seconds": 12.805,
+      "passed": 27,
+      "failed": 0,
+      "pending": 0,
+      "host_cpu_percent_max": 100.0,
+      "host_cpu_percent_mean": 99.97,
+      "host_available_bytes_min": 1334046720,
+      "unhandled_error_banner_seen": false,
+      "chart_value_is_null_seen": false,
+      "failed_assertions": [],
+      "log_sha256": "e08794f5a845ec096ca667945e6ea5c92bcadfa891f64b6397add3bf0bcac729"
+    }
+  ],
+  "additional_runs": [
+    {
+      "label": "original-four",
+      "success": false,
+      "passed": 57,
+      "failed": 1,
+      "json_sha256": "25d8331d8d9fcbca8c5cdbb37ec90490aa124baeda209fded60549fed12cc6b3",
+      "failed_assertions": [
+        {
+          "file": "t-f10.test.tsx",
+          "name": "③ 页面层：null 时显示「未知」，不拿常量兜底 指数因子页签显示「未知」而不是编造的截面日/因子集",
+          "duration_ms": 1785.6599999999999
+        }
+      ]
+    },
+    {
+      "label": "trace-four",
+      "success": false,
+      "passed": 57,
+      "failed": 1,
+      "json_sha256": "fc00053a4f771990081474186d3fd8d90c8163e163b8f47b2294631766f12306",
+      "failed_assertions": [
+        {
+          "file": "t-f10.test.tsx",
+          "name": "③ 页面层：null 时显示「未知」，不拿常量兜底 指数因子页签显示「未知」而不是编造的截面日/因子集",
+          "duration_ms": 2761.6245000000017
+        }
+      ]
+    },
+    {
+      "label": "trace-solo",
+      "success": true,
+      "passed": 4,
+      "failed": 0,
+      "json_sha256": "7fbe02856a0fafb40e9ab073d0c47530561893df26dea9bcd8c5d6dce5297ffc",
+      "failed_assertions": []
+    }
+  ],
+  "trace_selected": {
+    "trace-four": [
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 0,
+        "kind": "begin",
+        "async_util_timeout_ms": 1000
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 1389,
+        "kind": "request",
+        "path": "/api/v1/me"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 1406,
+        "kind": "mocked",
+        "path": "/api/v1/me",
+        "elapsed_ms": 17
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 1463,
+        "kind": "request",
+        "path": "/api/v1/securities/000300.SH"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 1475,
+        "kind": "mocked",
+        "path": "/api/v1/securities/000300.SH",
+        "elapsed_ms": 12
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 1500,
+        "kind": "request",
+        "path": "/api/v1/notifications/unread-count"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 1565,
+        "kind": "mocked",
+        "path": "/api/v1/notifications/unread-count",
+        "elapsed_ms": 65
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 2342,
+        "kind": "request",
+        "path": "/api/v1/quotes"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 2355,
+        "kind": "request",
+        "path": "/api/v1/securities/000300.SH/bars"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 2355,
+        "kind": "request",
+        "path": "/api/v1/securities/000300.SH/bars"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 2356,
+        "kind": "request",
+        "path": "/api/v1/horizon-assessments"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 2358,
+        "kind": "request",
+        "path": "/api/v1/securities/000300.SH/factors"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 2507,
+        "kind": "mocked",
+        "path": "/api/v1/horizon-assessments",
+        "elapsed_ms": 151
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 2542,
+        "kind": "mocked",
+        "path": "/api/v1/quotes",
+        "elapsed_ms": 201
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 2566,
+        "kind": "mocked",
+        "path": "/api/v1/securities/000300.SH/bars",
+        "elapsed_ms": 211
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 2600,
+        "kind": "mocked",
+        "path": "/api/v1/securities/000300.SH/bars",
+        "elapsed_ms": 245
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 2640,
+        "kind": "mocked",
+        "path": "/api/v1/securities/000300.SH/factors",
+        "elapsed_ms": 282
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 2756,
+        "kind": "end",
+        "event_loop_max_ms": 563,
+        "pending_paths": [],
+        "present_testids": [
+          "stock-head",
+          "profile-panel"
+        ]
+      }
+    ],
+    "trace-solo": [
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 0,
+        "kind": "begin",
+        "async_util_timeout_ms": 1000
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 354,
+        "kind": "request",
+        "path": "/api/v1/me"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 355,
+        "kind": "mocked",
+        "path": "/api/v1/me",
+        "elapsed_ms": 2
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 364,
+        "kind": "request",
+        "path": "/api/v1/securities/000300.SH"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 365,
+        "kind": "mocked",
+        "path": "/api/v1/securities/000300.SH",
+        "elapsed_ms": 1
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 368,
+        "kind": "request",
+        "path": "/api/v1/notifications/unread-count"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 369,
+        "kind": "mocked",
+        "path": "/api/v1/notifications/unread-count",
+        "elapsed_ms": 2
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 487,
+        "kind": "request",
+        "path": "/api/v1/quotes"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 491,
+        "kind": "request",
+        "path": "/api/v1/securities/000300.SH/bars"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 492,
+        "kind": "request",
+        "path": "/api/v1/securities/000300.SH/bars"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 492,
+        "kind": "request",
+        "path": "/api/v1/horizon-assessments"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 493,
+        "kind": "request",
+        "path": "/api/v1/securities/000300.SH/factors"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 503,
+        "kind": "mocked",
+        "path": "/api/v1/horizon-assessments",
+        "elapsed_ms": 10
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 503,
+        "kind": "mocked",
+        "path": "/api/v1/quotes",
+        "elapsed_ms": 16
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 504,
+        "kind": "mocked",
+        "path": "/api/v1/securities/000300.SH/bars",
+        "elapsed_ms": 13
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 504,
+        "kind": "mocked",
+        "path": "/api/v1/securities/000300.SH/bars",
+        "elapsed_ms": 12
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 506,
+        "kind": "mocked",
+        "path": "/api/v1/securities/000300.SH/factors",
+        "elapsed_ms": 13
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 516,
+        "kind": "request",
+        "path": "/api/v1/watchlist"
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 530,
+        "kind": "mocked",
+        "path": "/api/v1/watchlist",
+        "elapsed_ms": 14
+      },
+      {
+        "test": "指数因子页签显示「未知」而不是编造的截面日/因子集",
+        "since_test_ms": 563,
+        "kind": "end",
+        "event_loop_max_ms": 155,
+        "pending_paths": [],
+        "present_testids": [
+          "stock-head",
+          "profile-panel",
+          "tab-factors"
+        ]
+      }
+    ]
+  }
+}

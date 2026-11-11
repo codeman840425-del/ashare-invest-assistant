@@ -14,6 +14,11 @@ export type Exchange = 'SH' | 'SZ' | 'BJ';
 /** §5.1 ProviderRef：展示类接口的来源说明 */
 export interface ProviderRef { provider: DataProvider; endpoint: string | null; fetched_at: DateTime | null }
 interface Sourced extends DataStatusBlock { sources: ProviderRef[] }
+/**
+ * F-11：契约 §7.3 T-A53 裁定第 4 条——financials / fund-flows / announcements 的 `data_as_of` 全空时为 null。
+ * factors 不在该条点名范围内（其 data_as_of 未标可空），继续用 `Sourced`，不随本切片放开。
+ */
+interface SliceSourced extends Omit<Sourced, 'data_as_of'> { data_as_of: DateTime | null }
 
 /** §5.1 SecurityHit（GET /securities/search） */
 export interface SecurityHit {
@@ -74,7 +79,7 @@ export interface FinancialPeriod {
   debt_ratio_pct: Decimal | null;
   operating_cash_flow: Decimal | null;
 }
-export interface FinancialsResponse extends Sourced { security_code: string; name: string; items: FinancialPeriod[] }
+export interface FinancialsResponse extends SliceSourced { security_code: string; name: string; items: FinancialPeriod[] }
 
 /** §5.1 FundFlowDay：除 trade_date、is_final 外均可为 null；单位元 */
 export interface FundFlowDay {
@@ -88,7 +93,7 @@ export interface FundFlowDay {
   main_net_pct: Decimal | null;
   is_final: boolean;
 }
-export interface FundFlowsResponse extends Sourced { security_code: string; name: string; items: FundFlowDay[] }
+export interface FundFlowsResponse extends SliceSourced { security_code: string; name: string; items: FundFlowDay[] }
 
 /**
  * §3 factor_category：麦蕊因子的 11 个分类，键名【待 T003 补测】；定稿前按字符串处理（遗留问题见 T-A08-frontend.md）
@@ -127,7 +132,7 @@ export interface Announcement {
   file_format: 'pdf' | 'html' | 'other' | null;
   first_seen_at: DateTime;
 }
-export type AnnouncementsResponse = Paged<Announcement> & Sourced & { disclaimer: string };
+export type AnnouncementsResponse = Paged<Announcement> & SliceSourced & { disclaimer: string };
 
 /** §5.1 SectorFlow（GET /market/sector-flows，盘后数据） */
 export interface SectorFlow {

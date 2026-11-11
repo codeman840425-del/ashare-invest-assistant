@@ -22,6 +22,12 @@ export type Uuid = string;
 // ---------- §1 ----------
 export interface Gap { key: string; reason: GapReason; message: string }
 export interface DataStatusBlock { data_status: DataStatus; data_as_of: DateTime; gaps: Gap[] }
+/**
+ * F-11（契约 §7.3 T-A53 裁定第 4 条，v0.2.9 内）：「四端点结构不变…`data_as_of` 取实际使用行情时点最早值，**全空 null**」。
+ * 只对裁定点名的端点放开为可空——bars / financials / fund-flows / announcements / quotes；其余对象仍按 §1「可空」
+ * 规矩（未标 `| null` 的字段必有值）保持 `DateTime`。不得把它套到全局 DataStatusBlock 上。
+ */
+export interface SliceDataStatusBlock extends Omit<DataStatusBlock, 'data_as_of'> { data_as_of: DateTime | null }
 export interface Paged<T> { items: T[]; next_cursor: string | null }
 export interface ApiErrorBody {
   error: { code: string; message: string; details: Record<string, unknown> | null; request_id: string };
@@ -433,7 +439,7 @@ export interface Portfolio extends DataStatusBlock {
   exposure: { sector: { name: string; pct: Decimal }[] };
 }
 export interface WatchlistResponse { items: WatchlistItem[]; caps: { watchlist: number; focus: number } }
-export interface QuoteItem extends DataStatusBlock {
+export interface QuoteItem extends SliceDataStatusBlock {
   security_code: string;
   name: string;
   price: Decimal;
@@ -442,7 +448,7 @@ export interface QuoteItem extends DataStatusBlock {
   amount: Decimal;
   t: DateTime;
 }
-export interface BarsResponse extends DataStatusBlock {
+export interface BarsResponse extends SliceDataStatusBlock {
   security_code: string;
   name: string;
   freq: BarFreq;

@@ -103,6 +103,7 @@ HF 1 分钟包含退市股：转换后 manifest `delisted_stocks = 180`（其中
 2. 用沪深交易所终止上市名单（上交所 https://www.sse.com.cn/assortment/stock/list/delisting/ ，深交所 https://www.szse.cn/www/market/stock/suspend/index.html ）比对 2022-01-04 至 2026-11-10 期间终止上市的沪深股票（2026-08-07 以后退市的，看 vipdoc 是否有其退市整理期的 bar）：列出名单里有、股票池里没有的代码（含 `absent_instruments.csv` 中的），统计占全部退市股的比例。
 3. 每只退市股最后一根 bar 的日期，应不早于其退市整理期开始日；早于的列出，判为「尾段缺失」。
 4. 偏差方向照旧分方向报告：缺少退市前的下跌股会高估 `buy_first`（§8.3 P10）。
+5. **无退市整理期的退市股（T-A155 裁定）**：交易类强制退市/主动退市没有整理期。以 HF `coverage_by_instrument.csv` 的 `expected_end_date` 与该股最后一根 bar 日期**判等**为尾部无缺行的判据（通过，不另设自然日阈值）；公告标题无整理期证据的另标 `evidence_only`，后续逐股读终止上市公告正文交叉核收口；`expected_end_date` 与最后一根 bar 不等的，只有缺口交易日全部为已确认停牌时才按「停牌到摘牌」放行，否则判尾段缺失。
 
 ### 2.6 数据需求（后端开跑前确认）
 

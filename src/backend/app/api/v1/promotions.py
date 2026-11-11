@@ -114,7 +114,7 @@ def get_review(review_id: uuid.UUID, auth: AuthDep, engine: EngineDep) -> dict[s
         return service.detail(conn, auth.user_id, review_id)
 
 
-@router.get("/admin/promotions")
+@router.get("/admin/promotions", include_in_schema=False)
 def promotion_list(
     auth: AdminDep,
     engine: EngineDep,
@@ -178,7 +178,7 @@ def promotion_list(
     )
 
 
-@router.post("/admin/promotions/{review_id}/decision")
+@router.post("/admin/promotions/{review_id}/decision", include_in_schema=False)
 def decision(
     review_id: uuid.UUID,
     body: DecisionRequest,
@@ -211,7 +211,9 @@ def decision(
         )
 
 
-@router.post("/admin/strategies/{strategy_id}/versions/{version_id}/lifecycle")
+@router.post(
+    "/admin/strategies/{strategy_id}/versions/{version_id}/lifecycle", include_in_schema=False
+)
 def lifecycle(
     strategy_id: uuid.UUID,
     version_id: uuid.UUID,

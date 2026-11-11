@@ -155,6 +155,91 @@ def test_b05_announcements_url_allowlist(
     validate("announcements", response.json(), set(allowed))
 
 
+def test_b05_announcements_url_backslash_bypass(env: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    allowed = env.settings.business.securities.announcements.url_host_allowlist
+    body = deepcopy(env.reader.bundle["stock"]["response"])
+    # WHATWG treats the backslash as a path separator: the actual host is outside.example.
+    body["items"][0]["url"] = f"https://outside.example\\@{allowed[0]}/synthetic.pdf"
+    safe = f"https://{allowed[0]}/synthetic.pdf"
+    body["items"][1]["url"] = safe
+    monkeypatch.setattr(env.reader, "read", lambda *_args: body)
+    response = env.client.get(env.path)
+    assert response.status_code == 200
+    rows = response.json()["items"]
+    assert [row["id"] for row in rows] == ["syn-ann-0002", "syn-ann-0001"]
+    assert rows[0]["url"] is None
+    assert rows[0]["url_host"] == "outside.example"
+    assert rows[1]["url"] == safe
+    assert rows[1]["url_host"] == allowed[0]
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["etag"]
+
+
+@pytest.mark.parametrize("broken", ["https://[invalid/synthetic.pdf", "https://[gg::1]/x"])
+def test_b05_announcements_malformed_url_keeps_page(
+    env: Any, monkeypatch: pytest.MonkeyPatch, broken: str
+) -> None:
+    allowed = env.settings.business.securities.announcements.url_host_allowlist
+    body = deepcopy(env.reader.bundle["stock"]["response"])
+    safe = f"https://{allowed[0]}/synthetic.pdf"
+    body["items"][0]["url"] = broken
+    body["items"][0]["url_host"] = allowed[0]  # Must not retain misleading source metadata.
+    body["items"][1]["url"] = safe
+    monkeypatch.setattr(env.reader, "read", lambda *_args: body)
+    response = env.client.get(env.path)
+    assert response.status_code == 200
+    rows = response.json()["items"]
+    assert [row["id"] for row in rows] == ["syn-ann-0002", "syn-ann-0001"]
+    assert rows[0]["url"] is None
+    assert rows[0]["url_host"] is None
+    assert rows[1]["url"] == safe
+    assert rows[1]["url_host"] == allowed[0]
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["etag"]
+    validate("announcements", response.json(), set(allowed))
+
+
+@pytest.mark.parametrize("path", [r"\synthetic.pdf", r"/folder\synthetic.pdf"])
+def test_b05_announcements_returns_the_checked_normalized_url(
+    env: Any, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    allowed = env.settings.business.securities.announcements.url_host_allowlist
+    body = deepcopy(env.reader.bundle["stock"]["response"])
+    body["items"][0]["url"] = f"https://{allowed[0]}{path}"
+    monkeypatch.setattr(env.reader, "read", lambda *_args: body)
+    response = env.client.get(env.path)
+    assert response.status_code == 200
+    row = response.json()["items"][0]
+    expected_path = "/synthetic.pdf" if path.startswith("\\") else "/folder/synthetic.pdf"
+    assert row["url"] == f"https://{allowed[0]}{expected_path}"
+    assert "\\" not in row["url"]
+    assert row["url_host"] == allowed[0]
+    validate("announcements", response.json(), set(allowed))
+
+
+@pytest.mark.parametrize(
+    ("raw", "known_host"),
+    [
+        ("https://user@{host}/synthetic.pdf", True),
+        ("https://{host}/synthetic\n.pdf", False),
+        ("https://{host}:invalid/synthetic.pdf", False),
+        ("https://{host}:65536/synthetic.pdf", False),
+    ],
+)
+def test_b05_announcements_ambiguous_authority_disables_link(
+    env: Any, monkeypatch: pytest.MonkeyPatch, raw: str, known_host: bool
+) -> None:
+    allowed = env.settings.business.securities.announcements.url_host_allowlist
+    body = deepcopy(env.reader.bundle["stock"]["response"])
+    body["items"][0]["url"] = raw.format(host=allowed[0])
+    monkeypatch.setattr(env.reader, "read", lambda *_args: body)
+    response = env.client.get(env.path)
+    assert response.status_code == 200
+    row = response.json()["items"][0]
+    assert row["url"] is None
+    assert row["url_host"] == (allowed[0] if known_host else None)
+
+
 @pytest.mark.parametrize(
     "query",
     [

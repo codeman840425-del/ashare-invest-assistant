@@ -132,6 +132,28 @@ def get_announcements_reader(engine: EngineDep) -> ResourceReader[AnnouncementsQ
 ReaderDep = Annotated[ResourceReader[AnnouncementsQuery], Depends(get_announcements_reader)]
 
 
+def original_link(url: str, allowlist: tuple[str, ...]) -> tuple[str | None, str | None]:
+    """Check and publish the same browser-compatible URL; a bad link stays item-local."""
+    normalized = url.replace("\\", "/")
+    # Browsers trim/drop ASCII whitespace and controls; reject ambiguous inputs outright.
+    if any(ord(char) <= 32 or ord(char) == 127 for char in normalized):
+        return None, None
+    try:
+        parsed = urlsplit(normalized)
+        host = parsed.hostname
+        _ = parsed.port  # Validate non-numeric and out-of-range ports as well as bracket syntax.
+    except ValueError:
+        return None, None
+    if (
+        parsed.scheme != "https"
+        or host not in allowlist
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return None, host
+    return normalized, host
+
+
 def window(
     original: dict[str, Any],
     query: AnnouncementsQuery,
@@ -174,10 +196,7 @@ def window(
     allowlist = settings.business.securities.announcements.url_host_allowlist
     for row in selected:
         if row["url"] is not None:
-            parsed = urlsplit(row["url"])
-            row["url_host"] = parsed.hostname
-            if parsed.scheme != "https" or parsed.hostname not in allowlist:
-                row["url"] = None
+            row["url"], row["url_host"] = original_link(row["url"], allowlist)
     if not selected:
         body["data_as_of"] = None
         body["sources"] = []

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Request, Response
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, select
 from starlette.datastructures import QueryParams
 
 from app.api.v1.imports import etag_response
@@ -74,12 +74,27 @@ def validate_range(engine: Engine, query: FlowsQuery) -> None:
         return
     with engine.connect() as conn:
         rows = conn.execute(
-            select(trading_calendar.c.date, trading_calendar.c.is_open).where(
-                trading_calendar.c.date.between(query.start, query.end)
-            )
+            select(trading_calendar.c.date, trading_calendar.c.is_open)
+            .where(trading_calendar.c.date.between(query.start, query.end))
+            .order_by(trading_calendar.c.date)
         ).all()
-    if len(rows) != (query.end - query.start).days + 1:
-        raise AppError(ErrorCode.CALENDAR_NOT_COVERED)
+        if len(rows) != (query.end - query.start).days + 1:
+            lo, hi = conn.execute(
+                select(func.min(trading_calendar.c.date), func.max(trading_calendar.c.date))
+            ).one()
+            missing = query.start
+            for row in rows:
+                if row.date != missing:
+                    break
+                missing += dt.timedelta(days=1)
+            raise AppError(
+                ErrorCode.CALENDAR_NOT_COVERED,
+                details={
+                    "date": missing.isoformat(),
+                    "coverage_start": lo.isoformat() if lo is not None else None,
+                    "coverage_end": hi.isoformat() if hi is not None else None,
+                },
+            )
     if sum(bool(row.is_open) for row in rows) > 250:
         raise invalid("to", "range exceeds 250 trading days")
 

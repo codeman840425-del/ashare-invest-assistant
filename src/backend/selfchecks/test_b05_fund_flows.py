@@ -101,6 +101,44 @@ def test_b05_flows_actual_calendar_limit_and_hole(env: Any) -> None:
     hole = env.client.get(env.path + "?from=2026-01-01&to=" + day251)
     assert hole.status_code == 503
     assert hole.json()["error"]["code"] == "CALENDAR_NOT_COVERED"
+    assert hole.json()["error"]["details"] == {
+        "date": day250,
+        "coverage_start": "2026-01-01",
+        "coverage_end": "2026-12-31",
+    }
+
+
+@pytest.mark.parametrize("default_source", [False, True])
+@pytest.mark.parametrize(
+    ("start", "end", "missing", "empty"),
+    [
+        ("2025-12-31", "2026-01-01", "2025-12-31", False),
+        ("2026-12-31", "2027-01-01", "2027-01-01", False),
+        ("2026-11-02", "2026-11-03", "2026-11-02", True),
+    ],
+)
+def test_b05_flows_calendar_error_details(
+    env: Any,
+    default_source: bool,
+    start: str,
+    end: str,
+    missing: str,
+    empty: bool,
+) -> None:
+    if default_source:
+        del env.app.dependency_overrides[get_flows_reader]
+    if empty:
+        with env.engine.begin() as conn:
+            conn.execute(text("DELETE FROM market.trading_calendar"))
+    response = env.client.get(env.path + "?from=" + start + "&to=" + end)
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "CALENDAR_NOT_COVERED"
+    assert response.json()["error"]["details"] == {
+        "date": missing,
+        "coverage_start": None if empty else "2026-01-01",
+        "coverage_end": None if empty else "2026-12-31",
+    }
+    assert response.headers["cache-control"] == "private, no-store"
 
 
 @pytest.mark.parametrize(

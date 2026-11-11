@@ -393,7 +393,6 @@
 | `bar_adjust` | `none` `qfq` `hfq`（`1m` 只支持 `none`） |
 | `registration_mode` | `closed`（V1 默认）`invite` `open`（保留，V1 不用） |
 | `notification_target_type` | `suggestion` `candidate_signal` `plan_draft` `plan` `daily_report` `import_batch` `reconciliation` `strategy_version` `none` |
-| `notification_ref_type` | `signal` `plan_condition`（§7.11.4 T-A31 既有枚举同步登记，`refs[].type`） |
 | `notification_kind` | `suggestion_change` `invalidation` `daily_report` `alert` `import` `system` `reason_released` `plan_draft_ready` `plan_triggered` `strategy_health` `data_licence` |
 | `severity` | `info` `attention` `important` |
 | `channel` | `in_app` `email` `wecom_app`（预留） |

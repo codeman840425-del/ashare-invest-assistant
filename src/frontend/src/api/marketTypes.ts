@@ -108,8 +108,10 @@ export interface FactorValue {
 export interface FactorsResponse extends Sourced {
   security_code: string;
   name: string;
-  trade_date: DateStr;
-  factor_set_version: string;
+  /** T-A158 ①：请求带 ?trade_date= 时原样返回；未指定且无可用批次时为 null（不造「最新」日期） */
+  trade_date: DateStr | null;
+  /** T-A158 ②：无真实因子集批次时为 null（合成夹具版本不得进生产响应）；前端显示「—」，不编造版本号 */
+  factor_set_version: string | null;
   counts: { total: number; by_category: Record<FactorCategory, number> };
   items: FactorValue[];
 }

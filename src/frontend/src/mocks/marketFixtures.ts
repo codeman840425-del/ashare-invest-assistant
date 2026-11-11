@@ -355,13 +355,22 @@ const FACTOR_DEFS: { id: string; feature_key: string | null; name: string; categ
   { id: 'f.amount_20d', feature_key: null, name: '20 日日均成交额', category: 'liquidity', unit: '亿元', base: 0.5, spread: 40 },
 ];
 const FACTOR_UNIVERSE = 5300;
-/** §7.3 GET /securities/{code}/factors：只给全市场排名（没有行业内分位）；指数返回空列表 + no_source */
+/**
+ * §7.3 GET /securities/{code}/factors：只给全市场排名（没有行业内分位）。
+ * T-A158 空态三形：ETF → 空 items + not_applicable、trade_date/factor_set_version 为 null；
+ * 指数 → 同形但 gap 为 no_source；两者都不造日期/版本号。
+ */
 export function factors(code: string): FactorsResponse | null {
   const idx = INDEX_SPECS.find((x) => x.code === code);
-  if (idx) {
+  const etf = ETF_SPECS.find((x) => x.code === code);
+  if (idx || etf) {
+    const sec = idx ?? etf!;
     return {
-      security_code: idx.code, name: idx.name, trade_date: '2026-10-30', factor_set_version: 'mr-factors-85（示例）', counts: { total: 0, by_category: {} },
-      items: [], sources: [], data_status: 'unavailable', data_as_of: '2026-10-30T18:30:00+08:00', gaps: [{ key: 'factors', reason: 'no_source', message: '指数没有因子数据（示例）' }],
+      security_code: sec.code, name: sec.name, trade_date: null, factor_set_version: null, counts: { total: 0, by_category: {} },
+      items: [], sources: [], data_status: 'unavailable', data_as_of: '2026-10-30T18:30:00+08:00',
+      gaps: [idx
+        ? { key: 'factors', reason: 'no_source', message: '指数没有因子数据（示例）' }
+        : { key: 'factors', reason: 'not_applicable', message: 'ETF 没有因子数据（示例）' }],
     };
   }
   const s = specBrief(code);

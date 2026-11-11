@@ -285,11 +285,14 @@ const routeHandlers = [
     const f = fundFlows(code, days);
     return f ? HttpResponse.json(degrade(f, 'fund_flows')) : notFound('证券');
   }),
-  http.get(`${API}/securities/:code/factors`, async ({ params }) => {
+  http.get(`${API}/securities/:code/factors`, async ({ params, request }) => {
     await lag();
+    // T-A158 ①：请求带 ?trade_date= 时原样透传（空态也一样），未指定才由 fixture 给真实批次日期或 null
+    const requestedDate = new URL(request.url).searchParams.get('trade_date');
     if (isEtf(String(params.code))) {
+      // T-A158 ②：ETF 空态同指数——trade_date/factor_set_version 为 null（带请求日期时原样透传），gap=not_applicable
       return HttpResponse.json({
-        ...etfNotApplicable(String(params.code), 'factors'), trade_date: '2026-10-30', factor_set_version: 'mr-factors-85（示例）', counts: { total: 0, by_category: {} },
+        ...etfNotApplicable(String(params.code), 'factors'), trade_date: requestedDate ?? null, factor_set_version: null, counts: { total: 0, by_category: {} },
       });
     }
     const f = factors(String(params.code));

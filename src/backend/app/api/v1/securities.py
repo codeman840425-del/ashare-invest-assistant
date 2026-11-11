@@ -6,6 +6,7 @@ from fastapi import APIRouter, Header, Request, Response
 
 from app.api.v1.imports import etag_response
 from app.auth.deps import AuthDep, EngineDep, SettingsDep
+from app.marketdata.bars_read import BarsQuery, BarsReaderDep, BarsResponse
 from app.master.profile import profile
 from app.master.search import invalid, search
 
@@ -50,6 +51,19 @@ def search_securities(
         else value
     )
     return etag_response(content, if_none_match)
+
+
+@router.get("/{code}/bars", response_model=BarsResponse)
+def security_bars(
+    code: str,
+    request: Request,
+    auth: AuthDep,
+    reader: BarsReaderDep,
+    if_none_match: str | None = Header(default=None),
+) -> Response:
+    query = BarsQuery.parse(request.query_params)
+    content = BarsResponse.model_validate(reader.read(auth.user_id, code, query))
+    return etag_response(content.model_dump(mode="json"), if_none_match)
 
 
 @router.get("/{code}")

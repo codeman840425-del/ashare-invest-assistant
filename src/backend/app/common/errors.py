@@ -25,6 +25,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.routing import Match
 
 from app.common.request_id import get_request_id
+from app.common.resource_routes import StaticResourceRoute
 
 logger = logging.getLogger("app.errors")
 
@@ -389,13 +390,16 @@ _PROBE_METHODS = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
 
 
 def _allowed_methods(request: Request) -> list[str]:
-    """同一路径上**所有**路由的方法并集。
+    """已选完整静态资源的方法集；其余路径保留匹配路由的方法并集。
 
     Starlette/FastAPI 只把第一个“路径匹配、方法不匹配”的路由的方法放进 ``Allow``；同一路径分开
     注册 GET 与 PUT（如 ``/me/profile``）时会漏报（schemathesis ST205）。这里对每个候选方法用公开的
     ``route.matches`` 试匹配（兼容 FastAPI 0.16x 的嵌套 ``include_router``），完全匹配即视为允许。
     HEAD 只在路由显式声明时出现（与原 ``Allow`` 一致）。
     """
+    resource = request.scope.get("aia.static_resource")
+    if isinstance(resource, StaticResourceRoute):
+        return resource.allowed_methods
     routes = getattr(request.app, "routes", [])
     allowed: list[str] = []
     for method in _PROBE_METHODS:

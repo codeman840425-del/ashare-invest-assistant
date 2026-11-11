@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuites name="pytest tests">
+  <testsuite name="pytest" errors="0" failures="0" skipped="0" tests="6" time="2.801" timestamp="2026-11-11T05:50:58.768940-07:00">
+    <testcase classname="selfchecks.test_tb70_replay" name="test_synthetic_manifest" time="0.006" />
+    <testcase classname="selfchecks.test_tb70_replay" name="test_positions_preview[utf-8]" time="0.003" />
+    <testcase classname="selfchecks.test_tb70_replay" name="test_positions_preview[gbk]" time="0.002" />
+    <testcase classname="selfchecks.test_tb70_replay" name="test_migration_head_matches_checkout" time="0.108" />
+    <testcase classname="selfchecks.test_tb70_replay" name="test_migration_head_rejects_non_unique_graph[heads0]" time="0.001" />
+    <testcase classname="selfchecks.test_tb70_replay" name="test_migration_head_rejects_non_unique_graph[heads1]" time="0.001" />
+    <properties>
+      <property name="frozen_commit" value="8eca8bc94fbef434f76b625a0f3e50c9e86831de" />
+      <property name="original_xml_sha256" value="c97e2487d3b619f142be74566b08c7a57929eec598c442af97d5a398faa8d073" />
+    </properties>
+  </testsuite>
+</testsuites>

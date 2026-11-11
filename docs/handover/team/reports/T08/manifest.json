@@ -1,0 +1,50 @@
+[
+  {
+    "pr": 42,
+    "frozen_commit": "b939963d306517a427131866478c1b4bfd0e603a",
+    "base_commit": "9576a3e62106db04edf6228b18ec5c496fa088ae",
+    "passed": 9,
+    "skipped": 0,
+    "errors": 0,
+    "failures": 0,
+    "xml_sha256": "90ba3a15068ae116b97d98466b61f8d5f2f0a13e4ef0e9a1322d14bc7e994fb0",
+    "original_xml_sha256": "d958b2eda5badb1883eae915c6925070b74ef8e14fb4e0b3aa4cb53548ef57f4",
+    "secret_scan_files_exit": 0,
+    "secret_scan_range_exit": 0,
+    "gitleaks_exit": 0,
+    "gitleaks_findings": 0,
+    "normalization": "Removed machine hostname; preserved testcases, outcomes, original timestamp and durations; added frozen SHA and original XML hash."
+  },
+  {
+    "pr": 43,
+    "frozen_commit": "8eca8bc94fbef434f76b625a0f3e50c9e86831de",
+    "base_commit": "59d88a9aa8b3a2dd69ef7ee730af0ef5c99f940b",
+    "passed": 6,
+    "skipped": 0,
+    "errors": 0,
+    "failures": 0,
+    "xml_sha256": "785dfe8597d50b31754b6dcab0394ff2d6cccffdfb06e9de5476c61899fa7dc5",
+    "original_xml_sha256": "c97e2487d3b619f142be74566b08c7a57929eec598c442af97d5a398faa8d073",
+    "secret_scan_files_exit": 0,
+    "secret_scan_range_exit": 0,
+    "gitleaks_exit": 0,
+    "gitleaks_findings": 0,
+    "normalization": "Removed machine hostname; preserved testcases, outcomes, original timestamp and durations; added frozen SHA and original XML hash."
+  },
+  {
+    "pr": 66,
+    "frozen_commit": "8b79c0306ad662232dd75b1c576d554d8104410e",
+    "base_commit": "465e02046fa8d971897603742497444f884e89a2",
+    "passed": 60,
+    "skipped": 1,
+    "errors": 0,
+    "failures": 0,
+    "xml_sha256": "74cb7ee33c5eeffe40f0a5dba6c7e4377a9104c519e5683eb754c458c1b1930c",
+    "original_xml_sha256": "9c96ef52ce91f1821e96efc3401c9ca33f9a604ba053b06ba80da95667acebb6",
+    "secret_scan_files_exit": 0,
+    "secret_scan_range_exit": 0,
+    "gitleaks_exit": 0,
+    "gitleaks_findings": 0,
+    "normalization": "Removed machine hostname; preserved testcases, outcomes, original timestamp and durations; added frozen SHA and original XML hash."
+  }
+]

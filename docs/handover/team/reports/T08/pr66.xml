@@ -1,0 +1,72 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuites name="pytest tests">
+  <testsuite name="pytest" errors="0" failures="0" skipped="1" tests="61" time="0.898" timestamp="2026-11-11T05:51:02.282339-07:00">
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_legacy_defaults_are_unchanged" time="0.001" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_all_explicit_overrides_are_used" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_partial_override_rejected_before_inspect[keys0]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_partial_override_rejected_before_inspect[keys1]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_partial_override_rejected_before_inspect[keys2]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_partial_override_rejected_before_inspect[keys3]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_partial_override_rejected_before_inspect[keys4]" time="0.001" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_partial_override_rejected_before_inspect[keys5]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_invalid_identity_is_rejected[changes0]" time="0.001" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_invalid_identity_is_rejected[changes1]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_invalid_identity_is_rejected[changes2]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_invalid_identity_is_rejected[changes3]" time="0.008" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_invalid_identity_is_rejected[changes4]" time="0.001" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_invalid_identity_is_rejected[changes5]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_invalid_identity_is_rejected[changes6]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_invalid_identity_is_rejected[changes7]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_invalid_identity_is_rejected[changes8]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_valid_custom_identity_is_inspect_only" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_wrong_identity_or_network_rejected[change0]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_wrong_identity_or_network_rejected[change1]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_wrong_identity_or_network_rejected[change2]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_wrong_identity_or_network_rejected[change3]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_mount_identity_must_match_exactly[socket]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_mount_identity_must_match_exactly[volume]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_mount_identity_must_match_exactly[extra]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_shared_or_overlapping_mount_is_rejected[/tmp/synthetic-pg]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_shared_or_overlapping_mount_is_rejected[/tmp]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_shared_or_overlapping_mount_is_rejected[/tmp/synthetic-pg/subdir]" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_verify_uses_complete_environment_identity" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_disjoint_other_mount_is_allowed" time="0.000" />
+    <testcase classname="backend.integration.test_tb28_isolation_config" name="test_docker_unavailable_fails_closed_without_echo" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master0-buy-expected0]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master1-sell-expected1]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[None-buy-expected2]" time="0.001" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[None-hold-expected3]" time="0.001" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[None-wait-expected4]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master5-buy-expected5]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master6-buy-expected6]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master7-buy-expected7]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master8-buy-expected8]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master9-buy-expected9]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master10-sell-expected10]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master11-buy-expected11]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master12-buy-expected12]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master13-add-expected13]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master14-sell-expected14]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_assess_boundaries[master15-reduce-expected15]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_delisted_never_admits_candidate[buy]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_delisted_never_admits_candidate[add]" time="0.001" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_delisted_never_admits_candidate[hold]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_delisted_never_admits_candidate[reduce]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_delisted_never_admits_candidate[sell]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_delisted_never_admits_candidate[wait]" time="0.001" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_unknown_status_is_not_invented[None]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_unknown_status_is_not_invented[unknown]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_unknown_status_is_not_invented[suspended]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_explicit_market_date_required[invalid0]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_explicit_market_date_required[2026-11-06]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_explicit_market_date_required[None]" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_invalid_action_is_rejected" time="0.000" />
+    <testcase classname="backend.integration.test_tb63_signals" name="test_isolated_pg_guard_writes_and_savepoint" time="0.000">
+      <skipped type="pytest.skip" message="requires isolated Linux PostgreSQL Unix socket">F:\ashare-invest-assistant\.worktrees\ds-T07\tests\backend\integration\test_tb63_signals.py:96: requires isolated Linux PostgreSQL Unix socket</skipped>
+    </testcase>
+    <properties>
+      <property name="frozen_commit" value="8b79c0306ad662232dd75b1c576d554d8104410e" />
+      <property name="original_xml_sha256" value="9c96ef52ce91f1821e96efc3401c9ca33f9a604ba053b06ba80da95667acebb6" />
+    </properties>
+  </testsuite>
+</testsuites>

@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuites name="pytest tests">
+  <testsuite name="pytest" errors="0" failures="0" skipped="0" tests="9" time="1.553" timestamp="2026-11-11T05:50:56.634691-07:00">
+    <properties>
+      <property name="hypothesis-statistics-backend/golden/test_golden.py::test_comparator_identity_property" value="YmFja2VuZC9nb2xkZW4vdGVzdF9nb2xkZW4ucHk6OnRlc3RfY29tcGFyYXRvcl9pZGVudGl0eV9wcm9wZXJ0eToKCiAgLSBkdXJpbmcgZ2VuZXJhdGUgcGhhc2UgKDAuMzkgc2Vjb25kcyk6CiAgICAtIFR5cGljYWwgcnVudGltZXM6IH4gMC00IG1zLCBvZiB3aGljaCB+IDAtNCBtcyBpbiBkYXRhIGdlbmVyYXRpb24KICAgIC0gMjAwIHBhc3NpbmcsIDAgZmFpbGluZywgYW5kIDI1IGludmFsaWQgdGVzdCBjYXNlcwogICAgLSBFdmVudHM6CiAgICAgICogMTAuNjclLCBSZXRyaWVkIGRyYXcgZnJvbSB0ZXh0KGNoYXJhY3RlcnMoY29kZWM9J3V0Zi04JyksIG1heF9zaXplPTQpLmZpbHRlcihub3RfeWV0X2luX3VuaXF1ZV9saXN0KSB0byBzYXRpc2Z5IGZpbHRlcgogICAgICAqIDMuNTYlLCBEcmF3IGZvciByZWN1cnNpdmUob25lX29mKG5vbmUoKSwgYm9vbGVhbnMoKSwgaW50ZWdlcnMoKSwgdGV4dChtYXhfc2l6ZT04KSksIGxhbWJkYSBjaGlsZHJlbjogc3QubGlzdHMoY2hpbGRyZW4sIG1heF9zaXplPTQpIHwgc3QuZGljdGlvbmFyaWVzKHN0LnRleHQobWF4X3NpemU9NCksIGNoaWxkcmVuLCBtYXhfc2l6ZT00KSwgbWluX2xlYXZlcz1Ob25lLCBtYXhfbGVhdmVzPTIwKSBleGNlZWRlZCBtYXhfbGVhdmVzPTIwIGFuZCBoYWQgdG8gYmUgcmV0cmllZAoKICAtIFN0b3BwZWQgYmVjYXVzZSBzZXR0aW5ncy5tYXhfZXhhbXBsZXM9MjAw" />
+      <property name="frozen_commit" value="b939963d306517a427131866478c1b4bfd0e603a" />
+      <property name="original_xml_sha256" value="d958b2eda5badb1883eae915c6925070b74ef8e14fb4e0b3aa4cb53548ef57f4" />
+    </properties>
+    <testcase classname="backend.golden.test_golden" name="test_cases_directory_not_empty" time="0.001" />
+    <testcase classname="backend.golden.test_golden" name="test_golden_case[_harness_selftest_above_ma20.json]" time="0.001" />
+    <testcase classname="backend.golden.test_golden" name="test_golden_case[_harness_selftest_below_ma20.json]" time="0.000" />
+    <testcase classname="backend.golden.test_golden" name="test_comparator_reports_field_paths" time="0.000" />
+    <testcase classname="backend.golden.test_golden" name="test_comparator_identity_property" time="0.416" />
+    <testcase classname="backend.unit.test_tb117_session_filter_t_t61" name="test_cross_lunch_break_not_same_session" time="0.000" />
+    <testcase classname="backend.unit.test_tb117_session_filter_t_t61" name="test_old_date_source_not_same_session" time="0.000" />
+    <testcase classname="backend.unit.test_tb117_session_filter_t_t61" name="test_empty_session_segment_threshold_is_none" time="0.000" />
+    <testcase classname="backend.contract.test_contract_stub" name="test_contract_checker_catches_violation" time="0.335" />
+  </testsuite>
+</testsuites>

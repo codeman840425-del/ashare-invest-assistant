@@ -12,13 +12,14 @@ import json
 import sys
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 
 def main() -> int:
     out = Path(sys.argv[1])
     sys.path.insert(0, str(Path.cwd()))
     from app.config import Settings
     from app.main import create_app
-    from fastapi.testclient import TestClient
 
     # Export static route data before CI migrations; never inherit database/Redis access.
     settings = Settings(app_env="test", database_url=None, redis_url=None, _env_file=None)

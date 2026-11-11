@@ -19,13 +19,13 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_tb115_o66b_path_constants() -> None:
-    assert ingest.TEMP == Path("/run/aia/tmp/mairui-daily.tmp"), (
+    assert Path("/run/aia/tmp/mairui-daily.tmp") == ingest.TEMP, (
         f"TEMP still old path: {ingest.TEMP} (baseline red / T-O66b)"
     )
-    assert ingest.HALT == Path("/run/aia/state/halt/mairui-daily.HALTED"), (
+    assert Path("/run/aia/state/halt/mairui-daily.HALTED") == ingest.HALT, (
         f"HALT still old path: {ingest.HALT}"
     )
-    assert daily.AUTHORIZATION == Path("/run/aia/receipts/mairui-daily.json"), (
+    assert Path("/run/aia/receipts/mairui-daily.json") == daily.AUTHORIZATION, (
         f"AUTHORIZATION still old path: {daily.AUTHORIZATION}"
     )
     # Old locations must be gone from source
@@ -104,7 +104,7 @@ def test_tb115_no_write_to_receipts_dir(tmp_path: Path) -> None:
     receipt = receipts / "mairui-daily.json"
 
     # Source: daily_lists / daily_delivery must not open AUTHORIZATION for write
-    dl = (ROOT / "src/backend/app/ingest/daily_lists.py").read_text(encoding="utf-8")
+    (ROOT / "src/backend/app/ingest/daily_lists.py").read_text(encoding="utf-8")
     dd = (ROOT / "src/backend/app/master/daily_delivery.py").read_text(encoding="utf-8")
     assert "O_WRONLY" not in dd or "AUTHORIZATION" not in dd.split("O_WRONLY")[0][-200:]
     # read_grant uses O_RDONLY only

@@ -1,0 +1,691 @@
+{
+  "schema": "R-05.first-run-observations.v1",
+  "scope": "T-B136-official first completed empty run; not r2",
+  "captured_beijing": "2026-11-11T20:25:49+08:00",
+  "artifacts": {
+    "summary.json": {
+      "sha256": "ca0b88e8c3a3b41dc12fed198b393bcec4e4a04d2601f9c8bc2767347bd963bb",
+      "bytes": 15566003
+    },
+    "trials.csv": {
+      "sha256": "7c4a6c22df742d41538e355fab62ffaa3a539937a70058a33649cfd8eab4ee26",
+      "bytes": 97426
+    },
+    "legs.csv": {
+      "sha256": "10591b3db7bc1758339ee6eff286a141fdebc5dfa24a7d40ea6701fbad0adb0a",
+      "bytes": 413
+    }
+  },
+  "execution_record": {
+    "repo_relative_path": "reports/T-B136-official-run.md",
+    "sha256": "f3b11e0f8209abf6f1857b9ef05beb03c8787081f73267723f938ecf4cfec8c3",
+    "reported_code_sha": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+    "reported_start_beijing": "2026-11-11 08:40:31+08:00",
+    "reported_end_beijing": "2026-11-11 09:10:15+08:00",
+    "boundary": "Code/time are execution-record claims, not summary self-description"
+  },
+  "summary_projection": {
+    "plan": {
+      "doc": "docs/strategies/T-R58/retest_plan.md",
+      "commit": "6814edc61ac85db3464d793a28df73191cc7df7e"
+    },
+    "seed": 136,
+    "data": {
+      "stock_pool": {
+        "hf": 5387,
+        "vipdoc_only": 30,
+        "delisted_hf": 177,
+        "bj": 0
+      },
+      "segments": {
+        "warmup": {
+          "start": "2022-01-04",
+          "end": "2023-04-07",
+          "trading_days": 305,
+          "embargo": false
+        },
+        "fold1": {
+          "start": "2023-04-10",
+          "end": "2023-10-17",
+          "trading_days": 126,
+          "embargo": true
+        },
+        "fold2": {
+          "start": "2023-10-18",
+          "end": "2024-04-23",
+          "trading_days": 126,
+          "embargo": true
+        },
+        "fold3": {
+          "start": "2024-04-24",
+          "end": "2024-10-30",
+          "trading_days": 125,
+          "embargo": true
+        },
+        "fold4": {
+          "start": "2024-10-31",
+          "end": "2025-05-08",
+          "trading_days": 125,
+          "embargo": true
+        },
+        "fold5": {
+          "start": "2025-05-09",
+          "end": "2025-11-10",
+          "trading_days": 125,
+          "embargo": true
+        },
+        "holdout": {
+          "start": "2025-11-11",
+          "end": "2026-11-10",
+          "trading_days": 242,
+          "embargo": false
+        }
+      },
+      "st_coverage": null,
+      "listing_coverage": null,
+      "termination_list_sha256": null,
+      "gbbq_revision_bias": "unable_to_verify",
+      "vipdoc_single": {
+        "mode": "shared_date_use"
+      },
+      "vipdoc_main": {
+        "mode": "one_read_only_snapshot",
+        "files": 5229,
+        "by_exchange": {
+          "SH": 2321,
+          "SZ": 2908
+        },
+        "inventory_sha256": "cf3b061628bab693467cf9ac2d124082feac5c25ebf7008b8f30628c2b8f73f8",
+        "independent_package_equality": "not_applicable",
+        "uses": {
+          "single": "2026-08-07",
+          "main_from": "2026-08-10"
+        }
+      }
+    },
+    "root_coverage_present": false,
+    "exclusions": {
+      "2022": {
+        "warmup": 1310914,
+        "listing_status_unknown": 1310914,
+        "st_unknown": 1310914,
+        "suspended": 164793,
+        "daily_anchor_outside_coverage": 100,
+        "new_listing": 1705,
+        "listing_date_unknown": 7260
+      },
+      "2023": {
+        "warmup": 341271,
+        "listing_status_unknown": 1310914,
+        "st_unknown": 1310914,
+        "suspended": 100949,
+        "daily_anchor_outside_coverage": 729,
+        "new_listing": 1190,
+        "listing_date_unknown": 7260
+      },
+      "2024": {
+        "listing_status_unknown": 1310914,
+        "st_unknown": 1310914,
+        "suspended": 76675,
+        "daily_anchor_outside_coverage": 1279,
+        "new_listing": 392,
+        "listing_date_unknown": 7260
+      },
+      "2025": {
+        "listing_status_unknown": 1316331,
+        "st_unknown": 1316331,
+        "suspended": 67888,
+        "daily_anchor_outside_coverage": 361,
+        "new_listing": 440,
+        "listing_date_unknown": 7290
+      },
+      "2026": {
+        "listing_status_unknown": 1110485,
+        "st_unknown": 1110485,
+        "suspended": 45928,
+        "daily_anchor_outside_coverage": 163,
+        "new_listing": 193,
+        "listing_date_unknown": 6150
+      }
+    },
+    "checks": {
+      "L1": {
+        "evidence": "synthetic prefix/elapsed checks"
+      },
+      "L2": {
+        "state": "no_eligible_legs",
+        "legs": 0,
+        "settled": 0
+      },
+      "L3": {
+        "state": "no_eligible_legs",
+        "basis": "signal close / prior close"
+      },
+      "L4": {
+        "evidence": "prior completed days only; synthetic lookback checks"
+      },
+      "L5": {
+        "state": "no_eligible_legs",
+        "settled": 0,
+        "dated_stamp": true
+      },
+      "L6": {
+        "state": "no_eligible_legs",
+        "base_inventory": "assumed sellable; buy_first sells old shares"
+      },
+      "L7": {
+        "state": "phase_isolated",
+        "holdout_runs": 0
+      },
+      "L8": {
+        "state": "no_eligible_legs",
+        "basis": "signal lot and impact; realized commission floor"
+      },
+      "L9": {
+        "pool": {
+          "hf": 5387,
+          "vipdoc_only": 30,
+          "delisted_hf": 177,
+          "bj": 0
+        },
+        "stock_days": {
+          "2022": 1310914,
+          "2023": 1310914,
+          "2024": 1310914,
+          "2025": 1316331,
+          "2026": 1110485
+        },
+        "status_by_year": {
+          "2022": {
+            "warmup": 1310914,
+            "listing_status_unknown": 1310914,
+            "st_unknown": 1310914,
+            "suspended": 164793,
+            "daily_anchor_outside_coverage": 100,
+            "new_listing": 1705,
+            "listing_date_unknown": 7260
+          },
+          "2023": {
+            "warmup": 341271,
+            "listing_status_unknown": 1310914,
+            "st_unknown": 1310914,
+            "suspended": 100949,
+            "daily_anchor_outside_coverage": 729,
+            "new_listing": 1190,
+            "listing_date_unknown": 7260
+          },
+          "2024": {
+            "listing_status_unknown": 1310914,
+            "st_unknown": 1310914,
+            "suspended": 76675,
+            "daily_anchor_outside_coverage": 1279,
+            "new_listing": 392,
+            "listing_date_unknown": 7260
+          },
+          "2025": {
+            "listing_status_unknown": 1316331,
+            "st_unknown": 1316331,
+            "suspended": 67888,
+            "daily_anchor_outside_coverage": 361,
+            "new_listing": 440,
+            "listing_date_unknown": 7290
+          },
+          "2026": {
+            "listing_status_unknown": 1110485,
+            "st_unknown": 1110485,
+            "suspended": 45928,
+            "daily_anchor_outside_coverage": 163,
+            "new_listing": 193,
+            "listing_date_unknown": 6150
+          }
+        }
+      },
+      "L10": {
+        "evidence": "minute features only; daily index used only for P7"
+      },
+      "L13": {
+        "state": "no_eligible_legs",
+        "basis": "previous completed bar volume; zero-volume exception"
+      },
+      "L14": {
+        "stocks_checked": 5417,
+        "one_source_per_stock_day": true
+      },
+      "bar_quality": {
+        "outside_dates": 0,
+        "missing_bars": 110127600,
+        "bar_ok_failed": 4074747
+      },
+      "L11": {
+        "snapshot_revisions": "unable_to_verify"
+      }
+    },
+    "criteria": {
+      "P1": {
+        "status": "fail",
+        "windows": [
+          {
+            "n": 0,
+            "days": 0,
+            "mean": null,
+            "low": null,
+            "high": null
+          },
+          {
+            "n": 0,
+            "days": 0,
+            "mean": null,
+            "low": null,
+            "high": null
+          },
+          {
+            "n": 0,
+            "days": 0,
+            "mean": null,
+            "low": null,
+            "high": null
+          },
+          {
+            "n": 0,
+            "days": 0,
+            "mean": null,
+            "low": null,
+            "high": null
+          },
+          {
+            "n": 0,
+            "days": 0,
+            "mean": null,
+            "low": null,
+            "high": null
+          }
+        ]
+      },
+      "P2": {
+        "status": "unknown",
+        "robustness": null
+      },
+      "P3": {
+        "status": "unknown",
+        "average_cost_bp": null
+      },
+      "P4": {
+        "status": "unknown",
+        "share": null
+      },
+      "P5": {
+        "status": "unknown",
+        "paired": {
+          "n": 0,
+          "days": 0,
+          "mean": null,
+          "low": null,
+          "high": null
+        }
+      },
+      "P6": {
+        "status": "unknown",
+        "neighbors": []
+      },
+      "P7": {
+        "status": "unknown",
+        "labels": {
+          "2023": "down",
+          "2024": "up",
+          "2025": "up"
+        },
+        "scores": {
+          "down": {
+            "n": 0,
+            "days": 0,
+            "mean": null,
+            "low": null,
+            "high": null
+          },
+          "up": {
+            "n": 0,
+            "days": 0,
+            "mean": null,
+            "low": null,
+            "high": null
+          }
+        }
+      },
+      "P8": {
+        "status": "unknown",
+        "sensitivities": {
+          "p8_notional_10000": {
+            "train": null,
+            "holdout": null
+          },
+          "p8_commission_0.0003": {
+            "train": null,
+            "holdout": null
+          }
+        },
+        "training_brackets": null,
+        "boundary": null
+      },
+      "P9": {
+        "status": "unknown",
+        "state": "unknown",
+        "reason": "exchange termination list missing or empty",
+        "hf_pool_delisted": 177
+      },
+      "P10": {
+        "status": "fail",
+        "directions": []
+      }
+    },
+    "conclusion": {
+      "status": "data_insufficient",
+      "promote": false,
+      "reason": "P1 samples insufficient"
+    },
+    "delisting": {
+      "state": "unknown",
+      "reason": "exchange termination list missing or empty",
+      "hf_pool_delisted": 177
+    },
+    "holdout_by_source": {
+      "through_2026-08-06": {
+        "n": 0,
+        "days": 0,
+        "mean": null,
+        "low": null,
+        "high": null
+      },
+      "from_2026-08-07": {
+        "n": 0,
+        "days": 0,
+        "mean": null,
+        "low": null,
+        "high": null
+      }
+    },
+    "multiplicity": {
+      "family": 34,
+      "dsr": null,
+      "p_method": "one_sided_centered_day_block",
+      "trials": {
+        "A01.1": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A01.2": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A01.3": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A02.1": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A02.2": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A02.3": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A03.1": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A03.2": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A03.3": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A04.1": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A04.2": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A04.3": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A05.1": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A05.2": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A05.3": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A06.1": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A06.2": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A06.3": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A07.1": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A07.2": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "A07.3": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "B01": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "B02": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "B03": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "B04": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "B05": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "CA01": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "CA02": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "CA03": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "CA04": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "CB01": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "CB02": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "CB03": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        },
+        "CB04": {
+          "raw_p": 1.0,
+          "holm_p": 1.0,
+          "conservative_p1": true
+        }
+      }
+    },
+    "splice_aggregate": {
+      "stocks": 5417,
+      "ok": 5417
+    }
+  },
+  "trials_aggregate": {
+    "rows": 170,
+    "columns": [
+      "trial_id",
+      "group",
+      "phase",
+      "segment",
+      "start",
+      "end",
+      "params",
+      "holm_family",
+      "n",
+      "mean_bp",
+      "ci_low_bp",
+      "ci_high_bp",
+      "selected",
+      "status",
+      "started_at",
+      "elapsed_seconds"
+    ],
+    "by_phase": {
+      "training_1": 34,
+      "training_2": 34,
+      "training_3": 34,
+      "training_4": 34,
+      "training_final": 34
+    },
+    "by_group": {
+      "A": 105,
+      "B": 25,
+      "CA": 20,
+      "CB": 20
+    },
+    "by_status": {
+      "base_unselected": 40,
+      "no_legs": 130
+    },
+    "n_cells": {
+      "0": 170
+    },
+    "mean_cells": {
+      "": 170
+    },
+    "low_cells": {
+      "": 170
+    },
+    "high_cells": {
+      "": 170
+    },
+    "selected_cells": {
+      "False": 170
+    },
+    "holm_family_true": 34,
+    "started_at": [
+      "2026-11-11T08:40:31.054827+08:00"
+    ]
+  },
+  "legs_aggregate": {
+    "rows": 0,
+    "columns": [
+      "trial_id",
+      "group",
+      "segment",
+      "exchange",
+      "symbol",
+      "board",
+      "entry_date",
+      "direction",
+      "data_source",
+      "trigger_slot",
+      "entry_slot",
+      "entry_price",
+      "exit_trigger_date",
+      "exit_trigger_slot",
+      "exit_date",
+      "exit_slot",
+      "exit_price",
+      "reason",
+      "q",
+      "notional",
+      "planned_amount",
+      "participation_pct",
+      "impact_bp_frozen",
+      "theta",
+      "sigma",
+      "dev",
+      "vr",
+      "commission",
+      "stamp",
+      "transfer",
+      "slippage",
+      "impact",
+      "pnl_yuan",
+      "pnl_bp",
+      "cons_pnl_yuan",
+      "cons_pnl_bp",
+      "cons_mark_price",
+      "prior_anomaly",
+      "exec_anomaly",
+      "hold_bars",
+      "mae_bp"
+    ]
+  }
+}

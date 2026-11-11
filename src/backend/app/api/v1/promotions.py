@@ -79,7 +79,10 @@ def coarse_ip(request: Request, settings: SettingsDep) -> str | None:
     import ipaddress
 
     try:
-        address = ipaddress.ip_address(client_ip(request, settings))
+        raw_address = client_ip(request, settings)
+        if raw_address is None:
+            return None
+        address = ipaddress.ip_address(raw_address)
         return str(
             ipaddress.ip_network(f"{address}/{24 if address.version == 4 else 64}", strict=False)
         )

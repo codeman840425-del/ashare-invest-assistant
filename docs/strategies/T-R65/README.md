@@ -20,7 +20,7 @@
 | `st_history_sh.csv` | 2,654 | `e6b22041…653a3` | 沪市，2,396 只 |
 | `st_history.csv` | 6,208 | `9500e791…c2154` | 合并，5,417 只（runner `--st-history`） |
 | `listing_history.csv` | 5,627 | `6ea03f73…2b383` | 沪深上市状态（runner `--listing-history`） |
-| `termination_list.csv` | 337 | `48c6e743…186f` | 沪深终止名单（runner `--delisting-list`） |
+| `termination_list.csv` | 337 | `9f781837…f856d` | 沪深终止名单（runner `--delisting-list`；含 `no_period_evidence` 列） |
 | `delisting_period.csv` | 106 | `cc838335…6bcd8` | 退市整理期起点（listing 构建输入 + 证据） |
 
 完整 sha256 与统计：`manifests/*_manifest.json`。
@@ -53,22 +53,27 @@
 ### 终止名单 `termination_list.csv` 与整理期 `delisting_period.csv`
 
 - 337 行（SH 148 / SZ 189）。SZ 来自深交所终止上市导出（212 行，B 股 23 行不计、A 股 189 行）；SH 来自库内 `exchange_delist_list` 来源的 `delisted`+`delist_date`（148 行，含 2022 年前）。
-- 窗口内（2022-01-04~2026-08-06）188 行，**全部带巨潮「终止上市」公告 URL**（188/188）。
+- 窗口内（2022-01-04~2026-08-06）188 行，**全部带巨潮「终止上市」公告 URL**（188/188）；无整理期公告的行带 `no_period_evidence` 标题证据标签（窗口内 71 行 title_evidence / 12 行 no_title_evidence）。
 - 交叉核对：深市 xlsx vs 库内日期 0 差异；窗口内名单与股票池 0 缺失（P9 `missing`=0）；整理期起点晚于最后一根 bar 的 0 只（P9 `truncated`=0）。
 - 整理期起点 = 首次「进入退市整理期」公告日（早于实际首日，保守），106 只；公告日到终止日中位数 31 自然日。
 
-### P9 口径缺口（**需要架构师/编排者裁定**）
+### P9 退市整理期口径（T-A155 裁定落地）
 
-- 窗口内 188 只终止名单里，**83 只没有退市整理期公告**：43 只有面值/市值类关键词、7 只明示交易类强制退市、21 只主动退市/吸收合并、12 只无标题证据（逐股明细 `manifests/p9_no_delisting_period_evidence.json`）。这批股票的最后一根 bar 距终止日 1–3 自然日（与有整理期组一致），无尾段缺失。
-- 按当前 `judgement._delisting` 实现，找不到 `delisting_period` 区间即记 unknown → **P9=unknown → 重跑结论会是 `data_insufficient`**，与数据质量无关，是口径问题。
-- 建议（供裁定）：把「终止上市公告未披露整理期且最后一根 bar 距终止日 ≤5 自然日」记为 P9 通过证据（`reason=no_delisting_period_disclosed`），或在 P9 分母中剔除并披露。数据侧已备好证据清单，代码改动需架构师定。
+- 判据：无 `delisting_period` 区间时，以 HF `coverage_by_instrument.csv` 的 `expected_end_date` 与最后一根 bar **判等**（不另设自然日阈值）；不等时只有缺口交易日全部为已确认停牌才按「停牌到摘牌」放行，否则走尾段缺失路径（fail）。
+- 四分类（`summary.json` 的 `delisting` 节点逐股列出，窗口内 188 只全部命中）：
+  - `pass_with_period` 105：整理期起点 ≤ 终止日且最后一根 bar ≥ 起点；
+  - `no_delisting_period_by_rule` 69：无整理期，`expected_end_date` == 最后 bar，且终止上市公告标题有规则证据（交易类/面值/市值/主动退市等）；
+  - `no_delisting_period_evidence_only` 12：同上判等通过，但公告标题无证据；另标 `residual_risk`，后续逐股读终止上市公告正文交叉核收口；
+  - `suspended_until_delisting` 2（600355、000638）：停牌到摘牌，最后 bar 距终止日 >5 日但与 `expected_end_date` 相等。
+- 模拟：`judgement._delisting` 对真实产物输出 `state=pass`、105+69+12+2=188、`period_unknown` / `tail_missing` / `missing` 全 0。
+- 证据：`manifests/p9_no_delisting_period_evidence.json`（逐股标题关键词分类）；`termination_list.csv` 的 `no_period_evidence` 列承载 runner 侧标签。
 
 ## ③ runner 接线
 
 - `runner_data.require_status_inputs`：`st_history` / `listing_history` / `delisting_list` 任一缺失 → `DataFormatError` 拒绝执行。
 - `preflight`：`st_coverage` / `listing_coverage` / `termination_list` 任一为空 → 拒绝（T-A154，防「输入给了没吃」）。
 - `StockCache.prepare` 累计按交易所按年计数，`summary.json` 首页新增 `coverage`：`by_exchange_year` / `by_exchange` 的 `st_known_share`、`listing_known_share`、`st_true_share`、`delisting_period_share`。
-- 测试：`tests/backend/retest/test_status_inputs.py` 8 例（预检拒绝、load_status_history 契约、覆盖比例算术、空分母）；`tests/backend/retest` 全套 32 例通过。
+- 测试：`tests/backend/retest/test_status_inputs.py` 17 例（预检拒绝、load_status_history 契约、覆盖比例算术、P9 四分类与尾段缺失路径）；`tests/backend/retest` 全套 42 例通过。
 
 ## 自检
 

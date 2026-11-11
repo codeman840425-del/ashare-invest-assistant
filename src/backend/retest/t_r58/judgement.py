@@ -141,6 +141,23 @@ def _multiplicity(
     }
 
 
+NO_PERIOD_SUSPENDED_GAP_DAYS = 5  # 仅用于区分「停牌到摘牌」形态，不作为通过阈值（T-A155）
+
+
+def _suspended_missing_days(
+    prepared: runner_data.Prepared,
+    key: tuple[str, str],
+    start: date,
+    end: date,
+) -> bool:
+    """start < d <= end 的交易日是否全部为已确认停牌（用于「不等但停牌」判定）。"""
+    days = [day for day in prepared.dates if start < day <= end]
+    if not days:
+        return False
+    confirmed = prepared.meta.get("confirmed_suspension") or set()
+    return all((key[1], key[0], day) in confirmed for day in days)
+
+
 def _delisting(
     prepared: runner_data.Prepared,
     last_bars: dict[tuple[str, str], date],
@@ -157,6 +174,12 @@ def _delisting(
     missing = sorted(official.keys() - pool.keys())
     unknown = []
     truncated = []
+    with_period = []
+    by_rule = []
+    evidence_only = []
+    suspended_until_delisting = []
+    coverage = prepared.meta.get("coverage") or {}
+    evidence_map = prepared.meta.get("termination_evidence") or {}
     for key in sorted(official.keys() & pool.keys()):
         start = min(
             (
@@ -166,10 +189,32 @@ def _delisting(
             ),
             default=None,
         )
-        if start is None:
+        if start is not None:
+            if key not in last_bars or last_bars[key] < start:
+                truncated.append(key)
+            else:
+                with_period.append(key)
+            continue
+        # T-A155：交易类强制退市/主动退市没有整理期。判据是 HF 元数据认定的应有末日
+        # （expected_end_date == 最后一根 bar），不另拍自然日阈值；不等时只有在缺口
+        # 全是已确认停牌时才按「停牌到摘牌」放行，否则走尾段缺失路径。
+        expected_end = coverage.get(key[1], {}).get("expected_end_date")
+        last = last_bars.get(key)
+        if last is None or expected_end is None:
             unknown.append(key)
-        elif key not in last_bars or last_bars[key] < start:
+            continue
+        if last == expected_end:
+            if (official[key] - last).days > NO_PERIOD_SUSPENDED_GAP_DAYS:
+                suspended_until_delisting.append(key)
+            elif evidence_map.get(key) == "no_title_evidence":
+                evidence_only.append(key)
+            else:
+                by_rule.append(key)
+        elif _suspended_missing_days(prepared, key, last, expected_end):
+            suspended_until_delisting.append(key)
+        else:
             truncated.append(key)
+    no_period_total = len(by_rule) + len(evidence_only) + len(suspended_until_delisting)
     return {
         "state": "fail" if missing or truncated else "unknown" if unknown else "pass",
         "hf_pool_delisted": hf_count,
@@ -178,6 +223,18 @@ def _delisting(
         "missing_share": len(missing) / len(official),
         "tail_missing": truncated,
         "period_unknown": unknown,
+        "pass_with_period": with_period,
+        "no_delisting_period_total": no_period_total,
+        "no_delisting_period_by_rule": by_rule,
+        "no_delisting_period_evidence_only": evidence_only,
+        "suspended_until_delisting": suspended_until_delisting,
+        "no_period_policy": "last_bar_equals_hf_expected_end",
+        "residual_risk": (
+            f"{len(evidence_only)} 只无整理期标题证据的股票按 expected_end_date 判等通过，"
+            "需逐股读终止上市公告正文交叉核后收口"
+            if evidence_only
+            else None
+        ),
     }
 
 

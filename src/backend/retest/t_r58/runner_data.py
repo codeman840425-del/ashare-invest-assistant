@@ -116,10 +116,12 @@ def _securities(path: Path | None) -> dict[inputs.StockKey, dict[str, date | Non
 
 def _termination_list(
     path: Path | None, start: date, end: date
-) -> dict[inputs.StockKey, date] | None:
+) -> tuple[dict[inputs.StockKey, date], dict[inputs.StockKey, str]] | None:
+    """T-A155：额外返回「无整理期公告」的标题证据标签（title_evidence / no_title_evidence）。"""
     if path is None:
         return None
     result = {}
+    evidence: dict[inputs.StockKey, str] = {}
     with path.open(newline="", encoding="utf-8-sig") as file:
         rows = csv.DictReader(file)
         required = {"exchange", "symbol", "delisting_date"}
@@ -136,7 +138,10 @@ def _termination_list(
                 if key in result:
                     raise DataFormatError("duplicate termination-list identity")
                 result[key] = day
-    return result
+                tag = (row.get("no_period_evidence") or "").strip()
+                if tag:
+                    evidence[key] = tag
+    return result, evidence
 
 
 def _stock_pool(
@@ -217,7 +222,8 @@ def preflight(paths: ResearchPaths, config: data.Summary, *, workers: int = 8) -
     meta = data.load_meta(meta_dir)
     meta["config"] = config
     meta["securities"] = _securities(paths.securities)
-    meta["termination_list"] = _termination_list(paths.delisting_list, dates[0], dates[-1])
+    termination = _termination_list(paths.delisting_list, dates[0], dates[-1])
+    meta["termination_list"], meta["termination_evidence"] = termination or (None, {})
     st, st_coverage = data.load_status_history(paths.st_history, "st")
     listing, listing_coverage = data.load_status_history(paths.listing_history, "listing")
     archive_sha = data.sha256(archive)

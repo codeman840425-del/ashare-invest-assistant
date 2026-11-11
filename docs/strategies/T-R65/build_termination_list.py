@@ -27,6 +27,21 @@ A_PREFIXES = ("000", "001", "002", "003", "300", "301", "600", "601", "603", "60
 SZ_A_PREFIXES = ("000", "001", "002", "003", "300", "301")
 SH_A_PREFIXES = ("600", "601", "603", "605", "688", "689")
 CNINFO_PDF = "http://static.cninfo.com.cn/"
+# T-A155：无整理期公告的退市股按终止上市公告标题给「规则证据」；无任何标题证据的单独标出，
+# 由 runner 侧再按 expected_end_date 判等后归入 evidence_only 并做后续交叉核。
+EVIDENCE_RULES = [
+    ("交易类强制退市",),
+    ("面值", "市值低于", "股票收盘价", "1元", "一元"),
+    ("成交量", "股东人数"),
+    ("主动终止上市", "吸收合并", "股东大会", "要约"),
+]
+
+
+def no_period_evidence(announcements: list[dict]) -> str:
+    text = "|".join(a.get("title") or "" for a in announcements)
+    if any(keyword in text for rule in EVIDENCE_RULES for keyword in rule):
+        return "title_evidence"
+    return "no_title_evidence"
 
 
 def sha256(path: Path) -> str:
@@ -125,6 +140,7 @@ def main() -> int:
         if terminal:
             first = sorted(terminal, key=lambda a: a["time"] or 0)[-1]
             url = CNINFO_PDF + (first.get("adjunctUrl") or "") if first.get("adjunctUrl") else ""
+        starts = pick(anns, "进入退市整理期")
         termination.append(
             {
                 "exchange": "SZ",
@@ -133,9 +149,9 @@ def main() -> int:
                 "name": r["name"],
                 "source": "szse_delist_xlsx",
                 "source_url": url,
+                "no_period_evidence": "" if starts or not anns else no_period_evidence(anns),
             }
         )
-        starts = pick(anns, "进入退市整理期")
         if starts:
             first = sorted(starts, key=lambda a: a["time"] or 0)[0]
             day = announcement_time_ms_to_date(first.get("time"))
@@ -166,6 +182,7 @@ def main() -> int:
             first = sorted(terminal, key=lambda a: a["time"] or 0)[-1]
             if first.get("adjunctUrl"):
                 url = CNINFO_PDF + first["adjunctUrl"]
+        starts = pick(anns, "进入退市整理期")
         termination.append(
             {
                 "exchange": "SH",
@@ -174,9 +191,9 @@ def main() -> int:
                 "name": r["name"],
                 "source": "db_securities_exchange_delist_list",
                 "source_url": url,
+                "no_period_evidence": "" if starts or not anns else no_period_evidence(anns),
             }
         )
-        starts = pick(anns, "进入退市整理期")
         if starts:
             first = sorted(starts, key=lambda a: a["time"] or 0)[0]
             day = announcement_time_ms_to_date(first.get("time"))
@@ -217,7 +234,7 @@ def main() -> int:
     period.sort(key=lambda x: (x["exchange"], x["symbol"]))
     term_path = out / "termination_list.csv"
     with term_path.open("w", encoding="utf-8", newline="\n") as fh:
-        w = csv.DictWriter(fh, fieldnames=["exchange", "symbol", "delisting_date", "name", "source", "source_url"])
+        w = csv.DictWriter(fh, fieldnames=["exchange", "symbol", "delisting_date", "name", "source", "source_url", "no_period_evidence"])
         w.writeheader()
         w.writerows(termination)
     period_path = out / "delisting_period.csv"
@@ -242,12 +259,26 @@ def main() -> int:
                 e: sum(1 for x in termination if x["exchange"] == e) for e in ("SH", "SZ")
             },
             "period_by_exchange": {e: sum(1 for x in period if x["exchange"] == e) for e in ("SH", "SZ")},
+            "no_period_evidence_all": {
+                tag: sum(1 for x in termination if x["no_period_evidence"] == tag)
+                for tag in ("title_evidence", "no_title_evidence")
+            },
+            "no_period_evidence_in_window": {
+                tag: sum(
+                    1
+                    for x in termination
+                    if x["no_period_evidence"] == tag
+                    and "2022-01-04" <= x["delisting_date"] <= "2026-08-06"
+                )
+                for tag in ("title_evidence", "no_title_evidence")
+            },
         },
         "checks": notes,
         "rule": {
             "termination_source": "只认交易所：深交所终止上市导出；沪市取库内 exchange_delist_list 来源的 delisted+delist_date",
             "b_shares": "200/201 前缀不计入 runner 名单，仅计数披露",
             "delisting_period_start": "巨潮个股公告中最早一条「进入退市整理期」公告日期（未按交易日校正，见 README 口径）",
+            "no_period_evidence": "无整理期公告的退市股，按终止上市公告标题关键词给 title_evidence/no_title_evidence；判等由 runner 按 expected_end_date 做（T-A155）",
         },
     }
     (out / "termination_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")

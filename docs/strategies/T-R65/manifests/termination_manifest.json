@@ -1,6 +1,6 @@
 {
   "product": "termination_list_and_delisting_period",
-  "generated_at": "2026-11-11T10:13:09+08:00",
+  "generated_at": "2026-11-11T10:20:51+08:00",
   "inputs": {
     "szse_xlsx": {
       "path_name": "szse_delist.xlsx",
@@ -14,7 +14,7 @@
   "outputs": {
     "termination_list": {
       "rows": 337,
-      "sha256": "48c6e743b13177cff3dd2aedae4e13120b525c25730f07870949908bc521186f"
+      "sha256": "9f7818373f562cffb055293859afc0adce4ade3dbc3c92b0f254d3ca97cf856d"
     },
     "delisting_period": {
       "rows": 106,
@@ -29,6 +29,14 @@
     "period_by_exchange": {
       "SH": 44,
       "SZ": 62
+    },
+    "no_period_evidence_all": {
+      "title_evidence": 74,
+      "no_title_evidence": 12
+    },
+    "no_period_evidence_in_window": {
+      "title_evidence": 71,
+      "no_title_evidence": 12
     }
   },
   "checks": {
@@ -1659,6 +1667,7 @@
   "rule": {
     "termination_source": "只认交易所：深交所终止上市导出；沪市取库内 exchange_delist_list 来源的 delisted+delist_date",
     "b_shares": "200/201 前缀不计入 runner 名单，仅计数披露",
-    "delisting_period_start": "巨潮个股公告中最早一条「进入退市整理期」公告日期（未按交易日校正，见 README 口径）"
+    "delisting_period_start": "巨潮个股公告中最早一条「进入退市整理期」公告日期（未按交易日校正，见 README 口径）",
+    "no_period_evidence": "无整理期公告的退市股，按终止上市公告标题关键词给 title_evidence/no_title_evidence；判等由 runner 按 expected_end_date 做（T-A155）"
   }
 }

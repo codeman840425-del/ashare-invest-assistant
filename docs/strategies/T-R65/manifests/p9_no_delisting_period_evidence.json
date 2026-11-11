@@ -1,6 +1,6 @@
 {
  "task": "T-R65 ②",
- "note": "P9 需整理期起点；以下为官方终止名单窗口内无整理期公告的股票。分类只用公告标题关键词，不构成规则结论，等架构师/编排者裁定 P9 口径。",
+ "note": "P9 无整理期证据清单。T-A155 终版裁定：按 HF coverage_by_instrument expected_end_date 与最后 bar 判等；本清单的 tags 供 runner 侧区分 by_rule / evidence_only（no_period_title_evidence=12 只）。",
  "count": 83,
  "official_in_window": 188,
  "by_first_tag": {
@@ -791,5 +791,6 @@
     "no_period_title_evidence"
    ]
   }
- ]
+ ],
+ "ruling": "T-A155"
 }

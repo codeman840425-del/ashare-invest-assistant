@@ -283,6 +283,8 @@ def load_meta(meta_dir: str | Path) -> Summary:
         r["symbol"]: {
             "listing_date": _date(r["listing_date"]),
             "delisting_date": _date(r["delisting_date"]),
+            # T-A155：无退市整理期股票的尾部核对依据（HF 元数据认定的应有末日）
+            "expected_end_date": _date(r.get("expected_end_date")),
         }
         for r in _rows(root / "coverage_by_instrument.csv")
     }

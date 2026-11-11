@@ -255,7 +255,7 @@ def load_spliced_stock(
     price_limit: float | None = None,
     require_overlap: bool | None = None,
     shared_vipdoc: bool = False,
-    single_day_suspended: bool = False,
+    single_day_excluded: bool = False,
 ) -> tuple[Grid, Summary]:
     """Validate first, merge one source per stock-day, then use the shared grid loader."""
     checked = splice.check_splice(
@@ -269,7 +269,7 @@ def load_spliced_stock(
         price_limit=price_limit,
         require_overlap=require_overlap,
         shared_vipdoc=shared_vipdoc,
-        single_day_suspended=single_day_suspended,
+        single_day_excluded=single_day_excluded,
     )
     table, source_checks = splice.merge_sources(hf, single, main, exchange=exchange, symbol=symbol)
     grid, checks = grid_from_table(table, dates)
@@ -352,6 +352,7 @@ def day_kinds(
     smoke: bool = False,
     *,
     daily_suspensions: set[date] | None = None,
+    uncovered_daily_anchors: set[date] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, Summary]:
     config = meta.get("config") or load_config(Path(__file__).with_name("config.yaml"))
     start = _date(config["segments"]["folds"][0][0])
@@ -377,6 +378,9 @@ def day_kinds(
         if d < start:
             hits.append("warmup")
         confirmed_daily_suspension = daily_suspensions is not None and d in daily_suspensions
+        uncovered = uncovered_daily_anchors is not None and d in uncovered_daily_anchors
+        if uncovered:
+            hits.append("daily_anchor_outside_coverage")
         if confirmed_daily_suspension:
             hits.append("suspended")
         if d in new_days:
@@ -393,10 +397,14 @@ def day_kinds(
             hits.append("st_unknown")
         # Whole-day absence is diagnostic. It must not mask an already-known
         # exclusion and change the disposition of a deferred leg at the open.
-        if not confirmed_daily_suspension and (
-            not present_grid[i].any()
-            or not np.any(grid["v"][i] > 0)
-            or (stock[1], stock[0], d) in meta["confirmed_suspension"]
+        if (
+            not uncovered
+            and not confirmed_daily_suspension
+            and (
+                not present_grid[i].any()
+                or not np.any(grid["v"][i] > 0)
+                or (stock[1], stock[0], d) in meta["confirmed_suspension"]
+            )
         ):
             hits.append("suspended")
         for reason in hits:

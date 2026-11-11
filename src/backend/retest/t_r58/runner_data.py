@@ -19,7 +19,7 @@ from . import data, inputs, rules, sessions, sim, splice
 from .errors import DataFormatError
 
 CALENDAR_SHA = "af18d0298024c4e38f44aaf1ac35347d6e044a513f9cba9c26b23fdd64aa330b"
-SUSPENSION_POLICY = "absent_between_adjacent_hsjday_records_on_open_session"
+DAILY_ANCHOR_POLICY = "minute_stock_days_intersect_hsjday_coverage"
 _EPOCH = date(1970, 1, 1)
 
 
@@ -266,8 +266,22 @@ def _minute_stock(
     return table, checks
 
 
+def _first_minute_day(single: pa.Table, main: pa.Table) -> tuple[date, int] | None:
+    days = [(t["timestamp"][0].as_py().date(), t) for t in (single, main) if t.num_rows]
+    if not days:
+        return None
+    day, source = min(days, key=lambda item: item[0])
+    return day, splice._day(source, day).num_rows
+
+
 def _listing_check(
-    stock: data.Stock, prepared: Prepared, single: pa.Table, main: pa.Table, *, gap_exclusions: bool
+    stock: data.Stock,
+    prepared: Prepared,
+    single: pa.Table,
+    main: pa.Table,
+    *,
+    gap_exclusions: bool,
+    uncovered_first: tuple[date, int] | None,
 ) -> data.Summary:
     key = stock[:2]
     securities = prepared.meta["securities"].get(key)
@@ -279,17 +293,16 @@ def _listing_check(
             if securities is not None and hf.get(field) != securities[field]
         ]
         return {"state": "unknown" if securities is None else "checked", "mismatches": mismatches}
-    first_days = [(t["timestamp"][0].as_py().date(), t) for t in (single, main) if t.num_rows]
-    if not first_days:
+    first_observation = uncovered_first or _first_minute_day(single, main)
+    if first_observation is None:
         if gap_exclusions:
             return {
                 "state": "no_retained_minute_records",
                 "listing_date": securities["listing_date"] if securities else None,
             }
         raise DataFormatError(f"vipdoc-only code has no normalized records: {key}")
-    first, source = min(first_days, key=lambda item: item[0])
+    first, first_rows = first_observation
     listed = securities["listing_date"] if securities else None
-    first_rows = splice._day(source, first).num_rows
     if listed is not None and (listed > first or (first_rows == 1 and listed != first)):
         raise DataFormatError(f"vipdoc-only listing date conflicts with first bars: {key}")
     return {
@@ -339,26 +352,28 @@ def _exrights_audit(
     return result
 
 
-def _exclude_suspension_residuals(
+def _filter_unanchored_minutes(
     key: inputs.StockKey,
     sources: dict[str, pa.Table],
     daily: dict[date, splice.DailyBar],
     market_days: set[date],
-) -> tuple[set[date], list[data.Summary]]:
-    """Remove rows only for exchange sessions bracketed by dated daily records."""
+    *,
+    vipdoc_only: bool = False,
+) -> tuple[set[date], set[date], list[data.Summary]]:
+    """Keep anchored sessions and distinguish suspension from absent archive coverage."""
     dated = sorted(daily)
-    if len(dated) < 2:
-        return set(), []
-    suspended = {day for day in market_days.difference(daily) if dated[0] < day < dated[-1]}
-    if not suspended:
-        return set(), []
-    gap_days = {(day - _EPOCH).days: day for day in sorted(suspended)}
+    missing = market_days.difference(daily)
+    suspended = {day for day in missing if dated and dated[0] < day < dated[-1]}
+    if not missing:
+        return set(), set(), []
+    gap_days = {(day - _EPOCH).days: day for day in missing}
+    gap_offsets = np.fromiter(gap_days, dtype=np.int64, count=len(gap_days))
     removed: dict[date, dict[str, int]] = {}
     for name, table in sources.items():
         if not table.num_rows:
             continue
         days = (splice._timestamps(table) + splice.CST_US) // splice.DAY_US
-        mask = np.isin(days, list(gap_days))
+        mask = np.isin(days, gap_offsets)
         if not mask.any():
             continue
         # A malformed row cannot evade checks by falling on a removed date.
@@ -368,20 +383,28 @@ def _exclude_suspension_residuals(
         for offset, count in zip(offsets, counts, strict=True):
             removed.setdefault(gap_days[int(offset)], {})[name] = int(count)
     evidence = []
+    uncovered = removed.keys() - suspended
     for day, counts in sorted(removed.items()):
         following = bisect_left(dated, day)
+        if day in suspended:
+            reason, label = "suspension_residual_minutes", "停牌期分钟残留"
+        else:
+            reason = "daily_anchor_outside_coverage"
+            label = "超出日线归档覆盖区间，无锚可校"
+            if vipdoc_only and dated and day < dated[0]:
+                label = "新股日线归档延迟，无锚可校"
         evidence.append(
             {
                 "date": day.isoformat(),
-                "reason": "suspension_residual_minutes",
-                "label": "停牌期分钟残留",
+                "reason": reason,
+                "label": label,
                 "rows": sum(counts.values()),
                 "rows_by_source": counts,
-                "prior_daily_date": dated[following - 1].isoformat(),
-                "next_daily_date": dated[following].isoformat(),
+                "prior_daily_date": dated[following - 1].isoformat() if following else None,
+                "next_daily_date": dated[following].isoformat() if following < len(dated) else None,
             }
         )
-    return suspended, evidence
+    return suspended, uncovered, evidence
 
 
 def iter_stocks(prepared: Prepared) -> Iterator[tuple[sim.StockInput, data.Summary]]:
@@ -407,17 +430,27 @@ def iter_stocks(prepared: Prepared) -> Iterator[tuple[sim.StockInput, data.Summa
             else:
                 single, sc = _minute_stock(prepared.single, key)
                 sources = {"HF": hf, "vipdoc_single": single, "vipdoc_main": main}
-            suspended, exclusions = _exclude_suspension_residuals(
-                key, sources, anchors, market_days
+            vipdoc_only = stock[2] == "vipdoc_only"
+            raw_first = _first_minute_day(single, main) if vipdoc_only else None
+            suspended, uncovered, exclusions = _filter_unanchored_minutes(
+                key, sources, anchors, market_days, vipdoc_only=vipdoc_only
             )
+            single_day_excluded = splice.SINGLE_DAY in suspended or splice.SINGLE_DAY in uncovered
             hf = sources["HF"]
             if shared_vipdoc:
                 main = sources["vipdoc"]
-                if splice.SINGLE_DAY in suspended:
+                if single_day_excluded:
                     single = single.slice(0, 0)
             else:
                 single, main = sources["vipdoc_single"], sources["vipdoc_main"]
-            listing = _listing_check(stock, prepared, single, main, gap_exclusions=bool(exclusions))
+            listing = _listing_check(
+                stock,
+                prepared,
+                single,
+                main,
+                gap_exclusions=bool(exclusions),
+                uncovered_first=raw_first if raw_first and raw_first[0] in uncovered else None,
+            )
             events = prepared.events.get(key, [])
             try:
                 grid, checks = data.load_spliced_stock(
@@ -430,14 +463,14 @@ def iter_stocks(prepared: Prepared) -> Iterator[tuple[sim.StockInput, data.Summa
                     symbol=symbol,
                     events=events,
                     shared_vipdoc=shared_vipdoc,
-                    single_day_suspended=splice.SINGLE_DAY in suspended,
+                    single_day_excluded=single_day_excluded,
                 )
             except splice.SpliceError as exc:
-                exc.summary["splice"]["suspension_policy"] = SUSPENSION_POLICY
+                exc.summary["splice"]["daily_anchor_policy"] = DAILY_ANCHOR_POLICY
                 if exclusions:
                     exc.summary["splice"]["pre_splice_exclusions"] = exclusions
                 raise
-            checks["splice"]["suspension_policy"] = SUSPENSION_POLICY
+            checks["splice"]["daily_anchor_policy"] = DAILY_ANCHOR_POLICY
             if exclusions:
                 checks["splice"]["pre_splice_exclusions"] = exclusions
             checks["lc1"] = {"single": sc, "main": mc}
@@ -453,6 +486,7 @@ def iter_stocks(prepared: Prepared) -> Iterator[tuple[sim.StockInput, data.Summa
                 prepared.listing_history,
                 grid,
                 daily_suspensions=suspended,
+                uncovered_daily_anchors=uncovered,
             )
             checks["exclusions"] = reasons
             checks["exrights"] = _exrights_audit(stock, grid, prepared.dates, st, events)

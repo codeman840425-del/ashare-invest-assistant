@@ -361,7 +361,7 @@ def check_splice(
     price_limit: float | None = None,
     require_overlap: bool | None = None,
     shared_vipdoc: bool = False,
-    single_day_suspended: bool = False,
+    single_day_excluded: bool = False,
 ) -> Summary:
     """Validate one stock; any checkable failure stops.
 
@@ -421,7 +421,7 @@ def check_splice(
         result["overlap"] = _overlap(hf, main)
         if not result["overlap"]["ok"]:
             failures.append("overlap_below_98pct")
-        if not repeated.num_rows and not single_day_suspended:
+        if not repeated.num_rows and not single_day_excluded:
             failures.append("sample_main_missing_0807")
     result["ok"] = not failures
     if failures:

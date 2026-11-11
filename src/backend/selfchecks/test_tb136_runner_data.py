@@ -229,23 +229,43 @@ def test_tb136_runner_suspension_gap_uses_anchors_across_source_boundary(
     assert all(row["next_daily_date"] == "2026-08-13" for row in checks["pre_splice_exclusions"])
 
 
-@pytest.mark.parametrize(
-    ("archive_days", "reason"),
-    [
-        ((20260810,), "single_day.missing_daily_anchor"),
-        ((20260731,), "single_day.missing_daily_anchor"),
-        ((20260731, 20260807, 20260810), "single_day.daily_open"),
-    ],
-)
-def test_tb136_runner_suspension_gap_preserves_unbracketed_and_price_failures(
-    tmp_path: Path, archive_days: tuple[int, ...], reason: str
+@pytest.mark.parametrize("archive_days", [(20260810,), (20260731,), ()])
+def test_tb136_runner_excludes_uncovered_days_without_calling_them_suspended(
+    tmp_path: Path, archive_days: tuple[int, ...]
 ) -> None:
     prepared = _suspension_fixture(tmp_path, "300246", archive_days=archive_days)
+    stock, report = next(runner_data.iter_stocks(prepared))
+    assert np.isnan(stock.o[1]).all()
+    assert stock.day_kind[1] == sim.EXCLUDED
+    exclusion = report["splice"]["pre_splice_exclusions"][0]
+    assert exclusion["reason"] == "daily_anchor_outside_coverage"
+    assert exclusion["prior_daily_date"] == ("2026-07-31" if archive_days == (20260731,) else None)
+    assert exclusion["next_daily_date"] == ("2026-08-10" if archive_days == (20260810,) else None)
+
+
+def test_tb136_runner_in_coverage_price_failure_still_blocks(tmp_path: Path) -> None:
+    prepared = _suspension_fixture(tmp_path, "300246", archive_days=(20260731, 20260807, 20260810))
     with pytest.raises(splice.SpliceError) as error:
         next(runner_data.iter_stocks(prepared))
     checks = error.value.summary["splice"]
-    assert reason in checks["failures"]
+    assert "single_day.daily_open" in checks["failures"]
     assert "pre_splice_exclusions" not in checks
+
+
+def test_tb136_runner_vipdoc_only_retains_first_covered_day(tmp_path: Path) -> None:
+    key = ("SZ", "001246")
+    prepared = _suspension_fixture(tmp_path, key[1], archive_days=(20260810,))
+    prepared = replace(
+        prepared,
+        pool=[(*key, "vipdoc_only")],
+        meta={**prepared.meta, "securities": {key: {"listing_date": splice.SINGLE_DAY}}},
+    )
+    stock, report = next(runner_data.iter_stocks(prepared))
+    assert np.isnan(stock.o[1]).all()
+    assert stock.o[2, 0] == 10
+    assert report["listing"]["first"] == splice.SINGLE_DAY
+    assert report["splice"]["resume_day"]["date"] == "2026-08-10"
+    assert report["splice"]["pre_splice_exclusions"][0]["label"] == "新股日线归档延迟，无锚可校"
 
 
 def test_tb136_runner_suspension_gap_counts_hf_and_vipdoc_and_rejects_duplicate(
@@ -260,10 +280,13 @@ def test_tb136_runner_suspension_gap_counts_hf_and_vipdoc_and_rejects_duplicate(
     anchors = dict.fromkeys((left, right), splice.DailyBar(10, 10, 100))
     bad = {"HF": pa.concat_tables([residual, residual])}
     with pytest.raises(data.DataFormatError, match="duplicate timestamp"):
-        runner_data._exclude_suspension_residuals(key, bad, anchors, {day})
+        runner_data._filter_unanchored_minutes(key, bad, anchors, {day})
     sources = {"HF": residual, "vipdoc": table}
-    suspended, evidence = runner_data._exclude_suspension_residuals(key, sources, anchors, {day})
+    suspended, uncovered, evidence = runner_data._filter_unanchored_minutes(
+        key, sources, anchors, {day}
+    )
     assert suspended == {day}
+    assert not uncovered
     assert sources["HF"].num_rows == 0
     assert sources["vipdoc"].num_rows == 1
     assert evidence[0]["rows_by_source"] == {"HF": 1, "vipdoc": 1}

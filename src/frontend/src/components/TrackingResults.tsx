@@ -1,7 +1,7 @@
 import type { SuggestionTracking, TrackingResult } from '../api/phase2Types';
 import { EvidenceChips } from './EvidenceChips';
 import { GAP_REASON, ACTION_FULL } from '../i18n/labels';
-import { trackingDecimal } from './TrackingStats';
+import { trackingDecimal } from '../lib/trackingDecimal';
 import { fmtTime } from '../lib/format';
 const STATE = { pending: '尚未到期', complete: '已完成', untradable: '不可成交', excluded: '已排除', unavailable: '到期但数据不足' };
 const value = (x: string | null, unit = '') => unit === '%' ? trackingDecimal(x) + (x === null ? '' : '%') : x === null ? '—（缺数据）' : x;

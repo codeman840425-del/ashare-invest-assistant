@@ -216,19 +216,17 @@ def _policy_only(stem: str, data: Mapping[str, Any], hit: str) -> bool:
 def load_yaml_dir(config_dir: Path) -> dict[str, Any]:
     """读取 ``config_dir`` 下一层的 ``*.yaml`` / ``*.yml``（不递归），按文件名排序。
 
-    每个文件顶层必须是映射（或空文件），返回 ``{文件名stem: 内容}``。
+    每个文件顶层必须是映射（或空文件）；参考文件单独校验，
+    返回业务文件的 ``{文件名stem: 内容}``。
     目录不存在时返回空字典（Phase 0 仓库里只有 ``config/strategies/``）。
     """
     if not config_dir.is_dir():
         return {}
     result: dict[str, Any] = {}
     files = sorted(p for p in config_dir.iterdir() if p.is_file() and p.suffix in {".yaml", ".yml"})
-    from app.reference_files import REFERENCE_FILES, load_reference_file
+    from app.reference_files import REFERENCE_FILES
 
     for path in files:
-        if path.name in REFERENCE_FILES:
-            load_reference_file(config_dir, path.name)
-            continue
         if path.stem in result:
             raise ConfigError(f"配置文件重名：{path.stem}（.yaml 与 .yml 同时存在）")
         try:
@@ -245,6 +243,9 @@ def load_yaml_dir(config_dir: Path) -> dict[str, Any]:
             raise ConfigError(
                 f"配置文件 {path.name} 含疑似敏感键 {hits}：licence/密码/密钥只能走环境变量"
             )
+        if path.name in REFERENCE_FILES:
+            REFERENCE_FILES[path.name].model_validate(data)
+            continue
         result[path.stem] = data
     return result
 

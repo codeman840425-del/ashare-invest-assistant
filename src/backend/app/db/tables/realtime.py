@@ -58,7 +58,13 @@ signal_states = Table(
     txt("state"),
     txt("last_tick_id"),
     ts("changed_at", nullable=False, default_now=True),
-    UniqueConstraint("source_licence_id", "security_code", "strategy_version_id", "params_hash"),
+    UniqueConstraint(
+        "source_licence_id",
+        "security_code",
+        "strategy_version_id",
+        "params_hash",
+        name="uq_signal_states_licence_key",
+    ),
     schema=APP,
     comment="全站共享的当前状态",
 )

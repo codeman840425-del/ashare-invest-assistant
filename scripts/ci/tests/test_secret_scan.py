@@ -362,16 +362,28 @@ def test_check_licenses_forms(tmp_repo: Path, rel: str, body: str, bad: bool) ->
     assert r.returncode == (1 if bad else 0), r.stdout
 
 def test_check_coverage(tmp_path: Path) -> None:
+    from coverage_ratchet import bootstrap_record
+
+    base = bootstrap_record()
+    base["counts"] = {name: [0, 0] for name in base["counts"]}
+    base["counts"].update(total=[195, 200], domain=[95, 100])
+    frozen = tmp_path / "base.json"
+    frozen.write_text(json.dumps(base))
+
     def cov(pkg_cov: int) -> Path:
         files = {
             "app/domain/a.py": {"summary": {"covered_lines": pkg_cov, "num_statements": 100}},
             "app/api/b.py": {"summary": {"covered_lines": 100, "num_statements": 100}},
         }
         p = tmp_path / f"c{pkg_cov}.json"
-        p.write_text(json.dumps({"files": files}))
+        p.write_text(json.dumps({"files": files, "totals": {
+            "covered_lines": pkg_cov + 100, "num_statements": 200}}))
         return p
 
-    run = lambda p: subprocess.run([sys.executable, str(CI_DIR / "check_coverage.py"), str(p)], capture_output=True)  # noqa: E731
+    def run(path):
+        return subprocess.run([sys.executable, str(CI_DIR / "check_coverage.py"), str(path),
+                               "--base", str(frozen), "--output", str(tmp_path / "measurement.json")],
+                              capture_output=True, check=False)
     assert run(cov(95)).returncode == 0
     assert run(cov(85)).returncode == 1
 

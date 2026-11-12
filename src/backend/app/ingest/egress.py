@@ -502,7 +502,9 @@ def mairui_get(
         raise EgressDenied("halt_present")
 
     try:
-        with ng.egress_window(lease, lambda: _lease_is_valid(lease, time.monotonic() + WINDOW_RECHECK_BUDGET_S)):
+        with ng.egress_window(
+            lease, lambda: _lease_is_valid(lease, time.monotonic() + WINDOW_RECHECK_BUDGET_S)
+        ):
             status_code, body = transport(path, secret)
     except ng.EgressBlocked:
         core.complete(dispatched, Signal.NETWORK, clock())

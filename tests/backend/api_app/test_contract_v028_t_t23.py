@@ -348,12 +348,13 @@ def _route_regex(path: str) -> re.Pattern[str]:
     return re.compile(rx + r"(?![A-Za-z0-9_-])")
 
 
-def test_05_every_mounted_admin_endpoint_has_contract_test(app_client: Callable[..., Any]) -> None:
+def test_05_every_mounted_admin_endpoint_has_contract_test(backend: SimpleNamespace, make_settings: Callable[..., Any]) -> None:
     """第 5 条：后端挂载的每个 §7.9 ``/admin/*`` 接口（方法 + 路径）都在 tests/ 里有契约结构测试引用（本文件除外）。
     §7.9 中尚未挂载的接口（ingest/status、ingest pause/resume、realtime-settings、llm、plans、evaluation、audit-logs）
     挂载时此用例会要求补测试。"""
-    c = app_client()
-    admin = sorted((m, p[len(API):]) for m, p in app_routes(c.app) if "/admin" in p and m not in {"HEAD", "OPTIONS"})
+    # Route metadata requires the real app, not an unrelated database/session setup.
+    app = backend.main.create_app(make_settings())
+    admin = sorted((m, p[len(API):]) for m, p in app_routes(app) if "/admin" in p and m not in {"HEAD", "OPTIONS"})
     assert admin, "后端没有任何 /admin 路由"
     me = Path(__file__).resolve()
     texts = [p.read_text(encoding="utf-8") for p in sorted(TESTS_DIR.rglob("*.py")) if p.resolve() != me]

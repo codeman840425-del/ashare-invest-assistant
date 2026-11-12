@@ -1,0 +1,137 @@
+schema: r01_q5_candidate_cases_v0_1
+status: draft_pending_architect_ruling
+purpose: 架构裁定前的拟定分支场景；不是现行 v3 或已实现 v4 的执行期望
+synthetic_only: true
+currency: CNY
+units: 元
+rules:
+  sse_main_2026_04: 'S4 §7.4.1(一) 金额分支：M > 10000000 AND M / abs(N) >= 0.10'
+  sse_star_2026_04: 'S5 §9.4.1(一) 金额分支：M > 10000000 AND (M/A >= 0.01 OR M/V >= 0.01)；V 仅限规则定义值'
+  note: 以上为已核披露线示例，不把数值达线或未达线直接当作不利风险/无风险
+cases:
+  - id: L01
+    family: litigation
+    title: '【合成】公司涉及重大诉讼的进展公告'
+    profile: sse_main_2026_04
+    facts: {amount_cny: null, audited_net_assets_cny: null, issuer_role: unknown}
+    proposed_materiality: unknown
+    proposed_route: needs_evidence
+    reason: 重大二字不能补出金额、身份或剩余风险敞口
+  - id: L02
+    family: litigation
+    title: '【合成】公司被诉金额为一千万元'
+    profile: sse_main_2026_04
+    facts: {amount_cny: 10000000, audited_net_assets_cny: 100000000, issuer_role: defendant, adverse_impact_verified: true}
+    proposed_materiality: below_numeric_line
+    proposed_route: observe
+    reason: 金额恰为一千万元，不满足严格大于；只说明金额分支不达，非无风险结论
+  - id: L03
+    family: litigation
+    title: '【合成】公司被诉且承担赔付风险'
+    profile: sse_main_2026_04
+    facts: {amount_cny: 10000001, audited_net_assets_cny: 100000010, issuer_role: defendant, adverse_impact_verified: true}
+    proposed_materiality: above_numeric_line
+    proposed_route: risk_candidate
+    reason: 金额略高于一千万元，比例恰为百分之十，且不利身份已独立核实
+  - id: L04
+    family: litigation
+    title: '【合成】公司被诉近两千万元'
+    profile: sse_main_2026_04
+    facts: {amount_cny: 19999999, audited_net_assets_cny: 200000000, issuer_role: defendant, adverse_impact_verified: true}
+    proposed_materiality: below_numeric_line
+    proposed_route: observe
+    reason: 比例略低于百分之十，不能将四舍五入后的百分比拿来通过；保留非金额影响审查
+  - id: L05
+    family: litigation
+    title: '【合成】科创板公司发生已核不利仲裁'
+    profile: sse_star_2026_04
+    facts: {amount_cny: 11000000, audited_total_assets_cny: 1100000000, rule_market_value_cny: null, issuer_role: respondent, adverse_impact_verified: true}
+    proposed_materiality: above_numeric_line
+    proposed_route: risk_candidate
+    reason: 总资产分支恰为百分之一已可证真，OR 的另一个市值分支未知不妨碍该分支成立
+  - id: L06
+    family: litigation
+    title: '【合成】主板公司发生已核不利仲裁'
+    profile: sse_main_2026_04
+    facts: {amount_cny: 11000000, audited_net_assets_cny: 1100000000, issuer_role: respondent, adverse_impact_verified: true}
+    proposed_materiality: below_numeric_line
+    proposed_route: observe
+    reason: 与 L05 数量级相同而板块/分母不同，不可搬用科创板百分之一
+  - id: L07
+    family: litigation
+    title: '【合成】公司起诉客户追索货款'
+    profile: sse_main_2026_04
+    facts: {amount_cny: 20000000, audited_net_assets_cny: 100000000, issuer_role: plaintiff, adverse_impact_verified: false}
+    proposed_materiality: above_numeric_line
+    proposed_route: observe
+    reason: 达披露金额线不等于公司负有同额赔付义务，仍需核实可收回性等独立不利影响
+  - id: L08
+    family: litigation
+    title: '【合成】历史时点的涉诉评估'
+    profile: sse_main_2026_04
+    facts: {amount_cny: 20000000, audited_net_assets_cny: 100000000, as_of: '2026-06-01T09:30:00+08:00', financial_available_at: '2026-08-01T09:30:00+08:00', issuer_role: defendant}
+    proposed_materiality: unknown
+    proposed_route: needs_evidence
+    reason: 分母当时尚不可得，即使事后数值达线也不能回填过去
+  - id: L09
+    family: litigation
+    title: '【合成】公司被诉且最近一期净资产为零'
+    profile: sse_main_2026_04
+    facts: {amount_cny: 20000000, audited_net_assets_cny: 0, issuer_role: defendant}
+    proposed_materiality: unknown
+    proposed_route: needs_evidence
+    reason: 绝对值为零仍不能除，须独立审查较大影响分支，不默认金额门通过
+  - id: V01
+    family: volatility
+    title: '【合成】股票交易异常波动公告'
+    facts: {direction: unknown, independent_adverse_event: null}
+    proposed_route: observe
+    reason: 无方向和核查结论，不能推导基本面风险
+  - id: V02
+    family: volatility
+    title: '【合成】股票价格上涨交易异常波动公告'
+    facts: {direction: up, independent_adverse_event: null}
+    proposed_route: observe
+    reason: 价格上涨的交易风险观察与已证不利经营事件分列
+  - id: V03
+    family: volatility
+    title: '【合成】股票价格连续下跌交易异常波动公告'
+    facts: {direction: down, independent_adverse_event: null, new_policy_approved: false}
+    proposed_route: observe
+    reason: 若要求下跌即保守否决，先走 policy 裁定；本单不自动生效
+  - id: V04
+    family: volatility
+    title: '【合成】股票交易严重异常波动暨停牌核查公告'
+    facts: {direction: unknown, review_completed: false, independent_adverse_event: null}
+    proposed_route: observe
+    reason: 核查未完成，交易状态交既有可交易性模块，不能补出处罚结论
+  - id: V05
+    family: volatility
+    title: '【合成】股票交易异常波动暨公司债务逾期公告'
+    facts: {independent_adverse_event: issuer_debt_overdue, event_verified: true}
+    proposed_route: retain_existing_hit
+    reason: 债务逾期独立存在，异常波动的观察标签不清除已有 insolvency 命中
+  - id: F01
+    family: fp3
+    title: '【合成】控股股东及其一致行动人之间内部协议转让股份'
+    facts: {same_event: true, internal_parties_verified: true, group_total_unchanged_verified: true, external_selldown: false, independent_adverse_event: null}
+    proposed_route: neutral_candidate
+    reason: 完整内部事件证据仅支持该事件的 controller_equity 中性候选，不是全标题豁免
+  - id: F02
+    family: fp3
+    title: '【合成】控制人内部协议转让及向外部投资者减持公告'
+    facts: {internal_parties_verified: true, external_selldown: true, independent_adverse_event: controller_external_selldown}
+    proposed_route: retain_existing_hit
+    reason: 外部真实减持单独计，不能被内部转让词串覆盖
+  - id: F03
+    family: fp3
+    title: '【合成】内部权益调整暨股东询价转让公告'
+    facts: {group_total_unchanged_verified: true, frozen_policy_keyword: 询价转让}
+    proposed_route: retain_existing_hit
+    reason: v3 已有询价转让一律命中政策；内部调整不能暗加政策豁免
+  - id: K01
+    family: cross_event_negation
+    title: '【合成】控股股东承诺不减持及实控人通过大宗交易减持公告'
+    facts: {subjects_distinct: true, events_distinct: true, second_event_adverse: true}
+    proposed_route: retain_existing_hit
+    reason: 这是 v4 必须保护的目标分支；v3 K-1 已知缺陷不在本单修复，不冒称当前匹配器已通过

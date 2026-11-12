@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("requests", reason="optional p11 analysis import dependency; no requests sent")
+
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "src/backend/probes"))
 import p11_gaps as g  # noqa: E402

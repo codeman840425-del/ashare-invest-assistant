@@ -21,6 +21,7 @@ import base64
 import datetime as dt
 import importlib
 import importlib.util
+import json
 import re
 import time
 import uuid
@@ -382,9 +383,37 @@ CB_CODE = "113981.SH"  # 可转债：本版不收录
 
 
 def seed_securities(sql: Callable[..., Any]) -> None:
+    # plan 4.6 / contract 7.4: public bootstrap + searchable terms are prerequisites.
+    # These are invented local records, not an exchange fetch or production seed.
+    snapshots = []
+    sources = ("sse_list", "szse_list", "bse_list")
+    for source in sources:
+        snapshots.append(sql(
+            "INSERT INTO market.master_snapshots "
+            "(source, url, fetched_at, trade_date, row_count, sha256, parse_status) "
+            "VALUES (:s, 'https://example.invalid/synthetic', now(), '2026-11-01', 4, :h, 'ok') "
+            "RETURNING id", s=source, h=uuid.uuid4().hex * 2)[0][0])
+    sql("INSERT INTO market.master_runs (trigger, status, finished_at, snapshot_ids, stats) "
+        "VALUES ('bootstrap', 'ok', now(), :ids, CAST(:stats AS jsonb))",
+        ids=snapshots, stats=json.dumps({"sources": {s: {"status": "ok"} for s in sources}}))
     for code, typ, name, board in SEED:
         sql("INSERT INTO market.securities (code, type, name, exchange, board, listing_status, name_norm) "
             "VALUES (:c, :t, :n, 'SH', :b, 'listed', :n) ON CONFLICT (code) DO NOTHING", c=code, t=typ, n=name, b=board)
+        sql("INSERT INTO market.security_search_terms (code, term_kind, term, source_name, generator_version) "
+            "VALUES (:c, 'name', :n, :n, 1) ON CONFLICT DO NOTHING", c=code, n=name.upper())
+
+
+def seed_user_strategy_version(sql: Callable[..., Any], uid: str) -> str:
+    """An owned, explicitly synthetic version; no formal card or strategy seed."""
+    strategy, version = str(uuid.uuid4()), str(uuid.uuid4())
+    sql("INSERT INTO app.strategies (id, key, name, owner_user_id, horizons) "
+        "VALUES (:i, :k, '合成契约夹具', :u, ARRAY['swing'])",
+        i=strategy, k='synthetic_contract_' + strategy, u=uid)
+    sql("INSERT INTO app.strategy_versions "
+        "(id, strategy_id, version_no, config, config_hash, lifecycle) "
+        "VALUES (:i, :s, 1, CAST(:c AS jsonb), :h, 'published')",
+        i=version, s=strategy, c=json.dumps({'horizons': ['swing'], 'params_schema': {}}), h=version)
+    return version
 
 
 @pytest.mark.unit
@@ -460,23 +489,24 @@ def test_06_etf_search(session: Callable[..., SimpleNamespace], sql: Callable[..
         assert r.status_code == 200, r.text[:300]
         return r.json()["items"]
 
-    got = [x for x in items("测廿三") if x["code"] in {c for c, *_ in SEED}]
-    etf = [x for x in got if x["code"] == ETF_CODE]
+    # SecurityHit uses security_code (contract 5.1), not the storage column code.
+    got = [x for x in items("测廿三") if x["security_code"] in {c for c, *_ in SEED}]
+    etf = [x for x in got if x["security_code"] == ETF_CODE]
     assert len(etf) == 1 and etf[0]["type"] == "etf" and etf[0]["board"] is None
-    assert "000981.SH" not in {x["code"] for x in got}, "默认 types 不含 index"
-    assert ETF_CODE not in {x["code"] for x in items("测廿三", types="stock,cdr")}
-    allt = [x for x in items("测廿三", types="stock,cdr,etf,index") if x["code"] in {c for c, *_ in SEED}]
+    assert "000981.SH" not in {x["security_code"] for x in got}, "默认 types 不含 index"
+    assert ETF_CODE not in {x["security_code"] for x in items("测廿三", types="stock,cdr")}
+    allt = [x for x in items("测廿三", types="stock,cdr,etf,index") if x["security_code"] in {c for c, *_ in SEED}]
     ranks = [RANK[x["type"]] for x in allt]
     assert ranks == sorted(ranks) and len(allt) == 4
-    assert items(CB_CODE[:6]) == [] or CB_CODE not in {x["code"] for x in items(CB_CODE[:6])}
+    assert items(CB_CODE[:6]) == [] or CB_CODE not in {x["security_code"] for x in items(CB_CODE[:6])}
 
 
 DATASETS = ("financials", "fund-flows", "factors", "announcements")
 
 
 def test_07_etf_profile_and_datasets(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], httpdiag: Any) -> None:
-    """第 7 条：ETF 资料 board/risk_flag/股本/industry 为 null、concepts=[]、无 gap；四个个股数据集 200、空 items、
-    data_status=unavailable、gaps[0].reason=not_applicable；指数 financials 仍 no_source。"""
+    """第 7 条：ETF 不适用的资料字段 null/[] 且不出 gap，suspended 仍按本人证书判缺口；
+    四数据集 200、空 items、not_applicable；指数 financials 保持 no_source（缺路由时原 xfail）。"""
     s = session()
     require_route(s.client, "GET", "/securities/{code}", O_PROFILE)
     seed_securities(sql)
@@ -487,7 +517,13 @@ def test_07_etf_profile_and_datasets(session: Callable[..., SimpleNamespace], sq
     prof = p.json()
     for k in ("board", "risk_flag", "total_shares", "float_shares", "industry"):
         assert prof.get(k, "MISSING") is None, k
-    assert prof["concepts"] == [] and not prof.get("gaps")
+    assert prof["concepts"] == []
+    # Contract 5.1: ETF-inapplicable fields have no gaps; suspended still requires
+    # the owner's licence and must remain an explicit gap in this unlicensed fixture.
+    assert prof["suspended"] is None and prof["data_status"] == "partial"
+    assert [(gap["key"], gap["reason"]) for gap in prof["gaps"]] == [
+        ("suspended", "data_licence_unavailable")
+    ]
     for ds in DATASETS:
         require_route(s.client, "GET", f"/securities/{{code}}/{ds}", O_PROFILE)
         r = call("GET", f"/securities/{ETF_CODE}/{ds}")
@@ -516,16 +552,47 @@ def test_08_etf_trades_import_and_cb_unknown(session: Callable[..., SimpleNamesp
 
 
 def test_09_etf_strategy_instance_scope(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], httpdiag: Any) -> None:
-    """第 9 条（HTTP）：scope=security 指 ETF → 422 INSTANCE_SCOPE_INVALID{security_type: etf, issue: security_type_not_supported}；
-    scope=account → 201 且运行时跳过 ETF；分类器对 ETF 计 0 分不建 proposed；H-01 不挂 ETF。"""
+    """第 9 条（HTTP）：合法 scope=security ETF 请求 → 422 INSTANCE_SCOPE_INVALID，且不落实例。
+    account 运行、分类器和 H-01 的边界不由此单一 HTTP 拒绝例冒称验收。"""
     s = session()
     require_route(s.client, "POST", "/strategy-instances", O_STRATEGY)
     seed_securities(sql)
-    r = Rec(s)("POST", "/strategy-instances", json={"scope": "security", "security_code": ETF_CODE, "template_id": "S-01"})
+    call = Rec(s)
+    account = call("POST", "/accounts", json={"alias": "合成ETF边界", "broker_name": "合成券商"})
+    assert account.status_code == 201
+    version = seed_user_strategy_version(sql, s.user.id)
+    # Contract 7.5 requires a version, owned account and horizon before scope validation.
+    r = call("POST", "/strategy-instances", json={
+        "strategy_version_id": version, "account_id": account.json()["id"],
+        "horizon": "swing", "scope": "security", "security_code": ETF_CODE,
+    })
     _httpdiag.observe_response('etf_instance', r)
     err = assert_err(r, 422, "INSTANCE_SCOPE_INVALID")
     assert err["details"]["security_type"] == "etf" and err["details"]["issue"] == "security_type_not_supported"
-    pytest.xfail(f"{O_STRATEGY}；scope=account / 分类器 / H-01 部分待端点与夹具")
+    assert sql("SELECT count(*) FROM app.strategy_instances WHERE strategy_version_id=:v", v=version)[0][0] == 0
+
+
+def test_09_etf_instance_keeps_request_and_account_guards(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
+    """Fixing the ETF precondition never accepts the obsolete body or a foreign account."""
+    owner, stranger = session(), session()
+    seed_securities(sql)
+    call = Rec(owner)
+    obsolete = call("POST", "/strategy-instances", json={
+        "scope": "security", "security_code": ETF_CODE, "template_id": "S-01",
+    })
+    errors = assert_err(obsolete, 400, "VALIDATION_ERROR")["details"]["fields"]
+    assert {item["field"] for item in errors} == {
+        "strategy_version_id", "account_id", "horizon", "template_id",
+    }
+    foreign_account = Rec(stranger)("POST", "/accounts", json={"alias": "合成他人账户", "broker_name": "合成券商"})
+    assert foreign_account.status_code == 201
+    version = seed_user_strategy_version(sql, owner.user.id)
+    denied = call("POST", "/strategy-instances", json={
+        "strategy_version_id": version, "account_id": foreign_account.json()["id"],
+        "scope": "security", "security_code": ETF_CODE, "horizon": "swing",
+    })
+    assert_err(denied, 404, "NOT_FOUND")
+    assert sql("SELECT count(*) FROM app.strategy_instances WHERE strategy_version_id=:v", v=version)[0][0] == 0
 
 
 # =============================== 第 10 条：注册蜜罐 ===============================

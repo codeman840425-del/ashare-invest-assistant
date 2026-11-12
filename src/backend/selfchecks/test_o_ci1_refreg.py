@@ -1,4 +1,3 @@
-# ruff: noqa: S101
 """O-CI1-REFREG: business/reference loading and unchanged public consumers, offline."""
 
 from __future__ import annotations
@@ -85,29 +84,41 @@ def runtime_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_refreg_business_registry_and_startup_keep_nine_files(runtime_dir: Path) -> None:
-    assert set(BUSINESS_FILES) == BUSINESS_NAMES
-    assert set(BusinessConfig.model_fields) == BUSINESS_NAMES
-    assert REFERENCE_FILES["share_class_list.yaml"] is ShareClassListConfig
+    if not (set(BUSINESS_FILES) == BUSINESS_NAMES):
+        raise AssertionError("REFREG compatibility predicate failed")
+    if not (set(BusinessConfig.model_fields) == BUSINESS_NAMES):
+        raise AssertionError("REFREG compatibility predicate failed")
+    if REFERENCE_FILES["share_class_list.yaml"] is not ShareClassListConfig:
+        raise AssertionError("REFREG compatibility predicate failed")
     found = load_yaml_dir(runtime_dir)
     check_config_dir_files(found, runtime_dir)
     settings = Settings(database_url=None, redis_url=None)
-    assert set(found) == BUSINESS_NAMES
-    assert settings.business.model_dump() == BusinessConfig.model_validate(found).model_dump()
-    assert "share_class_list" not in settings.business.model_dump()
+    if not (set(found) == BUSINESS_NAMES):
+        raise AssertionError("REFREG compatibility predicate failed")
+    if not (settings.business.model_dump() == BusinessConfig.model_validate(found).model_dump()):
+        raise AssertionError("REFREG compatibility predicate failed")
+    if not ("share_class_list" not in settings.business.model_dump()):
+        raise AssertionError("REFREG compatibility predicate failed")
     reference = load_reference_file(runtime_dir, "share_class_list.yaml")
-    assert isinstance(reference, ShareClassListConfig)
-    assert reference.model_dump() == _reference()
+    if not (isinstance(reference, ShareClassListConfig)):
+        raise AssertionError("REFREG compatibility predicate failed")
+    if not (reference.model_dump() == _reference()):
+        raise AssertionError("REFREG compatibility predicate failed")
 
 
 def test_refreg_checked_in_reference_and_existing_consumers_agree() -> None:
     reference = load_reference_file(CONFIG, "share_class_list.yaml")
     direct = load_share_classes(CONFIG / "share_class_list.yaml")
-    assert reference.model_dump() == direct
-    assert set(load_yaml_dir(CONFIG)) == BUSINESS_NAMES
+    if not (reference.model_dump() == direct):
+        raise AssertionError("REFREG compatibility predicate failed")
+    if not (set(load_yaml_dir(CONFIG)) == BUSINESS_NAMES):
+        raise AssertionError("REFREG compatibility predicate failed")
     for day in ("2025-01-01", "2025-01-02", "2025-12-31"):
-        assert share_class_at(reference.model_dump(), "600000.SH", day) == share_class_at(
-            direct, "600000.SH", day
-        )
+        if not (
+            share_class_at(reference.model_dump(), "600000.SH", day)
+            == share_class_at(direct, "600000.SH", day)
+        ):
+            raise AssertionError("REFREG compatibility predicate failed")
 
 
 @pytest.mark.parametrize(
@@ -119,13 +130,21 @@ def test_refreg_same_record_version_and_interval_consumer(
     reference = load_reference_file(runtime_dir, "share_class_list.yaml")
     data = reference.model_dump()
     result = share_class_at(data, "600000.SH", day)
-    assert result == share_class_at(
-        load_share_classes(runtime_dir / "share_class_list.yaml"), "600000.SH", day
-    )
-    assert result["member"] == member
-    assert result["share_class_list_version"] == 2
-    assert result["share_class_check"] == "list"
-    assert data["records"][0]["verified"] is False
+    if not (
+        result
+        == share_class_at(
+            load_share_classes(runtime_dir / "share_class_list.yaml"), "600000.SH", day
+        )
+    ):
+        raise AssertionError("REFREG compatibility predicate failed")
+    if not (result["member"] == member):
+        raise AssertionError("REFREG compatibility predicate failed")
+    if not (result["share_class_list_version"] == 2):
+        raise AssertionError("REFREG compatibility predicate failed")
+    if not (result["share_class_check"] == "list"):
+        raise AssertionError("REFREG compatibility predicate failed")
+    if data["records"][0]["verified"] is not False:
+        raise AssertionError("REFREG compatibility predicate failed")
 
 
 @pytest.mark.parametrize(
@@ -191,7 +210,8 @@ def test_refreg_reference_sensitive_keys_remain_blocked_before_model_validation(
     _write(runtime_dir, data)
     with pytest.raises(ConfigError, match="疑似敏感键") as denied:
         load_yaml_dir(runtime_dir)
-    assert "9182736" not in str(denied.value)
+    if not ("9182736" not in str(denied.value)):
+        raise AssertionError("REFREG compatibility predicate failed")
 
 
 def test_refreg_reference_cannot_be_injected_as_business_override(
@@ -208,7 +228,10 @@ def test_refreg_reference_cannot_be_injected_as_business_override(
 def test_refreg_missing_reference_stays_explicit_at_consumer(runtime_dir: Path) -> None:
     reference_path = runtime_dir / "share_class_list.yaml"
     reference_path.unlink()
-    assert set(Settings(database_url=None, redis_url=None).business.model_dump()) == BUSINESS_NAMES
+    if not (
+        set(Settings(database_url=None, redis_url=None).business.model_dump()) == BUSINESS_NAMES
+    ):
+        raise AssertionError("REFREG compatibility predicate failed")
     with pytest.raises(FileNotFoundError):
         load_reference_file(runtime_dir, "share_class_list.yaml")
     with pytest.raises(FileNotFoundError):

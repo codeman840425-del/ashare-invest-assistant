@@ -15,6 +15,8 @@ from typing import Any, Callable
 
 import pytest
 
+pytest.importorskip("hypothesis", reason="optional golden property-test dependency")
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from golden_compare import diff_fields  # noqa: E402

@@ -14,7 +14,8 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-import schemathesis
+
+schemathesis = pytest.importorskip("schemathesis", reason="optional contract test dependency")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mock_app import make_app  # noqa: E402

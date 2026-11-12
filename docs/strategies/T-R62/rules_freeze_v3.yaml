@@ -1,0 +1,30 @@
+note: T-R62 F23 词表 v3 冻结记录（T-A152 定向修订：controller 否定短语 + insolvency 他方重整排除）。上一冻结记录见 docs/strategies/T-R23/rules_freeze_v2_1.yaml。集成规范见 docs/strategies/f23_lexicon_spec.md（v3 口径）。2026-11-11 T-R63/T-R63b/T-R63c 三轮返修（RV-20/RV-20b/RV-20c）：匹配器作用域与坐标修复（① 他方事件等长屏蔽、自身复合称谓、中间态不排除；② 渠道否定整段标记且绑定最近减持事件；③ 屏蔽保原始坐标、check 空映射）；词表本体与哈希未变，仅匹配器哈希更新。
+version: f23_lexicon_v3
+supersedes: {version: f23_lexicon_v2_1, record: docs/strategies/T-R23/rules_freeze_v2_1.yaml}
+frozen_at: '2026-11-10 (Asia/Shanghai)'
+basis: T-A152；实测依据 T-R61 B 轮（1,490 条样本、18 命中、FP-1/FP-2 两处误报）
+ruling_refs:
+  - {id: T-A151, doc: docs/reviews/T-A151-f23-dual-metric-ruling.md, commit: bf4b0ab, scope: '验收误报指标分列：semantic ≤5% 保留为门 + policy 命中差异如实报告不设上限、不作门'}
+  - {id: T-A152, scope: 'v3 定向修订授权（只 3 处，其余逐字继承 v2.1）'}
+  - {id: T-A153, scope: 'F23 升 verified_doc（ceiling simulating）；FP-3 与 Q-5 扩表并入 v4；两日非连续样本接受，v4 起优先连续日'}
+matcher_repairs:
+  - {id: T-R63, scope: 'RV-20 两个 P1 作用域返修：① exclude_all_of 收敛到他方主体子句（不跨子句吞整类、自身事项不排除）；② 渠道型否定只否被否渠道（另有真实渠道即命中）', regression: 'V3-P11–P14、V3-N11/N12；B 轮归档对照仍 18→16', lexicon_unchanged: true}
+  - {id: T-R63b, scope: 'RV-20b 边缘语义返修：① 他方事件只抹「动作词→事件词」跨度、不删整个子句（同子句自身风险词保留）；自身称谓补发行人/本公司及关联主体/及其子公司复合形态；中间态一律不排除。② 渠道否定从否定短语起整段标否定（嵌套渠道词幂等、回看到子句边界不按 16 字）；③ check 展平保留空映射节点', regression: 'V3-P15–P17、V3-N13/N14；原五反例不回退；B 轮 18→16、新样本 29→29 不变', lexicon_unchanged: true}
+  - {id: T-R63c, scope: 'RV-20c 二阶效应修复：① 屏蔽标记等长替换，关键词/否定窗口保持原始坐标（不因抹除拼接缩短间距）；② 渠道肯定/否定绑定最近减持事件的修饰段，不跨增持等其他事件；③ 否定绑定更早事件时不适用于本次减持', regression: 'V3-P18/P19、V3-N15；全部既有反例不回退；B 轮 18→16、新样本 29→29 不变', lexicon_unchanged: true}
+known_issues:
+  ref: docs/strategies/f23_lexicon_spec.md §3.2
+  items:
+    - {id: K-1, title: '整体否定跨事件漏报（承诺不减持 + 实控人通过大宗交易减持）', status: 'v3 不修（收口裁定）；v4 做事件级否定绑定', impact: '样本扫描未见该并列模式，已实测数字不受影响'}
+scope_of_change: 仅 3 处——controller_selldown.negations_before、controller_equity.negations_before、insolvency.exclude_all_of；其余逐字继承 v2.1（check_f23_v3.py 断言）
+sha256:
+  f23_lexicon_v3.yaml: 8a545da8eef56a30804a998f238d6a18c54469d3544840773d251d15922da05a
+  match_f23_v3.py: 46a5a9be0e3fa86265a616b01346b5791c81c5b687259e779f365fa20918d06c
+unchanged_by_ruling:
+  boundary_observations_kept_excluded: ['600136 重大诉讼', '603377 累计诉讼仲裁', '603366 异常波动', '300689 审核问询函回复']
+  note: T-A152 明确这 4 条维持排除不动，本单未纳入词表
+rerun_acceptance:
+  status: executed
+  protocol: docs/strategies/T-R60/sampling_plan.md（沿用；B 轮口径：如实报告点估计+区间，不设 FP 上限宣称）
+  sample: 2026-11-06 全市场公开公告（不与 A 轮 11-03/04/05、B 轮 11-09/11-10 重叠）
+  baseline: T-R61 B 轮 v2.1 结果归档（1,490 条 / 18 命中 / FP 2 / FN 0），本单以同口径对照
+  criteria: ['抽样完成（≥1,000 条、不按关键词筛）', '漏报 0（100 条盲抽）', '如实报告 FP 点估计与 95% 区间', '误报指标按 T-A151 分列：semantic 误报率 ≤5% 为验收门（本轮 1/29=3.45%）；policy 命中差异单列报告（本轮政策命中 3 条均 semantic_truth=true，差异 0）；不宣称总体 FP≤5%（CI 上界 17.18%）']

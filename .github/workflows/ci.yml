@@ -38,6 +38,9 @@ jobs:
   backend:
     name: backend (ruff, mypy, pytest+coverage)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     timeout-minutes: 30
     # T-O66：t_t41 / t_t45 读 TT41_DATABASE_URL；T-O67：A2–A31 读 PGHOST 等，均指向本 job 内建 PG（ci-only）。
     services:
@@ -66,6 +69,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: 绑定本 run 的私有回执与浏览器路径
         run: |
           set -euo pipefail
@@ -74,6 +78,10 @@ jobs:
           printf 'PLAYWRIGHT_BROWSERS_PATH=%s/o-ci1-browsers\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           printf 'AIA_CI_FAILURE_TRACE=%s/o-ci1-res/failures.jsonl\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           printf 'AIA_CI_TEMPLATE_RECEIPT=%s/o-ci1-templates/resources.json\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: 冻结可信 base 覆盖率棘轮基线
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/coverage_ratchet_base.py --output "${RUNNER_TEMP}/coverage-base.json"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: ${{ env.UV_VERSION }}
@@ -164,7 +172,7 @@ jobs:
           [ -f tests/pytest.ini ] && ini=(-c tests/pytest.ini)
           PYTHONPATH=src/backend "$py" -m pytest -p scripts.ci.pytest_safe_failures "${ini[@]}" "${dirs[@]}" \
             --cov=src/backend/app --cov-report=term-missing:skip-covered \
-            --cov-report="json:${RUNNER_TEMP}/coverage.json" --cov-fail-under=80 \
+            --cov-report="json:${RUNNER_TEMP}/coverage.json" \
             --junitxml="${RUNNER_TEMP}/backend-pytest.xml"
       - name: 确认 A1s–A32 与 t_t41 已执行（未因缺库 skip）
         if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
@@ -180,11 +188,27 @@ jobs:
             src/backend/selfchecks/test_tb116d_a1r_runtime.py \
             src/backend/selfchecks/test_tb116d_a28_a32.py \
             --junitxml="${RUNNER_TEMP}/selfcheck-a1s-a32.xml"
-      - name: 领域包覆盖率 ≥ 90%（domain/ importing/ signals/ advice/ llm/）
+      - name: 精确覆盖率棘轮（可信 base，不下降）
+        id: coverage_ratchet
         if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
         run: |
           test -f "${RUNNER_TEMP}/coverage.json" || { echo "::error title=coverage::没有 coverage.json（pytest 未运行）"; exit 1; }
-          python3 scripts/ci/check_coverage.py "${RUNNER_TEMP}/coverage.json"
+          python3 scripts/ci/check_coverage.py "${RUNNER_TEMP}/coverage.json" \
+            --base "${RUNNER_TEMP}/coverage-base.json" \
+            --policy scripts/ci/coverage-baseline.json \
+            --output "${RUNNER_TEMP}/coverage-ratchet-measurement.json"
+      - name: 归档可信覆盖率测量与原始 JSON/JUnit
+        if: ${{ !cancelled() && steps.coverage_ratchet.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-ratchet-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/coverage-ratchet-measurement.json
+            ${{ runner.temp }}/coverage.json
+            ${{ runner.temp }}/backend-pytest.xml
+            ${{ runner.temp }}/selfcheck-a1s-a32.xml
+          if-no-files-found: error
+          retention-days: 90
       - name: 正常收尾本 run 新建的 0030 模板与 head 自检库
         if: ${{ always() }}
         env:

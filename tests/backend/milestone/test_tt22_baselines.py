@@ -37,7 +37,7 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: _a
     expected = _assembly.load_policy(_assembly.ROOT / 'config')
     alternate_version = expected.version_no + 1
     instance = _assembly.prepare(setup)
-    assert enqueue_observer(_assembly.enqueue, _assembly.ANALYZE, owner, engine=engine) == [(_assembly.ANALYZE, 'ok')]
+    assert enqueue_observer(_assembly.enqueue, _assembly.ANALYZE, owner, engine=engine) == [(_assembly.ANALYZE, 'ok'), (_assembly.TRACKING, 'ok')]
     with engine.connect() as conn:
         candidate = conn.execute(_assembly.select(_assembly.candidate_signals).where(_assembly.candidate_signals.c.instance_id == instance)).one()
         row = conn.execute(_assembly.select(_assembly.suggestions).where(_assembly.suggestions.c.user_id == owner)).one()
@@ -57,7 +57,7 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: _a
     assert _assembly.Decimal(str(confidence['value'])) == value
     assert body['strategies'][0]['candidate_signal_id'] == cid
     assert stranger.get('/api/v1/suggestions/' + sid).status_code == 404
-    assert enqueue_observer(_assembly.enqueue, _assembly.ANALYZE, owner, engine=engine) == [(_assembly.ANALYZE, 'ok')]
+    assert enqueue_observer(_assembly.enqueue, _assembly.ANALYZE, owner, engine=engine) == [(_assembly.ANALYZE, 'ok'), (_assembly.TRACKING, 'ok')]
     with engine.connect() as conn:
         assert len(conn.execute(_assembly.select(_assembly.suggestions).where(_assembly.suggestions.c.user_id == owner)).all()) == 1
         assert len(conn.execute(_assembly.select(_assembly.candidate_signals).where(_assembly.candidate_signals.c.instance_id == instance)).all()) == 1
@@ -191,7 +191,7 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
         conn.execute(_daily.insert(_daily.strategies).values(id=strategy, key='tb76_fiction_' + strategy.hex, name='明确虚构非正式卡', owner_user_id=owner, horizons=['swing']))
         conn.execute(_daily.insert(_daily.strategy_versions).values(id=version, strategy_id=strategy, card_version_id=cardversion, version_no=1, config=spec, config_hash=version.hex, param_hash=version.hex, lifecycle='published'))
         conn.execute(_daily.insert(_daily.strategy_instances).values(id=instance, user_id=owner, strategy_version_id=version, scope='account', account_id=account, status='active', origin='user', horizon='swing'))
-    assert enqueue_observer(_daily.enqueue, _daily.ANALYZE, owner, engine=engine) == [(_daily.ANALYZE, 'ok')]
+    assert enqueue_observer(_daily.enqueue, _daily.ANALYZE, owner, engine=engine) == [(_daily.ANALYZE, 'ok'), (_daily.TRACKING, 'ok')]
     with engine.connect() as conn:
         runs = conn.execute(_daily.select(_daily.pipeline_runs).where(_daily.pipeline_runs.c.step == 'tb76.' + _daily.ANALYZE).order_by(_daily.pipeline_runs.c.started_at.desc())).first()
         outcome = runs.stats['users'][str(owner)]

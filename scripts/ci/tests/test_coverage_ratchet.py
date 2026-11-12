@@ -222,3 +222,71 @@ def test_workflow_keeps_full_selection_and_only_changes_coverage_gate():
     assert "timeout-minutes: 30" in workflow
     assert "steps.coverage_ratchet.outcome == 'success'" in workflow
     assert "fetch-depth: 0" in workflow and "GH_TOKEN: ${{ github.token }}" in workflow
+
+
+def test_pending_exact_main_push_is_distinct_from_missing_measurement(monkeypatch):
+    monkeypatch.setattr(loader.subprocess, "run", Mock(return_value=SimpleNamespace(returncode=0)))
+    sha = "b" * 40
+    get = Mock(side_effect=[{"workflow_runs": []}, {"workflow_runs": [{
+        "id": 123, "head_sha": sha, "head_branch": "main", "event": "push",
+        "status": "in_progress", "repository": {"full_name": "owner/repo"}}]}])
+    with pytest.raises(loader.MeasurementPending) as caught:
+        loader.freeze("owner/repo", sha, get)
+    assert caught.value.sha == sha and caught.value.run_id == 123
+    assert get.call_count == 2
+
+
+@pytest.mark.parametrize("change", ["head_sha", "head_branch", "event", "repository", "status"])
+def test_foreign_pr_or_finished_run_cannot_authorize_wait(monkeypatch, change):
+    monkeypatch.setattr(loader.subprocess, "run", Mock(return_value=SimpleNamespace(returncode=0)))
+    sha = "b" * 40
+    run = {"id": 123, "head_sha": sha, "head_branch": "main", "event": "push",
+           "status": "in_progress", "repository": {"full_name": "owner/repo"}}
+    run[change] = {"full_name": "foreign/repo"} if change == "repository" else "wrong"
+    get = Mock(side_effect=[{"workflow_runs": []}, {"workflow_runs": [run]}])
+    with pytest.raises(ValueError, match="No completed exact-base"):
+        loader.freeze("owner/repo", sha, get)
+
+
+def test_wait_uses_original_main_run_then_validated_measurement(monkeypatch):
+    record = ratchet.bootstrap_record()
+    freeze = Mock(side_effect=[loader.MeasurementPending("b" * 40, 123), record])
+    monkeypatch.setattr(loader, "freeze", freeze)
+    monkeypatch.setattr(loader.time, "monotonic", Mock(side_effect=[0, 0]))
+    sleep = Mock()
+    monkeypatch.setattr(loader.time, "sleep", sleep)
+    assert loader.wait_for_base("owner/repo", "b" * 40, Mock(), 30) is record
+    assert freeze.call_count == 2
+    sleep.assert_called_once_with(15)
+
+
+def test_wait_timeout_and_invalid_artifact_fail_without_fallback(monkeypatch):
+    freeze = Mock(side_effect=loader.MeasurementPending("b" * 40, 123))
+    monkeypatch.setattr(loader, "freeze", freeze)
+    monkeypatch.setattr(loader.time, "monotonic", Mock(side_effect=[0, 30]))
+    sleep = Mock()
+    monkeypatch.setattr(loader.time, "sleep", sleep)
+    with pytest.raises(loader.MeasurementPending):
+        loader.wait_for_base("owner/repo", "b" * 40, Mock(), 30)
+    assert freeze.call_count == 1
+    sleep.assert_not_called()
+    freeze.side_effect = ValueError("Missing, expired or ambiguous exact-base measurement")
+    monkeypatch.setattr(loader.time, "monotonic", Mock(return_value=0))
+    with pytest.raises(ValueError, match="Missing, expired"):
+        loader.wait_for_base("owner/repo", "b" * 40, Mock(), 30)
+    sleep.assert_not_called()
+
+
+def test_wait_job_precedes_backend_without_spending_backend_test_budget():
+    import yaml
+
+    path = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
+    jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
+    ready = jobs["coverage-base"]
+    assert jobs["backend"]["needs"] == "coverage-base"
+    assert jobs["backend"]["timeout-minutes"] == 30
+    assert ready["timeout-minutes"] == 35
+    assert ready["permissions"] == {"contents": "read", "actions": "read"}
+    commands = [step["run"] for step in ready["steps"] if "run" in step]
+    assert len(commands) == 1 and "--wait-for-main-seconds 1800" in commands[0]
+    assert "pytest" not in commands[0] and "rerun" not in commands[0]

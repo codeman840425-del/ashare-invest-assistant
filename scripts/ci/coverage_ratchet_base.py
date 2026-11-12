@@ -12,6 +12,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import urllib.parse
 import urllib.request
 import zipfile
@@ -95,6 +96,15 @@ def path_parts(name: str):
     return name.replace("\\", "/").split("/")
 
 
+class MeasurementPending(ValueError):
+    """Only an existing exact-main push may justify waiting; never a fallback."""
+
+    def __init__(self, sha: str, run_id: int):
+        self.sha = sha
+        self.run_id = run_id
+        super().__init__(f"Exact main measurement pending: base={sha}, run={run_id}")
+
+
 def freeze(repo: str, sha: str, get) -> dict:
     # git show reads the frozen base object; PR changes to its own JSON do not
     # choose the baseline. A missing later baseline is an error, not a reset.
@@ -116,6 +126,13 @@ def freeze(repo: str, sha: str, get) -> dict:
             and r["event"] == "push" and r["status"] == "completed"
             and r["repository"]["full_name"] == repo]
     if not runs:
+        active = get("/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha="
+                     + sha + "&per_page=100")["workflow_runs"]
+        active = [r for r in active if r["head_sha"] == sha and r["head_branch"] == "main"
+                  and r["event"] == "push" and r["status"] in {"queued", "in_progress", "waiting", "pending", "requested"}
+                  and r["repository"]["full_name"] == repo]
+        if active:
+            raise MeasurementPending(sha, max(int(r["id"]) for r in active))
         raise ValueError("No completed exact-base main measurement run")
     run = max(runs, key=lambda r: (r["id"], r["run_attempt"]))
     artifacts = get("/actions/runs/" + str(run["id"]) + "/artifacts?per_page=100")["artifacts"]
@@ -127,19 +144,38 @@ def freeze(repo: str, sha: str, get) -> dict:
     return read_artifact(data, sha, run["id"], run["run_attempt"])
 
 
+def wait_for_base(repo: str, sha: str, get, timeout: int) -> dict:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return freeze(repo, sha, get)
+        except MeasurementPending as pending:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            print(f"Waiting for existing trusted main run {pending.run_id}; base={sha}", flush=True)
+            time.sleep(min(15, remaining))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--wait-for-main-seconds", type=int, default=0)
     args = parser.parse_args()
+    if not 0 <= args.wait_for_main_seconds <= 1800:
+        parser.error("--wait-for-main-seconds must be between 0 and 1800")
     try:
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
         repo, sha = base_identity(event, os.environ)
-        record = freeze(repo, sha, api_reader(repo))
+        record = wait_for_base(repo, sha, api_reader(repo), args.wait_for_main_seconds)
         if args.output.exists():
             raise ValueError("Refuse to replace a frozen baseline")
         args.output.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
         print("Frozen coverage baseline: " + sha + "; source=" + record["source"]["kind"])
         return 0
+    except MeasurementPending as pending:
+        print("::error title=coverage-ratchet::" + str(pending))
+        return 1
     except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError):
         print("::error title=coverage-ratchet::Trusted base measurement unavailable or invalid")
         return 1

@@ -210,7 +210,10 @@ def apply(path: Path, env: dict) -> None:
             ready = all((p.is_socket() for p in [PG_SOCKET / ".s.PGSQL.5432", REDIS_SOCKET / "redis.sock"]))
             if ready:
                 pg = receipt["containers"][0]
-                if command(["docker", "exec", pg["Id"], "pg_isready", "-U", "postgres"], receipt, check=False).returncode == 0:
+                # initdb's temporary child server also answers pg_isready.
+                # Only the final postgres exec at PID 1 is a usable readiness gate.
+                probe = 'test "$(cat /proc/1/comm)" = postgres; exec pg_isready -U postgres'
+                if command(["docker", "exec", pg["Id"], "sh", "-ec", probe], receipt, check=False).returncode == 0:
                     break
             if time.monotonic() >= deadline:
                 raise RuntimeError("Fresh Unix services did not become ready within 75s")

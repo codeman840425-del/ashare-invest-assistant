@@ -1,7 +1,8 @@
 /** T-F12 候选信号卡补全（契约 §5.2、§7 /suggestions*）。示例数据，不发外网请求。 */
 import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { createMemoryRouter, RouterProvider } from 'react-router';
+import { createMemoryRouter } from 'react-router';
+import { TestRouterProvider as RouterProvider } from '../test/TestRouterProvider';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
@@ -11,6 +12,7 @@ import { server } from '../mocks/server';
 import { actionLog, REFRESH_MIN_INTERVAL_S } from '../mocks/suggestionHandlers';
 import { apiFetch } from '../test/apiFetch';
 import { preloadRoutes } from '../test/preloadRoutes';
+import { traceRefreshTest } from '../test/refreshTrace';
 
 // 整套并行跑时页面懒加载较慢：本文件的 findBy / waitFor 默认等待 5 秒
 configure({ asyncUtilTimeout: 5000 });
@@ -135,14 +137,22 @@ describe('候选信号卡详情页补全', () => {
   });
 
   it('手动刷新：跳到新卡；再次刷新给出 409 等待时间', async () => {
+    const trace = traceRefreshTest('refresh-new-card-409');
     const W = { timeout: 5000 };
     const router = renderAt(`/suggestions/${sgBank.id}`);
+    trace.watchRouter(router);
+    trace.mark('waiting for initial refresh button');
     fireEvent.click(await screen.findByTestId('sg-refresh', undefined, W));
+    trace.mark('initial refresh clicked; waiting for navigation');
     await waitFor(() => expect(router.state.location.pathname).not.toBe(`/suggestions/${sgBank.id}`), W);
+    trace.mark('navigation observed; waiting for supersedes link');
     await waitFor(() => expect(screen.getByTestId('sg-supersedes')).toHaveAttribute('href', `/suggestions/${sgBank.id}`), W);
+    trace.mark('supersedes link observed; waiting for refresh enabled');
     await waitFor(() => expect(screen.getByTestId('sg-refresh')).not.toBeDisabled(), W);
     fireEvent.click(screen.getByTestId('sg-refresh'));
+    trace.mark('second refresh clicked; waiting for 409 message');
     expect(await screen.findByTestId('sg-refresh-error', undefined, W)).toHaveTextContent(/刷新过于频繁，请 \d+ 秒后再试/);
+    trace.mark('409 message observed');
   });
 
   it('LLM说明：普通用户不渲染llm_call_id（T-A36）', async () => {

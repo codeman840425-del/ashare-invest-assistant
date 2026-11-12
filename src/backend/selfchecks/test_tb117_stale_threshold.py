@@ -1,4 +1,5 @@
 """T-B117：GAP1 stale_threshold 只用本段连续竞价样本（先红后绿，离线，不发请求）。"""
+
 from __future__ import annotations
 
 import sys
@@ -8,7 +9,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "probes"))
-import p11_gaps as g  # noqa: E402
+import p11_gaps as g
 
 # 13:00 段 run-20261109-220540 的 t / recv_bj / lag_s（只读摘录，非原始结果目录）
 AHEAD_S = -0.4402
@@ -461,38 +462,59 @@ def _per_source(by: dict, only_session: bool) -> dict:
 
 
 @pytest.fixture(scope="module")
-def grouped():
+def grouped() -> dict:
     return _attach(SAMPLES)
 
 
-def test_parse_bj_asia_shanghai_not_unit_or_date_bug():
+def test_parse_bj_asia_shanghai_not_unit_or_date_bug() -> None:
     """920000 券商源 t 已是完整北京时间日期，不是时区/日期补全/毫秒误解析。"""
     ts = g.parse_bj("2026-07-16 09:23:33")
-    assert ts is not None
-    assert ts.utcoffset().total_seconds() == 8 * 3600
-    assert (ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second) == (2026, 7, 16, 9, 23, 33)
+    if not (ts is not None):
+        raise AssertionError("ts is not None")
+    if not (ts.utcoffset().total_seconds() == 8 * 3600):
+        raise AssertionError("ts.utcoffset().total_seconds() == 8 * 3600")
+    if not ((ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second) == (2026, 7, 16, 9, 23, 33)):
+        raise AssertionError(
+            "(ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second) == (2026, 7, 16, 9, 23, 33)"
+        )
     live = g.parse_bj("2026-11-10 13:05:36")
-    assert live.hour == 13 and live.tzinfo is not None
+    if not (live.hour == 13 and live.tzinfo is not None):
+        raise AssertionError("live.hour == 13 and live.tzinfo is not None")
     # 秒级字符串不把毫秒当 unix；时间-only 不瞎补日期
-    assert g.parse_bj("13:05:36") is None
+    if g.parse_bj("13:05:36") is not None:
+        raise AssertionError("g.parse_bj('13:05:36') is None")
 
 
-def test_red_unfiltered_p95_distorted(grouped):
+def test_red_unfiltered_p95_distorted(grouped: dict) -> None:
     """红：把 920000 7 月旧票与 ssjy 午休冻结计入池，ref_p95 约 1012 万秒。"""
     thr = g.stale_threshold(_per_source(grouped, only_session=False))
-    assert thr["ref_p95_s"] is not None and thr["ref_p95_s"] > 1_000_000
-    assert thr["suggested_s"] > 1_000_000
+    if not (thr["ref_p95_s"] is not None and thr["ref_p95_s"] > 1_000_000):
+        raise AssertionError("thr['ref_p95_s'] is not None and thr['ref_p95_s'] > 1000000")
+    if not (thr["suggested_s"] > 1_000_000):
+        raise AssertionError("thr['suggested_s'] > 1000000")
 
 
-def test_green_session_filter_reasonable(grouped):
+def test_green_session_filter_reasonable(grouped: dict) -> None:
     """绿：只保留与收到时刻同段连续竞价的样本后，参考 p95 约 14.4s，建议值 29s。"""
     by = grouped
     # 券商 920000 与全部 ssjy 均不在下午时段
-    assert all(not s["in_session"] for s in by["real_time_broker"]["920000"])
-    assert all(not s["in_session"] for ss in by["ssjy_web"].values() for s in ss)
-    assert sum(1 for ss in by["real_time_broker"].values() for s in ss if s["in_session"]) == 24
+    if not (all(not s["in_session"] for s in by["real_time_broker"]["920000"])):
+        raise AssertionError("all((not s['in_session'] for s in by['real_time_broker']['920000']))")
+    if not (all(not s["in_session"] for ss in by["ssjy_web"].values() for s in ss)):
+        raise AssertionError(
+            "all((not s['in_session'] for ss in by['ssjy_web'].values() for s in ss))"
+        )
+    if not (sum(1 for ss in by["real_time_broker"].values() for s in ss if s["in_session"]) == 24):
+        raise AssertionError(
+            "sum((1 for ss in by['real_time_broker'].values() for s "
+            "in ss if s['in_session'])) == 24"
+        )
     thr = g.stale_threshold(_per_source(by, only_session=True))
-    assert thr["ref_p95_s"] == 14.391
-    assert thr["basis"] == "ntp_corrected_p95"
-    assert thr["suggested_s"] == 29
-    assert 1 < thr["ref_p95_s"] < 120
+    if not (thr["ref_p95_s"] == 14.391):
+        raise AssertionError("thr['ref_p95_s'] == 14.391")
+    if not (thr["basis"] == "ntp_corrected_p95"):
+        raise AssertionError("thr['basis'] == 'ntp_corrected_p95'")
+    if not (thr["suggested_s"] == 29):
+        raise AssertionError("thr['suggested_s'] == 29")
+    if not (1 < thr["ref_p95_s"] < 120):
+        raise AssertionError("1 < thr['ref_p95_s'] < 120")

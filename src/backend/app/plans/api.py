@@ -7,6 +7,7 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
+from pydantic import TypeAdapter
 from sqlalchemy import Column, Connection, Row, Select, Table, func, select, tuple_, update
 
 from app.auth.deps import AuthDep, EngineDep, RedisDep, SettingsDep
@@ -30,6 +31,7 @@ from app.plans.models import (
 
 router = APIRouter(tags=["plans"])
 Paging = Annotated[PageParams, Depends(page_params)]
+_PLAN_BODY = TypeAdapter(dict[str, object])
 
 
 def statuses(raw: str, allowed: set[str]) -> list[str]:
@@ -81,15 +83,17 @@ def create(
         with engine.begin() as conn:
             return 201, s.create(conn, auth.user_id, body)
 
-    result: dict[str, Any] = idempotency.run(
-        rds,
-        user_id=auth.user_id,
-        scope="plans:create",
-        key=key,
-        payload=body.model_dump(mode="json"),
-        fn=perform,
-    )[1]
-    return result
+    return _PLAN_BODY.validate_python(
+        idempotency.run(
+            rds,
+            user_id=auth.user_id,
+            scope="plans:create",
+            key=key,
+            payload=body.model_dump(mode="json"),
+            fn=perform,
+        )[1],
+        strict=True,
+    )
 
 
 @router.get("/plans", response_model=Page[PlanSummary])
@@ -144,15 +148,17 @@ def revise(
         with engine.begin() as conn:
             return 201, s.revise(conn, auth.user_id, identifier, body)
 
-    result: dict[str, Any] = idempotency.run(
-        rds,
-        user_id=auth.user_id,
-        scope=f"plans:{identifier}:versions",
-        key=key,
-        payload=body.model_dump(mode="json"),
-        fn=perform,
-    )[1]
-    return result
+    return _PLAN_BODY.validate_python(
+        idempotency.run(
+            rds,
+            user_id=auth.user_id,
+            scope=f"plans:{identifier}:versions",
+            key=key,
+            payload=body.model_dump(mode="json"),
+            fn=perform,
+        )[1],
+        strict=True,
+    )
 
 
 @router.get("/plans/{identifier}/versions", response_model=Page[PlanVersion])

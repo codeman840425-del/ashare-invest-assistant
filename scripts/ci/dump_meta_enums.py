@@ -12,12 +12,12 @@ import json
 import sys
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 
 def main() -> int:
     out = Path(sys.argv[1])
     sys.path.insert(0, str(Path.cwd()))
-    from fastapi.testclient import TestClient
-
     from app.config import Settings
     from app.main import create_app
 

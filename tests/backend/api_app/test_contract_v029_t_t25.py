@@ -45,6 +45,7 @@ authdb, sql, app_client, mkuser, session, make_settings = (
 API, assert_err, reg, new_name, new_pw = _t23.API, _t23.assert_err, _t23.reg, _t23.new_name, _t23.new_pw
 Rec, fake_licence, put, live_row, leak_count = _t23.Rec, _t23.fake_licence, _t23.put, _t23.live_row, _t23.leak_count
 require_route, backend_version = _t23.require_route, _t23.backend_version
+_httpdiag, httpdiag = _t23._httpdiag, _t23.httpdiag
 
 pytestmark = [pytest.mark.integration, pytest.mark.contract]
 
@@ -339,7 +340,21 @@ def test_04_db_reason_status_values() -> None:
 
 
 def _seed_reasons(sql: Callable[..., Any], uid: str) -> dict[str, str]:
-    sid = str(uuid.uuid4())
+    # Reasons reference an actual owned P1 signal (contract 7.6), not an orphan UUID.
+    _t23.seed_securities(sql)
+    version = _t23.seed_user_strategy_version(sql, uid)
+    sid = str(sql(
+        "INSERT INTO app.candidate_signals "
+        "(user_id, strategy_version_id, security_code, horizon, proposed_action, "
+        "rule_refs, evidence, counter_evidence, invalidation, model_refs) "
+        "VALUES (:u, :v, '600981.SH', 'swing', 'buy', CAST(:r AS jsonb), "
+        "CAST(:e AS jsonb), CAST(:c AS jsonb), CAST(:i AS jsonb), '[]') RETURNING id",
+        u=uid, v=version,
+        r=json.dumps([{'rule_id': 'synthetic_entry', 'role': 'entry', 'dimension': 'technical', 'passed': True}]),
+        e=json.dumps([{'id': 'synthetic_contract_evidence', 'provider': 'system'}]),
+        c=json.dumps([{'text': '合成反证', 'evidence_ids': ['synthetic_contract_evidence']}]),
+        i=json.dumps([{'text': '合成失效条件', 'evidence_ids': ['synthetic_contract_evidence']}]),
+    )[0][0])
     out = {}
     for st in ("active", "released", "obsolete"):
         out[st] = str(sql("INSERT INTO app.non_executable_reasons (signal_id, user_id, code, status, machine_checkable, "
@@ -352,22 +367,43 @@ def _seed_reasons(sql: Callable[..., Any], uid: str) -> dict[str, str]:
 
 def _reason_ids(call: Rec, **params: Any) -> set[str]:
     r = call("GET", "/non-executable-reasons", params=params)
+    _httpdiag.observe_response('reasons', r)
     assert r.status_code == 200, r.text[:300]
     body = r.json()
-    assert set(body) >= {"items", "next_cursor"}
+    # Contract 7.6: explicit signal_ids/suggestion_id batches are not paginated.
+    expected = {"items"} if {"signal_ids", "suggestion_id"} & params.keys() else {"items", "next_cursor"}
+    assert set(body) == expected
     return {x["id"] for x in body["items"]}
 
 
-def test_bc12_reasons_default_status_is_active(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
+def test_bc12_reasons_default_status_is_active(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], httpdiag: Any) -> None:
     """不兼容 #12 / 验收第 4 条：不带 status → 只有 active；released 只有已解除；all 含三种；带 signal_ids 不带 status → active。"""
     s = session()
     require_route(s.client, "GET", "/non-executable-reasons", O_SIGNALS)
     ids, call = _seed_reasons(sql, s.user.id), Rec(s)
+    httpdiag.synthetic_ids = ids
     assert _reason_ids(call) & set(ids.values()) == {ids["active"]}
     assert _reason_ids(call, status="released") & set(ids.values()) == {ids["released"]}
     assert _reason_ids(call, status="all") >= {ids["active"], ids["released"], ids["obsolete"]}
     assert _reason_ids(call, signal_ids=ids["signal_id"]) == {ids["active"]}
     assert _reason_ids(call, status="active", signal_ids=ids["signal_id"]) == {ids["active"]}
+
+
+def test_bc12_reasons_keep_owned_signal_join(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
+    """Real reasons remain visible to their owner; orphan/foreign references never leak."""
+    owner, stranger = session(), session()
+    ids = _seed_reasons(sql, owner.user.id)
+    orphan = str(sql(
+        "INSERT INTO app.non_executable_reasons (signal_id, user_id, code, machine_checkable) "
+        "VALUES (:s, :u, 'DATA_STALE', true) RETURNING id",
+        s=str(uuid.uuid4()), u=owner.user.id,
+    )[0][0])
+    own_call, foreign_call = Rec(owner), Rec(stranger)
+    assert _reason_ids(own_call, status="all") >= {ids["active"], ids["released"], ids["obsolete"]}
+    assert orphan not in _reason_ids(own_call, status="all")
+    assert _reason_ids(foreign_call, signal_ids=ids["signal_id"], status="all") == set()
+    for rid in (ids["active"], orphan):
+        assert_err(foreign_call("GET", "/non-executable-reasons/" + rid), 404, "NOT_FOUND")
 
 
 def test_bc12_reasons_bad_status_400(session: Callable[..., SimpleNamespace]) -> None:

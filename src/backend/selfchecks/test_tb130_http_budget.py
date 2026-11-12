@@ -1,4 +1,4 @@
-# ruff: noqa: S101, ANN401, S603, S607, S106, PT018, E501, I001
+# ruff: noqa: S101, ANN401, S603, S607, S106, PT018
 """T-B130：单 C，HTTP_UNLIMITED 哨兵与日 K HTTP 预算。
 
 契约只读参照 ``git show 7234aa7:docs/contracts/daily-bars-source.md`` §8.1 / §8.5。
@@ -32,7 +32,7 @@ from alembic.config import Config
 from psycopg import sql
 from pydantic import SecretStr
 from sqlalchemy import create_engine, func, insert, select
-from sqlalchemy.engine import Engine, URL
+from sqlalchemy.engine import URL
 
 from app.config import Settings
 from app.db.migration_check import BACKEND
@@ -48,7 +48,7 @@ from app.db.tables.users import users
 from app.marketdata.daily_bars import DailyBar
 from app.master.daily_delivery import DAILY_HTTP_LIMIT, live_budget_issue
 
-HOST = "127.0.0.1"
+ISOLATED_PG_HOST = "127.0.0.1"
 PORT = 55461
 USER = "postgres"
 FORBIDDEN_DBS = frozenset({"tt51_tpl", "o61_tmp_0030"})
@@ -91,18 +91,23 @@ def _require_o61() -> None:
         if mode == "host" and f"port={PORT}" in cmd:
             hits.append(name.lstrip("/"))
     if hits != [_O61]:
-        pytest.fail(f"拒绝建库：{HOST}:{PORT} 归属 {hits or '未知'}，须为 {_O61}")
+        pytest.fail(f"拒绝建库：{ISOLATED_PG_HOST}:{PORT} 归属 {hits or '未知'}，须为 {_O61}")
 
 
 def _admin() -> Any:
     return psycopg.connect(
-        host=HOST, port=PORT, user=USER, dbname="postgres", autocommit=True
+        host=ISOLATED_PG_HOST, port=PORT, user=USER, dbname="postgres", autocommit=True
     )
 
 
 def _url(dbname: str) -> URL:
     return URL.create(
-        "postgresql+psycopg", username=USER, password=None, host=HOST, port=PORT, database=dbname
+        "postgresql+psycopg",
+        username=USER,
+        password=None,
+        host=ISOLATED_PG_HOST,
+        port=PORT,
+        database=dbname,
     )
 
 
@@ -196,12 +201,9 @@ def no_egress(monkeypatch: pytest.MonkeyPatch) -> Any:
         counts["mairui_get"] += 1
         raise AssertionError("mairui_get must not be called in T-B130")
 
-    try:
-        import app.ingest.egress as egress
+    import app.ingest.egress as egress
 
-        monkeypatch.setattr(egress, "mairui_get", blocked_mairui_get)
-    except Exception:
-        pass
+    monkeypatch.setattr(egress, "mairui_get", blocked_mairui_get)
     counts["blocked"] = blocked
     return counts
 
@@ -327,7 +329,9 @@ def _status_on(
 
 def _issues(conn: Any) -> list[str]:
     row = conn.execute(
-        select(pipeline_runs.c.stats, pipeline_runs.c.status).order_by(pipeline_runs.c.finished_at.desc())
+        select(pipeline_runs.c.stats, pipeline_runs.c.status).order_by(
+            pipeline_runs.c.finished_at.desc()
+        )
     ).first()
     assert row is not None
     stats = row.stats if isinstance(row.stats, dict) else json.loads(row.stats)
@@ -456,7 +460,7 @@ def test_load_inputs_uses_final_after() -> None:
     src = inspect.getsource(dimensions.load_inputs)
     assert "FINAL_AFTER" in src
     assert "dt.time(17, 10)" not in src
-    assert FINAL_AFTER == dt.time(17, 10)
+    assert dt.time(17, 10) == FINAL_AFTER
 
 
 def test_dead_try_removed_from_build_owned_snapshot() -> None:
@@ -590,9 +594,7 @@ def test_unlimited_still_halts_on_stop_103_429(
         assert "daily_bars_upstream_halted" in _issues(db)
 
     calls_stop: list[Any] = []
-    written_stop = _run(
-        db, transport=_ok_transport(calls_stop), tmp_path=tmp_path, stop=True
-    )
+    written_stop = _run(db, transport=_ok_transport(calls_stop), tmp_path=tmp_path, stop=True)
     assert calls_stop == [] and written_stop == 0
     assert _issues(db).count("daily_bars_upstream_halted") == 5
     assert no_egress["mairui_get"] == 0
@@ -624,7 +626,9 @@ def test_mairui_fetched_at_not_before_last_response(
 GRANT_CLOCK = dt.datetime(2026, 11, 10, 17, 20, tzinfo=BEIJING)
 
 
-def _receipt_payload(*, kind: str, user_id: uuid.UUID, start: dt.datetime, end: dt.datetime) -> dict[str, str]:
+def _receipt_payload(
+    *, kind: str, user_id: uuid.UUID, start: dt.datetime, end: dt.datetime
+) -> dict[str, str]:
     return {
         "kind": kind,
         "user_id": str(user_id),
@@ -693,7 +697,9 @@ def test_receipt_expired_is_rejected(
         start=dt.datetime(2026, 11, 10, 16, 0, tzinfo=BEIJING),
         end=dt.datetime(2026, 11, 10, 17, 20, tzinfo=BEIJING),
     )
-    written, calls = _fetch_with_receipt(db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload)
+    written, calls = _fetch_with_receipt(
+        db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload
+    )
     assert written == 0 and calls == []
     assert "data_licence_unavailable" in _issues(db)
     assert _bar_count(db) == 0
@@ -709,7 +715,9 @@ def test_receipt_wrong_kind_is_rejected(
         start=dt.datetime(2026, 11, 10, 17, 0, tzinfo=BEIJING),
         end=dt.datetime(2026, 11, 10, 18, 0, tzinfo=BEIJING),
     )
-    written, calls = _fetch_with_receipt(db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload)
+    written, calls = _fetch_with_receipt(
+        db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload
+    )
     assert written == 0 and calls == []
     assert "data_licence_unavailable" in _issues(db)
     assert _bar_count(db) == 0
@@ -739,7 +747,9 @@ def test_receipt_user_mismatch_is_rejected(
         start=dt.datetime(2026, 11, 10, 17, 0, tzinfo=BEIJING),
         end=dt.datetime(2026, 11, 10, 18, 0, tzinfo=BEIJING),
     )
-    written, calls = _fetch_with_receipt(db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload)
+    written, calls = _fetch_with_receipt(
+        db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload
+    )
     assert written == 0 and calls == []
     assert "data_licence_unavailable" in _issues(db)
     assert _bar_count(db) == 0

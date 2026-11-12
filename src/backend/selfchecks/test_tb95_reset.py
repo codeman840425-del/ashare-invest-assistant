@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import shutil
 import socket
@@ -70,7 +71,8 @@ def relative_steps_to(script: ScriptDirectory, start: str, target: str) -> int:
             raise AssertionError("unexpected merge revision on mainline")
         steps += 1
         rev = script.get_revision(down)
-    assert rev is not None and rev.revision == target
+    assert rev is not None
+    assert rev.revision == target
     return steps
 
 
@@ -251,7 +253,7 @@ def test_n1_n2_n3_n5_n6_n7_authentication_shape_and_no_side_effects(env: Any) ->
                 client.request(
                     "DELETE",
                     URL + "/position_cap",
-                    content="null" if body is None else __import__("json").dumps(body),
+                    content="null" if body is None else json.dumps(body),
                 ),
                 404,
                 "NOT_FOUND",
@@ -801,7 +803,8 @@ def test_descendant_downgrade_plan_is_guarded_before_any_ddl(env: Any, tmp_path:
             command.downgrade(cfg, f"{synth_rev}:0027", sql=True)
         assert "DROP TABLE" not in cfg.output_buffer.getvalue()
     finally:
-        # Descendant -> real mainline head retains the column/cleared semantics and must remain permitted.
+        # Descendant -> real mainline head retains column/cleared semantics
+        # and must remain permitted.
         command.downgrade(cfg, "-1")
     with engine.connect() as conn:
         assert (
@@ -818,7 +821,6 @@ def test_descendant_downgrade_plan_is_guarded_before_any_ddl(env: Any, tmp_path:
 def test_reset_then_evaluation_and_candidate_requests_use_inheritance(
     env: Any, profile_cap: int | None
 ) -> None:
-    import json
 
     from app.db.tables.market import securities
     from app.risk.evaluation import assessed, inputs

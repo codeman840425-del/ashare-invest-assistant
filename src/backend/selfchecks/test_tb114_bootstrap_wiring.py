@@ -10,12 +10,12 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 import yaml
 from pydantic import SecretStr
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 
 from app.config_files import IngestConfig
 from app.ingest.core import IngestCore
@@ -35,11 +35,14 @@ def test_tb114_ingest_main_source_calls_bootstrap() -> None:
     assert "bootstrap_ingest_core" in main_body, "main does not call bootstrap (red)"
     # Must construct IngestCore with engine= and set_ingest_core
     boot = src.split("def bootstrap_ingest_core", 1)[1].split("\ndef ", 1)[0]
-    assert "IngestCore(" in boot and "engine=" in boot
+    assert "IngestCore(" in boot
+    assert "engine=" in boot
     assert "set_ingest_core" in boot
 
 
-def test_tb114_bootstrap_sets_core_with_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tb114_bootstrap_sets_core_with_engine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("SERVICE_NAME", "ingest")
     monkeypatch.setenv("APP_ENV", "local")
     from app.ingest import runtime
@@ -47,6 +50,8 @@ def test_tb114_bootstrap_sets_core_with_engine(monkeypatch: pytest.MonkeyPatch) 
 
     runtime.set_ingest_core(None)
 
+    # Exercise the real halt-directory probe in a disposable directory.
+    monkeypatch.setattr("app.ingest.daily_lists.HALT", tmp_path / "HALTED")
     # SQLite in-memory answers SELECT 1; enough to prove wiring (not PG-specific).
     engine = create_engine("sqlite+pysqlite:///:memory:")
 
@@ -62,7 +67,7 @@ def test_tb114_bootstrap_sets_core_with_engine(monkeypatch: pytest.MonkeyPatch) 
         database_url = SecretStr("sqlite+pysqlite:///:memory:")
         business = SimpleNamespace(ingest=_BizIngest())
 
-    def _fake_engine_for(url: str, profile: str = "default") -> Any:
+    def _fake_engine_for(url: str, profile: str = "default") -> Engine:
         assert "sqlite" in url
         return engine
 
@@ -116,7 +121,7 @@ def test_tb114_api_service_allows_memory_core_and_worker_import(
     assert core.engine is None
 
     # Importing worker entry must not wire ingest core.
-    import app.workers.worker as worker_mod  # noqa: F401
+    import app.workers.worker as worker_mod
 
     assert runtime.get_ingest_core() is None
     # worker.run path source uses runner.run — no bootstrap symbol

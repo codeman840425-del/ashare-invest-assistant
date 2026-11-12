@@ -10,7 +10,7 @@
  * 用例前提说明（T-F34b 重建项）：页签内空态只能在页签可渲染时断言，接口整体 404 时应断页面级，
  * 本轮据此把原两条财务页签用例改为页面级断言。
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
@@ -115,9 +115,10 @@ describe('② 北交所旧代码 superseded_by（真实资源 404 优先）', ()
 });
 
 describe('③ 个股子资源显式清单', () => {
-  it('清单内 5 条子资源 404 命中“开发中”；未登记的同类路径不命中', () => {
-    for (const sub of ['bars', 'financials', 'fund-flows', 'factors', 'announcements']) {
-      expect(isStockSubPending(apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/${sub}`))).toBe(true);
+  it('未注册 bars 的 404 命中“开发中”；已注册四子资源的真实 404 不命中', () => {
+    expect(isStockSubPending(apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/bars`))).toBe(true);
+    for (const sub of ['financials', 'fund-flows', 'factors', 'announcements']) {
+      expect(isStockSubPending(apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/${sub}`))).toBe(false);
     }
     // 未登记：后端将来实现了就会真 404，不能被吞
     expect(isStockSubPending(apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/unknown-sub`))).toBe(false);
@@ -127,22 +128,22 @@ describe('③ 个股子资源显式清单', () => {
     expect(isStockSubPending(apiError(500, 'INTERNAL_ERROR', null, `${API}/securities/600000.SH/bars`))).toBe(false);
   });
 
-  it('ErrorBox：子资源 404 → “功能开发中”空态；同类路径非清单项 → 正常错误框', () => {
-    const { unmount } = render(<ErrorBox error={apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/financials`)} />);
+  it('ErrorBox：未注册 bars 显示开发中；已注册财务子资源显示真实资源错误', () => {
+    const { unmount } = render(<ErrorBox error={apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/bars`)} />);
     expect(screen.getByTestId('route-pending')).toHaveTextContent(ROUTE_PENDING_TEXT);
     unmount();
-    render(<ErrorBox error={apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/unknown-sub`)} />);
+    render(<ErrorBox error={apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/financials`)} />);
     expect(screen.queryByTestId('route-pending')).toBeNull();
-    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('内容不存在或已删除');
   });
 
-  it('页面级：个股财务接口 404 → 财务页签内出现“功能开发中”空态（不再是“加载失败”）', async () => {
+  it('页面级：已注册财务接口的真实 404 显示资源错误，不吞成开发中', async () => {
     server.use(
       http.get(`${API}/securities/:code/financials`, () => HttpResponse.json(errorBody('NOT_FOUND', '资源不存在'), { status: 404 })),
     );
     renderAt('/stocks/600000.SH?tab=financials');
-    await waitFor(() => expect(screen.getAllByTestId('route-pending').length).toBeGreaterThan(0), { timeout: 8000 });
-    expect(screen.queryByText(/加载失败/)).toBeNull();
+    expect(await screen.findByRole('alert')).toHaveTextContent('内容不存在或已删除');
+    expect(screen.queryByTestId('route-pending')).toBeNull();
   });
 });
 

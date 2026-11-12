@@ -24,9 +24,9 @@ from typing import Literal
 from sqlalchemy.engine import Connection
 
 from app.common.errors import AppError
-from app.ingest.daily_lists import DailyHaltError, limited
 from app.ingest.daily_lists import STOP as LISTS_STOP
-from app.ingest.egress import EgressDenied, HALT_LIMIT
+from app.ingest.daily_lists import DailyHaltError, limited
+from app.ingest.egress import HALT_LIMIT, EgressDenied
 from app.marketdata.daily_bars import (
     DailyBar,
     DailyBarsResult,
@@ -222,7 +222,9 @@ def fetch_mairui_daily_bars(
             user_id,
             window_trading_days,
             status="skipped",
-            stats=_empty_stats(user_id, window_trading_days, issues=["daily_bars_http_budget_unset"]),
+            stats=_empty_stats(
+                user_id, window_trading_days, issues=["daily_bars_http_budget_unset"]
+            ),
         )
         return 0
 
@@ -279,7 +281,6 @@ def fetch_mairui_daily_bars(
     issues: list[str] = []
     bars: list[DailyBar] = []
     last_received: dt.datetime | None = None
-    halted = False
     calls = 0
 
     if halt.is_file() or stop.is_file():
@@ -306,14 +307,12 @@ def fetch_mairui_daily_bars(
         except (DailyHaltError, EgressDenied):
             persist_halt(halt, HALT_LIMIT)
             issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))
-            halted = True
             break
         last_received = _stamp(now)
-        calls += 1
+        calls = index + 1
         if limited(http_status, payload) or http_status in (103, 429):
             persist_halt(halt, HALT_LIMIT)
             issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))
-            halted = True
             break
         if http_status == 200 and isinstance(payload, DailyBar):
             bars.append(payload)

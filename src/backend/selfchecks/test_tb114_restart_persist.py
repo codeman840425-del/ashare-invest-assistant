@@ -98,7 +98,8 @@ def test_tb114_two_starts_escalation_count_persists(monkeypatch: pytest.MonkeyPa
     # ---- start 1 ----
     eng1 = ingest_worker.bootstrap_ingest_core(_Settings())  # type: ignore[arg-type]
     core1 = runtime.get_ingest_core()
-    assert core1 is not None and core1.engine is eng1
+    assert core1 is not None
+    assert core1.engine is eng1
     core1.upsert(lid, user_id=uid, tier=TIER, status=ACTIVE, now=NOW0)
     assert "ip_limited" in _hit(core1, lid, NOW0)
     assert "ip_limited" in _hit(core1, lid, NOW0 + dt.timedelta(minutes=5))

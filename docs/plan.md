@@ -583,6 +583,7 @@ L3 策略实例 strategy_instances → 扫描 → 候选信号 candidate_signals
 | G7 人工审核 + 合规文案 | 全站内置或共享模板由管理员审核，用户私有模板由本人确认。审核页并排展示卡片文字与规则的逐条对应，以及 G1–G6 报告；文案须通过禁用词校验。全站内置/共享模板的代批程序见 2.5.13 G7（T-A109），不放松缺证据不得批 | 人工 |
 
 - 不通过时卡片留在 L1，并显示缺哪一关（例如"止损规则待量化"）。这本身就是给新手的教育信息。
+- **T-A157 审核刷新语义（2026-11-11；S1-3 汇总登记为目标契约，后端实现另派）**：晋级申请默认幂等（同绑定非 stale pending → 返回旧 review_id 不重跑）；`rerun=true` 显式新建一轮审核（旧 pending 保留并存），用于数据证据变化（如 F21 补齐）后的重查；feature_catalog 状态变化**不自动失效已完成审核、不自动重跑**（批准是当时证据的人审结论，历史不回写）；G2 执行时在 gate detail 记 `feature_status_snapshot` 快照供复现；重跑新建轮记审计 `promotion.rerun`。详见 docs/reviews/T-A157-review-rerun-ruling.md。
 - 晋级后进入生命周期 `simulating`（2.5.13）：只做模拟跟踪，不生成计划草案；满足发布条件并经管理员批准后转为 `published`。退役 `retired` 需管理员确认，使用它的实例会收到提示，旧信号仍可回看。
 - **用户改参**会生成**用户私有派生版本**，记录 `parent_version_id`、`param_hash` 和 diff。版本不可变；实例只引用具体版本，升级必须显式操作。
 - **LLM 策略草稿**（第三阶段，2.7）只输出 JSON（卡片字段 + DSL + 参数 schema），自动跑 G1–G6，最多修正 3 轮；仍失败则降级保存为 L1 卡片。产物永远是 `draft`，必须经过 G7 人工审核。
@@ -995,6 +996,8 @@ class RuleTemplateStrategy(ScreenerStrategy, TimingStrategy):
        - 两项都满足后，N-01 才解除 `KEY_DATA_MISSING`。
      - **实测清单**：见 reports/T-A19.md，由编排者拿去找用户一次授权。所有调用都走后端统一出口，不打印证书。
    - **T-R22 裁定（架构师 2026-11-07，F23 词表 v1，依据 docs/strategies/T-R22/README.md）**：① 1,026 条巨潮标题按关键词检索、有选择偏差，**不能替代** T-A19 的 1,000 条通用标题，只作回归快照。替代做法（不调麦蕊、不要求后端补 V7）：研究员从巨潮公开页取**不按关键词筛选**的连续若干交易日全量标题 ≥1,000 条，v1 跑一遍，命中条目逐条人工复核（误报率 ≤5%），未命中条目抽 100 条复核（漏报 0 条为过）；通过后 F23 可写 verified_doc。② N-01 语义不改：问询函、关注函及回复、控股股东或实控人减持（v1 无法判比例，一律计入）照计；只阻断买入/加仓，偏保守可接受；simulating 期间统计否决率记入 G6 观察项，v2 再议降级。③ 接受 v1 已知漏检：含“澄清”整条排除、中介机构名单不全，记为 gap，v2 再细化。④ F23 每日冻结在 D 09:30，故 available_from 只需判所属生效日：交易日 D 的 t < 09:30（含盘前）→ D 09:30 生效；t ≥ 09:30（含盘中、午休、11:30/15:00 边界、盘后）或非交易日 → 次一交易日 09:30 生效；不再为午休/边界记 null。只有 t 与 first_seen_at 都未知时才记 null。状态 verified_live 仍以 T-A19 两项实测为准。
+   - **S1-3 来源整合裁定（Chief，2026-11-12）**：#23 的研究资产与 feature_spec v1.1.15 升级原稿只作历史保全；当前有效 `feature_spec.md` 保 main v1.1.14，F23 不因本次汇总升为 `verified_doc`。其所引“plan T-A153 F23 升级”缺有效原文且与 #37 ETF 注释裁定同号；源抓取清单仅15页/450条，报告为51页/1530条。缺据如实保留，后续获派补证，不改旧数、不新抓取；历史原文的“已升级”不作现行状态依据。详见 [S1-3 汇总](reviews/S1-3-consolidation.md)。
+   - **A-09 / RV-05（2026-11-11，F23 v4 待实施边界）**：`docs/reviews/A-09-f23-v4-boundary-ruling.md` 正式替代 T-A156（`c5a3c9c`），唯一有效口径为诉讼/仲裁标题发现后离线核五条件、冻结公告 ID 映射才新增计数；300169 型查封三证齐仅研究候选，不由此新增计数，既有独立风险命中保留。R-01 的 L03/L05 现有 facts 不足完整入表，18 例仅作金额/方向种子，补显式合成证据与缺证反例后再验回归。此登记不启动 v4，不改现行 v3、历史标签、特征等级或 N-01 闸门；无 API 变更，研究员与复核按裁定收口。
    - G3、G4、G5：按现有规则自动检查。
    - G6：fixtures 必须全部通过（26 例 golden）。120 日历史体检只做统计，原本就只出警告：数据不足 120 日时如实记“未体检/覆盖不足”的警告，并显示在 G7 报告里，不编造统计结果。**T-A17**：重合度 `max_jaccard` 无值（历史不足，或没有可比较的命中集合）时报 `null` 加原因码 `no_history` / `no_comparable_set`（契约 §7.4），G6 记 `warn` 不记 `fail`；fixtures 失败仍是 `fail`。
    - G7（T-A109，2026-11-10）：策略研究员逐条核对卡片原文与规则的对应关系，架构师复核后，编排者依据用户本人授权、以管理员可信交互会话代批，并在决定批注与审计中留证（引用用户原话、日期、授权覆盖的策略卡）。代批前提：缺证据项为 0，且 G1–G6 结论齐备（无 fail；每个 warn 已在 ack_warn_gates）。不放松 G1–G6，不放松「缺证据不得批」。每次代批须引用一条覆盖该卡的用户本人授权；当前书面授权（2026-11-09，原话针对「在 /admin/strategy-gates 页面审批 H-01 和 S-01 两张策略卡（G7）」「第二条你自己去办，别总让我做」）覆盖 H-01、S-01。其他策略卡的代批须有用户本人的新授权，或用户确认将代办改为长期授权（此项未决，由编排者向用户确认）。技术门禁不变：浏览器交互登录会话 + CSRF，`origin=password_login`，每次重输管理员密码；API token、服务账号、脚本一律 `403 HUMAN_SESSION_REQUIRED`；脚本与未获授权的代理不得代填密码或代点批准。解除 HALT、恢复出网等其他须用户本人确认的条款不变。细则见 `docs/reviews/T-A109-g7-delegation.md`。
@@ -1182,7 +1185,7 @@ class NotificationChannel(Protocol):
     def render(self, n: Notification, detail_level: Literal["full","summary","ping"]) -> RenderedMessage
 ```
   `notifications`（每用户一条通知）→ 按 `notification_preferences` 选择渠道 → `notification_deliveries`（每渠道一次投递：`queued/sent/failed/retrying/dropped`，`attempts`、`next_retry_at`、`error`）。重试：指数退避 3 次；permanent 错误（如绑定失效）自动停用绑定并站内提醒。
-- **频控与免打扰**：每用户每渠道每分钟 / 每小时上限（配置，默认外部渠道 5/分钟、30/小时）；同一股票同一类事件 10 分钟内合并（站内语义见契约 §7.11.4「通知合并与推送节奏」，T-A28）；免打扰时段内外部渠道只累积，结束后发摘要（站内照常）；严重级别 `important`（如失效条件触发）可设置"免打扰期间仍发送"。
+- **频控与免打扰**：每用户每渠道每分钟 / 每小时上限（配置，默认外部渠道 5/分钟、30/小时）；同一股票同一类事件 10 分钟内合并（站内语义见契约 §7.11.4「通知合并与推送节奏」，T-A28；完整 `Notification` 投影以契约 §5.1 同步既有 T-A28/T-A31 四字段 `merged_count`、`updated_at`、`refs`、`version`，旧记录按其既定默认值投影；T-A31 既有 `notification_ref_type=signal|plan_condition` 的契约 §3 登记原由 #14 承接，#14 已被 #25 取代，该前置及 `/meta/enums` 对照现由 #25 承接；本轮仅补全结构登记，不新增合并或版本行为）；免打扰时段内外部渠道只累积，结束后发摘要（站内照常）；严重级别 `important`（如失效条件触发）可设置"免打扰期间仍发送"。
 - **外部渠道内容最小化**：默认 `detail_level = summary`（"您关注的 1 只股票触发失效条件，请登录查看"），不在第三方渠道发送持仓数量、成本、金额。
 
 **微信类渠道评估（2026-11-01 网页核实；未实测）**
@@ -1637,6 +1640,7 @@ class LLMGateway:
    另有 `source_kind ∈ {market_data, disclosure, user_input, system_calc}` 与 `confidence`（仅对 estimate/hypothesis，用户自填 low/medium/high）。
 2. **只追加 + 版本**：`research_candidates`、`action_plans`、`reviews` 采用"头表（当前指针、状态）+ 版本表（不可变）"；版本表行禁止 UPDATE/DELETE（数据库触发器强制）。
 3. **数据快照**：每个版本创建时生成 `data_snapshots`，记录当时引用的数据项的值、数据源、`data_as_of`（数据本身对应的时点）、`fetched_at`（我们拿到的时间）。回看时只读快照，不读最新行情。
+   - **A-12 终裁（2026-11-11，收敛 #72/#78）**：响应级 DataStatusBlock 的 `data_as_of` 必须出现、允许 `null`，取实际使用数据时点的最早非空值；全空 `null`，不以生成/评估/当前时刻代替。SecurityProfile 的目标规则取公开主数据与本人证书参与字段的时点并集，公开时点仍可用时不能因证书部分为空而清空（当前 main 的 profile 仍固定 null，实现另派）；`master_as_of` 日期本身不拼造 datetime。Evidence 的单条数据时点与独立事件时间戳仍按各自非空定义；快照对象仅其 DataStatusBlock 服从可空总则，不变更存储约束。SSE quote 为独立推送结构：无 quote 变化不发布新事件，发布块必须有非空 `data_as_of`，取实际行情时点最早值。此前提由后续生产发布方落实，基线通用 transport 无该校验；既有续传仍重放合法历史事件。详见契约 §1.1、§5.1、§8 与 `docs/reviews/A-12-data-as-of-nullability-ruling.md`。
 4. **成交只追加**：`trades` 不允许修改；更正用 `void`（作废标记 + 原因）+ 新记录；持仓由成交推导。
 5. **个人数据与行情数据分 schema**：`app`（用户数据，含 `user_id`，所有查询强制按用户过滤）与 `market`（~~全站共享~~ v0.2.6 起麦蕊来源的行带 `source_licence_id` 按证书隔离，2.1B；只有证券公开主数据全站一份，第 9 节问题 51）。
 6. 时间：数据库统一 `timestamptz`（UTC）；交易日用 `date`（Asia/Shanghai 口径）；金额用 `numeric(20,4)`，API 中以字符串传输。
@@ -2574,7 +2578,9 @@ MVP 明确写入产品：**"本产品不提供新闻资讯；公告信息为盘�
 - **分页与错误**
   - 游标分页：`?limit=&cursor=`，响应 `{items, next_cursor}`。
   - 统一错误格式：`{"error":{"code","message","details","request_id"}}`，错误码表见契约第 4 节。
+  - **CI ST205 路由澄清（v0.2.9 内）**：完整静态路径先确定资源，再判断方法；实际分派与 `405` 的 `Allow`/`details.allowed` 必须同源，合并同一静态路径的分注册方法，不并入模板路径对保留文字的误匹配。`/suggestions/refresh` 当前只允许 `POST`，其他方法 `405` 且仅列 `POST`；合法 UUID 详情、非保留文字的参数校验、同路径 `GET`/`PUT` 并集、显式 `HEAD` 与原认证/CSRF/全局上限、管理端隐藏 `404` 均沿契约 §1.3。不改 OpenAPI 扩充虚假方法、不削 schemathesis 检查；后端与测试分别承接路由修复及定点负例，历史测试保持。
 - **数据状态**：所有带数据的响应都有 `data_status`（`fresh/stale/pending/partial/unavailable`）和 `gaps`。
+  - **S1-3 汇总（T-A158 与 O-CI1-PROFILE-CONTRACT）**：factors 的 `trade_date: string(date)|null` 必出现，合法请求日期原样返回，未指定且无批次时为 null；`factor_set_version` 沿既有真实因子集规则（无真实可核实集为 null，已知集筛选为空仍保留真实版本）。空态原因分别用 ETF `not_applicable`、无来源 `no_source`、本人证书不可用 `data_licence_unavailable`；不造日期/版本，不用无来源掩盖证书不可用。旧必为字符串消费者须同步可空类型，影响后端 B-05 与前端类型/mock，详见契约 §7.3；四 GET 当前仍仅 empty/unavailable 视图，正常 owner-scoped provider/cache 尚未接入。
 - **主线接口**
   - 建议：`/suggestions`，包括详情、建议链、用户动作和跟踪。
   - 盘后日报：`/daily-reports`。
@@ -2914,7 +2920,7 @@ segments:
       fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
       cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
       unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
-      data_source: null                             # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）
+      data_source: null   # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（null 时即使调用方传入类别也按 T+1；plan §2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）；候选来源与核实状态见 §2.13 及 reports/T-B47-R10.md，选定须架构师裁定
     fees:
       stamp_duty_sell_pct: 0.05       # 印花税仅卖出
       transfer_fee_pct: 0.001         # 过户费双向
@@ -2974,7 +2980,7 @@ segments:
       fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
       cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
       unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
-      data_source: null                             # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）
+      data_source: null   # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（null 时即使调用方传入类别也按 T+1；plan §2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）；候选来源与核实状态见 §2.13 及 reports/T-B47-R10.md，选定须架构师裁定
     fees:
       stamp_duty_sell_pct: 0.05       # 印花税仅卖出；2023-08-28 起减半征收为 0.05%（财政部 税务总局公告 2023 年第 39 号）
       transfer_fee_pct: 0.001         # 过户费双向
@@ -3034,7 +3040,7 @@ segments:
       fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
       cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
       unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
-      data_source: null                             # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）
+      data_source: null   # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（null 时即使调用方传入类别也按 T+1；plan §2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）；候选来源与核实状态见 §2.13 及 reports/T-B47-R10.md，选定须架构师裁定
     fees:
       stamp_duty_sell_pct: 0.1        # 印花税仅卖出；2023-08-28 减半前为 0.1%（《中华人民共和国印花税法》所附《印花税税目税率表》证券交易栏：成交金额的千分之一，2022-07-01 起施行；对出让方征收，见同法第三条；T-A148 复审 S9）；减半施行日见财政部 税务总局公告 2023 年第 39 号
       transfer_fee_pct: 0.001         # 过户费双向

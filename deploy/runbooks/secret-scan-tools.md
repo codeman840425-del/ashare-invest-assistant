@@ -97,7 +97,7 @@ if ($LASTEXITCODE -ne 0) { throw '暂存 diff 检查失败' }
 
 ## 5. 推送前：冻结完整提交范围并双扫
 
-- 首推新任务分支：以当次批准的 main 基线 SHA 到候选 HEAD 为范围；后续追加推送：至少覆盖本次远端旧头到候选 HEAD。若有分支合并/依赖，范围必须覆盖实际将推出的全部提交。
+- 先核 `.github/workflows/secret-scan.yml` 的实际事件范围：既有分支追加推送为远端旧头 `before..after`，PR为精确 `base..head`；首推新分支的 `before=0` 或旧头不可定位时，CI按 `git rev-list --all` 扫全部refs历史。批准main到候选HEAD的新增范围可另记，但不能替代实际全历史门禁。若有分支合并/依赖，范围必须覆盖实际将推出的全部提交。
 - 使用已核实存在的完整 SHA；`fetch` 后再冻结。没有 fetch/无法证明远端状态就如实标未核实，不猜测基线。只看最终 diff、只跑 files/staged 不足以检出「先提交密钥、后删除」的中间历史。
 - 不以仅提示报告生成成功的 `--exit-code 0` 判通过；下列 Windows 命令使用 gitleaks 默认阻断退出码。
 
@@ -145,4 +145,4 @@ uv run --no-project --with pyyaml==6.0.3 python scripts/ci/secret_scan.py range 
 
 wrapper 的原始 JSON 可能含匹配内容，只能放受控临时位置；不得 cat、提交、作为 artifact 上传或贴进群。共享报告仅记规则、路径、行号、数量与脱敏结论，不能复制真实值。命中或执行失败时 `set -euo pipefail` 会停止；不要 `|| true`、只看最后一条命令、吞 stderr 或用 `--exit-code 0` 直接放行。
 
-history（`--all`）只在明确的全历史/收口检查范围下执行，仍需报告检查器；不在普通单据中擅自跑全库历史或覆盖率。CI 已有同版固定与双扫流程，本单只同步本机文档，不修改工作流。
+history（`--all`）用于实际workflow要求的全历史范围（包括新分支首推、旧头不可定位、schedule或workflow_dispatch），仍需报告检查器；普通既有分支按已核实range执行，不擅自增加全库历史或覆盖率。新增范围绿与历史未通过项分别保留；历史误报须获适用裁定，不能自行豁免。CI 已有同版固定与双扫流程，本单只同步本机文档，不修改工作流。

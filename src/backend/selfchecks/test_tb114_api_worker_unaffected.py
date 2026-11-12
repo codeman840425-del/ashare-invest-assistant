@@ -100,9 +100,14 @@ def _main_refusal_child(output: Connection) -> None:
 def test_tb114_main_calls_bootstrap_then_run(
     record_testsuite_property: Callable[[str, object], None],
 ) -> None:
+    # pytest importlib mode can assign an out-of-root, non-importable module
+    # name. Bind the same file through its canonical backend package for spawn.
+    from selfchecks.test_tb114_api_worker_unaffected import _main_refusal_child as child_target
+
+    assert Path(sys.modules[child_target.__module__].__file__).resolve() == Path(__file__).resolve()
     ctx = multiprocessing.get_context("spawn")
     received, sent = ctx.Pipe(duplex=False)
-    child = ctx.Process(target=_main_refusal_child, args=(sent,))
+    child = ctx.Process(target=child_target, args=(sent,))
     child.start()
     sent.close()
     try:

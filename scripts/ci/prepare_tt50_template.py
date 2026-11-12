@@ -143,6 +143,10 @@ def prepare(conn, receipt: dict, path: Path, env: dict) -> None:
     if result.returncode:
         raise RuntimeError("Fresh template migration failed; output withheld")
     receipt["template"] = state(TEMPLATE, "0030")
+    from template_connections import seal
+
+    seal(conn, receipt, path)
+    # Prove a clone of the sealed template is connectable at the original 0030.
     cloned = create(conn, probe, TEMPLATE, receipt, path)
     receipt["clone_probe"] = state(probe, "0030")
     if receipt["clone_probe"]["tables"] != receipt["template"]["tables"]:

@@ -130,9 +130,21 @@ jobs:
           "$py" scripts/ci/owned_unix_resources.py check --receipt "$AIA_CI_UNIX_RECEIPT"
       - name: pytest + 覆盖率
         shell: bash
+        env:
+          AIA_CI_PG_SERVICE_ID: ${{ job.services.db.id }}
         run: |
           set -euo pipefail
           py=src/backend/.venv/bin/python
+          # Observe metadata only; preserve the original pytest argv and exit.
+          "$py" scripts/ci/observe_template_connections.py &
+          template_observer_pid=$!
+          stop_template_observer() {
+            if jobs -pr | grep -qx "$template_observer_pid"; then
+              kill -TERM "$template_observer_pid" || true
+            fi
+            wait "$template_observer_pid" || true
+          }
+          trap stop_template_observer EXIT
           if [ -f tests/requirements.txt ]; then
             uv pip install --python "$py" -r tests/requirements.txt "pytest-cov==${PYTEST_COV_VERSION}"
           else

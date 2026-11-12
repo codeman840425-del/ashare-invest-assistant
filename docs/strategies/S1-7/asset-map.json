@@ -283,10 +283,17 @@
       "absorbed": false
     }
   ],
-  "original_prs_remain_open": [
+  "original_prs_open_at_mapping_creation": [
     28,
     29
   ],
+  "retirement_ruling": {
+    "authority": "Grok via Chief, 2026-11-12 12:11 MST",
+    "action_after_verified_remote_transfer": "Create successor and close PR28/PR29 in the same round; retain original source branches and blobs",
+    "minimal_successor_size_treatment": "Treat as existing PR for G-1112c; no size split",
+    "deferred_seven_status": "Only recorded for PR81 successor; not implemented, not verified, not absorbed",
+    "does_not_authorize_runner_or_r2_execution": true
+  },
   "claims": {
     "original_18_assets_unchanged": true,
     "seven_assets_absorbed_by_PR81": false,

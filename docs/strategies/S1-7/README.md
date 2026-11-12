@@ -2,7 +2,7 @@
 
 2026-11-12 MST，按 Chief 11:50 裁定从 main `c18a74bc692bec7b9a253f4406527adb986fcca9` 新建；[逐件映射](asset-map.json)绑定原 PR/head/path/blob/SHA256 与新位置。
 #28 的14件与#29的4件共18件，按原路径逐字节保留：8脚本、6公开来源manifest、4说明/报告；另加本说明与映射，数据本体不入库。
-原 #28/#29 保持 open、原 head/base/分支；18件承接不代表下列7件已吸收，不代表原PR全部独有增量已替代，也不代表main已具备runner功能。
+按 Grok 12:11 MST 裁定，后继远端承接18件后同轮关闭原#28/#29，保留原head/base/源分支；关闭不代表下列7件已实现、已验证或被#81吸收，也不代表main已具备runner功能。
 `python docs/strategies/T-R65/check_status_inputs.py ...` 与 `python docs/strategies/T-R65/check_sh_st_vs_eastmoney.py ...` 均在26行导入 `retest.t_r58.data`；两checker仅登记、不迁入，历史命令不能在本后继直接运行。
 `runner_data.require_status_inputs`、`StockCache.prepare`、`judgement._delisting`及runner调用依赖原 `data.py`、`judgement.py`、`runner.py`、`runner_data.py` 四件改动和未合父链；本后继没有等价实现。
 `pytest tests/backend/retest/test_status_inputs.py` 依赖原测试及上述父链；测试未迁入，原“17/42例通过”不作为本后继结果。

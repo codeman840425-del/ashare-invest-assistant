@@ -122,17 +122,27 @@ def test_actual_assertions_keep_synthetic_failure_and_emit_first(filename, name,
         response.body = {'items': [], 'next_cursor': None, 'private': SENTINEL}
     ids = {'active': 'synthetic-active', 'released': 'synthetic-released',
            'obsolete': 'synthetic-obsolete', 'signal_id': 'synthetic-signal'}
-    calls = []
+    calls, error_checks, seeded_owners = [], [], []
+    account_response = Response({'id': 'synthetic-owned-account'})
+    account_response.status_code = 201
     def call(*args, **kwargs):
         calls.append((args, kwargs))
+        if label == 'etf_instance' and args == ('POST', '/accounts'):
+            assert kwargs == {'json': {'alias': '合成ETF边界', 'broker_name': '合成券商'}}
+            return account_response
         return response
+    def seed_user_strategy_version(sql, owner):
+        seeded_owners.append(owner)
+        return 'synthetic-owned-version'
     def assert_err(r, status, code):
+        error_checks.append((r is response, r.status_code, status, code))
         assert r.status_code == status
         assert r.json()['error']['code'] == code
         return r.json()['error']
     namespace = {'Callable': object, 'Any': object, 'SimpleNamespace': SimpleNamespace,
                  'Rec': lambda s: call, 'require_route': lambda *a: None,
                  'seed_securities': lambda sql: None, '_seed_reasons': lambda *a: ids,
+                 'seed_user_strategy_version': seed_user_strategy_version,
                  'O_SEARCH': '', 'O_PROFILE': '', 'O_STRATEGY': '', 'O_SIGNALS': '',
                  'ETF_CODE': 'synthetic-etf', 'DATASETS': (), '_httpdiag': diag,
                  'assert_err': assert_err}
@@ -152,10 +162,29 @@ def test_actual_assertions_keep_synthetic_failure_and_emit_first(filename, name,
         finally:
             diag._ACTIVE.reset(token)
     assert failures[0] == failures[1]
-    assert len(calls) == 2 and calls[0] == calls[1]
+    expected_routes = {
+        'etf_search': [('GET', '/securities/search')],
+        'etf_profile': [('GET', '/securities/synthetic-etf')],
+        'etf_instance': [('POST', '/accounts'), ('POST', '/strategy-instances')],
+        'reasons': [('GET', '/non-executable-reasons')],
+    }[label]
+    per_run = len(expected_routes)
+    assert len(calls) == 2 * per_run
+    assert calls[:per_run] == calls[per_run:]
+    assert [args for args, _ in calls[:per_run]] == expected_routes
+    if label == 'etf_instance':
+        assert seeded_owners == ['synthetic-user'] * 2
+        assert error_checks == [(True, 500, 422, 'INSTANCE_SCOPE_INVALID')] * 2
+        assert calls[1][1]['json'] == {
+            'strategy_version_id': 'synthetic-owned-version', 'account_id': 'synthetic-owned-account',
+            'horizon': 'swing', 'scope': 'security', 'security_code': 'synthetic-etf',
+        }
+    else:
+        assert seeded_owners == []
     assert len(stream.getvalue().splitlines()) == 1
     payload = json.loads(stream.getvalue().removeprefix('HTTPDIAG '))
     assert payload['probe'] == label and SENTINEL not in stream.getvalue()
+    assert payload['status'] == response.status_code
     if label == 'reasons':
         assert payload['synthetic_intersection_count'] == 0
 

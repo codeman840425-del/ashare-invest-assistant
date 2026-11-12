@@ -1,27 +1,24 @@
 """Safe metadata for the exact newly created CI template; never read SQL text.
 
-Unknown application names/types are hashed, not emitted. This module performs no
-session cancellation, termination or changes outside the recorded template.
+Only PID, state, transaction age and fixed source labels leave the process.
+This module performs no session cancellation or termination.
 """
 from __future__ import annotations
-
-import hashlib
 
 from owned_unix_resources import now, save
 from psycopg import sql
 
-BACKEND_TYPES = frozenset({"client backend", "background worker", "parallel worker", "autovacuum worker"})
 STATES = frozenset({"active", "idle", "idle in transaction", "idle in transaction (aborted)", "disabled"})
-APPLICATIONS = frozenset({"", "psql", "pg_dump", "pg_restore", "TimescaleDB Background Worker Scheduler", "TimescaleDB Background Worker Launcher"})
+APPLICATIONS = {"psql": "psql", "pg_dump": "pg_dump", "pg_restore": "pg_restore",
+                "TimescaleDB Background Worker Scheduler": "timescale_scheduler",
+                "TimescaleDB Background Worker Launcher": "timescale_launcher"}
 
 
-def label(value, allowed: frozenset) -> dict:
-    if value is None:
-        return {"known": None}
-    text = str(value)
-    if text in allowed:
-        return {"known": text}
-    return {"known": "other", "sha256": hashlib.sha256(text.encode()).hexdigest()[:16]}
+def source_label(backend_type, application) -> str:
+    if application in APPLICATIONS:
+        return APPLICATIONS[application]
+    return {"client backend": "client_unspecified", "autovacuum worker": "autovacuum",
+            "parallel worker": "parallel_worker", "background worker": "worker_unspecified"}.get(backend_type, "unknown")
 
 
 def template_row(receipt: dict) -> dict:
@@ -40,17 +37,15 @@ def snapshot(conn, row: dict) -> dict:
         raise RuntimeError("Template OID or owner changed")
     # No query, query_id, client address/hostname/port, credentials or SQL rows.
     sessions = conn.execute(
-        "SELECT pid, leader_pid, backend_type, application_name, state, "
-        "usename = %s, backend_start, xact_start IS NOT NULL "
-        "FROM pg_stat_activity WHERE datid=%s ORDER BY pid",
-        (row["owner"], row["oid"]),
+        "SELECT pid, state, EXTRACT(EPOCH FROM clock_timestamp() - xact_start), "
+        "backend_type, application_name FROM pg_stat_activity WHERE datid=%s ORDER BY pid",
+        (row["oid"],),
     ).fetchall()
     return {"at": now(), "database_oid": row["oid"], "allow_connections": actual[2],
             "session_count": len(sessions), "sessions": [
-                {"pid": s[0], "leader_pid": s[1], "backend_type": label(s[2], BACKEND_TYPES),
-                 "application": label(s[3], APPLICATIONS), "state": label(s[4], STATES),
-                 "is_owner_role": bool(s[5]), "backend_start": s[6].isoformat() if s[6] else None,
-                 "in_transaction": bool(s[7])} for s in sessions]}
+                {"pid": s[0], "state": s[1] if s[1] in STATES else "unknown",
+                 "transaction_age_seconds": max(0.0, round(float(s[2]), 3)) if s[2] is not None else None,
+                 "source": source_label(s[3], s[4])} for s in sessions]}
 
 
 def seal(conn, receipt: dict, path) -> None:

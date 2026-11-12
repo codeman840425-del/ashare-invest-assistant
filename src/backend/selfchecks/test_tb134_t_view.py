@@ -10,10 +10,12 @@ from __future__ import annotations
 import datetime as dt
 import logging
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 
 from app.aggregates import t_view as tv
+from app.common.logging import RedactFilter, redact
 from app.schemas.enums import DataStatus, GapReason, SecurityType
 
 BJ = dt.timezone(dt.timedelta(hours=8))
@@ -208,11 +210,17 @@ def test_t_view_sellable_clamped_with_gap(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.WARNING)
-    v = build(
-        base_qty=Decimal(base),
-        sold_today=Decimal(sold),
-        holding_sellable=None if raw is None else Decimal(raw),
-    )
+    redaction = RedactFilter()
+    caplog.handler.addFilter(redaction)
+    try:
+        with patch.object(tv.logger, "warning", wraps=tv.logger.warning) as warning:
+            v = build(
+                base_qty=Decimal(base),
+                sold_today=Decimal(sold),
+                holding_sellable=None if raw is None else Decimal(raw),
+            )
+    finally:
+        caplog.handler.removeFilter(redaction)
     assert v.sellable_qty == expect
     gap = [g for g in v.gaps if g.key == "t_view.sellable_qty"]
     if clamped:
@@ -220,8 +228,12 @@ def test_t_view_sellable_clamped_with_gap(
             (GapReason.UPSTREAM_ERROR, "可卖数量与底仓不一致，已按较小值显示")
         ]
         assert v.data_status is DataStatus.PARTIAL
-        assert "t_view_sellable_exceeds_base:600000" in caplog.text
+        warning.assert_called_once_with("t_view_sellable_exceeds_base:%s", "600000")
+        expected = "t_view_sellable_exceeds_base:600000"
+        assert redact(expected) in caplog.text
+        assert expected not in caplog.text
     else:
+        warning.assert_not_called()
         assert gap == [] and v.data_status is DataStatus.FRESH
 
 

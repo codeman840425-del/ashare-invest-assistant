@@ -134,11 +134,9 @@ export function isRoutePending(e: unknown): boolean {
  * T-F34b：个股子资源中后端 v1 尚未注册的路径（`{code}` 处为任意证券代码）。
  * 逐个显式登记，不用通配正则——后端实现对某个子资源后必须从本清单删掉对应行，
  * 否则已实现的子路由若返回真实 404 会被误吞成“功能开发中”。
- * main c18a74b 已注册 financials/fund-flows/factors/announcements（securities.py），仅 bars 尚未注册。
+ * main 042b7f7 已注册五个子资源（含 bars），当前清单为空，真实资源 404 不改写为开发中。
  */
-export const STOCK_SUB_PATHS_PENDING: readonly string[] = [
-  '/securities/{code}/bars',
-];
+export const STOCK_SUB_PATHS_PENDING: readonly string[] = [];
 
 /**
  * 契约 §7.3：北交所旧代码访问 `GET /securities/{code}` 时 404 带 `details.superseded_by`。

@@ -24,7 +24,6 @@ import {
   isRoutePending,
   isStockSubPending,
   isSuperseded,
-  ROUTE_PENDING_TEXT,
 } from '../api/errorPolicy';
 import { errorBody } from '../mocks/handlerUtils';
 import { server } from '../mocks/server';
@@ -115,9 +114,8 @@ describe('② 北交所旧代码 superseded_by（真实资源 404 优先）', ()
 });
 
 describe('③ 个股子资源显式清单', () => {
-  it('未注册 bars 的 404 命中“开发中”；已注册四子资源的真实 404 不命中', () => {
-    expect(isStockSubPending(apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/bars`))).toBe(true);
-    for (const sub of ['financials', 'fund-flows', 'factors', 'announcements']) {
+  it('五个已注册子资源的真实 404 均不命中“开发中”', () => {
+    for (const sub of ['bars', 'financials', 'fund-flows', 'factors', 'announcements']) {
       expect(isStockSubPending(apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/${sub}`))).toBe(false);
     }
     // 未登记：后端将来实现了就会真 404，不能被吞
@@ -128,9 +126,10 @@ describe('③ 个股子资源显式清单', () => {
     expect(isStockSubPending(apiError(500, 'INTERNAL_ERROR', null, `${API}/securities/600000.SH/bars`))).toBe(false);
   });
 
-  it('ErrorBox：未注册 bars 显示开发中；已注册财务子资源显示真实资源错误', () => {
+  it('ErrorBox：已注册 bars 与财务子资源都显示真实资源错误', () => {
     const { unmount } = render(<ErrorBox error={apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/bars`)} />);
-    expect(screen.getByTestId('route-pending')).toHaveTextContent(ROUTE_PENDING_TEXT);
+    expect(screen.queryByTestId('route-pending')).toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent('内容不存在或已删除');
     unmount();
     render(<ErrorBox error={apiError(404, 'NOT_FOUND', null, `${API}/securities/600000.SH/financials`)} />);
     expect(screen.queryByTestId('route-pending')).toBeNull();

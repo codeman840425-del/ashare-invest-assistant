@@ -12,7 +12,7 @@ from pathlib import PurePosixPath
 
 # Legacy identity is retained for the old runner; new fixtures must override all three.
 PG = "/tb58-isolated-pg3"
-SOCKET = "/tmp/tb58-pg3-socket"  # noqa: S108 -- legacy dedicated socket, inspect only
+SOCKET = "/tmp/tb58-pg3-socket"
 VOLUME = "cb74ac8b598dc70429ffc2081fae178a80cf6cad138e58e9d7cf93d100b1487d"
 ENV_KEYS = ("AIA_TB28_PG_CONTAINER", "AIA_TB28_PG_SOCKET", "AIA_TB28_PG_VOLUME")
 
@@ -58,12 +58,12 @@ def verify_isolated_pg(target: IsolationTarget | None = None) -> None:
     )
     try:
         ids = subprocess.check_output(
-            ["docker", "ps", "-aq"], text=True  # noqa: S607 -- existing Docker CLI from runner PATH
+            ["docker", "ps", "-aq"], text=True
         ).split()
         rows = [
             json.loads(
-                subprocess.check_output(  # noqa: S603 -- fixed inspect argv, no shell
-                    ["docker", "inspect", "--format", fmt, identifier], text=True  # noqa: S607
+                subprocess.check_output(
+                    ["docker", "inspect", "--format", fmt, identifier], text=True
                 )
             )
             for identifier in ids

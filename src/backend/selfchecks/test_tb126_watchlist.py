@@ -38,7 +38,7 @@ from app.db.tables.strategy import symbol_horizon_assessments
 from app.db.tables.users import users
 from app.main import create_app
 
-HOST = "127.0.0.1"
+ISOLATED_PG_HOST = "127.0.0.1"
 PORT = 55461
 USER = "postgres"
 FORBIDDEN_DBS = frozenset({"tt51_tpl", "o61_tmp_0030"})
@@ -101,18 +101,18 @@ def _require_o61() -> None:
         if mode == "host" and f"port={PORT}" in cmd:
             hits.append(name.lstrip("/"))
     if hits != [_O61]:
-        pytest.fail(f"拒绝建库：{HOST}:{PORT} 归属 {hits or '未知'}，须为 {_O61}")
+        pytest.fail(f"拒绝建库：{ISOLATED_PG_HOST}:{PORT} 归属 {hits or '未知'}，须为 {_O61}")
 
 
 def _admin():
     return psycopg.connect(
-        host=HOST, port=PORT, user=USER, dbname="postgres", autocommit=True
+        host=ISOLATED_PG_HOST, port=PORT, user=USER, dbname="postgres", autocommit=True
     )
 
 
 def _url(dbname: str) -> URL:
     return URL.create(
-        "postgresql+psycopg", username=USER, password=None, host=HOST, port=PORT, database=dbname
+        "postgresql+psycopg", username=USER, password=None, host=ISOLATED_PG_HOST, port=PORT, database=dbname
     )
 
 

@@ -1,0 +1,26 @@
+{
+  "bootstrap": {
+    "head": "4c02a41ebbea1612da9c5cb53ec9a32b2342ee6f",
+    "run": 43238057084,
+    "counts": {
+      "total": [15571, 22926],
+      "domain": [113, 172],
+      "importing": [1092, 1406],
+      "signals": [353, 436],
+      "advice": [0, 0],
+      "llm": [0, 0]
+    }
+  },
+  "selection": {
+    "directories": ["src/backend/tests", "tests/backend", "tests/replay"],
+    "coverage_source": "src/backend/app"
+  },
+  "minimums": {
+    "total": 67,
+    "domain": 65,
+    "importing": 77,
+    "signals": 81,
+    "advice": null,
+    "llm": null
+  }
+}

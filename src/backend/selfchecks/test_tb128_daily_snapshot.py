@@ -67,7 +67,7 @@ from app.tracking import service as tracking
 from app.workers import jobs as jobs_mod
 from app.workers.daily import analyze, analysis_task, report_task
 
-HOST = "127.0.0.1"
+ISOLATED_PG_HOST = "127.0.0.1"
 PORT = 55461
 USER = "postgres"
 FORBIDDEN_DBS = frozenset({"tt51_tpl", "o61_tmp_0030"})
@@ -192,16 +192,16 @@ def _require_o61() -> None:
         if mode == "host" and f"port={PORT}" in cmd:
             hits.append(name.lstrip("/"))
     if hits != [_O61]:
-        pytest.fail(f"拒绝建库：{HOST}:{PORT} 归属 {hits or '未知'}，须为 {_O61}")
+        pytest.fail(f"拒绝建库：{ISOLATED_PG_HOST}:{PORT} 归属 {hits or '未知'}，须为 {_O61}")
 
 
 def _admin():
-    return psycopg.connect(host=HOST, port=PORT, user=USER, dbname="postgres", autocommit=True)
+    return psycopg.connect(host=ISOLATED_PG_HOST, port=PORT, user=USER, dbname="postgres", autocommit=True)
 
 
 def _url(dbname: str) -> URL:
     return URL.create(
-        "postgresql+psycopg", username=USER, password=None, host=HOST, port=PORT, database=dbname
+        "postgresql+psycopg", username=USER, password=None, host=ISOLATED_PG_HOST, port=PORT, database=dbname
     )
 
 

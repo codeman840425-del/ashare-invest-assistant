@@ -1,15 +1,10 @@
 """固定main当前head负例及幂等验收；不自动降级/修复库。"""
-import sys
-from pathlib import Path
-
 import pytest
 from alembic import command
 from sqlalchemy import text
 from app.db.migration_check import MigrationLineageError, require_database_mainline, script_directory, BACKEND
 from selfchecks.test_ta14_migrations import config
-# Resolve the sibling helper under pytest's importlib mode, independent of cwd.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from tt21_head import expected_main_head
+from .tt21_head import expected_main_head
 
 
 def columns(conn):

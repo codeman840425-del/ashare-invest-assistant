@@ -92,17 +92,22 @@ describe(`Mock 字段与契约 ${CONTRACT_VERSION} 逐字一致`, () => {
     ['Bar', () => [...(dailyBars(SECURITY_CODES[0])?.items ?? []), ...(intradayBars(SECURITY_CODES[0])?.items ?? [])]],
     ['ReleaseCondition', () => REASONS.map((r) => r.release_condition)],
   ];
-  // 契约说明文字追加的字段也属于严格字段集合；不得删 mock 字段迁就 §5.1 的旧内联结构。
+  // v0.2.7 在说明文字里给对象加的字段（不在花括号结构内），逐条核对说明原文后并入期望集合
   const PROSE_ADDED: Record<string, string[]> = {
     Bar: ['is_final'],
-    Notification: ['version', 'merged_count', 'updated_at', 'refs'],
+    // §7.11.4 aggregation/version amendments extend the older §5.1 inline shape.
+    Notification: ['merged_count', 'refs', 'updated_at', 'version'],
   };
-  it('Notification 的追加字段来自 §7.8 合并与版本规则，不是 mock 自造', () => {
+  it('Notification includes the four explicit §7.11.4 contract amendments', () => {
     expect(CONTRACT).toContain('`Notification` 追加 `merged_count: int`');
     expect(CONTRACT).toContain('`updated_at: datetime`');
     expect(CONTRACT).toContain('`refs: [{type, id, at}]`');
     expect(CONTRACT).toContain('`Notification` 追加 `version: int`');
     expect(CONTRACT).toContain('每个 ref 加 `route: string | null`');
+    expect(sorted([...inlineShape('Notification'), ...PROSE_ADDED.Notification])).toEqual([
+      'body', 'created_at', 'id', 'kind', 'merged_count', 'name', 'read_at',
+      'refs', 'security_code', 'severity', 'target', 'title', 'updated_at', 'version',
+    ]);
   });
   it('Notification 追加字段满足整数、时间和引用投影约束', () => {
     expect(NOTIFICATIONS.length).toBeGreaterThan(0);

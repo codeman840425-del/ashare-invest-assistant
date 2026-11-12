@@ -1,4 +1,3 @@
-# ruff: noqa: S101, S108
 """Synthetic Docker metadata paths only: no daemon/PG/filesystem access."""
 
 from __future__ import annotations

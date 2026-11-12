@@ -1,3 +1,4 @@
+import { trackingDecimal } from '../lib/trackingDecimal';
 /** P2N-05a：机械骨架先由 DeepSeek 出稿，断言由执行者逐项对齐§7.11；全为示例数据。 */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
@@ -19,7 +20,7 @@ import type { DailyReport, Paged } from '../api/types';
 import type { RiskControlSetting, RiskEvaluation, RiskEvent, SuggestionTracking } from '../api/phase2Types';
 import { DailyDimensions } from '../features/daily/DailyDimensions';
 import { TrackingResults } from '../components/TrackingResults';
-import { StrategyTrackingStats, TrackingStatValue, SuggestionStrategyTracking, trackingDecimal } from '../components/TrackingStats';
+import { StrategyTrackingStats, TrackingStatValue, SuggestionStrategyTracking } from '../components/TrackingStats';
 import { STRATEGY_TEMPLATES, trackingOf } from '../mocks/strategyHandlers';
 import type { StrategyTracking } from '../api/strategyTypes';
 import { useSuggestionTracking } from '../api/suggestionQueries';

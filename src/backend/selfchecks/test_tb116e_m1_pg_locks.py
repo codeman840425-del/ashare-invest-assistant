@@ -1,4 +1,4 @@
-# ruff: noqa: S101, S105, ANN001, ANN201, E501
+# ruff: noqa: S101, ANN001, E501
 """T-B116e M-1: pg_locks check is a short SET LOCAL transaction; lock session not in a txn during HTTP."""
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ def test_tb116e_m1_pg_locks_short_txn_idle_during_http(
     captured: list[str] = []
 
     @event.listens_for(eng, "before_cursor_execute")
-    def _cap(conn, cursor, statement, parameters, context, executemany) -> None:  # noqa: ANN001
+    def _cap(conn, cursor, statement, parameters, context, executemany) -> None:
         captured.append(" ".join(str(statement).split()))
 
     uid, lid = uuid.uuid4(), uuid.uuid4()

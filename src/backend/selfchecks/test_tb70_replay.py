@@ -163,7 +163,7 @@ def integration(
         require_isolated(conn, app_env="test")
         assert (
             conn.execute(text("select version_num from public.alembic_version")).scalar_one()
-            == _migration_head()
+            == "0020"  # Legacy fixture stays fixed; current-head consumers use tt21_integration.
         )
     settings = Settings(
         _env_file=None,

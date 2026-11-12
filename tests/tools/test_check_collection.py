@@ -1,4 +1,4 @@
-# ruff: noqa: S101 -- pytest assertions in synthetic gate tests
+
 """End-to-end gate checks use only temporary synthetic test trees."""
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ SCRIPT = Path(__file__).with_name("check_collection.py")
 
 def run_guard(root: Path, *extra: str) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
     output = root / "summary.json"
-    result = subprocess.run(  # noqa: S603 -- fixed interpreter/script, synthetic argument list; no shell
+    result = subprocess.run(
         [
             sys.executable,
             str(SCRIPT),

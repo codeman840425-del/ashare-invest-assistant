@@ -289,7 +289,7 @@ const routeHandlers = [
     await lag();
     if (isEtf(String(params.code))) {
       return HttpResponse.json({
-        ...etfNotApplicable(String(params.code), 'factors'), trade_date: '2026-10-30', factor_set_version: 'mr-factors-85（示例）', counts: { total: 0, by_category: {} },
+        ...etfNotApplicable(String(params.code), 'factors'), trade_date: '2026-10-30', factor_set_version: null, counts: { total: 0, by_category: {} },
       });
     }
     const f = factors(String(params.code));

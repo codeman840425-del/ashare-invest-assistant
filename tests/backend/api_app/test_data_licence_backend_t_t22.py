@@ -15,6 +15,8 @@ from __future__ import annotations
 import importlib
 import os
 import secrets
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -53,9 +55,16 @@ def test_ingest_refuses_to_start_with_legacy_licence_env(backend: SimpleNamespac
     monkeypatch.setenv("MAIRUI_LICENCE", lic)
     monkeypatch.setenv("MAIRUI_MODE", "replay")
     assert present() is True  # 守卫先于任何连接；只有确认会走守卫分支才调用 main()
-    assert ingest.main() == 78
+    # main() installs an irreversible process audit hook before rejecting the licence.
+    # Run the real startup assertion in a fresh interpreter, keeping pytest unguarded.
+    proc = subprocess.run(
+        [sys.executable, "-X", "utf8", "-c", "from app.workers import ingest\nassert ingest.main() == 78"],
+        cwd=Path(ingest.__file__).resolve().parents[2],
+        env=os.environ.copy(), capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert proc.returncode == 0, "isolated ingest startup assertion failed"
     out = capfd.readouterr()
-    blob = out.out + out.err
+    blob = out.out + out.err + proc.stdout + proc.stderr
     assert "MAIRUI_LICENCE" in blob
     assert not [w for w in windows(lic) if w in blob], "拒绝启动的提示含证书片段"
 

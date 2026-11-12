@@ -12,12 +12,14 @@ from pathlib import Path
 import pytest
 import yaml
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 
 from app.config_files import IngestConfig
 from app.ingest import egress as eg
 from app.ingest import ip_limit as ipl
 from app.ingest.core import IngestCore
 from app.ingest.state import Priority
+from app.ingest.upstream import Signal
 from app.schemas.enums import DataLicenceStatus, DataLicenceTier
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -35,7 +37,7 @@ def _url() -> str:
     return u
 
 
-def _seed(eng, uid, lid, *, status: str = "active") -> None:
+def _seed(eng: Engine, uid: uuid.UUID, lid: uuid.UUID, *, status: str = "active") -> None:
     with eng.begin() as conn:
         conn.execute(
             text(
@@ -169,7 +171,7 @@ def test_tb116b_m2_102_persists_invalid_then_denies(
             halt=halt,
             transport=transport_102,
         )
-    assert result.signal == __import__("app.ingest.upstream", fromlist=["Signal"]).Signal.INVALID
+    assert result.signal == Signal.INVALID
     with eng.connect() as conn:
         st = conn.execute(
             text("SELECT status FROM app.user_data_licences WHERE id=:id"),

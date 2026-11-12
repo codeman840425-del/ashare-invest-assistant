@@ -10,12 +10,13 @@ def expected_main_head(backend: Path) -> str:
     pinned = json.loads(Path(__file__).with_name('tt21_mainline.json').read_text())
     actual = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
               for p in (backend / 'migrations/versions').glob('*.py')}
-    assert actual == {row['migration_file']: row['sha256_checksum'] for row in pinned['migrations']}, '受测迁移文件不是固定main dcf734d版本图'
+    assert actual == {row['migration_file']: row['sha256_checksum'] for row in pinned['migrations']}, f"受测迁移文件不是固定main {pinned['baseline']}版本图"
     cfg = Config()
     cfg.set_main_option('script_location', str(backend / 'migrations'))
     scripts = ScriptDirectory.from_config(cfg)
     heads = scripts.get_heads()
     assert len(heads) == 1, '迁移图必须唯一head'
+    assert heads == [pinned['expected_head']], '迁移head不是显式登记版本'
     chain = list(scripts.walk_revisions(base='base', head=heads[0]))
     assert chain and chain[-1].revision == '0001', '迁移链根不在主线0001'
     assert any(r.revision == '0020' for r in chain), '迁移head不是主线0020的后代'

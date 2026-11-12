@@ -1,7 +1,8 @@
 /** T-F12 候选信号卡补全（契约 §5.2、§7 /suggestions*）。示例数据，不发外网请求。 */
 import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { createMemoryRouter, RouterProvider } from 'react-router';
+import { createMemoryRouter } from 'react-router';
+import { TestRouterProvider as RouterProvider } from '../test/TestRouterProvider';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';

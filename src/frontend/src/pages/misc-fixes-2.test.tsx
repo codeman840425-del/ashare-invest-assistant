@@ -4,7 +4,8 @@
  */
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { createMemoryRouter, RouterProvider } from 'react-router';
+import { createMemoryRouter } from 'react-router';
+import { TestRouterProvider as RouterProvider } from '../test/TestRouterProvider';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';

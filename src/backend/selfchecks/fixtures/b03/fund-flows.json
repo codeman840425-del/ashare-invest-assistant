@@ -1,0 +1,115 @@
+{
+  "etf": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/510300.SH/fund-flows"
+    },
+    "response": {
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "gaps": [
+        {
+          "key": "fund_flows",
+          "message": "合成 ETF 不适用",
+          "reason": "not_applicable"
+        }
+      ],
+      "items": [],
+      "name": "合成 ETF 示例",
+      "security_code": "510300.SH",
+      "sources": []
+    }
+  },
+  "index": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/000001.SH/fund-flows"
+    },
+    "response": {
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "gaps": [
+        {
+          "key": "fund_flows",
+          "message": "合成指数无该数据源",
+          "reason": "no_source"
+        }
+      ],
+      "items": [],
+      "name": "合成指数示例",
+      "security_code": "000001.SH",
+      "sources": []
+    }
+  },
+  "licence_unavailable": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/999999.SH/fund-flows"
+    },
+    "response": {
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "gaps": [
+        {
+          "key": "fund_flows",
+          "message": "合成证书不可用，无缓存",
+          "reason": "data_licence_unavailable"
+        }
+      ],
+      "items": [],
+      "name": "合成示例股份",
+      "security_code": "999999.SH",
+      "sources": []
+    }
+  },
+  "stock": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/999999.SH/fund-flows"
+    },
+    "response": {
+      "data_as_of": "2026-11-03T15:45:00+08:00",
+      "data_status": "partial",
+      "gaps": [
+        {
+          "key": "fund_flows.2026-11-03",
+          "message": "合成示例：当日分档净额未取到",
+          "reason": "no_source"
+        }
+      ],
+      "items": [
+        {
+          "amount": "12000000.00",
+          "is_final": true,
+          "large_net": "900000.00",
+          "main_net": "1500000.00",
+          "main_net_pct": "12.50",
+          "medium_net": "-200000.00",
+          "small_net": "-1300000.00",
+          "super_large_net": "600000.00",
+          "trade_date": "2026-11-02"
+        },
+        {
+          "amount": "9200000.00",
+          "is_final": false,
+          "large_net": null,
+          "main_net": null,
+          "main_net_pct": null,
+          "medium_net": null,
+          "small_net": null,
+          "super_large_net": null,
+          "trade_date": "2026-11-03"
+        }
+      ],
+      "name": "合成示例股份",
+      "security_code": "999999.SH",
+      "sources": [
+        {
+          "endpoint": null,
+          "fetched_at": "2026-11-03T15:45:00+08:00",
+          "provider": "mairui"
+        }
+      ]
+    }
+  }
+}

@@ -35,7 +35,9 @@ export function PriceChartPanel({ code, initial = 'd', height = 400, testId }: {
   const [shownFreq, setShownFreq] = useState<BarFreq>(freq);
   if (curReady && shownFreq !== freq) setShownFreq(freq);
   const shownRes = shownFreq === '1m' ? minute.data : kl.first;
-  const tradeDate = minute.data && shownFreq === '1m' ? (minute.data.items[0]?.t ?? minute.data.data_as_of).slice(0, 10) : null;
+  // A-12/F-14：data_as_of 可为 null（无数据时点），取不到就不认交易日，不能直接 slice
+  const minuteStamp = minute.data ? (minute.data.items[0]?.t ?? minute.data.data_as_of) : null;
+  const tradeDate = minute.data && shownFreq === '1m' && minuteStamp ? minuteStamp.slice(0, 10) : null;
   const minutes = useMemo(() => (tradeDate ? dayMinutes(tradeDate) : []), [tradeDate]);
   // 评审 M2：空图时说明原因（gaps 的原因码 + message）
   const empty = shownRes ? (

@@ -45,6 +45,7 @@ authdb, sql, app_client, mkuser, session, make_settings = (
 API, assert_err, reg, new_name, new_pw = _t23.API, _t23.assert_err, _t23.reg, _t23.new_name, _t23.new_pw
 Rec, fake_licence, put, live_row, leak_count = _t23.Rec, _t23.fake_licence, _t23.put, _t23.live_row, _t23.leak_count
 require_route, backend_version = _t23.require_route, _t23.backend_version
+_httpdiag, httpdiag = _t23._httpdiag, _t23.httpdiag
 
 pytestmark = [pytest.mark.integration, pytest.mark.contract]
 
@@ -352,17 +353,19 @@ def _seed_reasons(sql: Callable[..., Any], uid: str) -> dict[str, str]:
 
 def _reason_ids(call: Rec, **params: Any) -> set[str]:
     r = call("GET", "/non-executable-reasons", params=params)
+    _httpdiag.observe_response('reasons', r)
     assert r.status_code == 200, r.text[:300]
     body = r.json()
     assert set(body) >= {"items", "next_cursor"}
     return {x["id"] for x in body["items"]}
 
 
-def test_bc12_reasons_default_status_is_active(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
+def test_bc12_reasons_default_status_is_active(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], httpdiag: Any) -> None:
     """不兼容 #12 / 验收第 4 条：不带 status → 只有 active；released 只有已解除；all 含三种；带 signal_ids 不带 status → active。"""
     s = session()
     require_route(s.client, "GET", "/non-executable-reasons", O_SIGNALS)
     ids, call = _seed_reasons(sql, s.user.id), Rec(s)
+    httpdiag.synthetic_ids = ids
     assert _reason_ids(call) & set(ids.values()) == {ids["active"]}
     assert _reason_ids(call, status="released") & set(ids.values()) == {ids["released"]}
     assert _reason_ids(call, status="all") >= {ids["active"], ids["released"], ids["obsolete"]}

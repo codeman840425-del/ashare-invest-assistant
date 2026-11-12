@@ -53,6 +53,11 @@ reg, new_name, new_pw, random_client_ip = _auth.reg, _auth.new_name, _auth.new_p
 fake_licence, body_of, Rec, leak_count = _t22.fake_licence, _t22.body_of, _t22.Rec, _t22.leak_count
 STATUS_KEYS, ADMIN_EXTRA = _t22.STATUS_KEYS, _t22.ADMIN_EXTRA
 
+_diag_spec = importlib.util.spec_from_file_location('contract_http_diagnostics', Path(__file__).with_name('http_diagnostics.py'))
+_httpdiag = importlib.util.module_from_spec(_diag_spec)
+_diag_spec.loader.exec_module(_httpdiag)
+httpdiag = _httpdiag.httpdiag
+
 pytestmark = [pytest.mark.integration, pytest.mark.contract]
 
 REPO = Path(__file__).resolve().parents[3]
@@ -442,7 +447,7 @@ def test_09_db_trigger_rejects_non_strategy_security(sql: Callable[..., Any]) ->
     assert {r for r, _ in trg} == {"strategy_instances", "candidate_signals"}  # 分区上的克隆触发器（tgparentid≠0）不计
 
 
-def test_06_etf_search(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
+def test_06_etf_search(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], httpdiag: Any) -> None:
     """第 6 条：默认 types 搜得到 ETF（type=etf、board=null）；types=stock,cdr 搜不到；同层 stock > cdr > etf > index；可转债搜不到。"""
     s = session()
     require_route(s.client, "GET", "/securities/search", O_SEARCH)
@@ -451,6 +456,7 @@ def test_06_etf_search(session: Callable[..., SimpleNamespace], sql: Callable[..
 
     def items(q: str, **params: str) -> list[dict[str, Any]]:
         r = call("GET", "/securities/search", params={"q": q, **params})
+        _httpdiag.observe_response('etf_search', r)
         assert r.status_code == 200, r.text[:300]
         return r.json()["items"]
 
@@ -468,7 +474,7 @@ def test_06_etf_search(session: Callable[..., SimpleNamespace], sql: Callable[..
 DATASETS = ("financials", "fund-flows", "factors", "announcements")
 
 
-def test_07_etf_profile_and_datasets(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
+def test_07_etf_profile_and_datasets(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], httpdiag: Any) -> None:
     """第 7 条：ETF 资料 board/risk_flag/股本/industry 为 null、concepts=[]、无 gap；四个个股数据集 200、空 items、
     data_status=unavailable、gaps[0].reason=not_applicable；指数 financials 仍 no_source。"""
     s = session()
@@ -476,6 +482,7 @@ def test_07_etf_profile_and_datasets(session: Callable[..., SimpleNamespace], sq
     seed_securities(sql)
     call = Rec(s)
     p = call("GET", f"/securities/{ETF_CODE}")
+    _httpdiag.observe_response('etf_profile', p)
     assert p.status_code == 200, p.text[:300]
     prof = p.json()
     for k in ("board", "risk_flag", "total_shares", "float_shares", "industry"):
@@ -484,10 +491,12 @@ def test_07_etf_profile_and_datasets(session: Callable[..., SimpleNamespace], sq
     for ds in DATASETS:
         require_route(s.client, "GET", f"/securities/{{code}}/{ds}", O_PROFILE)
         r = call("GET", f"/securities/{ETF_CODE}/{ds}")
+        _httpdiag.observe_response('etf_dataset', r)
         assert r.status_code == 200, (ds, r.text[:300])
         b = r.json()
         assert b["items"] == [] and b["data_status"] == "unavailable" and b["gaps"][0]["reason"] == "not_applicable", ds
     r = call("GET", "/securities/000981.SH/financials")
+    _httpdiag.observe_response('index_financials', r)
     assert r.status_code == 200 and r.json()["gaps"][0]["reason"] == "no_source"
 
 
@@ -506,13 +515,14 @@ def test_08_etf_trades_import_and_cb_unknown(session: Callable[..., SimpleNamesp
     pytest.xfail(f"{O_IMPORT}；端点挂载后补导入夹具再严格断言")
 
 
-def test_09_etf_strategy_instance_scope(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
+def test_09_etf_strategy_instance_scope(session: Callable[..., SimpleNamespace], sql: Callable[..., Any], httpdiag: Any) -> None:
     """第 9 条（HTTP）：scope=security 指 ETF → 422 INSTANCE_SCOPE_INVALID{security_type: etf, issue: security_type_not_supported}；
     scope=account → 201 且运行时跳过 ETF；分类器对 ETF 计 0 分不建 proposed；H-01 不挂 ETF。"""
     s = session()
     require_route(s.client, "POST", "/strategy-instances", O_STRATEGY)
     seed_securities(sql)
     r = Rec(s)("POST", "/strategy-instances", json={"scope": "security", "security_code": ETF_CODE, "template_id": "S-01"})
+    _httpdiag.observe_response('etf_instance', r)
     err = assert_err(r, 422, "INSTANCE_SCOPE_INVALID")
     assert err["details"]["security_type"] == "etf" and err["details"]["issue"] == "security_type_not_supported"
     pytest.xfail(f"{O_STRATEGY}；scope=account / 分类器 / H-01 部分待端点与夹具")

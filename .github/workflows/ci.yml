@@ -34,9 +34,29 @@ env:
   REDIS_IMAGE: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
 
 jobs:
+  # Wait only for an already-running exact-main push. Keep this outside the
+  # backend's original 30-minute test budget; never run another measurement.
+  coverage-base:
+    name: trusted main coverage readiness
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: 等待原 main push 的精确测量归档
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base-ready.json"
+
   # ------------------------------------------------------------------ 后端：ruff / mypy strict / pytest + 覆盖率
   backend:
     name: backend (ruff, mypy, pytest+coverage)
+    needs: coverage-base
     runs-on: ubuntu-24.04
     permissions:
       contents: read

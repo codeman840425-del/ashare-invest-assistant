@@ -1,0 +1,46 @@
+{
+  "status": "unverified_draft",
+  "model": "deepseek/deepseek-flash",
+  "generated_at": "2026-11-11T16:47:00+08:00",
+  "baseline": "465e02046fa8d971897603742497444f884e89a2",
+  "prompt_summary": "只读契约和前端类型/mock，起草五端点合成响应及ETF/指数/pending降级形状，不改源码、不联网、不读真实数据或凭据。",
+  "bars": {
+    "security_code": "999999.SH", "name": "合成示例股份", "freq": "d", "adjust": "none", "pre_close": null,
+    "items": [
+      {"t": "2026-11-02", "open": "10.00", "high": "10.20", "low": "9.90", "close": "10.10", "pre_close": "10.00", "volume": "1200000", "amount": "12000000.00", "avg_price": null, "is_final": true},
+      {"t": "2026-11-03", "open": "10.10", "high": "10.35", "low": "10.05", "close": "10.30", "pre_close": "10.10", "volume": "900000", "amount": "9200000.00", "avg_price": null, "is_final": true}
+    ],
+    "next_before": null, "adjust_as_of": null, "data_status": "fresh", "data_as_of": "2026-11-03T15:40:00+08:00", "gaps": [],
+    "sources": [{"provider": "mairui", "endpoint": null, "fetched_at": "2026-11-03T15:45:00+08:00"}]
+  },
+  "financials": {
+    "security_code": "999999.SH", "name": "合成示例股份",
+    "items": [{"period_end": "2026-09-30", "report_period": "q3", "announce_date": "2026-10-30", "available_from": "2026-11-02", "is_restated": false, "revenue": "1234567890.00", "revenue_yoy_pct": "8.50", "net_profit": "98765432.00", "net_profit_yoy_pct": "6.20", "deducted_net_profit": "90000000.00", "eps": "0.31", "bvps": "4.25", "roe_pct": "7.30", "gross_margin_pct": "31.20"}],
+    "sources": [{"provider": "mairui", "endpoint": null, "fetched_at": "2026-11-01T20:00:00+08:00"}], "data_status": "fresh", "data_as_of": "2026-11-01T20:00:00+08:00", "gaps": []
+  },
+  "fund-flows": {
+    "security_code": "999999.SH", "name": "合成示例股份",
+    "items": [
+      {"trade_date": "2026-11-02", "amount": "12000000.00", "main_net": "1500000.00", "super_large_net": "600000.00", "large_net": "900000.00", "medium_net": "-200000.00", "small_net": "-1300000.00", "main_net_pct": "12.50", "is_final": true},
+      {"trade_date": "2026-11-03", "amount": "9200000.00", "main_net": null, "super_large_net": null, "large_net": null, "medium_net": null, "small_net": null, "main_net_pct": null, "is_final": false}
+    ],
+    "sources": [{"provider": "mairui", "endpoint": null, "fetched_at": "2026-11-03T15:45:00+08:00"}], "data_status": "partial", "data_as_of": "2026-11-03T15:45:00+08:00", "gaps": [{"key": "fund_flows.2026-11-03", "reason": "no_source", "message": "合成示例：当日分档净额未取到"}]
+  },
+  "factors": {
+    "security_code": "999999.SH", "name": "合成示例股份", "trade_date": "2026-11-03", "factor_set_version": "synthetic-factors-85", "counts": {"total": 2, "by_category": {"momentum": 1, "liquidity": 1}},
+    "items": [
+      {"factor_id": "F-MOM-20D", "feature_key": "mom_20d", "name": "20日动量（合成）", "category": "momentum", "value": "0.0350", "unit": "ratio", "market_rank": 812, "market_rank_pct": "24.10"},
+      {"factor_id": "F-LIQ-TURN", "feature_key": "turnover_5d", "name": "5日换手率（合成）", "category": "liquidity", "value": null, "unit": "pct", "market_rank": null, "market_rank_pct": null}
+    ],
+    "sources": [{"provider": "mairui", "endpoint": null, "fetched_at": "2026-11-03T18:30:00+08:00"}], "data_status": "partial", "data_as_of": "2026-11-03T18:30:00+08:00", "gaps": [{"key": "factor.F-LIQ-TURN", "reason": "no_source", "message": "合成示例：该因子本日无值"}]
+  },
+  "announcements": {
+    "items": [
+      {"id": "syn-ann-0001", "published_at": "2026-11-02T18:00:00+08:00", "title": "合成示例：季度报告（合成标题）", "category": "periodic_report", "category_raw": "定期报告", "level_raw": null, "url": "https://example.invalid/disclosure/syn-ann-0001.pdf", "url_host": "example.invalid", "file_format": "pdf", "first_seen_at": "2026-11-02T18:20:00+08:00"},
+      {"id": "syn-ann-0002", "published_at": "2026-11-03T09:00:00+08:00", "title": "合成示例：非白名单链接演示（合成标题）", "category": "other", "category_raw": "其它", "level_raw": "提示", "url": null, "url_host": "not-whitelisted.example", "file_format": null, "first_seen_at": "2026-11-03T09:10:00+08:00"}
+    ],
+    "next_cursor": null, "disclaimer": "公告内容以交易所及上市公司披露原文为准，本系统仅提供标题与原文链接。", "sources": [{"provider": "mairui", "endpoint": null, "fetched_at": "2026-11-03T21:00:00+08:00"}], "data_status": "fresh", "data_as_of": "2026-11-03T21:00:00+08:00", "gaps": []
+  },
+  "degraded_draft_notes": {"etf": "四资源 items=[] + unavailable + not_applicable；gap键financials/fund_flows/factors/announcements；factors保留counts，announcements保留分页和免责声明", "index": "财务/资金流/因子空items + unavailable + no_source", "bars_pending": "空items、pre_close/adjust_as_of/next_before=null；原稿data_as_of为非空固定时点"},
+  "author_notes_unverified": ["原稿猜测bars含sources，待复核", "factor_category使用前端string占位值", "公告只给元数据，无正文和摘要"]
+}

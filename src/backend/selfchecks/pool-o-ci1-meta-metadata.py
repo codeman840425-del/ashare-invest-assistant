@@ -5,7 +5,6 @@ from __future__ import annotations
 import configparser
 import datetime as dt
 import hashlib
-import importlib.util
 import json
 import os
 import uuid
@@ -69,11 +68,10 @@ def test_export_never_inherits_database_or_redis(
 
     monkeypatch.setattr(migration_check, "engine_for", denied)
     monkeypatch.setattr(redis.Redis, "from_url", denied)
-    spec = importlib.util.spec_from_file_location("o_ci1_dump_meta", SCRIPT)
-    if spec is None or spec.loader is None:
-        pytest.fail("cannot import actual export entry point")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    monkeypatch.syspath_prepend(str(BACKEND.parents[1]))
+    from scripts.ci import dump_meta_enums as module
+
+    require(Path(module.__file__).resolve() == SCRIPT.resolve(), "wrong export module origin")
     output = tmp_path / "meta.json"
     monkeypatch.setattr("sys.argv", [str(SCRIPT), str(output)])
     require(module.main() == 0, "offline export failed")

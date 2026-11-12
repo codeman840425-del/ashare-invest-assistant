@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import datetime as dt
-import sys
 import os
+import sys
+import tempfile
 from pathlib import Path
 from typing import cast
 
@@ -103,9 +104,12 @@ def test_invalid_action_is_rejected() -> None:
 def test_isolated_pg_guard_writes_and_savepoint(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # Identity and tb60 must use the same socket; partial overrides fail before Docker/PG.
+    # Inspect supports configurable targets; tb60 still permits only its fixed socket.
+    # Match tb60's Path.resolve comparison and reject before any Docker/PG action.
     target = isolation_target()
-    verify_isolated_pg()
+    if Path(target.socket).resolve() != Path(tempfile.gettempdir()) / "tb58-pg3-socket":
+        raise ValueError("tb60 only supports its fixed socket; rejected before Docker/PG")
+    verify_isolated_pg(target)
     # 复用真实写入/外键/分区夹具，不以 mock 连接或空回调替代；失败不跳过。
     monkeypatch.setattr(
         sys,

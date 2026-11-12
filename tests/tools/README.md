@@ -12,7 +12,7 @@ python -m pytest tests/backend/integration/test_tb28_isolation_config.py tests/b
 
 可选依赖在场与缺失必须分别报告：schemathesis、hypothesis、requests 缺失时对应模块显式跳过，不能记为业务通过。完整依赖来自现有测试依赖声明，不由本工具安装。真实 CI 的忽略目录、testpaths 与插件仍需审查，数量下限不能替代逐节点核对。
 
-隔离身份只支持同时设置 `AIA_TB28_PG_CONTAINER`、`AIA_TB28_PG_SOCKET`、`AIA_TB28_PG_VOLUME`；部分覆盖先拒绝。参数不授权创建或连接资源。元数据自检禁真实 Docker；T-B63 的真 PG 用例保留 main 已批准的唯一 GitHub-hosted marker；本地不增加平台跳过，仍须专用 PG、network=none、独立挂载和清理责任核对。不得连接用户库或共享库。
+隔离身份只支持同时设置 `AIA_TB28_PG_CONTAINER`、`AIA_TB28_PG_SOCKET`、`AIA_TB28_PG_VOLUME`；部分覆盖先拒绝。inspect-only 元数据守卫支持配置目标，但 tb63 的真实写库消费者 tb60 仍只允许 `Path(tempfile.gettempdir()) / "tb58-pg3-socket"`：tb63 沿用 tb60 的 `Path.resolve()` 比较，在任何 Docker/PG 动作前拒绝其他 socket，不扩大写库目标。`test_tb63_socket_consumer.py` 只用合成 metadata 和 tb60 替身验证拒绝、传参及先 inspect 后消费的顺序，不代表真实 45 断言通过。参数不授权创建或连接资源。元数据自检禁真实 Docker；T-B63 的真 PG 用例保留 main 已批准的唯一 GitHub-hosted marker；本地不增加平台跳过，仍须专用 PG、network=none、独立挂载和清理责任核对。不得连接用户库或共享库。
 
 T-B86 两模块因 POSIX flock/权限在 Windows 跳过；Linux 证据须另行锁定 SHA。T-B70 本单只复验 synthetic_manifest、positions_preview 与 migration_head，三个写库集成用例不在验收范围。独立图自检要求当前检出图唯一 head，零 head/多 head 仍拒绝；旧 integration 的固定 0020 断言保留，当前主线写库消费者继续使用 tt21_integration 及固定 0034 清单，不能用动态 head 替换隔离版本约束。
 

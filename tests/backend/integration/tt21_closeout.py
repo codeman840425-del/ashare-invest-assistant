@@ -30,7 +30,8 @@ def audit(event,args):
         if p not in [PG+'/.s.PGSQL.5432','/tmp/tb91-owned-redis/redis.sock'] and not p.startswith('/tmp/'):
             denials.append('foreign-unix');raise PermissionError('T-T21 foreign Unix socket')
     # Internet is blocked by the runner network namespace, including descendants.
-sys.addaudithook(audit)
+if __name__ == '__main__':
+    sys.addaudithook(audit)
 import psycopg,redis
 from psycopg.conninfo import conninfo_to_dict
 real_connect=psycopg.connect
@@ -71,7 +72,8 @@ def guarded_connect(conninfo='',**kwargs):
         for k in ['host','port','dbname','user','password','options']:kwargs.pop(k,None)
         conninfo=psycopg.conninfo.make_conninfo(**info)
     return real_connect(conninfo,**kwargs)
-psycopg.connect=guarded_connect;psycopg.Cursor.execute=guarded_execute
+if __name__ == '__main__':
+    psycopg.connect=guarded_connect;psycopg.Cursor.execute=guarded_execute
 # Prefix physical keys without replacing any API/worker behavior. Never FLUSH the shared DB.
 raw_redis=redis.Redis.execute_command
 # The only Lua allowed is the frozen public rate-limit script, reviewed to
@@ -106,17 +108,21 @@ def namespaced(self,*args,**kwargs):
             if not cursor:break
         return True
     return raw_redis(self,*transform(args),**kwargs)
-redis.Redis.execute_command=namespaced
+if __name__ == '__main__':
+    redis.Redis.execute_command=namespaced
 raw_pipe=redis.client.Pipeline.execute_command
 def pipe(self,*args,**kwargs):return raw_pipe(self,*transform(args),**kwargs)
-redis.client.Pipeline.execute_command=pipe
+if __name__ == '__main__':
+    redis.client.Pipeline.execute_command=pipe
 import redis.asyncio as aioredis
 raw_async=aioredis.Redis.execute_command
 async def async_namespaced(self,*args,**kwargs):return await raw_async(self,*transform(args),**kwargs)
-aioredis.Redis.execute_command=async_namespaced
+if __name__ == '__main__':
+    aioredis.Redis.execute_command=async_namespaced
 raw_async_pipe=aioredis.client.Pipeline.execute_command
 def async_pipe(self,*args,**kwargs):return raw_async_pipe(self,*transform(args),**kwargs)
-aioredis.client.Pipeline.execute_command=async_pipe
+if __name__ == '__main__':
+    aioredis.client.Pipeline.execute_command=async_pipe
 
 def deploy_grants(conn):
     # Roles already exist and are checked; omit cluster-wide bootstrap/password/member changes.

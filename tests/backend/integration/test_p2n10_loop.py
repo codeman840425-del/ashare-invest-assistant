@@ -11,6 +11,7 @@ import datetime as dt
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -73,7 +74,10 @@ def artifacts() -> Path:
 
 def verify_services() -> Path:
     # T-T21: identity/mounts pinned by host preflight; recheck both real Unix sockets.
-    from tt21_closeout import verify_services as checked
+    if "tt21_closeout" in sys.modules:  # Preserve the dedicated runner's live adapter.
+        from tt21_closeout import verify_services as checked
+    else:
+        from .tt21_closeout import verify_services as checked
     return checked()
 
 
@@ -94,7 +98,10 @@ def database():
     ) as admin:
         assert admin.execute("SHOW listen_addresses").fetchone() == ("",)
         admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-        from tt21_closeout import own_name
+        if "tt21_closeout" in sys.modules:
+            from tt21_closeout import own_name
+        else:
+            from .tt21_closeout import own_name
         # Keep the native actual-database identity guard intact, not monkeypatched.
         url = url.replace("/" + name + "?", "/" + own_name(name) + "?")
         try:

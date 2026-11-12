@@ -27,7 +27,7 @@ def listing(
     security_code: str = Query(min_length=9, max_length=9),
     kind: str | None = None,
     since: dt.datetime | None = None,
-) -> dict:
+) -> dict[str, object]:
     if since is not None and since.tzinfo is None:
         raise AppError(
             ErrorCode.VALIDATION_ERROR, details={"field": "since", "issue": "timezone_required"}

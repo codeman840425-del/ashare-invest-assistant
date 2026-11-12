@@ -407,8 +407,11 @@ import socket
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(0.2)
 try:
-    # Hostname form: CPython 在审计事件之后走 C 层解析，不触发 socket.getaddrinfo。
-    s.connect(("tt56-public.example", 443))
+    # CPython resolves in C before socket.connect is audited. An unresolvable
+    # .example name raises gaierror before the product hook can inspect it.
+    # localhost resolves offline; its hostname tuple must still be refused,
+    # even though a loopback IP literal would be allowed. Do not patch sockets.
+    s.connect(("localhost", 443))
 except Blocked:
     print("EGRESS_BLOCKED")
     raise SystemExit(0)

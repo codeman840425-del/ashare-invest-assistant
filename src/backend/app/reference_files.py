@@ -9,6 +9,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, StrictStr, model_validator
 
+from app.config_files import ShareClassListConfig
 from app.engine_policies import EnginePolicyReference
 from app.financial_basis import TradingCalendar
 
@@ -33,6 +34,7 @@ class CalendarReference(BaseModel):
 REFERENCE_FILES: dict[str, type[BaseModel]] = {
     "trading_calendar.json": CalendarReference,
     "engine_policy.yaml": EnginePolicyReference,
+    "share_class_list.yaml": ShareClassListConfig,
 }
 
 

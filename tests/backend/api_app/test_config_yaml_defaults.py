@@ -213,8 +213,9 @@ def test_key_defaults_ingest():
 def test_key_defaults_market_rules():
     d = snap("market_rules")
     assert d["modeled_from"] == "2023-04-10"
-    first, second = d["segments"]
-    assert first["effective_from"] == "2026-07-06" and second["effective_from"] == "2023-04-10"
+    first, second, third = d["segments"]
+    assert first["effective_from"] == "2026-07-06" and second["effective_from"] == "2023-08-28"
+    assert third["effective_from"] == "2023-04-10"
     assert first["price_limit_pct"] == {"main_board": 10, "main_board_st": 10, "chinext": 20, "star": 20, "bse": 30}
     assert first["sessions"] == {"call_auction": ["09:15", "09:25"], "morning": ["09:30", "11:30"],
                                  "afternoon": ["13:00", "14:57"], "closing_auction": ["14:57", "15:00"]}
@@ -232,13 +233,27 @@ def test_key_defaults_market_rules():
 
 
 def test_market_rules_second_segment_written_in_full():
-    """第二段“除 main_board_st: 5 外与上一段相同（文件中写全，不做继承）”。"""
-    first, second = snap("market_rules")["segments"]
+    """正式三段写全：第二段仅ST比例变化，第三段仅印花税减半前税率变化。"""
+    first, second, third = snap("market_rules")["segments"]
     assert set(first) == set(second)
     assert second["price_limit_pct"]["main_board_st"] == 5
     a = {k: v for k, v in first.items() if k != "effective_from"}
     b = {k: v for k, v in second.items() if k != "effective_from"}
     assert diff_paths(a, b) == ["price_limit_pct.main_board_st"]
+    assert set(second) == set(third)
+    c = {k: v for k, v in third.items() if k != "effective_from"}
+    assert diff_paths(b, c) == ["fees.stamp_duty_sell_pct"]
+    assert second["fees"]["stamp_duty_sell_pct"] == 0.05
+    assert third["fees"]["stamp_duty_sell_pct"] == 0.1
+
+
+@pytest.mark.parametrize(("day", "rate"), [
+    ("2023-04-10", 0.1), ("2023-08-27", 0.1),
+    ("2023-08-28", 0.05), ("2026-07-06", 0.05),
+])
+def test_market_rules_stamp_duty_plan_split(day, rate):
+    segment = segment_for(snap("market_rules"), dt.date.fromisoformat(day))
+    assert segment["fees"]["stamp_duty_sell_pct"] == rate
 
 
 @pytest.mark.parametrize(("day", "st_pct"), [

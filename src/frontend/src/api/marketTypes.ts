@@ -109,7 +109,7 @@ export interface FactorsResponse extends Sourced {
   security_code: string;
   name: string;
   trade_date: DateStr;
-  factor_set_version: string;
+  factor_set_version: string | null;
   counts: { total: number; by_category: Record<FactorCategory, number> };
   items: FactorValue[];
 }

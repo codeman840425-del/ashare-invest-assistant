@@ -1,5 +1,5 @@
 # A28-negative
-# ruff: noqa: S101, S105, ANN001, E501, N817, I001
+# ruff: noqa: S101, ANN001, N817, I001
 """A28 negative fixtures. Run only as a subprocess (``python thisfile.py``), not under pytest."""
 
 from __future__ import annotations
@@ -105,7 +105,9 @@ def main() -> None:
     core = IngestCore(CFG, engine=eng)
     with eg.single_egress(eng) as lease:
         assert lease is not None
-        fake = eg.EgressLease(held=True, nonce="deadbeef", thread_id=lease.thread_id, lock_pid=1, mac=b"x")
+        fake = eg.EgressLease(
+            held=True, nonce="deadbeef", thread_id=lease.thread_id, lock_pid=1, mac=b"x"
+        )
         # A28-negative
         eg._ISSUED_LEASES[fake.nonce] = fake
         # A28-negative

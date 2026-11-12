@@ -3,10 +3,14 @@
 
 import json
 import socket
+import sys
 from contextlib import AbstractContextManager
 from pathlib import Path
 
 import pytest
+
+if sys.platform == "win32":
+    pytest.skip("T-B86 offline requires POSIX flock and file permissions", allow_module_level=True)
 
 from probes import tb86_offline as probe
 

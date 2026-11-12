@@ -1,5 +1,13 @@
 # ruff: noqa: S101, ANN401
+# The Windows module skip must precede POSIX-only imports.
 """Synthetic transport/credentials/ledger only. No live evidence acceptance claim."""
+
+import sys
+
+import pytest
+
+if sys.platform == "win32":
+    pytest.skip("T-B86 history requires POSIX flock and file permissions", allow_module_level=True)
 
 import fcntl
 import json
@@ -7,8 +15,6 @@ import socket
 import uuid
 from pathlib import Path
 from typing import Any
-
-import pytest
 
 from probes import tb86_history as probe
 

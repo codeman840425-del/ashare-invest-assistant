@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -111,6 +112,76 @@ def cleanup(conn, receipt: dict, path: Path) -> None:
         raise RuntimeError("Template cleanup incomplete")
 
 
+def stop_template_workers(conn, receipt: dict, path: Path, env: dict) -> None:
+    """Use the pinned extension's database-local STOP protocol, never a PID kill.
+
+    2.31.0 sends STOP for MyDatabaseId and waits for that scheduler to stop.
+    It disables that database's scheduler entry; it does not stop the launcher
+    or other databases. Unknown sessions reject the operation before STOP.
+    """
+    from template_connections import snapshot, template_row
+
+    row = template_row(receipt)
+    if (not row.get("fresh_empty") or receipt.get("migration") != {
+        "target": "0030", "exit": 0, "method": "upgrade"
+    } or receipt.get("template") != {"name": TEMPLATE, "version": "0030", "tables": 135}):
+        raise RuntimeError("Worker stop requires this run's real empty-to-0030 template")
+    if receipt["owner"] != identity(env):
+        raise RuntimeError("Worker stop service or run identity changed")
+    snapshot(conn, row)  # Recheck the exact OID/owner before connecting to it.
+    lifecycle = {"mechanism": "timescaledb_database_local_stop", "acknowledged": False,
+                 "sessions_terminated_by_script": 0}
+    receipt["template_worker_lifecycle"] = lifecycle
+    with connect(TEMPLATE) as fresh:
+        actual = fresh.execute(
+            "SELECT current_database(), current_user, "
+            "(SELECT oid FROM pg_database WHERE datname=current_database()), "
+            "(SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=current_database()), "
+            "(SELECT system_identifier::text FROM pg_control_system()), "
+            "(SELECT extversion FROM pg_extension WHERE extname='timescaledb'), "
+            "pg_backend_pid(), current_setting('is_superuser')"
+        ).fetchone()
+        expected = (TEMPLATE, row["owner"], row["oid"], row["owner"],
+                    receipt["owner"]["system_identifier"], "2.31.0")
+        if actual[:6] != expected or actual[7] != "on":
+            raise RuntimeError("Worker stop template, role, service or extension identity differs")
+        lifecycle["identity_verified"] = True
+        fresh.execute("SELECT set_config('application_name', 'aia_ci_template_lifecycle', false)")
+        lifecycle["before"] = snapshot(conn, row)
+        save(path, receipt)
+        allowed = {"timescale_scheduler", "timescale_telemetry", "timescale_history_retention"}
+        if any(s["pid"] != actual[6] and s["source"] not in allowed
+               for s in lifecycle["before"]["sessions"]):
+            raise RuntimeError("Unidentified or non-worker template session; STOP refused")
+        # Keep our one verified connection alive, reject all new connections,
+        # then ask the extension to stop only its own workers in this database.
+        conn.execute(sql.SQL("ALTER DATABASE {} ALLOW_CONNECTIONS false").format(sql.Identifier(TEMPLATE)))
+        if fresh.execute("SELECT _timescaledb_functions.stop_background_workers()").fetchone() != (True,):
+            raise RuntimeError("Template worker STOP was not acknowledged")
+        lifecycle["acknowledged"] = True
+        save(path, receipt)
+        # PQfinish sends Terminate but does not wait for the server to close.
+        # Retain a duplicate of this exact socket to acknowledge EOF before
+        # the zero-session guard. This is protocol shutdown, not a SQL retry.
+        disconnect = socket.fromfd(fresh.pgconn.socket, socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        disconnect.settimeout(5)
+        remaining = 65536
+        while remaining:
+            data = disconnect.recv(min(4096, remaining))
+            if not data:
+                break
+            remaining -= len(data)  # Discard pending notices without exposing them.
+        else:
+            raise RuntimeError("Template connection did not close within protocol bound")
+    finally:
+        disconnect.close()
+    lifecycle["connection_closed"] = True
+    lifecycle["after"] = snapshot(conn, row)
+    save(path, receipt)
+    # seal() still requires zero sessions and verifies a real clone afterwards.
+
+
 def prepare(conn, receipt: dict, path: Path, env: dict) -> None:
     source = os.environ.get("AIA_TT50_SOURCE_DB", "aia")
     if source != "aia" or os.environ.get("AIA_SELFCHECK_DB", SELFCHECK) != SELFCHECK:
@@ -143,6 +214,7 @@ def prepare(conn, receipt: dict, path: Path, env: dict) -> None:
     if result.returncode:
         raise RuntimeError("Fresh template migration failed; output withheld")
     receipt["template"] = state(TEMPLATE, "0030")
+    stop_template_workers(conn, receipt, path, env)
     from template_connections import seal
 
     seal(conn, receipt, path)

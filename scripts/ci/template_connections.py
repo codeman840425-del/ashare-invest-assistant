@@ -10,11 +10,20 @@ from psycopg import sql
 
 STATES = frozenset({"active", "idle", "idle in transaction", "idle in transaction (aborted)", "disabled"})
 APPLICATIONS = {"psql": "psql", "pg_dump": "pg_dump", "pg_restore": "pg_restore",
-                "TimescaleDB Background Worker Scheduler": "timescale_scheduler",
-                "TimescaleDB Background Worker Launcher": "timescale_launcher"}
+                "aia_ci_template_lifecycle": "ci_template_lifecycle"}
+# Exact backend types from the pinned 2.31.0 worker registrations/default jobs.
+# An arbitrary application string or numeric suffix never establishes a worker.
+WORKER_TYPES = {"TimescaleDB Background Worker Scheduler": "timescale_scheduler",
+                "TimescaleDB Background Worker Launcher": "timescale_launcher",
+                "Telemetry Reporter [1]": "timescale_telemetry",
+                "Job History Log Retention Policy [3]": "timescale_history_retention"}
 
 
 def source_label(backend_type, application) -> str:
+    if backend_type in WORKER_TYPES:
+        return WORKER_TYPES[backend_type]
+    if backend_type == "background worker" and application in WORKER_TYPES:
+        return WORKER_TYPES[application]
     if application in APPLICATIONS:
         return APPLICATIONS[application]
     return {"client backend": "client_unspecified", "autovacuum worker": "autovacuum",

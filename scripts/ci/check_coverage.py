@@ -1,59 +1,52 @@
 #!/usr/bin/env python3
-"""覆盖率门槛（plan.md §8.0）：领域包 domain/ importing/ signals/ advice/ llm/ 行覆盖 ≥ 90%，整体 ≥ 80%。
-
-输入为 `coverage json` 生成的 coverage.json（文件路径相对 src/backend，如 app/domain/x.py）。
-用法：check_coverage.py coverage.json [--total 80] [--package 90]
-"""
-
+"""Gate exact coverage against the frozen trusted base; 80/90 remain goals only."""
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
-from pathlib import PurePosixPath
+from pathlib import Path
 
-DOMAIN_PACKAGES = ("domain", "importing", "signals", "advice", "llm")
-
-
-def pct(covered: int, total: int) -> float:
-    return 100.0 if total == 0 else 100.0 * covered / total
+from coverage_ratchet import SELECTION, compare, load_policy, measured, validate_record
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("coverage_json")
-    ap.add_argument("--total", type=float, default=80.0)
-    ap.add_argument("--package", type=float, default=90.0)
-    args = ap.parse_args(argv)
-    data = json.load(open(args.coverage_json, encoding="utf-8"))
-    files = data.get("files", {})
-    agg = {p: [0, 0] for p in DOMAIN_PACKAGES}
-    tot = [0, 0]
-    for name, info in files.items():
-        s = info["summary"]
-        parts = PurePosixPath(name.replace("\\", "/")).parts
-        tot[0] += s["covered_lines"]
-        tot[1] += s["num_statements"]
-        if "app" in parts:
-            i = parts.index("app")
-            if len(parts) > i + 2 and parts[i + 1] in agg:
-                agg[parts[i + 1]][0] += s["covered_lines"]
-                agg[parts[i + 1]][1] += s["num_statements"]
-    fail = False
-    t = pct(*tot)
-    print(f"整体行覆盖 {t:.1f}%（{tot[0]}/{tot[1]}），门槛 {args.total:.0f}%")
-    if t < args.total:
-        print(f"::error title=coverage::整体行覆盖 {t:.1f}% < {args.total:.0f}%")
-        fail = True
-    for p, (c, n) in agg.items():
-        v = pct(c, n)
-        note = "（无语句）" if n == 0 else ""
-        print(f"app/{p}/ 行覆盖 {v:.1f}%（{c}/{n}）{note}，门槛 {args.package:.0f}%")
-        if v < args.package:
-            print(f"::error title=coverage::app/{p}/ 行覆盖 {v:.1f}% < {args.package:.0f}%")
-            fail = True
-    return 1 if fail else 0
+    parser = argparse.ArgumentParser()
+    parser.add_argument("coverage_json", type=Path)
+    parser.add_argument("--base", type=Path, required=True)
+    parser.add_argument("--policy", type=Path, default=Path(__file__).with_name("coverage-baseline.json"))
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args(argv)
+    try:
+        trusted = validate_record(json.loads(args.base.read_text(encoding="utf-8")))
+        if trusted.get("ratchet_passed") is not True:
+            raise ValueError("Trusted base did not pass its coverage ratchet")
+        floors = load_policy(args.policy, trusted)
+        counts = measured(args.coverage_json)
+        errors, rows = compare(counts, trusted, floors)
+        for row in rows:
+            value = (f"{100 * row['covered'] / row['statements']:.4f}%"
+                     if row["statements"] else "N/A (zero statements)")
+            print(f"{row['scope']}: {value} ({row['covered']}/{row['statements']}); "
+                  f"base={row['base_covered']}/{row['base_statements']}; "
+                  f"denominator_delta={row['denominator_delta']:+d}; "
+                  f"minimum_ratio={row.get('effective_minimum', 'N/A')}; "
+                  f"required_ratio={row.get('required_ratio', 'N/A')}; {row['status']}")
+        result = {"schema": "aia-coverage-ratchet-v1", "selection": SELECTION,
+                  "counts": counts, "minimums": floors, "commit": os.environ.get("GITHUB_SHA"),
+                  "run_id": os.environ.get("GITHUB_RUN_ID"),
+                  "attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+                  "base_commit": trusted.get("commit"), "base_source": trusted.get("source"),
+                  "ratchet_passed": not errors, "rows": rows}
+        args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        for error in errors:
+            print("::error title=coverage-ratchet::" + error)
+        return 1 if errors else 0
+    except (OSError, ValueError, KeyError, TypeError, ZeroDivisionError):
+        print("::error title=coverage-ratchet::Missing or invalid real measurement/trusted baseline", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

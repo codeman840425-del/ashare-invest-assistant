@@ -13,6 +13,7 @@ from starlette.datastructures import QueryParams
 
 from app.api.v1.imports import etag_response
 from app.auth.deps import AuthDep, EngineDep
+from app.marketdata.datasets import empty_dataset
 from app.marketdata.subresource_read import (
     DecimalText,
     NamedResponse,
@@ -20,10 +21,8 @@ from app.marketdata.subresource_read import (
     Shape,
     choices,
     day,
-    identity,
     integer,
     one,
-    unavailable,
 )
 from app.schemas.enums import ReportPeriod
 
@@ -75,7 +74,8 @@ class PlaceholderFinancialsReader:
         self.engine = engine
 
     def read(self, owner: uuid.UUID, code: str, query: FinancialsQuery) -> dict[str, Any]:
-        return unavailable(identity(self.engine, code), "financials")
+        with self.engine.connect() as conn:
+            return empty_dataset(conn, owner, code, "financials")
 
 
 def get_financials_reader(engine: EngineDep) -> ResourceReader[FinancialsQuery]:

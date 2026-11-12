@@ -15,16 +15,15 @@ from app.api.v1.imports import etag_response
 from app.auth.deps import AuthDep, EngineDep
 from app.common.errors import AppError, ErrorCode
 from app.db.tables.market import trading_calendar
+from app.marketdata.datasets import empty_dataset
 from app.marketdata.subresource_read import (
     DecimalText,
     NamedResponse,
     ResourceReader,
     Shape,
     day,
-    identity,
     integer,
     one,
-    unavailable,
 )
 from app.master.search import invalid
 
@@ -104,9 +103,10 @@ class PlaceholderFlowsReader:
         self.engine = engine
 
     def read(self, owner: uuid.UUID, code: str, query: FlowsQuery) -> dict[str, Any]:
-        security = identity(self.engine, code)
+        with self.engine.connect() as conn:
+            result = empty_dataset(conn, owner, code, "fund-flows")
         validate_range(self.engine, query)
-        return unavailable(security, "fund_flows")
+        return result
 
 
 def get_flows_reader(engine: EngineDep) -> ResourceReader[FlowsQuery]:

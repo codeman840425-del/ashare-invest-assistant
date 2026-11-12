@@ -20,16 +20,15 @@ from app.auth.deps import AuthDep, EngineDep, SettingsDep
 from app.common.errors import AppError, ErrorCode
 from app.common.pagination import decode_cursor, encode_cursor
 from app.config import Settings
+from app.marketdata.datasets import empty_dataset
 from app.marketdata.subresource_read import (
     ResourceReader,
     Shape,
     SourcedResponse,
     choices,
     day,
-    identity,
     integer,
     one,
-    unavailable,
 )
 from app.master.search import invalid
 from app.schemas.enums import AnnouncementCategory
@@ -53,6 +52,10 @@ class Announcement(Shape):
 
 
 class AnnouncementsResponse(SourcedResponse):
+    # Main's default unavailable view also includes its checked public identity.
+    # Explicit fixture/provider ports may retain the original unnamed Paged shape.
+    security_code: str | None = None
+    name: str | None = None
     items: list[Announcement]
     next_cursor: str | None
     disclaimer: Literal["公告内容以交易所及上市公司披露原文为准，本系统仅提供标题与原文链接。"]
@@ -120,7 +123,8 @@ class PlaceholderAnnouncementsReader:
         self.engine = engine
 
     def read(self, owner: uuid.UUID, code: str, query: AnnouncementsQuery) -> dict[str, Any]:
-        result = unavailable(identity(self.engine, code), "announcements", named=False)
+        with self.engine.connect() as conn:
+            result = empty_dataset(conn, owner, code, "announcements")
         result.update(next_cursor=None, disclaimer=DISCLAIMER)
         return result
 
@@ -222,4 +226,4 @@ def announcements(
     )
     content = window(reader.read(auth.user_id, code, query), query, auth.user_id, code, settings)
     value = AnnouncementsResponse.model_validate(content)
-    return etag_response(value.model_dump(mode="json"), if_none_match)
+    return etag_response(value.model_dump(mode="json", exclude_unset=True), if_none_match)

@@ -14,7 +14,8 @@ from types import SimpleNamespace
 import pytest
 import yaml
 from pydantic import SecretStr
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 
 from app.config_files import IngestConfig
 from app.ingest.core import IngestCore
@@ -39,7 +40,9 @@ def test_tb114_ingest_main_source_calls_bootstrap() -> None:
     assert "set_ingest_core" in boot
 
 
-def test_tb114_bootstrap_sets_core_with_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tb114_bootstrap_sets_core_with_engine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("SERVICE_NAME", "ingest")
     monkeypatch.setenv("APP_ENV", "local")
     from app.ingest import runtime
@@ -47,6 +50,8 @@ def test_tb114_bootstrap_sets_core_with_engine(monkeypatch: pytest.MonkeyPatch) 
 
     runtime.set_ingest_core(None)
 
+    # Exercise the real halt-directory probe in a disposable directory.
+    monkeypatch.setattr("app.ingest.daily_lists.HALT", tmp_path / "HALTED")
     # SQLite in-memory answers SELECT 1; enough to prove wiring (not PG-specific).
     engine = create_engine("sqlite+pysqlite:///:memory:")
 

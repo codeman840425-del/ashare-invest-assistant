@@ -13,11 +13,11 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Never, Self
+from typing import Never, Self
 
 import pytest
 import yaml
-from sqlalchemy import Connection, CursorResult, create_engine, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from app.config_files import IngestConfig
@@ -76,7 +76,6 @@ def _calls_transport(box: list[str]) -> Callable[[str, str], tuple[int, object]]
     return transport
 
 
-
 @contextmanager
 def _issued_lease(engine: Engine) -> Iterator[eg.EgressLease]:
     with eg.single_egress(engine) as lease:
@@ -104,7 +103,7 @@ def test_tb116_fc1_halt_present_zero_transport_no_db(
     halt.write_bytes(b"limit_103_or_429")
     stop = tmp_path / "STOP"
     calls: list[str] = []
-    _engine = create_engine("sqlite+pysqlite:///:memory:")  # must not be queried
+    create_engine("sqlite+pysqlite:///:memory:")  # must not be queried
 
     class BoomEngine:
         def connect(self) -> Never:
@@ -257,8 +256,8 @@ def test_tb116_happy_and_fc8_token_bucket_and_fc10_network(
     core = IngestCore(CFG, engine=engine)
 
     # Force tiny bucket via cfg copy — use annual default then drain by override on upsert path:
-    # mairui_get upserts without override; instead call twice with per_minute=1
-    # by patching core.per_minute
+    # mairui_get upserts without override; call twice with per_minute=1
+    # by patching core.per_minute.
     monkeypatch.setattr(core, "per_minute", lambda tier, override=None: 1)
 
     r1 = _mg(
@@ -397,10 +396,10 @@ def test_tb116_fc9_event_insert_fail_pending_then_deny(
 
     # Break event inserts by revoking INSERT on events for this session via a boom wrapper
     class BoomConn:
-        def __init__(self, real: Connection) -> None:
+        def __init__(self, real) -> None:  # noqa: ANN001
             self._real = real
 
-        def execute(self, *a: object, **k: object) -> CursorResult[Any]:
+        def execute(self, *a: object, **k: object) -> object:
             sql = str(a[0]) if a else ""
             if "data_licence_events" in sql.lower() or "INSERT" in sql.upper():
                 # only boom on event writes heuristically via compile
@@ -415,11 +414,11 @@ def test_tb116_fc9_event_insert_fail_pending_then_deny(
         def __enter__(self) -> Self:
             return self
 
-        def __exit__(self, *a: object) -> bool:
+        def __exit__(self, *a: object) -> bool | None:
             return False
 
     class BoomBegin:
-        def __init__(self, real_engine: Engine) -> None:
+        def __init__(self, real_engine) -> None:  # noqa: ANN001
             self._eng = real_engine
 
         def __enter__(self) -> BoomConn:
@@ -431,10 +430,10 @@ def test_tb116_fc9_event_insert_fail_pending_then_deny(
             return self._ctx.__exit__(*a)
 
     class BoomEngine:
-        def __init__(self, real: Engine) -> None:
+        def __init__(self, real) -> None:  # noqa: ANN001
             self._real = real
 
-        def connect(self) -> Connection:
+        def connect(self) -> object:
             return self._real.connect()
 
         def begin(self) -> BoomBegin:

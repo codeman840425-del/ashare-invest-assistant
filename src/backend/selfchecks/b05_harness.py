@@ -22,6 +22,8 @@ from app.auth import deps
 from app.auth.sessions import SESSION_COOKIE, Session
 from app.common.errors import AppError, ErrorCode
 from app.config import ConfigError, Settings
+from app.db.tables.licences import user_data_licence_status
+from app.db.tables.market import securities, security_code_history, security_name_history
 from app.main import create_app
 from selfchecks.b03_shapes import validate
 
@@ -122,21 +124,33 @@ def environment(
     )
     with engine.begin() as conn:
         conn.execute(text("ATTACH DATABASE ':memory:' AS market"))
-        conn.execute(
-            text("CREATE TABLE market.securities (code TEXT PRIMARY KEY, name TEXT, type TEXT)")
-        )
-        conn.execute(text("CREATE TABLE market.security_code_history (code TEXT, old_code TEXT)"))
+        conn.execute(text("ATTACH DATABASE ':memory:' AS app"))
+        # Execute main's real profile/owner-status SELECTs against a complete empty
+        # fixture schema; never replace the production profile or licence service.
+        for table in (
+            securities,
+            security_code_history,
+            security_name_history,
+            user_data_licence_status,
+        ):
+            columns = ", ".join(f'"{column.name}" TEXT' for column in table.c)
+            conn.execute(text(f"CREATE TABLE {table.schema}.{table.name} ({columns})"))
         for code, name, kind in (
             (STOCK, "合成股份", "stock"),
             (ETF, "合成ETF", "etf"),
             (INDEX, "合成指数", "index"),
         ):
             conn.execute(
-                text("INSERT INTO market.securities VALUES (:c, :n, :t)"),
+                text(
+                    "INSERT INTO market.securities "
+                    "(code,name,type,exchange,listing_status,master_as_of) "
+                    "VALUES (:c, :n, :t, 'SH', 'listed', '2026-11-02 18:00:00+08:00')"
+                ),
                 {"c": code, "n": name, "t": kind},
             )
         conn.execute(
-            text("INSERT INTO market.security_code_history VALUES (:c, :o)"), {"c": STOCK, "o": OLD}
+            text("INSERT INTO market.security_code_history (code,old_code) VALUES (:c, :o)"),
+            {"c": STOCK, "o": OLD},
         )
     app.dependency_overrides[deps.get_engine] = lambda: engine
     app.dependency_overrides[deps.get_session_store] = lambda: sessions
@@ -209,7 +223,14 @@ def check_scope(env: Any) -> None:
 
 def check_defaults(env: Any) -> None:
     del env.app.dependency_overrides[env.dependency]
-    for code, reason in ((STOCK, "no_source"), (ETF, "not_applicable"), (INDEX, "no_source")):
+    index_reason = (
+        "no_source" if env.resource in {"financials", "fund-flows"} else "data_licence_unavailable"
+    )
+    for code, reason in (
+        (STOCK, "data_licence_unavailable"),
+        (ETF, "not_applicable"),
+        (INDEX, index_reason),
+    ):
         result = env.client.get(env.path.replace(STOCK, code))
         assert result.status_code == 200
         body = result.json()

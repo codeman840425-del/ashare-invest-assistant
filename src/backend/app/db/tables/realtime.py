@@ -59,7 +59,10 @@ signal_states = Table(
     txt("last_tick_id"),
     ts("changed_at", nullable=False, default_now=True),
     UniqueConstraint(
-        "source_licence_id", "security_code", "strategy_version_id", "params_hash",
+        "source_licence_id",
+        "security_code",
+        "strategy_version_id",
+        "params_hash",
         name="uq_signal_states_licence_key",
     ),
     schema=APP,

@@ -13,6 +13,7 @@ from starlette.datastructures import QueryParams
 from app.api.v1.imports import etag_response
 from app.auth.deps import AuthDep, EngineDep
 from app.common.errors import AppError, ErrorCode
+from app.marketdata.datasets import empty_dataset
 from app.marketdata.subresource_read import (
     DecimalText,
     NamedResponse,
@@ -20,9 +21,7 @@ from app.marketdata.subresource_read import (
     Shape,
     choices,
     day,
-    identity,
     one,
-    unavailable,
 )
 from app.schemas.enums import FactorCategory
 
@@ -70,7 +69,8 @@ class PlaceholderFactorsReader:
         self.engine = engine
 
     def read(self, owner: uuid.UUID, code: str, query: FactorsQuery) -> dict[str, Any]:
-        value = unavailable(identity(self.engine, code), "factors")
+        with self.engine.connect() as conn:
+            value = empty_dataset(conn, owner, code, "factors")
         value.update(
             trade_date=query.trade_date,
             factor_set_version=None,

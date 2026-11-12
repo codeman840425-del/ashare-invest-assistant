@@ -1,14 +1,16 @@
-# ruff: noqa: S101, S105, ANN001, ANN201, E501
+# ruff: noqa: S101, ANN001
 """T-B116f B-4: window lease re-check uses a 0.5s budget; refusal logs category=lease."""
 
 from __future__ import annotations
 
 import datetime as dt
+import io
+import logging
+import multiprocessing
 import os
-import subprocess
-import sys
 import time
 import uuid
+from multiprocessing.connection import Connection
 from pathlib import Path
 
 import pytest
@@ -77,7 +79,7 @@ def test_tb116f_b4_slow_admit_still_reaches_transport(
 
     orig = ipl.acquire_ip_limit_lock
 
-    def slow(conn, user_id):
+    def slow(conn, user_id) -> None:
         time.sleep(2.65)
         return orig(conn, user_id)
 
@@ -112,43 +114,48 @@ def test_tb116f_b4_slow_admit_still_reaches_transport(
     eng.dispose()
 
 
+def _window_reject_child(output: Connection) -> None:
+    from app.ingest import netguard as ng
+
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    handler.setLevel(logging.WARNING)
+    log = logging.getLogger("app.ingest.netguard")
+    log.addHandler(handler)
+    log.setLevel(logging.WARNING)
+    ng.install()
+    try:
+        with ng.egress_window(None):
+            raise SystemExit(2)
+    except ng.EgressBlocked:
+        output.send(buf.getvalue())
+    finally:
+        output.close()
+
+
 def test_tb116f_b4_window_reject_logs_lease_category() -> None:
-    # Hook is sticky: run in a subprocess so later selfchecks can still use subprocess.
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT / "src/backend") + os.pathsep + env.get("PYTHONPATH", "")
-    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
-    script = r"""
-import io, logging, sys
-from app.ingest import netguard as ng
-buf = io.StringIO()
-h = logging.StreamHandler(buf)
-h.setLevel(logging.WARNING)
-log = logging.getLogger("app.ingest.netguard")
-log.addHandler(h)
-log.setLevel(logging.WARNING)
-ng.install()
-try:
-    with ng.egress_window(None):
-        raise SystemExit(2)
-except ng.EgressBlocked:
-    pass
-text = buf.getvalue()
-assert "event=egress_window" in text, text
-assert "category=lease" in text, text
-assert "window=none" in text, text
-low = text.lower()
-assert "http://" not in low and "https://" not in low, text
-assert "mairuiapi.com" not in low, text
-print("OK")
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=15,
-        cwd=str(ROOT / "src/backend"),
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "OK" in result.stdout
+    # The audit hook is sticky; spawn a fresh interpreter and keep it out of pytest.
+    ctx = multiprocessing.get_context("spawn")
+    received, sent = ctx.Pipe(duplex=False)
+    child = ctx.Process(target=_window_reject_child, args=(sent,))
+    child.start()
+    sent.close()
+    try:
+        child.join(timeout=15)
+        assert not child.is_alive(), "isolated log check exceeded 15s"
+        assert child.exitcode == 0
+        assert received.poll(), "isolated child did not report an EgressBlocked refusal"
+        output = received.recv()
+        assert "event=egress_window" in output, output
+        assert "category=lease" in output, output
+        assert "window=none" in output, output
+        low = output.lower()
+        assert "http://" not in low
+        assert "https://" not in low
+        assert "mairuiapi.com" not in low
+    finally:
+        if child.is_alive():
+            child.terminate()
+            child.join()
+        received.close()
+        child.close()

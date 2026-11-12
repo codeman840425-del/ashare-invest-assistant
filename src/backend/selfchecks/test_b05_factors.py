@@ -106,7 +106,12 @@ def test_b05_factors_explicit_fixture_null_contract(
 
 
 @pytest.mark.parametrize(
-    ("code", "reason"), [(STOCK, "no_source"), (ETF, "not_applicable"), (INDEX, "no_source")]
+    ("code", "reason"),
+    [
+        (STOCK, "data_licence_unavailable"),
+        (ETF, "not_applicable"),
+        (INDEX, "data_licence_unavailable"),
+    ],
 )
 @pytest.mark.parametrize("requested", [None, "2026-11-03"])
 def test_b05_factors_default_source_null_contract(

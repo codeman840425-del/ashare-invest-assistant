@@ -165,7 +165,7 @@ export function FactorsTab({ code }: { code: string }) {
   return (
     <div data-testid="tab-factors">
       <TabHead status={<DataStatusTag status={d.data_status} asOf={d.data_as_of} gaps={d.gaps} />}>
-        截面日 {d.trade_date} · 因子集 {d.factor_set_version} · 共 {d.counts.total} 个 · 分位 0–100 只表示在全市场截面中的相对位置，不代表方向判断（如 PE 分位高 = 估值相对高）
+        截面日 {d.trade_date}{d.factor_set_version !== null ? ` · 因子集 ${d.factor_set_version}` : ''} · 共 {d.counts.total} 个 · 分位 0–100 只表示在全市场截面中的相对位置，不代表方向判断（如 PE 分位高 = 估值相对高）
         <SourcesNote sources={d.sources} />
       </TabHead>
       <GapNote status={d.data_status} gaps={d.gaps} asOf={d.data_as_of} />

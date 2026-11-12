@@ -1,6 +1,6 @@
 """T-T22安全适配：校准3个陈旧基准及1个合法合成worker夹具，其余原断言与真实helper保留。
 
-来源为T-T21固定e6eaeb2的同名selfchecks；使用 -p tt21_plugin 与同一审计入口。
+来源为T-T21固定e6eaeb2的同名selfchecks；当前图经conftest接原tt21真实夹具，不安装全局替换hook。
 不执行正式卡/共享库；T-B88已交付，按固定9635f12运行这4例。
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from selfchecks import test_ta16_policy_confidence as _policy
 from selfchecks import test_tb76_assembly as _assembly
 from selfchecks import test_tb77_aggregates as _aggregates
 from selfchecks import test_tb76_daily as _daily
-from selfchecks.test_tb70_replay import integration, no_network  # noqa: F401
+from selfchecks.test_tb70_replay import no_network  # noqa: F401
 from selfchecks.test_tb74_candidates import setup  # noqa: F401
 
 def test_actual_isolated_seed_idempotence_and_same_version_conflict(integration: _policy.Any) -> None:

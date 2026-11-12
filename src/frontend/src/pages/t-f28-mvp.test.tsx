@@ -11,7 +11,7 @@ import { mockLoginAs } from '../mocks/session';
 import { DAILY_REPORTS, uid, SUGGESTIONS } from '../mocks/fixtures';
 import { EXAMPLE_PROMOTION_REPORT } from '../mocks/promotionFixtures';
 import { DEMO_REVIEW_ID } from '../mocks/promotionHandlers';
-import { promotionRows } from './admin/AdminStrategyGatesPage';
+import { promotionRows } from './admin/promotionDisplay';
 import { RiskFlagView } from '../components/RiskFlagView';
 import { ActionBadge } from '../components/common';
 import { NAV_ADMIN_GATES, navMoreFor } from '../app/nav';
@@ -169,7 +169,7 @@ describe('T-F28 产品字段', () => {
 
 describe('T-F31 门禁 detail 对象展示', () => {
   it('对象/数组 detail 展开为文字，不出现 [object Object]', async () => {
-    const { formatGateDetail } = await import('./admin/AdminStrategyGatesPage');
+    const { formatGateDetail } = await import('./admin/promotionDisplay');
     expect(formatGateDetail({ issues: [], fixtures_all_pass: true })).toBe('issues：无；fixtures_all_pass：是');
     expect(formatGateDetail({ issue: 'execution_pending' })).toBe('issue：execution_pending');
     expect(formatGateDetail('示例数据')).toBe('示例数据');

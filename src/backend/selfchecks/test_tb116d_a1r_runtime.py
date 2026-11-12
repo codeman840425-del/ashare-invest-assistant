@@ -331,12 +331,13 @@ else:
 
 
 def test_tb116e_a1r_hostname_connect_denied() -> None:
-    # ⑩ non-IP literal (hostname) is always denied, even if C would resolve it.
+    # ⑩ CPython resolves in C before auditing connect. localhost resolves offline
+    # but remains a hostname: only a real EgressBlocked satisfies this check.
     _ok(
         r"""
 s = socket.socket(); s.settimeout(0.2)
 try:
-    s.connect(("example.com", 443))
+    s.connect(("localhost", 443))
 except ng.EgressBlocked:
     check_log(); print("OK")
 else:

@@ -37,7 +37,7 @@ segments:
       fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
       cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
       unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
-      data_source: null                             # 未接入：ETF 类别数据来源见 reports/T-B47-R10.md；接入前全部按 T+1
+      data_source: null   # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（null 时即使调用方传入类别也按 T+1；plan §2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）；候选来源与核实状态见 §2.13 及 reports/T-B47-R10.md，选定须架构师裁定
     fees:
       stamp_duty_sell_pct: 0.05       # 印花税仅卖出
       transfer_fee_pct: 0.001         # 过户费双向
@@ -97,7 +97,7 @@ segments:
       fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
       cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
       unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
-      data_source: null                             # 未接入：ETF 类别数据来源见 reports/T-B47-R10.md；接入前全部按 T+1
+      data_source: null   # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（null 时即使调用方传入类别也按 T+1；plan §2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）；候选来源与核实状态见 §2.13 及 reports/T-B47-R10.md，选定须架构师裁定
     fees:
       stamp_duty_sell_pct: 0.05       # 印花税仅卖出
       transfer_fee_pct: 0.001         # 过户费双向
@@ -157,7 +157,7 @@ segments:
       fund_categories: [bond_etf, money_etf, gold_etf, commodity_futures_etf, cross_border_etf, cross_border_lof]
       cross_border_requires_t0_constituents: true   # 跨境类仅限跟踪成份证券/投资标的实施当日回转者（沪/深 3.1.5 第 2 款）
       unknown_category_default_t_plus: 1            # 实现约定（非规则原文）：类别缺失按 T+1 保守处理
-      data_source: null                             # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）
+      data_source: null   # 未接入：选定并接入前全部 ETF 按 T+1，实现以本键非空为前提（null 时即使调用方传入类别也按 T+1；plan §2.13 ETF 当日回转行，v0.2.9 内 T-O11 裁定）；候选来源与核实状态见 §2.13 及 reports/T-B47-R10.md，选定须架构师裁定
     fees:
       stamp_duty_sell_pct: 0.1        # 印花税仅卖出；2023-08-28 减半前为 0.1%（《中华人民共和国印花税法》所附《印花税税目税率表》证券交易栏：成交金额的千分之一，2022-07-01 起施行；对出让方征收，见同法第三条；T-A148 复审 S9）；减半施行日见财政部 税务总局公告 2023 年第 39 号
       transfer_fee_pct: 0.001         # 过户费双向

@@ -4,7 +4,7 @@ from alembic import command
 from sqlalchemy import text
 from app.db.migration_check import MigrationLineageError, require_database_mainline, script_directory, BACKEND
 from selfchecks.test_ta14_migrations import config
-from tt21_head import expected_main_head
+from .tt21_head import expected_main_head
 
 
 def columns(conn):

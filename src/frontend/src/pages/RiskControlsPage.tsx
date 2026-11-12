@@ -1,5 +1,5 @@
 import { numericRiskRule, restoredRiskDefault, validateRiskParams } from '../lib/riskControlParams';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Alert, Button, Checkbox, Input, InputNumber, Select, Tabs, Tag } from 'antd';
 import { Link, useSearchParams } from 'react-router';
 import type { RiskControlSetting } from '../api/phase2Types';
@@ -39,10 +39,14 @@ function SettingFields({ value, change }: { value: RiskControlSetting; change: (
 }
 function SettingCard({ item }: { item: RiskControlSetting }) {
   const [draft, setDraft] = useState(item);
+  const [previousItem, setPreviousItem] = useState(item);
+  if (previousItem !== item) {
+    setPreviousItem(item);
+    setDraft(item);
+  }
   const save = useSaveRiskSettings();
   const issues = validateRiskParams(draft);
   const systemDefault = restoredRiskDefault(item);
-  useEffect(() => { setDraft(item); }, [item]);
   const edit = (next: RiskControlSetting) => { save.reset(); setDraft(next); };
   return <section className="panel" style={{ padding: 16 }} data-testid={`risk-setting-${item.control}`}>
     <h3>{RISK_CONTROL[item.control]} <Tag>{item.source === 'system' ? '系统有效值' : '本人覆盖值'}</Tag></h3>

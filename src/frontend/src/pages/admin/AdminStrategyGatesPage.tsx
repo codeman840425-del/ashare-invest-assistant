@@ -1,3 +1,4 @@
+import { promotionRows } from './promotionDisplay';
 import { useState } from 'react';
 import { Alert, Button, Checkbox, Input, Modal, Select, Table, Tag } from 'antd';
 import { useSearchParams } from 'react-router';
@@ -11,39 +12,11 @@ import { useTransientPassword } from './useTransientPassword';
 import { isUuid } from '../../lib/uuid';
 import type { AutomaticGateId, GateResultEntry, PromotionFilters, PromotionReport, PromotionSummary } from '../../api/promotionTypes';
 
-const GATES = ['G1', 'G2', 'G3', 'G4', 'G5', 'G6'] as const;
 const RESULT = { pass: '通过', fail: '未通过', warn: '警告', skipped: '未执行' };
 const COLORS = { pass: 'green', fail: 'red', warn: 'orange', skipped: 'default' };
 const DECISION = { pending: '待审核', approved: '已批准', rejected: '已拒绝', changes_requested: '需修改' };
 const NULL_REASON = { no_history: '近 120 日历史不足或未体检', no_comparable_set: '没有可比较的其他模板命中集合' };
 
-/** detail 契约未定类型：字符串原样；对象/数组逐项展开成文字，不猜含义、不显示 [object Object]。 */
-export function formatGateDetail(detail: unknown): string {
-  if (detail === null || detail === undefined || detail === '') return '—';
-  if (typeof detail === 'string') return detail;
-  if (typeof detail === 'boolean') return detail ? '是' : '否';
-  if (typeof detail === 'number') return String(detail);
-  if (Array.isArray(detail)) return detail.length ? detail.map(formatGateDetail).join('、') : '无';
-  if (typeof detail === 'object') {
-    const entries = Object.entries(detail as Record<string, unknown>);
-    return entries.length ? entries.map(([k, v]) => `${k}：${formatGateDetail(v)}`).join('；') : '—';
-  }
-  return String(detail);
-}
-
-/** null 不填 0；夹具失败不能被覆盖成 warn；缺报告不造 pass。 */
-export function promotionRows(report: PromotionReport): GateResultEntry[] {
-  return GATES.map((gate) => {
-    const row = report.gate_results.find((g) => g.gate === gate) ?? { gate, result: 'skipped' as const, detail: '报告缺少该门禁结果' };
-    const text = formatGateDetail(row.detail);
-    if (gate === 'G6' && report.g6_report.max_jaccard === null) {
-      const reason = report.g6_report.max_jaccard_null_reason;
-      return { ...row, result: row.result === 'pass' ? 'warn' : row.result,
-        detail: `${text}；${reason ? `${reason}：${NULL_REASON[reason]}` : '缺少 max_jaccard_null_reason'}（重合度未通过验证）` };
-    }
-    return { ...row, detail: text };
-  });
-}
 function WriteError({ error }: { error: unknown }) {
   if (!error) return null;
   if (error instanceof ApiError && error.code === 'REAUTH_FAILED') return <Alert type="error" showIcon title="本次密码复核失败，请重新输入本人密码；当前会话未退出。" />;
@@ -114,6 +87,8 @@ function ReportContent({ id }: { id: string }) {
   const [dialog, setDialog] = useState<'decision' | 'lifecycle' | null>(null);
   const decisionPassword = useTransientPassword();
   const lifecyclePassword = useTransientPassword();
+  const { ref: decisionRef, onChange: decisionChanged } = decisionPassword;
+  const { ref: lifecycleRef, onChange: lifecycleChanged } = lifecyclePassword;
   const approve = useApprovePromotion(id, decisionPassword.take);
   const lifecycle = useStrategyLifecycle(lifecyclePassword.take);
   const rows = report.data ? promotionRows(report.data) : [];
@@ -172,7 +147,7 @@ function ReportContent({ id }: { id: string }) {
       onCancel={() => { if (!approve.isPending) { decisionPassword.clear(); setDialog(null); } }}
       onOk={() => approve.mutate({ comment: comment.trim(), ack_warn_gates: warnings.filter((g) => ack.includes(g)) }, { onSuccess: () => setDialog(null), onSettled: decisionPassword.clear })}>
       <p>请管理员本人重新输入密码并确认。审核意见：{comment}</p>
-      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={decisionPassword.ref} aria-label="审核复核密码" autoComplete="new-password" onChange={decisionPassword.onChange} disabled={approve.isPending} />
+      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={decisionRef} aria-label="审核复核密码" autoComplete="new-password" onChange={decisionChanged} disabled={approve.isPending} />
       <WriteError error={approve.error} />
     </Modal>
     <Modal title="晋级 · 本人密码复核" open={dialog === 'lifecycle'} destroyOnHidden confirmLoading={lifecycle.isPending} closable={!lifecycle.isPending} mask={{ closable: !lifecycle.isPending }}
@@ -180,7 +155,7 @@ function ReportContent({ id }: { id: string }) {
       onCancel={() => { if (!lifecycle.isPending) { lifecyclePassword.clear(); setDialog(null); } }}
       onOk={() => template && lifecycle.mutate({ id: template.id, vid: template.current_version.id, reason: reason.trim(), review_id: id }, { onSuccess: () => setDialog(null), onSettled: lifecyclePassword.clear })}>
       <p>请管理员本人重新输入密码。目标：{template?.name}；审核编号：{id}。此操作独立于 G7 批准。</p>
-      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={lifecyclePassword.ref} aria-label="晋级复核密码" autoComplete="new-password" onChange={lifecyclePassword.onChange} disabled={lifecycle.isPending} />
+      <input type="password" className="ant-input" style={{ width: '100%', padding: 8, background: '#141b24', color: 'inherit', border: '1px solid #314155' }} ref={lifecycleRef} aria-label="晋级复核密码" autoComplete="new-password" onChange={lifecycleChanged} disabled={lifecycle.isPending} />
       <WriteError error={lifecycle.error} />
     </Modal>
   </>;

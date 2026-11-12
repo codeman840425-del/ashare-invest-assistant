@@ -6,28 +6,25 @@ Uses TB116_DATABASE_URL (isolated PG). Never calls real Mairui (_https_get must 
 
 from __future__ import annotations
 
-import ast
 import datetime as dt
 import os
-import socket
 import time
 import uuid
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from types import SimpleNamespace
+from typing import Never, Self
 
 import pytest
 import yaml
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.pool import NullPool
 
 from app.config_files import IngestConfig
 from app.ingest import egress as eg
 from app.ingest.core import IngestCore
 from app.ingest.daily_lists import DailyHaltError
 from app.ingest.state import Priority
-from app.ingest.upstream import Signal
 from app.schemas.enums import DataLicenceStatus, DataLicenceTier
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -66,11 +63,11 @@ def _seed(engine: Engine, uid: uuid.UUID, lid: uuid.UUID, *, status: str = "acti
         )
 
 
-def _clock(when: dt.datetime):
+def _clock(when: dt.datetime) -> Callable[[], dt.datetime]:
     return lambda: when
 
 
-def _calls_transport(box: list[str]):
+def _calls_transport(box: list[str]) -> Callable[[str, str], tuple[int, object]]:
     def transport(path: str, secret: str) -> tuple[int, object]:
         box.append(path)
         assert secret == SENTINEL
@@ -79,15 +76,14 @@ def _calls_transport(box: list[str]):
     return transport
 
 
-
 @contextmanager
-def _issued_lease(engine: Engine):
+def _issued_lease(engine: Engine) -> Iterator[eg.EgressLease]:
     with eg.single_egress(engine) as lease:
         assert lease is not None, "single-egress not acquired in selfcheck"
         yield lease
 
 
-def _mg(*, engine: Engine, **kwargs):  # noqa: ANN003
+def _mg(*, engine: Engine, **kwargs: object) -> eg.EgressResult:
     """mairui_get under an issued lease. Pass lease= to exercise deny paths."""
     if "lease" in kwargs:
         return eg.mairui_get(engine=engine, **kwargs)
@@ -98,17 +94,19 @@ def _mg(*, engine: Engine, **kwargs):  # noqa: ANN003
 # ---- FC1 HALT/STOP before lock/DB ----
 
 
-def test_tb116_fc1_halt_present_zero_transport_no_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tb116_fc1_halt_present_zero_transport_no_db(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("SERVICE_NAME", "api")
     monkeypatch.setenv("APP_ENV", "local")
     halt = tmp_path / "HALTED"
     halt.write_bytes(b"limit_103_or_429")
     stop = tmp_path / "STOP"
     calls: list[str] = []
-    engine = create_engine("sqlite+pysqlite:///:memory:")  # must not be queried
+    create_engine("sqlite+pysqlite:///:memory:")  # must not be queried
 
     class BoomEngine:
-        def connect(self):  # noqa: ANN001
+        def connect(self) -> Never:
             raise AssertionError("halt_present must not open DB")
 
     with pytest.raises(eg.EgressDenied) as ei:
@@ -134,7 +132,9 @@ def test_tb116_fc1_halt_present_zero_transport_no_db(tmp_path: Path, monkeypatch
 # ---- FC4 / FC6 / FC13-style lease & core ----
 
 
-def test_tb116_fc4_no_lease_and_fc6_core_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tb116_fc4_no_lease_and_fc6_core_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("SERVICE_NAME", "api")
     monkeypatch.setenv("APP_ENV", "local")
     stop, halt = tmp_path / "STOP", tmp_path / "HALT"
@@ -256,7 +256,8 @@ def test_tb116_happy_and_fc8_token_bucket_and_fc10_network(
     core = IngestCore(CFG, engine=engine)
 
     # Force tiny bucket via cfg copy — use annual default then drain by override on upsert path:
-    # mairui_get upserts without override; instead call twice with per_minute=1 by patching core.per_minute
+    # mairui_get upserts without override; call twice with per_minute=1
+    # by patching core.per_minute.
     monkeypatch.setattr(core, "per_minute", lambda tier, override=None: 1)
 
     r1 = _mg(
@@ -395,10 +396,10 @@ def test_tb116_fc9_event_insert_fail_pending_then_deny(
 
     # Break event inserts by revoking INSERT on events for this session via a boom wrapper
     class BoomConn:
-        def __init__(self, real):  # noqa: ANN001
+        def __init__(self, real) -> None:  # noqa: ANN001
             self._real = real
 
-        def execute(self, *a, **k):  # noqa: ANN001
+        def execute(self, *a: object, **k: object) -> object:
             sql = str(a[0]) if a else ""
             if "data_licence_events" in sql.lower() or "INSERT" in sql.upper():
                 # only boom on event writes heuristically via compile
@@ -410,32 +411,32 @@ def test_tb116_fc9_event_insert_fail_pending_then_deny(
                     raise RuntimeError("tb116_event_insert_boom")
             return self._real.execute(*a, **k)
 
-        def __enter__(self):  # noqa: ANN001
+        def __enter__(self) -> Self:
             return self
 
-        def __exit__(self, *a):  # noqa: ANN001
+        def __exit__(self, *a: object) -> bool | None:
             return False
 
     class BoomBegin:
-        def __init__(self, real_engine):  # noqa: ANN001
+        def __init__(self, real_engine) -> None:  # noqa: ANN001
             self._eng = real_engine
 
-        def __enter__(self):  # noqa: ANN001
+        def __enter__(self) -> BoomConn:
             self._ctx = self._eng.begin()
             self._conn = self._ctx.__enter__()
             return BoomConn(self._conn)
 
-        def __exit__(self, *a):  # noqa: ANN001
+        def __exit__(self, *a: object) -> bool | None:
             return self._ctx.__exit__(*a)
 
     class BoomEngine:
-        def __init__(self, real):  # noqa: ANN001
+        def __init__(self, real) -> None:  # noqa: ANN001
             self._real = real
 
-        def connect(self):  # noqa: ANN001
+        def connect(self) -> object:
             return self._real.connect()
 
-        def begin(self):  # noqa: ANN001
+        def begin(self) -> BoomBegin:
             return BoomBegin(self._real)
 
     core.engine = BoomEngine(engine)  # type: ignore[assignment]
@@ -508,7 +509,7 @@ def test_tb116_fc5_rehydrate_lock_timeout_fail_closed(
     engine = create_engine(url, hide_parameters=True)
     uid, lid = uuid.uuid4(), uuid.uuid4()
     _seed(engine, uid, lid)
-    stop, halt = tmp_path / "S", tmp_path / "H"
+    _stop, _halt = tmp_path / "S", tmp_path / "H"
     core = IngestCore(CFG, engine=engine)
     # Hold ip_limit advisory lock in another connection so flush/rehydrate path times out
     holder = engine.connect()
@@ -585,7 +586,7 @@ def test_tb116_deny_codes_no_secret_or_url(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_tb116_https_get_not_used_in_selfchecks(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden(*a, **k):  # noqa: ANN001
+    def forbidden(*a: object, **k: object) -> Never:
         raise AssertionError("real _https_get must not be called in T-B116 selfchecks")
 
     monkeypatch.setattr(eg, "_https_get", forbidden)

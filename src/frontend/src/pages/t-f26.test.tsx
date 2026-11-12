@@ -2,7 +2,7 @@
  * T-F26：证券搜索显示曾用名命中与 quote_missing（契约 v0.2.9 内 T-A04 #33 ②，SecurityHit；§9 v0.2.9 验收 3、5、7），
  * 以及 #41：搜索不缓存（staleTime 0、不写本地存储）、429 按 retry_after_s 暂停、输入防抖 250 ms；网关 414。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
@@ -174,7 +174,9 @@ describe('顶栏搜索 UI', { timeout: 15_000 }, () => {
     await advance(400);
     expect(calls).toBe(1);
     expect(screen.getByTestId('search-status')).toHaveTextContent('搜索过于频繁');
-    await advance(30_000);
+    // Advance the full cooldown in one tick; act/findBy then flush the expiry request.
+    // Async per-timer advancement of this large window can exhaust the real test budget.
+    await act(async () => { vi.advanceTimersByTime(30_000); });
     await screen.findByTestId('search-hit-600000.SH', {}, { timeout: 3000 });
     expect(calls).toBe(2);
   });

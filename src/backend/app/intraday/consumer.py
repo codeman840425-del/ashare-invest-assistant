@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Protocol
 
 import redis
+from redis.client import PubSub
 from sqlalchemy import select
 
 from app.config import Settings
@@ -12,11 +14,16 @@ from app.db.tables.reviews import data_snapshots
 from app.intraday.engine import SCHEMA, Updated, task
 
 
+class PubSubClient(Protocol):
+    def pubsub(self, *, ignore_subscribe_messages: bool) -> PubSub: ...
+
+
 class Consumer:
     def __init__(self, settings: Settings, client: redis.Redis) -> None:
         self.settings = settings
         self.client = client
-        self.pubsub = client.pubsub(ignore_subscribe_messages=True)
+        pubsub_client: PubSubClient = client
+        self.pubsub = pubsub_client.pubsub(ignore_subscribe_messages=True)
         self.pubsub.subscribe("market.updated")
         self.last_fallback: dt.datetime | None = None
 

@@ -899,6 +899,8 @@
 
 有适用且可核实的真实因子集时，返回与该响应因子集绑定的真实非空版本字符串；即使分类/日期筛选使 `items=[]`，也不能仅因空结果把已知真实版本抹成 `null`。非空因子结果不得无版本；版本绑定缺失是需修复的数据完整性缺口，不能以 `null` 搭配正常数据状态冒充有效结果，也不得静默丢弃已有数据或吞掉 SQL/权限异常以满足空集例外。禁止空串、`"null"`、应用版本、示例版本或臆造版本作为替代；本条不创建版本注册来源，不改变 `calc_version`、`feature_set_version` 或其他字段的取值协议。身份、本人证书隔离、查询参数校验、错误码、弱 ETag 与缓存头沿用原规则；GET 不因补版本新增写入、抓取任务或审计事件。**兼容影响**：原来将该字段断言为必为字符串的客户端/schema/mock/测试须同步接受此限定的 `null`；前端不展示空版本，真实版本正常展示。
 
+**当前实现范围注（O-CI1-PROFILE，候选 `442554fd`）**：本轮 financials、fund-flows、factors、announcements 四个 GET 只接鉴权、查询校验与适用性/缺口的 empty/unavailable 视图；正常证券的 owner-scoped provider/cache 尚未接入，不代表正常数据查询已完成。没有归属证明的全局行情表不得作为替代来源；`200` 空集必须保留实际 `no_source`/`data_licence_unavailable` 或 ETF `not_applicable`，不得显示正常数据状态或伪造取数、版本与时点。本注记录本轮限制，不取消上表对正常数据集的目标契约；后续接 provider/cache 仍须绑定本人证书、真实因子集版本并验证正常数据分支。
+
 `/securities/*` 全部响应（含 `304`、错误）带 `Cache-Control: private, no-store`（v0.2.9 #41）。所有 v0.2.7 新增的个股读接口：`{code}` 不存在 → `404 NOT_FOUND`；用北交所旧代码 → `404{superseded_by}`；参数越界 → `400 VALIDATION_ERROR`；限流 → `429 RATE_LIMITED{retry_after_s}`。**不返回** `409 DATA_LICENCE_UNAVAILABLE`（§1.1）。弱 ETag 与 §1 相同。
 
 #### `/today` 补充（v0.2.7，在原响应结构上新增字段）

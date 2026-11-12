@@ -1857,6 +1857,8 @@ market.* (hypertable 标 *) : securities, trading_calendar, daily_bars*, minute_
 > **因子读接口版本投影（O-CI1-PROFILE-CONTRACT，2026-11-12 Chief 裁定；契约 §7.3）**：`GET /securities/{code}/factors.factor_set_version` 为必出现的 `string | null`。明确无适用/可用且版本可核实的真实因子集时，只返回 `items=[]`、`counts={total:0, by_category:{}}`、`data_status=unavailable` 及实际 `factors` gap，版本为 `null`；本版 ETF 必为该空集与 `not_applicable`、版本必 `null`。无来源/本人证书不可用分别保 `no_source`/`data_licence_unavailable`，不得改成类型不适用。完全无数据时不补时点。
 > 有真实因子集时返回其真实非空版本，筛选后无条目也不能抹掉已知版本；有数据却缺版本绑定须修复完整性，不能以 `null` 配正常数据状态、丢弃数据或吞 SQL/权限异常求绿。不使用空串、应用版本、示例版本或臆造来源；不改变 `calc_version`/`feature_set_version`，不新增注册表、迁移、读接口写入或外部抓取。后端响应/schema及契约测试、前端类型/mock/空版本显示须同批同步；旧必字符串假设不兼容，旧真实版本保持。详见 [裁定](reviews/O-CI1-PROFILE-CONTRACT.md)。
 
+> **O-CI1-PROFILE 当前交付边界（候选 442554fd）**：financials、fund-flows、factors、announcements 四 GET 本轮仅 empty/unavailable 的适用性与缺口视图；正常证券的 owner-scoped provider/cache 未接，不以无属主全局行情补齐，不把空集 200 当正常数据完成。真实 provider 与版本绑定仍按契约 §7.3 目标继续，当前限制须随 PR 保留。
+
 > **数据归属（T-A07，2.1B）**：`data_sharing.mode=per_licence`（默认）时，全部 `market.*` 表（`securities` 除外：它只存证券公开主数据，全站一份，第 9 节问题 51；`trading_calendar`、`daily_bars`、`quotes_snapshot`、`realtime_quotes`、`minute_bars`、`financial_reports`、`fund_flows`、`factor_values`、`announcements`、`qa_items`、`market_events`、`feature_bars_daily`）、`market.raw_payloads`、`intraday_universe` 与 Redis 行情缓存键都加 `source_licence_id`（uuid，FK `user_data_licences.id`），并进入唯一键和主要查询索引；`signal_states` 的 `scope=shared` 改为“同一证书内共享”。读取一律按当前用户的证书过滤，不读别人证书取到的数据。用户删除证书或账号时，该证书名下的行情数据按保留策略清理，不转给他人。`shared_cache` 模式下 `source_licence_id` 只记录实际取数的证书，供审计（启用前须取得麦蕊书面确认，第 9 节问题 50）。
 
 > `first_seen_at` 是"我们何时知道"的依据，是按原貌回看与"当时已知信息"判断的关键：回看 T 时刻时，只使用 `first_seen_at <= T` 的公告/事件/财报版本。

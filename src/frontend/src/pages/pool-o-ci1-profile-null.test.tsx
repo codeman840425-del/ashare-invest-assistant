@@ -29,7 +29,7 @@ it.each([
 });
 
 it('正常股票保留因子数据与已有字符串版本展示', async () => {
-  render(<AppProviders client={makeQueryClient(true)}><FactorsTab code="600519.SH" /></AppProviders>);
+  render(<AppProviders client={makeQueryClient(true)}><FactorsTab code="600000.SH" /></AppProviders>);
   expect(await screen.findByText(/因子集 mr-factors-85（示例）/)).toBeInTheDocument();
   expect(screen.getByRole('table')).toBeInTheDocument();
   expect(screen.queryByTestId('factor-empty')).toBeNull();

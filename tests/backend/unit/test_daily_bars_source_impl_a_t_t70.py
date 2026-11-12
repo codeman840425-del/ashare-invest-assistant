@@ -1149,10 +1149,10 @@ def test_downgrade_refuses_when_sourced_rows_exist(temp_db: SimpleNamespace) -> 
     assert _daily_bar_count(temp_db.engine) >= 1
     url_str = temp_db.url.render_as_string(hide_password=False)
     cfg = _alembic_config(url_str)
-    script = ScriptDirectory.from_config(cfg)
-    head = script.get_current_head()
-    down = script.get_revision(head).down_revision
-    with pytest.raises(Exception):  # noqa: BLE001
+    # Source columns belong to 0032. Later heads (0033/0034) have their own
+    # downgrade guards and must not silently move this regression's target.
+    down = ScriptDirectory.from_config(cfg).get_revision("0032").down_revision
+    with pytest.raises(Exception, match="refusing downgrade 0032"):  # noqa: BLE001
         command.downgrade(cfg, down)
     with temp_db.engine.connect() as conn:
         assert _daily_bar_count(temp_db.engine) >= 1

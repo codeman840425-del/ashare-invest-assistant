@@ -95,6 +95,11 @@ def test_invalid_action_is_rejected() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.local_tb58
+@pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="Grok 2026-11-12 B1: fixed tb58 identity is a local gate; never adopt CI resources",
+)
 def test_isolated_pg_guard_writes_and_savepoint(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

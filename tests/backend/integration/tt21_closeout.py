@@ -13,7 +13,14 @@ PREFIX='tt21_'+MODE+'_'+uuid.uuid4().hex[:10]+':'
 created=set();mapped={};denials=[]
 sys.path.insert(0,str(ROOT/'src/backend'));sys.path.insert(0,str(Path(__file__).parent))
 if __name__=='__main__':sys.modules['tt21_closeout']=sys.modules[__name__]
+def verify_ci_services():
+    # Explicit CI entrypoint; live daemon identity and creation evidence are mandatory.
+    from .ci_unix_identity import verify
+    return verify()[1]
+
 def verify_services():
+    if 'AIA_CI_UNIX_RECEIPT' in os.environ:
+        return verify_ci_services()
     rows=json.loads((OUT/'resources.json').read_text())
     assert [(x['Name'],x['network'],x['running']) for x in rows]==[('/o33-review-pg','none',True),('/o33-review-redis','none',True)]
     assert rows[0]['Id']=='5dec46709f06366bf33512765158376bfd93e304103a465b1ab8b5350493a5ff'

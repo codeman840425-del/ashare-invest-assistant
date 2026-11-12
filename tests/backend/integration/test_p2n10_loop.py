@@ -89,6 +89,13 @@ def database():
     )
     cache.flushdb()  # adapter deletes this run's physical prefix only, never shared FLUSHDB
     name = "tb70_p2n10_" + uuid.uuid4().hex
+    ci_receipt = None
+    ci_created = set()
+    if "AIA_CI_UNIX_RECEIPT" in os.environ:
+        from . import ci_unix_identity as ci_identity
+        ci_receipt, ci_artifacts = ci_identity.verify()
+        logical_name = name
+        name = ci_identity.owned_name(ci_receipt, logical_name)
     socket_path = json.loads((artifacts() / "isolation.json").read_text())[0]["mounts"][
         0
     ]["Source"]
@@ -97,14 +104,25 @@ def database():
         dbname="postgres", user="postgres", host=socket_path, autocommit=True
     ) as admin:
         assert admin.execute("SHOW listen_addresses").fetchone() == ("",)
-        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-        if "tt21_closeout" in sys.modules:
-            from tt21_closeout import own_name
+        if ci_receipt is not None:
+            from .ci_owned_database import create_owned_database
+            created_name = create_owned_database(admin, ci_receipt, logical_name, ci_created)
+            assert created_name == name
         else:
-            from .tt21_closeout import own_name
-        # Keep the native actual-database identity guard intact, not monkeypatched.
-        url = url.replace("/" + name + "?", "/" + own_name(name) + "?")
+            admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
         try:
+            if ci_receipt is not None:
+                ci_identity.require_owned_database(ci_receipt, logical_name, name, ci_created)
+                ci_identity.save_database_event(ci_artifacts, ci_receipt, logical_name, name, "created")
+                with psycopg.connect(dbname=name, user="postgres", host=socket_path) as owned:
+                    assert owned.execute("SELECT current_database()").fetchone() == (name,)
+            else:
+                if "tt21_closeout" in sys.modules:
+                    from tt21_closeout import own_name
+                else:
+                    from .tt21_closeout import own_name
+                # Preserve the legacy resource adapter's original mapping.
+                url = url.replace("/" + name + "?", "/" + own_name(name) + "?")
             cfg = Config()
             cfg.set_main_option("script_location", str(ROOT / "src/backend/migrations"))
             graph = ScriptDirectory.from_config(cfg)
@@ -122,7 +140,11 @@ def database():
                         ).scalar_one()
                         == heads[0]
                     )
-                    deploy_grants(conn)
+                    if ci_receipt is not None:
+                        from .ci_owned_database import deploy_owned_grants
+                        deploy_owned_grants(conn, ci_receipt, logical_name, name, ci_created)
+                    else:
+                        deploy_grants(conn)
                     for code in shared.CODES:
                         conn.execute(
                             insert(securities).values(
@@ -138,21 +160,28 @@ def database():
                 engine.dispose()
             yield url.replace("postgres@", "aia_api@")
         finally:
-            cache.flushdb()
-            cache.close()
-            # Business transactions intentionally commit to THIS disposable DB so
-            # independent API/worker connections see real state. Never shared DBs.
-            admin.execute(
-                sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name))
-            )
-            (artifacts() / "database-cleanup.json").write_text(
-                json.dumps(
-                    {
-                        "dedicated_database_dropped": True,
-                        "real_application_transactions": True,
-                    }
+            try:
+                cache.flushdb()
+            finally:
+                cache.close()
+                # Business transactions commit only to THIS disposable database.
+                if ci_receipt is not None:
+                    ci_identity.verify()  # Live identity before destructive cleanup.
+                    ci_identity.require_owned_database(ci_receipt, logical_name, name, ci_created)
+                admin.execute(
+                    sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name))
                 )
-            )
+                if ci_receipt is not None:
+                    ci_created.remove(name)
+                    ci_identity.save_database_event(ci_artifacts, ci_receipt, logical_name, name, "dropped")
+                (artifacts() / "database-cleanup.json").write_text(
+                    json.dumps(
+                        {
+                            "dedicated_database_dropped": True,
+                            "real_application_transactions": True,
+                        }
+                    )
+                )
 
 
 @pytest.fixture(scope="module")

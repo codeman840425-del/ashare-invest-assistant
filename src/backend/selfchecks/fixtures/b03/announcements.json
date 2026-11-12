@@ -1,0 +1,90 @@
+{
+  "etf": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/510300.SH/announcements"
+    },
+    "response": {
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "disclaimer": "公告内容以交易所及上市公司披露原文为准，本系统仅提供标题与原文链接。",
+      "gaps": [
+        {
+          "key": "announcements",
+          "message": "合成 ETF 不适用",
+          "reason": "not_applicable"
+        }
+      ],
+      "items": [],
+      "next_cursor": null,
+      "sources": []
+    }
+  },
+  "licence_unavailable": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/999999.SH/announcements"
+    },
+    "response": {
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "disclaimer": "公告内容以交易所及上市公司披露原文为准，本系统仅提供标题与原文链接。",
+      "gaps": [
+        {
+          "key": "announcements",
+          "message": "合成证书不可用，无缓存",
+          "reason": "data_licence_unavailable"
+        }
+      ],
+      "items": [],
+      "next_cursor": null,
+      "sources": []
+    }
+  },
+  "stock": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/999999.SH/announcements"
+    },
+    "response": {
+      "data_as_of": "2026-11-03T21:00:00+08:00",
+      "data_status": "fresh",
+      "disclaimer": "公告内容以交易所及上市公司披露原文为准，本系统仅提供标题与原文链接。",
+      "gaps": [],
+      "items": [
+        {
+          "category": "other",
+          "category_raw": "其它",
+          "file_format": null,
+          "first_seen_at": "2026-11-03T09:10:00+08:00",
+          "id": "syn-ann-0002",
+          "level_raw": "提示",
+          "published_at": "2026-11-03T09:00:00+08:00",
+          "title": "合成示例：非白名单链接演示（合成标题）",
+          "url": null,
+          "url_host": "not-whitelisted.example"
+        },
+        {
+          "category": "periodic_report",
+          "category_raw": "定期报告",
+          "file_format": "pdf",
+          "first_seen_at": "2026-11-02T18:20:00+08:00",
+          "id": "syn-ann-0001",
+          "level_raw": null,
+          "published_at": "2026-11-02T18:00:00+08:00",
+          "title": "合成示例：季度报告（合成标题）",
+          "url": null,
+          "url_host": "example.invalid"
+        }
+      ],
+      "next_cursor": null,
+      "sources": [
+        {
+          "endpoint": null,
+          "fetched_at": "2026-11-03T21:00:00+08:00",
+          "provider": "mairui"
+        }
+      ]
+    }
+  }
+}

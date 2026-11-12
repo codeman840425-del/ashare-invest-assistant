@@ -1,0 +1,140 @@
+{
+  "licence_unavailable": {
+    "request": {
+      "params": {
+        "adjust": "none",
+        "freq": "d"
+      },
+      "path": "/api/v1/securities/999999.SH/bars"
+    },
+    "response": {
+      "adjust": "none",
+      "adjust_as_of": null,
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "freq": "d",
+      "gaps": [
+        {
+          "key": "bars",
+          "message": "合成证书不可用，无缓存",
+          "reason": "data_licence_unavailable"
+        }
+      ],
+      "items": [],
+      "name": "合成示例股份",
+      "next_before": null,
+      "pre_close": null,
+      "security_code": "999999.SH"
+    }
+  },
+  "minute": {
+    "request": {
+      "params": {
+        "adjust": "none",
+        "freq": "1m"
+      },
+      "path": "/api/v1/securities/999999.SH/bars"
+    },
+    "response": {
+      "adjust": "none",
+      "adjust_as_of": null,
+      "data_as_of": "2026-11-03T15:40:00+08:00",
+      "data_status": "fresh",
+      "freq": "1m",
+      "gaps": [],
+      "items": [
+        {
+          "amount": "12000000.00",
+          "avg_price": "10.00",
+          "close": "10.10",
+          "high": "10.20",
+          "is_final": true,
+          "low": "9.90",
+          "open": "10.00",
+          "pre_close": "10.00",
+          "t": "2026-11-03T09:31:00+08:00",
+          "volume": "1200000"
+        }
+      ],
+      "name": "合成示例股份",
+      "next_before": null,
+      "pre_close": "10.00",
+      "security_code": "999999.SH"
+    }
+  },
+  "pending": {
+    "request": {
+      "params": {
+        "adjust": "none",
+        "freq": "d"
+      },
+      "path": "/api/v1/securities/999999.SH/bars"
+    },
+    "response": {
+      "adjust": "none",
+      "adjust_as_of": null,
+      "data_as_of": null,
+      "data_status": "pending",
+      "freq": "d",
+      "gaps": [
+        {
+          "key": "bars",
+          "message": "合成队列在途，未调用上游",
+          "reason": "quota_deferred"
+        }
+      ],
+      "items": [],
+      "name": "合成示例股份",
+      "next_before": null,
+      "pre_close": null,
+      "security_code": "999999.SH"
+    }
+  },
+  "stock": {
+    "request": {
+      "params": {
+        "adjust": "none",
+        "freq": "d"
+      },
+      "path": "/api/v1/securities/999999.SH/bars"
+    },
+    "response": {
+      "adjust": "none",
+      "adjust_as_of": null,
+      "data_as_of": "2026-11-03T15:40:00+08:00",
+      "data_status": "fresh",
+      "freq": "d",
+      "gaps": [],
+      "items": [
+        {
+          "amount": "12000000.00",
+          "avg_price": null,
+          "close": "10.10",
+          "high": "10.20",
+          "is_final": true,
+          "low": "9.90",
+          "open": "10.00",
+          "pre_close": "10.00",
+          "t": "2026-11-02",
+          "volume": "1200000"
+        },
+        {
+          "amount": "9200000.00",
+          "avg_price": null,
+          "close": "10.30",
+          "high": "10.35",
+          "is_final": true,
+          "low": "10.05",
+          "open": "10.10",
+          "pre_close": "10.10",
+          "t": "2026-11-03",
+          "volume": "900000"
+        }
+      ],
+      "name": "合成示例股份",
+      "next_before": null,
+      "pre_close": null,
+      "security_code": "999999.SH"
+    }
+  }
+}

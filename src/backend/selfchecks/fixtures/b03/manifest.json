@@ -1,0 +1,24 @@
+{
+  "application_routes": false,
+  "baseline": "465e02046fa8d971897603742497444f884e89a2",
+  "cases": 19,
+  "draft_model": "deepseek/deepseek-flash",
+  "draft_sha256": "00840a6550b03099a883f7840d7df46d49d1795fa2897fc63e57057967fe8a3a",
+  "files": {
+    "announcements.json": "9630ae29c291a344f4422fd37fbb3d6465ba2c2614a4d8c3a8f74a5e7c2bfccf",
+    "bars.json": "7ecf21a63e898fcdae6434f0243817e8439f4eda309f88fe28ceb6e933f1db26",
+    "factors.json": "14692c2166633033fd97f6966f965b92b483c9d19a3077c09432aacffac3ea9a",
+    "financials.json": "0100f1b38118e8a5843ef590b2562d43a52de3a595046d5143d6198b6cb31df4",
+    "fund-flows.json": "ee9c2d23579a71e7dfe4ab90e4130dcde0ce011530f06b8b87a41ed8f0a3379c"
+  },
+  "frontend_types": {
+    "announcements": "AnnouncementsResponse",
+    "bars": "BarsResponse",
+    "factors": "FactorsResponse",
+    "financials": "FinancialsResponse",
+    "fund-flows": "FundFlowsResponse"
+  },
+  "known_frontend_gap": "DataStatusBlock.data_as_of is string in baseline; empty-data cases require null under T-A53",
+  "synthetic": true,
+  "upstream_calls": 0
+}

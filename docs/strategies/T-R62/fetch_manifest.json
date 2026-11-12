@@ -1,0 +1,30 @@
+{
+  "source": "http://www.cninfo.com.cn/new/hisAnnouncement/query",
+  "fetched_at": "2026-11-10T20:46:59.927420+00:00",
+  "delay_seconds": 1.5,
+  "total_rows": 450,
+  "dates": {
+    "2026-11-02": {
+      "pages": 15,
+      "totalAnnouncement": 460,
+      "rows_fetched": 450,
+      "page_sha256": [
+        "3ab2593550f3f5ca8f38cffcdad12b6564998d04ccc5b0c2272bbd8ff1c04a1c",
+        "168e0230dbbc2b340927719bb40d50df92542ffc400ee964c5cb2cf6cda96ea8",
+        "eb8a9c6b7719b1d05f57981f9d568e8347f078a167157d025d9dd884caf4acc9",
+        "ad70890832b237ecd7c18b3ca9c175f5db72eef85ee5383449166380e44bc5eb",
+        "ebea4cefd59500d847320f737b3b9999f6f95b04a33a07762ec8df4b10c7c381",
+        "69685a4c72021f706a691a7681c6782645d2b061e2d8e6e0cf9eff001fd43cac",
+        "a7d5350f30b7f1648b0bf5dd0938943d1e3f2602d9b618b1954b72bd9c5197ca",
+        "44bd186e29f308a0e7b01537d738d8629969d62cb48350ba435d532e6a614787",
+        "dbc3395a99c3ff70b1af1b0985a62d2aab0b5c51238205a19547700759a8469c",
+        "382c49c9bdb896bd8c638ce88e8d14b68522d70142a93bfc10a338ee7d31d85c",
+        "988ca06b2d788f7145aacf99601d81f3e95ed9be0282e93bc26e50694f6e0c6f",
+        "7515b2e76cc8c1943f16d603d5de76a08f6e8b1adfbc23da3182c100c27aa6c0",
+        "5b2818eda7dcf562f8308f874d1aee158a4a5d667a00edbdd66659538d520ccb",
+        "9c60849e92e98a1cff38a5963a1e17311cb885da9df9696206a405bf21bbd3f9",
+        "5e7b4e04192d63ec5ef4e35278d86f935c9c22c9ebad4a11f7eb20fa3faabb5b"
+      ]
+    }
+  }
+}

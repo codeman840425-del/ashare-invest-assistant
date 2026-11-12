@@ -95,15 +95,13 @@ describe(`Mock 字段与契约 ${CONTRACT_VERSION} 逐字一致`, () => {
   // v0.2.7 在说明文字里给对象加的字段（不在花括号结构内），逐条核对说明原文后并入期望集合
   const PROSE_ADDED: Record<string, string[]> = {
     Bar: ['is_final'],
-    // §7.11.4 aggregation/version amendments extend the older §5.1 inline shape.
-    Notification: ['merged_count', 'refs', 'updated_at', 'version'],
   };
   it('Notification includes the four explicit §7.11.4 contract amendments', () => {
     expect(CONTRACT).toContain('`Notification` 追加 `merged_count: int`');
     expect(CONTRACT).toContain('`updated_at: datetime`');
     expect(CONTRACT).toContain('`refs: [{type, id, at}]`');
     expect(CONTRACT).toContain('`Notification` 追加 `version: int`');
-    expect(sorted([...inlineShape('Notification'), ...PROSE_ADDED.Notification])).toEqual([
+    expect(sorted(inlineShape('Notification'))).toEqual([
       'body', 'created_at', 'id', 'kind', 'merged_count', 'name', 'read_at',
       'refs', 'security_code', 'severity', 'target', 'title', 'updated_at', 'version',
     ]);

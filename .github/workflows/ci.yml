@@ -73,6 +73,7 @@ jobs:
           printf 'P2N10_ARTIFACTS=%s/o-ci1-res/artifacts\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           printf 'PLAYWRIGHT_BROWSERS_PATH=%s/o-ci1-browsers\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           printf 'AIA_CI_FAILURE_TRACE=%s/o-ci1-res/failures.jsonl\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'AIA_CI_TEMPLATE_RECEIPT=%s/o-ci1-templates/resources.json\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: ${{ env.UV_VERSION }}
@@ -90,7 +91,9 @@ jobs:
       - name: 迁移到 head（供 TT41_DATABASE_URL / t_t41·t_t45）
         working-directory: src/backend
         run: uv run --frozen alembic upgrade head
-      - name: 准备 A2–A31 模板库（o61_tmp_0030 仅存在于本一次性服务）
+      - name: 准备独立 0030 模板与 head 自检库（仅本次服务）
+        env:
+          AIA_CI_PG_SERVICE_ID: ${{ job.services.db.id }}
         run: bash scripts/ci/prepare_tt50_template.sh
       - name: 预拉 A32 用例所需镜像（--pull never）
         run: |
@@ -170,6 +173,15 @@ jobs:
         run: |
           test -f "${RUNNER_TEMP}/coverage.json" || { echo "::error title=coverage::没有 coverage.json（pytest 未运行）"; exit 1; }
           python3 scripts/ci/check_coverage.py "${RUNNER_TEMP}/coverage.json"
+      - name: 正常收尾本 run 新建的 0030 模板与 head 自检库
+        if: ${{ always() }}
+        env:
+          AIA_CI_PG_SERVICE_ID: ${{ job.services.db.id }}
+        run: |
+          set -euo pipefail
+          if [ -f "$AIA_CI_TEMPLATE_RECEIPT" ]; then
+            bash scripts/ci/prepare_tt50_template.sh cleanup
+          fi
       - name: 正常收尾本 run 的精确自有 Unix 资源
         if: ${{ always() }}
         run: |

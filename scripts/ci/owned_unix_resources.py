@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -114,10 +115,46 @@ def cleanup(path: Path, receipt: dict) -> None:
         raise RuntimeError("Owned resource cleanup incomplete; see receipt")
 
 
+def initialize_roles(conn, receipt: dict, path: Path) -> None:
+    # Original role definitions, exclusively on the newly owned PG, without
+    # passwords, database grants or cluster settings from the rest of the file.
+    grants = (ROOT / "deploy/db/roles/grants.sql").read_text(encoding="utf-8")
+    roles_sql = grants[grants.index("DO $roles$"):grants.index("-- 口令：")].strip()
+    expected = {"aia_api": True, "aia_ingest": True, "aia_maint": False}
+    if conn.execute("SELECT rolname FROM pg_roles WHERE rolname = ANY(%s)", (list(expected),)).fetchall():
+        raise RuntimeError("Refuse to adopt pre-existing application roles")
+    conn.execute(roles_sql)
+    rows = conn.execute(
+        "SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, "
+        "rolreplication, rolbypassrls, rolinherit FROM pg_roles WHERE rolname = ANY(%s)", (list(expected),),
+    ).fetchall()
+    if {r[0]: tuple(r[1:]) for r in rows} != {
+        name: (True, False, False, False, False, False, inherit) for name, inherit in expected.items()
+    }:
+        raise RuntimeError("Fresh application role attributes differ from grants.sql")
+    if conn.execute(
+        "SELECT count(*) FROM pg_auth_members WHERE roleid IN "
+        "(SELECT oid FROM pg_roles WHERE rolname = ANY(%s)) OR member IN "
+        "(SELECT oid FROM pg_roles WHERE rolname = ANY(%s))", (list(expected), list(expected)),
+    ).fetchone() != (0,):
+        raise RuntimeError("Fresh application roles must have no memberships")
+    receipt["initialized_roles"] = {
+        "names": sorted(expected), "container_id": receipt["containers"][0]["Id"],
+        "source": "deploy/db/roles/grants.sql", "sql_sha256": hashlib.sha256(roles_sql.encode()).hexdigest(),
+        "attributes_verified": True, "memberships": 0, "initialized_at": now(),
+    }
+    save(path, receipt)
+
+
 def apply(path: Path, env: dict) -> None:
     path = path.resolve()
     if not path.is_relative_to(Path(env["RUNNER_TEMP"]).resolve()) or path.exists():
         raise RuntimeError("A new receipt under RUNNER_TEMP is required")
+    artifacts = path.parent / "artifacts"
+    if os.path.lexists(artifacts):
+        raise RuntimeError("Refuse to adopt an existing artifacts directory")
+    if os.environ.get("P2N10_ARTIFACTS") != str(artifacts):
+        raise RuntimeError("P2N10_ARTIFACTS must match this receipt's artifacts directory")
     # Fixed test paths must not already exist, including dangling links.
     for p in [PG_SOCKET, REDIS_SOCKET, *ALIASES]:
         if os.path.lexists(p):
@@ -125,10 +162,17 @@ def apply(path: Path, env: dict) -> None:
     token = secrets.token_hex(12)
     owner = {"aia.task": "O-CI1-RES", "aia.run": env["GITHUB_RUN_ID"], "aia.attempt": env["GITHUB_RUN_ATTEMPT"], "aia.owner": token}
     receipt = {"schema": "aia-ci-unix-resources-v1", "run_id": env["GITHUB_RUN_ID"], "attempt": env["GITHUB_RUN_ATTEMPT"], "sha": env["GITHUB_SHA"],
-               "owner": owner, "created_at": now(), "state": "creating", "containers": [], "commands": [], "paths": []}
+               "owner": owner, "created_at": now(), "state": "creating", "containers": [], "commands": [], "paths": [],
+               "artifacts_root": str(artifacts)}
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     save(path, receipt)
     try:
+        artifacts.mkdir(mode=0o700)
+        (artifacts / "p2n10").mkdir(mode=0o700)
+        (artifacts / "p2n10/runtime").mkdir(mode=0o700)
+        for p in [artifacts, artifacts / "p2n10", artifacts / "p2n10/runtime"]:
+            receipt["paths"].append({"path": str(p), "inode": p.stat().st_ino})
+        save(path, receipt)
         for p in [PG_SOCKET, REDIS_SOCKET]:
             p.mkdir(mode=0o777)
             p.chmod(0o777)  # Only a new socket dir on the dedicated ephemeral host.
@@ -182,6 +226,7 @@ def apply(path: Path, env: dict) -> None:
         with psycopg.connect(dbname="postgres", user="postgres", host=str(PG_SOCKET), autocommit=True) as conn:
             if conn.execute("SHOW listen_addresses").fetchone() != ("",):
                 raise RuntimeError("Dedicated PostgreSQL must have TCP disabled")
+            initialize_roles(conn, receipt, path)
             conn.execute(sql.SQL("CREATE DATABASE {} ").format(sql.Identifier("tb70_replay")))
         receipt["created_databases"] = [{"name": "tb70_replay", "container_id": receipt["containers"][0]["Id"], "created_at": now(), "fresh_empty": True}]
         save(path, receipt)

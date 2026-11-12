@@ -111,6 +111,9 @@ def cleanup(path: Path, receipt: dict) -> None:
             failures.append({"Id": row["Id"], "error_type": type(error).__name__, "message": str(error)})
     receipt.update(cleanup_at=now(), cleanup_failures=failures, state="cleanup_failed" if failures else "cleaned")
     save(path, receipt)
+    # This schema contains selected inspect fields and command metadata only;
+    # never Config.Env, application logs, SQL rows or browser session context.
+    print(json.dumps({"owned_resource_receipt": receipt}, sort_keys=True))
     if failures:
         raise RuntimeError("Owned resource cleanup incomplete; see receipt")
 
@@ -163,7 +166,7 @@ def apply(path: Path, env: dict) -> None:
     owner = {"aia.task": "O-CI1-RES", "aia.run": env["GITHUB_RUN_ID"], "aia.attempt": env["GITHUB_RUN_ATTEMPT"], "aia.owner": token}
     receipt = {"schema": "aia-ci-unix-resources-v1", "run_id": env["GITHUB_RUN_ID"], "attempt": env["GITHUB_RUN_ATTEMPT"], "sha": env["GITHUB_SHA"],
                "owner": owner, "created_at": now(), "state": "creating", "containers": [], "commands": [], "paths": [],
-               "artifacts_root": str(artifacts)}
+               "artifacts_root": str(artifacts), "artifact_paths": []}
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     save(path, receipt)
     try:
@@ -171,7 +174,7 @@ def apply(path: Path, env: dict) -> None:
         (artifacts / "p2n10").mkdir(mode=0o700)
         (artifacts / "p2n10/runtime").mkdir(mode=0o700)
         for p in [artifacts, artifacts / "p2n10", artifacts / "p2n10/runtime"]:
-            receipt["paths"].append({"path": str(p), "inode": p.stat().st_ino})
+            receipt["artifact_paths"].append({"path": str(p), "inode": p.stat().st_ino})
         save(path, receipt)
         for p in [PG_SOCKET, REDIS_SOCKET]:
             p.mkdir(mode=0o777)

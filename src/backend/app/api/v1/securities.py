@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 from fastapi import APIRouter, Header, Request, Response
 
 from app.api.v1.imports import etag_response
 from app.auth.deps import AuthDep, EngineDep, SettingsDep
-from app.marketdata.dataset_queries import validate_dataset_query
-from app.marketdata.datasets import Dataset, empty_dataset
+from app.marketdata.bars_read import BarsQuery, BarsReaderDep, BarsResponse
 from app.master.profile import profile
 from app.master.search import invalid, search
 
@@ -56,6 +53,19 @@ def search_securities(
     return etag_response(content, if_none_match)
 
 
+@router.get("/{code}/bars", response_model=BarsResponse)
+def security_bars(
+    code: str,
+    request: Request,
+    auth: AuthDep,
+    reader: BarsReaderDep,
+    if_none_match: str | None = Header(default=None),
+) -> Response:
+    query = BarsQuery.parse(request.query_params)
+    content = BarsResponse.model_validate(reader.read(auth.user_id, code, query))
+    return etag_response(content.model_dump(mode="json"), if_none_match)
+
+
 @router.get("/{code}")
 def security_profile(
     code: str,
@@ -65,29 +75,4 @@ def security_profile(
 ) -> Response:
     with engine.connect() as conn:
         content = profile(conn, auth.user_id, code)
-    return etag_response(content, if_none_match)
-
-
-@router.get("/{code}/financials")
-@router.get("/{code}/fund-flows")
-@router.get("/{code}/factors")
-@router.get("/{code}/announcements")
-def security_dataset(
-    code: str,
-    request: Request,
-    auth: AuthDep,
-    engine: EngineDep,
-    settings: SettingsDep,
-    if_none_match: str | None = Header(default=None),
-) -> Response:
-    """Authenticated dataset applicability; never borrows another user's cache."""
-    # Only these four concrete registered paths reach this handler.
-    dataset = cast(Dataset, request.url.path.rsplit("/", 1)[1])
-    with engine.connect() as conn:
-        selected_date = validate_dataset_query(
-            conn, settings, auth.user_id, code, dataset, request.query_params
-        )
-        content = empty_dataset(conn, auth.user_id, code, dataset)
-        if dataset == "factors":
-            content["trade_date"] = selected_date
     return etag_response(content, if_none_match)

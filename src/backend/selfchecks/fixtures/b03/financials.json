@@ -1,0 +1,105 @@
+{
+  "etf": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/510300.SH/financials"
+    },
+    "response": {
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "gaps": [
+        {
+          "key": "financials",
+          "message": "合成 ETF 不适用",
+          "reason": "not_applicable"
+        }
+      ],
+      "items": [],
+      "name": "合成 ETF 示例",
+      "security_code": "510300.SH",
+      "sources": []
+    }
+  },
+  "index": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/000001.SH/financials"
+    },
+    "response": {
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "gaps": [
+        {
+          "key": "financials",
+          "message": "合成指数无该数据源",
+          "reason": "no_source"
+        }
+      ],
+      "items": [],
+      "name": "合成指数示例",
+      "security_code": "000001.SH",
+      "sources": []
+    }
+  },
+  "licence_unavailable": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/999999.SH/financials"
+    },
+    "response": {
+      "data_as_of": null,
+      "data_status": "unavailable",
+      "gaps": [
+        {
+          "key": "financials",
+          "message": "合成证书不可用，无缓存",
+          "reason": "data_licence_unavailable"
+        }
+      ],
+      "items": [],
+      "name": "合成示例股份",
+      "security_code": "999999.SH",
+      "sources": []
+    }
+  },
+  "stock": {
+    "request": {
+      "params": {},
+      "path": "/api/v1/securities/999999.SH/financials"
+    },
+    "response": {
+      "data_as_of": "2026-11-01T20:00:00+08:00",
+      "data_status": "fresh",
+      "gaps": [],
+      "items": [
+        {
+          "announce_date": "2026-10-30",
+          "available_from": "2026-11-02",
+          "bvps": "4.25",
+          "debt_ratio_pct": "42.00",
+          "deducted_net_profit": "90000000.00",
+          "eps": "0.31",
+          "gross_margin_pct": "31.20",
+          "is_restated": false,
+          "net_profit": "98765432.00",
+          "net_profit_yoy_pct": "6.20",
+          "operating_cash_flow": "87654321.00",
+          "period_end": "2026-09-30",
+          "report_period": "q3",
+          "revenue": "1234567890.00",
+          "revenue_yoy_pct": "8.50",
+          "roe_pct": "7.30"
+        }
+      ],
+      "name": "合成示例股份",
+      "security_code": "999999.SH",
+      "sources": [
+        {
+          "endpoint": null,
+          "fetched_at": "2026-11-01T20:00:00+08:00",
+          "provider": "mairui"
+        }
+      ]
+    }
+  }
+}

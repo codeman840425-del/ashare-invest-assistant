@@ -1,0 +1,16 @@
+"""Collect the original test_b04_bars assertions in the backend CI scope."""
+
+from selfchecks.test_b04_bars import (
+    env as env,
+    test_b04_auth_before_parameters_and_reader as test_b04_auth_before_parameters_and_reader,
+    test_b04_default_source_only_reads_public_identity as test_b04_default_source_only_reads_public_identity,
+    test_b04_etag_304_keeps_private_no_store as test_b04_etag_304_keeps_private_no_store,
+    test_b04_fixture_install_refused_outside_local_test as test_b04_fixture_install_refused_outside_local_test,
+    test_b04_fixture_unknown_security_404 as test_b04_fixture_unknown_security_404,
+    test_b04_invalid_query_400 as test_b04_invalid_query_400,
+    test_b04_owner_scope_no_fallback_or_spoofed_owner as test_b04_owner_scope_no_fallback_or_spoofed_owner,
+    test_b04_pagination_no_duplicates_and_inclusive_dates as test_b04_pagination_no_duplicates_and_inclusive_dates,
+    test_b04_pending_preserves_null_without_queue_writes as test_b04_pending_preserves_null_without_queue_writes,
+    test_b04_registered_http_shape_and_data_times as test_b04_registered_http_shape_and_data_times,
+    test_b04_unconnected_modes_never_relabel_unadjusted_data as test_b04_unconnected_modes_never_relabel_unadjusted_data,
+)

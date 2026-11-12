@@ -556,6 +556,21 @@
       "path": "docs/strategies/T-R55/inventory.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R55 read-only inventory of S-01 v1 bindings in src/tests/config/deploy (not a card, not importable); T-A78 ①b non-identity"
+    },
+    {
+      "path": "docs/strategies/T-R58/param_audit.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R58 read-only audit of thresholds/defaults in contracts T-A142/T-A143 and cards H-01/W-01/S-01 (not a card, not importable); T-A78 ①b non-identity"
+    },
+    {
+      "path": "docs/strategies/T-R58/reference_survey.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R58 reference survey of intraday VWAP-deviation/volume-ratio parameters in prior research and external projects (not a card, not importable); T-A78 ①b non-identity"
+    },
+    {
+      "path": "docs/strategies/T-R58/retest_plan.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R58b retest plan spec for intraday VWAP-deviation k*sigma+floor and volume-ratio thresholds (method spec, not a card, not importable); T-A78 ①b non-identity"
     }
   ],
   "records": [

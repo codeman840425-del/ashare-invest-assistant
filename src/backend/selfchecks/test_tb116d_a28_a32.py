@@ -1,4 +1,4 @@
-# ruff: noqa: S101, S105, S110, S603, ANN001, ANN002, ANN003, ANN202, E501, PT017, PT018, SIM105
+# ruff: noqa: S101, S110, S603, ANN001, ANN002, ANN003, ANN202, E501, PT017, PT018, SIM105
 """T-B116d A28–A31 selfchecks (A32 lives with the tb90 pipeline fixture)."""
 
 from __future__ import annotations

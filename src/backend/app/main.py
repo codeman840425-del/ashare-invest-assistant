@@ -22,6 +22,7 @@ from app.common.middleware import (
     PathCacheControlMiddleware,
     RequestIdMiddleware,
 )
+from app.common.resource_routes import install_resources
 from app.config import ConfigError, Settings, get_settings
 from app.config_files import BUSINESS_FILES
 from app.db.migration_check import check_startup
@@ -84,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         value=SECURITIES_CACHE_CONTROL,
     )
     app.include_router(v1_router, prefix=cfg.api_prefix)
+    install_resources(app)
 
     logger.info(
         "app created env=%s prefix=%s business_config=%s",

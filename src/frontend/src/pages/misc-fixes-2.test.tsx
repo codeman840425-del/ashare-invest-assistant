@@ -4,7 +4,8 @@
  */
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { createMemoryRouter, RouterProvider } from 'react-router';
+import { createMemoryRouter } from 'react-router';
+import { TestRouterProvider as RouterProvider } from '../test/TestRouterProvider';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
@@ -16,6 +17,7 @@ import { emptyStats, state, type MockBatch } from '../mocks/session';
 import { apiFetch } from '../test/apiFetch';
 import { preloadRoutes } from '../test/preloadRoutes';
 import { settled } from '../test/timing';
+import { traceRefreshTest } from '../test/refreshTrace';
 
 configure({ asyncUtilTimeout: 5000 });
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -79,11 +81,17 @@ describe('#36：refresh 以响应体为准', () => {
   });
 
   it('取代旧卡：按响应体里的 suggestion.id 跳转，不再另发 GET /suggestions?status=active', async () => {
+    const trace = traceRefreshTest('misc-refresh-response-id');
     const rec = recordRequests();
     const router = renderAt(`/suggestions/${sgBank.id}`);
+    trace.watchRouter(router);
+    trace.mark('waiting for initial refresh button');
     fireEvent.click(await screen.findByTestId('sg-refresh'));
+    trace.mark('initial refresh clicked; waiting for navigation');
     await waitFor(() => expect(router.state.location.pathname).not.toBe(`/suggestions/${sgBank.id}`));
+    trace.mark('navigation observed; waiting for new-card message');
     expect(await screen.findByTestId('sg-refresh-msg')).toHaveTextContent('已切换到新卡');
+    trace.mark('new-card message observed');
     rec.stop();
     const after = rec.seen.slice(rec.seen.findIndex((x) => x.startsWith('POST /api/v1/suggestions/refresh')));
     // 旧实现刷新后另发 GET /suggestions?security_code=&status=active&limit=1 取当前卡；现在以响应体为准

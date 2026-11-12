@@ -7,4 +7,4 @@ if [ ! -x "$py" ]; then
   echo "::error title=tt50-template::找不到 src/backend/.venv，须先 uv sync" >&2
   exit 1
 fi
-exec "$py" "$root/scripts/ci/prepare_tt50_template.py"
+exec "$py" "$root/scripts/ci/prepare_tt50_template.py" "$@"

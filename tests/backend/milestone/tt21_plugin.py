@@ -12,7 +12,10 @@ from app.schemas.enums import RegistrationMode
 from app.db.tables.users import users
 from app.replay.baseline import require_isolated
 from selfchecks import test_tb70_replay as tb70
-from tt21_head import expected_main_head
+if __package__:
+    from .tt21_head import expected_main_head
+else:  # Original standalone -p tt21_plugin entrypoint.
+    from tt21_head import expected_main_head
 DB, REDIS, INSTRUMENTS = tb70.DB, tb70.REDIS, tb70.INSTRUMENTS
 
 @pytest.fixture
@@ -88,7 +91,10 @@ from sqlalchemy import update
 from app.auth.deps import get_password_policy
 from app.auth.sessions import CSRF_HEADER
 from app.strategy.cards.persistence import validate_batch, import_batch
-from tt21_synthetic import document as synthetic_document, registry as synthetic_registry
+if __package__:
+    from .tt21_synthetic import document as synthetic_document, registry as synthetic_registry
+else:
+    from tt21_synthetic import document as synthetic_document, registry as synthetic_registry
 @pytest.fixture
 def tt21_gate_context(integration: Any) -> Any:
     engine, client, stranger, owner, other = integration

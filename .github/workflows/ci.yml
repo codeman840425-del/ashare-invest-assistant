@@ -61,14 +61,17 @@ jobs:
       PGPASSWORD: ci-only
       # 后端自检 A28–A31（独立库，由 prepare_tt50_template.py 创建）
       TB116D_DATABASE_URL: postgresql+psycopg://aia:ci-only@127.0.0.1:5432/o67_selfcheck
-      AIA_CI_UNIX_RECEIPT: ${{ runner.temp }}/o-ci1-res/resources.json
-      P2N10_ARTIFACTS: ${{ runner.temp }}/o-ci1-res/artifacts
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/o-ci1-browsers
       MAIRUI_MODE: replay
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: 绑定本 run 的私有回执与浏览器路径
+        run: |
+          set -euo pipefail
+          printf 'AIA_CI_UNIX_RECEIPT=%s/o-ci1-res/resources.json\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'P2N10_ARTIFACTS=%s/o-ci1-res/artifacts\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'PLAYWRIGHT_BROWSERS_PATH=%s/o-ci1-browsers\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: ${{ env.UV_VERSION }}

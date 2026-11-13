@@ -139,7 +139,9 @@ it('45秒无任何字节主动断开；reset不把latest冒充已收到事件，
 
 // P2N-05h：T-A32两项裁定，不包含AI解释工作。
 it('T-A32 非200、200后EOF、45秒读超时连续累计到3次，期间建流成功不归零', async () => {
-  fakeClock(); let calls = 0; const failures: number[] = []; const polls: boolean[] = [];
+  // 精确累计 44999/45000ms 边界，纯注入流只允许显式推进时钟。
+  vi.useFakeTimers({ shouldAdvanceTime: false, toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  let calls = 0; const failures: number[] = []; const polls: boolean[] = [];
   const fetchImpl: typeof fetch = async (_url, init) => {
     calls++; if (calls === 1) return new Response(null, { status: 503 });
     return new Response(new ReadableStream({ start(c) {

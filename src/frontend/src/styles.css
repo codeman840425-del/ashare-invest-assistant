@@ -171,8 +171,7 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; }
 /* ---------- report ---------- */
 .report .detail-head h1 { margin: 0; font-size: 18px; }
 .report-meta { display: flex; flex-wrap: wrap; gap: 10px 24px; margin: 12px 0; }
-.report-meta dt { color: var(--muted); }
-.report-meta dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.report-meta p { margin: 0; overflow-wrap: anywhere; }
 .report-nav { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 12px 0; }
 .report-nav a { padding: 4px 0; }
 .report-nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

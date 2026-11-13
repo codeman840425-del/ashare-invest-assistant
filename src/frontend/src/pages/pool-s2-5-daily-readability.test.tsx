@@ -29,8 +29,8 @@ it('章节入口定位已渲染区域，快照日期、生成时间和来源时�
   }
   const info = within(page).getByLabelText('日报快照信息');
   expect(info).toHaveTextContent(REPORT_DATE);
-  expect(within(info).getByText('生成于')).toBeInTheDocument();
-  expect(within(info).getByText('数据截至')).toBeInTheDocument();
+  expect(within(info).getByText(`生成于 ${fmtTime(DAILY_REPORTS[0].generated_at)}`)).toBeInTheDocument();
+  expect(within(info).getByText(`数据截至 ${DAILY_REPORTS[0].data_as_of === null ? '—（无来源）' : fmtTime(DAILY_REPORTS[0].data_as_of)}`)).toBeInTheDocument();
   expect(info).toHaveTextContent(fmtTime(DAILY_REPORTS[0].generated_at));
   expect(info).toHaveTextContent(DAILY_REPORTS[0].data_as_of === null ? '—（无来源）' : fmtTime(DAILY_REPORTS[0].data_as_of));
   expect(router.state.location.search).toBe('?filter=changed');

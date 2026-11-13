@@ -220,12 +220,12 @@ export function DailyReportPage() {
         <Tag>不可变快照</Tag>
         <DataStatusTag status={r.data_status} asOf={r.data_as_of} gaps={r.gaps} />
       </div>
-      <dl className="report-meta small" aria-label="日报快照信息">
-        <div><dt>日报日期</dt><dd>{r.date}</dd></div>
-        <div><dt>生成于</dt><dd>{fmtTime(r.generated_at)}</dd></div>
-        <div><dt>数据截至</dt><dd>{r.data_as_of === null ? '—（无来源）' : fmtTime(r.data_as_of)}</dd></div>
-        <div><dt>说明来源</dt><dd>{r.explanation.source === 'template' ? '模板' : 'LLM'}</dd></div>
-      </dl>
+      <div className="report-meta small" role="group" aria-label="日报快照信息">
+        <p>日报日期 {r.date}</p>
+        <p>生成于 {fmtTime(r.generated_at)}</p>
+        <p>数据截至 {r.data_as_of === null ? '—（无来源）' : fmtTime(r.data_as_of)}</p>
+        <p>说明来源 {r.explanation.source === 'template' ? '模板' : 'LLM'}</p>
+      </div>
       <nav className="report-nav small" aria-label="日报章节">
         <a href="#report-overview">本期总览</a>
         {r.gaps.length ? <a href="#report-data-gaps">数据缺口（{r.gaps.length}）</a> : null}

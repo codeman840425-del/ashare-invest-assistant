@@ -2,7 +2,7 @@
  * T-T74：today 页空态与缺口展示，按契约 16 条 G/W/T 先写红。
  *
  * 契约：git show 1c10a10:docs/contracts/today-view.md（§4 的 16 条）；补充裁定 git show 838b121:docs/contracts/today-view.md（docs/T-A139 新头，§7 的 12 条）。未合入 docs。
- * 编排者裁定默认：17:30–18:30 不提前显示缺口；逾时阈值 = REPORT_EXPECTED_AT + 15 分钟（默认 18:45）；缺口区显示代码和名称；
+ * S3-7 编排者批准同步：17:30–17:45 不提前显示缺口；逾时阈值 = REPORT_EXPECTED_AT + 15 分钟（默认 17:45）；缺口区显示代码和名称；
  * 时间按 Asia/Shanghai（含浏览器时区非上海的用例）；未知 code 兜底。
  *
  * 禁用 skip / todo / xfail。断言失败信息带「缺实现：…」，避免被当成用例写错。
@@ -31,15 +31,15 @@ const TIME_1720 = '2026-11-10T09:20:00Z';
 const TIME_1740 = '2026-11-10T09:40:00Z';
 /** 北京 18:40（日报已生成窗口） */
 const TIME_1840 = '2026-11-10T10:40:00Z';
-/** 北京 18:44（默认逾时阈值前 1 分钟，仍为 S4） */
+/** 北京 18:44（保留原场景，已过默认逾时阈值，S5） */
 const TIME_1844 = '2026-11-10T10:44:00Z';
-/** 北京 18:45（默认逾时阈值，含边界，S5） */
+/** 北京 18:45（保留原场景，已过默认逾时阈值，S5） */
 const TIME_1845 = '2026-11-10T10:45:00Z';
 /** 北京 18:50（S5 逾时，默认阈值之后） */
 const TIME_1850 = '2026-11-10T10:50:00Z';
-/** 北京 17:44（非默认 REPORT_EXPECTED_AT=17:30 时，逾时 17:45 前 1 分钟） */
+/** 北京 17:44（默认 REPORT_EXPECTED_AT=17:30，逾时 17:45 前 1 分钟） */
 const TIME_1744 = '2026-11-10T09:44:00Z';
-/** 北京 17:45（非默认逾时阈值） */
+/** 北京 17:45（默认逾时阈值） */
 const TIME_1745 = '2026-11-10T09:45:00Z';
 /** 北京 14:59:59（交易日 15:00 前，不显示 R2） */
 const TIME_145959 = '2026-11-10T06:59:59Z';
@@ -51,7 +51,7 @@ const TIME_1910 = '2026-11-10T11:10:00Z';
 const S1 = '还没有导入持仓，导入后才能生成你的日报。';
 const S2 = '当前没有持仓，日报只覆盖你的自选。';
 const S3 = '今天休市，没有新的日报。';
-const S4 = '盘后数据准备中，日报约 18:30 生成。';
+const S4 = '盘后数据准备中，日报约 17:30 生成。';
 const S4_HINT = '候选信号已更新。';
 const S5 = '今日日报还没有生成，请稍后再看。';
 const S6 = '今日行情数据未就绪，本日报未做策略分析。';
@@ -448,8 +448,8 @@ describe('T-T74 today 页验收（1c10a10 §4，16 条 + 通用断言与逾时�
         focus: { items: [holdingRow('000001.SZ', '示例甲')], more: false },
       }),
     });
-    expectText(S4, missing('S4 未显示「盘后数据准备中，日报约 18:30 生成。」（契约 §2.1 / §3 / 用例 4；17:30–18:30 不提前显示缺口）'));
-    expectNoText(COPY_BARS_MISSING, missing('17:30–18:30 窗口不得提前显示分析缺口（契约 §3、用例 4）'));
+    expectText(S4, missing('S4 未显示「盘后数据准备中，日报约 17:30 生成。」（契约 §2.1 / §3 / 用例 4；17:30–17:45 不提前显示缺口）'));
+    expectNoText(COPY_BARS_MISSING, missing('17:30–17:45 窗口不得提前显示分析缺口（契约 §3、用例 4）'));
     expectNoDailyReportFetch(missing('S4 在 status 非 ready 时不得请求 /daily-reports/（契约 §1、用例 4）'));
   });
 
@@ -464,7 +464,7 @@ describe('T-T74 today 页验收（1c10a10 §4，16 条 + 通用断言与逾时�
     });
     expectText(S4, missing('S4 文案未显示（契约用例 5）'));
     expectText(S4_HINT, missing('S4 在 focus 已有候选信号时应追加「候选信号已更新。」（契约 §2.1 / §3 / 用例 5）'));
-    expectNoDailyReportFetch(missing('17:30–18:30 且 status 非 ready 时不得请求 /daily-reports/（契约 §3、用例 5）'));
+    expectNoDailyReportFetch(missing('17:30–17:45 且 status 非 ready 时不得请求 /daily-reports/（契约 §3、用例 5）'));
   });
 
   it('6. 北京 18:50、status=not_yet → S5', async () => {
@@ -476,11 +476,25 @@ describe('T-T74 today 页验收（1c10a10 §4，16 条 + 通用断言与逾时�
         focus: { items: [holdingRow('000001.SZ', '示例甲')], more: false },
       }),
     });
-    expectText(S5, missing('S5 未显示「今日日报还没有生成，请稍后再看。」（契约 §2.1 / §3：逾时 = REPORT_EXPECTED_AT+15 分钟，默认 18:45；用例 6）'));
+    expectText(S5, missing('S5 未显示「今日日报还没有生成，请稍后再看。」（契约 §2.1 / §3：逾时 = REPORT_EXPECTED_AT+15 分钟，默认 17:45；用例 6）'));
     expectNoDailyReportFetch(missing('S5 时 status 仍为 not_yet，不得请求 /daily-reports/（契约 §1、用例 6）'));
   });
 
-  it('6b. 默认逾时边界：北京 18:44、not_yet 仍为 S4，不出 S5', async () => {
+  it('6b. 默认逾时边界：北京 17:44、not_yet 仍为 S4，不出 S5', async () => {
+    await renderToday({
+      today: emptyToday({
+        session: 'closed',
+        server_time: TIME_1744,
+        daily_report: { date: TRADE_DATE, status: 'not_yet' },
+        focus: { items: [holdingRow('000001.SZ', '示例甲')], more: false },
+      }),
+    });
+    expectText(S4, missing('默认 REPORT_EXPECTED_AT=17:30 时，逾时阈值为 17:45；17:44 仍应显示 S4'));
+    expectNoText(S5, missing('17:44（阈值前 1 分钟）不得显示 S5'));
+    expectNoDailyReportFetch(missing('17:44 且 status 非 ready 时不得请求 /daily-reports/'));
+  });
+
+  it('6b补充. 原北京 18:44、not_yet 场景 → S5', async () => {
     await renderToday({
       today: emptyToday({
         session: 'closed',
@@ -489,12 +503,25 @@ describe('T-T74 today 页验收（1c10a10 §4，16 条 + 通用断言与逾时�
         focus: { items: [holdingRow('000001.SZ', '示例甲')], more: false },
       }),
     });
-    expectText(S4, missing('默认 REPORT_EXPECTED_AT=18:30 时，逾时阈值为 18:45；18:44 仍应显示 S4（编排者裁定：REPORT_EXPECTED_AT+15 分钟）'));
-    expectNoText(S5, missing('18:44（阈值前 1 分钟）不得显示 S5'));
+    expectText(S5, missing('18:44 已过默认逾时阈值 17:45，应显示 S5'));
+    expectNoText(S4, missing('18:44、not_yet 不得显示 S4'));
     expectNoDailyReportFetch(missing('18:44 且 status 非 ready 时不得请求 /daily-reports/'));
   });
 
-  it('6c. 默认逾时边界：北京 18:45、not_yet → S5（含边界）', async () => {
+  it('6c新增. 默认逾时边界：北京 17:45、not_yet → S5（含边界）', async () => {
+    await renderToday({
+      today: emptyToday({
+        session: 'closed',
+        server_time: TIME_1745,
+        daily_report: { date: TRADE_DATE, status: 'not_yet' },
+        focus: { items: [holdingRow('000001.SZ', '示例甲')], more: false },
+      }),
+    });
+    expectText(S5, missing('17:45 为默认逾时阈值（17:30 + 15 分钟），含边界，应显示 S5'));
+    expectNoDailyReportFetch(missing('S5 时 status 仍为 not_yet，不得请求 /daily-reports/'));
+  });
+
+  it('6c. 原北京 18:45、not_yet 场景 → S5', async () => {
     await renderToday({
       today: emptyToday({
         session: 'closed',
@@ -503,7 +530,7 @@ describe('T-T74 today 页验收（1c10a10 §4，16 条 + 通用断言与逾时�
         focus: { items: [holdingRow('000001.SZ', '示例甲')], more: false },
       }),
     });
-    expectText(S5, missing('18:45 为默认逾时阈值（REPORT_EXPECTED_AT 18:30 + 15 分钟），含边界，应显示 S5'));
+    expectText(S5, missing('18:45 已过默认逾时阈值（REPORT_EXPECTED_AT 17:30 + 15 分钟），应显示 S5'));
     expectNoDailyReportFetch(missing('S5 时 status 仍为 not_yet，不得请求 /daily-reports/'));
   });
 
@@ -759,9 +786,9 @@ describe('T-T74 today 页验收（1c10a10 §4，16 条 + 通用断言与逾时�
     expect(moreArea.textContent?.includes(COPY_MORE(2)), missing('缺口区最多 10 只，其余应显示「等 2 只」（契约 §2 展示位置 / 通用断言）')).toBe(true);
   });
 
-  it('通用：逾时阈值由 REPORT_EXPECTED_AT + 15 分钟推导（非默认 17:30 → 17:45）', async () => {
+  it('通用：逾时阈值由 REPORT_EXPECTED_AT + 15 分钟推导（默认 17:30 → 17:45，保留显式 18:30 参数）', async () => {
     const view = await loadTodayView();
-    expect(view.REPORT_EXPECTED_AT, missing('应导出 REPORT_EXPECTED_AT，默认 18:30')).toBe('18:30');
+    expect(view.REPORT_EXPECTED_AT, missing('应导出 REPORT_EXPECTED_AT，默认 17:30')).toBe('17:30');
     expect(view.REPORT_OVERDUE_GRACE_MIN, missing('应导出 REPORT_OVERDUE_GRACE_MIN=15（编排者裁定：逾时 = REPORT_EXPECTED_AT+15 分钟）')).toBe(15);
     expect(typeof view.overdueAt, missing('应导出 overdueAt()，由 expectedAt + 15 分钟推导逾时阈值，不得写死 18:45')).toBe('function');
     expect(view.overdueAt!('18:30'), missing('REPORT_EXPECTED_AT=18:30 时逾时应为 18:45')).toBe('18:45');
@@ -776,17 +803,17 @@ describe('T-T74 today 页验收（1c10a10 §4，16 条 + 通用断言与逾时�
     });
     expect(
       view.preReportState({ ...base, server_time: TIME_1744 }, '17:30'),
-      missing('非默认 17:30+15=17:45 时，17:44 应仍为 S4，不得出 S5'),
+      missing('默认 17:30+15=17:45 时，17:44 应仍为 S4，不得出 S5'),
     ).toBe('S4');
     expect(
       view.preReportState({ ...base, server_time: TIME_1745 }, '17:30'),
-      missing('非默认 17:30+15=17:45 时，17:45 含边界应出 S5'),
+      missing('默认 17:30+15=17:45 时，17:45 含边界应出 S5'),
     ).toBe('S5');
   });
 
   // ---------- 838b121 §7 补充裁定（12 条 + ③ 的 15:00 边界） ----------
 
-  it('§7① 北京 18:40、not_yet → S4（18:30 至逾时阈值之间仍为 S4）', async () => {
+  it('§7① 北京 18:40、not_yet → S5（已过默认逾时阈值 17:45）', async () => {
     await renderToday({
       today: emptyToday({
         session: 'closed',
@@ -795,8 +822,8 @@ describe('T-T74 today 页验收（1c10a10 §4，16 条 + 通用断言与逾时�
         focus: { items: [holdingRow('000001.SZ', '示例甲')], more: false },
       }),
     });
-    expectText(S4, missing('北京 18:40、not_yet 应显示 S4（契约 838b121 §7①）'));
-    expectNoText(S5, missing('18:40 尚未到逾时阈值，不得显示 S5（契约 838b121 §7①）'));
+    expectText(S5, missing('北京 18:40、not_yet 已过默认逾时阈值，应显示 S5（§9.1 17:30 链）'));
+    expectNoText(S4, missing('18:40 已过逾时阈值，not_yet 不得显示 S4'));
     expectNoDailyReportFetch(missing('18:40 且 status 非 ready 时不得请求 /daily-reports/'));
   });
 

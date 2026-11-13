@@ -272,6 +272,13 @@ def test_r6_daily_close_beats_snapshot(session: Callable[..., SimpleNamespace], 
 
 def test_r6_sector_gap_alone_is_not_partial(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
     c = _snap_ctx(session, sql)
+    # T-B134c §3.8 requires a covered calendar to prove this snapshot is current.
+    # Supply that premise so the original assertions still isolate the sector gap.
+    sql("INSERT INTO market.trading_calendar (date,is_open) "
+        "SELECT d::date, extract(isodow FROM d) < 6 FROM generate_series("
+        "(now() AT TIME ZONE 'Asia/Shanghai')::date - 14, "
+        "(now() AT TIME ZONE 'Asia/Shanghai')::date, interval '1 day') AS d "
+        "ON CONFLICT (date) DO NOTHING")
     code = f"{_uniq_code('601')}.SH"
     _seed_security(sql, code)
     acc = _snapshot_account(c.call, sql, str(c.s.user.id), [(code, 100, "10.00", "11.00")])

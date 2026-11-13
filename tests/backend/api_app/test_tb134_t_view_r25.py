@@ -1,0 +1,26 @@
+"""Run original test_tb134_t_view assertions in the CI-owned migrated database harness."""
+
+from selfchecks.test_tb134_t_view import (
+    test_t_view_base_qty_from_snapshot_without_trades as test_t_view_base_qty_from_snapshot_without_trades,
+    test_t_view_base_qty_snapshot_before_open_no_gap as test_t_view_base_qty_snapshot_before_open_no_gap,
+    test_t_view_dev_pct_is_percent_4dp as test_t_view_dev_pct_is_percent_4dp,
+    test_t_view_field_types_and_nullability as test_t_view_field_types_and_nullability,
+    test_t_view_not_applicable_keys as test_t_view_not_applicable_keys,
+    test_t_view_not_stale_lunch_and_after_close as test_t_view_not_stale_lunch_and_after_close,
+    test_t_view_only_on_today_focus_rows as test_t_view_only_on_today_focus_rows,
+    test_t_view_pending_before_first_bar as test_t_view_pending_before_first_bar,
+    test_t_view_sellable_clamped_with_gap as test_t_view_sellable_clamped_with_gap,
+    test_t_view_sellable_is_base_minus_sold_today as test_t_view_sellable_is_base_minus_sold_today,
+    test_t_view_stale_after_twice_interval_in_session as test_t_view_stale_after_twice_interval_in_session,
+    test_t_view_thresholds_absent_until_validated as test_t_view_thresholds_absent_until_validated,
+    test_t_view_volume_ratio_5min_tier_minutes as test_t_view_volume_ratio_5min_tier_minutes,
+    test_t_view_volume_ratio_first_bar_as_is as test_t_view_volume_ratio_first_bar_as_is,
+    test_t_view_volume_ratio_half_up_2dp as test_t_view_volume_ratio_half_up_2dp,
+    test_t_view_volume_ratio_minutes_frozen_at_lunch as test_t_view_volume_ratio_minutes_frozen_at_lunch,
+    test_t_view_volume_ratio_needs_5_days as test_t_view_volume_ratio_needs_5_days,
+    test_t_view_volume_ratio_null_has_gap as test_t_view_volume_ratio_null_has_gap,
+    test_t_view_volume_ratio_per_minute_avg_240 as test_t_view_volume_ratio_per_minute_avg_240,
+    test_t_view_volume_ratio_zero_history_gap as test_t_view_volume_ratio_zero_history_gap,
+    test_t_view_vwap_2dp_half_up as test_t_view_vwap_2dp_half_up,
+    test_t_view_vwap_and_dev as test_t_view_vwap_and_dev,
+)

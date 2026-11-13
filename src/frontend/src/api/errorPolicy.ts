@@ -130,6 +130,42 @@ export function isRoutePending(e: unknown): boolean {
   return !u.searchParams.has('account_id') && !u.searchParams.has('security_code');
 }
 
+/**
+ * T-F34b：个股子资源中后端 v1 尚未注册的路径（`{code}` 处为任意证券代码）。
+ * 逐个显式登记，不用通配正则——后端实现对某个子资源后必须从本清单删掉对应行，
+ * 否则已实现的子路由若返回真实 404 会被误吞成“功能开发中”。
+ * main 042b7f7 已注册五个子资源（含 bars），当前清单为空，真实资源 404 不改写为开发中。
+ */
+export const STOCK_SUB_PATHS_PENDING: readonly string[] = [];
+
+/**
+ * 契约 §7.3：北交所旧代码访问 `GET /securities/{code}` 时 404 带 `details.superseded_by`。
+ * 这是真实资源 404，必须优先于“开发中”判定，不能被吞成空态。
+ */
+export function isSuperseded(e: unknown): boolean {
+  if (!(e instanceof ApiError) || e.status !== 404) return false;
+  const next = e.details?.superseded_by;
+  return typeof next === 'string' && next !== '';
+}
+
+/** T-F34b：个股子资源（bars/financials/fund-flows/factors/announcements）路由未实现时的 404 → “功能开发中” */
+export function isStockSubPending(e: unknown): boolean {
+  if (!(e instanceof ApiError) || e.status !== 404 || !e.url) return false;
+  if (e.code !== 'NOT_FOUND' && e.code !== 'HTTP_ERROR') return false;
+  const path = new URL(e.url, 'http://x').pathname.replace(/^\/api\/v1/, '');
+  return STOCK_SUB_PATHS_PENDING.some((tpl) => new RegExp(`^${tpl.replace('{code}', '[^/]+')}$`).test(path));
+}
+
+/**
+ * 首导未完成（T-B94 裁定 / plan §4.6.6 部署前置）：全空或任一所从未成功合并主数据时，
+ * 后端返回 `500 INTERNAL_ERROR` + `details.issue = "security_master_bootstrap_required"`。
+ * 这是部署态问题，不是用户操作错误，前端要给可理解的提示而不是通用“服务暂时不可用”。
+ */
+export const BOOTSTRAP_REQUIRED_ISSUE = 'security_master_bootstrap_required';
+export function isBootstrapRequired(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 500 && e.details?.issue === BOOTSTRAP_REQUIRED_ISSUE;
+}
+
 export type GlobalErrorAction = 'login' | 'csrf' | 'log' | 'none';
 
 /**

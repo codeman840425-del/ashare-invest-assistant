@@ -1,0 +1,87 @@
+{
+  "scope": "four purposively selected notices; not a complete exchange list or F23 accuracy sample",
+  "mode": "archived HTML",
+  "pinned_inputs": {
+    "T-R62/f23_lexicon_v3.yaml": "8a545da8eef56a30804a998f238d6a18c54469d3544840773d251d15922da05a",
+    "T-R62/match_f23_v3.py": "46a5a9be0e3fa86265a616b01346b5791c81c5b687259e779f365fa20918d06c",
+    "T-R65/manifests/termination_manifest.json": "88d488a328999caa61317b679dbc1f5b646629fe1fafb90a8ada103f47f42e28",
+    "T-R65/build_termination_list.py": "2ebca0a912e8bde9b8d2919ca735b9d9e82ae3b2e2a65e62c1c4176a8e9b9766"
+  },
+  "source_notices": 4,
+  "a_share_rows": 4,
+  "excluded_b_share_keys": [
+    "SH:900952",
+    "SZ:200003"
+  ],
+  "historical_missing_url_keys_with_new_evidence": [
+    "SZ:000003"
+  ],
+  "notice_date_differences": [
+    {
+      "source": "sh-600636",
+      "published": "2026-06-22",
+      "delisted": "2026-06-29"
+    },
+    {
+      "source": "sh-600190",
+      "published": "2025-07-18",
+      "delisted": "2025-07-25"
+    },
+    {
+      "source": "sh-600462",
+      "published": "2025-07-14",
+      "delisted": "2025-07-21"
+    }
+  ],
+  "f23_title_observations": [
+    {
+      "source": "sz-000003",
+      "title": "PT 金 田：股票终止上市公告",
+      "f23_hit": true,
+      "categories": [
+        "delisting_risk"
+      ]
+    },
+    {
+      "source": "sh-600636",
+      "title": "关于国新文化控股股份有限公司股票摘牌的公告",
+      "f23_hit": false,
+      "categories": []
+    },
+    {
+      "source": "sh-600190",
+      "title": "关于锦州港股份有限公司股票摘牌的公告",
+      "f23_hit": false,
+      "categories": []
+    },
+    {
+      "source": "sh-600462",
+      "title": "关于湖北九有投资股份有限公司股票摘牌的公告",
+      "f23_hit": false,
+      "categories": []
+    }
+  ],
+  "raw_checks": [
+    {
+      "id": "sz-000003",
+      "raw_sha256": "8c0398a6bae6ab9698c44d0a05ae40da53725edc52a5f9c94c68e3f79feed837",
+      "matches_archived_bytes": true
+    },
+    {
+      "id": "sh-600636",
+      "raw_sha256": "1d5d185e4158a9b461477f52d6c8143fb6b0a70adf152dc5a3deda64952e280d",
+      "matches_archived_bytes": true
+    },
+    {
+      "id": "sh-600190",
+      "raw_sha256": "91d6b9a8b1141c8ddd60822b255cca794d698890911229b59abbeb550d7c99bd",
+      "matches_archived_bytes": true
+    },
+    {
+      "id": "sh-600462",
+      "raw_sha256": "77ba351464336c90a56ad8ab62f05ff18bd8ecd9c77216feab2cdf9e1d624888",
+      "matches_archived_bytes": true
+    }
+  ],
+  "limits": "No original 337-row CSV/DB comparison, no whole-list completeness/date verdict, no FP/FN estimate; title non-hit does not change frozen policy."
+}

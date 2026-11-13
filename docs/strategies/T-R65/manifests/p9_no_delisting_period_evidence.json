@@ -1,0 +1,796 @@
+{
+ "task": "T-R65 ②",
+ "note": "P9 无整理期证据清单。T-A155 终版裁定：按 HF coverage_by_instrument expected_end_date 与最后 bar 判等；本清单的 tags 供 runner 侧区分 by_rule / evidence_only（no_period_title_evidence=12 只）。",
+ "count": 83,
+ "official_in_window": 188,
+ "by_first_tag": {
+  "trade_type_explicit": 7,
+  "voluntary_merger": 21,
+  "face_value_or_market_cap": 43,
+  "no_period_title_evidence": 12
+ },
+ "stocks": [
+  {
+   "exchange": "SH",
+   "symbol": "600070",
+   "delisting_date": "2025-04-30",
+   "name": "*ST富润",
+   "tags": [
+    "trade_type_explicit",
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600077",
+   "delisting_date": "2023-07-25",
+   "name": "*ST宋都",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600083",
+   "delisting_date": "2025-03-05",
+   "name": "*ST博信",
+   "tags": [
+    "trade_type_explicit",
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600112",
+   "delisting_date": "2024-08-15",
+   "name": "*ST天成",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600122",
+   "delisting_date": "2023-06-26",
+   "name": "*ST宏图",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600139",
+   "delisting_date": "2023-03-27",
+   "name": "*ST西源",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600213",
+   "delisting_date": "2024-10-17",
+   "name": "*ST亚星",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600220",
+   "delisting_date": "2024-07-10",
+   "name": "ST阳光",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600260",
+   "delisting_date": "2023-02-15",
+   "name": "*ST凯乐",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600277",
+   "delisting_date": "2024-07-18",
+   "name": "ST亿利",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600290",
+   "delisting_date": "2024-01-16",
+   "name": "*ST华仪",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600297",
+   "delisting_date": "2024-08-28",
+   "name": "广汇汽车",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600311",
+   "delisting_date": "2023-03-27",
+   "name": "*ST荣华",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600321",
+   "delisting_date": "2024-06-27",
+   "name": "正源股份",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600355",
+   "delisting_date": "2026-04-27",
+   "name": "*ST精伦",
+   "tags": [
+    "trade_type_explicit",
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600393",
+   "delisting_date": "2023-07-18",
+   "name": "ST粤泰",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600466",
+   "delisting_date": "2023-06-06",
+   "name": "*ST蓝光",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600565",
+   "delisting_date": "2024-08-07",
+   "name": "ST迪马",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600705",
+   "delisting_date": "2025-05-27",
+   "name": "中航产融",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600811",
+   "delisting_date": "2025-04-30",
+   "name": "*ST东方",
+   "tags": [
+    "trade_type_explicit",
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600823",
+   "delisting_date": "2024-06-14",
+   "name": "*ST世茂",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600836",
+   "delisting_date": "2024-07-11",
+   "name": "*ST易连",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600837",
+   "delisting_date": "2025-03-04",
+   "name": "海通证券",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "600898",
+   "delisting_date": "2025-02-10",
+   "name": "*ST美讯",
+   "tags": [
+    "trade_type_explicit",
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "601028",
+   "delisting_date": "2025-05-27",
+   "name": "玉龙股份",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "601258",
+   "delisting_date": "2023-06-30",
+   "name": "*ST庞大",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "601989",
+   "delisting_date": "2025-09-05",
+   "name": "中国重工",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "603056",
+   "delisting_date": "2026-03-31",
+   "name": "德邦股份",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "603388",
+   "delisting_date": "2025-12-05",
+   "name": "*ST元成",
+   "tags": [
+    "trade_type_explicit",
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "603555",
+   "delisting_date": "2024-03-29",
+   "name": "ST贵人",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SH",
+   "symbol": "603963",
+   "delisting_date": "2025-03-21",
+   "name": "*ST大药",
+   "tags": [
+    "trade_type_explicit",
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000005",
+   "delisting_date": "2024-04-26",
+   "name": "ST星源",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000023",
+   "delisting_date": "2024-09-02",
+   "name": "*ST深天",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000040",
+   "delisting_date": "2025-04-30",
+   "name": "*ST旭蓝",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000046",
+   "delisting_date": "2024-02-07",
+   "name": "*ST泛海",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000150",
+   "delisting_date": "2023-06-09",
+   "name": "*ST宜康",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000413",
+   "delisting_date": "2024-10-11",
+   "name": "ST旭电",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000416",
+   "delisting_date": "2024-06-05",
+   "name": "*ST民控",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000540",
+   "delisting_date": "2023-06-30",
+   "name": "*ST中天",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000587",
+   "delisting_date": "2023-04-03",
+   "name": "*ST金洲",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000616",
+   "delisting_date": "2023-08-23",
+   "name": "*ST海投",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000627",
+   "delisting_date": "2025-09-30",
+   "name": "*ST天茂",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000638",
+   "delisting_date": "2026-06-03",
+   "name": "*ST万方",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000666",
+   "delisting_date": "2023-10-26",
+   "name": "经纬纺机",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000667",
+   "delisting_date": "2023-07-14",
+   "name": "ST美置",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000671",
+   "delisting_date": "2023-08-16",
+   "name": "ST阳光城",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000732",
+   "delisting_date": "2023-08-04",
+   "name": "ST泰禾",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000780",
+   "delisting_date": "2022-01-24",
+   "name": "ST平能",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000836",
+   "delisting_date": "2024-08-12",
+   "name": "ST富通",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000851",
+   "delisting_date": "2025-11-11",
+   "name": "*ST高鸿",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000861",
+   "delisting_date": "2024-09-18",
+   "name": "海印股份",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000918",
+   "delisting_date": "2023-07-28",
+   "name": "*ST嘉凯",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000961",
+   "delisting_date": "2024-07-11",
+   "name": "ST中南",
+   "tags": [
+    "face_value_or_market_cap",
+    "volume_or_holders",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000971",
+   "delisting_date": "2024-07-24",
+   "name": "*ST高升",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000976",
+   "delisting_date": "2024-08-27",
+   "name": "*ST华铁",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "000982",
+   "delisting_date": "2024-08-12",
+   "name": "中银绒业",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002002",
+   "delisting_date": "2024-03-18",
+   "name": "ST鸿达",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002013",
+   "delisting_date": "2023-03-17",
+   "name": "中航机电",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002113",
+   "delisting_date": "2023-08-11",
+   "name": "*ST天润",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002118",
+   "delisting_date": "2023-08-04",
+   "name": "*ST紫鑫",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002231",
+   "delisting_date": "2026-03-27",
+   "name": "*ST奥维",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002280",
+   "delisting_date": "2024-08-16",
+   "name": "ST联络",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002288",
+   "delisting_date": "2024-08-19",
+   "name": "*ST超华",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002308",
+   "delisting_date": "2024-09-27",
+   "name": "*ST威创",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002325",
+   "delisting_date": "2024-08-15",
+   "name": "*ST洪涛",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002341",
+   "delisting_date": "2024-08-23",
+   "name": "ST新纶",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002435",
+   "delisting_date": "2024-08-15",
+   "name": "ST长康",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002502",
+   "delisting_date": "2024-09-05",
+   "name": "ST鼎龙",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002503",
+   "delisting_date": "2023-08-11",
+   "name": "*ST搜特",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002504",
+   "delisting_date": "2023-08-21",
+   "name": "*ST弘高",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002505",
+   "delisting_date": "2024-08-30",
+   "name": "鹏都农牧",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002610",
+   "delisting_date": "2024-08-12",
+   "name": "ST爱康",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002619",
+   "delisting_date": "2022-04-28",
+   "name": "*ST艾格",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002621",
+   "delisting_date": "2024-08-05",
+   "name": "*ST美吉",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002665",
+   "delisting_date": "2024-08-26",
+   "name": "ST航高",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002699",
+   "delisting_date": "2024-06-05",
+   "name": "*ST美盛",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002740",
+   "delisting_date": "2024-03-04",
+   "name": "*ST爱迪",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "002776",
+   "delisting_date": "2024-01-25",
+   "name": "*ST柏龙",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "300108",
+   "delisting_date": "2025-05-29",
+   "name": "*ST吉药",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "300116",
+   "delisting_date": "2024-07-25",
+   "name": "*ST保力",
+   "tags": [
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "300117",
+   "delisting_date": "2025-04-30",
+   "name": "*ST嘉寓",
+   "tags": [
+    "face_value_or_market_cap",
+    "voluntary_merger"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "300262",
+   "delisting_date": "2024-08-19",
+   "name": "*ST巴安",
+   "tags": [
+    "face_value_or_market_cap"
+   ]
+  },
+  {
+   "exchange": "SZ",
+   "symbol": "300495",
+   "delisting_date": "2024-09-20",
+   "name": "*ST美尚",
+   "tags": [
+    "no_period_title_evidence"
+   ]
+  }
+ ],
+ "ruling": "T-A155"
+}

@@ -1,0 +1,304 @@
+{
+  "task": "S1-7",
+  "candidate_branch": "ds/S1-7-research-successor",
+  "base_main": "c18a74bc692bec7b9a253f4406527adb986fcca9",
+  "decision": "Chief 2026-11-12 11:50 MST; reports/S1-7-chief-ruling.md",
+  "source_evidence_sha256": "0c5c5d94cf3314656a2e57d52cfb33c57f3b78ddc51cd358cf829fb7b2078d0d",
+  "transferred_assets": [
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/handover/team/reports/T-R65.md",
+      "source_blob": "18a75b7740ac620c1e2f264d05a5ae896bca593d",
+      "sha256": "66ddd9babaa01c890315f80696868871d2412b92aed9c39c820427ecc7e4b546",
+      "destination_path": "docs/handover/team/reports/T-R65.md",
+      "destination_blob": "18a75b7740ac620c1e2f264d05a5ae896bca593d",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/README.md",
+      "source_blob": "6bfe33488831fa53387642d9f9112f9f8ecbaab2",
+      "sha256": "337c766eb6c8c5b05646e3b465a1059667d23595f05ff8b4d0cbdf2469500d81",
+      "destination_path": "docs/strategies/T-R65/README.md",
+      "destination_blob": "6bfe33488831fa53387642d9f9112f9f8ecbaab2",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/build_listing_history.py",
+      "source_blob": "172423807178a26328c9f477d86a7af1c764d1ee",
+      "sha256": "969b42a7d8bffd8bebd232eeec69e1bec79229d6c718532a95e0431d57ec45ac",
+      "destination_path": "docs/strategies/T-R65/build_listing_history.py",
+      "destination_blob": "172423807178a26328c9f477d86a7af1c764d1ee",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/build_st_history_sh.py",
+      "source_blob": "5f6910af5d83e45dd942aa3be1b6b2a249858d5d",
+      "sha256": "0f577d962692c5c1f93f3088bcc5fcc79fdc1d06f1b8499ebd302bfc2ec9759c",
+      "destination_path": "docs/strategies/T-R65/build_st_history_sh.py",
+      "destination_blob": "5f6910af5d83e45dd942aa3be1b6b2a249858d5d",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/build_st_history_sz.py",
+      "source_blob": "28caeb07ec686b2141cb0dc30d2b9a2b59b48ae1",
+      "sha256": "da3fdc5439ed65be58c886a4a6e2cce6a2a3c592d1ea83818bd92b28d58946bc",
+      "destination_path": "docs/strategies/T-R65/build_st_history_sz.py",
+      "destination_blob": "28caeb07ec686b2141cb0dc30d2b9a2b59b48ae1",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/build_termination_list.py",
+      "source_blob": "3a2a0d8b814fd29d6827731a40aadb3a869c3aee",
+      "sha256": "2ebca0a912e8bde9b8d2919ca735b9d9e82ae3b2e2a65e62c1c4176a8e9b9766",
+      "destination_path": "docs/strategies/T-R65/build_termination_list.py",
+      "destination_blob": "3a2a0d8b814fd29d6827731a40aadb3a869c3aee",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/fetch_cninfo_per_stock.py",
+      "source_blob": "a1bc14ba2471c60e5247ec74463e31052152ef2b",
+      "sha256": "113567960788c24f8cc1c89b13477c0e3f76f0fc2974c0615716c4814ea01995",
+      "destination_path": "docs/strategies/T-R65/fetch_cninfo_per_stock.py",
+      "destination_blob": "a1bc14ba2471c60e5247ec74463e31052152ef2b",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/fetch_cninfo_st_events.py",
+      "source_blob": "5d81aa493421f56bf45b86d06b1b28deedea93f6",
+      "sha256": "701250c4f6a55335addce9f2056505bc18065db0c2836d2a725f2845327cc77d",
+      "destination_path": "docs/strategies/T-R65/fetch_cninfo_st_events.py",
+      "destination_blob": "5d81aa493421f56bf45b86d06b1b28deedea93f6",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/fetch_eastmoney_cym.py",
+      "source_blob": "61671524d18abecb5b5b258babde2327657260b4",
+      "sha256": "65c8b6b0711cd18c4a1dd47fd35fed0a4294289e6b6ecf16158c0dd4f167b8d8",
+      "destination_path": "docs/strategies/T-R65/fetch_eastmoney_cym.py",
+      "destination_blob": "61671524d18abecb5b5b258babde2327657260b4",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/manifests/listing_history_manifest.json",
+      "source_blob": "e9c7b4ac462d594d2e3cde2af766c7ac09331159",
+      "sha256": "dd30f0b3899c90744f31c61700d8b369c0f32bd4099c9cca0292ae56d248b07d",
+      "destination_path": "docs/strategies/T-R65/manifests/listing_history_manifest.json",
+      "destination_blob": "e9c7b4ac462d594d2e3cde2af766c7ac09331159",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/manifests/p9_no_delisting_period_evidence.json",
+      "source_blob": "c58671842aed9959160e42ceec2a8b39077ad6b1",
+      "sha256": "2cb96051f7eab6040c5d5746e92b100173afb23110476a61996d79f92752b52f",
+      "destination_path": "docs/strategies/T-R65/manifests/p9_no_delisting_period_evidence.json",
+      "destination_blob": "c58671842aed9959160e42ceec2a8b39077ad6b1",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/manifests/st_history_sh_manifest.json",
+      "source_blob": "6196f5a78d80423b1d845bae282b103b12d21030",
+      "sha256": "038d8151c7ce072791150a1d90ba9cd545fd97d5f1c9ead3159bbf1985d81147",
+      "destination_path": "docs/strategies/T-R65/manifests/st_history_sh_manifest.json",
+      "destination_blob": "6196f5a78d80423b1d845bae282b103b12d21030",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/manifests/st_history_sz_manifest.json",
+      "source_blob": "336e5419884876de85950aaca7ee77d3f8161bee",
+      "sha256": "2071b597a2e8f25f8c6c58be8eba78637771b539bc8221c172be43c334facbea",
+      "destination_path": "docs/strategies/T-R65/manifests/st_history_sz_manifest.json",
+      "destination_blob": "336e5419884876de85950aaca7ee77d3f8161bee",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_parent_merge_base": "d4405a8d64420acba2ffb880bc977cfe5059dd45",
+      "source_path": "docs/strategies/T-R65/manifests/termination_manifest.json",
+      "source_blob": "4b3d4873230771163484a81a1689c771ff70c55c",
+      "sha256": "88d488a328999caa61317b679dbc1f5b646629fe1fafb90a8ada103f47f42e28",
+      "destination_path": "docs/strategies/T-R65/manifests/termination_manifest.json",
+      "destination_blob": "4b3d4873230771163484a81a1689c771ff70c55c",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 29,
+      "source_head": "b2b0028bf77b484765d3bcb33bcdb1c70cc45e30",
+      "source_parent_merge_base": "a782a1ef5b6a404488c603b49bd2a6ee90112047",
+      "source_path": "docs/handover/team/reports/T-R66b.md",
+      "source_blob": "04d516644dc262c05b7e4d927771e14ab6863f65",
+      "sha256": "87b6d0f1c27078a1e04af2f2413d57ef6db3b545ee0559eeecfe49138f6e5618",
+      "destination_path": "docs/handover/team/reports/T-R66b.md",
+      "destination_blob": "04d516644dc262c05b7e4d927771e14ab6863f65",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 29,
+      "source_head": "b2b0028bf77b484765d3bcb33bcdb1c70cc45e30",
+      "source_parent_merge_base": "a782a1ef5b6a404488c603b49bd2a6ee90112047",
+      "source_path": "docs/strategies/T-R66b/README.md",
+      "source_blob": "02d8d2dbc2108432d8d70b6e2fd70e4308756ced",
+      "sha256": "8e2517e49af97f68b4e2c2695327a2813ecddd492a1f1110dc88842d300744df",
+      "destination_path": "docs/strategies/T-R66b/README.md",
+      "destination_blob": "02d8d2dbc2108432d8d70b6e2fd70e4308756ced",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 29,
+      "source_head": "b2b0028bf77b484765d3bcb33bcdb1c70cc45e30",
+      "source_parent_merge_base": "a782a1ef5b6a404488c603b49bd2a6ee90112047",
+      "source_path": "docs/strategies/T-R66b/crosscheck_evidence_only.py",
+      "source_blob": "1813779e4d62f7fe876587d02ec0a39ae727ab48",
+      "sha256": "725d7dad0307a9a26eb00a7c9da9b965f430d97d177fd7a768d26518d0a60142",
+      "destination_path": "docs/strategies/T-R66b/crosscheck_evidence_only.py",
+      "destination_blob": "1813779e4d62f7fe876587d02ec0a39ae727ab48",
+      "transfer": "byte-for-byte"
+    },
+    {
+      "source_pr": 29,
+      "source_head": "b2b0028bf77b484765d3bcb33bcdb1c70cc45e30",
+      "source_parent_merge_base": "a782a1ef5b6a404488c603b49bd2a6ee90112047",
+      "source_path": "docs/strategies/T-R66b/manifests/evidence_only_crosscheck.json",
+      "source_blob": "354ea72a2df5193dc82dafb5530ae1e4353afa3e",
+      "sha256": "afffa502ceb593210a17bfd224d82657e77439fc31423fe18202deb299d7174a",
+      "destination_path": "docs/strategies/T-R66b/manifests/evidence_only_crosscheck.json",
+      "destination_blob": "354ea72a2df5193dc82dafb5530ae1e4353afa3e",
+      "transfer": "byte-for-byte"
+    }
+  ],
+  "deferred_parent_assets": [
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_path": "docs/strategies/T-R65/check_sh_st_vs_eastmoney.py",
+      "source_blob": "3039332b4b39af7b11f27a70884860066f3f60a0",
+      "sha256": "27a55dfbd9627cf2311509fdd43363189e9ea6980b5392fe1e00e2f8d29f0249",
+      "status": "pending-explicit-absorption-by-PR81-successor",
+      "record_owner": "Chief / future PR81 successor owner",
+      "destination_path": null,
+      "absorbed": false
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_path": "docs/strategies/T-R65/check_status_inputs.py",
+      "source_blob": "718042959159ed59c5e7b93ece5b976010f6746e",
+      "sha256": "759f1665d55ba7f2bc2b5c07d00a6ac0aae76b163bd1aae850a5ad38f91f550c",
+      "status": "pending-explicit-absorption-by-PR81-successor",
+      "record_owner": "Chief / future PR81 successor owner",
+      "destination_path": null,
+      "absorbed": false
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_path": "src/backend/retest/t_r58/data.py",
+      "source_blob": "d94d510303eb6829db0182033ee91955d5eed419",
+      "sha256": "328c5b691acf3937d5253e0176a828e667025febd1e32f447697c0e21e27718f",
+      "status": "pending-explicit-absorption-by-PR81-successor",
+      "record_owner": "Chief / future PR81 successor owner",
+      "destination_path": null,
+      "absorbed": false
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_path": "src/backend/retest/t_r58/judgement.py",
+      "source_blob": "afef92d17b7816e2161f3bd43fb101203da8069c",
+      "sha256": "23ddfa47d7fbd3af400c042d2a27a8a0699e41c0a0d247690071fc35d8f84a45",
+      "status": "pending-explicit-absorption-by-PR81-successor",
+      "record_owner": "Chief / future PR81 successor owner",
+      "destination_path": null,
+      "absorbed": false
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_path": "src/backend/retest/t_r58/runner.py",
+      "source_blob": "87b43a5beafe780ede97d5dce338eb3dc8c40737",
+      "sha256": "e129c4f30de3866909224c5ef46564d1e8c1dbed2c10fd619141795817162cc3",
+      "status": "pending-explicit-absorption-by-PR81-successor",
+      "record_owner": "Chief / future PR81 successor owner",
+      "destination_path": null,
+      "absorbed": false
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_path": "src/backend/retest/t_r58/runner_data.py",
+      "source_blob": "18cba31b7a07872963e7f3c5aed04a564cab1d4d",
+      "sha256": "7c2ed457651d12392b405cd81c58bf19091123d7b647253f14408e3121920921",
+      "status": "pending-explicit-absorption-by-PR81-successor",
+      "record_owner": "Chief / future PR81 successor owner",
+      "destination_path": null,
+      "absorbed": false
+    },
+    {
+      "source_pr": 28,
+      "source_head": "b8f3037e2e1406bb6f00228f7619961d43c89cb8",
+      "source_path": "tests/backend/retest/test_status_inputs.py",
+      "source_blob": "32edd4d4b95a83e95d7b504291bc7d7bf81c7d1f",
+      "sha256": "c23e57ecc23a6b6bde327bf20eb15795cbbf20b4b3f2098de64d6977c9d03919",
+      "status": "pending-explicit-absorption-by-PR81-successor",
+      "record_owner": "Chief / future PR81 successor owner",
+      "destination_path": null,
+      "absorbed": false
+    }
+  ],
+  "original_prs_open_at_mapping_creation": [
+    28,
+    29
+  ],
+  "retirement_ruling": {
+    "authority": "Grok via Chief, 2026-11-12 12:11 MST",
+    "action_after_verified_remote_transfer": "Create successor and close PR28/PR29 in the same round; retain original source branches and blobs",
+    "minimal_successor_size_treatment": "Treat as existing PR for G-1112c; no size split",
+    "deferred_seven_status": "Only recorded for PR81 successor; not implemented, not verified, not absorbed",
+    "does_not_authorize_runner_or_r2_execution": true
+  },
+  "claims": {
+    "original_18_assets_unchanged": true,
+    "seven_assets_absorbed_by_PR81": false,
+    "historical_research_conclusions_revalidated": false,
+    "runner_or_r2_executed": false,
+    "new_data_fetched": false
+  }
+}

@@ -1,0 +1,21 @@
+"""Collect the original test_b05_announcements assertions in the backend CI scope."""
+
+from selfchecks.test_b05_announcements import (
+    env as env,
+    test_b05_announcements_ambiguous_authority_disables_link as test_b05_announcements_ambiguous_authority_disables_link,
+    test_b05_announcements_auth as test_b05_announcements_auth,
+    test_b05_announcements_cursor_cannot_cross_scope as test_b05_announcements_cursor_cannot_cross_scope,
+    test_b05_announcements_dates_categories_empty as test_b05_announcements_dates_categories_empty,
+    test_b05_announcements_default_404_and_empty as test_b05_announcements_default_404_and_empty,
+    test_b05_announcements_invalid_400 as test_b05_announcements_invalid_400,
+    test_b05_announcements_malformed_cursor_400 as test_b05_announcements_malformed_cursor_400,
+    test_b05_announcements_malformed_url_keeps_page as test_b05_announcements_malformed_url_keeps_page,
+    test_b05_announcements_owner_etag as test_b05_announcements_owner_etag,
+    test_b05_announcements_pagination_ties_no_duplicates as test_b05_announcements_pagination_ties_no_duplicates,
+    test_b05_announcements_production_guard as test_b05_announcements_production_guard,
+    test_b05_announcements_returns_the_checked_normalized_url as test_b05_announcements_returns_the_checked_normalized_url,
+    test_b05_announcements_shape_and_metadata as test_b05_announcements_shape_and_metadata,
+    test_b05_announcements_signed_but_invalid_cursor as test_b05_announcements_signed_but_invalid_cursor,
+    test_b05_announcements_url_allowlist as test_b05_announcements_url_allowlist,
+    test_b05_announcements_url_backslash_bypass as test_b05_announcements_url_backslash_bypass,
+)

@@ -91,7 +91,10 @@ function todayBar(bars: Bar[] | undefined, q: QuoteItem | null | undefined) {
 /** 1m 响应顶层 pre_close（契约 v0.2.6 Bar 响应）；只在与行情同一交易日时使用 */
 function intradayPreClose(res: BarsResponse | undefined, q: QuoteItem | null | undefined) {
   if (!res?.pre_close || !q) return null;
-  const day = (res.items[0]?.t ?? res.data_as_of).slice(0, 10);
+  // A-12/F-14：data_as_of 可为 null（无数据时点），不能直接 slice；取不到交易日就不认这个前收
+  const stamp = res.items[0]?.t ?? res.data_as_of;
+  if (!stamp) return null;
+  const day = stamp.slice(0, 10);
   return day === q.t.slice(0, 10) ? res.pre_close : null;
 }
 

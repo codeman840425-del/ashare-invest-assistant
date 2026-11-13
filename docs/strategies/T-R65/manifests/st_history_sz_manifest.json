@@ -1,0 +1,52 @@
+{
+  "product": "st_history_sz",
+  "generated_at": "2026-11-11T10:12:58+08:00",
+  "source": {
+    "name": "szse_ssgsgmxx_name_change_xlsx",
+    "url": "https://www.szse.cn/api/report/ShowReport?SHOWTYPE=xlsx&CATALOGID=SSGSGMXX&TABKEY=tab2",
+    "note": "深交所「上市公司简称变更」公开导出；全历史 1994-01-03 起",
+    "xlsx_path_name": "szse_name_change_20261110.xlsx",
+    "xlsx_bytes": 287492,
+    "xlsx_sha256": "9291117adc1eb566a9edb1ee2a93c6813d8defea41d0c1845123799ced56a109"
+  },
+  "window": {
+    "start": "2022-01-01",
+    "end": null
+  },
+  "format": "csv exchange,symbol,valid_from,valid_to,is_st (runner data.load_status_history)",
+  "not_mixed_with": [
+    "security_risk_flag_history"
+  ],
+  "rule": {
+    "is_st_true": "简称以 *ST / ST 开头（NFKC 归一、去空白）",
+    "tui": "简称含「退」不计入 is_st；退市整理期由 listing-status 输入处理",
+    "no_change_records": "全程 is_st=false（简称从未变化）",
+    "continuity": "每只股票从 WINDOW_START 连续覆盖到开区间"
+  },
+  "pool": {
+    "stocks": 3021,
+    "source_pool": "HF manifest 深市 A 股 + vipdoc sz/minline 文件名",
+    "prefixes": [
+      "000",
+      "001",
+      "002",
+      "003",
+      "300",
+      "301",
+      "302"
+    ]
+  },
+  "coverage": {
+    "stocks_expected": 3021,
+    "stocks_covered": 3021,
+    "stocks_with_st": 372,
+    "st_true_intervals": 399,
+    "continuous_from_window_start": true
+  },
+  "rows": 3554,
+  "output": {
+    "file": "st_history_sz.csv",
+    "bytes": 108040,
+    "sha256": "1b91cf2f503f4b7f04d7d2c559329c9e5618eb0aba7a270b89901f980c4c371b"
+  }
+}

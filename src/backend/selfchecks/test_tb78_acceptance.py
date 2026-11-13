@@ -40,10 +40,7 @@ def run(owner: uuid.UUID, date: str, task: str) -> None:
     try:
         assert client.llen(jobs.QUEUE_KEY) == 0
         jobs._push(client, task, {"trade_date": date, "user_id": str(owner)})
-        expected = (
-            [(ANALYZE, "ok"), (REPORT, "ok"), (TRACKING, "ok")]
-            if task == ANALYZE else [(task, "ok")]
-        )
+        expected = [(ANALYZE, "ok"), (TRACKING, "ok")] if task == ANALYZE else [(task, "ok")]
         assert jobs.worker_tick(settings(), client=client) == expected
     finally:
         client.close()

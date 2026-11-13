@@ -71,7 +71,7 @@ def test_real_queue_holdings_calendar_report_http_and_idempotence(
                     last_price_ref=13,
                 )
             )
-    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (REPORT, "ok"), (TRACKING, "ok")]
+    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (TRACKING, "ok")]
     assert enqueue(REPORT, owner) == [(REPORT, "ok")]
     response = client.get("/api/v1/daily-reports/2026-10-30")
     assert response.status_code == 200
@@ -217,7 +217,7 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
                 horizon="swing",
             )
         )
-    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (REPORT, "ok"), (TRACKING, "ok")]
+    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (TRACKING, "ok")]
     with engine.connect() as conn:
         runs = conn.execute(
             select(pipeline_runs)

@@ -39,6 +39,10 @@ from app.reports.service import covered
 
 DAILY_BARS_HTTP_UNLIMITED = "unlimited"
 DAILY_BARS_HTTP_LIMIT: int = 0
+# C2 effective batch gates; opening either remains a separately authorized D change.
+DAILY_BARS_BATCH_LIMIT: int = 0
+DAILY_BARS_BACKFILL_BATCH_LIMIT: int = 0
+DAILY_BARS_BATCH_CEILING = 2000
 AUTHORIZATION = Path("/run/aia/receipts/mairui-daily-bars.json")
 HALT = Path("/run/aia/state/halt/mairui-daily-bars.HALTED")
 # 日 K 回执与日 K outbox 共用。
@@ -83,6 +87,13 @@ def daily_bars_http_budget(value: object) -> DailyBarsBudget:
     if value == DAILY_BARS_HTTP_UNLIMITED:
         return DailyBarsBudget(kind="unlimited")
     if type(value) is int and value > 0:
+        return DailyBarsBudget(kind="capped", cap=value)
+    return DailyBarsBudget(kind="unset")
+
+
+def daily_bars_batch_budget(value: object) -> DailyBarsBudget:
+    """C2 only accepts a bounded integer batch cap; no environment or receipt override."""
+    if type(value) is int and 0 < value <= DAILY_BARS_BATCH_CEILING:
         return DailyBarsBudget(kind="capped", cap=value)
     return DailyBarsBudget(kind="unset")
 

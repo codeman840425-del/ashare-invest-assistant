@@ -155,7 +155,7 @@ function SectorPanel() {
         <span className="panel-title">板块资金</span>
         <Segmented size="small" value={kind} onChange={(v) => setKind(v as SectorKind)} options={[{ value: 'industry', label: '行业' }, { value: 'concept', label: '概念' }]} />
         <span className="muted small" data-testid="sector-meta">
-          按主力净流入排序 · 盘后数据{q.data ? `（${q.data.trade_date}${q.data.taxonomy ? ` · ${INDUSTRY_TAXONOMY[q.data.taxonomy]}` : ''}）` : ''}
+          按主力净流入排序 · 盘后数据{q.data ? `（${q.data.trade_date ?? '交易日期暂不可用'}${q.data.taxonomy ? ` · ${INDUSTRY_TAXONOMY[q.data.taxonomy]}` : ''}）` : ''}
         </span>
         <span className="spacer" />
         {q.data ? <DataStatusTag status={q.data.data_status} asOf={q.data.data_as_of} gaps={q.data.gaps} /> : null}

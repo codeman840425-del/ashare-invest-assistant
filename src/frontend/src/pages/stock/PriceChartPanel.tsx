@@ -61,7 +61,7 @@ export function PriceChartPanel({ code, initial = 'd', height = 400, testId }: {
           {freq === '1m' ? (
             <>不复权 · 白线 价格<i style={{ background: '#e3b341' }} />均价 · 虚线 昨收</>
           ) : (
-            <>前复权<i style={{ background: '#e3b341' }} />MA5<i style={{ background: '#58a6ff' }} />MA20<i style={{ background: '#bc8cff' }} />MA60</>
+            <><span data-testid="chart-adjust-label">{shownRes?.adjust === 'none' ? '不复权（前复权数据不可用，已回落）' : '前复权'}</span><i style={{ background: '#e3b341' }} />MA5<i style={{ background: '#58a6ff' }} />MA20<i style={{ background: '#bc8cff' }} />MA60</>
           )}
         </span>
         <span className="spacer" />
@@ -81,7 +81,7 @@ export function PriceChartPanel({ code, initial = 'd', height = 400, testId }: {
         ) : shownFreq === '1m' ? (
           <IntradayChart bars={minute.data!.items} preClose={minute.data!.pre_close} allMinutes={minutes} markers={NO_MARKERS} empty={empty} />
         ) : (
-          <KlineChart bars={kl.bars} markers={NO_MARKERS} empty={empty} viewKey={`${code}:${shownFreq}`} onReachStart={kl.loadOlderAuto} />
+          <KlineChart bars={kl.bars} markers={NO_MARKERS} empty={empty} viewKey={`${code}:${shownFreq}${shownRes?.adjust === 'none' ? ':none' : ''}`} onReachStart={kl.loadOlderAuto} />
         )}
       </div>
     </section>

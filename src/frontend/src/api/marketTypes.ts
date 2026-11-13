@@ -143,6 +143,6 @@ export interface SectorFlow {
 export interface SectorFlowsResponse extends Sourced {
   kind: SectorKind;
   taxonomy: IndustryTaxonomy | null;
-  trade_date: DateStr;
+  trade_date: DateStr | null;
   items: SectorFlow[];
 }

@@ -88,7 +88,7 @@ export function consistentPages(pages: readonly BarsResponse[]): BarsResponse[] 
   const base = pages[0].adjust_as_of;
   const out: BarsResponse[] = [];
   for (const p of pages) {
-    if (p.adjust_as_of !== base) break;
+    if (p.adjust !== pages[0].adjust || p.adjust_as_of !== base) break;
     out.push(p);
   }
   return out;
@@ -99,8 +99,7 @@ export function consistentPages(pages: readonly BarsResponse[]): BarsResponse[] 
  * 先取最近 `pageSize` 根；图表向左拖到窗口边缘（或点“更早”）时用上一页的 `next_before` 取更早一页，拼在左侧。
  * `next_before=null` 表示已到最早。v0.2.7：翻页时发现 `adjust_as_of` 与已缓存的不同 → 丢弃整个窗口，从最新一页重新加载。
  */
-export function useBarsWindow(code: string | undefined, freq: Exclude<BarFreq, '1m'>, pageSize: number, opts: { keepPrevious?: boolean; enabled?: boolean } = {}) {
-  const adjust: BarAdjust = 'qfq';
+function useAdjustedBarsWindow(code: string | undefined, freq: Exclude<BarFreq, '1m'>, adjust: BarAdjust, pageSize: number, opts: { keepPrevious?: boolean; enabled?: boolean } = {}) {
   const qc = useQueryClient();
   const key = mk.barsWindow(code ?? '', freq, adjust, pageSize);
   const query = useInfiniteQuery({
@@ -121,9 +120,9 @@ export function useBarsWindow(code: string | undefined, freq: Exclude<BarFreq, '
   // 更早一页的基准日与最新一页不同：整窗重载（resetQueries 只会重取第一页）
   useEffect(() => {
     if (stale) void qc.resetQueries({ queryKey: key, exact: true });
-    // key 由 code/freq/pageSize 决定，已在依赖里
+    // key 由 code/freq/adjust/pageSize 决定，已在依赖里
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stale, qc, code, freq, pageSize]);
+  }, [stale, qc, code, freq, adjust, pageSize]);
   const bars = useMemo(() => mergeBarPages(good), [good]);
   const { hasNextPage, isFetching, fetchNextPage } = query;
   const { isFetchNextPageError } = query;
@@ -136,6 +135,22 @@ export function useBarsWindow(code: string | undefined, freq: Exclude<BarFreq, '
   }, [hasNextPage, isFetching, isFetchNextPageError, fetchNextPage]);
   const loadOlderAuto = useCallback(() => loadOlder(false), [loadOlder]);
   return { ...query, first: good[0], bars, loadOlder, loadOlderAuto, reachedStart: !!pages && !hasNextPage };
+}
+
+/** 仅明确的日K qfq 无来源空响应允许回落；HTTP错误、pending与正常空窗均保持原结果。 */
+export function dailyQfqUnavailable(res: BarsResponse | undefined): boolean {
+  return !!res && res.freq === 'd' && res.adjust === 'qfq' && res.items.length === 0
+    && res.data_status === 'unavailable' && res.gaps.some((gap) => gap.key === 'bars' && gap.reason === 'no_source');
+}
+
+/** qfq 与 none 使用独立缓存及游标；回落后只消费 none 窗口，不拼接两个价格口径。 */
+export function useBarsWindow(code: string | undefined, freq: Exclude<BarFreq, '1m'>, pageSize: number, opts: { keepPrevious?: boolean; enabled?: boolean } = {}) {
+  const qfq = useAdjustedBarsWindow(code, freq, 'qfq', pageSize, opts);
+  const fallbackToNone = freq === 'd' && !qfq.isPlaceholderData && !qfq.isError && dailyQfqUnavailable(qfq.first);
+  const none = useAdjustedBarsWindow(code, freq, 'none', pageSize, {
+    enabled: (opts.enabled ?? true) && fallbackToNone,
+  });
+  return { ...(fallbackToNone ? none : qfq), fallbackToNone };
 }
 
 /** 契约 §7.3 /securities/{code}/bars；日/周默认前复权，1m 只能不复权 */

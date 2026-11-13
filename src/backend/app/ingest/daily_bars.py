@@ -228,7 +228,16 @@ def fetch_mairui_daily_bars(
         )
         return 0
 
-    if reader() is None:
+    grant = reader()
+    if (
+        not isinstance(grant, DailyBarsGrant)
+        or grant.user_id != user_id
+        or not isinstance(grant.licence_id, uuid.UUID)
+        or not isinstance(grant.receipt_id, uuid.UUID)
+        or grant.start.tzinfo is None
+        or grant.end.tzinfo is None
+        or not (grant.start <= _stamp(now) < grant.end)
+    ):
         _record_run(
             conn,
             trade_date,
@@ -291,9 +300,7 @@ def fetch_mairui_daily_bars(
             user_id,
             window_trading_days,
             status="skipped",
-            stats=_empty_stats(
-                user_id, window_trading_days, codes=len(codes), issues=issues
-            ),
+            stats=_empty_stats(user_id, window_trading_days, codes=len(codes), issues=issues),
         )
         return 0
 
@@ -326,7 +333,7 @@ def fetch_mairui_daily_bars(
             conn,
             DailyBarsResult(bars=tuple(bars)),
             source=MairuiDailyBarsSource.name,
-            licence_id=None,
+            licence_id=grant.licence_id,
             fetched_at=fetched_at,
         )
         written = upsert.inserted + upsert.unchanged

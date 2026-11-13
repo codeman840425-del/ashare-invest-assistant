@@ -1,6 +1,6 @@
-"""B-04 read-only bars port; the default source is explicitly an empty placeholder.
+"""Bars read port: owned unadjusted daily cache; other modes remain unconnected.
 
-No price cache, adjustment, aggregation, backfill or upstream IO is enabled here.
+No adjustment, aggregation, backfill or upstream IO is enabled here.
 Synthetic readers are installed explicitly by local/test selfchecks only.
 """
 
@@ -164,7 +164,9 @@ class PlaceholderBarsReader:
 
 
 def get_bars_reader(engine: EngineDep) -> BarsReader:
-    return PlaceholderBarsReader(engine)
+    from app.marketdata.owned_daily_read import OwnedDailyBarsReader
+
+    return OwnedDailyBarsReader(engine)
 
 
 BarsReaderDep = Annotated[BarsReader, Depends(get_bars_reader)]

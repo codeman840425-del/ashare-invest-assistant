@@ -129,23 +129,27 @@ def install_table(world: Any) -> Any:
 
 
 @pytest.mark.parametrize(
-    "value,expected",
+    "value,batch_kind,expected",
     [
-        (0, "unset"),
-        (1, "capped"),
-        (2000, "capped"),
-        (2001, "unset"),
-        (True, "unset"),
-        ("unlimited", "unset"),
-        (-1, "unset"),
+        (0, "daily", "unset"),
+        (0, "backfill", "unset"),
+        (1, "daily", "capped"),
+        (500, "daily", "capped"),
+        (501, "daily", "unset"),
+        (2000, "daily", "unset"),
+        (2000, "backfill", "capped"),
+        (2001, "backfill", "unset"),
+        (True, "daily", "unset"),
+        ("unlimited", "backfill", "unset"),
+        (-1, "daily", "unset"),
     ],
 )
 def test_batch_budget_rejects_unlimited_and_out_of_bounds(
-    value: Any, expected: str
+    value: Any, batch_kind: str, expected: str
 ) -> None:
     assert hasattr(ingest, "daily_bars_batch_budget"), "C2 batch budget missing"
     assert ingest.DAILY_BARS_BATCH_LIMIT == ingest.DAILY_BARS_BACKFILL_BATCH_LIMIT == 0
-    assert ingest.daily_bars_batch_budget(value).kind == expected
+    assert ingest.daily_bars_batch_budget(value, batch_kind).kind == expected
 
 
 def test_worker_default_zero_never_reads_receipt_or_egress(
@@ -165,6 +169,30 @@ def test_worker_default_zero_never_reads_receipt_or_egress(
         run = conn.execute(select(pipeline_runs)).one()
         assert run.status == "skipped"
         assert run.stats["issues"] == ["daily_bars_http_budget_unset"]
+
+
+@pytest.mark.parametrize(
+    "daily_limit,backfill_limit,batch_kind,expected",
+    [
+        (500, 0, "daily", "capped"),
+        (0, 2000, "backfill", "capped"),
+        (500, 0, "backfill", "unset"),
+        (0, 2000, "daily", "unset"),
+        (501, 2000, "daily", "unset"),
+        (500, 2001, "backfill", "unset"),
+    ],
+)
+def test_batch_kind_does_not_borrow_the_other_constant(
+    monkeypatch: pytest.MonkeyPatch,
+    daily_limit: int,
+    backfill_limit: int,
+    batch_kind: str,
+    expected: str,
+) -> None:
+    module = implementation()
+    monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", daily_limit)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BACKFILL_BATCH_LIMIT", backfill_limit)
+    assert module.batch_budget(batch_kind).kind == expected
 
 
 def test_worker_nonunset_records_running_and_outbox_atomically(
@@ -327,3 +355,19 @@ def test_migration_single_head_upgrade_downgrade_and_nonempty_refusal(
             migration.downgrade()
         assert conn.scalar(select(func.count()).select_from(module.outbox)) == 1
         assert conn.scalar(select(func.count()).select_from(pipeline_runs)) == 1
+
+
+@pytest.mark.parametrize("daily_limit", [501, 2000])
+def test_daily_oversized_budget_never_builds_outbox(
+    world: Any, monkeypatch: pytest.MonkeyPatch, daily_limit: int
+) -> None:
+    module = install_table(world)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", daily_limit)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BACKFILL_BATCH_LIMIT", 2000)
+    with world.engine.begin() as conn:
+        module.enqueue(conn, trade_date=DAY, user_id=OWNER, grant_reader=grant, now=NOW)
+    with world.engine.connect() as conn:
+        assert conn.scalar(select(func.count()).select_from(module.outbox)) == 0
+        run = conn.execute(select(pipeline_runs)).one()
+        assert run.status == "skipped"
+        assert run.stats["issues"] == ["daily_bars_http_budget_unset"]

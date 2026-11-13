@@ -29,7 +29,7 @@ def batch_budget(batch_kind: str) -> ingest.DailyBarsBudget:
         if batch_kind == "backfill"
         else ingest.DAILY_BARS_BATCH_LIMIT
     )
-    return ingest.daily_bars_batch_budget(limit)
+    return ingest.daily_bars_batch_budget(limit, batch_kind)
 
 
 def valid_grant(

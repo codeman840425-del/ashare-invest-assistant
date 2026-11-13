@@ -14,6 +14,9 @@ import { fmtNum, fmtTime, pctClass, signed } from '../lib/format';
 import { PENDING_ROUTE, STOCK_FILTERS, type StockFilter } from './dailyReportRoutes';
 
 const CHANGE = { new: { t: '新增', c: 'blue' }, changed: { t: '有变化', c: 'orange' }, unchanged: { t: '无变化', c: 'default' }, removed: { t: '已移出', c: 'default' } } as const;
+const CHANGE_FIELD: Record<DailyReportStock['change_fields'][number], string> = {
+  actions: '策略动作', confidence_level: '置信等级', executability: '可执行性', max_risk_level: '最高风险级别',
+};
 const VS_REGIME = { below: '低于参考区间', within: '在参考区间内', above: '高于参考区间' } as const;
 
 const FILTER_LABEL: Record<StockFilter, string> = { all: '全部', changed: '新增 / 有变化', unchanged: '无变化', removed: '已移出' };
@@ -106,11 +109,11 @@ function StockCard({ s, r }: { s: DailyReportStock; r: DailyReport }) {
           <span id={titleId} className="stc-title"><b>{s.name}</b> <span className="mono muted small">{s.security_code}</span></span>
         )}
         {s.change_from_previous === null ? <Tag>无比较基准 · 见数据缺口</Tag> : <Tag color={CHANGE[s.change_from_previous].c}>{CHANGE[s.change_from_previous].t}</Tag>}
-        {s.change_fields?.length ? <span className="muted small">变化：{s.change_fields.join("、")}</span> : null}
+        {s.change_fields?.length ? <span className="muted small">变化：{s.change_fields.map((field) => CHANGE_FIELD[field]).join('、')}</span> : null}
         <span className="spacer" />
         {/* v0.2.3 #3：收盘价、涨跌幅、数据状态、最高风险级别 */}
         <span className={`mono small ${pctClass(s.change_pct)}`} data-testid="stc-close">
-          {s.close ?? '—'} {s.change_pct != null ? `${signed(s.change_pct)}%` : ''}
+          收盘价 {s.close ?? '—（缺数据）'} · 涨跌幅 {s.change_pct == null ? '—（缺数据）' : `${signed(s.change_pct)}%`}
         </span>
         <DataStatusTag status={s.data_status} />
         {s.max_risk_level ? <Tag color={RISK_LEVEL[s.max_risk_level].color}>风险 {RISK_LEVEL[s.max_risk_level].text}</Tag> : null}
@@ -126,9 +129,11 @@ function StockCard({ s, r }: { s: DailyReportStock; r: DailyReport }) {
           {s.suggestion.divergent_dimensions.length ? ` · 分歧维度：${s.suggestion.divergent_dimensions.map((d) => DIMENSION[d]).join('、')}` : ''}
         </div>
       ) : null}
-      <div className="stc-sec"><b className="small">要点</b><Lines items={s.highlights} r={r} /></div>
-      <div className="stc-sec stc-inv"><b className="small">失效条件</b><Lines items={s.invalidation} r={r} /></div>
-      <div className="stc-sec"><b className="small">次日关注</b><Lines items={s.next_watch} r={r} /></div>
+      <div className="report-stock-notes">
+        <div className="stc-sec"><h3>要点</h3><Lines items={s.highlights} r={r} /></div>
+        <div className="stc-sec stc-inv"><h3>失效条件</h3><Lines items={s.invalidation} r={r} /></div>
+        <div className="stc-sec"><h3>次日关注</h3><Lines items={s.next_watch} r={r} /></div>
+      </div>
       <DailyDimensions stock={s} evidence={r.evidence} />
       {s.explanation ? <details onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} data-testid={`stock-explanation-${s.security_code}`}><summary>本股解释</summary><ExplanationView explanation={s.explanation} evidence={r.evidence.filter((e) => e.id.startsWith(`${s.security_code}:`))} testId={`report-stock-explanation-${s.security_code}`} title="本股解释" /></details> : null}
       <div className="small" onClick={(e) => e.stopPropagation()}><Link to={`/risk-controls?security_code=${encodeURIComponent(s.security_code)}`}>查看当前风控设置与事件</Link>{to ? <> · <Link to={to + "#sg-tracking"}>查看候选信号模拟结果</Link></> : null}</div>
@@ -210,25 +215,43 @@ export function DailyReportPage() {
   return (
     <div className="page-scroll report" data-testid="daily-report">
       <div className="detail-head">
-        <span className="q-name">盘后日报</span>
+        <h1 className="q-name">盘后日报</h1>
         <DateSwitcher date={r.date} />
         <Tag>不可变快照</Tag>
         <DataStatusTag status={r.data_status} asOf={r.data_as_of} gaps={r.gaps} />
-        <span className="muted small">生成于 {fmtTime(r.generated_at)} · 数据截至 {r.data_as_of === null ? '—（无来源）' : fmtTime(r.data_as_of)} · 说明来源：{r.explanation.source === 'template' ? '模板' : 'LLM'}</span>
       </div>
-      <p className="muted small">解释增量为契约 mock 阶段；真实接口仅显示已存档字段。逐股与分歧仅读取本项已冻结解释，缺失不补造、不借用整体解释。</p>
+      <dl className="report-meta small" aria-label="日报快照信息">
+        <div><dt>日报日期</dt><dd>{r.date}</dd></div>
+        <div><dt>生成于</dt><dd>{fmtTime(r.generated_at)}</dd></div>
+        <div><dt>数据截至</dt><dd>{r.data_as_of === null ? '—（无来源）' : fmtTime(r.data_as_of)}</dd></div>
+        <div><dt>说明来源</dt><dd>{r.explanation.source === 'template' ? '模板' : 'LLM'}</dd></div>
+      </dl>
+      <nav className="report-nav small" aria-label="日报章节">
+        <a href="#report-overview">本期总览</a>
+        {r.gaps.length ? <a href="#report-data-gaps">数据缺口（{r.gaps.length}）</a> : null}
+        <a href="#report-context">账户与市场</a>
+        <a href="#report-stocks">逐股卡片</a>
+      </nav>
       {IS_MOCK ? <Alert type="info" title="示例数据 · 日报六维事实与缺口均为合成示例" /> : <Alert type="info" title="真实日报接口 · 仅读取已生成的本人不可变快照；缺数据不补算、不当中性。" />}
-      <div className="report-summary"><ExplanationView explanation={r.explanation} evidence={r.evidence} testId="report-explanation" title="日报整体解释" /></div>
-      <CardDisclaimer />
+      <section id="report-overview" className="report-section" aria-labelledby="report-overview-title">
+        <h2 id="report-overview-title">本期总览</h2>
+        <div className="report-summary"><ExplanationView explanation={r.explanation} evidence={r.evidence} testId="report-explanation" title="日报整体解释" /></div>
+        <CardDisclaimer />
+      </section>
       {r.gaps.length ? (
-        <Alert
-          className="gap-alert" type="warning" showIcon data-testid="report-gaps"
-          title={`数据缺口 ${r.gaps.length} 项（缺失不臆测；相关维度标为“未知”）`}
-          description={<div className="gap-grid">{r.gaps.map((g) => <div key={g.key}><Tag>{GAP_REASON[g.reason]}</Tag><span className="mono muted small">{g.key}</span>　{g.message}</div>)}</div>}
-        />
+        <section id="report-data-gaps" className="report-section" aria-labelledby="report-data-gaps-title">
+          <h2 id="report-data-gaps-title">数据缺口</h2>
+          <Alert
+            className="gap-alert" type="warning" showIcon data-testid="report-gaps"
+            title={`数据缺口 ${r.gaps.length} 项（缺失不臆测；相关维度标为“未知”）`}
+            description={<ul className="gap-grid report-gap-list">{r.gaps.map((g) => <li key={g.key}><Tag>{GAP_REASON[g.reason]}</Tag><span className="mono muted small">{g.key}</span><p>{g.message}</p></li>)}</ul>}
+          />
+        </section>
       ) : null}
 
-      <div className="report-top">
+      <section id="report-context" className="report-section" aria-labelledby="report-context-title">
+        <h2 id="report-context-title">账户与市场</h2>
+        <div className="report-top">
         <AccountPanel r={r} />
         <section className="panel expo">
           <div className="panel-head"><span className="panel-title">市场</span></div>
@@ -248,10 +271,12 @@ export function DailyReportPage() {
             {r.pending.active_reasons ? <> <Link to={PENDING_ROUTE.active_reasons}>查看 ›</Link></> : null}
           </div>
         </section>
-      </div>
+        </div>
+      </section>
 
+      <section id="report-stocks" className="report-section" aria-labelledby="report-stocks-title">
       <div className="panel-head section-gap">
-        <span className="panel-title">逐股卡片（持仓 + 自选，共 {r.stocks.length} 只）</span>
+        <h2 id="report-stocks-title">逐股卡片（持仓 + 自选，共 {r.stocks.length} 只）</h2>
         <Segmented
           size="small" value={filter} onChange={(v) => setFilter(v as StockFilter)} aria-label="按变化筛选"
           options={STOCK_FILTERS.map((f) => ({ value: f, label: `${FILTER_LABEL[f]} ${count(f)}` }))}
@@ -261,6 +286,7 @@ export function DailyReportPage() {
       {shown.length ? (
         <div className="stock-grid">{shown.map((s) => <StockCard key={s.security_code} s={s} r={r} />)}</div>
       ) : <div className="loading-box" data-testid="report-empty">{r.stocks.length ? '没有符合筛选条件的证券' : '本期没有持仓或自选证券'}</div>}
+      </section>
     </div>
   );
 }

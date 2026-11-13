@@ -57,7 +57,7 @@ def seed_differences(engine: Any, account: uuid.UUID, at: dt.datetime) -> uuid.U
 def assembled(setup: Any) -> Any:
     _engine, _client, _stranger, owner, _other, _account, *_ = setup
     instance = prepare(setup)
-    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (TRACKING, "ok")]
+    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (REPORT, "ok"), (TRACKING, "ok")]
     return setup, instance
 
 

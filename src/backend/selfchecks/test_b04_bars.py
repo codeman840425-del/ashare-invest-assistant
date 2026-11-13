@@ -264,6 +264,28 @@ def test_b04_fixture_install_refused_outside_local_test(env: Any, mode: str) -> 
 
 
 def test_b04_default_source_only_reads_public_identity(env: Any) -> None:
+    # Chief S2-6: the default SQL reader needs only this caller's synthetic licence.
+    from app.db.tables.market import daily_bars, trading_calendar
+
+    engine = env.app.dependency_overrides[deps.get_engine]()
+    with engine.begin() as conn:
+        conn.execute(text("ATTACH DATABASE ':memory:' AS app"))
+        conn.execute(
+            text(
+                "CREATE TABLE app.user_data_licence_status (id TEXT, user_id TEXT, "
+                "status TEXT, deleted_at TIMESTAMP, paused_until TIMESTAMP, expires_on DATE)"
+            )
+        )
+        conn.execute(text("CREATE TABLE app.user_data_licence_holds (user_id TEXT)"))
+        conn.execute(
+            text(
+                "INSERT INTO app.user_data_licence_status (id,user_id,status) "
+                "VALUES (:id,:owner,'active')"
+            ),
+            {"id": uuid.uuid4().hex, "owner": env.owners["a"].hex},
+        )
+        daily_bars.create(conn)
+        trading_calendar.create(conn)
     del env.app.dependency_overrides[get_bars_reader]
     response = env.client.get(PATH + QUERY)
     assert response.status_code == 200

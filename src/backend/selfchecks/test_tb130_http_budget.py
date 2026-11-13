@@ -342,12 +342,25 @@ def _bar_count(conn: Any) -> int:
     return int(conn.execute(select(func.count()).select_from(daily_bars)).scalar_one())
 
 
+def _synthetic_grant() -> object:
+    from app.ingest.daily_bars import DailyBarsGrant
+
+    return DailyBarsGrant(
+        OWNER,
+        uuid.UUID(int=130),
+        uuid.UUID(int=131),
+        AT - dt.timedelta(days=1),
+        AT + dt.timedelta(days=1),
+        "0" * 64,
+    )
+
+
 def _run(
     conn: Any,
     *,
     transport: Callable[..., Any],
     tmp_path: Path,
-    grant: object | None = object(),
+    grant: object | None = _synthetic_grant(),
     stop: bool = False,
     halt: bool = False,
     clock: Callable[[], dt.datetime] | None = None,
@@ -568,7 +581,7 @@ def test_unlimited_still_halts_on_stop_103_429(
             transport=_status_on(2, status, calls),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_synthetic_grant,
             clock=lambda: dt.datetime(2026, 11, 10, 17, 20, tzinfo=BEIJING),
         )
         assert len(calls) == 2, status
@@ -587,7 +600,7 @@ def test_unlimited_still_halts_on_stop_103_429(
             transport=_ok_transport(calls2),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_synthetic_grant,
             clock=lambda: dt.datetime(2026, 11, 10, 17, 20, tzinfo=BEIJING),
         )
         assert calls2 == [] and again == 0
@@ -614,7 +627,7 @@ def test_mairui_fetched_at_not_before_last_response(
         return 200, _bar(code, start)
 
     def clock() -> dt.datetime:
-        return seen[-1]
+        return seen[-1] if seen else GRANT_CLOCK
 
     written = _run(db, transport=transport, tmp_path=tmp_path, clock=clock)
     assert written == 5

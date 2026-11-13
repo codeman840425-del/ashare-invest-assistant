@@ -107,7 +107,18 @@ def test_pool_ci_budget_and_authorization_still_fence_transport(
         transport=upstream,
         stop_path=stop,
         halt_path=tmp_path / "HALTED",
-        grant_reader=lambda: object() if authorized else None,
+        grant_reader=lambda: (
+            daily_bars.DailyBarsGrant(
+                uuid.UUID(int=1),
+                uuid.UUID(int=2),
+                uuid.UUID(int=3),
+                dt.datetime(2026, 11, 10, tzinfo=dt.UTC),
+                dt.datetime(2026, 11, 11, tzinfo=dt.UTC),
+                "0" * 64,
+            )
+            if authorized
+            else None
+        ),
         clock=lambda: dt.datetime(2026, 11, 10, 12, tzinfo=dt.UTC),
     )
     if len(calls) != expected_calls:

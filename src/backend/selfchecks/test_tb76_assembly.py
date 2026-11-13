@@ -168,7 +168,7 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: An
     expected = load_policy(ROOT / "config")
     alternate_version = expected.version_no + 1
     instance = prepare(setup)
-    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (TRACKING, "ok")]
+    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (REPORT, "ok"), (TRACKING, "ok")]
     with engine.connect() as conn:
         candidate = conn.execute(
             select(candidate_signals).where(candidate_signals.c.instance_id == instance)
@@ -196,7 +196,7 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: An
     assert Decimal(str(confidence["value"])) == value
     assert body["strategies"][0]["candidate_signal_id"] == cid
     assert stranger.get("/api/v1/suggestions/" + sid).status_code == 404
-    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (TRACKING, "ok")]
+    assert enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), (REPORT, "ok"), (TRACKING, "ok")]
     with engine.connect() as conn:
         assert (
             len(conn.execute(select(suggestions).where(suggestions.c.user_id == owner)).all()) == 1

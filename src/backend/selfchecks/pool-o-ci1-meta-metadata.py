@@ -197,13 +197,13 @@ def test_actual_0025_unique_name_and_0020_not_null_match_model() -> None:
     [
         (0, True, False, 400, "", 0),
         (2, True, False, 400, "", 2),
-        ("unlimited", True, False, 400, "", 3),
-        ("unlimited", False, False, 400, "", 0),
-        ("unlimited", True, True, 400, "", 0),
-        ("unlimited", True, False, 103, "", 1),
-        ("unlimited", True, False, 429, "", 1),
-        ("unlimited", True, False, 400, "daily_halt", 1),
-        ("unlimited", True, False, 400, "egress_denied", 1),
+        (5, True, False, 400, "", 3),
+        (5, False, False, 400, "", 0),
+        (5, True, True, 400, "", 0),
+        (5, True, False, 103, "", 1),
+        (5, True, False, 429, "", 1),
+        (5, True, False, 400, "daily_halt", 1),
+        (5, True, False, 400, "egress_denied", 1),
     ],
 )
 def test_budget_loop_cap_stop_and_limits_with_fake_upstream(
@@ -221,7 +221,7 @@ def test_budget_loop_cap_stop_and_limits_with_fake_upstream(
     stop, halt = tmp_path / "STOP", tmp_path / "HALTED"
     if stopped:
         stop.touch()
-    monkeypatch.setattr(daily_bars, "DAILY_BARS_HTTP_LIMIT", limit)
+    monkeypatch.setattr(daily_bars, "DAILY_BARS_BATCH_LIMIT", limit)
     monkeypatch.setattr(daily_bars, "covered", lambda *_args: True)
     monkeypatch.setattr(
         daily_bars, "daily_universe", lambda *_args: ["600000.SH", "000001.SZ", "600001.SH"]

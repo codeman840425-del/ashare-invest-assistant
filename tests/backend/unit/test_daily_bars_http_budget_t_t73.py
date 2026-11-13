@@ -222,12 +222,23 @@ def _clock() -> dt.datetime:
     return CLOCK
 
 
+def _valid_grant() -> Any:
+    return _require_ingest("DailyBarsGrant").DailyBarsGrant(
+        OWNER,
+        uuid.UUID(int=7301),
+        uuid.UUID(int=7302),
+        CLOCK - dt.timedelta(hours=1),
+        CLOCK + dt.timedelta(hours=1),
+        "0" * 64,
+    )
+
+
 def _fetch(
     conn: Any,
     *,
     transport: Callable[..., Any],
     tmp_path: Path,
-    grant: object | None = object(),
+    grant: object | None = _valid_grant(),
     stop: bool = False,
     halt: bool = False,
     stop_path: Path | None = None,
@@ -410,7 +421,7 @@ def test_unlimited_halts_on_103(
             transport=_status_on(2, 103, calls),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_valid_grant,
             clock=_clock,
         )
         assert len(calls) == 2
@@ -427,7 +438,7 @@ def test_unlimited_halts_on_103(
             transport=_ok_transport(calls2),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_valid_grant,
             clock=_clock,
         )
         assert calls2 == [] and again == 0
@@ -454,7 +465,7 @@ def test_unlimited_halts_on_429(
             transport=_status_on(2, 429, calls),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_valid_grant,
             clock=_clock,
         )
         assert len(calls) == 2
@@ -471,7 +482,7 @@ def test_unlimited_halts_on_429(
             transport=_ok_transport(calls2),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_valid_grant,
             clock=_clock,
         )
         assert calls2 == [] and again == 0

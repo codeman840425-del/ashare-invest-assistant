@@ -14,7 +14,6 @@ const lazyPage = <M,>(load: () => Promise<M>, pick: (m: M) => React.ComponentTyp
 /** 契约 §4 / plan 规划的页面；未实现的先给占位 */
 export const PLACEHOLDERS: [string, string][] = [
   ['strategies/:id', '策略详情'],
-  ['strategy-cards', '策略知识卡'],
   ['restrictions', '禁投 / 冷静期 / 屏蔽'],
   ['reviews', '复盘'],
   ['discover', '发现'],
@@ -50,6 +49,7 @@ export const routes: RouteObject[] = [
       { path: 'settings/profile', lazy: lazyPage(() => import('../pages/settings/ProfilePage'), (m) => m.ProfilePage) },
       { path: 'settings/data-licence', lazy: lazyPage(() => import('../pages/settings/DataLicencePage'), (m) => m.DataLicencePage) },
       { path: 'strategies', lazy: lazyPage(() => import('../pages/strategies/StrategiesPage'), (m) => m.StrategiesPage) },
+      { path: 'strategy-cards', lazy: lazyPage(() => import('../pages/strategies/StrategyCardsPage'), (m) => m.StrategyCardsPage) },
       // F-03：策略实例独立成页（编排者 2026-11-11 裁定），与策略库按模板视角互补
       { path: 'strategy-instances', lazy: lazyPage(() => import('../pages/strategies/StrategyInstancesPage'), (m) => m.StrategyInstancesPage) },
       { path: 'candidate-signals', lazy: lazyPage(() => import('../pages/signals/CandidateSignalsPage'), (m) => m.CandidateSignalsPage) },

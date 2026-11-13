@@ -266,7 +266,7 @@ def user_session_keys(authdb: SimpleNamespace, uid: str) -> set[str]:
 #: 另以被测树 migrations/versions 的 revision/down_revision 链推出唯一 head，库中版本须等于它——以后新增迁移时
 #: 本用例会以"head 未登记"的明确信息失败，提醒同步本集合与 DB 自检。
 # 0034: T-B133 minute-bars sources; CI migrates this fixed source tree to its unique head.
-KNOWN_HEADS = ("0008", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0034")
+KNOWN_HEADS = ("0008", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0034", "0035")
 
 _REV_RE = re.compile(r"""^(down_revision|revision)\b[^=]*=\s*(.+)$""", re.MULTILINE)
 

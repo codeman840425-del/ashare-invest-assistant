@@ -282,6 +282,7 @@ STEPS: Final[tuple[Step, ...]] = (
     _d("app.import_mappings"),
     _d("app.accounts"),
     _d("app.watchlist_items"),
+    _d("app.daily_bars_outbox"),
     _d("app.user_profiles"),
     _d("app.user_realtime_prefs"),
     _d("app.user_restrictions"),
@@ -381,7 +382,7 @@ HANDLED_FK: Final[frozenset[str]] = frozenset(
                 "app.alert_rules", "app.risk_events", "app.suggestion_user_actions",
                 "app.alerts", "app.user_data_licences", "ops.data_licence_events",
                 "app.user_data_licence_holds", "app.user_data_licence_cooldowns",
-                "app.data_snapshots", "app.signal_event_projections",
+                "app.data_snapshots", "app.signal_event_projections", "app.daily_bars_outbox",
             )
         ),
         "app.users.reviewed_by", "app.account_reviews.admin_id", "app.invite_codes.created_by",

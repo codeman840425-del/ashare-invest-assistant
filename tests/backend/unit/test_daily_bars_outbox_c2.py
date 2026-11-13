@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import importlib
 import importlib.util
+import re
 import socket
 import uuid
 from collections.abc import Iterator
@@ -355,6 +356,55 @@ def test_migration_single_head_upgrade_downgrade_and_nonempty_refusal(
             migration.downgrade()
         assert conn.scalar(select(func.count()).select_from(module.outbox)) == 1
         assert conn.scalar(select(func.count()).select_from(pipeline_runs)) == 1
+
+
+def test_outbox_purge_handles_only_target_owner(
+    world: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.cli.delete_user_data import HANDLED_FK, STEPS
+
+    module = install_table(world)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", 2)
+    with world.engine.begin() as conn:
+        for owner in (OWNER, OTHER):
+            module.enqueue(conn, trade_date=DAY, user_id=owner, grant_reader=grant, now=NOW)
+        assert "app.daily_bars_outbox.user_id" in HANDLED_FK
+        steps = [step for step in STEPS if step.table == "app.daily_bars_outbox"]
+        assert len(steps) == 1 and steps[0].action == "delete"
+        conn.execute(text("SAVEPOINT synthetic_purge"))
+        root = Path(__file__).resolve().parents[3]
+        sql_text = (root / "deploy/db/roles/grants.sql").read_text(encoding="utf-8")
+        match = re.search(r"DO \$maint\$.*?\n\$maint\$;", sql_text, re.DOTALL)
+        assert match is not None
+        block = match.group(0)
+        roles = {}
+        for original in ("aia_maint", "aia_api", "aia_ingest"):
+            role = "c2_role_" + uuid.uuid4().hex
+            assert conn.scalar(text("SELECT count(*) FROM pg_roles WHERE rolname=:r"), {"r": role}) == 0
+            conn.execute(text(f"CREATE ROLE {role} LOGIN NOINHERIT"))
+            roles[original] = role
+            block = re.sub(rf"\b{original}\b", role, block)
+        conn.execute(text(block))  # Original production block, with isolated role names only.
+        maint = roles["aia_maint"]
+        for column in module.outbox.c:
+            assert conn.scalar(
+                text("SELECT has_column_privilege(:r, 'app.daily_bars_outbox', :c, 'SELECT')"),
+                {"r": maint, "c": column.name},
+            ) is (column.name in {"id", "user_id"})
+        for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+            assert conn.scalar(
+                text("SELECT has_table_privilege(:r, 'app.daily_bars_outbox', :p)"),
+                {"r": maint, "p": privilege},
+            ) is (privilege == "DELETE")
+        conn.execute(text(f"SET LOCAL ROLE {maint}"))
+        conn.execute(
+            text(f"DELETE FROM {steps[0].table} WHERE {steps[0].where}"), {"uid": OWNER}
+        )
+        assert conn.execute(select(module.outbox.c.user_id)).scalars().all() == [OTHER]
+        conn.execute(text("ROLLBACK TO SAVEPOINT synthetic_purge"))
+        assert set(conn.execute(select(module.outbox.c.user_id)).scalars()) == {OWNER, OTHER}
+        for role in roles.values():
+            assert conn.scalar(text("SELECT count(*) FROM pg_roles WHERE rolname=:r"), {"r": role}) == 0
 
 
 @pytest.mark.parametrize("daily_limit", [501, 2000])

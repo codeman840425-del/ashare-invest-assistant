@@ -15,10 +15,10 @@ from .tt21_head import expected_main_head
 
 def test_current_head_alias_preserves_real_fixture_object_and_lifecycle():
     assert milestone.integration is milestone.tt21_integration is original.tt21_integration
-    assert expected_main_head(Path(original.tb70.__file__).resolve().parents[1]) == '0034'
+    assert expected_main_head(Path(original.tb70.__file__).resolve().parents[1]) == '0035'
 
 
-@pytest.mark.parametrize('version', ['0020', '0030', '0035'])
+@pytest.mark.parametrize('version', ['0020', '0030', '0036'])
 def test_real_fixture_rejects_wrong_database_version_before_writes(tmp_path, monkeypatch, version):
     statements = []
     def execute(query):

@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.backend.milestone.tt21_head import expected_main_head
+
 PG_IMAGE = 'timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731'
 REDIS_IMAGE = 'redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f'
 ROOT = Path(__file__).resolve().parents[3]
@@ -67,7 +69,7 @@ def verify():
         require(receipt[field] == os.environ[env], 'Receipt belongs to another run/attempt/SHA')
     head = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True, timeout=10).stdout.strip()
     require(head == receipt['sha'], 'Checkout SHA differs')
-    require(receipt['require_isolated_passed'] is True and receipt['current_database'] == 'tb70_replay' and receipt['version'] == '0034', 'Fresh baseline database not verified')
+    require(receipt['require_isolated_passed'] is True and receipt['current_database'] == 'tb70_replay' and receipt['version'] == expected_main_head(ROOT / 'src/backend'), 'Fresh baseline database not verified')
     require(len(receipt['containers']) == 2 and {r['kind'] for r in receipt['containers']} == {'pg', 'redis'}, 'Exact PG/Redis pair required')
     pg_id = next(r['Id'] for r in receipt['containers'] if r['kind'] == 'pg')
     require(any(r['name'] == 'tb70_replay' and r['container_id'] == pg_id and r['fresh_empty'] is True for r in receipt['created_databases']), 'No fresh baseline creation receipt')

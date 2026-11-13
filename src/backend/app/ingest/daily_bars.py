@@ -39,6 +39,11 @@ from app.reports.service import covered
 
 DAILY_BARS_HTTP_UNLIMITED = "unlimited"
 DAILY_BARS_HTTP_LIMIT: int = 0
+# C2 effective batch gates; opening either remains a separately authorized D change.
+DAILY_BARS_BATCH_LIMIT: int = 0
+DAILY_BARS_BACKFILL_BATCH_LIMIT: int = 0
+DAILY_BARS_BATCH_CEILING = 2000
+DAILY_BARS_DAILY_BATCH_CEILING = 500
 AUTHORIZATION = Path("/run/aia/receipts/mairui-daily-bars.json")
 HALT = Path("/run/aia/state/halt/mairui-daily-bars.HALTED")
 # 日 K 回执与日 K outbox 共用。
@@ -83,6 +88,18 @@ def daily_bars_http_budget(value: object) -> DailyBarsBudget:
     if value == DAILY_BARS_HTTP_UNLIMITED:
         return DailyBarsBudget(kind="unlimited")
     if type(value) is int and value > 0:
+        return DailyBarsBudget(kind="capped", cap=value)
+    return DailyBarsBudget(kind="unset")
+
+
+def daily_bars_batch_budget(value: object, batch_kind: str = "daily") -> DailyBarsBudget:
+    """Reject caps outside this batch type's bound; defaults never borrow backfill quota."""
+    if batch_kind not in {"daily", "backfill"}:
+        return DailyBarsBudget(kind="unset")
+    ceiling = (
+        DAILY_BARS_DAILY_BATCH_CEILING if batch_kind == "daily" else DAILY_BARS_BATCH_CEILING
+    )
+    if type(value) is int and 0 < value <= ceiling:
         return DailyBarsBudget(kind="capped", cap=value)
     return DailyBarsBudget(kind="unset")
 

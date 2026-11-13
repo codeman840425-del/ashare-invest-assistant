@@ -438,7 +438,7 @@ def test_real_business_worker_settings_snapshot_events_and_readonly_projection(
 ) -> None:
     from app.db.tables.realtime import suggestions
     from app.db.tables.reviews import data_snapshots
-    from app.workers.daily import ANALYZE
+    from app.workers.daily import ANALYZE, REPORT
     from selfchecks import test_tb76_daily as worker_fixture
     from selfchecks.test_tb74_candidates import setup as make_setup
     from selfchecks.test_tb76_assembly import prepare
@@ -474,7 +474,9 @@ def test_real_business_worker_settings_snapshot_events_and_readonly_projection(
     from app.workers import jobs
 
     jobs.TASKS[ANALYZE](settings, trade_date=str(worker_fixture.DATE), user_id=str(owner))
-    assert worker_fixture.enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), ("tracking", "ok")]
+    assert worker_fixture.enqueue(ANALYZE, owner) == [
+        (ANALYZE, "ok"), (REPORT, "ok"), ("tracking", "ok"),
+    ]
     with engine.connect() as conn:
         before = count(conn, risk_events, owner)
         assert before >= 1
@@ -489,7 +491,9 @@ def test_real_business_worker_settings_snapshot_events_and_readonly_projection(
         assert source[0].items["risk_account_id"] == str(setup[5])
         assert source[0].items["risk_control_evaluation"][0]["state"] == "disabled"
         assert any(s["instance_id"] == str(instance) for s in produced.strategies)
-    assert worker_fixture.enqueue(ANALYZE, owner) == [(ANALYZE, "ok"), ("tracking", "ok")]
+    assert worker_fixture.enqueue(ANALYZE, owner) == [
+        (ANALYZE, "ok"), (REPORT, "ok"), ("tracking", "ok"),
+    ]
     evaluation = client.get("/api/v1/risk-controls/evaluation?security_code=688018.SH").json()
     assert evaluation["snapshot_id"] == str(produced.snapshot_id)
     ids = {e["id"] for e in evaluation["evidence"]}

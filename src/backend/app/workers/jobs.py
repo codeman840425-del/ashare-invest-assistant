@@ -512,7 +512,7 @@ def slot_jobs(settings: Settings, now: dt.datetime) -> list[tuple[str, str, dict
         dt.datetime.combine(bj.date(), _hhmm(h), BEIJING)
         <= bj
         < dt.datetime.combine(bj.date(), _hhmm(h), BEIJING) + dt.timedelta(seconds=SLOT_WINDOW_S)
-        for h in ("17:30", "18:30")
+        for h in ("17:30",)
     ):
         from app.reports.service import covered
 
@@ -521,7 +521,7 @@ def slot_jobs(settings: Settings, now: dt.datetime) -> list[tuple[str, str, dict
         plan.extend(
             [
                 (ANALYZE, "17:30", {"trade_date": str(bj.date())}, is_open),
-                (REPORT, "18:30", {"trade_date": str(bj.date())}, is_open),
+                (REPORT, "17:30", {"trade_date": str(bj.date())}, is_open),
             ]
         )
     out = []
@@ -549,7 +549,14 @@ def beat_slots(
     now = now or dt.datetime.now(dt.UTC)
     queued: list[str] = []
     try:
-        for task, slot, args in slot_jobs(settings, now):
+        slots = slot_jobs(settings, now)
+        # §9.1：两份恢复意图均先持久化，REPORT 只由 analyze 完成后推送。
+        for task, _, args in slots:
+            if task in {ANALYZE, REPORT}:
+                record_intent(settings, task, str(args["trade_date"]))
+        for task, slot, args in slots:
+            if task == REPORT:
+                continue
             if task == MAIRUI_SNAPSHOT:
                 from app.master.daily_delivery import read_grant, request
 
@@ -561,8 +568,6 @@ def beat_slots(
                 with _engine(settings).begin() as conn:
                     if request(conn, grant, now) is None:
                         continue
-            if task in {ANALYZE, REPORT}:
-                record_intent(settings, task, str(args["trade_date"]))
             if r.set(f"{SLOT_PREFIX}{task}:{slot}", 1, nx=True, ex=SLOT_TTL_S):
                 _push(r, task, args)
                 queued.append(task)
@@ -613,6 +618,8 @@ def worker_tick(settings: Settings, client: redis.Redis | None = None) -> list[t
                 log.warning("worker 任务 %s 失败：%s", task, type(exc).__name__)
                 done.append((task, "failed"))
                 _after_failure(settings, r, task, args, attempt, exc)
+                if task == ANALYZE:
+                    _push(r, REPORT, {k: args[k] for k in ("trade_date", "user_id") if k in args})
                 continue
             finally:
                 if task in LOCKED_TASKS and r.get(lock) == token.encode():
@@ -620,6 +627,7 @@ def worker_tick(settings: Settings, client: redis.Redis | None = None) -> list[t
             log.info("worker 任务 %s 完成：%s", task, n)
             done.append((task, "ok"))
             if task == ANALYZE:
+                _push(r, REPORT, {k: args[k] for k in ("trade_date", "user_id") if k in args})
                 _push(r, TRACKING, {"user_id": args.get("user_id")})
             if task == SYNC_LISTS and RECONCILE_VENDOR in TASKS:
                 # T-B53；首次导入（CLI）从不走这里

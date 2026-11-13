@@ -1,5 +1,5 @@
 /** T-F13（契约 v0.2.7 §5.3 DailyReport、§7 `/daily-reports*`）：盘后日报页补全 */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
@@ -21,14 +21,16 @@ vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div
 const API = '/api/v1';
 
 let lastClient: ReturnType<typeof makeQueryClient>;
+let lastContainer: HTMLElement;
 function renderAt(path: string) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
   const router = createMemoryRouter(routes, { initialEntries: [path] });
-  render(
+  const view = render(
     <AppProviders client={(lastClient = makeQueryClient(true))}>
       <RouterProvider router={router} />
     </AppProviders>,
   );
+  lastContainer = view.container;
   return router;
 }
 
@@ -139,28 +141,52 @@ describe('T-F13 盘后日报', () => {
     expect(seen).toContain('p2');
   });
 
-  it('“上一期”加载更早时用户已换日期：加载完成后不再跳转（评审 b23401a N6）', async () => {
+  it.each([true, false])('“上一期”加载更早时用户已换日期：加载完成后不再跳转（评审 b23401a N6，先换日期=%s）', async (changeDate) => {
     let release: () => void = () => {};
+    let entered = false;
+    let responded = false;
     const gate = new Promise<void>((r) => { release = r; });
     server.use(http.get(`${API}/daily-reports`, async ({ request }) => {
       const cursor = new URL(request.url).searchParams.get('cursor');
-      if (cursor === 'p2') { await gate; return HttpResponse.json({ items: [DAILY_REPORT_LIST[1]], next_cursor: null }); }
+      if (cursor === 'p2') {
+        entered = true;
+        await gate;
+        responded = true;
+        return HttpResponse.json({ items: [DAILY_REPORT_LIST[1]], next_cursor: null });
+      }
       return HttpResponse.json({ items: [DAILY_REPORT_LIST[0]], next_cursor: 'p2' });
     }), http.get(`${API}/daily-reports/2026-10-20`, () => HttpResponse.json({ ...cur, date: '2026-10-20' })));
     // 先看过 10-20（进缓存），再回到最新一期；之后切回 10-20 时页面不经过加载态，切换器保持挂载
     const router = renderAt('/daily-reports/2026-10-20');
-    await screen.findByTestId('daily-report');
-    await router.navigate(`/daily-reports/${REPORT_DATE}`);
-    await waitFor(() => expect(document.querySelector('.report-dates')?.textContent).toContain(REPORT_DATE));
-    const prev = await screen.findByRole('button', { name: '上一期' });
+    await within(lastContainer).findByTestId('daily-report');
+    const selected = () => {
+      const content = within(lastContainer).getByRole('combobox', { name: '选择日期' }).closest('.ant-select-content');
+      return content?.getAttribute('title') === content?.textContent?.trim() ? content?.getAttribute('title') : null;
+    };
+    await act(async () => { await router.navigate(`/daily-reports/${REPORT_DATE}`); });
+    await waitFor(() => expect(selected()).toBe(REPORT_DATE));
+    const prev = within(lastContainer).getByRole('button', { name: '上一期' });
     await waitFor(() => expect(prev).toBeEnabled());
     fireEvent.click(prev);
-    await router.navigate('/daily-reports/2026-10-20');
-    await waitFor(() => expect(document.querySelector('.report-dates')?.textContent).toContain('2026-10-20'));
-    // “更早”那一页此时才返回：等待期间地址已变，不应再跳到 10-29
-    release();
+    // The original cancellation assertion must consume an already pending p2 request.
+    await waitFor(() => expect(entered).toBe(true));
+    expect(responded).toBe(false);
+    if (changeDate) {
+      await act(async () => { await router.navigate('/daily-reports/2026-10-20'); });
+      await waitFor(() => expect(selected()).toBe('2026-10-20'));
+    }
+    // Await the actual in-flight page promise inside act, including its React consumers.
+    const pending = lastClient.getQueryCache().find({ queryKey: ['daily-reports', 'pages', 20], exact: true })?.promise;
+    expect(pending).toBeDefined();
+    await act(async () => { release(); await pending; });
     await settled(lastClient);
-    expect(router.state.location.pathname).toBe('/daily-reports/2026-10-20');
+    expect(responded).toBe(true);
+    if (changeDate) {
+      expect(router.state.location.pathname).toBe('/daily-reports/2026-10-20');
+    } else {
+      // Same real delayed page must still navigate when the user has not changed date.
+      await waitFor(() => expect(router.state.location.pathname).toBe(`/daily-reports/${PREV_REPORT_DATE}`));
+    }
   });
 
   it('切换日期保留 ?filter=（评审 7afbc06 m2）', async () => {

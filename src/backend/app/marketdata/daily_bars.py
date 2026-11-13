@@ -613,22 +613,10 @@ def daily_bars_fetch_task(
                 _record_run(conn, day, uid, window_trading_days, status="skipped", stats=stats)
                 return 0
             if settings.daily_bars_source == "mairui":
-                from app.ingest.daily_bars import (
-                    DAILY_BARS_HTTP_LIMIT,
-                    daily_bars_http_budget,
-                )
+                from app.marketdata.daily_bars_outbox import enqueue
 
-                budget = daily_bars_http_budget(DAILY_BARS_HTTP_LIMIT)
-                if budget.kind == "unset":
-                    stats = _empty_stats(
-                        uid, window_trading_days, issues=["daily_bars_http_budget_unset"]
-                    )
-                    _record_run(
-                        conn, day, uid, window_trading_days, status="skipped", stats=stats
-                    )
-                    return 0
-                # Worker must not go online. Ingest fetch is the C entry; outbox
-                # tick wiring is left unset (no new table / migration in this ticket).
+                enqueue(conn, trade_date=day, user_id=uid, window_trading_days=window_trading_days)
+                # The worker schedules only; inserted bars remain zero until ingest consumes.
                 return 0
             return fetch_and_record(
                 conn,

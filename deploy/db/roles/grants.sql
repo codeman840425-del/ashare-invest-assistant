@@ -311,6 +311,8 @@ DECLARE
     'app.claim_links|DELETE|',
     'app.claims|SELECT|id,user_id',
     'app.claims|DELETE|',
+    'app.daily_bars_outbox|SELECT|id,user_id',
+    'app.daily_bars_outbox|DELETE|',
     'app.daily_report_items|SELECT|report_id',
     'app.daily_report_items|DELETE|',
     'app.daily_reports|SELECT|id,llm_call_id,user_id',

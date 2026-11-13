@@ -445,7 +445,7 @@ def test_daily_bars_fetch_slot_1715_open_day_only(monkeypatch: pytest.MonkeyPatc
                 hits.append((now.hour, now.minute, slot, args))
     assert [(h, m) for h, m, _s, _a in hits] == [(17, 15), (17, 20), (17, 25)]
     assert all(slot == "20261110:1715" and args == {"trade_date": "2026-11-10"} for _h, _m, slot, args in hits)
-    # REPORT 仍在 18:30；17:15 窗口不含 17:30
+    # §9.1：REPORT意图在17:30；beat只推ANALYZE，17:15窗口不含二者。
     report_slots = []
     for hhmm in ("17:15", "17:30", "18:30"):
         h, m = (int(p) for p in hhmm.split(":"))
@@ -455,7 +455,8 @@ def test_daily_bars_fetch_slot_1715_open_day_only(monkeypatch: pytest.MonkeyPatc
         )
     assert name in report_slots[0] and jobs_mod.REPORT not in report_slots[0]
     assert name not in report_slots[1] and jobs_mod.ANALYZE in report_slots[1]
-    assert jobs_mod.REPORT in report_slots[2]
+    assert jobs_mod.REPORT in report_slots[1]
+    assert jobs_mod.REPORT not in report_slots[2]
     monkeypatch.setattr("app.reports.service.covered", lambda _conn, _day: False)
     for minute in range(0, 24 * 60, 5):
         now = dt.datetime(2026, 11, 10, minute // 60, minute % 60, tzinfo=BEIJING)

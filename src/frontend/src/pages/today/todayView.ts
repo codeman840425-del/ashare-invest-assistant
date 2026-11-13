@@ -4,11 +4,11 @@
  */
 import type { DailyReport, Gap, TodayResponse } from '../../api/types';
 
-/** 「日报约 HH:MM 生成」的时刻（用户尚未定 17:30 还是 18:30，只改这一处） */
-export const REPORT_EXPECTED_AT = '18:30';
+/** 日报预期时刻（北京时间；daily-bars-source §9.1、G-STAGE3 S3-7） */
+export const REPORT_EXPECTED_AT = '17:30';
 /** 收盘后开始显示「盘后数据准备中」的时刻 */
 export const POST_CLOSE_AT = '15:00';
-/** 日报逾时 = 「日报约 HH:MM 生成」时刻 + 15 分钟（编排者裁定 ⑧；默认 18:30 → 18:45） */
+/** 日报逾时 = 「日报约 HH:MM 生成」时刻 + 15 分钟（编排者裁定 ⑧；默认 17:30 → 17:45） */
 export const REPORT_OVERDUE_GRACE_MIN = 15;
 /** 「数据缺口」区最多列出的证券数 */
 export const GAP_SECURITY_LIMIT = 10;
@@ -18,7 +18,7 @@ const hhmm = (s: string) => { const [h, m] = s.split(':').map(Number); return h 
 const fmtHhmm = (min: number) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 /** 由「日报约 HH:MM 生成」时刻推导逾时阈值（HH:MM） */
 export const overdueAt = (expectedAt: string = REPORT_EXPECTED_AT) => fmtHhmm(hhmm(expectedAt) + REPORT_OVERDUE_GRACE_MIN);
-/** 日报逾时阈值（默认由 REPORT_EXPECTED_AT 推导，即 18:45） */
+/** 日报逾时阈值（默认由 REPORT_EXPECTED_AT 推导，即 17:45） */
 export const REPORT_OVERDUE_AT = overdueAt();
 /** S4 文案随「日报约 HH:MM 生成」时刻变化 */
 export const s4Text = (expectedAt: string = REPORT_EXPECTED_AT) => `盘后数据准备中，日报约 ${expectedAt} 生成。`;
@@ -63,7 +63,7 @@ export function preReportState(t: TodayResponse, expectedAt: string = REPORT_EXP
   if (now === null) return null; // 时间无法判定：不猜，不显示时段状态
   // S5：交易日、已到逾时阈值、仍为 not_yet
   if (st === 'not_yet' && now >= hhmm(overdueAt(expectedAt))) return 'S5';
-  // S4：交易日、收盘后、日报未就绪（契约 15:00–18:30；18:30 到逾时阈值之间以及逾时后仍 generating 也保守按 S4，见待裁定）
+  // S4：交易日、收盘后、日报未就绪；17:45 前 not_yet 或逾时后仍 generating 均按 S4。
   if (now >= hhmm(POST_CLOSE_AT)) return 'S4';
   return null;
 }

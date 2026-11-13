@@ -22,6 +22,7 @@ from app.api.v1 import (
     notifications,
     portfolio,
     promotions,
+    quotes,
     risk_controls,
     sector_flows,
     securities,
@@ -60,6 +61,7 @@ router.include_router(candidates.router)
 router.include_router(instances.router)
 
 router.include_router(aggregates.router)
+router.include_router(quotes.router)
 router.include_router(sector_flows.router)
 router.include_router(securities.router)
 router.include_router(security_financials.router)

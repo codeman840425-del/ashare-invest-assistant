@@ -89,33 +89,37 @@ describe('T-F34 时间换算（纯函数）', () => {
     process.env.TZ = 'America/Denver';
     expect(shanghaiMinutes('not-a-time')).toBeNull();
   });
-  it('边界 14:59/15:00/17:29/17:30/18:30/18:44/18:45（not_yet）与 generating', () => {
+  it('边界 14:59/15:00/17:29/17:30/17:44/17:45/18:30/18:44/18:45（not_yet）与 generating', () => {
     const st = (t: string, status: TodayResponse['daily_report']['status'] = 'not_yet') => preReportState(today({ server_time: bj(t), daily_report: { date: DATE, status } }));
     expect(st('14:59')).toBeNull();
     expect(st('15:00')).toBe('S4');
     expect(st('17:29')).toBe('S4');
     expect(st('17:30')).toBe('S4');
-    expect(st('18:30')).toBe('S4');
-    expect(st('18:44')).toBe('S4');
+    expect(st('17:44')).toBe('S4');
+    expect(st('17:45')).toBe('S5');
+    expect(st('18:30')).toBe('S5');
+    expect(st('18:44')).toBe('S5');
     expect(st('18:45')).toBe('S5');
     expect(st('18:45', 'generating')).toBe('S4');
     expect(st('18:50', 'ready')).toBeNull();
   });
   it('「日报约 HH:MM 生成」取自单一常量', () => {
-    expect(REPORT_EXPECTED_AT).toBe('18:30');
+    expect(REPORT_EXPECTED_AT).toBe('17:30');
     expect(STATE_TEXT.S4).toBe(`盘后数据准备中，日报约 ${REPORT_EXPECTED_AT} 生成。`);
   });
-  it('⑧ 逾时阈值 = 常量 + 15 分钟：默认 18:45；常量换 17:30 → 17:45，文案随之变化', () => {
-    expect(REPORT_OVERDUE_AT).toBe('18:45');
-    expect(overdueAt('17:30')).toBe('17:45');
-    expect(s4Text('17:30')).toBe('盘后数据准备中，日报约 17:30 生成。');
+  it('⑧ 逾时阈值 = 常量 + 15 分钟：默认 17:45；常量换 18:30 → 18:45，文案随之变化', () => {
+    expect(REPORT_OVERDUE_AT).toBe('17:45');
+    expect(overdueAt('18:30')).toBe('18:45');
+    expect(s4Text('18:30')).toBe('盘后数据准备中，日报约 18:30 生成。');
     expect(s4Text()).toBe(STATE_TEXT.S4);
     const st = (t: string, expectedAt?: string) => preReportState(today({ server_time: bj(t), daily_report: { date: DATE, status: 'not_yet' } }), expectedAt);
-    expect(st('18:44')).toBe('S4');
+    expect(st('17:44')).toBe('S4');
+    expect(st('17:45')).toBe('S5');
+    expect(st('18:44')).toBe('S5');
     expect(st('18:45')).toBe('S5');
-    expect(st('17:44', '17:30')).toBe('S4');
-    expect(st('17:45', '17:30')).toBe('S5');
-    expect(st('17:20', '17:30')).toBe('S4');
+    expect(st('18:44', '18:30')).toBe('S4');
+    expect(st('18:45', '18:30')).toBe('S5');
+    expect(st('18:20', '18:30')).toBe('S4');
   });
 });
 
@@ -233,7 +237,7 @@ describe('T-F34 全局状态 S1–S9（契约 §4 用例 1–9、16）', () => {
     expect(barState()).toBe('S4');
   });
   it.each([
-    ['17:29', 'S4'], ['17:30', 'S4'], ['18:30', 'S4'], ['18:44', 'S4'], ['18:45', 'S5'],
+    ['17:29', 'S4'], ['17:30', 'S4'], ['17:44', 'S4'], ['17:45', 'S5'], ['18:30', 'S5'], ['18:44', 'S5'], ['18:45', 'S5'],
   ])('时间边界 北京 %s not_yet → %s，且不请求日报', async (t, s) => {
     await setup(today({ server_time: bj(t), daily_report: { date: DATE, status: 'not_yet' } }));
     await settled(false);
@@ -394,10 +398,10 @@ describe('T-F34 数据缺口区（用例 10–13 与通用断言）', () => {
 
 describe('T-F34b 契约 §7 补充裁定（12 条）', () => {
   const cashToday = { items: [{ key: 'cash', reason: 'user_input_missing' as const, scope: 'account' as const, dataset: null, message: '未录入现金（示例）', security_count: 0, securities: [], since: null, route: '/portfolio/import' }], more: false };
-  it('§7①-1：北京 18:40、not_yet → S4', async () => {
+  it('§7①-1：北京 18:40、not_yet → S5', async () => {
     await setup(today({ server_time: bj('18:40'), daily_report: { date: DATE, status: 'not_yet' } }));
     await settled(false);
-    expect(barState()).toBe('S4');
+    expect(barState()).toBe('S5');
   });
   it('§7①-2：北京 19:10、generating → S4，不显示 S5', async () => {
     await setup(today({ server_time: bj('19:10'), daily_report: { date: DATE, status: 'generating' } }));

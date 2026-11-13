@@ -1,7 +1,14 @@
 import type { DimensionCell, Evidence } from '../api/types';
 import { PROVIDER } from '../i18n/labels';
 /** 契约时间均为 +08:00；界面统一按北京时间显示。Z 或其他偏移换算到 Asia/Shanghai；+08:00 输出与旧实现逐字节不变。 */
-export const fmtTime = (t: string) => {
+/**
+ * F-13：`t` 为 null/undefined 时返回空串，**不抛错**。
+ * 空数据场景（契约 T-A53）`data_as_of` 为 null 是合法的；此前直接调 `.endsWith` 会让整页
+ * 崩成 ErrorBoundary（市场页实测），这属于白屏级缺陷，不能等类型可空化才修。
+ * 调用方仍应自行决定 null 时显示什么文案（本函数只保证不崩）。
+ */
+export const fmtTime = (t: string | null | undefined) => {
+  if (t === null || t === undefined || t === '') return '';
   if (t.endsWith('+08:00') || !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(t)) {
     return t.replace('T', ' ').replace(/\+08:00$/, '').replace(/:00$/, '');
   }

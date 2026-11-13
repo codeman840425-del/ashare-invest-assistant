@@ -1,6 +1,7 @@
 /** T-F18 计划草案（契约 v0.2.8 §7.7） */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { createMemoryRouter, RouterProvider } from 'react-router';
+import { createMemoryRouter } from 'react-router';
+import { TestRouterProvider as RouterProvider } from '../test/TestRouterProvider';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';

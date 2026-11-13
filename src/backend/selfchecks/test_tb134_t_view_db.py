@@ -72,20 +72,38 @@ def test_t_view_volume_ratio_skips_suspended_days(db: Engine) -> None:
 
 
 def test_t_view_history_cached_once_per_day(db: Engine) -> None:
+    # T-B134b：按 T-A149 ⑥ 只缓存非空结果，故首次即给满 5 日，再改历史验证当天不刷新
     tv._HISTORY.clear()
     with db.begin() as conn:
         conn.execute(
-            insert(minute_bars), [_row("600002", d, 10, 0, 50, "mairui") for d in PAST[:3]]
+            insert(minute_bars), [_row("600002", d, 10, 0, 50, "mairui") for d in PAST[1:]]
         )
     with db.connect() as conn:
         first = tv.history_volumes(conn, "600002", TODAY)
+        conn.execute(insert(minute_bars), [_row("600002", PAST[-1], 10, 1, 50, "mairui")])
+        conn.commit()
+        assert tv.history_volumes(conn, "600002", TODAY) == first == [Decimal(50)] * 5
+        tv._HISTORY.clear()
+        assert tv.history_volumes(conn, "600002", TODAY)[0] == Decimal(100)
+
+
+def test_t_view_volume_ratio_null_not_cached(db: Engine) -> None:
+    # T-A149 ⑥：首次历史不足（量比为空）不缓存，同日补齐后下次请求得到非空量比
+    tv._HISTORY.clear()
+    with db.begin() as conn:
         conn.execute(
-            insert(minute_bars), [_row("600002", d, 10, 0, 50, "mairui") for d in PAST[3:]]
+            insert(minute_bars), [_row("600005", d, 10, 0, 240, "mairui") for d in PAST[:3]]
+        )
+    with db.connect() as conn:
+        first = tv.history_volumes(conn, "600005", TODAY)
+        assert tv.volume_ratio(Decimal(240), 1, first) == (None, "历史分时不足 5 个交易日")
+        conn.execute(
+            insert(minute_bars), [_row("600005", d, 10, 0, 240, "mairui") for d in PAST[3:]]
         )
         conn.commit()
-        assert tv.history_volumes(conn, "600002", TODAY) == first == [Decimal(50)] * 3
-        tv._HISTORY.clear()
-        assert len(tv.history_volumes(conn, "600002", TODAY)) == 5
+        again = tv.history_volumes(conn, "600005", TODAY)
+    assert len(again) == 5
+    assert tv.volume_ratio(Decimal(240), 1, again) == ("240.00", None)
 
 
 def test_t_view_ignores_tdx_local(db: Engine) -> None:

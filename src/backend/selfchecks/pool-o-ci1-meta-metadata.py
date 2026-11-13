@@ -239,14 +239,26 @@ def test_budget_loop_cap_stop_and_limits_with_fake_upstream(
         return status, None
 
     monkeypatch.setattr(daily_bars, "_record_run", record)
+    owner = uuid.uuid4()
     written = daily_bars.fetch_mairui_daily_bars(
         Mock(spec=Connection),
         trade_date=dt.date(2026, 11, 11),
-        user_id=uuid.uuid4(),
+        user_id=owner,
         transport=upstream,
         stop_path=stop,
         halt_path=halt,
-        grant_reader=lambda: object() if authorized else None,
+        grant_reader=lambda: (
+            daily_bars.DailyBarsGrant(
+                owner,
+                uuid.UUID(int=2),
+                uuid.UUID(int=3),
+                dt.datetime(2026, 11, 10, tzinfo=dt.UTC),
+                dt.datetime(2026, 11, 12, tzinfo=dt.UTC),
+                "0" * 64,
+            )
+            if authorized
+            else None
+        ),
         clock=lambda: dt.datetime(2026, 11, 11, tzinfo=dt.UTC),
     )
     require(written == 0 and len(calls) == expected_calls, "budget/stop/limit call count changed")

@@ -2,7 +2,8 @@
 """Freeze a trusted base measurement, never the PR's own editable baseline.
 
 Only the first approved pre-ratchet main commit uses the reviewed 4c02 counts.
-Later baselines come from exact-base main push CI artifacts, not PR artifacts.
+Later baselines use validated main push artifacts. Only main events may recover
+through a bounded first-parent history; PR events remain exact-base.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from coverage_ratchet import BOOTSTRAP_BASE, bootstrap_record, validate_record
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = "scripts/ci/coverage-baseline.json"
 LIMIT = 8 * 1024 * 1024
+MAX_FALLBACK_ANCESTORS = 50
 
 
 class SafeRedirect(urllib.request.HTTPRedirectHandler):
@@ -105,9 +107,13 @@ class MeasurementPending(ValueError):
         super().__init__(f"Exact main measurement pending: base={sha}, run={run_id}")
 
 
-def freeze(repo: str, sha: str, get) -> dict:
-    # git show reads the frozen base object; PR changes to its own JSON do not
-    # choose the baseline. A missing later baseline is an error, not a reset.
+class MeasurementUnavailable(ValueError):
+    """A known main head lacks a usable, validated main push measurement."""
+
+
+def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError) -> dict:
+    # Keep PR selection, trust checks and failure behavior exact. Main recovery
+    # classifies only missing/invalid measurement data, never git or API failures.
     exists = subprocess.run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=ROOT,
                             capture_output=True, check=False)
     if exists.returncode:
@@ -133,21 +139,64 @@ def freeze(repo: str, sha: str, get) -> dict:
                   and r["repository"]["full_name"] == repo]
         if active:
             raise MeasurementPending(sha, max(int(r["id"]) for r in active))
-        raise ValueError("No completed exact-base main measurement run")
+        raise unavailable("No completed exact-base main measurement run")
     run = max(runs, key=lambda r: (r["id"], r["run_attempt"]))
     artifacts = get("/actions/runs/" + str(run["id"]) + "/artifacts?per_page=100")["artifacts"]
     name = "coverage-ratchet-" + str(run["id"]) + "-" + str(run["run_attempt"])
     selected = [a for a in artifacts if a["name"] == name and not a["expired"]]
     if len(selected) != 1:
-        raise ValueError("Missing, expired or ambiguous exact-base measurement")
+        raise unavailable("Missing, expired or ambiguous exact-base measurement")
     data = get("/actions/artifacts/" + str(selected[0]["id"]) + "/zip", binary=True)
-    return read_artifact(data, sha, run["id"], run["run_attempt"])
+    try:
+        return read_artifact(data, sha, run["id"], run["run_attempt"])
+    except (ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
+        if unavailable is ValueError:
+            raise
+        raise unavailable("Invalid exact-base main push measurement") from exc
 
 
-def wait_for_base(repo: str, sha: str, get, timeout: int) -> dict:
+def freeze(repo: str, sha: str, get, *, allow_fallback: bool = False) -> dict:
+    if not allow_fallback:
+        return _freeze_exact(repo, sha, get)
+    requested = sha
+    for skipped in range(MAX_FALLBACK_ANCESTORS + 1):
+        try:
+            record = _freeze_exact(repo, sha, get, unavailable=MeasurementUnavailable)
+        except MeasurementPending:
+            if skipped == 0:
+                raise  # Retain the existing wait for this head's active push.
+        except MeasurementUnavailable:
+            pass
+        else:
+            if skipped == 0:
+                return record  # Including the original exact bootstrap behavior.
+            if record["source"]["kind"] != "trusted-main-push-artifact":
+                break  # Never reset a missing chain to bootstrap counts.
+            record["source"]["fallback"] = {
+                "requested_base_commit": requested, "skipped_heads": skipped,
+                "ancestor_limit": MAX_FALLBACK_ANCESTORS,
+            }
+            return record
+        if skipped == MAX_FALLBACK_ANCESTORS:
+            break
+        parent = subprocess.run(["git", "rev-parse", "--verify", sha + "^1"],
+                                cwd=ROOT, capture_output=True, text=True, check=False)
+        if parent.returncode:
+            break
+        sha = parent.stdout.strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise ValueError("Invalid first-parent commit identity")
+    raise MeasurementUnavailable(
+        "No usable trusted main push measurement within "
+        f"{MAX_FALLBACK_ANCESTORS} first-parent ancestors")
+
+
+def wait_for_base(repo: str, sha: str, get, timeout: int, *, allow_fallback: bool = False) -> dict:
     deadline = time.monotonic() + timeout
     while True:
         try:
+            if allow_fallback:
+                return freeze(repo, sha, get, allow_fallback=True)
             return freeze(repo, sha, get)
         except MeasurementPending as pending:
             remaining = deadline - time.monotonic()
@@ -167,11 +216,22 @@ def main() -> int:
     try:
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
         repo, sha = base_identity(event, os.environ)
-        record = wait_for_base(repo, sha, api_reader(repo), args.wait_for_main_seconds)
+        get = api_reader(repo)
+        if (os.environ["GITHUB_EVENT_NAME"] in {"push", "workflow_dispatch"}
+                and os.environ.get("GITHUB_REF") == "refs/heads/main"):
+            record = wait_for_base(repo, sha, get, args.wait_for_main_seconds,
+                                   allow_fallback=True)
+        else:
+            record = wait_for_base(repo, sha, get, args.wait_for_main_seconds)
         if args.output.exists():
             raise ValueError("Refuse to replace a frozen baseline")
         args.output.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-        print("Frozen coverage baseline: " + sha + "; source=" + record["source"]["kind"])
+        source = record["source"]
+        selected = source.get("commit", sha)
+        print("Frozen coverage baseline: " + selected + "; source=" + source["kind"])
+        if "fallback" in source:
+            print("Recovered requested base: " + sha
+                  + "; skipped_heads=" + str(source["fallback"]["skipped_heads"]))
         return 0
     except MeasurementPending as pending:
         print("::error title=coverage-ratchet::" + str(pending))

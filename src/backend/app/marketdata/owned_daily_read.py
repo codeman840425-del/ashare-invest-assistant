@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -98,6 +97,7 @@ class OwnedDailyBarsReader(PlaceholderBarsReader):
             content["next_before"] = page[0].trade_date.isoformat() if more else None
             expected = _expected_day(conn, now)
         items, gaps = [], []
+        returned_stamps: list[dt.datetime] = []
         for row in page:
             day = row.trade_date.isoformat()
             if row.is_suspended or any(
@@ -123,12 +123,11 @@ class OwnedDailyBarsReader(PlaceholderBarsReader):
                         for key in ("open", "high", "low", "close", "volume", "amount")
                     },
                     "pre_close": None if row.pre_close is None else format(row.pre_close, "f"),
-                    "avg_price": format(row.amount / row.volume, "f")
-                    if row.volume > Decimal(0)
-                    else None,
+                    "avg_price": None,
                     "is_final": stamp >= dt.datetime.combine(row.trade_date, FINAL_AFTER, BEIJING),
                 }
             )
+            returned_stamps.append(stamp)
         if not items:
             content["gaps"] = gaps
             return content
@@ -136,7 +135,7 @@ class OwnedDailyBarsReader(PlaceholderBarsReader):
         content.update(
             items=items,
             gaps=gaps,
-            data_as_of=max(row.fetched_at for row in page).astimezone(BEIJING).isoformat(),
+            data_as_of=min(returned_stamps).astimezone(BEIJING).isoformat(),
             data_status="partial" if gaps else ("fresh" if expected == latest else "stale"),
         )
         return content

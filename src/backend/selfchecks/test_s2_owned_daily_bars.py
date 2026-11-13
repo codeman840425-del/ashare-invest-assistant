@@ -154,7 +154,7 @@ def test_default_reader_returns_owned_daily_prices(world: Any) -> None:
         "volume": "100.0000",
         "amount": "1050.0000",
         "pre_close": None,
-        "avg_price": "10.5",
+        "avg_price": None,
         "is_final": True,
     }
     assert result["adjust_as_of"] is None
@@ -240,6 +240,34 @@ def test_suspension_incomplete_future_and_calendar_gap(world: Any) -> None:
         conn.execute(trading_calendar.delete())
     seed(world)
     assert world.reader.read(OWNER, CODE, query())["data_status"] == "stale"
+
+
+@pytest.mark.parametrize("missing_hours", [3, 0.5])
+@pytest.mark.parametrize("suspended", [False, True])
+def test_response_timestamp_uses_only_returned_bars(
+    world: Any, missing_hours: float, suspended: bool
+) -> None:
+    oldest = NOW - dt.timedelta(hours=2)
+    seed(world, day=DAY - dt.timedelta(days=2), fetched_at=oldest)
+    seed(world, day=DAY - dt.timedelta(days=1), fetched_at=NOW - dt.timedelta(hours=1))
+    seed(
+        world, open=None, is_suspended=suspended, fetched_at=NOW - dt.timedelta(hours=missing_hours)
+    )
+    result = world.reader.read(OWNER, CODE, query())
+    assert len(result["items"]) == 2
+    assert result["data_status"] == "partial"
+    assert result["data_as_of"] == oldest.astimezone(owned_daily_read.BEIJING).isoformat()
+    assert all(item["avg_price"] is None for item in result["items"])
+
+
+@pytest.mark.parametrize("suspended", [False, True])
+def test_gap_only_response_has_no_timestamp(world: Any, suspended: bool) -> None:
+    seed(world, open=None, is_suspended=suspended, fetched_at=NOW - dt.timedelta(hours=2))
+    result = world.reader.read(OWNER, CODE, query())
+    assert result["items"] == []
+    assert result["data_as_of"] is None
+    assert result["data_status"] == "unavailable"
+    assert result["gaps"][0]["reason"] == ("suspended" if suspended else "no_source")
 
 
 def test_registered_http_uses_default_owned_reader(

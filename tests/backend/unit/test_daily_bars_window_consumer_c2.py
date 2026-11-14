@@ -10,7 +10,7 @@ from app.db.tables.market import daily_bars, trading_calendar
 from app.ingest import daily_bars as fetcher
 from app.marketdata.daily_bars import DailyBar, DailyBarsResult
 from sqlalchemy import delete, event, insert
-from test_daily_bars_consumer_c2 import CODES, DAY, GRANT, NOW, facts, implementation, queue, world  # noqa: F401
+from tests.backend.unit.test_daily_bars_consumer_c2 import CODES, DAY, GRANT, NOW, facts, implementation, queue, world  # noqa: F401
 
 
 @pytest.fixture

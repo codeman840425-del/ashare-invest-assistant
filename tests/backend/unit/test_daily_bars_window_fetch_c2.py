@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 from app.ingest import daily_bars as ingest
 from app.marketdata.daily_bars import DailyBar, DailyBarsResult
-from test_daily_bars_batch_fetch_c2 import DAY, NOW, OWNER, world  # noqa: F401
+from tests.backend.unit.test_daily_bars_batch_fetch_c2 import DAY, NOW, OWNER, world  # noqa: F401
 
 DAYS = tuple(DAY - dt.timedelta(days=n) for n in reversed(range(5)))
 

@@ -56,6 +56,29 @@ def consume(history, bid, *, k=2, transport=None):
     )
 
 
+@pytest.mark.parametrize("partial", [False, True])
+def test_history_missing_pairs_and_single_code_issue_persist_on_original_run(history, monkeypatch, partial):
+    monkeypatch.setattr(fetcher, "DAILY_BARS_BATCH_LIMIT", 5)
+    original = history.transport
+
+    def send(code, start, end):
+        status, result = original(code, start, end)
+        bars = tuple(bar for bar in result.bars if partial and bar.trade_date in (history.days[0], DAY))
+        return status, DailyBarsResult(bars=bars)
+
+    bid = queue(history, window=5)
+    assert consume(history, bid, transport=send) == "done"
+    items, runs, bars = facts(history)
+    assert len(history.calls) == 3 and len(runs) == 1
+    assert bars == (2 if partial else 0)
+    assert items[0].pipeline_run_id == runs[0].id and items[0].status == "done"
+    assert runs[0].status == "partial"
+    assert runs[0].stats["missing"] == (3 if partial else 5)
+    assert runs[0].stats["issues"] == [f"daily_bars_missing:{CODES[0]}", "daily_bars_quota_deferred"]
+    assert consume(history, bid, transport=send) == "noop"
+    assert len(history.calls) == 3
+
+
 def test_history_real_calendar_pages_original_run_and_idempotent(history):
     bid = queue(history, window=5)
     assert consume(history, bid) == "done"

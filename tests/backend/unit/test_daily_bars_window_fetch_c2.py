@@ -153,3 +153,55 @@ def test_unset_budget_precedes_calendar_grant_and_transport(window, monkeypatch)
     monkeypatch.setattr(ingest, "window_days", lambda *args: pytest.fail("unset touched calendar"))
     assert fetch(window) == 0
     assert window.grants == window.calls == []
+
+
+@pytest.mark.parametrize("status", [200, 503])
+def test_empty_pages_count_missing_pairs_once_per_code(window, status):
+    def send(code, start, end):
+        window.calls.append((code, start, end))
+        return status, None
+
+    window.transport = send
+    assert fetch(window) == 0
+    stats = window.runs[-1]["stats"]
+    assert len(window.calls) == 3 and stats["missing"] == 5
+    assert stats["issues"] == ["daily_bars_missing:999990.SH"] + ["daily_bars_quota_deferred"] * 4
+    assert window.runs[-1]["status"] == "partial"
+
+
+def test_partial_pages_accumulate_only_absent_days_once_per_code(window):
+    value = Decimal("1")
+
+    def send(code, start, end):
+        window.calls.append((code, start, end))
+        return 200, DailyBarsResult(bars=tuple(
+            DailyBar(code, day, "none", value, value, value, value, value, value, value, False)
+            for day in (DAYS[0], DAYS[4]) if start <= day <= end
+        ))
+
+    window.transport = send
+    assert fetch(window) == 2
+    stats = window.runs[-1]["stats"]
+    assert stats["missing"] == 3 and stats["inserted"] == 2
+    assert stats["issues"] == ["daily_bars_missing:999990.SH"] + ["daily_bars_quota_deferred"] * 4
+    assert [bar.trade_date for bar in window.writes] == [DAYS[0], DAYS[4]]
+
+
+def test_halted_and_unsent_pages_do_not_inflate_missing_pairs(window):
+    def send(code, start, end):
+        window.calls.append((code, start, end))
+        return (200 if len(window.calls) == 1 else 429), None
+
+    window.transport = send
+    assert fetch(window) == 0
+    stats = window.runs[-1]["stats"]
+    assert len(window.calls) == 2 and stats["missing"] == 2
+    assert stats["issues"].count("daily_bars_missing:999990.SH") == 1
+    assert stats["issues"].count("daily_bars_upstream_halted") == 5
+
+
+def test_single_day_missing_pairs_remain_per_requested_code(window):
+    assert fetch(window, days=1) == 0
+    stats = window.runs[-1]["stats"]
+    assert len(window.calls) == 5 and stats["missing"] == 5
+    assert stats["issues"] == [f"daily_bars_missing:99999{i}.SH" for i in range(5)]

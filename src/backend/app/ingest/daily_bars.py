@@ -324,6 +324,7 @@ def fetch_mairui_daily_bars(
     last_received: dt.datetime | None = None
     calls = 0
     already_ready = 0
+    missing = 0
 
     if halt.is_file() or stop.is_file():
         issues.extend(["daily_bars_upstream_halted"] * len(codes))
@@ -346,6 +347,7 @@ def fetch_mairui_daily_bars(
         if cap - calls < len(pages):
             issues.extend(["daily_bars_quota_deferred"] * (len(codes) - index))
             break
+        code_missing = 0
         for start, end in pages:
             if halt.exists() or stop.exists():
                 batch_halted = True
@@ -369,10 +371,10 @@ def fetch_mairui_daily_bars(
                 if isinstance(payload, DailyBarsResult)
                 else ()
             )
-            if http_status != 200 or not received:
-                issues.append(f"daily_bars_missing:{code}")
-                continue
             expected_days = {day for day in days if start <= day <= end}
+            if http_status != 200 or not received:
+                code_missing += len(expected_days)
+                continue
             keys = [(bar.code, bar.trade_date, bar.adj_type) for bar in received]
             if len(set(keys)) != len(keys) or any(
                 bar.code != code or bar.trade_date not in expected_days or bar.adj_type != "none"
@@ -380,8 +382,10 @@ def fetch_mairui_daily_bars(
             ):
                 raise ValueError("daily_bars_history_payload_outside_plan")
             bars.extend(received)
-            if {bar.trade_date for bar in received} != expected_days:
-                issues.append(f"daily_bars_missing:{code}")
+            code_missing += len(expected_days - {bar.trade_date for bar in received})
+        if code_missing:
+            missing += code_missing
+            issues.append(f"daily_bars_missing:{code}")
         if batch_halted:
             persist_halt(halt, HALT_LIMIT)
             issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))
@@ -416,6 +420,7 @@ def fetch_mairui_daily_bars(
             window_trading_days,
             codes=len(codes),
             inserted=written,
+            missing=missing,
             issues=issues,
         ),
     )

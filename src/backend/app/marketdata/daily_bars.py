@@ -601,6 +601,8 @@ def daily_bars_fetch_task(
     trade_date: str,
     user_id: str | None = None,
     window_trading_days: int | None = None,
+    batch_kind: str = "daily",
+    batch_seq: int = 0,
 ) -> int:
     from app.workers.jobs import _engine
 
@@ -615,7 +617,10 @@ def daily_bars_fetch_task(
             if settings.daily_bars_source == "mairui":
                 from app.marketdata.daily_bars_outbox import enqueue
 
-                enqueue(conn, trade_date=day, user_id=uid, window_trading_days=window_trading_days)
+                enqueue(
+                    conn, trade_date=day, user_id=uid, window_trading_days=window_trading_days,
+                    batch_kind=batch_kind, batch_seq=batch_seq,
+                )
                 # The worker schedules only; inserted bars remain zero until ingest consumes.
                 return 0
             return fetch_and_record(

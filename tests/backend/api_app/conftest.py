@@ -205,6 +205,11 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, backend: SimpleNa
     cfg = tmp_path / "config"
     cfg.mkdir()
     populate_business(cfg, backend_business_files())
+    # References are independent startup inputs, never business configuration fields.
+    from app.reference_files import REFERENCE_FILES
+
+    for name in REFERENCE_FILES:
+        shutil.copyfile(CONFIG_SRC_DIR / name, cfg / name)
     monkeypatch.setenv("CONFIG_DIR", str(cfg))
     return cfg
 

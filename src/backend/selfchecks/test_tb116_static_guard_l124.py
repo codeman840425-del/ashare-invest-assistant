@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import ast
-import os
 import socket
 import time
 from pathlib import Path
+from typing import Never
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -43,7 +45,6 @@ def _http_lib_hits(src: str) -> list[str]:
     if "socket.create_connection" in src:
         hits.append("socket.create_connection")
     return hits
-
 
 
 def _http_import_names(src: str) -> list[str]:
@@ -94,18 +95,20 @@ def _refs_egress_private(src: str) -> list[str]:
             for alias in node.names:
                 if alias.name in {"_https_get", "HOST"}:
                     bad.append(f"from app.ingest.egress import {alias.name}")
-        if isinstance(node, ast.Attribute):
-            # egress._https_get / eg._https_get / egress.HOST
-            if isinstance(node.value, ast.Name) and node.attr in {"_https_get", "HOST"}:
-                # only flag if name looks like egress alias — conservative: any ._https_get
-                if node.attr == "_https_get":
-                    bad.append("attr _https_get")
-                if node.attr == "HOST" and node.value.id in {
-                    "egress",
-                    "eg",
-                    "egress_mod",
-                }:
-                    bad.append(f"attr {node.value.id}.HOST")
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.attr in {"_https_get", "HOST"}
+        ):
+            # only flag if name looks like egress alias — conservative: any ._https_get
+            if node.attr == "_https_get":
+                bad.append("attr _https_get")
+            if node.attr == "HOST" and node.value.id in {
+                "egress",
+                "eg",
+                "egress_mod",
+            }:
+                bad.append(f"attr {node.value.id}.HOST")
     # string form import used by deleted wire shim
     if "from app.ingest.egress import _https_get" in src:
         bad.append("string import _https_get")
@@ -155,9 +158,7 @@ def test_tb116_a1_static_guard_only_egress_opens_mairui() -> None:
             # HTTP client libraries forbidden outside egress (and sources urllib)
             if http_hits:
                 offenders.append(f"{rel}: http lib outside egress: {http_hits}")
-            if has_mairui and (
-                "HTTPSConnection" in src or "urlopen" in src or "httpx." in src
-            ):
+            if has_mairui and ("HTTPSConnection" in src or "urlopen" in src or "httpx." in src):
                 offenders.append(f"{rel}: mairui connect API outside egress")
 
         for ref in _refs_egress_private(src):
@@ -179,9 +180,7 @@ def test_tb116_a1_static_guard_only_egress_opens_mairui() -> None:
             has_mairui = any(m in src.lower() for m in MAIRUI_MARKERS)
             http_imports = _http_import_names(src)
             if has_mairui and http_imports:
-                offenders.append(
-                    f"{rel}: probes outside whitelist with mairui+http {http_imports}"
-                )
+                offenders.append(f"{rel}: probes outside whitelist with mairui+http {http_imports}")
             for ref in _refs_egress_private(src):
                 offenders.append(f"{rel}: {ref}")
 
@@ -208,12 +207,13 @@ def test_tb116b_b2_four_bypasses_are_detected(tmp_path: Path) -> None:
     src2 = "from app.ingest.egress import HOST\nimport http.client\n"
     assert _refs_egress_private(src2) or _http_lib_hits(src2)
     # 3) call wire — wire deleted; guard flags def wire in daily_lists
-    assert "def wire(" not in (
-        ROOT / "src/backend/app/ingest/daily_lists.py"
-    ).read_text(encoding="utf-8")
+    assert "def wire(" not in (ROOT / "src/backend/app/ingest/daily_lists.py").read_text(
+        encoding="utf-8"
+    )
     # 4) new probes file with mairui would be flagged (simulate content check)
     fake = "import http.client\nURL = 'https://api.mairuiapi.com/x'\n"
-    assert _http_lib_hits(fake) and any(m in fake.lower() for m in MAIRUI_MARKERS)
+    assert _http_lib_hits(fake)
+    assert any(m in fake.lower() for m in MAIRUI_MARKERS)
 
 
 def test_tb116_l4_try_acquire_removed_and_docstring() -> None:
@@ -257,8 +257,8 @@ def test_tb116_l1_connect_timeout_bound_blackhole(monkeypatch: pytest.MonkeyPatc
             conn, _ = srv.accept()
             time.sleep(30)
             conn.close()
-        except Exception:  # noqa: BLE001
-            pass
+        except OSError:
+            return
 
     import threading
 
@@ -269,9 +269,8 @@ def test_tb116_l1_connect_timeout_bound_blackhole(monkeypatch: pytest.MonkeyPatc
     url = f"postgresql+psycopg://postgres@127.0.0.1:{port}/postgres"
     eng = engine_for(url, profile="ingest")
     t0 = time.monotonic()
-    with pytest.raises(Exception):  # noqa: BLE001 — operational/timeout
-        with eng.connect() as conn:
-            conn.execute(__import__("sqlalchemy").text("SELECT 1"))
+    with pytest.raises(OperationalError), eng.connect() as conn:
+        conn.execute(text("SELECT 1"))
     elapsed = time.monotonic() - t0
     engine_for.cache_clear()
     srv.close()
@@ -279,7 +278,7 @@ def test_tb116_l1_connect_timeout_bound_blackhole(monkeypatch: pytest.MonkeyPatc
 
 
 def test_tb116_l2_main_exit_78_no_traceback_no_secret(
-    monkeypatch: pytest.MonkeyPatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("SERVICE_NAME", "ingest")
     monkeypatch.setenv("APP_ENV", "local")
@@ -292,7 +291,7 @@ def test_tb116_l2_main_exit_78_no_traceback_no_secret(
     monkeypatch.setattr(iw, "legacy_licence_present", lambda environ=None: False)
     monkeypatch.setattr(iw, "master_key_present", lambda environ=None: False)
 
-    def bad_settings():  # noqa: ANN001
+    def bad_settings() -> Never:
         raise ValueError("password=super-secret-tb116")
 
     import app.config as config_mod

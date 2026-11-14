@@ -10,10 +10,12 @@ from __future__ import annotations
 import datetime as dt
 import logging
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 
 from app.aggregates import t_view as tv
+from app.common.logging import RedactFilter, redact
 from app.schemas.enums import DataStatus, GapReason, SecurityType
 
 BJ = dt.timezone(dt.timedelta(hours=8))
@@ -51,6 +53,7 @@ def build(**kw: object) -> tv.TView:
         "scheduled": False,
         "interval_s": 60,
         "thresholds": None,
+        "previous_open": dt.date(2026, 11, 9),
     }
     args.update(kw)
     return tv.build(**args)  # type: ignore[arg-type]
@@ -207,11 +210,17 @@ def test_t_view_sellable_clamped_with_gap(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.WARNING)
-    v = build(
-        base_qty=Decimal(base),
-        sold_today=Decimal(sold),
-        holding_sellable=None if raw is None else Decimal(raw),
-    )
+    redaction = RedactFilter()
+    caplog.handler.addFilter(redaction)
+    try:
+        with patch.object(tv.logger, "warning", wraps=tv.logger.warning) as warning:
+            v = build(
+                base_qty=Decimal(base),
+                sold_today=Decimal(sold),
+                holding_sellable=None if raw is None else Decimal(raw),
+            )
+    finally:
+        caplog.handler.removeFilter(redaction)
     assert v.sellable_qty == expect
     gap = [g for g in v.gaps if g.key == "t_view.sellable_qty"]
     if clamped:
@@ -219,8 +228,12 @@ def test_t_view_sellable_clamped_with_gap(
             (GapReason.UPSTREAM_ERROR, "可卖数量与底仓不一致，已按较小值显示")
         ]
         assert v.data_status is DataStatus.PARTIAL
-        assert "t_view_sellable_exceeds_base:600000" in caplog.text
+        warning.assert_called_once_with("t_view_sellable_exceeds_base:%s", "600000")
+        expected = "t_view_sellable_exceeds_base:600000"
+        assert redact(expected) in caplog.text
+        assert expected not in caplog.text
     else:
+        warning.assert_not_called()
         assert gap == [] and v.data_status is DataStatus.FRESH
 
 
@@ -305,3 +318,35 @@ def test_t_view_only_on_today_focus_rows() -> None:
     assert out[1]["t_view"] is None  # 非持仓行为 null（§3.7 ①）
     assert "dev_pct_threshold" not in out[0]["t_view"]  # 嵌套序列化仍缺省阈值字段
     assert out[0]["t_view"]["volume_ratio"] == "2.00"
+
+
+# ---- T-B134b：§3.8 T-A149 ④ 只有快照、没有成交流水（契约 a281095 intraday-bars.md §3.8 ④）----
+
+
+def test_t_view_base_qty_from_snapshot_without_trades() -> None:
+    # 无流水、快照时点为当日 10:00：可能含今日买入
+    v = build(base_qty=Decimal(800), base_source="snapshot", snapshot_as_of=at(10, 0))
+    assert v.base_qty == "800"
+    base_gaps = [g for g in v.gaps if g.key == "t_view.base_qty"]
+    assert len(base_gaps) == 1
+    assert base_gaps[0].reason is GapReason.USER_INPUT_MISSING
+    assert base_gaps[0].message == "未导入今日成交流水，底仓按持仓快照计，可能含今日买入"
+    assert v.data_status is DataStatus.PARTIAL
+    # 快照时点为空同样加 gap
+    assert any(
+        g.key == "t_view.base_qty" for g in build(base_source="snapshot", snapshot_as_of=None).gaps
+    )
+
+
+def test_t_view_base_qty_snapshot_before_open_no_gap() -> None:
+    # 快照时点为上一交易日 15:30：即上一交易日收盘持有量，不加 gap
+    prev = dt.datetime(2026, 11, 9, 15, 30, tzinfo=BJ)
+    v = build(base_qty=Decimal(800), base_source="snapshot", snapshot_as_of=prev)
+    assert v.base_qty == "800"
+    assert all(g.key != "t_view.base_qty" for g in v.gaps)
+    assert v.data_status is DataStatus.FRESH
+    # bb55fd8：独立集合竞价边界为 09:15，不复用分钟线的 09:30。
+    assert any(
+        g.key == "t_view.base_qty"
+        for g in build(base_source="snapshot", snapshot_as_of=at(9, 15)).gaps
+    )

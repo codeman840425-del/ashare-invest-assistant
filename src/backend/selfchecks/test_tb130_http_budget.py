@@ -1,5 +1,5 @@
-# ruff: noqa: S101, ANN401, S603, S607, S106, PT018, E501, I001
-"""T-B130：单 C，HTTP_UNLIMITED 哨兵与日 K HTTP 预算。
+# ruff: noqa: S101, ANN401, S603, S607, S106, PT018
+"""T-B130续C2：按Chief批准迁移至§9.3双批预算，旧场景保持。
 
 契约只读参照 ``git show 7234aa7:docs/contracts/daily-bars-source.md`` §8.1 / §8.5。
 隔离 PG：仅在 o61-pg 127.0.0.1:55461 自建临时库，用后删除。
@@ -32,7 +32,7 @@ from alembic.config import Config
 from psycopg import sql
 from pydantic import SecretStr
 from sqlalchemy import create_engine, func, insert, select
-from sqlalchemy.engine import Engine, URL
+from sqlalchemy.engine import URL
 
 from app.config import Settings
 from app.db.migration_check import BACKEND
@@ -48,7 +48,7 @@ from app.db.tables.users import users
 from app.marketdata.daily_bars import DailyBar
 from app.master.daily_delivery import DAILY_HTTP_LIMIT, live_budget_issue
 
-HOST = "127.0.0.1"
+ISOLATED_PG_HOST = "127.0.0.1"
 PORT = 55461
 USER = "postgres"
 FORBIDDEN_DBS = frozenset({"tt51_tpl", "o61_tmp_0030"})
@@ -91,18 +91,23 @@ def _require_o61() -> None:
         if mode == "host" and f"port={PORT}" in cmd:
             hits.append(name.lstrip("/"))
     if hits != [_O61]:
-        pytest.fail(f"拒绝建库：{HOST}:{PORT} 归属 {hits or '未知'}，须为 {_O61}")
+        pytest.fail(f"拒绝建库：{ISOLATED_PG_HOST}:{PORT} 归属 {hits or '未知'}，须为 {_O61}")
 
 
 def _admin() -> Any:
     return psycopg.connect(
-        host=HOST, port=PORT, user=USER, dbname="postgres", autocommit=True
+        host=ISOLATED_PG_HOST, port=PORT, user=USER, dbname="postgres", autocommit=True
     )
 
 
 def _url(dbname: str) -> URL:
     return URL.create(
-        "postgresql+psycopg", username=USER, password=None, host=HOST, port=PORT, database=dbname
+        "postgresql+psycopg",
+        username=USER,
+        password=None,
+        host=ISOLATED_PG_HOST,
+        port=PORT,
+        database=dbname,
     )
 
 
@@ -196,12 +201,9 @@ def no_egress(monkeypatch: pytest.MonkeyPatch) -> Any:
         counts["mairui_get"] += 1
         raise AssertionError("mairui_get must not be called in T-B130")
 
-    try:
-        import app.ingest.egress as egress
+    import app.ingest.egress as egress
 
-        monkeypatch.setattr(egress, "mairui_get", blocked_mairui_get)
-    except Exception:
-        pass
+    monkeypatch.setattr(egress, "mairui_get", blocked_mairui_get)
     counts["blocked"] = blocked
     return counts
 
@@ -327,7 +329,9 @@ def _status_on(
 
 def _issues(conn: Any) -> list[str]:
     row = conn.execute(
-        select(pipeline_runs.c.stats, pipeline_runs.c.status).order_by(pipeline_runs.c.finished_at.desc())
+        select(pipeline_runs.c.stats, pipeline_runs.c.status).order_by(
+            pipeline_runs.c.finished_at.desc()
+        )
     ).first()
     assert row is not None
     stats = row.stats if isinstance(row.stats, dict) else json.loads(row.stats)
@@ -338,12 +342,25 @@ def _bar_count(conn: Any) -> int:
     return int(conn.execute(select(func.count()).select_from(daily_bars)).scalar_one())
 
 
+def _synthetic_grant() -> object:
+    from app.ingest.daily_bars import DailyBarsGrant
+
+    return DailyBarsGrant(
+        OWNER,
+        uuid.UUID(int=130),
+        uuid.UUID(int=131),
+        AT - dt.timedelta(days=1),
+        AT + dt.timedelta(days=1),
+        "0" * 64,
+    )
+
+
 def _run(
     conn: Any,
     *,
     transport: Callable[..., Any],
     tmp_path: Path,
-    grant: object | None = object(),
+    grant: object | None = _synthetic_grant(),
     stop: bool = False,
     halt: bool = False,
     clock: Callable[[], dt.datetime] | None = None,
@@ -373,25 +390,25 @@ def _run(
 
 
 def test_daily_http_limit_unchanged() -> None:
-    from app.ingest.daily_bars import DAILY_BARS_HTTP_LIMIT, DAILY_BARS_HTTP_UNLIMITED
+    from app.ingest.daily_bars import DAILY_BARS_BACKFILL_BATCH_LIMIT, DAILY_BARS_BATCH_LIMIT
 
     assert DAILY_HTTP_LIMIT == 1
     assert live_budget_issue() == "daily_http_budget_unresolved"
-    assert DAILY_BARS_HTTP_LIMIT == 0
-    assert type(DAILY_BARS_HTTP_LIMIT) is int
-    assert DAILY_BARS_HTTP_UNLIMITED == "unlimited"
+    assert DAILY_BARS_BATCH_LIMIT == 0
+    assert type(DAILY_BARS_BATCH_LIMIT) is int
+    assert DAILY_BARS_BACKFILL_BATCH_LIMIT == 0
+    assert type(DAILY_BARS_BACKFILL_BATCH_LIMIT) is int
 
 
 def test_http_budget_resolution_table() -> None:
     from app.ingest.daily_bars import (
-        DAILY_BARS_HTTP_UNLIMITED,
         DailyBarsBudget,
-        daily_bars_http_budget,
+        daily_bars_batch_budget,
     )
 
     cases: list[tuple[object, DailyBarsBudget]] = [
         (0, DailyBarsBudget(kind="unset")),
-        (DAILY_BARS_HTTP_UNLIMITED, DailyBarsBudget(kind="unlimited")),
+        ("unlimited", DailyBarsBudget(kind="unset")),
         (3, DailyBarsBudget(kind="capped", cap=3)),
         (-1, DailyBarsBudget(kind="unset")),
         (True, DailyBarsBudget(kind="unset")),
@@ -400,7 +417,11 @@ def test_http_budget_resolution_table() -> None:
         (2.0, DailyBarsBudget(kind="unset")),
     ]
     for value, expected in cases:
-        assert daily_bars_http_budget(value) == expected, value
+        assert daily_bars_batch_budget(value) == expected, value
+    assert daily_bars_batch_budget(501).kind == "unset"
+    assert daily_bars_batch_budget(2000).kind == "unset"
+    assert daily_bars_batch_budget(2000, "backfill") == DailyBarsBudget(kind="capped", cap=2000)
+    assert daily_bars_batch_budget(2001, "backfill").kind == "unset"
 
 
 def test_no_switch_entry_and_not_settings() -> None:
@@ -410,21 +431,22 @@ def test_no_switch_entry_and_not_settings() -> None:
     fields = getattr(SettingsType, "model_fields", {})
     assert "daily_bars_http_limit" not in fields
     assert "daily_bars_http_unlimited" not in fields
-    assert ibars.DAILY_BARS_HTTP_LIMIT == 0
+    assert ibars.DAILY_BARS_BATCH_LIMIT == ibars.DAILY_BARS_BACKFILL_BATCH_LIMIT == 0
+    assert not hasattr(ibars, "DAILY_BARS_HTTP_UNLIMITED")
     src = Path(inspect.getsourcefile(ibars) or "")
     text = src.read_text(encoding="utf-8")
-    assert "DAILY_BARS_HTTP_LIMIT" in text
+    assert "DAILY_BARS_BATCH_LIMIT" in text
     # 生产源码不得把限额写成正整数或哨兵；切换属于开放单 D。
     tree = ast.parse(text)
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             names = [t.id for t in node.targets if isinstance(t, ast.Name)]
-            if "DAILY_BARS_HTTP_LIMIT" in names:
+            if "DAILY_BARS_BATCH_LIMIT" in names:
                 assert isinstance(node.value, ast.Constant) and node.value.value == 0
     cli = Path(__file__).resolve().parents[1] / "app/cli/daily_bars_backfill.py"
     cli_text = cli.read_text(encoding="utf-8")
     assert "HTTP_UNLIMITED" not in cli_text
-    assert "DAILY_BARS_HTTP_LIMIT" not in cli_text
+    assert "DAILY_BARS_BATCH_LIMIT" not in cli_text
 
 
 def test_marketdata_daily_bars_no_top_level_egress() -> None:
@@ -456,7 +478,7 @@ def test_load_inputs_uses_final_after() -> None:
     src = inspect.getsource(dimensions.load_inputs)
     assert "FINAL_AFTER" in src
     assert "dt.time(17, 10)" not in src
-    assert FINAL_AFTER == dt.time(17, 10)
+    assert dt.time(17, 10) == FINAL_AFTER
 
 
 def test_dead_try_removed_from_build_owned_snapshot() -> None:
@@ -470,9 +492,9 @@ def test_dead_try_removed_from_build_owned_snapshot() -> None:
 def test_limit_not_widened_by_env_or_receipt(
     world: Any, db: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_egress: Any
 ) -> None:
-    from app.ingest.daily_bars import DAILY_BARS_HTTP_LIMIT, fetch_mairui_daily_bars
+    from app.ingest.daily_bars import DAILY_BARS_BATCH_LIMIT, fetch_mairui_daily_bars
 
-    monkeypatch.setenv("DAILY_BARS_HTTP_LIMIT", "9999")
+    monkeypatch.setenv("DAILY_BARS_BATCH_LIMIT", "9999")
     receipt = tmp_path / "mairui-daily-bars.json"
     receipt.write_text(json.dumps({"limit": 9999, "kind": "mairui_daily_bars"}), encoding="utf-8")
     calls: list[Any] = []
@@ -486,8 +508,8 @@ def test_limit_not_widened_by_env_or_receipt(
         grant_reader=lambda: {"limit": 9999},
         clock=lambda: dt.datetime(2026, 11, 10, 17, 20, tzinfo=BEIJING),
     )
-    assert DAILY_BARS_HTTP_LIMIT == 0
-    assert os.environ["DAILY_BARS_HTTP_LIMIT"] == "9999"
+    assert DAILY_BARS_BATCH_LIMIT == 0
+    assert os.environ["DAILY_BARS_BATCH_LIMIT"] == "9999"
     assert written == 0
     assert calls == []
     assert "daily_bars_http_budget_unset" in _issues(db)
@@ -507,7 +529,7 @@ def test_mairui_requires_receipt_and_budget(
     assert "daily_bars_http_budget_unset" in _issues(db)
     assert _bar_count(db) == 0
 
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 5)
     calls = []
     written = _run(db, transport=_ok_transport(calls), tmp_path=tmp_path, grant=None)
     assert written == 0 and calls == []
@@ -516,12 +538,12 @@ def test_mairui_requires_receipt_and_budget(
     assert no_egress["mairui_get"] == 0
 
 
-def test_unlimited_no_cap_calls_equal_planned(
+def test_batch_budget_five_calls_equal_planned(
     world: Any, db: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_egress: Any
 ) -> None:
     from app.ingest import daily_bars as ibars
 
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 5)
     calls: list[Any] = []
     written = _run(db, transport=_ok_transport(calls), tmp_path=tmp_path)
     assert len(calls) == 5
@@ -536,7 +558,7 @@ def test_budget_cap_reached_defers_rest(
 ) -> None:
     from app.ingest import daily_bars as ibars
 
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", 2)
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 2)
     calls: list[Any] = []
     written = _run(db, transport=_ok_transport(calls), tmp_path=tmp_path)
     assert len(calls) == 2
@@ -546,12 +568,12 @@ def test_budget_cap_reached_defers_rest(
     assert no_egress["mairui_get"] == 0
 
 
-def test_unlimited_still_halts_on_stop_103_429(
+def test_batch_budget_still_halts_on_stop_103_429(
     world: Any, db: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_egress: Any
 ) -> None:
     from app.ingest import daily_bars as ibars
 
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 5)
 
     for status in (103, 429):
         calls: list[Any] = []
@@ -564,7 +586,7 @@ def test_unlimited_still_halts_on_stop_103_429(
             transport=_status_on(2, status, calls),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_synthetic_grant,
             clock=lambda: dt.datetime(2026, 11, 10, 17, 20, tzinfo=BEIJING),
         )
         assert len(calls) == 2, status
@@ -583,16 +605,14 @@ def test_unlimited_still_halts_on_stop_103_429(
             transport=_ok_transport(calls2),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_synthetic_grant,
             clock=lambda: dt.datetime(2026, 11, 10, 17, 20, tzinfo=BEIJING),
         )
         assert calls2 == [] and again == 0
         assert "daily_bars_upstream_halted" in _issues(db)
 
     calls_stop: list[Any] = []
-    written_stop = _run(
-        db, transport=_ok_transport(calls_stop), tmp_path=tmp_path, stop=True
-    )
+    written_stop = _run(db, transport=_ok_transport(calls_stop), tmp_path=tmp_path, stop=True)
     assert calls_stop == [] and written_stop == 0
     assert _issues(db).count("daily_bars_upstream_halted") == 5
     assert no_egress["mairui_get"] == 0
@@ -603,7 +623,7 @@ def test_mairui_fetched_at_not_before_last_response(
 ) -> None:
     from app.ingest import daily_bars as ibars
 
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 5)
     last = dt.datetime(2026, 11, 10, 17, 21, 30, tzinfo=BEIJING)
     seen: list[dt.datetime] = []
 
@@ -612,7 +632,7 @@ def test_mairui_fetched_at_not_before_last_response(
         return 200, _bar(code, start)
 
     def clock() -> dt.datetime:
-        return seen[-1]
+        return seen[-1] if seen else GRANT_CLOCK
 
     written = _run(db, transport=transport, tmp_path=tmp_path, clock=clock)
     assert written == 5
@@ -624,7 +644,9 @@ def test_mairui_fetched_at_not_before_last_response(
 GRANT_CLOCK = dt.datetime(2026, 11, 10, 17, 20, tzinfo=BEIJING)
 
 
-def _receipt_payload(*, kind: str, user_id: uuid.UUID, start: dt.datetime, end: dt.datetime) -> dict[str, str]:
+def _receipt_payload(
+    *, kind: str, user_id: uuid.UUID, start: dt.datetime, end: dt.datetime
+) -> dict[str, str]:
     return {
         "kind": kind,
         "user_id": str(user_id),
@@ -654,7 +676,7 @@ def _fetch_with_receipt(
 ) -> tuple[int, list[Any]]:
     from app.ingest import daily_bars as ibars
 
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 5)
     monkeypatch.setattr(ibars, "_receipt_permission_ok", lambda _path: True)
     receipt = _write_receipt(tmp_path / "mairui-daily-bars.json", payload)
     calls: list[Any] = []
@@ -693,7 +715,9 @@ def test_receipt_expired_is_rejected(
         start=dt.datetime(2026, 11, 10, 16, 0, tzinfo=BEIJING),
         end=dt.datetime(2026, 11, 10, 17, 20, tzinfo=BEIJING),
     )
-    written, calls = _fetch_with_receipt(db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload)
+    written, calls = _fetch_with_receipt(
+        db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload
+    )
     assert written == 0 and calls == []
     assert "data_licence_unavailable" in _issues(db)
     assert _bar_count(db) == 0
@@ -709,7 +733,9 @@ def test_receipt_wrong_kind_is_rejected(
         start=dt.datetime(2026, 11, 10, 17, 0, tzinfo=BEIJING),
         end=dt.datetime(2026, 11, 10, 18, 0, tzinfo=BEIJING),
     )
-    written, calls = _fetch_with_receipt(db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload)
+    written, calls = _fetch_with_receipt(
+        db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload
+    )
     assert written == 0 and calls == []
     assert "data_licence_unavailable" in _issues(db)
     assert _bar_count(db) == 0
@@ -739,7 +765,9 @@ def test_receipt_user_mismatch_is_rejected(
         start=dt.datetime(2026, 11, 10, 17, 0, tzinfo=BEIJING),
         end=dt.datetime(2026, 11, 10, 18, 0, tzinfo=BEIJING),
     )
-    written, calls = _fetch_with_receipt(db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload)
+    written, calls = _fetch_with_receipt(
+        db, tmp_path=tmp_path, monkeypatch=monkeypatch, payload=payload
+    )
     assert written == 0 and calls == []
     assert "data_licence_unavailable" in _issues(db)
     assert _bar_count(db) == 0

@@ -93,7 +93,38 @@ describe(`Mock 字段与契约 ${CONTRACT_VERSION} 逐字一致`, () => {
     ['ReleaseCondition', () => REASONS.map((r) => r.release_condition)],
   ];
   // v0.2.7 在说明文字里给对象加的字段（不在花括号结构内），逐条核对说明原文后并入期望集合
-  const PROSE_ADDED: Record<string, string[]> = { Bar: ['is_final'] };
+  const PROSE_ADDED: Record<string, string[]> = {
+    Bar: ['is_final'],
+  };
+  it('Notification includes the four explicit §7.11.4 contract amendments', () => {
+    expect(CONTRACT).toContain('`Notification` 追加 `merged_count: int`');
+    expect(CONTRACT).toContain('`updated_at: datetime`');
+    expect(CONTRACT).toContain('`refs: [{type, id, at}]`');
+    expect(CONTRACT).toContain('`Notification` 追加 `version: int`');
+    expect(CONTRACT).toContain('每个 ref 加 `route: string | null`');
+    expect(sorted(inlineShape('Notification'))).toEqual([
+      'body', 'created_at', 'id', 'kind', 'merged_count', 'name', 'read_at',
+      'refs', 'security_code', 'severity', 'target', 'title', 'updated_at', 'version',
+    ]);
+  });
+  it('Notification 追加字段满足整数、时间和引用投影约束', () => {
+    expect(NOTIFICATIONS.length).toBeGreaterThan(0);
+    for (const notification of NOTIFICATIONS) {
+      expect(Number.isInteger(notification.version)).toBe(true);
+      expect(notification.version).toBeGreaterThanOrEqual(1);
+      expect(Number.isInteger(notification.merged_count)).toBe(true);
+      expect(notification.merged_count).toBeGreaterThanOrEqual(1);
+      expect(Number.isFinite(Date.parse(notification.updated_at))).toBe(true);
+      expect(Array.isArray(notification.refs)).toBe(true);
+      expect(notification.refs.length).toBeLessThanOrEqual(20);
+      for (const ref of notification.refs) {
+        expect(keysOf(ref)).toEqual(sorted(['type', 'id', 'at', 'route']));
+        expect(ENUMS.notification_ref_type).toContain(ref.type);
+        expect(Number.isFinite(Date.parse(ref.at))).toBe(true);
+        if (ref.type === 'signal') expect(ref.route).toBeNull();
+      }
+    }
+  });
   it('v0.2.7：Bar 的 is_final 来自说明原文', () => {
     expect(CONTRACT).toContain('v0.2.7 加 `is_final: boolean`');
   });

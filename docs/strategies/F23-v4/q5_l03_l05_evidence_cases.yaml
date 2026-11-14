@@ -1,0 +1,611 @@
+schema: rv05_p2_2_synthetic_evidence_seeds_v1
+scope: pure_synthetic_regression_specification_not_v4_implementation
+synthetic_only: true
+authority:
+  pr: 65
+  sha: 28a7f8ecb93d51d762153aee144f9587cdeccb93
+  path: docs/reviews/A-09-f23-v4-boundary-ruling.md
+  sections:
+  - R1
+  - R2
+  - RV-05 P2-2
+original_seeds:
+  pr: 41
+  sha: 3fed15c97f6d43800d5db57aa3374aa084eb55e7
+  file: q5_candidate_cases.yaml
+  blob: d4f5714c6771246bf5c3e59f6b4f428ee25980a2
+  sha256: d2fc81a391466339d1a8c76688bcfaaeec7872cbe6ab390eb43be196b2adb560
+  unchanged: true
+original_facts_full_route:
+  L03: needs_evidence
+  L05: needs_evidence
+required_evidence_fields:
+  subject:
+  - issuer_id
+  - event_entity_id
+  - relation
+  - case_id
+  - announcement_id
+  - source_ref
+  - quote
+  identity:
+  - role
+  - case_id
+  - source_ref
+  - quote
+  amount:
+  - case_id
+  - source_ref
+  - quote
+  - currency
+  - issuer_share
+  - claimed_total_cny
+  - attributable_claim_cny
+  - supported
+  - paid_cny
+  - unresolved_claim_cny
+  - exposure_kind
+  - materiality_basis
+  - fx_conversion
+  pit:
+  - entity_id
+  - report_ref
+  - audit_status
+  - period_end
+  - available_at
+  - denominator_kind
+  - denominator_currency
+  - denominator_cny
+  - quote
+  - latest_audited_check_ref
+  - latest_audited_check_at
+  - latest_audited_check_quote
+  independent_impact:
+  - case_id
+  - source_ref
+  - quote
+  - observed_effect
+  - existing_hit_review_ref
+  - existing_hit_review_quote
+positive_cases:
+- id: L03-FIVE-EVIDENCE
+  original_case: L03
+  synthetic_only: true
+  profile: sse_main_2026_04
+  as_of: '2026-11-06T09:30:00+08:00'
+  announcement_available_at: '2026-11-05T18:00:00+08:00'
+  existing_hits:
+  - insolvency:SYN-DEBT-L03
+  existing_hits_note: 纯合成的既有路径输入；本单既不重新裁决该命中，也不允许新事项缺证将其清除。
+  evidence:
+    subject:
+      issuer_id: SYN-ISSUER-L03
+      event_entity_id: SYN-ISSUER-L03
+      relation: issuer_self
+      case_id: SYN-CASE-L03
+      announcement_id: SYN-ANN-L03
+      source_ref: synthetic:L03/announcement#subject
+      quote: 【纯合成】公告SYN-ANN-L03所涉案件SYN-CASE-L03的当事人是合成发行人L03自身，不是股东、客户或未并表主体。
+    identity:
+      role: defendant
+      case_id: SYN-CASE-L03
+      source_ref: synthetic:L03/announcement#identity
+      quote: 【纯合成】合成发行人L03在SYN-CASE-L03中为被告，对方请求其承担金钱给付义务。
+    amount:
+      case_id: SYN-CASE-L03
+      source_ref: synthetic:L03/announcement#amount
+      quote: 【纯合成】SYN-CASE-L03请求金额人民币10000001元，全部向合成发行人L03主张，承担份额100%；截至公告日尚未裁判，已付0元，未结争议索赔10000001元。
+      currency: CNY
+      issuer_share: '1'
+      claimed_total_cny: '10000001'
+      attributable_claim_cny: '10000001'
+      supported:
+        status: not_adjudicated_as_of
+        amount_cny: null
+      paid_cny: '0'
+      unresolved_claim_cny: '10000001'
+      exposure_kind: disputed_claim_not_recognized_loss
+      materiality_basis: attributable_claim_cny
+      fx_conversion:
+        status: not_required_cny
+        source_ref: null
+        available_at: null
+    pit:
+      entity_id: SYN-ISSUER-L03
+      report_ref: synthetic:L03/audited-FY2025
+      audit_status: audited
+      period_end: '2025-12-31'
+      available_at: '2026-04-20T18:00:00+08:00'
+      denominator_kind: audited_net_assets
+      denominator_currency: CNY
+      denominator_cny: '100000010'
+      quote: 【纯合成】合成发行人L032025年度经审计净资产为人民币100000010元，报告于2026-04-20 18:00北京时间公开。
+      latest_audited_check_ref: synthetic:L03/pit-ledger#2026-11-06
+      latest_audited_check_at: '2026-11-06T09:30:00+08:00'
+      latest_audited_check_quote: 【纯合成】截至评估时点，该主体已可得的最近一期经审计报告为2025年度报告；中期报告未经审计，无更晚已公开审计报告。
+      unused_market_value:
+        used: false
+        value_cny: null
+        source_ref: null
+        available_at: null
+    independent_impact:
+      case_id: SYN-CASE-L03
+      source_ref: synthetic:L03/impact-review#case
+      quote: 【纯合成】独立复核SYN-CASE-L03的请求书及截至评估时点的进展：合成发行人L03仍被请求给付10000001元，未有撤诉、免责或已履行结案事实；该争议索赔并非确定损失。
+      observed_effect: unresolved_adverse_payment_claim
+      existing_hit_review_ref: synthetic:L03/impact-review#parallel-events
+      existing_hit_review_quote: 【纯合成】另有独立债务逾期事件SYN-DEBT-L03作为既有命中输入，与本案区分；本案的金额线及缺证结果均不清除该命中。
+  expected:
+    numeric_materiality: above_numeric_line
+    full_route: risk_candidate
+    count_mapping_written: false
+    count_eligibility_note: 仅完整合成证据规格的目标；尚未生成、核验或冻结公告ID映射，不构成新增F23计数。
+- id: L05-FIVE-EVIDENCE
+  original_case: L05
+  synthetic_only: true
+  profile: sse_star_2026_04
+  as_of: '2026-11-06T09:30:00+08:00'
+  announcement_available_at: '2026-11-05T18:00:00+08:00'
+  existing_hits:
+  - insolvency:SYN-DEBT-L05
+  existing_hits_note: 纯合成的既有路径输入；本单既不重新裁决该命中，也不允许新事项缺证将其清除。
+  evidence:
+    subject:
+      issuer_id: SYN-ISSUER-L05
+      event_entity_id: SYN-ISSUER-L05
+      relation: issuer_self
+      case_id: SYN-CASE-L05
+      announcement_id: SYN-ANN-L05
+      source_ref: synthetic:L05/announcement#subject
+      quote: 【纯合成】公告SYN-ANN-L05所涉案件SYN-CASE-L05的当事人是合成发行人L05自身，不是股东、客户或未并表主体。
+    identity:
+      role: respondent
+      case_id: SYN-CASE-L05
+      source_ref: synthetic:L05/announcement#identity
+      quote: 【纯合成】合成发行人L05在SYN-CASE-L05中为仲裁被申请人，对方请求其承担金钱给付义务。
+    amount:
+      case_id: SYN-CASE-L05
+      source_ref: synthetic:L05/announcement#amount
+      quote: 【纯合成】SYN-CASE-L05请求金额人民币11000000元，全部向合成发行人L05主张，承担份额100%；截至公告日尚未裁判，已付0元，未结争议索赔11000000元。
+      currency: CNY
+      issuer_share: '1'
+      claimed_total_cny: '11000000'
+      attributable_claim_cny: '11000000'
+      supported:
+        status: not_adjudicated_as_of
+        amount_cny: null
+      paid_cny: '0'
+      unresolved_claim_cny: '11000000'
+      exposure_kind: disputed_claim_not_recognized_loss
+      materiality_basis: attributable_claim_cny
+      fx_conversion:
+        status: not_required_cny
+        source_ref: null
+        available_at: null
+    pit:
+      entity_id: SYN-ISSUER-L05
+      report_ref: synthetic:L05/audited-FY2025
+      audit_status: audited
+      period_end: '2025-12-31'
+      available_at: '2026-04-20T18:00:00+08:00'
+      denominator_kind: audited_total_assets
+      denominator_currency: CNY
+      denominator_cny: '1100000000'
+      quote: 【纯合成】合成发行人L052025年度经审计总资产为人民币1100000000元，报告于2026-04-20 18:00北京时间公开。
+      latest_audited_check_ref: synthetic:L05/pit-ledger#2026-11-06
+      latest_audited_check_at: '2026-11-06T09:30:00+08:00'
+      latest_audited_check_quote: 【纯合成】截至评估时点，该主体已可得的最近一期经审计报告为2025年度报告；中期报告未经审计，无更晚已公开审计报告。
+      unused_market_value:
+        used: false
+        value_cny: null
+        source_ref: null
+        available_at: null
+    independent_impact:
+      case_id: SYN-CASE-L05
+      source_ref: synthetic:L05/impact-review#case
+      quote: 【纯合成】独立复核SYN-CASE-L05的请求书及截至评估时点的进展：合成发行人L05仍被请求给付11000000元，未有撤诉、免责或已履行结案事实；该争议索赔并非确定损失。
+      observed_effect: unresolved_adverse_payment_claim
+      existing_hit_review_ref: synthetic:L05/impact-review#parallel-events
+      existing_hit_review_quote: 【纯合成】另有独立债务逾期事件SYN-DEBT-L05作为既有命中输入，与本案区分；本案的金额线及缺证结果均不清除该命中。
+  expected:
+    numeric_materiality: above_numeric_line
+    full_route: risk_candidate
+    count_mapping_written: false
+    count_eligibility_note: 仅完整合成证据规格的目标；尚未生成、核验或冻结公告ID映射，不构成新增F23计数。
+missing_evidence_cases:
+- id: MISSING-AS-OF
+  delete:
+  - as_of
+  expected_full_route: needs_evidence
+- id: MISSING-ANNOUNCEMENT-TIME
+  delete:
+  - announcement_available_at
+  expected_full_route: needs_evidence
+- id: MISSING-subject
+  delete:
+  - evidence
+  - subject
+  expected_full_route: needs_evidence
+- id: MISSING-subject-issuer_id
+  delete:
+  - evidence
+  - subject
+  - issuer_id
+  expected_full_route: needs_evidence
+- id: MISSING-subject-event_entity_id
+  delete:
+  - evidence
+  - subject
+  - event_entity_id
+  expected_full_route: needs_evidence
+- id: MISSING-subject-relation
+  delete:
+  - evidence
+  - subject
+  - relation
+  expected_full_route: needs_evidence
+- id: MISSING-subject-case_id
+  delete:
+  - evidence
+  - subject
+  - case_id
+  expected_full_route: needs_evidence
+- id: MISSING-subject-announcement_id
+  delete:
+  - evidence
+  - subject
+  - announcement_id
+  expected_full_route: needs_evidence
+- id: MISSING-subject-source_ref
+  delete:
+  - evidence
+  - subject
+  - source_ref
+  expected_full_route: needs_evidence
+- id: MISSING-subject-quote
+  delete:
+  - evidence
+  - subject
+  - quote
+  expected_full_route: needs_evidence
+- id: MISSING-identity
+  delete:
+  - evidence
+  - identity
+  expected_full_route: needs_evidence
+- id: MISSING-identity-role
+  delete:
+  - evidence
+  - identity
+  - role
+  expected_full_route: needs_evidence
+- id: MISSING-identity-case_id
+  delete:
+  - evidence
+  - identity
+  - case_id
+  expected_full_route: needs_evidence
+- id: MISSING-identity-source_ref
+  delete:
+  - evidence
+  - identity
+  - source_ref
+  expected_full_route: needs_evidence
+- id: MISSING-identity-quote
+  delete:
+  - evidence
+  - identity
+  - quote
+  expected_full_route: needs_evidence
+- id: MISSING-amount
+  delete:
+  - evidence
+  - amount
+  expected_full_route: needs_evidence
+- id: MISSING-amount-case_id
+  delete:
+  - evidence
+  - amount
+  - case_id
+  expected_full_route: needs_evidence
+- id: MISSING-amount-source_ref
+  delete:
+  - evidence
+  - amount
+  - source_ref
+  expected_full_route: needs_evidence
+- id: MISSING-amount-quote
+  delete:
+  - evidence
+  - amount
+  - quote
+  expected_full_route: needs_evidence
+- id: MISSING-amount-currency
+  delete:
+  - evidence
+  - amount
+  - currency
+  expected_full_route: needs_evidence
+- id: MISSING-amount-issuer_share
+  delete:
+  - evidence
+  - amount
+  - issuer_share
+  expected_full_route: needs_evidence
+- id: MISSING-amount-claimed_total_cny
+  delete:
+  - evidence
+  - amount
+  - claimed_total_cny
+  expected_full_route: needs_evidence
+- id: MISSING-amount-attributable_claim_cny
+  delete:
+  - evidence
+  - amount
+  - attributable_claim_cny
+  expected_full_route: needs_evidence
+- id: MISSING-amount-supported
+  delete:
+  - evidence
+  - amount
+  - supported
+  expected_full_route: needs_evidence
+- id: MISSING-amount-paid_cny
+  delete:
+  - evidence
+  - amount
+  - paid_cny
+  expected_full_route: needs_evidence
+- id: MISSING-amount-unresolved_claim_cny
+  delete:
+  - evidence
+  - amount
+  - unresolved_claim_cny
+  expected_full_route: needs_evidence
+- id: MISSING-amount-exposure_kind
+  delete:
+  - evidence
+  - amount
+  - exposure_kind
+  expected_full_route: needs_evidence
+- id: MISSING-amount-materiality_basis
+  delete:
+  - evidence
+  - amount
+  - materiality_basis
+  expected_full_route: needs_evidence
+- id: MISSING-amount-fx_conversion
+  delete:
+  - evidence
+  - amount
+  - fx_conversion
+  expected_full_route: needs_evidence
+- id: MISSING-pit
+  delete:
+  - evidence
+  - pit
+  expected_full_route: needs_evidence
+- id: MISSING-pit-entity_id
+  delete:
+  - evidence
+  - pit
+  - entity_id
+  expected_full_route: needs_evidence
+- id: MISSING-pit-report_ref
+  delete:
+  - evidence
+  - pit
+  - report_ref
+  expected_full_route: needs_evidence
+- id: MISSING-pit-audit_status
+  delete:
+  - evidence
+  - pit
+  - audit_status
+  expected_full_route: needs_evidence
+- id: MISSING-pit-period_end
+  delete:
+  - evidence
+  - pit
+  - period_end
+  expected_full_route: needs_evidence
+- id: MISSING-pit-available_at
+  delete:
+  - evidence
+  - pit
+  - available_at
+  expected_full_route: needs_evidence
+- id: MISSING-pit-denominator_kind
+  delete:
+  - evidence
+  - pit
+  - denominator_kind
+  expected_full_route: needs_evidence
+- id: MISSING-pit-denominator_currency
+  delete:
+  - evidence
+  - pit
+  - denominator_currency
+  expected_full_route: needs_evidence
+- id: MISSING-pit-denominator_cny
+  delete:
+  - evidence
+  - pit
+  - denominator_cny
+  expected_full_route: needs_evidence
+- id: MISSING-pit-quote
+  delete:
+  - evidence
+  - pit
+  - quote
+  expected_full_route: needs_evidence
+- id: MISSING-pit-latest_audited_check_ref
+  delete:
+  - evidence
+  - pit
+  - latest_audited_check_ref
+  expected_full_route: needs_evidence
+- id: MISSING-pit-latest_audited_check_at
+  delete:
+  - evidence
+  - pit
+  - latest_audited_check_at
+  expected_full_route: needs_evidence
+- id: MISSING-pit-latest_audited_check_quote
+  delete:
+  - evidence
+  - pit
+  - latest_audited_check_quote
+  expected_full_route: needs_evidence
+- id: MISSING-independent_impact
+  delete:
+  - evidence
+  - independent_impact
+  expected_full_route: needs_evidence
+- id: MISSING-independent_impact-case_id
+  delete:
+  - evidence
+  - independent_impact
+  - case_id
+  expected_full_route: needs_evidence
+- id: MISSING-independent_impact-source_ref
+  delete:
+  - evidence
+  - independent_impact
+  - source_ref
+  expected_full_route: needs_evidence
+- id: MISSING-independent_impact-quote
+  delete:
+  - evidence
+  - independent_impact
+  - quote
+  expected_full_route: needs_evidence
+- id: MISSING-independent_impact-observed_effect
+  delete:
+  - evidence
+  - independent_impact
+  - observed_effect
+  expected_full_route: needs_evidence
+- id: MISSING-independent_impact-existing_hit_review_ref
+  delete:
+  - evidence
+  - independent_impact
+  - existing_hit_review_ref
+  expected_full_route: needs_evidence
+- id: MISSING-independent_impact-existing_hit_review_quote
+  delete:
+  - evidence
+  - independent_impact
+  - existing_hit_review_quote
+  expected_full_route: needs_evidence
+- id: MISSING-amount-supported-status
+  delete:
+  - evidence
+  - amount
+  - supported
+  - status
+  expected_full_route: needs_evidence
+- id: MISSING-amount-supported-amount_cny
+  delete:
+  - evidence
+  - amount
+  - supported
+  - amount_cny
+  expected_full_route: needs_evidence
+- id: MISSING-amount-fx_conversion-status
+  delete:
+  - evidence
+  - amount
+  - fx_conversion
+  - status
+  expected_full_route: needs_evidence
+variant_cases:
+- id: PIT-FUTURE-DENOMINATOR
+  case: L03-FIVE-EVIDENCE
+  set:
+  - path:
+    - evidence
+    - pit
+    - available_at
+    value: '2026-12-01T18:00:00+08:00'
+  expected_full_route: needs_evidence
+- id: PIT-FUTURE-ANNOUNCEMENT
+  case: L05-FIVE-EVIDENCE
+  set:
+  - path:
+    - announcement_available_at
+    value: '2026-12-01T18:00:00+08:00'
+  expected_full_route: needs_evidence
+- id: WRONG-CASE-BINDING
+  case: L03-FIVE-EVIDENCE
+  set:
+  - path:
+    - evidence
+    - amount
+    - case_id
+    value: SYN-OTHER-CASE
+  expected_full_route: needs_evidence
+- id: WRONG-ENTITY-DENOMINATOR
+  case: L05-FIVE-EVIDENCE
+  set:
+  - path:
+    - evidence
+    - pit
+    - entity_id
+    value: SYN-OTHER-ISSUER
+  expected_full_route: needs_evidence
+- id: UNBOUND-SHARE
+  case: L03-FIVE-EVIDENCE
+  set:
+  - path:
+    - evidence
+    - amount
+    - issuer_share
+    value: '0.5'
+  expected_full_route: needs_evidence
+- id: CURRENCY-UNVERIFIED-FX
+  case: L05-FIVE-EVIDENCE
+  set:
+  - path:
+    - evidence
+    - amount
+    - currency
+    value: USD
+  expected_full_route: needs_evidence
+- id: BOOLEAN-CANNOT-REPLACE-IMPACT
+  case: L03-FIVE-EVIDENCE
+  set:
+  - path:
+    - evidence
+    - independent_impact
+    value:
+      adverse_impact_verified: true
+  expected_full_route: needs_evidence
+- id: OR-ASSET-TRUE-MARKET-MISSING
+  case: L05-FIVE-EVIDENCE
+  delete:
+  - - evidence
+    - pit
+    - unused_market_value
+  expected_full_route: risk_candidate
+- id: OR-ASSET-FALSE-MARKET-MISSING
+  case: L05-FIVE-EVIDENCE
+  set:
+  - path:
+    - evidence
+    - pit
+    - denominator_cny
+    value: '2200000000'
+  - path:
+    - evidence
+    - pit
+    - quote
+    value: 【纯合成】该主体最近一期经审计总资产为人民币2200000000元；时点与主体绑定沿用本样例。
+  expected_full_route: needs_evidence
+mutation_semantics: 每个missing_evidence_cases分别对两正例深拷贝后只删除列明路径；删除并非设false/0。既有命中对所有反例均须保留。
+not_created:
+- v4_lexicon
+- runtime_matcher
+- frozen_announcement_id_mapping
+- new_f23_counts
+- production_or_sample_acceptance

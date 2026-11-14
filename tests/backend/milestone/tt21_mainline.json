@@ -1,6 +1,9 @@
 {
-  "baseline": "dcf734d",
-  "purpose": "sha256 of migration file; T-T21 test-only mainline migration checksums",
+  "baseline": "6190fbb17057094843e22d2e7a7935c9a270c770",
+  "main_migration_baseline": "465e02046fa8d971897603742497444f884e89a2",
+  "expected_head": "0035",
+  "previous_baseline": "dcf734d",
+  "purpose": "Original 33-file PR89 6190fbb snapshot matches main 465e020 at 0034. PR104 candidate 4b350762 adds only 0035, approved by Chief 2026-11-13 01:17 MST; this does not assert PR104 is merged. Updating requires a new reviewed manifest commit.",
   "migrations": [
     {
       "migration_file": "0001_baseline.py",
@@ -85,6 +88,58 @@
     {
       "migration_file": "0022_t_a13_feature_metadata.py",
       "sha256_checksum": "82b101caae857b04cd14551183e63814a89211e995f346a077b7716c44726b81"
+    },
+    {
+      "migration_file": "0023_t_b85b_mairui_source.py",
+      "sha256_checksum": "7ef671fc1b9d5950892ad7e235956459729489e71088843907a5d76f04e09630"
+    },
+    {
+      "migration_file": "0024_p2n07_plan_times.py",
+      "sha256_checksum": "1e8435456dd346164ba3595b2856a7ddb3c64b78721d09ff79bcb34f83f6caa1"
+    },
+    {
+      "migration_file": "0025_p2n06_notification_merge.py",
+      "sha256_checksum": "853d81d1a873d5c58c84cf1ab0b979b9de5e57d6fb02c7dea25793f53d0461ab"
+    },
+    {
+      "migration_file": "0026_p2n06_notification_refs.py",
+      "sha256_checksum": "6e0d21a0353e4eb4d100195eb2f43e0e590cee1c282fe124303ef8cf7f546493"
+    },
+    {
+      "migration_file": "0027_tb92_frozen_projections.py",
+      "sha256_checksum": "9a7bf877fc64acb26a25d5137e2f680cbceeefe823b6eebc8a777bff2763f746"
+    },
+    {
+      "migration_file": "0028_tb95_risk_override_active.py",
+      "sha256_checksum": "68adaaa5035b5b3f55d48735d02dd00341f8c4876a7ebef404e2860d804fdc2a"
+    },
+    {
+      "migration_file": "0029_tb99e_gate_bindings.py",
+      "sha256_checksum": "a8c80aa1fab30a85bced44b5581f28cf3c646b63ce02ae396383eb8af81e3cc9"
+    },
+    {
+      "migration_file": "0030_ta73_purge_gate_facts.py",
+      "sha256_checksum": "2b5590255813c683b9a262b514f398c5b44f8fae98817aeaacd1b41998a0e753"
+    },
+    {
+      "migration_file": "0031_tb126_watchlist_active_unique.py",
+      "sha256_checksum": "04d8f1a8d1fa771da7f6bea98d34baaa3668801857e733e0f48a30df900b122b"
+    },
+    {
+      "migration_file": "0032_tb127_daily_bars_source_columns.py",
+      "sha256_checksum": "4278cabffb2e7f01060b41cba58a33dc727fa68a948e6dceb9e03ad87210b515"
+    },
+    {
+      "migration_file": "0033_tb133_daily_bars_tdx_local.py",
+      "sha256_checksum": "fffbdad69b985450c92801f8cbca06493cd5803fd4ccd3ac75a8b5a215e26553"
+    },
+    {
+      "migration_file": "0034_tb133_minute_bars_sources.py",
+      "sha256_checksum": "c4dfe774f6923cf7ccfd024a143070927fa7c06ae2ca5f6e87eed55474512b44"
+    },
+    {
+      "migration_file": "0035_c2_daily_bars_outbox.py",
+      "sha256_checksum": "772adeaddbfe2768fea46e12ed3f820f034d9843d9aaf8106678f703ae1e37b7"
     }
   ]
 }

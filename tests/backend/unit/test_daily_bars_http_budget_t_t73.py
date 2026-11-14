@@ -222,12 +222,23 @@ def _clock() -> dt.datetime:
     return CLOCK
 
 
+def _valid_grant() -> Any:
+    return _require_ingest("DailyBarsGrant").DailyBarsGrant(
+        OWNER,
+        uuid.UUID(int=7301),
+        uuid.UUID(int=7302),
+        CLOCK - dt.timedelta(hours=1),
+        CLOCK + dt.timedelta(hours=1),
+        "0" * 64,
+    )
+
+
 def _fetch(
     conn: Any,
     *,
     transport: Callable[..., Any],
     tmp_path: Path,
-    grant: object | None = object(),
+    grant: object | None = _valid_grant(),
     stop: bool = False,
     halt: bool = False,
     stop_path: Path | None = None,
@@ -259,16 +270,16 @@ def _assert_fetch_not_retried() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 1) 哨兵能解析，但没有任何开启入口
+# 1) 双批常量默认0，旧unlimited已移除且没有开启入口
 # ---------------------------------------------------------------------------
 
 
 def test_http_budget_resolution_table() -> None:
-    """§8.1 :429–:433、:444：0→unset，哨兵→unlimited，3→capped(3)，其余非法值全部 unset。"""
-    ibars = _require_ingest("daily_bars_http_budget", "DAILY_BARS_HTTP_UNLIMITED", "DailyBarsBudget")
+    """§8.1 :429–:433、:444：0/旧哨兵→unset，3→capped(3)，其余非法值全部 unset。"""
+    ibars = _require_ingest("daily_bars_batch_budget", "DAILY_BARS_BACKFILL_BATCH_LIMIT", "DailyBarsBudget")
     cases: list[tuple[object, Any]] = [
         (0, ibars.DailyBarsBudget(kind="unset")),
-        (ibars.DAILY_BARS_HTTP_UNLIMITED, ibars.DailyBarsBudget(kind="unlimited")),
+        ("unlimited", ibars.DailyBarsBudget(kind="unset")),
         (3, ibars.DailyBarsBudget(kind="capped", cap=3)),
         (-1, ibars.DailyBarsBudget(kind="unset")),
         (True, ibars.DailyBarsBudget(kind="unset")),
@@ -277,22 +288,27 @@ def test_http_budget_resolution_table() -> None:
         (2.0, ibars.DailyBarsBudget(kind="unset")),
     ]
     for value, expected in cases:
-        assert ibars.daily_bars_http_budget(value) == expected, value
+        assert ibars.daily_bars_batch_budget(value) == expected, value
+    assert ibars.daily_bars_batch_budget(501).kind == "unset"
+    assert ibars.daily_bars_batch_budget(2000).kind == "unset"
+    assert ibars.daily_bars_batch_budget(2000, "backfill") == ibars.DailyBarsBudget(kind="capped", cap=2000)
+    assert ibars.daily_bars_batch_budget(2001, "backfill").kind == "unset"
 
 
 def test_no_switch_entry_and_not_settings() -> None:
-    """§8.1 :425–:428、:434–:439：哨兵可解析为 unlimited，但无任何开启入口。
+    """§8.1 :425–:428、:434–:439：旧哨兵已移除，两类批次默认0且无开启入口。
 
-    限额不进 Settings、生产赋值仍为 0、CLI 无开关；改成哨兵属于开放单 D。
+    限额不进 Settings、生产赋值仍为 0、CLI 无开关；打开任一生效常量属于开放单D。
     """
     from app.config import Settings as SettingsType
 
-    ibars = _require_ingest("DAILY_BARS_HTTP_LIMIT", "DAILY_BARS_HTTP_UNLIMITED", "daily_bars_http_budget")
-    assert ibars.DAILY_BARS_HTTP_UNLIMITED == "unlimited"
-    assert ibars.daily_bars_http_budget(ibars.DAILY_BARS_HTTP_UNLIMITED).kind == "unlimited"
-    assert ibars.DAILY_BARS_HTTP_LIMIT == 0
-    assert type(ibars.DAILY_BARS_HTTP_LIMIT) is int
-    assert ibars.daily_bars_http_budget(ibars.DAILY_BARS_HTTP_LIMIT).kind == "unset"
+    ibars = _require_ingest("DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT", "daily_bars_batch_budget")
+    assert not hasattr(ibars, "DAILY_BARS_HTTP_UNLIMITED")
+    assert ibars.DAILY_BARS_BACKFILL_BATCH_LIMIT == 0
+    assert ibars.daily_bars_batch_budget("unlimited").kind == "unset"
+    assert ibars.DAILY_BARS_BATCH_LIMIT == 0
+    assert type(ibars.DAILY_BARS_BATCH_LIMIT) is int
+    assert ibars.daily_bars_batch_budget(ibars.DAILY_BARS_BATCH_LIMIT).kind == "unset"
     fields = getattr(SettingsType, "model_fields", {})
     assert "daily_bars_http_limit" not in fields
     assert "daily_bars_http_unlimited" not in fields
@@ -302,19 +318,19 @@ def test_no_switch_entry_and_not_settings() -> None:
     found = False
     for node in ast.walk(tree):
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            if node.target.id == "DAILY_BARS_HTTP_LIMIT":
+            if node.target.id in {"DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT"}:
                 found = True
                 assert isinstance(node.value, ast.Constant) and node.value.value == 0
         if isinstance(node, ast.Assign):
             names = [t.id for t in node.targets if isinstance(t, ast.Name)]
-            if "DAILY_BARS_HTTP_LIMIT" in names:
+            if {"DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT"} & set(names):
                 found = True
                 assert isinstance(node.value, ast.Constant) and node.value.value == 0
     assert found
     cli = ROOT / "src/backend/app/cli/daily_bars_backfill.py"
     cli_text = cli.read_text(encoding="utf-8")
     assert "HTTP_UNLIMITED" not in cli_text
-    assert "DAILY_BARS_HTTP_LIMIT" not in cli_text
+    assert "DAILY_BARS_BATCH_LIMIT" not in cli_text
 
 
 # ---------------------------------------------------------------------------
@@ -324,8 +340,8 @@ def test_no_switch_entry_and_not_settings() -> None:
 
 def test_limit_default_zero_no_network(temp_db: SimpleNamespace, tmp_path: Path) -> None:
     """§8.1 :428、:430：默认限额 0 为 unset；假 transport 0 次，不写库，记 budget_unset。"""
-    ibars = _require_ingest("fetch_mairui_daily_bars", "DAILY_BARS_HTTP_LIMIT")
-    assert ibars.DAILY_BARS_HTTP_LIMIT == 0
+    ibars = _require_ingest("fetch_mairui_daily_bars", "DAILY_BARS_BATCH_LIMIT")
+    assert ibars.DAILY_BARS_BATCH_LIMIT == 0
     with temp_db.engine.begin() as conn:
         _seed_c_owner(conn)
         calls: list[tuple[str, dt.date, dt.date]] = []
@@ -340,8 +356,8 @@ def test_limit_not_widened_by_env_or_receipt(
     temp_db: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """§8.1 :434、:447：限额常量为 0 时，环境变量或回执里的 limit 都不能放宽，transport 0 次。"""
-    ibars = _require_ingest("DAILY_BARS_HTTP_LIMIT", "fetch_mairui_daily_bars")
-    monkeypatch.setenv("DAILY_BARS_HTTP_LIMIT", "9999")
+    ibars = _require_ingest("DAILY_BARS_BATCH_LIMIT", "fetch_mairui_daily_bars")
+    monkeypatch.setenv("DAILY_BARS_BATCH_LIMIT", "9999")
     receipt = tmp_path / "mairui-daily-bars.json"
     receipt.write_text(json.dumps({"limit": 9999, "kind": "mairui_daily_bars"}), encoding="utf-8")
     with temp_db.engine.begin() as conn:
@@ -357,8 +373,8 @@ def test_limit_not_widened_by_env_or_receipt(
             grant_reader=lambda: {"limit": 9999},
             clock=_clock,
         )
-        assert ibars.DAILY_BARS_HTTP_LIMIT == 0
-        assert os.environ["DAILY_BARS_HTTP_LIMIT"] == "9999"
+        assert ibars.DAILY_BARS_BATCH_LIMIT == 0
+        assert os.environ["DAILY_BARS_BATCH_LIMIT"] == "9999"
         assert written == 0
         assert calls == []
         assert "daily_bars_http_budget_unset" in _issues(conn)
@@ -368,8 +384,8 @@ def test_limit_not_widened_by_env_or_receipt(
 def test_mairui_requires_receipt_and_budget(
     temp_db: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§8.1 :435–:439、:448：默认 0 即使缺回执也只记 unset；monkeypatch 哨兵后缺回执记 licence unavailable，仍 0 次。"""
-    ibars = _require_ingest("DAILY_BARS_HTTP_LIMIT", "DAILY_BARS_HTTP_UNLIMITED", "fetch_mairui_daily_bars")
+    """§8.1 :435–:439、:448：默认 0 即使缺回执也只记 unset；monkeypatch测试cap=5后缺回执记 licence unavailable，仍 0 次。"""
+    ibars = _require_ingest("DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT", "fetch_mairui_daily_bars")
     with temp_db.engine.begin() as conn:
         _seed_c_owner(conn)
         calls: list[tuple[str, dt.date, dt.date]] = []
@@ -378,7 +394,7 @@ def test_mairui_requires_receipt_and_budget(
         assert "daily_bars_http_budget_unset" in _issues(conn)
         assert _bar_count(conn) == 0
 
-        monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+        monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 5)
         calls2: list[tuple[str, dt.date, dt.date]] = []
         written2 = _fetch(conn, transport=_ok_transport(calls2), tmp_path=tmp_path, grant=None)
         assert written2 == 0 and calls2 == []
@@ -391,13 +407,13 @@ def test_mairui_requires_receipt_and_budget(
 # ---------------------------------------------------------------------------
 
 
-def test_unlimited_halts_on_103(
+def test_batch_budget_halts_on_103(
     temp_db: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """§8.1 :420、:446；§3 :85：假 transport 第 2 次返回 103，恰 2 次、写 HALT，剩余 4 只记 halted，已成功 1 行；再 tick 0 次。不进 RETRY_TASKS。"""
     _assert_fetch_not_retried()
-    ibars = _require_ingest("DAILY_BARS_HTTP_LIMIT", "DAILY_BARS_HTTP_UNLIMITED", "fetch_mairui_daily_bars")
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+    ibars = _require_ingest("DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT", "fetch_mairui_daily_bars")
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 5)
     halt_path = tmp_path / "halt-103"
     stop_path = tmp_path / "stop-103"
     with temp_db.engine.begin() as conn:
@@ -410,7 +426,7 @@ def test_unlimited_halts_on_103(
             transport=_status_on(2, 103, calls),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_valid_grant,
             clock=_clock,
         )
         assert len(calls) == 2
@@ -427,7 +443,7 @@ def test_unlimited_halts_on_103(
             transport=_ok_transport(calls2),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_valid_grant,
             clock=_clock,
         )
         assert calls2 == [] and again == 0
@@ -435,13 +451,13 @@ def test_unlimited_halts_on_103(
     _assert_fetch_not_retried()
 
 
-def test_unlimited_halts_on_429(
+def test_batch_budget_halts_on_429(
     temp_db: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """§8.1 :420、:446；§3 :85：假 transport 第 2 次返回 429，恰 2 次、写 HALT，剩余 4 只记 halted，已成功 1 行；再 tick 0 次。不进 RETRY_TASKS。"""
     _assert_fetch_not_retried()
-    ibars = _require_ingest("DAILY_BARS_HTTP_LIMIT", "DAILY_BARS_HTTP_UNLIMITED", "fetch_mairui_daily_bars")
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+    ibars = _require_ingest("DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT", "fetch_mairui_daily_bars")
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 5)
     halt_path = tmp_path / "halt-429"
     stop_path = tmp_path / "stop-429"
     with temp_db.engine.begin() as conn:
@@ -454,7 +470,7 @@ def test_unlimited_halts_on_429(
             transport=_status_on(2, 429, calls),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_valid_grant,
             clock=_clock,
         )
         assert len(calls) == 2
@@ -471,7 +487,7 @@ def test_unlimited_halts_on_429(
             transport=_ok_transport(calls2),
             stop_path=stop_path,
             halt_path=halt_path,
-            grant_reader=lambda: object(),
+            grant_reader=_valid_grant,
             clock=_clock,
         )
         assert calls2 == [] and again == 0
@@ -479,13 +495,13 @@ def test_unlimited_halts_on_429(
     _assert_fetch_not_retried()
 
 
-def test_unlimited_halts_on_stop(
+def test_batch_budget_halts_on_stop(
     temp_db: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """§8.1 :420、:446；§3 :85：运行前已有 STOP 文件，transport 0 次，5 只都记 halted，不写行；不进 RETRY_TASKS。"""
     _assert_fetch_not_retried()
-    ibars = _require_ingest("DAILY_BARS_HTTP_LIMIT", "DAILY_BARS_HTTP_UNLIMITED", "fetch_mairui_daily_bars")
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+    ibars = _require_ingest("DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT", "fetch_mairui_daily_bars")
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 5)
     with temp_db.engine.begin() as conn:
         _seed_c_owner(conn)
         calls: list[tuple[str, dt.date, dt.date]] = []
@@ -515,17 +531,18 @@ def test_daily_http_limit_unchanged() -> None:
     # 达到上限时 request / publish_pending 直接拒绝，不写出队。
     assert daily.request(None, object(), CLOCK) is None  # type: ignore[arg-type]
     assert daily.publish_pending(None, None) == 0  # type: ignore[arg-type]
-    ibars = _require_ingest("DAILY_BARS_HTTP_LIMIT", "DAILY_BARS_HTTP_UNLIMITED")
-    assert ibars.DAILY_BARS_HTTP_LIMIT == 0
-    assert ibars.DAILY_BARS_HTTP_UNLIMITED == "unlimited"
+    ibars = _require_ingest("DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT")
+    assert ibars.DAILY_BARS_BATCH_LIMIT == 0
+    assert not hasattr(ibars, "DAILY_BARS_HTTP_UNLIMITED")
+    assert ibars.DAILY_BARS_BACKFILL_BATCH_LIMIT == 0
 
 
 def test_budget_cap_reached_defers_rest(
     temp_db: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """§8.1 :432：仅测试 monkeypatch 为正整数 2 时，第 2 次之后的标的记 quota_deferred，当日不重试。"""
-    ibars = _require_ingest("DAILY_BARS_HTTP_LIMIT", "fetch_mairui_daily_bars")
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", 2)
+    ibars = _require_ingest("DAILY_BARS_BATCH_LIMIT", "fetch_mairui_daily_bars")
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 2)
     with temp_db.engine.begin() as conn:
         _seed_c_owner(conn)
         calls: list[tuple[str, dt.date, dt.date]] = []
@@ -536,12 +553,12 @@ def test_budget_cap_reached_defers_rest(
         assert _bar_count(conn) == 2
 
 
-def test_unlimited_no_cap_calls_equal_planned(
+def test_batch_budget_no_cap_calls_equal_planned(
     temp_db: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """§8.1 :441、:445：monkeypatch 为哨兵、回执与假 transport 齐备、5 个标的单日，transport 恰 5 次，无 quota_deferred。"""
-    ibars = _require_ingest("DAILY_BARS_HTTP_LIMIT", "DAILY_BARS_HTTP_UNLIMITED", "fetch_mairui_daily_bars")
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+    """§8.1 :441、:445：monkeypatch为测试cap=5、回执与假 transport 齐备、5 个标的单日，transport 恰 5 次，无 quota_deferred。"""
+    ibars = _require_ingest("DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT", "fetch_mairui_daily_bars")
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 5)
     with temp_db.engine.begin() as conn:
         _seed_c_owner(conn)
         calls: list[tuple[str, dt.date, dt.date]] = []

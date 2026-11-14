@@ -828,7 +828,7 @@ def test_fetch_and_record_fetched_at_injection(b_db: SimpleNamespace) -> None:
         after = conn.execute(text("SELECT count(*) FROM market.daily_bars")).scalar_one()
         assert after == before
     params = list(inspect.signature(m.daily_bars_fetch_task).parameters)
-    assert params == ["settings", "trade_date", "user_id", "window_trading_days"]
+    assert params == ["settings", "trade_date", "user_id", "window_trading_days", "batch_kind", "batch_seq"]
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from app.db.tables import (
     accounts,
+    daily_bars,
     evaluation,
     licences,
     llm,
@@ -25,6 +26,7 @@ from app.db.tables import (
 
 __all__ = [
     "accounts",
+    "daily_bars",
     "evaluation",
     "licences",
     "llm",

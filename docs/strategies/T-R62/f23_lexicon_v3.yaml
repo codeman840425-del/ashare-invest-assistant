@@ -1,0 +1,316 @@
+# F23 f.ann_risk_count_10d 风险公告标题词表 v3（T-R62；T-A152 定向修订）
+# 由 make_lexicon_v3.py 从 v2.1（docs/strategies/T-R23/f23_lexicon_v2_1.yaml）定向生成；
+# 除 controller 否定短语与 insolvency 他方重整排除外，逐字继承 v2.1。
+version: f23_lexicon_v3
+base_version: f23_lexicon_v2_1
+normalize:
+  nfkc: true
+  strip_spaces: true
+  strip_html: true
+  map:
+    ＊: '*'
+    其它: 其他
+clause_split: '[，,；;。：:！!？?（）()\[\]【】《》〈〉“”"]|暨|并且|并'
+after_window: 10
+negation_resets:
+- 继续
+- 仍
+- 叠加
+- 新增
+- 再次
+title_exclude_prefix_regex: ^[^关]{0,40}(会计师事务所|律师事务所|证券股份有限公司|证券有限责任公司|资产评估|鹏元|资信评估|中诚信|新世纪评级|东方金诚|大公国际)
+title_excludes:
+- 澄清
+- 审核问询函
+- 注册环节
+- 管理办法
+- 制度
+- 专项审核报告
+- 情况表
+- 汇总表
+- 关联资金往来
+- 非本公司事项
+- 承诺函
+- 关于关注
+- 关注公告
+- 工作细则
+- 专项核查意见
+- 核查意见
+- 法律意见书
+- 鉴证报告
+categories:
+  investigation:
+    keywords:
+    - 立案告知书
+    - 立案调查
+    - 被立案
+    negations_before:
+    - 撤销
+    - 解除
+    - 结案
+    - 终止调查
+    - 不予立案
+    - 未被
+    - 不存在
+    - 未收到
+    negations_after:
+    - 结案
+    - 结束
+    - 终止
+  delisting_risk:
+    keywords:
+    - 退市风险警示
+    - 被实施退市
+    - 终止上市
+    - 强制退市
+    - 退市整理期
+    negations_before:
+    - 撤销
+    - 解除
+    - 申请撤销
+    - 不存在
+    - 未触及
+    - 不会
+  other_risk_warning:
+    keywords:
+    - 其他风险警示
+    negations_before:
+    - 撤销
+    - 解除
+    - 申请撤销
+    - 不存在
+    - 未触及
+  audit_opinion:
+    keywords:
+    - 无法表示意见
+    - 否定意见
+    - 保留意见
+    - 非标准审计意见
+    - 持续经营重大不确定性
+    - 持续经营相关的重大不确定性
+    negations_before:
+    - 无保留
+    negations_after:
+    - 已消除
+    - 消除
+    after_window: 20
+  regulatory_action:
+    keywords:
+    - 问询函
+    - 关注函
+    - 监管函
+    - 警示函
+    - 监管工作函
+    - 纪律处分
+    - 公开谴责
+    - 通报批评
+    - 行政处罚事先告知书
+    - 行政处罚决定书
+    - 市场禁入
+    - 责令改正
+    - 违规减持
+    - 行政监管措施
+    - 监管措施决定书
+    - 监督管理措施
+    negations_before:
+    - 撤销
+    - 解除
+    - 不存在
+  control_person_risk:
+    keywords:
+    - 被留置
+    - 留置
+    - 无法履职
+    - 强制措施
+    - 刑事拘留
+    negations_before:
+    - 解除
+    - 撤销
+    - 恢复
+    negations_after:
+    - 解除
+    - 结束
+    - 恢复履职
+    - 已消除
+  funds_and_guarantee:
+    keywords:
+    - 资金占用
+    - 违规担保
+    - 违规对外担保
+    negations_before:
+    - 解除
+    - 清偿完毕
+    - 归还完毕
+    - 已全部归还
+    - 不存在
+    negations_after:
+    - 已解决
+    - 解除
+    - 清偿情况
+    - 已清偿
+    - 已归还
+  shareholder_pledge_freeze:
+    keywords:
+    - 司法冻结
+    - 司法再冻结
+    - 再冻结
+    - 轮候冻结
+    - 司法拍卖
+    - 被冻结
+    - 强制平仓
+    - 被动减持
+    negations_before:
+    - 解除
+    - 解冻
+    - 撤销
+    - 不存在
+    - 终止
+    negations_after:
+    - 解除
+    - 解冻
+    after_window: 2
+  insolvency:
+    keywords:
+    - 破产
+    - 重整
+    - 预重整
+    - 债务逾期
+    - 逾期债务
+    - 债务违约
+    negations_before:
+    - 撤回
+    - 驳回
+    - 终止
+    - 执行完毕
+    - 解除部分
+    - 解除
+    negations_after:
+    - 已归还
+    - 已偿还
+    - 已清偿
+    - 已解决
+    exclude_all_of:
+    - - 参与
+      - 破产重整
+    - - 参与
+      - 重整投资
+    - - 认购
+      - 重整投资
+  controller_selldown:
+    require_all:
+    - 减持
+    require_any:
+    - 控股股东
+    - 实际控制人
+    - 实控人
+    negations_before:
+    - 不减持
+    - 未减持
+    - 终止
+    - 未实施
+    - 不通过
+    - 不会通过
+    - 不主动
+    - 承诺不
+    - 自愿不
+  control_instability:
+    keywords:
+    - 变更为无实际控制人
+    - 变更为无控股股东
+    - 控制权存在不确定性
+    - 控制权不稳定
+    negations_before:
+    - 不存在
+    - 不会
+    - 未
+  controller_equity:
+    type: controller_equity
+    subjects:
+    - 控股股东
+    - 实际控制人
+    - 实控人
+    subject_negations:
+    - 非控股股东
+    - 非实际控制人
+    down_words:
+    - 减持
+    - 减少
+    - 下降
+    - 降至
+    - 降低
+    - 询价转让
+    - 变卖
+    up_words:
+    - 增持
+    - 增加
+    - 上升
+    - 提高
+    - 受让
+    - 认购
+    - 被动增加
+    change_terms:
+    - 权益变动
+    - 持股比例变动
+    - 股份变动
+    - 持股变动
+    direction_neutral_excludes:
+    - 被动稀释
+    - 一致行动协议
+    - 一致行动人协议
+    - 一致行动关系
+    - 表决权
+    - 继承
+    - 分割
+    - 赠与
+    - 划转
+    negations_before:
+    - 不减持
+    - 未减持
+    - 终止
+    - 取消
+    - 未实施
+    - 不会
+    - 不通过
+    - 不会通过
+    - 不主动
+    - 承诺不
+    - 自愿不
+    direction_unknown_policy: conservative_hit
+    subject_unknown_policy: no_hit
+policy_rules:
+  inquiry_transfer_policy:
+    any:
+    - 询价转让
+    precedence: over_title_excludes
+    negation_exemptions: none
+  concert_change_policy:
+    require_any_subject:
+    - 控股股东
+    - 实际控制人
+    - 实控人
+    - 一致行动人
+    require_all:
+    - 一致行动
+    require_any_event:
+    - 到期
+    - 解除
+    - 终止
+    require_any_change:
+    - 权益变动
+    - 持股比例变动
+    - 股份变动
+    - 持股变动
+    precedence: normal
+    note: 覆盖“控制人/一致行动 + 协议到期/解除 + 权益变动”；可能并无减持（如仅不再合并计算），保守否决，非事实判断
+dedup:
+  primary: nr
+  secondary:
+  - security_code
+  - normalized_title_without_version_suffix
+  - available_date
+  version_suffix: '[（(](更正后|修订稿|修订版|更新后|英文版|更正)[）)]$'
+window:
+  trading_days: 10
+  available_from: max(t, first_seen_at)；t 只有日期 → 次一交易日 09:30（V7）
+count_rule: 每条公告最多计 1（命中多个类别也只计 1，类别列表并记）
+revision_basis: T-A152（T-R61 B 轮实测 FP-1/FP-2 定向修复；其余逐字继承 v2.1）

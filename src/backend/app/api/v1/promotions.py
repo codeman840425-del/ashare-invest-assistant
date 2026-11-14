@@ -79,7 +79,10 @@ def coarse_ip(request: Request, settings: SettingsDep) -> str | None:
     import ipaddress
 
     try:
-        address = ipaddress.ip_address(client_ip(request, settings))
+        raw_address = client_ip(request, settings)
+        if raw_address is None:
+            return None
+        address = ipaddress.ip_address(raw_address)
         return str(
             ipaddress.ip_network(f"{address}/{24 if address.version == 4 else 64}", strict=False)
         )
@@ -111,7 +114,7 @@ def get_review(review_id: uuid.UUID, auth: AuthDep, engine: EngineDep) -> dict[s
         return service.detail(conn, auth.user_id, review_id)
 
 
-@router.get("/admin/promotions")
+@router.get("/admin/promotions", include_in_schema=False)
 def promotion_list(
     auth: AdminDep,
     engine: EngineDep,
@@ -175,7 +178,7 @@ def promotion_list(
     )
 
 
-@router.post("/admin/promotions/{review_id}/decision")
+@router.post("/admin/promotions/{review_id}/decision", include_in_schema=False)
 def decision(
     review_id: uuid.UUID,
     body: DecisionRequest,
@@ -208,7 +211,9 @@ def decision(
         )
 
 
-@router.post("/admin/strategies/{strategy_id}/versions/{version_id}/lifecycle")
+@router.post(
+    "/admin/strategies/{strategy_id}/versions/{version_id}/lifecycle", include_in_schema=False
+)
 def lifecycle(
     strategy_id: uuid.UUID,
     version_id: uuid.UUID,

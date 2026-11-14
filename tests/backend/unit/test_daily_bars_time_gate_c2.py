@@ -393,3 +393,15 @@ def test_cli_past_trade_date_respects_1700_start(gated, monkeypatch, capsys):
         assert len(client.queued) == int(not expected)
     assert gated.calls == [] and facts(gated)[2] == 0
     capsys.readouterr()
+
+
+def test_task_signature_preserves_old_arguments_and_safe_batch_defaults():
+    import inspect
+    from app.marketdata.daily_bars import daily_bars_fetch_task
+    signature = inspect.signature(daily_bars_fetch_task)
+    assert list(signature.parameters) == [
+        "settings", "trade_date", "user_id", "window_trading_days", "batch_kind", "batch_seq"]
+    assert signature.parameters["batch_kind"].default == "daily"
+    assert signature.parameters["batch_seq"].default == 0
+    assert type(signature.parameters["batch_seq"].default) is int
+    assert "fetched_at" not in signature.parameters

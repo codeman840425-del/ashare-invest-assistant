@@ -64,10 +64,21 @@ class BarGap:
 
 
 @dataclass(frozen=True)
+class HistoryConfirmation:
+    """Explicit adapter evidence; absent until the source confirms no earlier history."""
+
+    code: str
+    window: tuple[dt.date, dt.date]
+    first: dt.date
+    no_earlier: bool
+
+
+@dataclass(frozen=True)
 class DailyBarsResult:
     bars: Sequence[DailyBar] = ()
     gaps: Sequence[BarGap] = ()
     halted: str | None = None
+    history_confirmation: HistoryConfirmation | None = None
 
 
 FetchResult = DailyBarsResult

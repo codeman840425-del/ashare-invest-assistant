@@ -9,8 +9,11 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import Connection, select
 
+from app.db.tables.daily_bars import outbox
 from app.db.tables.market import daily_bars, trading_calendar
+from app.db.tables.realtime import pipeline_runs
 from app.marketdata.daily_snapshot import FINAL_AFTER
+from app.master.vendor import licence_available
 
 BEIJING = ZoneInfo("Asia/Shanghai")
 
@@ -77,6 +80,7 @@ def ready_for_window(
     days: Sequence[dt.date],
     *,
     now: dt.datetime,
+    user_id: uuid.UUID | None = None,
 ) -> bool:
     """Caller supplies the current validated grant's licence; other sources never count."""
     if not days:
@@ -108,4 +112,65 @@ def ready_for_window(
             )
         )
     }
-    return set(days) <= ready
+    if set(days) <= ready:
+        return True
+    if user_id is None or len(days) < 2 or not ready:
+        return False
+    if not licence_available(conn, licence_id, now):
+        return False
+    candidates = conn.execute(
+        select(pipeline_runs.c.stats)
+        .select_from(
+            pipeline_runs.join(
+                outbox,
+                outbox.c.pipeline_run_id == pipeline_runs.c.id,
+            )
+        )
+        .where(
+            pipeline_runs.c.kind == "daily_batch",
+            pipeline_runs.c.step == "daily_bars.fetch",
+            pipeline_runs.c.run_date == days[-1],
+            pipeline_runs.c.status.in_(["ok", "partial"]),
+            pipeline_runs.c.finished_at <= now,
+            pipeline_runs.c.started_at <= pipeline_runs.c.finished_at,
+            outbox.c.kind == "mairui_daily_bars",
+            outbox.c.status.in_(["running", "done"]),
+            outbox.c.user_id == user_id,
+            outbox.c.source_licence_id == licence_id,
+            outbox.c.trade_date == days[-1],
+            outbox.c.window_trading_days == len(days),
+        )
+    ).scalars()
+    for stats in candidates:
+        if (
+            not isinstance(stats, dict)
+            or stats.get("user_id") != str(user_id)
+            or stats.get("window_trading_days") != len(days)
+        ):
+            continue
+        evidence = stats.get("history_evidence")
+        entry = evidence.get(code) if isinstance(evidence, dict) else None
+        if not isinstance(entry, dict) or (
+            entry.get("status") != "ok"
+            or entry.get("code") != code
+            or entry.get("no_earlier") is not True
+            or entry.get("user_id") != str(user_id)
+            or entry.get("source_licence_id") != str(licence_id)
+            or entry.get("window") != [day.isoformat() for day in days]
+        ):
+            continue
+        first = entry.get("first")
+        if not isinstance(first, str):
+            continue
+        try:
+            earliest = dt.date.fromisoformat(first)
+        except ValueError:
+            continue
+        if (
+            earliest in days
+            and earliest > days[0]
+            and earliest == min(row.trade_date for row in rows)
+            and {day for day in days if day >= earliest} <= ready
+        ):
+            return True
+    return False

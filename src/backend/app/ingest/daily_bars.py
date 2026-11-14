@@ -24,7 +24,7 @@ from typing import Literal
 from sqlalchemy.engine import Connection
 
 from app.common.errors import AppError
-from app.ingest.daily_bars_plan import DailyBarsPlanError, segments, window_days
+from app.ingest.daily_bars_plan import BEIJING, DailyBarsPlanError, segments, window_days
 from app.ingest.daily_bars_schedule import HistoryWindowDeferredError
 from app.ingest.daily_lists import STOP as LISTS_STOP
 from app.ingest.daily_lists import DailyHaltError, limited
@@ -32,11 +32,13 @@ from app.ingest.egress import HALT_LIMIT, EgressDenied
 from app.marketdata.daily_bars import (
     DailyBar,
     DailyBarsResult,
+    HistoryConfirmation,
     _empty_stats,
     _record_run,
     daily_universe,
     upsert_daily_bars,
 )
+from app.marketdata.daily_snapshot import FINAL_AFTER
 from app.reports.service import covered
 
 # C2 effective batch gates; opening either remains a separately authorized D change.
@@ -195,6 +197,23 @@ def _stamp(clock: Clock) -> dt.datetime:
     return value
 
 
+def _history_first(value: object, code: str, days: tuple[dt.date, ...]) -> dt.date | None:
+    if not isinstance(value, HistoryConfirmation) or value.no_earlier is not True:
+        return None
+    if (
+        value.code != code
+        or type(value.first) is not dt.date
+        or not isinstance(value.window, tuple)
+        or len(value.window) != 2
+        or any(type(day) is not dt.date for day in value.window)
+        or value.window != (days[0], days[-1])
+        or value.first not in days
+        or value.first <= days[0]
+    ):
+        return None
+    return value.first
+
+
 def fetch_mairui_daily_bars(
     conn: Connection,
     *,
@@ -326,6 +345,7 @@ def fetch_mairui_daily_bars(
     calls = 0
     already_ready = 0
     missing = 0
+    history_evidence: dict[str, dict[str, object]] = {}
 
     if halt.is_file() or stop.is_file():
         issues.extend(["daily_bars_upstream_halted"] * len(codes))
@@ -350,6 +370,9 @@ def fetch_mairui_daily_bars(
             issues.extend(["daily_bars_quota_deferred"] * (len(codes) - index))
             break
         code_missing = 0
+        code_start = len(bars)
+        first: dt.date | None = None
+        consistent = all_pages_ok = True
         for start, end in pages:
             if halt.exists() or stop.exists():
                 batch_halted = True
@@ -377,6 +400,15 @@ def fetch_mairui_daily_bars(
                 else ()
             )
             expected_days = {day for day in days if start <= day <= end}
+            if http_status != 200:
+                all_pages_ok = False
+            if http_status == 200 and isinstance(payload, DailyBarsResult) and window_trading_days:
+                candidate = _history_first(payload.history_confirmation, code, days)
+                if payload.history_confirmation is not None and candidate is None:
+                    consistent = False
+                if candidate is not None:
+                    consistent = consistent and (first is None or first == candidate)
+                    first = candidate
             if http_status != 200 or not received:
                 code_missing += len(expected_days)
                 continue
@@ -388,6 +420,50 @@ def fetch_mairui_daily_bars(
                 raise ValueError("daily_bars_history_payload_outside_plan")
             bars.extend(received)
             code_missing += len(expected_days - {bar.trade_date for bar in received})
+        seen = {bar.trade_date for bar in bars[code_start:]}
+        final_rows = False
+        if first is not None and last_received is not None:
+            stamp = last_received
+            final_rows = all(
+                stamp >= dt.datetime.combine(bar.trade_date, FINAL_AFTER, BEIJING)
+                and (
+                    bar.is_suspended is True
+                    or (
+                        bar.is_suspended is False
+                        and all(
+                            value is not None
+                            for value in (
+                                bar.open,
+                                bar.high,
+                                bar.low,
+                                bar.close,
+                                bar.volume,
+                                bar.amount,
+                            )
+                        )
+                    )
+                )
+                for bar in bars[code_start:]
+            )
+        if (
+            first is not None
+            and final_rows
+            and consistent
+            and all_pages_ok
+            and not batch_halted
+            and not window_deferred
+            and seen == {day for day in days if day >= first}
+        ):
+            code_missing = 0
+            history_evidence[code] = {
+                "status": "ok",
+                "code": code,
+                "window": [day.isoformat() for day in days],
+                "first": first.isoformat(),
+                "no_earlier": True,
+                "user_id": str(user_id),
+                "source_licence_id": str(grant.licence_id),
+            }
         if code_missing:
             missing += code_missing
             issues.append(f"daily_bars_missing:{code}")
@@ -417,19 +493,22 @@ def fetch_mairui_daily_bars(
         if issues
         else ("ok" if last_received is not None or bars or already_ready else "skipped")
     )
+    stats = _empty_stats(
+        user_id,
+        window_trading_days,
+        codes=len(codes),
+        inserted=written,
+        missing=missing,
+        issues=issues,
+    )
+    if history_evidence and not batch_halted:
+        stats["history_evidence"] = history_evidence
     record_run(
         conn,
         trade_date,
         user_id,
         window_trading_days,
         status=run_status,
-        stats=_empty_stats(
-            user_id,
-            window_trading_days,
-            codes=len(codes),
-            inserted=written,
-            missing=missing,
-            issues=issues,
-        ),
+        stats=stats,
     )
     return written

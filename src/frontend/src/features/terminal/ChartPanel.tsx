@@ -59,7 +59,7 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
         <DataStatusTag status={row.data_status} asOf={row.data_as_of} gaps={minute.data?.gaps} />
       </div>
       <div className="chart-title">
-        日 K（前复权）<span className="muted small">　▲/▼ = 候选信号标记（策略简称 + 动作）</span>
+        日 K（{daily.first?.adjust === 'none' ? '不复权，前复权数据不可用已回落' : '前复权'}）<span className="muted small">　▲/▼ = 候选信号标记（策略简称 + 动作）</span>
         <span className="muted small" data-testid="stop-legend">
           　{stops ? `虚线 = ${stops.legend} 的止损/止盈` : suggestion?.consensus.status === 'divergent' ? '各策略分歧：止损/止盈见右侧各策略，图上不画' : ''}
         </span>
@@ -68,7 +68,7 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
       </div>
       <div className="chart-wrap kline">
         {daily.first ? (
-          <KlineChart bars={daily.bars} markers={klineMarkers} stopLoss={stops?.stopLoss} takeProfit={stops?.takeProfit} viewKey={code} onReachStart={daily.loadOlderAuto} />
+          <KlineChart bars={daily.bars} markers={klineMarkers} stopLoss={stops?.stopLoss} takeProfit={stops?.takeProfit} viewKey={`${code}${daily.first.adjust === 'none' ? ':none' : ''}`} onReachStart={daily.loadOlderAuto} />
         ) : <div className="chart-empty">{daily.isError ? '日 K 加载失败' : '加载中…'}</div>}
       </div>
       <div className="chart-title">分时（不复权 · 黄线 = 均价 · 点线 = 昨收）<span className="muted small">　● = 盘中规则事件</span></div>

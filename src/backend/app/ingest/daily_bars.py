@@ -206,6 +206,8 @@ def fetch_mairui_daily_bars(
     window_trading_days: int | None = None,
     receipt_path: Path | None = None,
     batch_kind: str = "daily",
+    run_recorder: Callable[..., None] | None = None,
+    code_ready: Callable[[str], bool] | None = None,
 ) -> int:
     """按预算与停止规则拉取一日（或窗口）日 K。不读证书，默认不出网。"""
     send = transport if transport is not None else _transport_disabled
@@ -218,11 +220,12 @@ def fetch_mairui_daily_bars(
         return read_daily_bars_grant(receipt, now=_stamp(now), user_id=user_id)
 
     reader = grant_reader if grant_reader is not None else _default_grant_reader
+    record_run = _record_run if run_recorder is None else run_recorder
 
     value = DAILY_BARS_BACKFILL_BATCH_LIMIT if batch_kind == "backfill" else DAILY_BARS_BATCH_LIMIT
     budget = daily_bars_batch_budget(value, batch_kind)
     if budget.kind == "unset":
-        _record_run(
+        record_run(
             conn,
             trade_date,
             user_id,
@@ -244,7 +247,7 @@ def fetch_mairui_daily_bars(
         or grant.end.tzinfo is None
         or not (grant.start <= _stamp(now) < grant.end)
     ):
-        _record_run(
+        record_run(
             conn,
             trade_date,
             user_id,
@@ -258,7 +261,7 @@ def fetch_mairui_daily_bars(
         is_open = covered(conn, trade_date)
     except AppError as exc:
         if exc.details is not None and exc.details.get("issue") == "CALENDAR_NOT_COVERED":
-            _record_run(
+            record_run(
                 conn,
                 trade_date,
                 user_id,
@@ -269,7 +272,7 @@ def fetch_mairui_daily_bars(
             return 0
         raise
     if not is_open:
-        _record_run(
+        record_run(
             conn,
             trade_date,
             user_id,
@@ -281,7 +284,7 @@ def fetch_mairui_daily_bars(
 
     codes = daily_universe(conn, user_id, trade_date)
     if not codes:
-        _record_run(
+        record_run(
             conn,
             trade_date,
             user_id,
@@ -297,10 +300,11 @@ def fetch_mairui_daily_bars(
     bars: list[DailyBar] = []
     last_received: dt.datetime | None = None
     calls = 0
+    already_ready = 0
 
     if halt.is_file() or stop.is_file():
         issues.extend(["daily_bars_upstream_halted"] * len(codes))
-        _record_run(
+        record_run(
             conn,
             trade_date,
             user_id,
@@ -312,6 +316,9 @@ def fetch_mairui_daily_bars(
 
     cap = budget.cap or 0
     for index, code in enumerate(codes):
+        if code_ready is not None and code_ready(code):
+            already_ready += 1
+            continue
         if cap is not None and calls >= cap:
             issues.extend(["daily_bars_quota_deferred"] * (len(codes) - index))
             break
@@ -322,7 +329,7 @@ def fetch_mairui_daily_bars(
             issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))
             break
         last_received = _stamp(now)
-        calls = index + 1
+        calls += 1
         if limited(http_status, payload) or http_status in (103, 429):
             persist_halt(halt, HALT_LIMIT)
             issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))
@@ -345,8 +352,8 @@ def fetch_mairui_daily_bars(
         written = upsert.inserted + upsert.unchanged
         issues.extend(upsert.issues)
 
-    run_status = "ok" if last_received is not None or bars else "skipped"
-    _record_run(
+    run_status = "ok" if last_received is not None or bars or already_ready else "skipped"
+    record_run(
         conn,
         trade_date,
         user_id,

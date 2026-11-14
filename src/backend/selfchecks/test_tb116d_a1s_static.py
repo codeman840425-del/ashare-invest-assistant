@@ -147,6 +147,15 @@ def _has_a28_negative(src: str, lineno: int) -> bool:
     return False
 
 
+def _daily_bars_seam_call(tree: ast.Module, node: ast.Call) -> bool:
+    expected = ast.parse("operation(*args, transport=sender, **options)").body[0].value
+    for function in tree.body:
+        if isinstance(function, ast.FunctionDef) and function.name == "daily_bars_seam":
+            last = function.body[-1]
+            return isinstance(last, ast.Return) and last.value is node and ast.dump(node) == ast.dump(expected)
+    return False
+
+
 def scan_tree(root: Path | None = None) -> list[tuple[str, str, int, str]]:
     """Return (rule, relpath, lineno, detail) violations."""
     base = root or BACKEND
@@ -293,7 +302,7 @@ def scan_tree(root: Path | None = None) -> list[tuple[str, str, int, str]]:
                     elif isinstance(node.func, ast.Attribute):
                         func_name = node.func.attr
                     for kw in node.keywords:
-                        if kw.arg == "transport":
+                        if kw.arg == "transport" and not (is_daily and _daily_bars_seam_call(tree, node)):
                             violations.append(("S5", rel, node.lineno, "transport_kw"))
                         if kw.arg == "upstream" and func_name == "process":
                             violations.append(("S5", rel, node.lineno, "process_upstream"))
@@ -412,6 +421,21 @@ def test_tb116d_a1s_s3_s5_s6_registered_exceptions() -> None:
     daily = (BACKEND / "app/ingest/daily_lists.py").read_text(encoding="utf-8").splitlines()
     assert any('get_kwargs["transport"] = upstream' in line for line in daily[272:290])
     assert ("probes/p11_replay.py", 49) in S6_REGISTRY
+
+
+@pytest.mark.parametrize(("relative", "function", "call", "extra", "allowed"), [
+    ("daily_lists.py", "daily_bars_seam", "operation(*args, transport=sender, **options)", "", True),
+    ("other.py", "daily_bars_seam", "operation(*args, transport=sender, **options)", "", False),
+    ("daily_lists.py", "outside_seam", "operation(*args, transport=sender, **options)", "", False),
+    ("daily_lists.py", "daily_bars_seam", "operation(*args, transport=other, **options)", "", False),
+    ("daily_lists.py", "daily_bars_seam", "operation(*args, transport=sender, **options)", "operation(transport=sender)", False),
+])
+def test_tb116d_daily_bars_seam_exact_registration(tmp_path: Path, relative: str, function: str, call: str, extra: str, allowed: bool) -> None:
+    target = tmp_path / "app/ingest" / relative
+    target.parent.mkdir(parents=True)
+    target.write_text(f"def {function}(operation, *args, sender, **options):\n    return {call}\n{extra}\n", encoding="utf-8")
+    hits = [item for item in scan_tree(tmp_path) if item[0] == "S5"]
+    assert bool(hits) is not allowed
 
 
 def test_tb116d_a1s_frozen_probe_count() -> None:

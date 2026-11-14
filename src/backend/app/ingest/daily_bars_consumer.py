@@ -21,7 +21,7 @@ from app.db.tables.users import users
 from app.ingest import daily_bars as fetcher
 from app.ingest.daily_bars_plan import ready_for_window
 from app.ingest.daily_lists import STOP as LISTS_STOP
-from app.ingest.daily_lists import DailyHaltError, limited
+from app.ingest.daily_lists import DailyHaltError, daily_bars_seam, limited
 from app.ingest.egress import EgressDenied, single_egress
 from app.marketdata.daily_bars import DailyBar, _empty_stats
 from app.marketdata.daily_bars_outbox import batch_budget, valid_grant
@@ -230,13 +230,14 @@ def process(
             if stop.exists() or halt.exists():
                 raise UpstreamHaltError()
             with engine.begin() as conn:
-                fetcher.fetch_mairui_daily_bars(
+                daily_bars_seam(
+                    fetcher.fetch_mairui_daily_bars,
                     conn,
                     trade_date=item["trade_date"],
                     user_id=item["user_id"],
                     window_trading_days=item["window_trading_days"],
                     batch_kind=item["batch_kind"],
-                    transport=send,
+                    sender=send,
                     grant_reader=lambda: read(item["user_id"]),
                     clock=clock,
                     stop_path=stop,
@@ -307,10 +308,11 @@ def tick(
         ).scalar_one_or_none()
     if item_id is None:
         return 0
-    result = process(
+    result = daily_bars_seam(
+        process,
         engine,
         item_id,
-        transport=transport,
+        sender=transport,
         grant_reader=grant_reader,
         clock=clock,
         stop=stop,

@@ -1,6 +1,6 @@
 """T-T22安全适配：校准3个陈旧基准及1个合法合成worker夹具，其余原断言与真实helper保留。
 
-来源为T-T21固定e6eaeb2的同名selfchecks；使用 -p tt21_plugin 与同一审计入口。
+来源为T-T21固定e6eaeb2的同名selfchecks；当前图经conftest接原tt21真实夹具，不安装全局替换hook。
 不执行正式卡/共享库；T-B88已交付，按固定9635f12运行这4例。
 """
 from __future__ import annotations
@@ -9,8 +9,9 @@ from selfchecks import test_ta16_policy_confidence as _policy
 from selfchecks import test_tb76_assembly as _assembly
 from selfchecks import test_tb77_aggregates as _aggregates
 from selfchecks import test_tb76_daily as _daily
-from selfchecks.test_tb70_replay import integration, no_network  # noqa: F401
+from selfchecks.test_tb70_replay import no_network  # noqa: F401
 from selfchecks.test_tb74_candidates import setup  # noqa: F401
+from .enqueue_diagnostics import enqueue_observer as enqueue_observer
 
 def test_actual_isolated_seed_idempotence_and_same_version_conflict(integration: _policy.Any) -> None:
     engine, *_ = integration
@@ -31,12 +32,12 @@ def test_actual_isolated_seed_idempotence_and_same_version_conflict(integration:
             _policy.check(conn, altered)
         transaction.rollback()
 
-def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: _assembly.Any) -> None:
+def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: _assembly.Any, enqueue_observer: _assembly.Any) -> None:
     engine, client, stranger, owner, *_ = setup
     expected = _assembly.load_policy(_assembly.ROOT / 'config')
     alternate_version = expected.version_no + 1
     instance = _assembly.prepare(setup)
-    assert _assembly.enqueue(_assembly.ANALYZE, owner) == [(_assembly.ANALYZE, 'ok')]
+    assert enqueue_observer(_assembly.enqueue, _assembly.ANALYZE, owner, engine=engine) == [(_assembly.ANALYZE, 'ok'), (_assembly.REPORT, 'ok'), (_assembly.TRACKING, 'ok')]
     with engine.connect() as conn:
         candidate = conn.execute(_assembly.select(_assembly.candidate_signals).where(_assembly.candidate_signals.c.instance_id == instance)).one()
         row = conn.execute(_assembly.select(_assembly.suggestions).where(_assembly.suggestions.c.user_id == owner)).one()
@@ -56,11 +57,11 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: _a
     assert _assembly.Decimal(str(confidence['value'])) == value
     assert body['strategies'][0]['candidate_signal_id'] == cid
     assert stranger.get('/api/v1/suggestions/' + sid).status_code == 404
-    assert _assembly.enqueue(_assembly.ANALYZE, owner) == [(_assembly.ANALYZE, 'ok')]
+    assert enqueue_observer(_assembly.enqueue, _assembly.ANALYZE, owner, engine=engine) == [(_assembly.ANALYZE, 'ok'), (_assembly.REPORT, 'ok'), (_assembly.TRACKING, 'ok')]
     with engine.connect() as conn:
         assert len(conn.execute(_assembly.select(_assembly.suggestions).where(_assembly.suggestions.c.user_id == owner)).all()) == 1
         assert len(conn.execute(_assembly.select(_assembly.candidate_signals).where(_assembly.candidate_signals.c.instance_id == instance)).all()) == 1
-    assert _assembly.enqueue(_assembly.REPORT, owner) == [(_assembly.REPORT, 'ok')]
+    assert enqueue_observer(_assembly.enqueue, _assembly.REPORT, owner, engine=engine) == [(_assembly.REPORT, 'ok')]
     report = client.get('/api/v1/daily-reports/2026-10-30').json()
     assert report['stocks'][0]['suggestion_id'] == sid
     assert report['evidence']
@@ -149,7 +150,7 @@ def test_routes_real_ownership_unread_and_imported_holdings(integration: _aggreg
     assert no_network == []
 
 
-def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: _daily.Any) -> None:
+def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: _daily.Any, enqueue_observer: _daily.Any) -> None:
     engine, client, _, owner, _, account, *_ = setup
     # 复用既有合成缓存及factor元数据，不延长MA60历史；暂停helper附带的另一实例。
     import types as fixture_types
@@ -190,7 +191,7 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
         conn.execute(_daily.insert(_daily.strategies).values(id=strategy, key='tb76_fiction_' + strategy.hex, name='明确虚构非正式卡', owner_user_id=owner, horizons=['swing']))
         conn.execute(_daily.insert(_daily.strategy_versions).values(id=version, strategy_id=strategy, card_version_id=cardversion, version_no=1, config=spec, config_hash=version.hex, param_hash=version.hex, lifecycle='published'))
         conn.execute(_daily.insert(_daily.strategy_instances).values(id=instance, user_id=owner, strategy_version_id=version, scope='account', account_id=account, status='active', origin='user', horizon='swing'))
-    assert _daily.enqueue(_daily.ANALYZE, owner) == [(_daily.ANALYZE, 'ok')]
+    assert enqueue_observer(_daily.enqueue, _daily.ANALYZE, owner, engine=engine) == [(_daily.ANALYZE, 'ok'), (_daily.REPORT, 'ok'), (_daily.TRACKING, 'ok')]
     with engine.connect() as conn:
         runs = conn.execute(_daily.select(_daily.pipeline_runs).where(_daily.pipeline_runs.c.step == 'tb76.' + _daily.ANALYZE).order_by(_daily.pipeline_runs.c.started_at.desc())).first()
         outcome = runs.stats['users'][str(owner)]
@@ -205,7 +206,7 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
         generated = conn.execute(_daily.select(generated_suggestions).where(generated_suggestions.c.user_id == owner, generated_suggestions.c.security_code == '688018.SH')).one()
         assert str(generated.id) in outcome['suggestion_ids']
         assert outcome['evaluations'][0]['rule_refs'][0]['passed'] is None
-    assert _daily.enqueue(_daily.REPORT, owner) == [(_daily.REPORT, 'ok')]
+    assert enqueue_observer(_daily.enqueue, _daily.REPORT, owner, engine=engine) == [(_daily.REPORT, 'ok')]
     response = client.get('/api/v1/daily-reports/2026-10-30')
     assert response.status_code == 200
     report = response.json()

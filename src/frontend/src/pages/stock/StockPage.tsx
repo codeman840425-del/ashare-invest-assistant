@@ -41,10 +41,19 @@ export function StockPage() {
   if (profile.isPending) return <div className="page-scroll" data-testid="stock-page"><Loading /></div>;
   if (profile.isError) {
     const nf = profile.error instanceof ApiError && profile.error.status === 404;
+    // 契约 §7.3：北交所旧代码 404 带 details.superseded_by，提示改用新代码（真实资源 404，不是“开发中”）
+    const superseded = nf ? (profile.error as ApiError).details?.superseded_by : undefined;
     return (
       <div className="page-scroll" data-testid="stock-page">
         {nf ? (
-          <Result status="404" title="未找到该证券" subTitle={<span className="mono">{code}</span>} extra={<Button size="small" onClick={() => navigate('/market')}>去市场概览</Button>} />
+          <Result
+            status="404"
+            title="未找到该证券"
+            subTitle={typeof superseded === 'string' && superseded !== ''
+              ? <span><span className="mono">{code}</span> 已停用，请改用 <span className="mono">{superseded}</span></span>
+              : <span className="mono">{code}</span>}
+            extra={<Button size="small" onClick={() => navigate('/market')}>去市场概览</Button>}
+          />
         ) : <ErrorBox error={profile.error} />}
       </div>
     );

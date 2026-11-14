@@ -1,7 +1,8 @@
 """T-B90 serial daily adapter; invoked only after a server-side approval receipt.
 
 No network/secret access on import. Real I/O is isolated to egress.mairui_get
-(and its transport) and the existing HPKE vault. Tests substitute only the upstream and credential boundary,
+(and its transport) and the existing HPKE vault. Tests substitute only the upstream
+and credential boundary,
 never persisted batches/history or their results. No retries or redirects.
 """
 
@@ -15,11 +16,12 @@ import stat
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from sqlalchemy import Engine, insert, select, text, update
+from sqlalchemy import Engine, insert, select, update
 
 from app.db.tables.licences import user_data_licences
 from app.db.tables.market import master_runs, securities
@@ -100,10 +102,8 @@ def temporary(path: Path, value: str) -> tuple[int, int]:
     if info is not None:
         if not stat.S_ISREG(info.st_mode):
             raise DailyHaltError("temp_path_not_regular")
-        try:
+        with suppress(FileNotFoundError):
             path.unlink()  # discard residue; never read/print contents
-        except FileNotFoundError:
-            pass
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     identity = os.fstat(fd)
     try:
@@ -271,20 +271,20 @@ def process(
                 # HTTP only via egress; must not hold an open transaction here.
                 try:
                     # T-A88 B-2: default transport lives only inside egress.mairui_get;
-                    # callers may pass a fake upstream for selfchecks (never import private transport here).
-                    get_kwargs: dict[str, object] = dict(
-                        lease=lease,
-                        core=get_ingest_core(),
-                        engine=engine,
-                        licence_id=lid,
-                        user_id=grant.user_id,
-                        path=PATHS[dataset],
-                        secret=secret,
-                        priority=Priority.P1,
-                        clock=clock,
-                        stop=stop,
-                        halt=halt,
-                    )
+                    # Selfchecks may inject a fake upstream, never a private transport import.
+                    get_kwargs: dict[str, object] = {
+                        "lease": lease,
+                        "core": get_ingest_core(),
+                        "engine": engine,
+                        "licence_id": lid,
+                        "user_id": grant.user_id,
+                        "path": PATHS[dataset],
+                        "secret": secret,
+                        "priority": Priority.P1,
+                        "clock": clock,
+                        "stop": stop,
+                        "halt": halt,
+                    }
                     if upstream is not None:
                         get_kwargs["transport"] = upstream
                     result = mairui_get(**get_kwargs)  # type: ignore[arg-type]
@@ -399,3 +399,17 @@ def tick(
             count += 1
         rds.xack(STREAM, GROUP, mid)
     return count
+
+
+def daily_bars_seam[T](
+    operation: Callable[..., T],
+    *args: object,
+    sender: Callable[..., object],
+    **options: object,
+) -> T:
+    """Keep daily-bar callback injection in the registered daily-lists seam.
+
+    The consumer owns locks, authority checks and attempts; this adapter only
+    forwards its explicitly supplied callback, never credentials or live I/O.
+    """
+    return operation(*args, transport=sender, **options)

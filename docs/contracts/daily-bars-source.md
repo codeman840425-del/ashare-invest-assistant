@@ -92,7 +92,7 @@
 - 用户授权开关（默认关）：需要同时满足下面三条才会出网，否则不建 outbox、不取证书、不开 socket。
   - `daily_bars_source=mairui`；
   - 运维安装的只读回执 `/run/aia/receipts/mairui-daily-bars.json`，校验沿用 `daily_delivery.read_grant` 的 root-owned 0444 规则；
-  - `DAILY_BARS_HTTP_LIMIT` 不是 0（**已由 T-A135 细化**：合法的开放取值只有「不限」哨兵，见 §8.1）。
+  - `DAILY_BARS_HTTP_LIMIT` 不是 0（T-A135 的历史哨兵定义见 §8.1；**C2 当前以 §9.3 双批上限取代哨兵，所选批型上限默认 0，合法开放值按批型为 500／2,000**，不得据旧哨兵出网）。
 - 必测用例（建议名）：
   - `test_daily_bars_default_off_no_writes`
   - `test_fake_source_refused_outside_test_env`
@@ -587,6 +587,8 @@
 
 依据：`rules/daily-bars-user-decisions-2026-11-10.md` 末节，用户答卡 t809s2732 原话：「日报提前到17:30」「新加的股票自动补3年历史」「按不突破上限设置，然后多次续接」。编排者裁定与原话的出入见 `reports/T-A142.md`；本节以原话为准。
 
+**S3-5 修订依据（G-STAGE3-1113，用户 t1062u「好，按这个执行」）：** §9.3 改为日常 500／回填 2,000 两个每批开放值，默认仍都为 0；§9.6 全市场「只存不推」结案。阶段令参数表转引上述规则文件中「编排者据此落实」及用户 t863u「你自己拿主意」后的裁定；`reports/T-A142.md` 原「不采用回填 2,000」由本次授权取代，保留为历史，不再适用于当前 §9.3。旧报告及规则文件原件本次未取得，转引未独立核实；本次可核依据为阶段令与 main 现行契约。日报、自动补历史、串行停止规则与通达信 T-A143 语义不变，文档合入不代表批准实调。
+
 **不变的红线：** 真实调用仍不放开。§8.1 的四个前提仍须同时满足，其中「开放」只能由开放单 D 的一次经评审的代码提交完成，并且单 D 须用户本人批准首次实调后才开。本节所有新增常量的默认值都使默认部署 0 次出网。
 
 ### 9.1 日报 17:30：REPORT 紧跟 analyze
@@ -639,14 +641,15 @@ G/W/T（单 A2，后端）：
 
 - 用户原话「按不突破上限设置，然后多次续接」。落地为：**每批**有上限，**每日**仍不封顶（Q1 不变），一批用完自动接下一批。
 - 常量（`app/ingest/daily_bars.py` 模块常量，不进 Settings，不读环境变量、回执或 CLI 参数）：
-  - `DAILY_BARS_BATCH_LIMIT`：默认整数 0；开放后的值为 500。17:15 日常批、§9.2 新股补历史、`daily-bars-backfill --apply` 回填批、§9.6 全市场回填批**共用这一个上限**。
-  - 硬上界 `DAILY_BARS_BATCH_CEILING` 为 500。
-  - 为什么只有一个 500：用户被告知的方案是「每批 500 次上限，自动续接下一批……全市场 3 年 5,577 次约 12 批」（5,577 ÷ 500 ≈ 12），用户据此答「按不突破上限设置，然后多次续接」。编排者另写的「回填每批 ≤2,000」用户没有见过，不采用（出入见 `reports/T-A142.md`）。
+  - `DAILY_BARS_BATCH_LIMIT`：日常批上限，默认整数 0；开放后的值为 500。仅用于 17:15 例行批和 §9.2 新股／新加自选补历史批。
+  - `DAILY_BARS_BACKFILL_BATCH_LIMIT`：回填批上限，默认整数 0；开放后的值为 2,000。仅用于 `daily-bars-backfill --apply`，包括 §9.6 的 market 回填。
+  - 硬上界 `DAILY_BARS_BATCH_CEILING` 为 2,000，覆盖回填开放值；日常批另受 500 的批型边界约束，不能借用回填额度。批型由服务端触发入口确定，新股补历史即使带 `window_trading_days` 也仍属日常批，不能仅凭窗口非空选回填上限；环境变量、回执及外部调用参数不能提升额度。
+  - 出处：G-STAGE3-1113 参数表（日常 ≤500／回填 ≤2,000，转引 11-10 用户决定文件「编排者据此落实」），用户 t1062u 本次确认；取代 `reports/T-A142.md` 原「统一 500、不采用回填 2,000」（原件本次未取得，见本节依据）。两项默认 0 与 Q1「每日总量不封顶」不变。
 - 删除：`DAILY_BARS_HTTP_UNLIMITED`、`DAILY_BARS_HTTP_LIMIT`、`daily_bars_http_budget`、`DailyBarsBudget` 的 unlimited 分支。不再有「不限」取值。
-- 判定（纯函数 `daily_bars_batch_budget(value) -> DailyBarsBudget`，两种结果）：
-  - 正整数 n 且 n 不超过 `DAILY_BARS_BATCH_CEILING`：**capped(n)**；
-  - 其他一切（0、负数、布尔、None、字符串、浮点、超过硬上界的整数）：**unset**，不建 outbox，transport 0 次，记 `daily_bars_http_budget_unset`，运行 skipped。超过硬上界不截断，而是拒绝。
-- 开放：单 D 以一次经评审的代码提交，把 `DAILY_BARS_BATCH_LIMIT` 从 0 改为 500；须用户本人批准首次实调，提交说明引用本节与用户原话。其他任何途径都不能改变它。
+- 判定（纯函数 `daily_bars_batch_budget(value, *, batch_kind="daily") -> DailyBarsBudget`，只接受服务端派生的 daily 或 backfill，未知批型为 unset；两种结果）：
+  - 正整数 n、不超过 `DAILY_BARS_BATCH_CEILING` 且符合所选批型边界（日常 ≤500、回填 ≤2,000）：**capped(n)**；
+  - 其他一切（0、负数、布尔、None、字符串、浮点、超过硬上界或批型边界的整数）：**unset**，不建 outbox，transport 0 次，记 `daily_bars_http_budget_unset`，运行 skipped。超界不截断，而是拒绝。先选本批的上限常量再判定，回填常量非零不能使日常常量 0 的批次出网，反之亦然。
+- 开放：单 D 以一次经评审的代码提交，按用户本人批准的范围把日常 `DAILY_BARS_BATCH_LIMIT` 从 0 改为 500、回填 `DAILY_BARS_BACKFILL_BATCH_LIMIT` 从 0 改为 2,000；未批准的仍为 0。须用户本人批准首次实调，提交说明引用本节与用户原话。其他任何途径都不能改变它们；C2 只实现默认 0 的结构与离线测试，不执行单 D。
 - 「直到做完」：续接不设批数上限。唯一的停止条件是做完、STOP/HALT/103/429，或下文的「无进展」保护（防空转，不是额度）。
 - 一批的执行：
   - 串行、单连接：日常批、补历史批、回填批共用同一把锁（`LOCKED_TASKS` 里的 daily_bars_fetch 锁），同一时刻只有一个批在出网；`ingest.yaml` 并发仍为 1。
@@ -655,15 +658,16 @@ G/W/T（单 A2，后端）：
   - 遇 STOP、HALT、103、429：整批立即停，不重试，写 HALT，剩余标的记 `daily_bars_upstream_halted`；**不续接**，HALT 由运维人工清除后才恢复（§8.1 规则不变）。
 - 达到上限：剩余标的记 `daily_bars_quota_deferred`（沿用现有 issue），运行状态 partial。
 - 断点续跑（幂等）：
-  - 不存游标。每一批开始时按代码排序（`daily_universe` 的顺序，补2）重新算「未就绪」集合，只请求未就绪的：日常批的就绪是该代码当日已有完成版行；回填批的就绪是 `backfill_ready`。已就绪的不再请求；写入仍是 DO NOTHING 幂等。
+  - 不存游标。每一批开始时按代码排序（`daily_universe` 的顺序，补2）重新算「未就绪」集合，只请求未就绪的：17:15 例行批的就绪是该代码当日已有完成版行；§9.2 新股补历史和 CLI 回填的就绪均为 `backfill_ready`（按历史窗口判断，不因新股使用日常预算而退化为只查当日；`tdx_local` 不计已就绪，见 `daily-bars-tdx.md` §2）。已就绪的不再请求；写入仍是 DO NOTHING 幂等。
   - 续接：一批以 `daily_bars_quota_deferred` 结束，且本批至少让一个标的变为就绪、没有 HALT 时，`worker_tick` 立即推下一批（同参数，另带 batch_seq 加 1）。本批没有任何进展时不续接，记一条 issue `daily_bars_resume_stalled`，防止空转。
-  - 开市日 17:00–17:45 窗口内不跑回填批与补历史批：运行中到 17:00 时剩余标的顺延（issue 同上），续接批放进 `jobs:delayed`，17:45 放出。日常批不受此限。
+  - 开市日 17:00–17:45 窗口内不跑回填批与补历史批：运行中到 17:00 时剩余标的顺延（issue 同上），续接批放进 `jobs:delayed`，17:45 放出。17:15 例行批不受此限；新股补历史即使使用日常预算也仍按 §9.2 延后。
   - 日常批续接到 17:30 之后取到的行，按 §9.1 当日不进日报，次日作为历史。
 - fetched_at 口径（§8.4）、回执校验（§8.1 ②）、`DAILY_HTTP_LIMIT` 为 1 与 `live_budget_issue()`：都不变。
 
 G/W/T（单 C2，后端）：
-- `test_batch_limits_default_zero`（取代 `test_daily_http_limit_unchanged` 中关于 `DAILY_BARS_HTTP_LIMIT` 与哨兵的断言，其余断言不动）：Given 导入模块 / Then `DAILY_BARS_BATCH_LIMIT` 为 0，`DAILY_BARS_BATCH_CEILING` 为 500，模块里没有 `DAILY_BARS_HTTP_UNLIMITED`；`DAILY_HTTP_LIMIT` 为 1，`live_budget_issue()` 不变。单 D 合入时同一提交把第一项期望改为 500。
-- `test_batch_budget_resolution_table`（取代 `test_http_budget_resolution_table`）：Given 0、1、500、501、2000、-1、True、None、字符串 500、500.0 / Then 1 为 capped(1)，500 为 capped(500)，其余 unset。
+- `test_batch_limits_default_zero`（取代 `test_daily_http_limit_unchanged` 中关于 `DAILY_BARS_HTTP_LIMIT` 与哨兵的断言，其余断言不动）：Given 导入模块 / Then `DAILY_BARS_BATCH_LIMIT` 与 `DAILY_BARS_BACKFILL_BATCH_LIMIT` 均为整数 0，`DAILY_BARS_BATCH_CEILING` 为 2,000，模块里没有 `DAILY_BARS_HTTP_UNLIMITED`；`DAILY_HTTP_LIMIT` 为 1，`live_budget_issue()` 不变。单 D 按本人批准范围在同一提交更新对应期望为 500／2,000，未开放的一项仍为 0。
+- `test_batch_budget_resolution_table`（取代 `test_http_budget_resolution_table`）：Given 0、1、500、501、2000、2001、-1、True、None、字符串 500、500.0 / Then 日常批仅 1、500 为 capped；回填批 1、500、501、2000 为 capped；其余均 unset，未知批型也 unset。
+- `test_batch_kind_selects_own_limit`（新）：Given 日常 0／回填 2,000（另组日常 500／回填 0，仅测试 monkeypatch）/ Then 未开放批型 transport 0 次、不建 outbox；17:15 与新股补历史只取日常常量，CLI owned／market 回填只取回填常量；即使新股任务 window 非空也不能借回填额度。
 - `test_batch_cap_defers_rest_and_continues`（取代 `test_budget_cap_reached_defers_rest`）：Given monkeypatch 日常上限为 3，5 个标的 / When 第一批 / Then transport 3 次，2 条 `daily_bars_quota_deferred`，队列有续接批；续接批 transport 2 次，前 3 个不再请求，合计写 5 行。
 - `test_resume_skips_ready_codes_idempotent`（新）：Given 5 个标的里 3 个当日已有完成版行 / When 一批 / Then transport 恰 2 次。
 - `test_resume_stalled_no_infinite_loop`（新）：Given 假 transport 始终返回空数据 / Then 不续接，记 `daily_bars_resume_stalled`。
@@ -677,15 +681,15 @@ G/W/T（单 C2，后端）：
 
 - 固定出口 IP：ingest 出网只走一个固定出口，避免 60 秒内超过 2 个 IP 触发 103；Windows 部署上同样只允许一个出网进程。
 - 单连接：`ingest.yaml` 并发保持 1。
-- 单 D 的批准内容须写明：每批上限 500、首次实调的次数与时段、`DAILY_BARS_SOURCE` 设为 mairui、回执安装。用户本人批准后才开单。
+- 单 D 的批准内容须写明：要开放的批型及各自每批上限（日常 500／回填 2,000，未批准项仍为 0）、首次实调的次数与时段、`DAILY_BARS_SOURCE` 设为 mairui、回执安装。用户本人批准后才开单；本次文档修订与摘要确认均不代替该批准。
 
 ### 9.5 §8.6 的 U1–U3 结案
 
 - U1：日报 17:30，见 §9.1。U2：自动补 3 年，见 §9.2。U3：每批上限加续接，见 §9.3。
-- 仍未答：Q2 复权因子（保守不变）；全市场「只存不推」（卡片 t811s2739，见 §9.6，未确认前不做全市场）；5 次小实调与退市股（单 D 前置）。
+- 全市场「只存不推」已结案，见 §9.6；不再等待卡片 t811s2739 的答复。仍未答：Q2 复权因子（保守不变）；5 次小实调与退市股（单 D 前置）。
 - 通达信融合另见 `daily-bars-tdx.md`。
 
-### 9.6 全市场数据只存不推（待用户确认，卡片 t811s2739）
+### 9.6 全市场数据只存不推（已结案，t863u 裁定／t1062u 再次确认）
 
 - 含义：全市场（market 主数据里 stock 且 listed 的全部代码）的日 K 只进 `market.daily_bars`，只供策略复测等研究用途；**不进** Q4 的日报范围，不进 analyze、owned 快照、日报、today。
 - 边界（不随数据量变化）：
@@ -693,8 +697,8 @@ G/W/T（单 C2，后端）：
   - `build_owned_snapshot` 与 `_load_bars` 只按 `daily_universe` 的代码读，库里多出的代码不进快照；
   - `reports/service.build` 与 `aggregates/service.today` 不新增任何按全库扫描 daily_bars 的读取；
   - 不新增读取全市场日 K 的 API；研究读取入口另开单定。
-- 写入入口：`daily-bars-backfill` 新增参数 scope，取值 owned（默认）或 market。market 由模块常量 `RESEARCH_MARKET_SCOPE_ENABLED`（默认 False）把关，为 False 时 CLI 拒绝，退出码非 0，不入队。用户确认本节后，以一次评审提交改为 True。经麦蕊写入还须单 D；经通达信离线导入不需要单 D（`daily-bars-tdx.md`）。
-- 规模（T-A136）：5,577 只 × 3 年，1 次/只，约 12 批（每批 500）。
+- 写入入口：`daily-bars-backfill` 新增参数 scope，取值 owned（默认）或 market。market 由模块常量 `RESEARCH_MARKET_SCOPE_ENABLED`（默认 False）把关，为 False 时 CLI 拒绝，退出码非 0，不入队。「只存不推」语义已由编排者依 t863u「你自己拿主意」裁定、并由 t1062u 本次确认（G-STAGE3-1113 参数表转引）；开关打开仍须一次经评审的代码提交，本次不改为 True。经麦蕊写入还须单 D 及用户本人批准真实执行；经通达信离线导入不需要单 D，但挂载与真实导入须用户本人同意，默认不导入（`daily-bars-tdx.md` §3.1）。
+- 规模示意（沿用 T-A136 的旧样本，非本次核实的当前全市场数量）：若 N=5,577、且一次 history 可覆盖全部 3 年窗口，则计划 5,577 次、按回填开放值 2,000 约 3 批。k 仍未验证；实际调用数按 §8.3 的 N×ceil(W/k)，批数还受整标的预算约束。默认 0 时不执行上述批次，不据旧样本宣称已完成容量实测。
 - G/W/T（单 A2 / 测试）：
   - `test_market_rows_not_in_snapshot_report_today`（新，连库，测试隔离库）：Given 库里有不在本人范围内的代码 Z 的完成版行 / When analyze、REPORT、GET /today / Then 快照 instruments、日报 body、today 响应里都没有 Z。
   - `test_backfill_scope_market_refused_by_default`（新，不连库）：Given 常量为 False / When `daily-bars-backfill --scope market --apply` / Then 退出码非 0，队列为空。
@@ -708,6 +712,6 @@ G/W/T（单 C2，后端）：
 | --- | --- | --- |
 | §9.1 日报 17:30（N1） | 全部：`slot_jobs`、`beat_slots`、`worker_tick` 链式推送、today 常量 | — |
 | §9.2 自动补 3 年（A2） | 触发、入队、`backfill_ready` 去重、17:00–17:45 延后、LIMIT=0 记待补 | 真实补齐（运维跑一次 `daily-bars-backfill --years 3 --apply`） |
-| §9.3 每批上限与续接（C2） | 常量与判定、续接与幂等、停止规则，全部用打桩 transport 测 | 把 `DAILY_BARS_BATCH_LIMIT` 改为 500；固定出口 IP 的实网核验 |
-| §9.6 全市场只存不推 | 边界与拒绝用例 | 经麦蕊写全市场（另须用户确认 §9.6 并改 `RESEARCH_MARKET_SCOPE_ENABLED`） |
+| §9.3 每批上限与续接（C2） | 两项常量默认 0 与批型判定、续接与幂等、停止规则，全部用打桩 transport 测 | 本人批准后将对应日常／回填常量改为 500／2,000；固定出口 IP 的实网核验 |
+| §9.6 全市场只存不推 | 已结案的边界与拒绝用例；开关默认 False，打开另经评审提交 | 经麦蕊写全市场仍须单 D 与真实执行批准；不再要求重答 §9.6 |
 | 通达信（`daily-bars-tdx.md`） | 迁移、离线导入、核对 CLI（对 fake 行或已有行） | 与真实麦蕊行的交叉核对；「麦蕊回填被拒」兜底的实际触发 |

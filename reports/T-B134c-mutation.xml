@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="5" skipped="0" tests="9" time="0.598" timestamp="2026-11-10T13:43:34.413456-07:00" hostname="WIN-SPD6GD4H42E"><testcase classname="selfchecks.test_tb134c_snapshot" name="test_tb134c_portfolio_sellable_zero_when_today_snapshot_lacks_sellable[as_of0-None]" time="0.071"><failure message="AssertionError: assert '200' == '0'&#10;  &#10;  - 0&#10;  + 200">selfchecks\test_tb134c_snapshot.py:193: in test_tb134c_portfolio_sellable_zero_when_today_snapshot_lacks_sellable
+    assert value["positions"][0]["sellable_qty"] == "0"
+E   AssertionError: assert '200' == '0'
+E
+E     - 0
+E     + 200</failure></testcase><testcase classname="selfchecks.test_tb134c_snapshot" name="test_tb134c_portfolio_sellable_zero_when_today_snapshot_lacks_sellable[None-created1]" time="0.027"><failure message="AssertionError: assert '200' == '0'&#10;  &#10;  - 0&#10;  + 200">selfchecks\test_tb134c_snapshot.py:193: in test_tb134c_portfolio_sellable_zero_when_today_snapshot_lacks_sellable
+    assert value["positions"][0]["sellable_qty"] == "0"
+E   AssertionError: assert '200' == '0'
+E
+E     - 0
+E     + 200</failure></testcase><testcase classname="selfchecks.test_tb134c_snapshot" name="test_tb134c_portfolio_sellable_zero_when_today_snapshot_lacks_sellable[as_of2-None]" time="0.026"><failure message="AssertionError: assert '200' == '0'&#10;  &#10;  - 0&#10;  + 200">selfchecks\test_tb134c_snapshot.py:193: in test_tb134c_portfolio_sellable_zero_when_today_snapshot_lacks_sellable
+    assert value["positions"][0]["sellable_qty"] == "0"
+E   AssertionError: assert '200' == '0'
+E
+E     - 0
+E     + 200</failure></testcase><testcase classname="selfchecks.test_tb134c_snapshot" name="test_tb134c_snapshot_stale_uses_previous_open_day[10-6-True]" time="0.027"><failure message="assert False is True&#10; +  where False = bool([])">selfchecks\test_tb134c_snapshot.py:272: in test_tb134c_snapshot_stale_uses_previous_open_day
+    assert bool(found) is stale
+E   assert False is True
+E    +  where False = bool([])</failure></testcase><testcase classname="selfchecks.test_tb134c_snapshot" name="test_tb134c_snapshot_stale_uses_previous_open_day[10-9-False]" time="0.027" /><testcase classname="selfchecks.test_tb134c_snapshot" name="test_tb134c_snapshot_stale_uses_previous_open_day[7-5-True]" time="0.027"><failure message="assert False is True&#10; +  where False = bool([])">selfchecks\test_tb134c_snapshot.py:272: in test_tb134c_snapshot_stale_uses_previous_open_day
+    assert bool(found) is stale
+E   assert False is True
+E    +  where False = bool([])</failure></testcase><testcase classname="selfchecks.test_tb134c_snapshot" name="test_tb134c_snapshot_stale_uses_previous_open_day[7-6-False]" time="0.026" /><testcase classname="selfchecks.test_tb134c_snapshot" name="test_tb134c_snapshot_stale_uses_previous_open_day[9-6-False]" time="0.025" /><testcase classname="selfchecks.test_tb134c_snapshot" name="test_tb134c_snapshot_stale_uses_previous_open_day[8-6-False]" time="0.025" /></testsuite></testsuites>

@@ -40,9 +40,6 @@ from app.db.tables.notify import notifications
 from app.db.tables.users import users
 from app.db.tables.vendor import master_vendor_batches as batches
 from app.ingest import daily_lists as ingest
-
-# Bound before any monkeypatch so multi-run_synthetic tests wrap the real body.
-_REAL_PROCESS = ingest.process
 from app.ingest.vault import LicenceVault
 from app.licences.seal import seal_licence
 from app.main import create_app
@@ -51,9 +48,10 @@ from app.master.mairui_snapshot import latest_visible_flags, read_flags
 from app.master.vendor import sweep_batches
 from app.workers import ingest as ingest_worker
 from app.workers import jobs
-
-ROOT = Path(__file__).resolve().parents[2]
 from selfchecks.test_tb89_full_migrations import AT, CODES, DAY, NAMES, ROOT, deploy_grants, seed
+
+# Bound before any monkeypatch so multi-run_synthetic tests wrap the real body.
+_REAL_PROCESS = ingest.process
 
 SOCKET = "/tmp/tb90-pg-socket"
 REDIS = "unix:///tmp/tb90-redis/redis.sock?db=0"
@@ -250,9 +248,10 @@ def run_synthetic(
     # T-B116/b: collection seam uses egress+IngestCore. Budget already opened in env for
     # daily.request; keep ingest patch here for defense in depth. DAILY_HTTP_LIMIT unchanged.
     import yaml
+
     from app.config_files import IngestConfig
-    from app.ingest.core import IngestCore
     from app.ingest import runtime
+    from app.ingest.core import IngestCore
 
     cfg = IngestConfig.model_validate(
         yaml.safe_load((ROOT / "config/ingest.yaml").read_text(encoding="utf-8"))
@@ -694,6 +693,8 @@ def test_egress_https_get_single_attempt_no_redirect_and_sanitized_failure(
     # Default transport via public signature — do not name egress private attrs (S2).
     transport = inspect.signature(eg.mairui_get).parameters["transport"].default
 
+    closed: list[bool] = []
+
     class _FakeSock:
         def connect(self, address: object) -> None:
             return None
@@ -707,9 +708,11 @@ def test_egress_https_get_single_attempt_no_redirect_and_sanitized_failure(
 
     monkeypatch.setattr(eg.socket, "getaddrinfo", fake_getaddrinfo)
     monkeypatch.setattr(eg.socket.socket, "connect", lambda self, address: None)
-    monkeypatch.setattr(eg.ssl, "create_default_context", lambda: SimpleNamespace(
-        wrap_socket=lambda raw, server_hostname=None: raw
-    ))
+    monkeypatch.setattr(
+        eg.ssl,
+        "create_default_context",
+        lambda: SimpleNamespace(wrap_socket=lambda raw, server_hostname=None: raw),
+    )
     monkeypatch.setattr(eg.http.client, "HTTPSConnection", connection)
     if status == 500:
         with pytest.raises(ingest.DailyHaltError) as caught:

@@ -130,6 +130,8 @@ def write_heartbeat(settings: Settings) -> None:
     try:
         client.set(settings.ingest_heartbeat_key, heartbeat_payload(), ex=hb.ttl_s)
         from app.db.engine import engine_for
+        from app.ingest.daily_bars_consumer import tick as tick_bars
+        from app.ingest.daily_bars_consumer import wake_delayed
         from app.ingest.daily_lists import tick
         from app.ingest.runtime import get_ingest_core, tick_ingest_core
 
@@ -152,10 +154,16 @@ def write_heartbeat(settings: Settings) -> None:
         if not client.exists(settings.ingest_paused_key):
             if shared_engine is not None:
                 tick(shared_engine, client, pause=heartbeat_wait)
+                if getattr(settings, "daily_bars_source", "off") == "mairui":
+                    tick_bars(shared_engine)
+                    wake_delayed(shared_engine, client)
             elif settings.database_url is not None:
                 engine = engine_for(settings.database_url.get_secret_value(), profile="ingest")
                 try:
                     tick(engine, client, pause=heartbeat_wait)
+                    if getattr(settings, "daily_bars_source", "off") == "mairui":
+                        tick_bars(engine)
+                        wake_delayed(engine, client)
                 finally:
                     engine.dispose()
         # T-B113 / T-A84: every heartbeat round must tick IngestCore (pending IP-limit flush).

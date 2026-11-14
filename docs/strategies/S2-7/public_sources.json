@@ -1,0 +1,76 @@
+{
+  "selection": "Purposeful evidence subset: one historical missing_url key and three SSE stock-removal titles; includes two dual A/B notices. Not random, not exhaustive.",
+  "sources": [
+    {
+      "id": "sz-000003",
+      "url": "https://disc.static.szse.cn/disc/disk01/finalpage/2002-06-14/9f563d23-42ca-40fa-998a-1eb3f775b699.html",
+      "publisher": "金田实业（集团）股份有限公司；深交所公开档案，内引深证上[2002]43号决定",
+      "encoding": "gb18030",
+      "http_status": 200,
+      "fetched_at": "2026-11-13T01:27:10.462183+00:00",
+      "raw_sha256": "8c0398a6bae6ab9698c44d0a05ae40da53725edc52a5f9c94c68e3f79feed837",
+      "title": "PT 金 田：股票终止上市公告",
+      "published_date": "2002-06-14",
+      "published_label": "2002-06-14 06:43",
+      "delisting_date": "2002-06-14",
+      "date_evidence": "终止上市日期：自2002年6月14日起",
+      "excerpt": "股票代码：000003、200003 股票简称：PT金田A、PT金田B 2、终止上市日期：自2002年6月14日起",
+      "securities": [
+        {"exchange": "SZ", "symbol": "000003", "share_class": "A"},
+        {"exchange": "SZ", "symbol": "200003", "share_class": "B"}
+      ],
+      "limit": "页面标示2002-06-14 06:43，落款2002年6月15日；保留两者差异，未以落款改写网页时刻；终止日期取明文。"
+    },
+    {
+      "id": "sh-600636",
+      "url": "https://www.sse.com.cn/disclosure/announcement/listing/stock/c/c_20260622_10823156.shtml",
+      "publisher": "上海证券交易所；上证公告（公司股票摘牌）【2026】079号",
+      "encoding": "utf-8",
+      "http_status": 200,
+      "fetched_at": "2026-11-13T01:27:12.095776+00:00",
+      "raw_sha256": "1d5d185e4158a9b461477f52d6c8143fb6b0a70adf152dc5a3deda64952e280d",
+      "title": "关于国新文化控股股份有限公司股票摘牌的公告",
+      "published_date": "2026-06-22",
+      "published_label": "2026-06-22",
+      "delisting_date": "2026-06-29",
+      "date_evidence": "本所于2026年6月29日对其予以摘牌",
+      "excerpt": "国新文化控股股份有限公司发行的股票（证券简称为“退市国化”，证券代码为“600636”）已被本所决定终止上市，退市整理期于2026年6月22日届满，本所于2026年6月29日对其予以摘牌。",
+      "securities": [{"exchange": "SH", "symbol": "600636", "share_class": "A"}]
+    },
+    {
+      "id": "sh-600190",
+      "url": "https://www.sse.com.cn/disclosure/announcement/listing/stock/c/c_20250718_10785880.shtml",
+      "publisher": "上海证券交易所；上证公告（公司股票摘牌）【2025】064号",
+      "encoding": "utf-8",
+      "http_status": 200,
+      "fetched_at": "2026-11-13T01:27:13.933858+00:00",
+      "raw_sha256": "91d6b9a8b1141c8ddd60822b255cca794d698890911229b59abbeb550d7c99bd",
+      "title": "关于锦州港股份有限公司股票摘牌的公告",
+      "published_date": "2025-07-18",
+      "published_label": "2025-07-18",
+      "delisting_date": "2025-07-25",
+      "date_evidence": "本所于2025年7月25日对其予以摘牌",
+      "excerpt": "锦州港股份有限公司发行的股票（A股证券简称为“退市锦港”，证券代码为“600190”；B股证券简称为“退市锦B”，证券代码为“900952”）已被本所决定终止上市，退市整理期于2025年7月18日届满，本所于2025年7月25日对其予以摘牌。",
+      "securities": [
+        {"exchange": "SH", "symbol": "600190", "share_class": "A"},
+        {"exchange": "SH", "symbol": "900952", "share_class": "B"}
+      ]
+    },
+    {
+      "id": "sh-600462",
+      "url": "https://www.sse.com.cn/disclosure/announcement/listing/stock/c/c_20250714_10784844.shtml",
+      "publisher": "上海证券交易所；上证公告（公司股票摘牌）【2025】061号",
+      "encoding": "utf-8",
+      "http_status": 200,
+      "fetched_at": "2026-11-13T01:27:15.701524+00:00",
+      "raw_sha256": "77ba351464336c90a56ad8ab62f05ff18bd8ecd9c77216feab2cdf9e1d624888",
+      "title": "关于湖北九有投资股份有限公司股票摘牌的公告",
+      "published_date": "2025-07-14",
+      "published_label": "2025-07-14",
+      "delisting_date": "2025-07-21",
+      "date_evidence": "本所于2025年7月21日对其予以摘牌",
+      "excerpt": "湖北九有投资股份有限公司发行的股票（证券简称为“退市九有”，证券代码为“600462”）已被本所决定终止上市，退市整理期于2025年7月14日届满，本所于2025年7月21日对其予以摘牌。",
+      "securities": [{"exchange": "SH", "symbol": "600462", "share_class": "A"}]
+    }
+  ]
+}

@@ -56,7 +56,6 @@ CONFIG_DIR = Path(os.environ.get("AIA_CONFIG_DIR") or REPO_ROOT / "config").reso
 
 #: T-A02 改动的文件 → 负责同步仓库文件与后端模型的任务
 OWNER = {
-    "market_rules": "后端 T-B36（交易规则模块：modeled_from / adv_basis / risk_warning，第二段 2023-04-10；v0.2.3 applies_to_boards 加 chinext、新增 limit_order_only_exchanges）",
     "horizon_classifier": "后端 T-B30（周期分类：f.* 特征、recompute 加 position_open_close、rules 全文；v0.2.5 version_no 3 / classifier_version 1.2.0 / 画像类 requires 为 mode: hint，T-A06 §3）",
     "llm": "后端 T-B25（LLM 网关：config/llm.yaml 与其模型）",
     "imports": "后端 T-B02a 跟进（T-A05：新建 config/imports.yaml 与模型，键路径 imports.*，删除 ingest.imports.*）",
@@ -213,8 +212,9 @@ def test_key_defaults_ingest():
 def test_key_defaults_market_rules():
     d = snap("market_rules")
     assert d["modeled_from"] == "2023-04-10"
-    first, second = d["segments"]
-    assert first["effective_from"] == "2026-07-06" and second["effective_from"] == "2023-04-10"
+    first, second, third = d["segments"]
+    assert first["effective_from"] == "2026-07-06" and second["effective_from"] == "2023-08-28"
+    assert third["effective_from"] == "2023-04-10"
     assert first["price_limit_pct"] == {"main_board": 10, "main_board_st": 10, "chinext": 20, "star": 20, "bse": 30}
     assert first["sessions"] == {"call_auction": ["09:15", "09:25"], "morning": ["09:30", "11:30"],
                                  "afternoon": ["13:00", "14:57"], "closing_auction": ["14:57", "15:00"]}
@@ -232,13 +232,27 @@ def test_key_defaults_market_rules():
 
 
 def test_market_rules_second_segment_written_in_full():
-    """第二段“除 main_board_st: 5 外与上一段相同（文件中写全，不做继承）”。"""
-    first, second = snap("market_rules")["segments"]
+    """正式三段写全：第二段仅ST比例变化，第三段仅印花税减半前税率变化。"""
+    first, second, third = snap("market_rules")["segments"]
     assert set(first) == set(second)
     assert second["price_limit_pct"]["main_board_st"] == 5
     a = {k: v for k, v in first.items() if k != "effective_from"}
     b = {k: v for k, v in second.items() if k != "effective_from"}
     assert diff_paths(a, b) == ["price_limit_pct.main_board_st"]
+    assert set(second) == set(third)
+    c = {k: v for k, v in third.items() if k != "effective_from"}
+    assert diff_paths(b, c) == ["fees.stamp_duty_sell_pct"]
+    assert second["fees"]["stamp_duty_sell_pct"] == 0.05
+    assert third["fees"]["stamp_duty_sell_pct"] == 0.1
+
+
+@pytest.mark.parametrize(("day", "rate"), [
+    ("2023-04-10", 0.1), ("2023-08-27", 0.1),
+    ("2023-08-28", 0.05), ("2026-07-06", 0.05),
+])
+def test_market_rules_stamp_duty_plan_split(day, rate):
+    segment = segment_for(snap("market_rules"), dt.date.fromisoformat(day))
+    assert segment["fees"]["stamp_duty_sell_pct"] == rate
 
 
 @pytest.mark.parametrize(("day", "st_pct"), [
@@ -480,6 +494,8 @@ def _repo_file(name: str) -> Path:
         p = CONFIG_DIR / f"{name}{ext}"
         if p.is_file():
             return p
+    if name == "market_rules":
+        pytest.fail(f"{CONFIG_DIR.name}/market_rules.yaml 缺失：已同步的仓库默认值必须存在")
     if name in OWNER and any((CONFIG_DIR / f"{n}.yaml").is_file() for n in NAMES):
         pytest.xfail(f"{CONFIG_DIR.name}/{name}.yaml 未创建（plan §6.1）：{OWNER[name]}")
     pytest.skip(f"{CONFIG_DIR}/{name}.yaml 尚未创建（依赖 T-B01 后续 / T-B02：plan §6.1 文件由后端创建）")
@@ -493,7 +509,7 @@ def test_repo_yaml_equals_plan_defaults(name):
         pytest.xfail(V029_BACKEND_PENDING_BY.get(name, V029_BACKEND_PENDING))
     if diffs and name in OWNER:
         pytest.xfail(f"仓库 config/{name}.yaml 与 plan §6.1 快照不一致 {diffs[:8]}：{OWNER[name]}")
-    assert diffs == []
+    assert diffs == [], f"仓库 config/{name}.yaml 与 plan §6.1 快照不一致：{diffs[:8]}"
 
 
 def test_repo_yaml_loads_in_settings(backend, cfgtools, clean_env, monkeypatch):

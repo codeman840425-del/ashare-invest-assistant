@@ -1,0 +1,120 @@
+{
+  "mode": "synthetic",
+  "deepseek": "未用；环境无可用凭据，合成展示 oracle 由研究员制定并本地确定性填充",
+  "run": {
+    "run_id": "SYNTHETIC-R03-FILL-ONLY",
+    "scope": "纯合成填表演练；非 r2 结果，统计量为手工给定展示值，未运行策略或 bootstrap",
+    "code_sha": null,
+    "plan_sha": null,
+    "cutoff_beijing": "2026-11-11 16:48（演练标记）"
+  },
+  "source_conclusion": {
+    "status": "unknown",
+    "reason": "合成样例仅核对呈现；三件套和独立复核未执行"
+  },
+  "windows": {
+    "holdout": {
+      "candidate": "selected_A",
+      "direction": "sell_first（合成展示）",
+      "n": 31,
+      "days": 20,
+      "mean_bp": 69.99997,
+      "low_bp": 60.00010,
+      "high_bp": 79.99984,
+      "cost_bp": 35.00000,
+      "status": "unknown",
+      "evidence": "synthetic_input.json#/windows/holdout；精度演练，非实测证据"
+    },
+    "evaluation_3": {
+      "candidate": "selected_A",
+      "n": 33,
+      "days": 22,
+      "mean_bp": -0.25000,
+      "low_bp": -5.25000,
+      "high_bp": 4.75000,
+      "cost_bp": null,
+      "status": "unknown",
+      "evidence": "synthetic_input.json#/windows/evaluation_3；成本缺证不能借用保留集成本"
+    },
+    "evaluation_1": {
+      "candidate": "selected_A",
+      "direction": "训练窗选定（合成展示）",
+      "n": 32,
+      "days": 21,
+      "mean_bp": 72.125,
+      "low_bp": 65.005,
+      "high_bp": 79.245,
+      "cost_bp": 30.25,
+      "status": "unknown",
+      "evidence": "synthetic_input.json#/windows/evaluation_1"
+    },
+    "evaluation_2": {
+      "candidate": "selected_A",
+      "n": 0,
+      "days": 0,
+      "mean_bp": 0,
+      "low_bp": 0,
+      "high_bp": 0,
+      "cost_bp": null,
+      "status": "unknown",
+      "evidence": "synthetic_input.json#/windows/evaluation_2；故意给零统计量，必须显示不可估"
+    }
+  },
+  "criteria": {
+    "P1": {
+      "status": "fail",
+      "observation": "合成演练：evaluation_2 的 n=0、days=0；evaluation_4 缺证",
+      "evidence": "synthetic_input.json#/windows",
+      "gap": "研究：核对真实冻结窗口；本例 fail 为手工提供原状态，渲染器未计算 P1"
+    },
+    "P3": {
+      "status": "unknown",
+      "observation": "合成展示均值 69.99997、成本 35.00000；不先舍入成 70 再比较",
+      "evidence": "synthetic_input.json#/windows/holdout",
+      "gap": "研究：从正式产物复制原判据，演练不产生门禁结论"
+    },
+    "P5": {
+      "status": "unknown",
+      "observation": "演练假定 paired.n=A* n=31；只有汇总计数，没有逐腿对照",
+      "evidence": "synthetic_input.json#/criteria/P5",
+      "gap": "后端/复核：补可追溯逐腿证据；未持久化项保持缺证"
+    },
+    "P8": {
+      "status": "unknown",
+      "observation": "敏感性未执行；不可将 RV-01 的费率推导填为观测值",
+      "evidence": "synthetic_input.json#/criteria/P8",
+      "gap": "研究：补原敏感性输出；观察项不升为新硬门"
+    },
+    "P9": {
+      "status": "unknown",
+      "observation": "T-R66b 为公告证据入口，本例没有运行时退市核验结果",
+      "evidence": "synthetic_input.json#/criteria/P9",
+      "gap": "后端/复核：核对本次 delisting 与尾段，不自动升级 evidence_only"
+    }
+  },
+  "flags": {
+    "R0": {
+      "state": "hit",
+      "observation": "演练注入 L8 费用检查失败的假设疑点；不代表 r2 存在该缺陷",
+      "evidence": "synthetic_input.json#/flags/R0（虚构，不是 r2 checks）",
+      "impact": "暂停判定",
+      "owner": "后端（仅演练角色）"
+    },
+    "R13": {
+      "state": "insufficient",
+      "observation": "汇总 n 相等；control_mean_bp/control_n_ok 未提供",
+      "evidence": "synthetic_input.json#/criteria/P5",
+      "impact": "逐腿 1:1、R 分布和显著性独立复算仍缺证",
+      "owner": "后端/复核"
+    }
+  },
+  "annex": {
+    "coverage": "合成例未提供覆盖/剔除分母；缺证，不外推全 A 股",
+    "splice": "未执行；08-06/08-07 分段槽待正式产物",
+    "cost_components": "仅给定展示成本 35.00000bp；未提供五项费用或腿，不声称复算",
+    "sensitivity": "未执行；不填固定成交额下成本 +1bp/−2bp 推导为观测值",
+    "r_control": "仅假设汇总 n=31；无逐腿明细，R 均值反推未做，不宣称配对分布已核",
+    "p9_crosscheck": "T-R66b@35dfe61 为正文证据；运行时核验未执行，分类升级仍待正式裁定",
+    "remaining": "本例不含真实数据、代码 SHA 或正式三件套；独立复核 pending；由私聊 T-R66 在出数后接续"
+  }
+}

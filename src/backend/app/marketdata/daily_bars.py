@@ -64,10 +64,21 @@ class BarGap:
 
 
 @dataclass(frozen=True)
+class HistoryConfirmation:
+    """Explicit adapter evidence; absent until the source confirms no earlier history."""
+
+    code: str
+    window: tuple[dt.date, dt.date]
+    first: dt.date
+    no_earlier: bool
+
+
+@dataclass(frozen=True)
 class DailyBarsResult:
     bars: Sequence[DailyBar] = ()
     gaps: Sequence[BarGap] = ()
     halted: str | None = None
+    history_confirmation: HistoryConfirmation | None = None
 
 
 FetchResult = DailyBarsResult
@@ -601,6 +612,8 @@ def daily_bars_fetch_task(
     trade_date: str,
     user_id: str | None = None,
     window_trading_days: int | None = None,
+    batch_kind: str = "daily",
+    batch_seq: int = 0,
 ) -> int:
     from app.workers.jobs import _engine
 
@@ -613,22 +626,13 @@ def daily_bars_fetch_task(
                 _record_run(conn, day, uid, window_trading_days, status="skipped", stats=stats)
                 return 0
             if settings.daily_bars_source == "mairui":
-                from app.ingest.daily_bars import (
-                    DAILY_BARS_HTTP_LIMIT,
-                    daily_bars_http_budget,
-                )
+                from app.marketdata.daily_bars_outbox import enqueue
 
-                budget = daily_bars_http_budget(DAILY_BARS_HTTP_LIMIT)
-                if budget.kind == "unset":
-                    stats = _empty_stats(
-                        uid, window_trading_days, issues=["daily_bars_http_budget_unset"]
-                    )
-                    _record_run(
-                        conn, day, uid, window_trading_days, status="skipped", stats=stats
-                    )
-                    return 0
-                # Worker must not go online. Ingest fetch is the C entry; outbox
-                # tick wiring is left unset (no new table / migration in this ticket).
+                enqueue(
+                    conn, trade_date=day, user_id=uid, window_trading_days=window_trading_days,
+                    batch_kind=batch_kind, batch_seq=batch_seq,
+                )
+                # The worker schedules only; inserted bars remain zero until ingest consumes.
                 return 0
             return fetch_and_record(
                 conn,

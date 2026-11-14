@@ -28,7 +28,7 @@ import type { DataStatus } from '../api/enums';
 import type { Gap } from '../api/types';
 import {
   ACCOUNT_ID, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOW, PORTFOLIO, QUOTES,
-  SIGNAL_EVENTS, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, dailyBars, intradayBars,
+  SIGNAL_EVENTS, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, dailyBars, intradayBars, SECURITY_CODES,
 } from './fixtures';
 import {
   ETF_QUOTES, INDEX_SPECS, MARKET_OVERVIEW, announcements, announcementsMeta, factors, financials, fundFlows, indexBars, searchSecurities, sectorFlows,
@@ -99,6 +99,25 @@ function degrade<T extends Block>(body: T, key: string, mode: 'stale' | 'unavail
   if (!licenceOut()) return body;
   const out = { ...body, data_status: mode, gaps: [...body.gaps, licenceGap(key)] };
   return mode === 'unavailable' && 'items' in out ? { ...out, items: [] } : out;
+}
+
+
+/**
+ * F-08：旧代码 → 新代码。对齐后端 B-04（bars_read.PlaceholderBarsReader 查 security_code_history）。
+ * 从示例证券档案的 code_history 推导，不手写编造。
+ * 惰性构建：模块顶层求值会撞上 fixtures 的导入初始化顺序，导致表为空。
+ */
+let oldCodeMap: Record<string, string> | null = null;
+function oldCodeToNew(): Record<string, string> {
+  if (!oldCodeMap) {
+    oldCodeMap = Object.fromEntries(
+      SECURITY_CODES.flatMap((code) => {
+        const p = securityProfile(code);
+        return (p?.code_history ?? []).map((h) => [h.security_code, code] as const);
+      }),
+    );
+  }
+  return oldCodeMap;
 }
 
 /** v0.2.3 #12：/today 首页聚合 mock（契约 §7.3；每个列表 ≤ 50，more 表示是否截断） */
@@ -220,6 +239,12 @@ const routeHandlers = [
     if (!['1m', 'd', 'w'].includes(freq)) return validation('freq', 'freq 取值为 1m|d|w');
     if (freq === '1m' && adjust !== 'none') return validation('adjust', '1m 只支持 adjust=none');
     const code = String(params.code);
+    // F-08 对齐后端 B-04（bars_read.PlaceholderBarsReader）：
+    // ① 旧代码 → 404 且带 details.superseded_by（契约 §7.3，前端 isSuperseded() 据此提示改用新代码）
+    const oldCode = oldCodeToNew()[code];
+    if (oldCode) {
+      return HttpResponse.json(errorBody('NOT_FOUND', '证券代码已停用', { superseded_by: oldCode }), { status: 404 });
+    }
     // 个股用 fixtures 规格，指数用 marketFixtures；周线由日线聚合（T-F03）
     const day = dailyBars(code) ?? indexBars(code, 'd');
     const res = freq === '1m' ? intradayBars(code) ?? indexBars(code, '1m') : freq === 'w' ? day && toWeekly(day) : day;
@@ -228,7 +253,22 @@ const routeHandlers = [
     const limit = Number(url.searchParams.get('limit') ?? 500);
     if (!Number.isInteger(limit) || limit < 1 || limit > 2000) return validation('limit', 'limit 取值 1–2000');
     const before = url.searchParams.get('before');
-    const pool = before ? res.items.filter((b) => b.t < before) : res.items;
+    // F-08：补 from/to 日期窗过滤（契约 §7.3 bars 支持 from/to，原 mock 未实现）
+    const from = url.searchParams.get('from');
+    const to = url.searchParams.get('to');
+    let pool = before ? res.items.filter((b) => b.t < before) : res.items;
+    // from/to 为包含端点的交易日期；1m 的 t 是 +08:00 datetime，不能直接与 to 日期比较。
+    if (from) pool = pool.filter((b) => b.t.slice(0, 10) >= from);
+    if (to) pool = pool.filter((b) => b.t.slice(0, 10) <= to);
+    // 日期窗内没有任何数据：对齐后端 empty_bars()（200 + unavailable + no_source + data_as_of=null）
+    if (pool.length === 0) {
+      return HttpResponse.json({
+        security_code: res.security_code, name: res.name, freq: res.freq, adjust: res.adjust,
+        pre_close: null, adjust_as_of: null, next_before: null, items: [],
+        data_status: 'unavailable', data_as_of: null,
+        gaps: [{ key: 'bars', reason: 'no_source', message: '行情读取源尚未接入（示例数据）' }],
+      });
+    }
     const items = pool.slice(-limit);
     const body = { ...res, items, next_before: pool.length > items.length ? items[0].t : null };
     // 证书不可用：分时没有可用缓存 → unavailable；日/周保留缓存 → stale

@@ -1,8 +1,8 @@
-"""日 K HTTP 预算与 ingest 侧拉取（T-B130 / 单 C）。
+"""日 K 分型批次预算与 ingest 侧拉取（C2，契约 §9.3）。
 
-常量与 ``daily_bars_http_budget`` 是本模块的配置面，不进 Settings，不读环境
-变量或回执来放宽限额。默认 ``DAILY_BARS_HTTP_LIMIT = 0``（unset）。把限额改成
-``DAILY_BARS_HTTP_UNLIMITED`` 属于开放单 D，须用户本人批准，本模块不提供切换入口。
+日常与回填有效常量各自默认0（unset），仅接受各自硬界内的正整数。
+不进Settings、不读环境或回执放宽预算；移除旧unlimited路径。
+打开任一生效常量仍属单D，须用户本人批准，本模块不提供切换入口。
 
 本模块不读证书、不调用 ``mairui_get``；出网只通过调用方注入的 transport。
 未注入时 fail-closed，不打开套接字。k 未测得前，单日按每标的一段计计划调用。
@@ -37,8 +37,6 @@ from app.marketdata.daily_bars import (
 )
 from app.reports.service import covered
 
-DAILY_BARS_HTTP_UNLIMITED = "unlimited"
-DAILY_BARS_HTTP_LIMIT: int = 0
 # C2 effective batch gates; opening either remains a separately authorized D change.
 DAILY_BARS_BATCH_LIMIT: int = 0
 DAILY_BARS_BACKFILL_BATCH_LIMIT: int = 0
@@ -73,7 +71,7 @@ Clock = Callable[[], dt.datetime]
 
 @dataclass(frozen=True)
 class DailyBarsBudget:
-    kind: Literal["unset", "unlimited", "capped"]
+    kind: Literal["unset", "capped"]
     cap: int | None = None
 
 
@@ -83,22 +81,11 @@ class MairuiDailyBarsSource:
     name = "mairui"
 
 
-def daily_bars_http_budget(value: object) -> DailyBarsBudget:
-    """解析限额。0 / 非法值 → unset；哨兵 → unlimited；正整数 → capped（仅测试）。"""
-    if value == DAILY_BARS_HTTP_UNLIMITED:
-        return DailyBarsBudget(kind="unlimited")
-    if type(value) is int and value > 0:
-        return DailyBarsBudget(kind="capped", cap=value)
-    return DailyBarsBudget(kind="unset")
-
-
 def daily_bars_batch_budget(value: object, batch_kind: str = "daily") -> DailyBarsBudget:
     """Reject caps outside this batch type's bound; defaults never borrow backfill quota."""
     if batch_kind not in {"daily", "backfill"}:
         return DailyBarsBudget(kind="unset")
-    ceiling = (
-        DAILY_BARS_DAILY_BATCH_CEILING if batch_kind == "daily" else DAILY_BARS_BATCH_CEILING
-    )
+    ceiling = DAILY_BARS_DAILY_BATCH_CEILING if batch_kind == "daily" else DAILY_BARS_BATCH_CEILING
     if type(value) is int and 0 < value <= ceiling:
         return DailyBarsBudget(kind="capped", cap=value)
     return DailyBarsBudget(kind="unset")
@@ -218,6 +205,7 @@ def fetch_mairui_daily_bars(
     clock: Clock | None = None,
     window_trading_days: int | None = None,
     receipt_path: Path | None = None,
+    batch_kind: str = "daily",
 ) -> int:
     """按预算与停止规则拉取一日（或窗口）日 K。不读证书，默认不出网。"""
     send = transport if transport is not None else _transport_disabled
@@ -231,7 +219,8 @@ def fetch_mairui_daily_bars(
 
     reader = grant_reader if grant_reader is not None else _default_grant_reader
 
-    budget = daily_bars_http_budget(DAILY_BARS_HTTP_LIMIT)
+    value = DAILY_BARS_BACKFILL_BATCH_LIMIT if batch_kind == "backfill" else DAILY_BARS_BATCH_LIMIT
+    budget = daily_bars_batch_budget(value, batch_kind)
     if budget.kind == "unset":
         _record_run(
             conn,
@@ -321,7 +310,7 @@ def fetch_mairui_daily_bars(
         )
         return 0
 
-    cap = budget.cap if budget.kind == "capped" else None
+    cap = budget.cap or 0
     for index, code in enumerate(codes):
         if cap is not None and calls >= cap:
             issues.extend(["daily_bars_quota_deferred"] * (len(codes) - index))

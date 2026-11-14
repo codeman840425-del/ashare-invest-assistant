@@ -13,6 +13,7 @@ import re
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import psycopg
@@ -130,8 +131,29 @@ def stop_template_workers(conn, receipt: dict, path: Path, env: dict) -> None:
         raise RuntimeError("Worker stop service or run identity changed")
     snapshot(conn, row)  # Recheck the exact OID/owner before connecting to it.
     lifecycle = {"mechanism": "timescaledb_database_local_stop", "acknowledged": False,
-                 "sessions_terminated_by_script": 0}
+                 "sessions_terminated_by_script": 0, "wait_limit_seconds": 120}
     receipt["template_worker_lifecycle"] = lifecycle
+    deadline = time.monotonic() + lifecycle["wait_limit_seconds"]
+    allowed = {"timescale_scheduler", "timescale_telemetry", "timescale_history_retention"}
+
+    def drain(phase: str, own_pid: int | None = None) -> dict:
+        while True:
+            current = snapshot(conn, row)  # Recheck exact OID/owner on every observation.
+            lifecycle[phase] = current
+            save(path, receipt)
+            if current["allow_connections"]:
+                raise RuntimeError("Template must reject new connections before waiting")
+            other = [s for s in current["sessions"] if s["pid"] != own_pid]
+            if any(s["source"] not in allowed | {"autovacuum"} for s in other):
+                raise RuntimeError("Unidentified or non-worker template session; drain refused")
+            pending = other if own_pid is None else [s for s in other if s["source"] == "autovacuum"]
+            if not pending:
+                return current
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("Template background sessions did not drain within 120 seconds")
+            time.sleep(min(1, remaining))
+
     with connect(TEMPLATE) as fresh:
         actual = fresh.execute(
             "SELECT current_database(), current_user, "
@@ -149,13 +171,13 @@ def stop_template_workers(conn, receipt: dict, path: Path, env: dict) -> None:
         fresh.execute("SELECT set_config('application_name', 'aia_ci_template_lifecycle', false)")
         lifecycle["before"] = snapshot(conn, row)
         save(path, receipt)
-        allowed = {"timescale_scheduler", "timescale_telemetry", "timescale_history_retention"}
-        if any(s["pid"] != actual[6] and s["source"] not in allowed
+        if any(s["pid"] != actual[6] and s["source"] not in allowed | {"autovacuum"}
                for s in lifecycle["before"]["sessions"]):
             raise RuntimeError("Unidentified or non-worker template session; STOP refused")
-        # Keep our one verified connection alive, reject all new connections,
-        # then ask the extension to stop only its own workers in this database.
+        # Only this exact fresh template is fenced; leave the head source alone.
+        # Let its autovacuum finish naturally before the existing local STOP.
         conn.execute(sql.SQL("ALTER DATABASE {} ALLOW_CONNECTIONS false").format(sql.Identifier(TEMPLATE)))
+        drain("before_stop", actual[6])
         if fresh.execute("SELECT _timescaledb_functions.stop_background_workers()").fetchone() != (True,):
             raise RuntimeError("Template worker STOP was not acknowledged")
         lifecycle["acknowledged"] = True
@@ -177,7 +199,8 @@ def stop_template_workers(conn, receipt: dict, path: Path, env: dict) -> None:
     finally:
         disconnect.close()
     lifecycle["connection_closed"] = True
-    lifecycle["after"] = snapshot(conn, row)
+    # The same deadline covers both phases; known workers may finish after STOP.
+    lifecycle["after"] = drain("after")
     save(path, receipt)
     # seal() still requires zero sessions and verifies a real clone afterwards.
 

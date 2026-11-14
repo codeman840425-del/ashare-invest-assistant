@@ -290,7 +290,7 @@ def _run_fetch_with_real_grant(
     _forge_root_readonly(monkeypatch, receipt)
     # 默认参数 path=AUTHORIZATION 在定义时绑定，不能靠改模块常量改路径；
     # 显式把临时回执交给真实 read_daily_bars_grant，绝不读 /run/aia。
-    monkeypatch.setattr(ibars, "DAILY_BARS_HTTP_LIMIT", ibars.DAILY_BARS_HTTP_UNLIMITED)
+    monkeypatch.setattr(ibars, "DAILY_BARS_BATCH_LIMIT", 5)
     kwargs: dict[str, Any] = {
         "trade_date": OPEN_10,
         "user_id": OWNER,
@@ -338,7 +338,7 @@ def test_expired_receipt_no_network(
 
     红因（121a17c）：缺实现：B1 read_daily_bars_grant 非空即 True，不校验 expires_at。
     """
-    ibars = _require_ingest("fetch_mairui_daily_bars", "read_daily_bars_grant", "DAILY_BARS_HTTP_UNLIMITED")
+    ibars = _require_ingest("fetch_mairui_daily_bars", "read_daily_bars_grant", "DAILY_BARS_BATCH_LIMIT")
     payload = _receipt_payload(
         not_before=dt.datetime(2026, 11, 9, 0, 0, tzinfo=BEIJING),
         expires_at=dt.datetime(2026, 11, 10, 17, 0, tzinfo=BEIJING),  # clock 17:20 已过期
@@ -368,7 +368,7 @@ def test_wrong_kind_receipt_no_network(
 
     红因（121a17c）：缺实现：B1 不解析 JSON、不校验 kind。
     """
-    ibars = _require_ingest("fetch_mairui_daily_bars", "read_daily_bars_grant", "DAILY_BARS_HTTP_UNLIMITED")
+    ibars = _require_ingest("fetch_mairui_daily_bars", "read_daily_bars_grant", "DAILY_BARS_BATCH_LIMIT")
     payload = _receipt_payload(kind="mairui_daily_snapshot")
     why = (
         "缺实现：B1 kind 错误的回执应按 read_grant 字段集合与日 K 专用 kind 拒绝，"
@@ -395,7 +395,7 @@ def test_non_json_receipt_no_network(
 
     红因（121a17c）：缺实现：B1 非空文件即返回 True，不解析 JSON。
     """
-    ibars = _require_ingest("fetch_mairui_daily_bars", "read_daily_bars_grant", "DAILY_BARS_HTTP_UNLIMITED")
+    ibars = _require_ingest("fetch_mairui_daily_bars", "read_daily_bars_grant", "DAILY_BARS_BATCH_LIMIT")
     why = (
         "缺实现：B1 非 JSON 回执应解析失败并拒绝，transport 0 次并记 data_licence_unavailable"
     )

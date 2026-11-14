@@ -353,7 +353,7 @@ def test_authorized_ingest_persists_same_grant_and_default_reader_consumes(
             False,
         )
 
-    monkeypatch.setattr(ingest, "DAILY_BARS_HTTP_LIMIT", 1)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", 1)
     monkeypatch.setattr(ingest, "daily_universe", lambda *_: [CODE])
     monkeypatch.setattr(ingest, "_record_run", lambda *_args, **_kwargs: None)
     with world.engine.begin() as conn:
@@ -390,7 +390,7 @@ def test_invalid_grant_never_reaches_transport(
             NOW if bad == "expired" else NOW + dt.timedelta(hours=1),
             "0" * 64,
         )
-    monkeypatch.setattr(ingest, "DAILY_BARS_HTTP_LIMIT", 1)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", 1)
     monkeypatch.setattr(ingest, "_record_run", lambda *_args, **_kwargs: None)
     calls: list[str] = []
     with world.engine.begin() as conn:

@@ -125,7 +125,7 @@ def main(
         if args.apply and _is_open(conn, bj.date()):
             lock_start = dt.datetime.combine(bj.date(), _APPLY_LOCK_START, bj.tzinfo)
             lock_end = dt.datetime.combine(bj.date(), _APPLY_LOCK_END, bj.tzinfo)
-            if lock_start <= bj <= lock_end:
+            if lock_start <= bj < lock_end:
                 print("refused: open-day 17:00-17:45 Beijing lock window")
                 return 1
 
@@ -156,7 +156,11 @@ def main(
         jobs_mod._push(
             client,
             DAILY_BARS_FETCH,
-            {"trade_date": day.isoformat(), "window_trading_days": window},
+            {
+                "trade_date": day.isoformat(),
+                "window_trading_days": window,
+                "batch_kind": "backfill",
+            },
         )
     finally:
         if redis_client is None:

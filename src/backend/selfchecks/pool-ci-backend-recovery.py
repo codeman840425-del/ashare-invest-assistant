@@ -70,10 +70,10 @@ def test_pool_ci_application_still_rejects_uninitialized_database(
     [
         (0, True, False, False, 0),
         (2, True, False, False, 2),
-        ("unlimited", True, False, False, 3),
-        ("unlimited", False, False, False, 0),
-        ("unlimited", True, True, False, 0),
-        ("unlimited", True, False, True, 1),
+        (5, True, False, False, 3),
+        (5, False, False, False, 0),
+        (5, True, True, False, 0),
+        (5, True, False, True, 1),
     ],
 )
 def test_pool_ci_budget_and_authorization_still_fence_transport(
@@ -86,7 +86,7 @@ def test_pool_ci_budget_and_authorization_still_fence_transport(
     expected_calls: int,
 ) -> None:
     calls: list[str] = []
-    monkeypatch.setattr(daily_bars, "DAILY_BARS_HTTP_LIMIT", limit)
+    monkeypatch.setattr(daily_bars, "DAILY_BARS_BATCH_LIMIT", limit)
     monkeypatch.setattr(daily_bars, "_record_run", lambda *args, **kwargs: None)
     monkeypatch.setattr(daily_bars, "covered", lambda *args: True)
     monkeypatch.setattr(

@@ -1,8 +1,8 @@
-"""日 K HTTP 预算与 ingest 侧拉取（T-B130 / 单 C）。
+"""日 K 分型批次预算与 ingest 侧拉取（C2，契约 §9.3）。
 
-常量与 ``daily_bars_http_budget`` 是本模块的配置面，不进 Settings，不读环境
-变量或回执来放宽限额。默认 ``DAILY_BARS_HTTP_LIMIT = 0``（unset）。把限额改成
-``DAILY_BARS_HTTP_UNLIMITED`` 属于开放单 D，须用户本人批准，本模块不提供切换入口。
+日常与回填有效常量各自默认0（unset），仅接受各自硬界内的正整数。
+不进Settings、不读环境或回执放宽预算；移除旧unlimited路径。
+打开任一生效常量仍属单D，须用户本人批准，本模块不提供切换入口。
 
 本模块不读证书、不调用 ``mairui_get``；出网只通过调用方注入的 transport。
 未注入时 fail-closed，不打开套接字。k 未测得前，单日按每标的一段计计划调用。
@@ -24,21 +24,23 @@ from typing import Literal
 from sqlalchemy.engine import Connection
 
 from app.common.errors import AppError
+from app.ingest.daily_bars_plan import BEIJING, DailyBarsPlanError, segments, window_days
+from app.ingest.daily_bars_schedule import HistoryWindowDeferredError
 from app.ingest.daily_lists import STOP as LISTS_STOP
 from app.ingest.daily_lists import DailyHaltError, limited
 from app.ingest.egress import HALT_LIMIT, EgressDenied
 from app.marketdata.daily_bars import (
     DailyBar,
     DailyBarsResult,
+    HistoryConfirmation,
     _empty_stats,
     _record_run,
     daily_universe,
     upsert_daily_bars,
 )
+from app.marketdata.daily_snapshot import FINAL_AFTER
 from app.reports.service import covered
 
-DAILY_BARS_HTTP_UNLIMITED = "unlimited"
-DAILY_BARS_HTTP_LIMIT: int = 0
 # C2 effective batch gates; opening either remains a separately authorized D change.
 DAILY_BARS_BATCH_LIMIT: int = 0
 DAILY_BARS_BACKFILL_BATCH_LIMIT: int = 0
@@ -66,14 +68,14 @@ def persist_halt(halt: Path, payload: bytes = HALT_LIMIT) -> bool:
         return False
 
 
-Transport = Callable[[str, dt.date, dt.date], tuple[int, DailyBar | None]]
+Transport = Callable[[str, dt.date, dt.date], tuple[int, DailyBar | DailyBarsResult | None]]
 GrantReader = Callable[[], object | None]
 Clock = Callable[[], dt.datetime]
 
 
 @dataclass(frozen=True)
 class DailyBarsBudget:
-    kind: Literal["unset", "unlimited", "capped"]
+    kind: Literal["unset", "capped"]
     cap: int | None = None
 
 
@@ -83,22 +85,11 @@ class MairuiDailyBarsSource:
     name = "mairui"
 
 
-def daily_bars_http_budget(value: object) -> DailyBarsBudget:
-    """解析限额。0 / 非法值 → unset；哨兵 → unlimited；正整数 → capped（仅测试）。"""
-    if value == DAILY_BARS_HTTP_UNLIMITED:
-        return DailyBarsBudget(kind="unlimited")
-    if type(value) is int and value > 0:
-        return DailyBarsBudget(kind="capped", cap=value)
-    return DailyBarsBudget(kind="unset")
-
-
 def daily_bars_batch_budget(value: object, batch_kind: str = "daily") -> DailyBarsBudget:
     """Reject caps outside this batch type's bound; defaults never borrow backfill quota."""
     if batch_kind not in {"daily", "backfill"}:
         return DailyBarsBudget(kind="unset")
-    ceiling = (
-        DAILY_BARS_DAILY_BATCH_CEILING if batch_kind == "daily" else DAILY_BARS_BATCH_CEILING
-    )
+    ceiling = DAILY_BARS_DAILY_BATCH_CEILING if batch_kind == "daily" else DAILY_BARS_BATCH_CEILING
     if type(value) is int and 0 < value <= ceiling:
         return DailyBarsBudget(kind="capped", cap=value)
     return DailyBarsBudget(kind="unset")
@@ -206,6 +197,23 @@ def _stamp(clock: Clock) -> dt.datetime:
     return value
 
 
+def _history_first(value: object, code: str, days: tuple[dt.date, ...]) -> dt.date | None:
+    if not isinstance(value, HistoryConfirmation) or value.no_earlier is not True:
+        return None
+    if (
+        value.code != code
+        or type(value.first) is not dt.date
+        or not isinstance(value.window, tuple)
+        or len(value.window) != 2
+        or any(type(day) is not dt.date for day in value.window)
+        or value.window != (days[0], days[-1])
+        or value.first not in days
+        or value.first <= days[0]
+    ):
+        return None
+    return value.first
+
+
 def fetch_mairui_daily_bars(
     conn: Connection,
     *,
@@ -218,6 +226,10 @@ def fetch_mairui_daily_bars(
     clock: Clock | None = None,
     window_trading_days: int | None = None,
     receipt_path: Path | None = None,
+    batch_kind: str = "daily",
+    run_recorder: Callable[..., None] | None = None,
+    code_ready: Callable[[str], bool] | None = None,
+    page_days: int | None = None,
 ) -> int:
     """按预算与停止规则拉取一日（或窗口）日 K。不读证书，默认不出网。"""
     send = transport if transport is not None else _transport_disabled
@@ -230,10 +242,12 @@ def fetch_mairui_daily_bars(
         return read_daily_bars_grant(receipt, now=_stamp(now), user_id=user_id)
 
     reader = grant_reader if grant_reader is not None else _default_grant_reader
+    record_run = _record_run if run_recorder is None else run_recorder
 
-    budget = daily_bars_http_budget(DAILY_BARS_HTTP_LIMIT)
+    value = DAILY_BARS_BACKFILL_BATCH_LIMIT if batch_kind == "backfill" else DAILY_BARS_BATCH_LIMIT
+    budget = daily_bars_batch_budget(value, batch_kind)
     if budget.kind == "unset":
-        _record_run(
+        record_run(
             conn,
             trade_date,
             user_id,
@@ -255,7 +269,7 @@ def fetch_mairui_daily_bars(
         or grant.end.tzinfo is None
         or not (grant.start <= _stamp(now) < grant.end)
     ):
-        _record_run(
+        record_run(
             conn,
             trade_date,
             user_id,
@@ -269,7 +283,7 @@ def fetch_mairui_daily_bars(
         is_open = covered(conn, trade_date)
     except AppError as exc:
         if exc.details is not None and exc.details.get("issue") == "CALENDAR_NOT_COVERED":
-            _record_run(
+            record_run(
                 conn,
                 trade_date,
                 user_id,
@@ -280,7 +294,7 @@ def fetch_mairui_daily_bars(
             return 0
         raise
     if not is_open:
-        _record_run(
+        record_run(
             conn,
             trade_date,
             user_id,
@@ -290,9 +304,32 @@ def fetch_mairui_daily_bars(
         )
         return 0
 
+    # The page size is verified offline by the caller; production has no default k.
+    try:
+        if window_trading_days not in (None, 1) and page_days is None:
+            raise DailyBarsPlanError("daily_bars_history_page_size_unverified")
+        days = (
+            window_days(conn, trade_date, window_trading_days)
+            if window_trading_days not in (None, 1)
+            else (trade_date,)
+        )
+        pages = segments(days, page_days)
+    except DailyBarsPlanError as exc:
+        issue = str(exc)
+        record_run(
+            conn,
+            trade_date,
+            user_id,
+            window_trading_days,
+            status="failed",
+            error=issue,
+            stats=_empty_stats(user_id, window_trading_days, issues=[issue]),
+        )
+        return 0
+
     codes = daily_universe(conn, user_id, trade_date)
     if not codes:
-        _record_run(
+        record_run(
             conn,
             trade_date,
             user_id,
@@ -302,16 +339,17 @@ def fetch_mairui_daily_bars(
         )
         return 0
 
-    # k 未测得：保守按每标的一段，计划调用数 = N（单日）或 N（整段窗口一次）。
-    start, end = trade_date, trade_date
     issues: list[str] = []
     bars: list[DailyBar] = []
     last_received: dt.datetime | None = None
     calls = 0
+    already_ready = 0
+    missing = 0
+    history_evidence: dict[str, dict[str, object]] = {}
 
     if halt.is_file() or stop.is_file():
         issues.extend(["daily_bars_upstream_halted"] * len(codes))
-        _record_run(
+        record_run(
             conn,
             trade_date,
             user_id,
@@ -321,27 +359,121 @@ def fetch_mairui_daily_bars(
         )
         return 0
 
-    cap = budget.cap if budget.kind == "capped" else None
+    cap = budget.cap or 0
+    batch_halted = False
+    window_deferred = False
     for index, code in enumerate(codes):
-        if cap is not None and calls >= cap:
+        if code_ready is not None and code_ready(code):
+            already_ready += 1
+            continue
+        if cap - calls < len(pages):
             issues.extend(["daily_bars_quota_deferred"] * (len(codes) - index))
             break
-        try:
-            http_status, payload = send(code, start, end)
-        except (DailyHaltError, EgressDenied):
-            persist_halt(halt, HALT_LIMIT)
-            issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))
-            break
-        last_received = _stamp(now)
-        calls = index + 1
-        if limited(http_status, payload) or http_status in (103, 429):
-            persist_halt(halt, HALT_LIMIT)
-            issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))
-            break
-        if http_status == 200 and isinstance(payload, DailyBar):
-            bars.append(payload)
-        else:
+        code_missing = 0
+        code_start = len(bars)
+        first: dt.date | None = None
+        consistent = all_pages_ok = True
+        for start, end in pages:
+            if halt.exists() or stop.exists():
+                batch_halted = True
+                break
+            try:
+                http_status, payload = send(code, start, end)
+            except HistoryWindowDeferredError:
+                window_deferred = True
+                break
+            except (DailyHaltError, EgressDenied):
+                batch_halted = True
+                break
+            last_received = _stamp(now)
+            calls += 1
+            if limited(http_status, payload) or (
+                isinstance(payload, DailyBarsResult) and payload.halted is not None
+            ):
+                batch_halted = True
+                break
+            received = (
+                (payload,)
+                if isinstance(payload, DailyBar)
+                else tuple(payload.bars)
+                if isinstance(payload, DailyBarsResult)
+                else ()
+            )
+            expected_days = {day for day in days if start <= day <= end}
+            if http_status != 200:
+                all_pages_ok = False
+            if http_status == 200 and isinstance(payload, DailyBarsResult) and window_trading_days:
+                candidate = _history_first(payload.history_confirmation, code, days)
+                if payload.history_confirmation is not None and candidate is None:
+                    consistent = False
+                if candidate is not None:
+                    consistent = consistent and (first is None or first == candidate)
+                    first = candidate
+            if http_status != 200 or not received:
+                code_missing += len(expected_days)
+                continue
+            keys = [(bar.code, bar.trade_date, bar.adj_type) for bar in received]
+            if len(set(keys)) != len(keys) or any(
+                bar.code != code or bar.trade_date not in expected_days or bar.adj_type != "none"
+                for bar in received
+            ):
+                raise ValueError("daily_bars_history_payload_outside_plan")
+            bars.extend(received)
+            code_missing += len(expected_days - {bar.trade_date for bar in received})
+        seen = {bar.trade_date for bar in bars[code_start:]}
+        final_rows = False
+        if first is not None and last_received is not None:
+            stamp = last_received
+            final_rows = all(
+                stamp >= dt.datetime.combine(bar.trade_date, FINAL_AFTER, BEIJING)
+                and (
+                    bar.is_suspended is True
+                    or (
+                        bar.is_suspended is False
+                        and all(
+                            value is not None
+                            for value in (
+                                bar.open,
+                                bar.high,
+                                bar.low,
+                                bar.close,
+                                bar.volume,
+                                bar.amount,
+                            )
+                        )
+                    )
+                )
+                for bar in bars[code_start:]
+            )
+        if (
+            first is not None
+            and final_rows
+            and consistent
+            and all_pages_ok
+            and not batch_halted
+            and not window_deferred
+            and seen == {day for day in days if day >= first}
+        ):
+            code_missing = 0
+            history_evidence[code] = {
+                "status": "ok",
+                "code": code,
+                "window": [day.isoformat() for day in days],
+                "first": first.isoformat(),
+                "no_earlier": True,
+                "user_id": str(user_id),
+                "source_licence_id": str(grant.licence_id),
+            }
+        if code_missing:
+            missing += code_missing
             issues.append(f"daily_bars_missing:{code}")
+        if window_deferred:
+            issues.extend(["daily_bars_quota_deferred"] * (len(codes) - index))
+            break
+        if batch_halted:
+            persist_halt(halt, HALT_LIMIT)
+            issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))
+            break
 
     fetched_at = last_received if last_received is not None else _stamp(now)
     written = 0
@@ -356,19 +488,27 @@ def fetch_mairui_daily_bars(
         written = upsert.inserted + upsert.unchanged
         issues.extend(upsert.issues)
 
-    run_status = "ok" if last_received is not None or bars else "skipped"
-    _record_run(
+    run_status = (
+        "partial"
+        if issues
+        else ("ok" if last_received is not None or bars or already_ready else "skipped")
+    )
+    stats = _empty_stats(
+        user_id,
+        window_trading_days,
+        codes=len(codes),
+        inserted=written,
+        missing=missing,
+        issues=issues,
+    )
+    if history_evidence and not batch_halted:
+        stats["history_evidence"] = history_evidence
+    record_run(
         conn,
         trade_date,
         user_id,
         window_trading_days,
         status=run_status,
-        stats=_empty_stats(
-            user_id,
-            window_trading_days,
-            codes=len(codes),
-            inserted=written,
-            issues=issues,
-        ),
+        stats=stats,
     )
     return written

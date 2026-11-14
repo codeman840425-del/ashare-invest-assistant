@@ -399,3 +399,17 @@ def tick(
             count += 1
         rds.xack(STREAM, GROUP, mid)
     return count
+
+
+def daily_bars_seam[T](
+    operation: Callable[..., T],
+    *args: object,
+    sender: Callable[..., object],
+    **options: object,
+) -> T:
+    """Keep daily-bar callback injection in the registered daily-lists seam.
+
+    The consumer owns locks, authority checks and attempts; this adapter only
+    forwards its explicitly supplied callback, never credentials or live I/O.
+    """
+    return operation(*args, transport=sender, **options)

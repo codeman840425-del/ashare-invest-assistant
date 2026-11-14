@@ -15,6 +15,7 @@ export type Exchange = 'SH' | 'SZ' | 'BJ';
 export interface ProviderRef { provider: DataProvider; endpoint: string | null; fetched_at: DateTime | null }
 interface Sourced extends DataStatusBlock { sources: ProviderRef[] }
 
+
 /** §5.1 SecurityHit（GET /securities/search） */
 export interface SecurityHit {
   security_code: string;
@@ -108,7 +109,8 @@ export interface FactorValue {
 export interface FactorsResponse extends Sourced {
   security_code: string;
   name: string;
-  trade_date: DateStr;
+  /** §7.3 / T-A158：请求日期原样透传；未指定且无可用批次时为 null。 */
+  trade_date: DateStr | null;
   factor_set_version: string | null;
   counts: { total: number; by_category: Record<FactorCategory, number> };
   items: FactorValue[];

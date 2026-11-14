@@ -1,7 +1,7 @@
 """DB-owned daily-bar consumer. No Redis dependency or default live transport.
 
-This slice consumes single-day intents. Unverified multi-day page sizing fails
-closed; pagination and quota continuation are subsequent C2 work.
+Windows use real open days and an explicitly verified page size. Unverified
+multi-day requests fail closed; quota continuation is subsequent C2 work.
 """
 
 from __future__ import annotations
@@ -19,11 +19,11 @@ from app.db.tables.licences import user_data_licence_status as licences
 from app.db.tables.realtime import pipeline_runs
 from app.db.tables.users import users
 from app.ingest import daily_bars as fetcher
-from app.ingest.daily_bars_plan import ready_for_window
+from app.ingest.daily_bars_plan import DailyBarsPlanError, ready_for_window, segments, window_days
 from app.ingest.daily_lists import STOP as LISTS_STOP
 from app.ingest.daily_lists import DailyHaltError, daily_bars_seam, limited
 from app.ingest.egress import EgressDenied, single_egress
-from app.marketdata.daily_bars import DailyBar, _empty_stats
+from app.marketdata.daily_bars import DailyBar, DailyBarsResult, _empty_stats
 from app.marketdata.daily_bars_outbox import batch_budget, valid_grant
 from app.master.vendor import licence_available
 
@@ -100,6 +100,7 @@ def process(
     clock: fetcher.Clock = lambda: dt.datetime.now(dt.UTC),
     stop: Path = LISTS_STOP,
     halt: Path = fetcher.HALT,
+    page_days: int | None = None,
 ) -> str:
     """Reserve before HTTP, never replay an uncertain batch, update its original run."""
     if transport is None:
@@ -149,16 +150,24 @@ def process(
                 return "failed"
             if batch_budget(item["batch_kind"]).kind == "unset":
                 return "disabled"
-            if item["window_trading_days"] not in (None, 1):
+            if item["window_trading_days"] not in (None, 1) and page_days is None:
                 _failed(conn, item, "daily_bars_history_page_size_unverified", clock())
                 return "failed"
             if not _authorized(conn, item, read(item["user_id"]), clock()):
                 _failed(conn, item, "data_licence_unavailable", clock())
                 return "failed"
+            try:
+                days = window_days(conn, item["trade_date"], item["window_trading_days"])
+                segments(days, page_days)
+            except DailyBarsPlanError as exc:
+                _failed(conn, item, str(exc), clock())
+                return "failed"
             conn.execute(update(outbox).where(outbox.c.id == item_id).values(status="running"))
         attempted = False
 
-        def send(code: str, start: dt.date, end: dt.date) -> tuple[int, DailyBar | None]:
+        def send(
+            code: str, start: dt.date, end: dt.date
+        ) -> tuple[int, DailyBar | DailyBarsResult | None]:
             nonlocal attempted
             if stop.exists() or halt.exists():
                 raise UpstreamHaltError()
@@ -196,7 +205,9 @@ def process(
                 status, bar = transport(code, start, end)
             except (DailyHaltError, EgressDenied):
                 raise UpstreamHaltError() from None
-            if limited(status, bar):
+            if limited(status, bar) or (
+                isinstance(bar, DailyBarsResult) and bar.halted is not None
+            ):
                 raise UpstreamHaltError()
             return status, bar
 
@@ -210,6 +221,11 @@ def process(
             stats: dict[str, object],
             error: str | None = None,
         ) -> None:
+            issues = stats.get("issues")
+            if isinstance(issues, (list, tuple)) and "daily_bars_upstream_halted" in issues:
+                raise UpstreamHaltError()
+            if status == "failed":
+                raise DailyBarsPlanError(error or "daily_bars_plan_invalid")
             if (day, owner, window) != (
                 item["trade_date"],
                 item["user_id"],
@@ -243,11 +259,12 @@ def process(
                     stop_path=stop,
                     halt_path=halt,
                     run_recorder=record,
+                    page_days=page_days,
                     code_ready=lambda code: ready_for_window(
                         conn,
                         code,
                         item["source_licence_id"],
-                        (item["trade_date"],),
+                        days,
                         now=clock(),
                     ),
                 )
@@ -273,6 +290,10 @@ def process(
                     halted=True,
                 )
             return "halted"
+        except DailyBarsPlanError as exc:
+            with engine.begin() as conn:
+                _failed(conn, item, str(exc), clock())
+            return "failed"
         except OSError:
             # An unreadable gate is busy, not permission to ACK or send again.
             return "busy"
@@ -290,6 +311,7 @@ def tick(
     clock: fetcher.Clock = lambda: dt.datetime.now(dt.UTC),
     stop: Path = LISTS_STOP,
     halt: Path = fetcher.HALT,
+    page_days: int | None = None,
 ) -> int:
     """Poll durable daily-bar intents; no shared stream or list message is consumed."""
     if all(batch_budget(kind).kind == "unset" for kind in ("daily", "backfill")):
@@ -317,5 +339,6 @@ def tick(
         clock=clock,
         stop=stop,
         halt=halt,
+        page_days=page_days,
     )
     return int(result in {"done", "failed", "halted"})

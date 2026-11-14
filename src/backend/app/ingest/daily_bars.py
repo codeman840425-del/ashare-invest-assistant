@@ -24,6 +24,7 @@ from typing import Literal
 from sqlalchemy.engine import Connection
 
 from app.common.errors import AppError
+from app.ingest.daily_bars_plan import DailyBarsPlanError, segments, window_days
 from app.ingest.daily_lists import STOP as LISTS_STOP
 from app.ingest.daily_lists import DailyHaltError, limited
 from app.ingest.egress import HALT_LIMIT, EgressDenied
@@ -64,7 +65,7 @@ def persist_halt(halt: Path, payload: bytes = HALT_LIMIT) -> bool:
         return False
 
 
-Transport = Callable[[str, dt.date, dt.date], tuple[int, DailyBar | None]]
+Transport = Callable[[str, dt.date, dt.date], tuple[int, DailyBar | DailyBarsResult | None]]
 GrantReader = Callable[[], object | None]
 Clock = Callable[[], dt.datetime]
 
@@ -208,6 +209,7 @@ def fetch_mairui_daily_bars(
     batch_kind: str = "daily",
     run_recorder: Callable[..., None] | None = None,
     code_ready: Callable[[str], bool] | None = None,
+    page_days: int | None = None,
 ) -> int:
     """按预算与停止规则拉取一日（或窗口）日 K。不读证书，默认不出网。"""
     send = transport if transport is not None else _transport_disabled
@@ -282,6 +284,29 @@ def fetch_mairui_daily_bars(
         )
         return 0
 
+    # The page size is verified offline by the caller; production has no default k.
+    try:
+        if window_trading_days not in (None, 1) and page_days is None:
+            raise DailyBarsPlanError("daily_bars_history_page_size_unverified")
+        days = (
+            window_days(conn, trade_date, window_trading_days)
+            if window_trading_days not in (None, 1)
+            else (trade_date,)
+        )
+        pages = segments(days, page_days)
+    except DailyBarsPlanError as exc:
+        issue = str(exc)
+        record_run(
+            conn,
+            trade_date,
+            user_id,
+            window_trading_days,
+            status="failed",
+            error=issue,
+            stats=_empty_stats(user_id, window_trading_days, issues=[issue]),
+        )
+        return 0
+
     codes = daily_universe(conn, user_id, trade_date)
     if not codes:
         record_run(
@@ -294,13 +319,12 @@ def fetch_mairui_daily_bars(
         )
         return 0
 
-    # k 未测得：保守按每标的一段，计划调用数 = N（单日）或 N（整段窗口一次）。
-    start, end = trade_date, trade_date
     issues: list[str] = []
     bars: list[DailyBar] = []
     last_received: dt.datetime | None = None
     calls = 0
     already_ready = 0
+    missing = 0
 
     if halt.is_file() or stop.is_file():
         issues.extend(["daily_bars_upstream_halted"] * len(codes))
@@ -315,29 +339,57 @@ def fetch_mairui_daily_bars(
         return 0
 
     cap = budget.cap or 0
+    batch_halted = False
     for index, code in enumerate(codes):
         if code_ready is not None and code_ready(code):
             already_ready += 1
             continue
-        if cap is not None and calls >= cap:
+        if cap - calls < len(pages):
             issues.extend(["daily_bars_quota_deferred"] * (len(codes) - index))
             break
-        try:
-            http_status, payload = send(code, start, end)
-        except (DailyHaltError, EgressDenied):
-            persist_halt(halt, HALT_LIMIT)
-            issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))
-            break
-        last_received = _stamp(now)
-        calls += 1
-        if limited(http_status, payload) or http_status in (103, 429):
-            persist_halt(halt, HALT_LIMIT)
-            issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))
-            break
-        if http_status == 200 and isinstance(payload, DailyBar):
-            bars.append(payload)
-        else:
+        code_missing = 0
+        for start, end in pages:
+            if halt.exists() or stop.exists():
+                batch_halted = True
+                break
+            try:
+                http_status, payload = send(code, start, end)
+            except (DailyHaltError, EgressDenied):
+                batch_halted = True
+                break
+            last_received = _stamp(now)
+            calls += 1
+            if limited(http_status, payload) or (
+                isinstance(payload, DailyBarsResult) and payload.halted is not None
+            ):
+                batch_halted = True
+                break
+            received = (
+                (payload,)
+                if isinstance(payload, DailyBar)
+                else tuple(payload.bars)
+                if isinstance(payload, DailyBarsResult)
+                else ()
+            )
+            expected_days = {day for day in days if start <= day <= end}
+            if http_status != 200 or not received:
+                code_missing += len(expected_days)
+                continue
+            keys = [(bar.code, bar.trade_date, bar.adj_type) for bar in received]
+            if len(set(keys)) != len(keys) or any(
+                bar.code != code or bar.trade_date not in expected_days or bar.adj_type != "none"
+                for bar in received
+            ):
+                raise ValueError("daily_bars_history_payload_outside_plan")
+            bars.extend(received)
+            code_missing += len(expected_days - {bar.trade_date for bar in received})
+        if code_missing:
+            missing += code_missing
             issues.append(f"daily_bars_missing:{code}")
+        if batch_halted:
+            persist_halt(halt, HALT_LIMIT)
+            issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))
+            break
 
     fetched_at = last_received if last_received is not None else _stamp(now)
     written = 0
@@ -352,7 +404,11 @@ def fetch_mairui_daily_bars(
         written = upsert.inserted + upsert.unchanged
         issues.extend(upsert.issues)
 
-    run_status = "ok" if last_received is not None or bars or already_ready else "skipped"
+    run_status = (
+        "partial"
+        if issues
+        else ("ok" if last_received is not None or bars or already_ready else "skipped")
+    )
     record_run(
         conn,
         trade_date,
@@ -364,6 +420,7 @@ def fetch_mairui_daily_bars(
             window_trading_days,
             codes=len(codes),
             inserted=written,
+            missing=missing,
             issues=issues,
         ),
     )

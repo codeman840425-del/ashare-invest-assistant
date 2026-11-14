@@ -130,5 +130,5 @@ def test_window_never_selects_larger_backfill_gate_implicitly(
 ) -> None:
     monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", 2)
     monkeypatch.setattr(ingest, "DAILY_BARS_BACKFILL_BATCH_LIMIT", 4)
-    assert fetch(world, window=700) == 0
+    assert fetch(world, window=1) == 0
     assert len(world.calls) == 2

@@ -192,7 +192,9 @@ def process(
         unready: set[str] = set()
 
         def code_ready(conn: Connection, code: str) -> bool:
-            ready = ready_for_window(conn, code, item["source_licence_id"], days, now=clock())
+            ready = ready_for_window(
+                conn, code, item["source_licence_id"], days, now=clock(), user_id=item["user_id"]
+            )
             if not ready:
                 unready.add(code)
             return ready
@@ -284,17 +286,6 @@ def process(
                 item["window_trading_days"],
             ):
                 raise RuntimeError("daily_bars_run_identity_changed")
-            if (
-                (continue_batches or window_deferred)
-                and isinstance(issues, (list, tuple))
-                and "daily_bars_quota_deferred" in issues
-            ):
-                resume_pending = window_deferred or any(
-                    ready_for_window(conn, code, item["source_licence_id"], days, now=clock())
-                    for code in unready
-                )
-                if not resume_pending:
-                    stats = {**stats, "issues": [*issues, "daily_bars_resume_stalled"]}
             conn.execute(
                 update(pipeline_runs)
                 .where(
@@ -304,6 +295,29 @@ def process(
                 )
                 .values(status=status, stats=stats, error=error, finished_at=clock())
             )
+            if (
+                (continue_batches or window_deferred)
+                and isinstance(issues, (list, tuple))
+                and "daily_bars_quota_deferred" in issues
+            ):
+                resume_pending = window_deferred or any(
+                    ready_for_window(
+                        conn,
+                        code,
+                        item["source_licence_id"],
+                        days,
+                        now=clock(),
+                        user_id=item["user_id"],
+                    )
+                    for code in unready
+                )
+                if not resume_pending:
+                    stats = {**stats, "issues": [*issues, "daily_bars_resume_stalled"]}
+                    conn.execute(
+                        update(pipeline_runs)
+                        .where(pipeline_runs.c.id == item["pipeline_run_id"])
+                        .values(stats=stats)
+                    )
 
         try:
             if stop.exists() or halt.exists():

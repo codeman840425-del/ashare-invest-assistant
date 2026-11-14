@@ -12,6 +12,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 
+import redis
 from sqlalchemy import Connection, Engine, select, update
 from sqlalchemy.engine import RowMapping
 
@@ -27,6 +28,7 @@ from app.ingest.daily_bars_plan import (
     segments,
     window_days,
 )
+from app.ingest.daily_bars_schedule import HistoryWindowDeferredError, delay, delayed_until
 from app.ingest.daily_lists import STOP as LISTS_STOP
 from app.ingest.daily_lists import DailyHaltError, daily_bars_seam, limited
 from app.ingest.egress import EgressDenied, single_egress
@@ -34,7 +36,6 @@ from app.marketdata import daily_bars_outbox as intents
 from app.marketdata.daily_bars import DailyBar, DailyBarsResult, _empty_stats
 from app.marketdata.daily_bars_outbox import batch_budget, valid_grant
 from app.master.vendor import licence_available
-from app.reports.service import covered
 
 GrantReader = Callable[[uuid.UUID], fetcher.DailyBarsGrant | None]
 RESUME_PENDING = "daily_bars_resume_pending"
@@ -180,9 +181,14 @@ def process(
             except DailyBarsPlanError as exc:
                 _failed(conn, item, str(exc), clock())
                 return "failed"
+            if not (stop.exists() or halt.exists()) and delayed_until(
+                conn, clock(), item["batch_kind"], item["window_trading_days"]
+            ):
+                return "delayed"
             conn.execute(update(outbox).where(outbox.c.id == item_id).values(status="running"))
         attempted = False
         resume_pending = False
+        window_deferred = False
         unready: set[str] = set()
 
         def code_ready(conn: Connection, code: str) -> bool:
@@ -194,7 +200,7 @@ def process(
         def send(
             code: str, start: dt.date, end: dt.date
         ) -> tuple[int, DailyBar | DailyBarsResult | None]:
-            nonlocal attempted
+            nonlocal attempted, window_deferred
             if (
                 continue_batches
                 and fetcher._stamp(clock).astimezone(BEIJING).date()
@@ -226,11 +232,24 @@ def process(
                     raise RuntimeError("daily_bars_authorization_changed")
                 if current["attempted_at"] is not None and not attempted:
                     raise RuntimeError("daily_bars_uncertain_attempt_no_retry")
+                if stop.exists() or halt.exists():
+                    raise UpstreamHaltError()
+                if delayed_until(
+                    reservation, clock(), item["batch_kind"], item["window_trading_days"]
+                ):
+                    window_deferred = True
+                    raise HistoryWindowDeferredError()
                 if not attempted:
                     reservation.execute(
                         update(outbox).where(outbox.c.id == item_id).values(attempted_at=clock())
                     )
             attempted = True  # The write-ahead marker is committed before transport.
+            if stop.exists() or halt.exists():
+                raise UpstreamHaltError()
+            with engine.connect() as gate:
+                if delayed_until(gate, clock(), item["batch_kind"], item["window_trading_days"]):
+                    window_deferred = True
+                    raise HistoryWindowDeferredError()
             if stop.exists() or halt.exists():
                 raise UpstreamHaltError()
             try:
@@ -266,11 +285,11 @@ def process(
             ):
                 raise RuntimeError("daily_bars_run_identity_changed")
             if (
-                continue_batches
+                (continue_batches or window_deferred)
                 and isinstance(issues, (list, tuple))
                 and "daily_bars_quota_deferred" in issues
             ):
-                resume_pending = any(
+                resume_pending = window_deferred or any(
                     ready_for_window(conn, code, item["source_licence_id"], days, now=clock())
                     for code in unready
                 )
@@ -419,18 +438,7 @@ def _resume(
                 return False
             if batch_budget(item["batch_kind"]).kind == "unset":
                 return False
-            # Continuation alone must not open the protected history window.
-            # Scheduling/initial-batch interruption and jobs:delayed are subsequent work.
-            local = now.astimezone(BEIJING)
-            history = item["batch_kind"] == "backfill" or item["window_trading_days"] not in (
-                None,
-                1,
-            )
-            if (
-                history
-                and dt.time(17) <= local.time() < dt.time(17, 45)
-                and covered(conn, local.date())
-            ):
+            if delayed_until(conn, now, item["batch_kind"], item["window_trading_days"]):
                 return False
             grant = (
                 grant_reader(item["user_id"])
@@ -456,9 +464,61 @@ def _resume(
             return True
 
 
+def wake_delayed(
+    engine: Engine,
+    client: redis.Redis,
+    *,
+    clock: fetcher.Clock = lambda: dt.datetime.now(dt.UTC),
+    stop: Path = LISTS_STOP,
+    halt: Path = fetcher.HALT,
+) -> None:
+    """Rebuild stable Redis wakeups from durable DB intents, without receipt or HTTP."""
+    if all(batch_budget(kind).kind == "unset" for kind in ("daily", "backfill")):
+        return
+    if stop.exists() or halt.exists():
+        return
+    with engine.connect() as conn:
+        if _halted(conn):
+            return
+        items = (
+            conn.execute(
+                select(outbox).where(
+                    outbox.c.kind == fetcher.KIND,
+                    (outbox.c.status == "pending")
+                    | ((outbox.c.status == "done") & (outbox.c.error_code == RESUME_PENDING)),
+                )
+            )
+            .mappings()
+            .all()
+        )
+        for item in items:
+            now = fetcher._stamp(clock)
+            if (
+                batch_budget(item["batch_kind"]).kind == "unset"
+                or now.astimezone(BEIJING).date() != item["created_at"].astimezone(BEIJING).date()
+            ):
+                continue
+            until = delayed_until(conn, now, item["batch_kind"], item["window_trading_days"])
+            if until is not None:
+                # Redis is only a wakeup; either side of ZADD may fail without losing DB work.
+                with suppress(redis.RedisError):
+                    delay(
+                        client,
+                        {
+                            "trade_date": item["trade_date"].isoformat(),
+                            "user_id": str(item["user_id"]),
+                            "window_trading_days": item["window_trading_days"],
+                            "batch_kind": item["batch_kind"],
+                            "batch_seq": item["batch_seq"],
+                        },
+                        until,
+                    )
+
+
 def tick(
     engine: Engine,
     *,
+    redis_client: redis.Redis | None = None,
     transport: fetcher.Transport | None = None,
     grant_reader: GrantReader | None = None,
     clock: fetcher.Clock = lambda: dt.datetime.now(dt.UTC),
@@ -475,16 +535,40 @@ def tick(
         _resume(engine, grant_reader=grant_reader, clock=clock, stop=stop, halt=halt)
     except OSError:
         return 0
+    if redis_client is not None:
+        wake_delayed(engine, redis_client, clock=clock, stop=stop, halt=halt)
+    item_id = None
     with engine.connect() as conn:
-        item_id = conn.execute(
-            select(outbox.c.id)
-            .where(
-                outbox.c.kind == fetcher.KIND,
-                outbox.c.status.in_(["pending", "running"]),
+        items = (
+            conn.execute(
+                select(outbox)
+                .where(
+                    outbox.c.kind == fetcher.KIND,
+                    (outbox.c.status.in_(["pending", "running"]))
+                    | ((outbox.c.status == "done") & (outbox.c.error_code == RESUME_PENDING)),
+                )
+                .order_by(outbox.c.created_at, outbox.c.batch_seq, outbox.c.id)
             )
-            .order_by(outbox.c.created_at, outbox.c.batch_seq, outbox.c.id)
-            .limit(1)
-        ).scalar_one_or_none()
+            .mappings()
+            .all()
+        )
+        for item in items:
+            if batch_budget(item["batch_kind"]).kind == "unset":
+                continue
+            stamp = fetcher._stamp(clock)
+            expired = (
+                stamp.astimezone(BEIJING).date() != item["created_at"].astimezone(BEIJING).date()
+            )
+            uncertain = item["status"] == "running" and item["attempted_at"] is not None
+            until = (
+                None
+                if expired or uncertain
+                else delayed_until(conn, stamp, item["batch_kind"], item["window_trading_days"])
+            )
+            if until is not None and not (stop.exists() or halt.exists()):
+                continue
+            if item["status"] != "done" and item_id is None:
+                item_id = item["id"]
     if item_id is None:
         return 0
     result = daily_bars_seam(
@@ -503,4 +587,6 @@ def tick(
         # An IO failure leaves the durable marker pending, without replaying HTTP.
         with suppress(OSError):
             _resume(engine, grant_reader=grant_reader, clock=clock, stop=stop, halt=halt)
+    if result in {"done", "delayed"} and redis_client is not None:
+        wake_delayed(engine, redis_client, clock=clock, stop=stop, halt=halt)
     return int(result in {"done", "failed", "halted"})

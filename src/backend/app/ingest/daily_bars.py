@@ -25,6 +25,7 @@ from sqlalchemy.engine import Connection
 
 from app.common.errors import AppError
 from app.ingest.daily_bars_plan import DailyBarsPlanError, segments, window_days
+from app.ingest.daily_bars_schedule import HistoryWindowDeferredError
 from app.ingest.daily_lists import STOP as LISTS_STOP
 from app.ingest.daily_lists import DailyHaltError, limited
 from app.ingest.egress import HALT_LIMIT, EgressDenied
@@ -340,6 +341,7 @@ def fetch_mairui_daily_bars(
 
     cap = budget.cap or 0
     batch_halted = False
+    window_deferred = False
     for index, code in enumerate(codes):
         if code_ready is not None and code_ready(code):
             already_ready += 1
@@ -354,6 +356,9 @@ def fetch_mairui_daily_bars(
                 break
             try:
                 http_status, payload = send(code, start, end)
+            except HistoryWindowDeferredError:
+                window_deferred = True
+                break
             except (DailyHaltError, EgressDenied):
                 batch_halted = True
                 break
@@ -386,6 +391,9 @@ def fetch_mairui_daily_bars(
         if code_missing:
             missing += code_missing
             issues.append(f"daily_bars_missing:{code}")
+        if window_deferred:
+            issues.extend(["daily_bars_quota_deferred"] * (len(codes) - index))
+            break
         if batch_halted:
             persist_halt(halt, HALT_LIMIT)
             issues.extend(["daily_bars_upstream_halted"] * (len(codes) - index))

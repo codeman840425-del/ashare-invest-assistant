@@ -614,6 +614,19 @@ def worker_tick(settings: Settings, client: redis.Redis | None = None) -> list[t
                 continue
             try:
                 n = fn(settings, **args)
+                if task == DAILY_BARS_FETCH:
+                    from app.ingest.daily_bars_schedule import delay, delayed_until
+
+                    stamp = dt.datetime.now(dt.UTC)
+                    with _engine(settings).connect() as conn:
+                        until = delayed_until(
+                            conn, stamp, args.get("batch_kind", "daily"),
+                            args.get("window_trading_days"),
+                        )
+                    if until is not None:
+                        delay(r, args, until)
+                        done.append((task, "delayed"))
+                        continue
             except Exception as exc:  # noqa: BLE001  只记类型，不输出连接串或参数
                 log.warning("worker 任务 %s 失败：%s", task, type(exc).__name__)
                 done.append((task, "failed"))

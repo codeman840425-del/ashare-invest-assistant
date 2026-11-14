@@ -531,7 +531,7 @@ def test_backfill_cli_apply_enqueues_once(temp_db: SimpleNamespace) -> None:
         assert client.llen(jobs_mod.QUEUE_KEY) == 1
         body = json.loads(client.lrange(jobs_mod.QUEUE_KEY, 0, 0)[0])
         assert body["task"] == "daily_bars_fetch"
-        assert body["args"] == {"trade_date": "2026-11-10", "window_trading_days": window}
+        assert body["args"] == {"trade_date": "2026-11-10", "window_trading_days": window, "batch_kind": "backfill"}
         with temp_db.engine.begin() as conn:
             conn.execute(text("TRUNCATE market.trading_calendar"))
             _seed_calendar_span(conn, dt.date(2025, 1, 1), OPEN_10)

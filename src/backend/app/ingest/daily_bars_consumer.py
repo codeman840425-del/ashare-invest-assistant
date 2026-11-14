@@ -1,7 +1,7 @@
 """DB-owned daily-bar consumer. No Redis dependency or default live transport.
 
-Windows use real open days and an explicitly verified page size. Unverified
-multi-day requests fail closed; quota continuation is subsequent C2 work.
+Windows use real open days and an explicitly verified page size. The tick
+coordinates durable quota continuation; process remains a single-batch primitive.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 
 from sqlalchemy import Connection, Engine, select, update
@@ -19,15 +20,24 @@ from app.db.tables.licences import user_data_licence_status as licences
 from app.db.tables.realtime import pipeline_runs
 from app.db.tables.users import users
 from app.ingest import daily_bars as fetcher
-from app.ingest.daily_bars_plan import DailyBarsPlanError, ready_for_window, segments, window_days
+from app.ingest.daily_bars_plan import (
+    BEIJING,
+    DailyBarsPlanError,
+    ready_for_window,
+    segments,
+    window_days,
+)
 from app.ingest.daily_lists import STOP as LISTS_STOP
 from app.ingest.daily_lists import DailyHaltError, daily_bars_seam, limited
 from app.ingest.egress import EgressDenied, single_egress
+from app.marketdata import daily_bars_outbox as intents
 from app.marketdata.daily_bars import DailyBar, DailyBarsResult, _empty_stats
 from app.marketdata.daily_bars_outbox import batch_budget, valid_grant
 from app.master.vendor import licence_available
+from app.reports.service import covered
 
 GrantReader = Callable[[uuid.UUID], fetcher.DailyBarsGrant | None]
+RESUME_PENDING = "daily_bars_resume_pending"
 
 
 class UpstreamHaltError(RuntimeError):
@@ -101,6 +111,7 @@ def process(
     stop: Path = LISTS_STOP,
     halt: Path = fetcher.HALT,
     page_days: int | None = None,
+    continue_batches: bool = False,
 ) -> str:
     """Reserve before HTTP, never replay an uncertain batch, update its original run."""
     if transport is None:
@@ -145,6 +156,13 @@ def process(
                 str(item["user_id"]),
             ):
                 raise RuntimeError("daily_bars_run_identity_changed")
+            if (
+                continue_batches
+                and fetcher._stamp(clock).astimezone(BEIJING).date()
+                != item["created_at"].astimezone(BEIJING).date()
+            ):
+                _failed(conn, item, "daily_bars_batch_expired", clock())
+                return "failed"
             if item["attempted_at"] is not None:
                 _failed(conn, item, "daily_bars_uncertain_attempt_no_retry", clock())
                 return "failed"
@@ -164,11 +182,25 @@ def process(
                 return "failed"
             conn.execute(update(outbox).where(outbox.c.id == item_id).values(status="running"))
         attempted = False
+        resume_pending = False
+        unready: set[str] = set()
+
+        def code_ready(conn: Connection, code: str) -> bool:
+            ready = ready_for_window(conn, code, item["source_licence_id"], days, now=clock())
+            if not ready:
+                unready.add(code)
+            return ready
 
         def send(
             code: str, start: dt.date, end: dt.date
         ) -> tuple[int, DailyBar | DailyBarsResult | None]:
             nonlocal attempted
+            if (
+                continue_batches
+                and fetcher._stamp(clock).astimezone(BEIJING).date()
+                != item["created_at"].astimezone(BEIJING).date()
+            ):
+                raise DailyBarsPlanError("daily_bars_batch_expired")
             if stop.exists() or halt.exists():
                 raise UpstreamHaltError()
             with engine.begin() as reservation:
@@ -221,6 +253,7 @@ def process(
             stats: dict[str, object],
             error: str | None = None,
         ) -> None:
+            nonlocal resume_pending
             issues = stats.get("issues")
             if isinstance(issues, (list, tuple)) and "daily_bars_upstream_halted" in issues:
                 raise UpstreamHaltError()
@@ -232,6 +265,17 @@ def process(
                 item["window_trading_days"],
             ):
                 raise RuntimeError("daily_bars_run_identity_changed")
+            if (
+                continue_batches
+                and isinstance(issues, (list, tuple))
+                and "daily_bars_quota_deferred" in issues
+            ):
+                resume_pending = any(
+                    ready_for_window(conn, code, item["source_licence_id"], days, now=clock())
+                    for code in unready
+                )
+                if not resume_pending:
+                    stats = {**stats, "issues": [*issues, "daily_bars_resume_stalled"]}
             conn.execute(
                 update(pipeline_runs)
                 .where(
@@ -260,13 +304,7 @@ def process(
                     halt_path=halt,
                     run_recorder=record,
                     page_days=page_days,
-                    code_ready=lambda code: ready_for_window(
-                        conn,
-                        code,
-                        item["source_licence_id"],
-                        days,
-                        now=clock(),
-                    ),
+                    code_ready=lambda code: code_ready(conn, code),
                 )
                 conn.execute(
                     update(outbox)
@@ -274,7 +312,7 @@ def process(
                     .values(
                         status="done",
                         finished_at=clock(),
-                        error_code=None,
+                        error_code=RESUME_PENDING if resume_pending else None,
                     )
                 )
             return "done"
@@ -303,6 +341,121 @@ def process(
             return "failed"
 
 
+def _end_resume(conn: Connection, item: RowMapping, issue: str, *, halted: bool = False) -> None:
+    """Close only continuation; retain committed bars and their original run stats."""
+    stats = conn.execute(
+        select(pipeline_runs.c.stats).where(pipeline_runs.c.id == item["pipeline_run_id"])
+    ).scalar_one()
+    stats = {**stats, "issues": [*stats.get("issues", []), issue]}
+    conn.execute(
+        update(pipeline_runs)
+        .where(pipeline_runs.c.id == item["pipeline_run_id"])
+        .values(stats=stats)
+    )
+    conn.execute(
+        update(outbox)
+        .where(outbox.c.id == item["id"])
+        .values(
+            status="halted" if halted else "done",
+            error_code=issue,
+        )
+    )
+
+
+def _resume_stopped(conn: Connection, item: RowMapping, stop: Path, halt: Path) -> bool:
+    for gate in (stop, halt):
+        try:
+            gate.lstat()
+        except FileNotFoundError:
+            continue
+        persisted = fetcher.persist_halt(halt)
+        _end_resume(
+            conn,
+            item,
+            "daily_bars_upstream_halted" if persisted else "daily_bars_halt_persist_failed",
+            halted=True,
+        )
+        return True
+    return False
+
+
+def _resume(
+    engine: Engine,
+    *,
+    grant_reader: GrantReader | None,
+    clock: fetcher.Clock,
+    stop: Path,
+    halt: Path,
+) -> bool:
+    """Recover committed progress under the same send lock, without replaying HTTP."""
+    with single_egress(engine) as lease:
+        if lease is None:
+            return False
+        with engine.begin() as conn:
+            if _halted(conn):
+                return False
+            item = (
+                conn.execute(
+                    select(outbox)
+                    .where(
+                        outbox.c.kind == fetcher.KIND,
+                        outbox.c.status == "done",
+                        outbox.c.error_code == RESUME_PENDING,
+                    )
+                    .order_by(outbox.c.created_at, outbox.c.batch_seq, outbox.c.id)
+                    .limit(1)
+                    .with_for_update()
+                )
+                .mappings()
+                .first()
+            )
+            if item is None:
+                return False
+            now = fetcher._stamp(clock)
+            if now.astimezone(BEIJING).date() != item["created_at"].astimezone(BEIJING).date():
+                _end_resume(conn, item, "daily_bars_batch_expired")
+                return False
+            if _resume_stopped(conn, item, stop, halt):
+                return False
+            if batch_budget(item["batch_kind"]).kind == "unset":
+                return False
+            # Continuation alone must not open the protected history window.
+            # Scheduling/initial-batch interruption and jobs:delayed are subsequent work.
+            local = now.astimezone(BEIJING)
+            history = item["batch_kind"] == "backfill" or item["window_trading_days"] not in (
+                None,
+                1,
+            )
+            if (
+                history
+                and dt.time(17) <= local.time() < dt.time(17, 45)
+                and covered(conn, local.date())
+            ):
+                return False
+            grant = (
+                grant_reader(item["user_id"])
+                if grant_reader
+                else fetcher.read_daily_bars_grant(now=now, user_id=item["user_id"])
+            )
+            if not _authorized(conn, item, grant, now):
+                _end_resume(conn, item, "data_licence_unavailable")
+                return False
+            if _resume_stopped(conn, item, stop, halt) or _halted(conn):
+                return False
+            intents.enqueue(
+                conn,
+                trade_date=item["trade_date"],
+                user_id=item["user_id"],
+                window_trading_days=item["window_trading_days"],
+                batch_kind=item["batch_kind"],
+                batch_seq=item["batch_seq"] + 1,
+                grant_reader=lambda _: grant,
+                now=now,
+            )
+            conn.execute(update(outbox).where(outbox.c.id == item["id"]).values(error_code=None))
+            return True
+
+
 def tick(
     engine: Engine,
     *,
@@ -318,6 +471,10 @@ def tick(
         return 0
     if transport is None:
         return 0
+    try:
+        _resume(engine, grant_reader=grant_reader, clock=clock, stop=stop, halt=halt)
+    except OSError:
+        return 0
     with engine.connect() as conn:
         item_id = conn.execute(
             select(outbox.c.id)
@@ -325,7 +482,7 @@ def tick(
                 outbox.c.kind == fetcher.KIND,
                 outbox.c.status.in_(["pending", "running"]),
             )
-            .order_by(outbox.c.created_at, outbox.c.id)
+            .order_by(outbox.c.created_at, outbox.c.batch_seq, outbox.c.id)
             .limit(1)
         ).scalar_one_or_none()
     if item_id is None:
@@ -340,5 +497,10 @@ def tick(
         stop=stop,
         halt=halt,
         page_days=page_days,
+        continue_batches=True,
     )
+    if result == "done":
+        # An IO failure leaves the durable marker pending, without replaying HTTP.
+        with suppress(OSError):
+            _resume(engine, grant_reader=grant_reader, clock=clock, stop=stop, halt=halt)
     return int(result in {"done", "failed", "halted"})

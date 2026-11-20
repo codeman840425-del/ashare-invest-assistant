@@ -119,6 +119,7 @@ tests:
   - {"file": "tests/backend/unit/test_master_sync_pg_s2.py", "group": "serial_pg", "keywords": ["conn->owned_engine->pg_url", "psycopg.connect", "docker", "tmp_path.parent UUID filename"], "unverified": false}
   - {"file": "tests/backend/unit/test_master_terms_offline.py", "group": "parallel", "keywords": ["fake DB calls", "deny_network monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_master_xlsx_offline_r_b3.py", "group": "parallel", "keywords": ["in-memory ZIP/XML", "forbid_network monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_pn03_entry_wiring.py", "group": "serial_pg", "keywords": ["pg_url isolated PostgreSQL", "docker", "local HTTP and PS1 docker fake", "socket egress denied"], "unverified": false}
   - {"file": "tests/backend/unit/test_pn06_entry_wiring.py", "group": "serial_pg", "keywords": ["pg_url isolated PostgreSQL", "docker", "local HTTP and PS1 docker fake", "socket egress denied"], "unverified": false}
   - {"file": "tests/backend/unit/test_quotes_empty_s3.py", "group": "parallel", "keywords": ["fake DB", "ASGI TestClient", "subprocess import check", "socket monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_s3_report_chain_coverage.py", "group": "parallel", "keywords": ["fake RedisQueue", "isolated_jobs autouse monkeypatch", "TASKS restored via setitem"], "unverified": false}

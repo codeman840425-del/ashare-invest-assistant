@@ -109,6 +109,8 @@ def _condition(expression, event, docs_only):
     expression = expression.removeprefix("${{").removesuffix("}}").strip()
     expression = expression.replace("github.event_name", repr(event))
     expression = expression.replace("needs.changes.outputs.docs_only", repr(docs_only))
+    # The aggregate backend gate must run after failed upstreams to report their status.
+    expression = expression.replace("always()", "True")
     tree = ast.parse(expression.replace("&&", " and ").replace("||", " or "), mode="eval")
     assert all(isinstance(node, (ast.Expression, ast.BoolOp, ast.And, ast.Or,
                                 ast.Compare, ast.Eq, ast.NotEq, ast.Constant))
@@ -126,14 +128,19 @@ EMPTY_DOCS_JOBS = {
 
 def test_required_check_routing_and_audited_empty_jobs():
     jobs = WORKFLOW["jobs"]
-    assert set(jobs) == {"changes", *CHECKS, "contract-docs", *EMPTY_DOCS_JOBS}
+    backend_upstreams = ("backend-lint", "backend-mypy", "backend-tests")
+    assert set(jobs) == {"changes", *CHECKS, *backend_upstreams, "contract-docs", *EMPTY_DOCS_JOBS}
     for key, name in CHECKS.items():
         assert jobs[key]["name"] == name
         if key in ALWAYS_RUN:
             assert "needs" not in jobs[key] and "if" not in jobs[key]
         else:
             assert jobs[key + "-docs"]["name"] == name
-            assert jobs[key]["needs"] == jobs[key + "-docs"]["needs"] == "changes"
+            assert jobs[key + "-docs"]["needs"] == "changes"
+            if key == "backend":
+                assert jobs[key]["needs"] == ["changes", *backend_upstreams]
+            else:
+                assert jobs[key]["needs"] == "changes"
     for key, job in jobs.items():
         if _condition(job.get("if", "True"), "pull_request", "true"):
             commands = [line.strip() for step in job["steps"]
@@ -323,7 +330,11 @@ def test_workflow_ignores_pythonpath_injection(workflow_repo, tmp_path):
     ("migrations", ["alembic upgrade head", "alembic downgrade base"]),
 ])
 def test_full_jobs_retain_heavy_commands(key, commands):
-    steps = WORKFLOW["jobs"][key]["steps"]
+    # The backend required check aggregates three upstream jobs plus its own merge/ratchet steps.
+    job_keys = {
+        "backend": ("backend-lint", "backend-mypy", "backend-tests", "backend"),
+    }.get(key, (key,))
+    steps = [step for job_key in job_keys for step in WORKFLOW["jobs"][job_key]["steps"]]
     runs = "\n".join(step.get("run", "") for step in steps)
     for command in commands:
         assert command in runs

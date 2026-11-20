@@ -1,0 +1,7 @@
+<testsuite>
+  <testcase classname="backend.contract.test_contract_stub" name="test_stub_conforms_to_contract" time="0.902" />
+  <testcase classname="backend.contract.test_contract_stub" name="test_stub_conforms_to_contract[GET /health]" time="0.142" />
+  <testcase classname="backend.contract.test_contract_stub" name="test_stub_conforms_to_contract[GET /me]" time="0.021" />
+  <testcase classname="backend.contract.test_contract_stub" name="test_contract_checker_catches_violation" time="0.005" />
+  <testcase classname="backend.contract.test_contract_stub" name="test_stub_paths_exist_in_api_contract_doc" time="0.002" />
+</testsuite>

@@ -97,18 +97,63 @@ jobs:
         run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base-ready.json" --coverage-output "${RUNNER_TEMP}/coverage-base-ready-coverage.json"
 
   # ------------------------------------------------------------------ 后端：ruff / mypy strict / pytest + 覆盖率
-  backend:
+  backend-lint:
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
-    name: backend (ruff, mypy, pytest+coverage)
+    name: backend lint (ruff)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: src/backend/uv.lock
+      - name: uv sync --frozen
+        working-directory: src/backend
+        run: uv sync --frozen
+      - name: ruff check
+        working-directory: src/backend
+        run: uv run --frozen ruff check --output-format=github .
+
+  backend-mypy:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
+    name: backend typecheck (mypy --strict)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: src/backend/uv.lock
+      - name: uv sync --frozen
+        working-directory: src/backend
+        run: uv sync --frozen
+      - name: mypy --strict
+        working-directory: src/backend
+        run: uv run --frozen mypy
+
+  backend-tests:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
+    name: backend tests (shard ${{ matrix.shard }}/6)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
-    # T-O80：慢次 pytest+覆盖率约 28 分钟，自检约 0.4 分钟，曾顶满 30 分钟；原运行预算为 45 分钟。
-    # T-O89：与 coverage-base 并行，pytest 后再冻结基线；最坏仍可能额外等待 main 归档 1800 秒。
-    # 保留原 45 分钟运行余量 + 最多 30 分钟等待 = 75 分钟，避免等待挤占测试/收尾预算。
-    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    timeout-minutes: 30
     # T-O66：t_t41 / t_t45 读 TT41_DATABASE_URL；T-O67：A2–A31 读 PGHOST 等，均指向本 job 内建 PG（ci-only）。
     services:
       db:
@@ -124,6 +169,8 @@ jobs:
       # CI 专用口令（与 contract/migrations 一致），不是真实密钥；驱动用 psycopg 与用例注释一致。
       TT41_DATABASE_URL: postgresql+psycopg://aia:ci-only@127.0.0.1:5432/aia
       DATABASE_URL: postgresql://aia:ci-only@127.0.0.1:5432/aia
+      # Every matrix shard receives the same isolated service; src/backend/tests require this variable.
+      AIA_TEST_DATABASE_URL: postgresql://aia:ci-only@127.0.0.1:5432/aia
       # T-O67：正式 A2–A31 读 PGHOST/PGPORT/PGUSER（缺则 skip）；口令走 PGPASSWORD / libpq，不进测试源码 URL。
       PGHOST: 127.0.0.1
       PGPORT: "5432"
@@ -153,12 +200,6 @@ jobs:
       - name: uv sync --frozen
         working-directory: src/backend
         run: uv sync --frozen
-      - name: ruff check
-        working-directory: src/backend
-        run: uv run --frozen ruff check --output-format=github .
-      - name: mypy --strict
-        working-directory: src/backend
-        run: uv run --frozen mypy
       - name: 迁移到 head（供 TT41_DATABASE_URL / t_t41·t_t45）
         working-directory: src/backend
         run: uv run --frozen alembic upgrade head
@@ -199,14 +240,42 @@ jobs:
           "$py" scripts/ci/owned_unix_resources.py plan
           "$py" scripts/ci/owned_unix_resources.py apply --receipt "$AIA_CI_UNIX_RECEIPT"
           "$py" scripts/ci/owned_unix_resources.py check --receipt "$AIA_CI_UNIX_RECEIPT"
+      - name: 收集未分片基线
+        if: ${{ matrix.shard == 1 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          py=src/backend/.venv/bin/python
+          if [ -f tests/requirements.txt ]; then
+            uv pip install --python "$py" -r tests/requirements.txt "pytest-cov==${PYTEST_COV_VERSION}"
+          else
+            uv pip install --python "$py" "pytest-cov==${PYTEST_COV_VERSION}"
+          fi
+          # A1r 正式例 ③/⑤（__import__('requests')、urllib3.PoolManager）需要这两库在测试环境里
+          uv pip install --python "$py" "requests==${REQUESTS_VERSION}" "urllib3==${URLLIB3_VERSION}"
+          dirs=()
+          for d in src/backend/tests tests/backend tests/replay; do
+            [ -d "$d" ] && dirs+=("$d")
+          done
+          if [ "${#dirs[@]}" -eq 0 ]; then
+            echo "::error title=backend tests::没有找到后端测试（src/backend/tests、tests/backend、tests/replay 都不存在）——需要测试角色合入 T-T01 测试骨架"
+            exit 1
+          fi
+          ini=()
+          [ -f tests/pytest.ini ] && ini=(-c tests/pytest.ini)
+          PYTHONPATH=src/backend "$py" -m pytest -p scripts.ci.pytest_shard "${ini[@]}" "${dirs[@]}" --collect-only -q > "${RUNNER_TEMP}/baseline-collect.txt"
       - name: pytest + 覆盖率
         shell: bash
         env:
+          AIA_SHARD_INDEX: ${{ matrix.shard }}
+          AIA_SHARD_TOTAL: 6
           AIA_CI_PG_SERVICE_ID: ${{ job.services.db.id }}
         run: |
           set -euo pipefail
           py=src/backend/.venv/bin/python
-          # Observe metadata only; preserve pytest argv (plus durations) and exit.
+          export AIA_SHARD_REPORT="${RUNNER_TEMP}/shard-report.json"
+          export COVERAGE_FILE="${RUNNER_TEMP}/coverage-shard-${AIA_SHARD_INDEX}.data"
+          # Observe metadata only; preserve the pytest exit code.
           "$py" scripts/ci/observe_template_connections.py &
           template_observer_pid=$!
           stop_template_observer() {
@@ -233,16 +302,12 @@ jobs:
           fi
           ini=()
           [ -f tests/pytest.ini ] && ini=(-c tests/pytest.ini)
-          PYTHONPATH=src/backend "$py" -m pytest -p scripts.ci.pytest_safe_failures "${ini[@]}" "${dirs[@]}" \
+          PYTHONPATH=src/backend "$py" -m pytest -p scripts.ci.pytest_safe_failures -p scripts.ci.pytest_shard "${ini[@]}" "${dirs[@]}" \
             --durations=30 --durations-min=0.5 \
             --cov=src/backend/app --cov-report=term-missing:skip-covered \
-            --cov-report="json:${RUNNER_TEMP}/coverage.json" \
-            --junitxml="${RUNNER_TEMP}/backend-pytest.xml"
-      - name: 确认 A1s–A32 与 t_t41 已执行（未因缺库 skip）
-        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
-        run: python3 scripts/ci/assert_a1s_a32_ran.py "${RUNNER_TEMP}/backend-pytest.xml"
+            --junitxml="${RUNNER_TEMP}/backend-pytest-shard-${AIA_SHARD_INDEX}.xml"
       - name: 后端自检 A1s/A1r/A28–A31（A32 在 tb90，正式例已覆盖）
-        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
+        if: ${{ !cancelled() && matrix.shard == 1 && hashFiles('src/backend/.venv/bin/python') != '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -252,6 +317,122 @@ jobs:
             src/backend/selfchecks/test_tb116d_a1r_runtime.py \
             src/backend/selfchecks/test_tb116d_a28_a32.py \
             --junitxml="${RUNNER_TEMP}/selfcheck-a1s-a32.xml"
+      - name: 正常收尾本 run 新建的 0030 模板与 head 自检库
+        if: ${{ always() }}
+        env:
+          AIA_CI_PG_SERVICE_ID: ${{ job.services.db.id }}
+        run: |
+          set -euo pipefail
+          if [ -f "$AIA_CI_TEMPLATE_RECEIPT" ]; then
+            bash scripts/ci/prepare_tt50_template.sh cleanup
+          fi
+      - name: 正常收尾本 run 的精确自有 Unix 资源
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if [ -f "$AIA_CI_UNIX_RECEIPT" ]; then
+            src/backend/.venv/bin/python scripts/ci/owned_unix_resources.py cleanup --receipt "$AIA_CI_UNIX_RECEIPT"
+          fi
+      - name: 上传后端分片测量
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backend-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/coverage-shard-${{ matrix.shard }}.data
+            ${{ runner.temp }}/backend-pytest-shard-${{ matrix.shard }}.xml
+            ${{ runner.temp }}/shard-report.json
+            ${{ runner.temp }}/baseline-collect.txt
+            ${{ runner.temp }}/selfcheck-a1s-a32.xml
+          if-no-files-found: error
+          retention-days: 14
+
+  backend:
+    name: backend (ruff, mypy, pytest+coverage)
+    needs: [changes, backend-lint, backend-mypy, backend-tests]
+    # Docs-only PRs use the explicit substitute below; every other event retains the aggregate gate.
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-24.04
+    # Preserve main's 45-minute run budget plus up to 30 minutes waiting for the exact-base archive.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: 确认所有后端上游成功
+        env:
+          BACKEND_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, sys
+          failed = [name for name, job in json.loads(os.environ["BACKEND_NEEDS"]).items() if job["result"] != "success"]
+          if failed:
+              print("::error title=backend::上游未成功: " + ", ".join(failed))
+              sys.exit(1)
+          PYTHON
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: src/backend/uv.lock
+      - name: uv sync --frozen
+        working-directory: src/backend
+        run: uv sync --frozen
+      - name: 安装覆盖率合并依赖
+        run: uv pip install --python src/backend/.venv/bin/python "pytest-cov==${PYTEST_COV_VERSION}"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: backend-shard-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/shards
+      - name: 核对分片归档完整性
+        run: |
+          python3 - <<'PYTHON'
+          import os, shutil, sys
+          from pathlib import Path
+          temp = Path(os.environ["RUNNER_TEMP"])
+          root = temp / "shards"
+          for pattern, count in (("coverage-shard-*.data", 6), ("backend-pytest-shard-*.xml", 6),
+                                 ("shard-report.json", 6), ("baseline-collect.txt", 1), ("selfcheck-a1s-a32.xml", 1)):
+              paths = list(root.rglob(pattern))
+              if len(paths) != count:
+                  print(f"::error title=backend artifacts::{pattern}: expected {count}, got {len(paths)}")
+                  sys.exit(1)
+              if pattern.startswith(("coverage-shard-", "backend-pytest-shard-")):
+                  expected = {pattern.replace("*", str(i)) for i in range(1, 7)}
+                  if {p.name for p in paths} != expected:
+                      print(f"::error title=backend artifacts::{pattern}: missing or duplicate shard")
+                      sys.exit(1)
+          shutil.copyfile(next(root.rglob("selfcheck-a1s-a32.xml")), temp / "selfcheck-a1s-a32.xml")
+          PYTHON
+      # T-T93：分组以 tests/ci-groups.yaml 为准；每片独立 runner（自有 PG/docker/端口/tmp）且单 worker 顺序执行，
+      # serial_* 不与任何并发测试共享资源。并集精确比对参数，仅归一化随机 UUID。
+      - name: 校验分片并集与串行资源组
+        run: |
+          uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_shard_union.py \
+            --baseline "${RUNNER_TEMP}"/shards/*/baseline-collect.txt \
+            --config scripts/ci/test-shards.json --groups tests/ci-groups.yaml --junit "${RUNNER_TEMP}/shards" \
+            "${RUNNER_TEMP}"/shards/*/shard-report.json
+      - name: 合并覆盖率与 JUnit
+        run: |
+          set -euo pipefail
+          py=src/backend/.venv/bin/python
+          "$py" scripts/ci/check_coverage_data.py "${RUNNER_TEMP}"/shards/*/coverage-shard-*.data
+          "$py" -m coverage combine --keep --data-file="${RUNNER_TEMP}/.coverage" "${RUNNER_TEMP}"/shards/*/coverage-shard-*.data
+          "$py" -m coverage json --data-file="${RUNNER_TEMP}/.coverage" -o "${RUNNER_TEMP}/coverage.json"
+          "$py" -m coverage report --data-file="${RUNNER_TEMP}/.coverage" --skip-covered
+          python3 scripts/ci/merge_junit.py --output "${RUNNER_TEMP}/backend-pytest.xml" "${RUNNER_TEMP}"/shards/*/backend-pytest-shard-*.xml
+      - name: 确认 A1s–A32 与 t_t41 已执行（未因缺库 skip）
+        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
+        run: python3 scripts/ci/assert_a1s_a32_ran.py "${RUNNER_TEMP}/backend-pytest.xml"
+      # T-O100 / T-G07：分片后真实 PG 用例（ci-groups.yaml serial_pg）跳过数不得超过 main 基线。
+      - name: 确认 serial_pg 用例未悄悄变成跳过
+        run: |
+          uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_serial_skips.py \
+            "${RUNNER_TEMP}/backend-pytest.xml" --groups tests/ci-groups.yaml --config scripts/ci/test-shards.json
       - name: 冻结可信 base 覆盖率棘轮基线
         if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
         env:
@@ -280,22 +461,6 @@ jobs:
             ${{ runner.temp }}/selfcheck-a1s-a32.xml
           if-no-files-found: error
           retention-days: 90
-      - name: 正常收尾本 run 新建的 0030 模板与 head 自检库
-        if: ${{ always() }}
-        env:
-          AIA_CI_PG_SERVICE_ID: ${{ job.services.db.id }}
-        run: |
-          set -euo pipefail
-          if [ -f "$AIA_CI_TEMPLATE_RECEIPT" ]; then
-            bash scripts/ci/prepare_tt50_template.sh cleanup
-          fi
-      - name: 正常收尾本 run 的精确自有 Unix 资源
-        if: ${{ always() }}
-        run: |
-          set -euo pipefail
-          if [ -f "$AIA_CI_UNIX_RECEIPT" ]; then
-            src/backend/.venv/bin/python scripts/ci/owned_unix_resources.py cleanup --receipt "$AIA_CI_UNIX_RECEIPT"
-          fi
 
   # ------------------------------------------------------------------ 前端：eslint / tsc / vitest / pnpm audit
   frontend:

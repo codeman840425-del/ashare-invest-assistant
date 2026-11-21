@@ -174,3 +174,5 @@ tests:
   - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "alembic upgrade"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1b_completion_evidence_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata and purge wiring", "no IO"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1b_completion_evidence_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "synthetic evidence"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb172b2a_evidence_store_offline.py", "group": "parallel", "keywords": ["pure validation", "synthetic materials"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb172b2a_evidence_store_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "isolated database", "alembic upgrade"], "unverified": false}

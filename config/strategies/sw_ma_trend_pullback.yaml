@@ -1,5 +1,11 @@
 key: sw_ma_trend_pullback
-narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式卡 v2（T-R20；v1 为 T-R15）
+narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式卡 v3（T-R88；v2 为 T-R20；v1 为
+  T-R15）
+
+  > **v3 变更（T-R88/T-R88c，按 T-R87 出处表补参数出处，并入 T-R91 约束和成本补文）**：版本 v2 → v3；本版除补参数出处外，还补
+  A 股约束和成本节；规则、参数、阈值、data_needs、universe、screen、costs 均不变；夹具及期望值不变。v2 原文冻结在 `cards/history/sw_ma_trend_pullback.v2.md`。新版本须重新导入并重跑
+  G1–G6；后续由正式单 T-R88（`docs/handover/team/tasks/T-R88.md`）承接导入、G1–G6、生成快照/自检适配及运行接线，待
+  Grok 排期，本 PR 不执行、不激活；lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
 
 
   > 正式卡（非 catalog 草案、非 `_template.md` 示例）。导入格式：plan 2.5.14 A 节三个带标签块（`strategy-card`
@@ -33,7 +39,7 @@ narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式�
 
   ## 时点 / 单位 / 复权 / 预热
 
-  - 日线盘后（`daily_close`）求值，只用 as_of 当日及以前的有效日 K；信号最早 T+1 09:30 执行，模拟入场价 = T+1 开盘价；季报类特征按
+  - 日线盘后（`daily_close`）求值，只用 as_of 当日及以前的有效日 K；信号最早 T+1 09:30 执行，模拟入场价 = T+1 开盘价（出处：docs/plan.md:1283；出处：src/backend/app/tracking/engine.py:154）；季报类特征按
   plrq 次一交易日 09:30 可见；公告按 2.12.2 次日开盘生效。无未来数据。
 
   - **价格口径（plan 2.5.14 T-R15 裁定⓪）**：全部价格规则统一 qfq，基准日 = as_of（T）：`x_qfq(d)=x(d)×A(d)/A(T)`，A(d)
@@ -50,11 +56,43 @@ narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式�
   在计划确认时按草案 `market_rule_version_id` 校验，不在卡内重算）。T+1：买入当日可卖 0，卖出信号照常、执行层 `T1_NOT_SELLABLE`。
 
 
+  ## A 股约束（补充执行口径）
+
+  - 仅解释候选信号的交易边界，不构成荐股，不承诺收益；候选信号不等于可成交。
+
+  - ST/*ST、退市整理、停牌仍由 G-01 处理；ST/*ST、退市整理阻断买入方向候选信号的执行，持仓退出仍按原规则评估。（docs/strategies/cards/history/sw_ma_trend_pullback.v2.md:120；docs/strategies/_template.md:134；docs/strategies/system_components_T-R15.md:8）。
+
+  - 普通有涨跌幅限制交易日：主板普通股 10%；主板 ST/*ST 在 2026-07-06 前为 5%，当天起为 10%；创业板/科创板含风险警示均为 20%，北交所含风险警示为
+  30%。按交易日读取 config/market_rules.yaml 的有效段；2023-04-10 前未建模。本卡仍不扫描北交所，列出 30% 不扩大 universe（config/market_rules.yaml:4；config/market_rules.yaml:6；config/market_rules.yaml:8；config/market_rules.yaml:9；config/market_rules.yaml:10；config/market_rules.yaml:11；config/market_rules.yaml:12；config/market_rules.yaml:69；config/market_rules.yaml:129）。
+
+  - 沪深注册制新股上市前 5 个交易日、北交所新股首日及退市整理首日为配置列出的无涨跌幅例外，不把常规比例硬套到无涨跌幅日；北交所例外仅作完整口径说明（config/market_rules.yaml:14；config/market_rules.yaml:15；config/market_rules.yaml:16）。
+
+  - T+1：当日新买股份不可当日卖出；原退出候选信号照常评估，执行时受可卖数量限制（config/market_rules.yaml:36；docs/strategies/cards/sw_ma_trend_pullback.md:18）。
+
+  - 停牌买卖均不可执行；一字涨停阻买、一字跌停阻卖，原卖出候选信号可以保留但不得记为成交；不得靠加大滑点模拟不可成交交易（config/market_rules.yaml:58；config/market_rules.yaml:59；config/market_rules.yaml:60；docs/strategies/system_components_T-R15.md:13；docs/strategies/_template.md:268）。
+
+  - 买入沿用科创板至少 200 股，其余所含板块 100 股整数倍；零股一次性卖出。科创板 200 股以上按 1 股递增在配置中仅部分核实，完整依据未验证（config/market_rules.yaml:18；config/market_rules.yaml:19；config/market_rules.yaml:20；config/market_rules.yaml:23）。
+
+
   ## 成本与滑点（`epistemic: estimate`）
 
-  佣金按用户费率（单笔最低 5 元）；印花税卖出 0.05%；过户费双向 0.001%；基础滑点 `slippage_bp` 默认 10bp；冲击成本按参与率 5
-  档 0/5/15/30/60bp（plan 2.13，待校准），参与率 > 2% 标“容量受限”。`fixed_cost_bp`=8 是 F3 使用的往返固定费率近似值（印花税
-  5bp + 双边佣金约 2.5bp + 过户费），不进计划价格计算。
+  - 佣金按用户实际费率逐笔计算，买卖双向各有最低 5 元；费率缺失不能当作零费率，配置未提供统一默认值。真实佣金费率未验证（config/market_rules.yaml:45；config/market_rules.yaml:46；docs/strategies/_template.md:245）。
+
+  - 印花税仅卖出收取：2023-04-10 至 2023-08-27 为成交额的 0.1%，2023-08-28 起为 0.05%；按成交日有效段取值，2023-04-10
+  前未建模（config/market_rules.yaml:4；config/market_rules.yaml:66；config/market_rules.yaml:126；config/market_rules.yaml:163；config/market_rules.yaml:43）。
+
+  - 过户费按每笔成交额双向各收 0.001%（config/market_rules.yaml:44）。
+
+  - 单边基础滑点沿用 10 bp（0.1%）默认估算；参数不改，真实成交校准未验证（config/market_rules.yaml:47）。
+
+  - 冲击成本：r=计划数量×参考价/近20个有效交易日日成交额均值，停牌日不计。r≤0.1%取0 bp，0.1%<r≤0.5%取5 bp，0.5%<r≤1%取15
+  bp，1%<r≤2%取30 bp，r>2%取60 bp；均为单边估算，初值校准未验证（config/market_rules.yaml:49；config/market_rules.yaml:50；config/market_rules.yaml:52；config/market_rules.yaml:53；config/market_rules.yaml:54；config/market_rules.yaml:55；config/market_rules.yaml:56；docs/strategies/_template.md:253）。
+
+  - 单边价格成本=基础滑点+冲击成本；往返按两边分别计价并加入佣金、印花税及过户费。ADV为零或有效K不足5根时不做除法，按I5并提示估算不可靠；停牌/封板不可成交不计算冲击成本，不得当作零成本成交（docs/strategies/_template.md:264；docs/strategies/_template.md:267；docs/strategies/_template.md:268）。
+
+  - r>2%沿用“容量受限”提示。F3 的 fixed_cost_bp=8 是既有往返固定费率近似，合理性及真实费率适配未验证，不进计划价格计算；F3 原表达式及参数均不改，不以本节费用清单替换过滤公式（docs/strategies/cards/history/sw_ma_trend_pullback.v2.md:20；docs/strategies/cards/sw_ma_trend_pullback.md:136；docs/strategies/cards/sw_ma_trend_pullback.md:169；docs/strategies/cards/sw_ma_trend_pullback.md:178）。
+
+  - 本节仅补成本解释和出处，保留现有 costs/params_schema 及默认数值；不得据此声称引擎已按历史费率重算，历史执行一致性未验证。候选信号不构成荐股，不承诺收益。
 
 
   ## 反证 / 失效
@@ -86,10 +124,12 @@ narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式�
   series 已按 qfq@as_of 折算；W01-FX14 锁定 Wilder（SMA 口径会得出相反结论）；W01-FX15 跟踪止盈跨除权（A(d)=前
   74 根 1.0、后 6 根 1.5）。含 `LIMIT_LOCKED`/`SUSPENDED` 的夹具写 `expect.reason_details:{码:{direction}}`；`expect.lot_rule={min_buy,
   step, odd_lot_sell_all, sell_qty?}`（plan 2.5.14 T-R15 ⑧⑨）。'
-source_hash: 6caead93321aa62f83039baa2a7000a69ba5ffe8fb5249951f803628018e6124
+source_hash: f5b4d795e28124fdebb6f822439de1957fa26a03693daf0239b6d1d22bbaf669
 strategy-card:
-  a_share_constraints: 涨跌停按 config/market_rules.yaml 生效段（创业板/科创板现行 20%，注册制新股前 5 日无涨跌幅为
-    null）；科创板买入 ≥200 股、1 股递增，其余 100 股整数倍；零股卖出一次性申报；T+1；ST/退市整理/停牌/新股由 G-01 处理
+  a_share_constraints: ST/*ST、退市整理、停牌仍由 G-01 处理；ST/*ST、退市整理阻断买入方向候选信号的执行，持仓退出仍按原规则评估。
+    T+1：当日新买股份不可当日卖出；停牌买卖均不可执行，一字涨停阻买、一字跌停阻卖。 涨跌停按 config/market_rules.yaml 有效段：主板普通股10%；主板ST/*ST在2026-07-06前5%、当天起10%；创业板/科创板含风险警示20%；北交所含风险警示30%，但本卡仍不含北交所。
+    沪深注册制新股前5个交易日、北交所新股首日及退市整理首日按配置不设涨跌幅；2023-04-10前未建模。 科创板买入至少200股、其余所含板块100股整数倍；科创板1股递增完整依据未验证；零股一次性卖出；原止损价截断口径不变，仅在存在有效涨跌停价时适用。
+    参数出处及未验证边界见正文“A 股约束（补充执行口径）”；仅为候选信号，不荐股、不承诺收益。
   applicability:
     market_regime:
     - uptrend
@@ -281,7 +321,7 @@ strategy-card:
     trade_log_ref: null
     type: rule
     window: 未执行
-  version_no: 2
+  version_no: 3
 strategy-spec:
   action_map:
     else: wait
@@ -615,7 +655,7 @@ strategy-spec:
     time_stop_days: 40
   valid_until:
     trading_days: 5
-  version_no: 2
+  version_no: 3
 validation:
   feature_requests: []
   fixtures:
@@ -5765,4 +5805,4 @@ validation:
   window:
     lookback_trading_days: 120
     universe: 全A（不含北交所）
-version_no: 2
+version_no: 3

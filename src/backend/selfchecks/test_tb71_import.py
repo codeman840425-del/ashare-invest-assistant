@@ -20,8 +20,8 @@ ROOT = Path(__file__).resolve().parents[3]
 FORMAL_REV = "3895963"
 POLICY_V2_REV = "3ede1c2"
 OFFICIAL_CARDS = (
-    ("hold_risk_monitor.md", "hold_risk_monitor", "H-01", 3),
-    ("sw_ma_trend_pullback.md", "sw_ma_trend_pullback", "W-01", 2),
+    ("hold_risk_monitor.md", "hold_risk_monitor", "H-01", 4),
+    ("sw_ma_trend_pullback.md", "sw_ma_trend_pullback", "W-01", 3),
 )
 
 
@@ -69,7 +69,7 @@ def test_formal_import_idempotence_generation_queries(
             ).one()
             assert (
                 version.version_no
-                == {"hold_risk_monitor": 3, "sw_ma_trend_pullback": 2}[row["key"]]
+                == {"hold_risk_monitor": 4, "sw_ma_trend_pullback": 3}[row["key"]]
             )
             assert version.lifecycle == "draft"
             assert len(version.config["gates_missing"]) == 7
@@ -187,7 +187,7 @@ def test_formal_offline_identities_snapshots_and_policy_digests(tmp_path: Path) 
     from app.engine_policies import load as load_policy
 
     policy = load_policy(ROOT / "config")
-    assert policy.version_no == 3
+    assert policy.version_no == 4
     hold = next(
         component for component in policy.system_components if component.key == "hold_risk_monitor"
     )
@@ -289,13 +289,13 @@ def test_formal_v2_real_gates_no_g7(integration: Any, tmp_path: Path) -> None:
             key = conn.execute(
                 select(strategies.c.key).where(strategies.c.id == version.strategy_id)
             ).scalar_one()
-            assert version.version_no == {"hold_risk_monitor": 3, "sw_ma_trend_pullback": 2}[key]
+            assert version.version_no == {"hold_risk_monitor": 4, "sw_ma_trend_pullback": 3}[key]
             assert version.lifecycle == "draft"
             assert version.config["applicability_eval_source"] in {None, "f.market_regime_idx"}
         output.append(
             {
                 "key": key,
-                "version_no": {"hold_risk_monitor": 3, "sw_ma_trend_pullback": 2}[key],
+                "version_no": {"hold_risk_monitor": 4, "sw_ma_trend_pullback": 3}[key],
                 "verification_review_id_rolled_back": str(identifier),
                 "gates": {k: v["result"] for k, v in gate.items()},
                 "g2_issues": gate["G2"]["detail"]["issues"],

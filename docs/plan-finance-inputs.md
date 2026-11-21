@@ -3,7 +3,7 @@
 依据：`docs/contracts/finance-inputs.md`（#225，T-A197，F-Q01–09 均为 Opt-A）。本方案只新增本文，不代表功能已实现。
 模块路径除特别注明外相对 `src/backend/`；下文「新建」包括拟增模块、函数、测试文件及 JSON 键，均未实现、未验证。
 核查仅依据仓库代码与迁移，未连接数据库，表内实际行数、历史覆盖及来源响应均为「未验证」，不把建表等同已有可用数据。
-研究基准目录 `docs/strategies/T-R86/` 当前不存在；所有 B9–B12 参考值均为「待 T-R86 交付后填值」，不编造数值，不改该目录。
+研究基准目录 `docs/strategies/T-R86/` 由 PR #249@77dc09d（分支 `docs/T-R86r`，未合入）交付；合入前以该 head 的 README 与 `reference_values.csv` 为准。本次离线读取的 `.codex-input/README.md`、`.codex-input/reference_values.csv` 已与该 head 逐字节核对一致，不将交付文件复制进本分支，不改该目录。
 全程离线；不读写 `.env`、密钥或私有样本，不运行外呼探针，不真调麦蕊、不回填、不提交、不 push。
 新增数据或补齐证据按实际操作区分：离线已有数据、合成输入、补证整理不属于真调。依 TEAM-RULES 第二节，仅硬红线须用户本人批准：真调麦蕊（日K、分钟、单 D）、生产部署、删除用户数据、对外发送、解除 HALT、恢复外网出口、`backfill --apply`。通达信真实全量导入已由用户 11-14 t1110u 授权，仍须走 `upsert_daily_bars` 并过写库门闩；本 PR 不执行采集或回填。
 
@@ -83,11 +83,34 @@ PR6 复查 CLI／Windows／SQL 执行链，新增入口必须逐一补验收；�
 
 以下测试名均为建议新建、未验证；沿用契约 `test_ta197_` 名便于对账，其余为 `test_ta199_`。各条均需记录实现版本、平台、通过／失败／跳过；未执行写「未验证」。
 同一份明确标为虚构的合成包包含财报／因子／事件版本、身份、规则、日历、闭合证明及固定 d/as_of，各格式由它派生。正常、边界、缺数、依赖晚于 t、等价时区、新版本不改旧时点为每个适用入口的参数场景。
-数值回归基准统一取 `docs/strategies/T-R86/`：B9/B10/B11/B12 均「待 T-R86 交付后填值」；交付前只做契约性质断言，不把合成值冒充研究基准。
+数值回归基准统一取 PR #249@77dc09d 的 `docs/strategies/T-R86/reference_values.csv`；依据同目录 README「验收用途（编排者 T-R86c 裁定）」分层验收，不把合成值冒充研究基准。
 
-**基准分层（编排者 11-15 裁定）**：T-R86（PR #226，未合入）的代理层值是计算逻辑的验收基准。PR2/PR3 的数值回归用 `test_ta199_ref_proxy_b9`…`_b12` 读 `docs/strategies/T-R86/reference_values.csv` 的代理列，逐行比对 B9–B12 的计算结果。正式值列全部为 null 符合本契约（主源单位、窗口、PIT 缺证时为 null），对应断言是 `test_ta199_ref_formal_null`：正式输出为 null，且 null_reasons 非空。代理值不得写入正式值，也不得替换主源。#226 合入前，这几项保持「待填」，CSV 的列名在实现前按 #226 的最终 head 核对（未验证）。
+**基准分层**：主值列为 `value`，空值原因列为 `null_reason`（分号分隔），单位列为 `unit`；代理层列为 `proxy_value`，另有 `proxy_available_at`、`proxy_flags`。README 已明确代理层是后端计算逻辑的验收基准，仅用于离线验收，不是麦蕊真值，不能作为生产主值，也不得替换契约主源；不据此引入真调。
+
+- `test_ta199_ref_formal_null` 按每行 `code/as_of/feature` 对照：240 行 `value` 均为字面量 `null`，正式输出须为 null，内部 `null_reasons` 按 CSV `null_reason` 拆分后的原因码集合断言，不能仅检查非空。`available_at` 也全部为 `null`，不以代理时点补正式可见时点。
+- PR2/PR3 的 `test_ta199_ref_proxy_b9`…`_b12` 在同一份输入下逐行核对 `proxy_value`：非空项作数值相等断言；B9 为整数，B10/B11 按 README 仅在最终 `ROUND_HALF_UP` 到 pct 两位后比较。容差以 README「逐值一致」为准，不自行放宽；README 未另列绝对／相对容差，此类额外容差为「未验证」。空项断言 null，保留 `proxy_flags` 中的缺证说明，不把 null 当0，也不跳过空行。
+- B12 的主值与代理值均全空，不能从本 CSV 提取非空数值样例或验证连续年数的非空数值路径；按 README 用标为【虚构】的合成夹具另验 F-Q06–F-Q09 边界，不把夹具值写成研究样例。`ex_date_proxy_years`、`cash_distribution_plus_buyback_years` 是独立对照列，在 B12 的60行也均为 `null`，不填入 B12。
+
+**覆盖与列名出处**：以下统计、原因码及各 B 项样例均取自该 head 的 `reference_values.csv` 表头及相应列；代理算法、舍入与验收用途取自 README。全表240行，B9–B12 各60行，均为同一20代码×3个 `as_of` 的完整组合（代码按字符串保留前导零）：
+
+- `code` 集合：`000001,000972,001225,001246,001381,300502,300750,301569,301718,600228,600293,600519,600825,603159,603307,688610,688801,688981,920000,920085`。
+- `as_of` 集合：`2026-06-30T15:05:00+08:00`、`2026-09-30T15:05:00+08:00`、`2026-11-09T15:05:00+08:00`。README 规定各日统一按当日15:00截止；代理时点使用指数观察日与首K等代理，历史 PIT 仍未验证。
+
+| `feature`／`input_key`／`unit` | 主值 `value`／`null_reason`（每项60行相同） | 代理层 `proxy_value` 形态与非空／null行数 |
+| --- | --- | --- |
+| B9／`f.fin_report_count`／`count` | `null`／`missing_visibility;coverage_unknown;identity_unknown` | 按报告期去重计数的整数代理；41／19 |
+| B10／`f.roe_ttm`／`pct` | `null`／`missing_visibility;source_semantics_unverified;unit_unverified;incomparable_basis` | 归母 ROE TTM 的两位 pct 代理，可为负；38／22 |
+| B11／`f.profit_cagr_3y`／`pct` | `null`／`missing_visibility;source_semantics_unverified;unit_unverified;incomparable_basis;identity_unknown` | 三年年报端点 CAGR 的两位 pct 代理，可为负；26／34 |
+| B12／`f.dividend_continuous_years`／`years` | `null`／`missing_visibility;source_semantics_unverified;payment_unconfirmed;year_unclosed;coverage_unknown;no_known_break` | 全部 `null`，缺支付完成、年度闭合、覆盖与明确中断证据；0／60 |
 
 ### B9：报告期数
+
+参考样例（列名及单元格逐字取自 `reference_values.csv`，未换算）：
+
+| code | as_of | feature | value | proxy_value | unit |
+| --- | --- | --- | --- | --- | --- |
+| 600519 | 2026-06-30T15:05:00+08:00 | B9 | null | 96 | count |
+| 000001 | 2026-06-30T15:05:00+08:00 | B9 | null | 115 | count |
 
 | 测试名／PR | 场景 | 期望 |
 | --- | --- | --- |
@@ -97,6 +120,13 @@ PR6 复查 CLI／Windows／SQL 执行链，新增入口必须逐一补验收；�
 
 ### B10：归母 ROE TTM
 
+参考样例（列名及单元格逐字取自 `reference_values.csv`，未换算）：
+
+| code | as_of | feature | value | proxy_value | unit |
+| --- | --- | --- | --- | --- | --- |
+| 600519 | 2026-06-30T15:05:00+08:00 | B10 | null | 31.26 | pct |
+| 000001 | 2026-06-30T15:05:00+08:00 | B10 | null | 8.20 | pct |
+
 | 测试名／PR | 场景 | 期望 |
 | --- | --- | --- |
 | `test_ta197_b10_vendor`／PR2 | quality 主源单位、窗口、归母语义、依赖／历史 PIT 缺证；已证负值 | 缺证 null／保留原因，合法负值保留；不切 F44、不用离线值补位 |
@@ -105,6 +135,13 @@ PR6 复查 CLI／Windows／SQL 执行链，新增入口必须逐一补验收；�
 
 ### B11：归母利润三年 CAGR
 
+参考样例（列名及单元格逐字取自 `reference_values.csv`，未换算）：
+
+| code | as_of | feature | value | proxy_value | unit |
+| --- | --- | --- | --- | --- | --- |
+| 600519 | 2026-06-30T15:05:00+08:00 | B11 | null | 9.49 | pct |
+| 000001 | 2026-06-30T15:05:00+08:00 | B11 | null | -2.16 | pct |
+
 | 测试名／PR | 场景 | 期望 |
 | --- | --- | --- |
 | `test_ta197_b11_vendor`／PR2 | growth 主源年报锚点／归母利润／单位／历史 PIT 未证 | null／保留原因；离线算出也不能替代正式主源 |
@@ -112,6 +149,13 @@ PR6 复查 CLI／Windows／SQL 执行链，新增入口必须逐一补验收；�
 | `test_ta199_b11_span_basis`／PR2 | 上市不足三年／身份未知、会计年度变更、缺端点、未来年报／较旧可算组合、中间两年缺失 | 对应 null，不退旧 y、不变两年／TTM；不强制中间两年进公式，端点仍须可比，最终才舍入 |
 
 ### B12：现金分红连续年数
+
+参考空值样例（列名及单元格逐字取自 `reference_values.csv`，未换算；该项没有非空数值，不能编造数值样例）：
+
+| code | as_of | feature | value | proxy_value | unit |
+| --- | --- | --- | --- | --- | --- |
+| 600519 | 2026-06-30T15:05:00+08:00 | B12 | null | null | years |
+| 000001 | 2026-06-30T15:05:00+08:00 | B12 | null | null | years |
 
 | 测试名／PR | 场景 | 期望 |
 | --- | --- | --- |
@@ -157,4 +201,4 @@ PR6 复查 CLI／Windows／SQL 执行链，新增入口必须逐一补验收；�
 - 日历表无来源与覆盖元数据；新证据包必须显式提供可信覆盖，不能因查到几个开市日就宣称完整。补证整理离线已有数据及使用合成输入作离线验证均不属于真调；若需真调麦蕊或执行 `backfill --apply`，须用户本人批准，其他操作按前述硬红线边界处理。
 - 追加证据与财报唯一约束的并发一致性、原始响应固定及快照不可变触发器实际行为、来源授权与性能均待 PR1 在隔离数据库核验；本任务未连接数据库。
 - `deploy/db/drill/sample-schema.sql` 的 `factor_values` 用 `security_id`／整数 `factor_id`，与生产代码表结构不同；恢复演练通过也不能证明财务语义。Windows 未发现直接计算入口，仍须 PR6 复查并记录，未执行就是未验证。
-- T-R86 未交付，四组参考值和研究样本回归未解决；方案及本任务的静态检查通过不等于功能、真实 SQL、Windows 或主源准入已通过。
+- T-R86 四组参考值已按 #249@77dc09d 回填，交付 PR 尚未合入；后端研究样本回归仍待 T-B176 实现后执行，B12 非空数值路径须用【虚构】合成夹具覆盖。方案及本任务的静态检查通过不等于功能、真实 SQL、Windows 或主源准入已通过。
